@@ -25,17 +25,6 @@
       }
     }
   },
-  "automation_worker": {
-    "build_poll_interval_seconds": "int",
-    "enabled": "bool",
-    "executor": "str",
-    "interval_seconds": "int",
-    "report_collection_timeout_seconds": "int",
-    "stale_build_seconds": "int",
-    "stale_run_seconds": "int",
-    "test_timeout_seconds": "int",
-    "waiting_device_timeout_seconds": "int"
-  },
   "client_hosts": {
     "<dynamic-key>": "str"
   },
@@ -43,7 +32,6 @@
     {
       "device_host": "str",
       "host": "str",
-      "password": "str",
       "username": "str"
     }
   ],
@@ -196,9 +184,6 @@
   "ubuntu_host": "str",
   "ubuntu_pswd": "str",
   "ubuntu_user": "str",
-  "ui_defaults": {
-    "architecture_build_server": "str"
-  },
   "usbip_devices_source": {},
   "usbip_vid_pid": "str",
   "use_key_auth": "bool",
@@ -209,9 +194,6 @@
   "vpn_target": [
     "str"
   ],
-  "weekly_report": {
-    "android17_sheet_url": "str"
-  },
   "wifi": {
     "password": "str",
     "ssid": "str"

@@ -11,9 +11,7 @@ DEFAULT_REDMINE_STATS = {
     "stale_days": 3,
     "window_days": 60,
     "cache_ttl": 600,
-    # 近 N 天的趋势数据每次实时拉取 Redmine；更早的已关闭工单趋势冻结进
-    # 长期缓存（_ASSIGNEE_TREND_HISTORICAL_CACHE），因为半年前关闭的工单其
-    # 趋势计数几乎不再变化。设为上限 3650 即等同"全部实时拉取"。
+    # 近期趋势实时查询，较早趋势使用长期缓存。
     "freshness_days": 180,
     "chart_date_ranges": {},
 }

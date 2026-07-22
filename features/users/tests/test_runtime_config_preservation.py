@@ -26,13 +26,15 @@ class RuntimeConfigPreservationTests(unittest.TestCase):
         old_manager = config_api.config_manager
         try:
             config_api.config_manager = fake
-            response = asyncio.run(config_api.update_config({"sidebar_order": ["test"]}))
+            response = asyncio.run(config_api.update_config({
+                "client_hosts": {"172.16.14.67": "alice"},
+            }))
         finally:
             config_api.config_manager = old_manager
 
         body = json.loads(response.body.decode("utf-8"))
         self.assertTrue(body["success"])
-        self.assertEqual(fake.saved["sidebar_order"], ["test"])
+        self.assertEqual(fake.saved["client_hosts"], {"172.16.14.67": "alice"})
         self.assertEqual(fake.saved["gerrit_dashboard"]["ssh_host"], "10.10.10.29")
         self.assertEqual(fake.saved["redmine_auth"]["username"], "chaoqun.huang@rock-chips.com")
 

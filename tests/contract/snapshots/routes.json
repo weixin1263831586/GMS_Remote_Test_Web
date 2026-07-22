@@ -151,6 +151,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/auth/roles"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/auth/setup"
@@ -160,6 +166,36 @@
       "GET"
     ],
     "path": "/api/auth/status"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/auth/users"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/users"
+  },
+  {
+    "methods": [
+      "PATCH"
+    ],
+    "path": "/api/auth/users/{user_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/users/{user_id}/reset-password"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/users/{user_id}/revoke-sessions"
   },
   {
     "methods": [
@@ -244,6 +280,12 @@
       "POST"
     ],
     "path": "/api/automation/runs/{run_id}/retry"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/runs/{run_id}/timeline"
   },
   {
     "methods": [
@@ -493,9 +535,9 @@
   },
   {
     "methods": [
-      "POST"
+      "GET"
     ],
-    "path": "/api/cluster/mode"
+    "path": "/api/cluster/jobs/{job_id}/timeline"
   },
   {
     "methods": [
@@ -508,12 +550,6 @@
       "GET"
     ],
     "path": "/api/cluster/suite-library"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/cluster/suite-library-download/{safe_filename}"
   },
   {
     "methods": [
@@ -643,6 +679,18 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/workers/ssh-host-key/scan"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/workers/ssh-host-key/trust"
+  },
+  {
+    "methods": [
       "DELETE"
     ],
     "path": "/api/cluster/workers/{worker_id}"
@@ -658,6 +706,18 @@
       "POST"
     ],
     "path": "/api/cluster/workers/{worker_id}/commands/{command_id}/ack"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/config"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/config"
   },
   {
     "methods": [
@@ -819,6 +879,18 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/config/external-services"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config/external-services"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/config/opengrok"
   },
   {
@@ -843,13 +915,13 @@
     "methods": [
       "POST"
     ],
-    "path": "/api/desktop/validate"
+    "path": "/api/desktop/novnc/access"
   },
   {
     "methods": [
       "POST"
     ],
-    "path": "/api/desktop/validate-host"
+    "path": "/api/desktop/validate"
   },
   {
     "methods": [
@@ -1820,6 +1892,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/security-audit/verify"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/sidebar-order"
   },
   {
@@ -1862,19 +1940,25 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/system/health/details"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/system/health/live"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/system/health/ready"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/system/help"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/system/install-package"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/system/install-sh"
   },
   {
     "methods": [
@@ -2162,12 +2246,6 @@
     "methods": [
       "POST"
     ],
-    "path": "/api/vnc/start"
-  },
-  {
-    "methods": [
-      "POST"
-    ],
     "path": "/api/vpn/connect"
   },
   {
@@ -2258,6 +2336,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/favicon.ico"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/gerrit-dashboard"
   },
   {
@@ -2282,6 +2366,12 @@
       "GET"
     ],
     "path": "/mainline-known-issues"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/metrics"
   },
   {
     "methods": [

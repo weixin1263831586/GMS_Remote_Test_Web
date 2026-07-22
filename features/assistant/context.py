@@ -1,7 +1,7 @@
 """
 Agent Context Manager — 多轮对话上下文管理。
 
-上下文存储在 session dict 的 "context" key 中，向后兼容旧会话。
+上下文存储在 session dict 的 "context" key 中。
 """
 
 from __future__ import annotations
@@ -205,9 +205,6 @@ _CN_DIGITS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
 
 def _parse_chinese_number(text: str) -> int:
     """解析中文数字(支持 一~九十九,如 十一=11、二十=20、二十三=23)。
-
-    旧实现用单字符 ``in`` 查表,"十一"会先命中"一"误返回 1。这里按十进制的
-    十位/个位组合正确解析。
     """
     text = (text or "").strip()
     if text.isdigit():

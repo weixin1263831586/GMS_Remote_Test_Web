@@ -1,158 +1,126 @@
 """终端会话管理 - PTY通道、SSH终端、ADB Shell"""
-
 import asyncio
-import fcntl
 import logging
 import os
-import pty
-import select
 import shlex
-import signal
-import struct
-import termios
 import threading
 import time
+import uuid
 from typing import Any
 
 import paramiko
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from features.devices import device_lock_manager
 from features.system.ssh import ssh_manager
 from features.system.state import global_state
-from foundation.common_utils import CommonUtils
+from foundation.networking import is_local_host
 from foundation.config import config_manager
 
+from .terminal_channels import LocalPtyChannel, close_terminal_session_resources
 
 logger = logging.getLogger(__name__)
+TERMINAL_CLAIM_TTL_SECONDS = 120
 
 
-class LocalPtyChannel:
-    """Minimal Paramiko-like PTY channel for local terminal sessions."""
+def resolve_authorized_terminal_target(
+    worker_id: str,
+    *,
+    mode: str = "ssh",
+    serial_no: str = "",
+) -> tuple[str, str, str, str, str]:
+    """Resolve a terminal target exclusively from server-managed inventory.
 
-    def __init__(self, command: list[str], cwd: str | None = None, env: dict[str, str] | None = None):
-        self.command = command
-        self.cwd = cwd or os.path.expanduser("~")
-        self.env = env or os.environ.copy()
-        self.pid, self.fd = pty.fork()
-        self.closed = False
-        self._reaped = False
+    Browser supplied host names, usernames, and passwords are intentionally not
+    accepted here. ``worker_id`` selects either the configured local host or a
+    registered Worker; credentials remain server-side. The returned tuple is
+    ``(worker_id, host, user, password, normalized_serial)``.
+    """
 
-        if self.pid == 0:
-            try:
-                os.chdir(self.cwd)
-                os.execvpe(command[0], command, self.env)
-            except Exception as e:
-                os.write(2, f"Failed to start local terminal: {e}\n".encode("utf-8", errors="ignore"))
-                os._exit(127)
+    if mode not in {"ssh", "adb"}:
+        raise ValueError("不支持的终端模式")
 
-        os.set_blocking(self.fd, False)
+    config = config_manager.load_config()
+    from features.cluster import get_cluster_service
 
-    def recv_ready(self) -> bool:
-        if self.closed:
-            return False
-        readable, _, _ = select.select([self.fd], [], [], 0)
-        return bool(readable)
+    cluster = get_cluster_service()
+    requested_worker = str(worker_id or "").strip() or cluster.config.local_worker_id
+    if requested_worker == cluster.config.local_worker_id:
+        host = config_manager.get_ubuntu_host(config) or "localhost"
+        user = config_manager.get_ubuntu_user(config)
+        password = str(config.get("ubuntu_pswd") or "")
+    else:
+        worker = cluster.repository.get_worker(requested_worker)
+        if not worker or worker.get("status") not in {"online", "busy", "draining"}:
+            raise ValueError("所选 Worker 不在线")
+        host = str(worker.get("address") or worker.get("hostname") or "").strip()
+        user = str((worker.get("capabilities") or {}).get("ssh_user") or "").strip()
+        if not host or not user:
+            raise ValueError("Worker 缺少 SSH 连接元数据")
+        password = (
+            config_manager.find_device_host_password(f"{user}@{host}", config)
+            or ""
+        )
 
-    def recv(self, size: int) -> bytes:
-        if self.closed:
-            return b""
-        try:
-            return os.read(self.fd, size)
-        except BlockingIOError:
-            return b""
-        except OSError:
-            self.closed = True
-            return b""
+    normalized_serial = str(serial_no or "").strip()
+    if mode == "adb":
+        if not normalized_serial:
+            raise ValueError("缺少设备序列号")
+        device_ids = {
+            str(item.get("id") or "")
+            for item in cluster.repository.list_devices(requested_worker)
+        }
+        composite_id = (
+            normalized_serial
+            if normalized_serial.startswith(f"{requested_worker}:")
+            else f"{requested_worker}:{normalized_serial}"
+        )
+        if composite_id not in device_ids:
+            raise ValueError("设备不属于所选 Worker")
+        normalized_serial = composite_id.split(":", 1)[1]
 
-    def send(self, data: str | bytes) -> int:
-        if self.closed:
-            return 0
-        if isinstance(data, str):
-            data = data.encode("utf-8", errors="ignore")
-        return os.write(self.fd, data)
-
-    def resize_pty(self, width: int = 120, height: int = 30):
-        if self.closed:
-            return
-        packed = struct.pack("HHHH", height, width, 0, 0)
-        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, packed)
-
-    def close(self):
-        if self.closed:
-            return
-        self.closed = True
-        try:
-            os.close(self.fd)
-        except OSError:
-            pass
-
-        self._terminate_child()
-
-    def _terminate_child(self) -> None:
-        """Terminate and reap the PTY child so closed terminals do not become zombies."""
-        if self._reaped:
-            return
-
-        for sig, grace_seconds in (
-            (signal.SIGHUP, 0.2),
-            (signal.SIGTERM, 0.5),
-            (signal.SIGKILL, 0.0),
-        ):
-            try:
-                os.kill(self.pid, sig)
-            except ProcessLookupError:
-                self._reap_child(block=False)
-                return
-            except OSError:
-                self._reap_child(block=False)
-                return
-
-            deadline = time.monotonic() + grace_seconds
-            while True:
-                if self._reap_child(block=False):
-                    return
-                if grace_seconds <= 0 or time.monotonic() >= deadline:
-                    break
-                time.sleep(0.02)
-
-        self._reap_child(block=True)
-
-    def _reap_child(self, *, block: bool) -> bool:
-        try:
-            waited_pid, _status = os.waitpid(self.pid, 0 if block else os.WNOHANG)
-        except ChildProcessError:
-            self._reaped = True
-            return True
-        except OSError:
-            return False
-
-        if waited_pid == self.pid:
-            self._reaped = True
-            return True
-        return False
+    return requested_worker, host, user, password, normalized_serial
 
 
-def close_terminal_session_resources(session_info: dict[str, Any]):
-    mode = session_info.get('mode')
-    channel = session_info.get('channel')
-    ssh = session_info.get('ssh')
+def terminal_connection_id(websocket: WebSocket) -> str:
+    return str(getattr(websocket.state, "terminal_connection_id", "") or "")
 
-    try:
-        if channel and mode in {'local', 'local_adb', 'adb'}:
-            channel.close()
-    except Exception:
-        pass
 
-    try:
-        if mode == 'adb' and ssh:
-            ssh_manager.return_connection(ssh)
-        elif ssh:
-            ssh.close()
-    except Exception:
-        pass
+def close_websocket_terminal(websocket: WebSocket) -> None:
+    connection_id = terminal_connection_id(websocket)
+    session_info = None
+    if connection_id:
+        with global_state.terminal_lock:
+            session_info = global_state.terminal_ssh_sessions.pop(connection_id, None)
+    if session_info:
+        close_terminal_session_resources(session_info)
+    claim_registry = getattr(websocket.state, "terminal_claim_registry", None)
+    claim_source_id = str(
+        getattr(websocket.state, "terminal_claim_source_id", "") or ""
+    )
+    if claim_registry is not None and claim_source_id:
+        claim_registry.release(claim_source_id, status="released")
+    websocket.state.terminal_claim_registry = None
+    websocket.state.terminal_claim_source_id = ""
+    websocket.state.terminal_claim_id = ""
+    websocket.state.terminal_claim_generation = 0
+    websocket.state.terminal_connection_id = ""
 
+
+def _terminal_device_claim_valid(session_info: dict[str, Any]) -> bool:
+    registry = session_info.get("claim_registry")
+    device_key = str(session_info.get("device_key") or "")
+    if registry is None or not device_key:
+        return True
+    active = registry.active_claim(device_key)
+    return bool(
+        active
+        and active.get("id") == session_info.get("claim_id")
+        and int(active.get("generation") or 0)
+        == int(session_info.get("claim_generation") or 0)
+        and active.get("owner_id") == session_info.get("owner_id")
+        and active.get("source_id") == session_info.get("claim_source_id")
+    )
 
 def create_local_terminal_channel(command: list[str] | None = None) -> LocalPtyChannel:
     shell = os.environ.get("SHELL") or "/bin/bash"
@@ -162,7 +130,18 @@ def create_local_terminal_channel(command: list[str] | None = None) -> LocalPtyC
     return LocalPtyChannel(terminal_command, cwd=os.path.expanduser("~"), env=env)
 
 
-async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_no: str, config: dict):
+async def handle_adb_shell_connect(
+    connection_id: str,
+    websocket: WebSocket,
+    serial_no: str,
+    config: dict,
+    *,
+    worker_id: str,
+    owner_id: str,
+    claim: dict[str, Any],
+    claim_registry: Any,
+    claim_source_id: str,
+):
     """处理ADB Shell连接 - 通过SSH执行adb shell命令"""
     try:
         if config_manager.is_config_host_local(config):
@@ -187,7 +166,7 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
             channel.send(cmd)
 
         loop = asyncio.get_event_loop()
-        session_id = client_id
+        session_id = connection_id
 
         with global_state.terminal_lock:
             if session_id in global_state.terminal_ssh_sessions:
@@ -199,10 +178,18 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
             global_state.terminal_ssh_sessions[session_id] = {
                 'ssh': ssh,
                 'channel': channel,
+                'connection_id': session_id,
                 'host': config_manager.get_ubuntu_host(config),
                 'user': config_manager.get_ubuntu_user(config),
                 'mode': backend_mode,
+                'worker_id': worker_id,
                 'serial_no': serial_no,
+                'device_key': claim['device_key'],
+                'owner_id': owner_id,
+                'claim_registry': claim_registry,
+                'claim_source_id': claim_source_id,
+                'claim_id': claim['id'],
+                'claim_generation': claim['generation'],
                 'connected_at': time.time(),
                 'websocket': websocket,
                 'event_loop': loop
@@ -212,18 +199,37 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
         await websocket.send_json({
             'type': 'terminal_connected',
             'mode': 'adb',
-            'serial_no': serial_no
+            'serial_no': serial_no,
+            'connection_id': connection_id,
+            'lease_id': claim['id'],
+            'generation': claim['generation'],
         })
 
         def read_adb_shell_output():
             """后台线程持续读取终端输出"""
+            next_renewal = time.monotonic() + 30
             try:
                 while True:
                     if session_id not in global_state.terminal_ssh_sessions:
                         break
 
                     try:
-                        current_channel = global_state.terminal_ssh_sessions[session_id]['channel']
+                        session_info = global_state.terminal_ssh_sessions[session_id]
+                        if not _terminal_device_claim_valid(session_info):
+                            logger.warning(
+                                "[TERMINAL] Device claim was revoked for %s", session_id
+                            )
+                            break
+                        if time.monotonic() >= next_renewal:
+                            renewed = claim_registry.renew(
+                                claim_source_id,
+                                TERMINAL_CLAIM_TTL_SECONDS,
+                                device_keys=[claim['device_key']],
+                            )
+                            if renewed != 1:
+                                break
+                            next_renewal = time.monotonic() + 30
+                        current_channel = session_info['channel']
 
                         if current_channel.recv_ready():
                             data_chunk = current_channel.recv(4096)
@@ -256,12 +262,19 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
             except Exception as e:
                 logger.error(f"[TERMINAL] ADB read thread error: {e}")
             finally:
+                with global_state.terminal_lock:
+                    session_info = global_state.terminal_ssh_sessions.pop(
+                        session_id, None
+                    )
+                if session_info:
+                    close_terminal_session_resources(session_info)
                 logger.info(f"[TERMINAL] ADB read thread exiting for {session_id}")
 
         thread = threading.Thread(target=read_adb_shell_output, daemon=True)
         thread.start()
 
     except Exception as e:
+        close_websocket_terminal(websocket)
         logger.error(f"[TERMINAL] ADB Shell connection error: {e}")
         await websocket.send_json({
             'type': 'terminal_error',
@@ -271,42 +284,62 @@ async def handle_adb_shell_connect(client_id: str, websocket: WebSocket, serial_
 
 async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: dict):
     try:
+        principal = getattr(websocket.state, "current_user", None)
+        owner_id = str(getattr(principal, "id", "") or client_id)
+        owner_username = str(
+            getattr(principal, "username", "") or owner_id
+        )
         config = config_manager.load_config()
-        host = data.get('host', config_manager.get_ubuntu_host(config))
-        user = data.get('user', config_manager.get_ubuntu_user(config))
-        password = data.get('password', config.get('ubuntu_pswd', ''))
-        mode = data.get('mode', 'ssh')
-        serial_no = data.get('serial_no', '')
+        mode = str(data.get('mode') or 'ssh').strip().lower()
+        serial_no = str(data.get('serial_no') or '').strip()
         worker_id = str(data.get('worker_id') or '').strip()
+        try:
+            worker_id, host, user, password, serial_no = resolve_authorized_terminal_target(
+                worker_id,
+                mode=mode,
+                serial_no=serial_no,
+            )
+        except ValueError as exc:
+            await websocket.send_json({'type': 'terminal_error', 'error': str(exc)})
+            return
 
-        if worker_id:
-            from features.cluster import get_cluster_service
-            cluster = get_cluster_service()
-            worker = cluster.repository.get_worker(worker_id)
-            if worker_id == cluster.config.local_worker_id and not worker:
-                worker_id = ""
-            if not worker_id:
-                worker = None
-            elif not worker or worker.get('status') not in {'online', 'busy', 'draining'}:
-                await websocket.send_json({'type': 'terminal_error', 'error': '所选 Worker 不在线'})
-                return
-            host = (worker or {}).get('address') or (worker or {}).get('hostname') or host
-            user = str(((worker or {}).get('capabilities') or {}).get('ssh_user') or user)
-            if not host or not user:
-                await websocket.send_json({'type': 'terminal_error', 'error': 'Worker 缺少 SSH 连接元数据'})
-                return
-            password = config_manager.find_device_host_password(f'{user}@{host}', config) or password
-            if mode == 'adb':
-                device_ids = {item['id'] for item in get_cluster_service().repository.list_devices(worker_id)}
-                composite_id = serial_no if serial_no.startswith(f'{worker_id}:') else f'{worker_id}:{serial_no}'
-                if composite_id not in device_ids:
-                    await websocket.send_json({'type': 'terminal_error', 'error': '设备不属于所选 Worker'})
-                    return
-                serial_no = composite_id.split(':', 1)[1]
-
-        session_id = client_id
+        close_websocket_terminal(websocket)
+        session_id = uuid.uuid4().hex
+        websocket.state.terminal_connection_id = session_id
 
         if mode == 'adb':
+            from features.cluster import get_cluster_service
+
+            claim_registry = get_cluster_service().repository.claims
+            device_key = f"{worker_id}:{serial_no}"
+            claim_source_id = f"terminal:{session_id}"
+            acquired, records = claim_registry.acquire(
+                [{
+                    'device_key': device_key,
+                    'worker_id': worker_id,
+                    'serial': serial_no,
+                }],
+                owner_id=owner_id,
+                username=owner_username,
+                source_type='terminal',
+                source_id=claim_source_id,
+                ttl_seconds=TERMINAL_CLAIM_TTL_SECONDS,
+                allow_existing_source=False,
+            )
+            if not acquired:
+                conflict = records[0]
+                await websocket.send_json({
+                    'type': 'terminal_error',
+                    'error': '设备正由另一个任务或用户占用',
+                    'conflict_source': conflict.get('source_type', ''),
+                })
+                websocket.state.terminal_connection_id = ''
+                return
+            claim = records[0]
+            websocket.state.terminal_claim_registry = claim_registry
+            websocket.state.terminal_claim_source_id = claim_source_id
+            websocket.state.terminal_claim_id = claim['id']
+            websocket.state.terminal_claim_generation = claim['generation']
             adb_config = dict(config)
             adb_config.update({
                 'ubuntu_host': host,
@@ -316,12 +349,22 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                 'username': user,
                 'password': password,
             })
-            await handle_adb_shell_connect(client_id, websocket, serial_no, adb_config)
+            await handle_adb_shell_connect(
+                session_id,
+                websocket,
+                serial_no,
+                adb_config,
+                worker_id=worker_id,
+                owner_id=owner_id,
+                claim=claim,
+                claim_registry=claim_registry,
+                claim_source_id=claim_source_id,
+            )
             return
 
         logger.info(f"[TERMINAL] SSH Connection request from {session_id} to {user}@{host}")
 
-        if CommonUtils.is_local_host(host):
+        if is_local_host(host):
             channel = create_local_terminal_channel()
             channel.resize_pty(width=80, height=24)
             loop = asyncio.get_event_loop()
@@ -336,12 +379,18 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                     'host': host,
                     'user': user,
                     'mode': 'local',
+                    'worker_id': worker_id,
+                    'connection_id': session_id,
                     'connected_at': time.time(),
                     'websocket': websocket,
                     'event_loop': loop
                 }
 
-            await websocket.send_json({'type': 'terminal_connected', 'mode': 'local'})
+            await websocket.send_json({
+                'type': 'terminal_connected',
+                'mode': 'local',
+                'connection_id': session_id,
+            })
 
             def read_local_terminal_output():
                 try:
@@ -390,21 +439,37 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
             'private_key_path': config.get('private_key_path', '~/.ssh/id_rsa')
         }
 
-        # create_connection + invoke_shell are blocking paramiko calls (connect
-        # timeout up to 5s) — build the channel off the event loop so opening a
-        # terminal doesn't stall other websocket clients.
+        # Paramiko 建连和打开 Shell 均为阻塞调用，在线程中执行。
         def _open_terminal_channel():
-            conn = ssh_manager.create_connection(ssh_config)
-            if not conn:
-                return None, None
-            ch = conn.invoke_shell(term='xterm-256color')
-            ch.setblocking(0)
-            ch.resize_pty(width=80, height=24)
-            return conn, ch
+            try:
+                conn = ssh_manager.create_connection(ssh_config, raise_on_error=True)
+                if not conn:
+                    return None, None, None
+                ch = conn.invoke_shell(term='xterm-256color')
+                ch.setblocking(0)
+                ch.resize_pty(width=80, height=24)
+                return conn, ch, None
+            except Exception as exc:
+                return None, None, exc
 
-        ssh, channel = await asyncio.to_thread(_open_terminal_channel)
+        ssh, channel, connection_error = await asyncio.to_thread(_open_terminal_channel)
         if not ssh:
-            await websocket.send_json({'type': 'terminal_error', 'error': 'SSH连接失败：请检查用户名、密码或密钥配置'})
+            close_websocket_terminal(websocket)
+            host_key_error = "known_hosts" in str(connection_error or "").lower()
+            payload = {
+                'type': 'terminal_error',
+                'error': (
+                    'SSH 主机密钥尚未信任，请先在主机集群页面登记主机密钥'
+                    if host_key_error
+                    else f'SSH连接失败：请录入或更新 {user}@{host} 的密码'
+                ),
+            }
+            if not host_key_error:
+                payload.update({
+                    'credential_required': True,
+                    'device_host': f'{user}@{host}',
+                })
+            await websocket.send_json(payload)
             return
 
         loop = asyncio.get_event_loop()
@@ -417,12 +482,18 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                 'channel': channel,
                 'host': host,
                 'user': user,
+                'worker_id': worker_id,
+                'connection_id': session_id,
                 'connected_at': time.time(),
                 'websocket': websocket,
                 'event_loop': loop
             }
 
-        await websocket.send_json({'type': 'terminal_connected'})
+        await websocket.send_json({
+            'type': 'terminal_connected',
+            'mode': 'ssh',
+            'connection_id': session_id,
+        })
 
         def read_ssh_terminal_output():
             try:
@@ -471,28 +542,52 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         thread.start()
 
     except paramiko.AuthenticationException:
+        close_websocket_terminal(websocket)
         await websocket.send_json({'type': 'terminal_error', 'error': 'SSH认证失败：用户名或密码错误'})
     except paramiko.SSHException as e:
+        close_websocket_terminal(websocket)
         await websocket.send_json({'type': 'terminal_error', 'error': f'SSH连接错误：{e!s}'})
     except Exception as e:
+        close_websocket_terminal(websocket)
         logger.error(f"[TERMINAL] Connection error: {e}")
         await websocket.send_json({'type': 'terminal_error', 'error': f'连接失败：{e!s}'})
 
 
 async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict):
-    session_id = client_id
+    session_id = terminal_connection_id(websocket)
+    supplied_id = str(data.get('connection_id') or '')
+    if supplied_id and supplied_id != session_id:
+        await websocket.send_json({'type': 'terminal_error', 'error': '终端连接标识无效'})
+        return
+    claim_revoked = False
     with global_state.terminal_lock:
         if session_id in global_state.terminal_ssh_sessions:
             try:
-                input_data = data.get('input', data.get('data', ''))
-                global_state.terminal_ssh_sessions[session_id]['channel'].send(input_data)
+                session_info = global_state.terminal_ssh_sessions[session_id]
+                if not _terminal_device_claim_valid(session_info):
+                    close_terminal_session_resources(session_info)
+                    del global_state.terminal_ssh_sessions[session_id]
+                    claim_revoked = True
+                else:
+                    input_data = data.get('input', data.get('data', ''))
+                    session_info['channel'].send(input_data)
             except Exception as e:
                 logger.error(f"[TERMINAL] Input error for {session_id}: {e}")
                 await websocket.send_json({'type': 'terminal_error', 'error': f'发送数据失败：{e!s}'})
+    if claim_revoked:
+        close_websocket_terminal(websocket)
+        await websocket.send_json({
+            'type': 'terminal_error',
+            'error': '设备租约已失效，终端已关闭',
+        })
 
 
 async def handle_terminal_resize(client_id: str, websocket: WebSocket, data: dict):
-    session_id = client_id
+    session_id = terminal_connection_id(websocket)
+    supplied_id = str(data.get('connection_id') or '')
+    if supplied_id and supplied_id != session_id:
+        await websocket.send_json({'type': 'terminal_error', 'error': '终端连接标识无效'})
+        return
     with global_state.terminal_lock:
         if session_id in global_state.terminal_ssh_sessions:
             try:
@@ -501,85 +596,3 @@ async def handle_terminal_resize(client_id: str, websocket: WebSocket, data: dic
                 global_state.terminal_ssh_sessions[session_id]['channel'].resize_pty(width=cols, height=rows)
             except Exception as e:
                 logger.error(f"[TERMINAL] Resize error for session {session_id}: {e}")
-
-
-async def refresh_devices_websocket(client_id: str, websocket: WebSocket):
-    try:
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-
-        if ssh:
-            try:
-                stdout, _stderr, code = ssh_manager.execute_command(ssh, "adb devices", timeout=5)
-                if code == 0:
-                    lines = stdout.strip().split('\n')[1:]
-                    devices_info = []
-                    for line in lines:
-                        if line.strip():
-                            parts = line.split('\t')
-                            if len(parts) >= 2:
-                                device_id = parts[0]
-                                status = parts[1]
-                                device_data = {'id': device_id, 'status': status}
-
-                                lock_status = device_lock_manager.get_lock_status(device_id)
-                                if lock_status:
-                                    device_data['locked'] = True
-                                    device_data['locked_by'] = lock_status['locked_by']
-
-                                devices_info.append(device_data)
-
-                    await websocket.send_json({'type': 'devices_updated', 'devices': devices_info})
-            except Exception as e:
-                logger.error(f"Error refreshing devices: {e}")
-            finally:
-                ssh_manager.return_connection(ssh)
-    except Exception as e:
-        logger.error(f"Error in refresh_devices_websocket: {e}")
-        await websocket.send_json({'type': 'error', 'message': str(e)})
-
-
-async def handle_tradefed_list_results(client_id: str, websocket: WebSocket, data: dict):
-    from features.test_execution import execute_tradefed_command, parse_tradefed_list_results
-
-    try:
-        config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
-
-        if not ssh:
-            await websocket.send_json({'type': 'tradefed_list_results_error', 'error': 'SSH 连接失败'})
-            return
-
-        suite_path = data.get('suite_path', '')
-        tradefed_bin = data.get('tradefed_bin', '')
-
-        if not suite_path or not tradefed_bin:
-            await websocket.send_json({'type': 'tradefed_list_results_error', 'error': '缺少参数：suite_path 或 tradefed_bin'})
-            ssh_manager.return_connection(ssh)
-            return
-
-        output, error, code = execute_tradefed_command(ssh, suite_path, tradefed_bin)
-        ssh_manager.return_connection(ssh)
-
-        if code == 0:
-            parsed = parse_tradefed_list_results(output)
-            await websocket.send_json({
-                'type': 'tradefed_list_results',
-                'success': True,
-                'output': output,
-                'columns': parsed.get('columns', []),
-                'results': parsed.get('results', []),
-                'count': len(parsed.get('results', [])),
-                'command': f"cd '{suite_path}' && {tradefed_bin} list results"
-            })
-        else:
-            await websocket.send_json({
-                'type': 'tradefed_list_results_error',
-                'success': False,
-                'error': error or f'命令执行失败，退出代码：{code}',
-                'command': f"cd '{suite_path}' && {tradefed_bin} list results"
-            })
-
-    except Exception as e:
-        logger.error(f"[TRADEFED_LIST_RESULTS] Error: {e}")
-        await websocket.send_json({'type': 'tradefed_list_results_error', 'success': False, 'error': str(e)})

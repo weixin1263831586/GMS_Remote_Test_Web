@@ -37,8 +37,8 @@ from features.gerrit.config import (
     denormalize_gerrit_dashboard_config,
     normalize_gerrit_dashboard_config,
 )
-from features.gerrit.dependencies import configure_redmine_users_provider
 from features.gerrit.service import _query_gerrit_dual_mode
+from features.gerrit.settings import config_manager as gerrit_config_manager
 from features.redmine import api as redmine
 from features.redmine import reply_api as redmine_reply
 from features.redmine.api import configure_redmine_service
@@ -69,12 +69,12 @@ from features.test_execution.api import (
 from features.test_execution.dependencies import (
     configure_test_execution_dependencies,
 )
+from features.test_execution.suite_task_store import SuiteTaskStore
 from features.users import api as users
 from features.users import (
     client_manager,
     get_client_id_from_request,
     get_client_ip,
-    parse_client_id,
     probe_windows_usbipd,
     resolve_tailscale_device_host,
 )
@@ -96,10 +96,6 @@ from foundation.config import (
 )
 from foundation.files import FileUtils
 from workflows.cluster_test_execution import start_cluster_test
-from workflows.device_test_execution import (
-    acquire_test_devices,
-    release_test_devices,
-)
 from workflows.firmware_device import (
     lock_firmware_devices,
     release_firmware_devices,
@@ -248,8 +244,6 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             safe_websocket_send=safe_websocket_send,
             generate_help_or_continue=generate_help_or_continue,
             get_client_id_from_request=get_client_id_from_request,
-            parse_client_id=parse_client_id,
-            store_notification=store_notification,
             apk_max_file_size=APK_MAX_FILE_SIZE,
             apk_upload_dir=APK_UPLOAD_DIR,
             max_log_entries=MAX_LOG_ENTRIES,
@@ -257,14 +251,13 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             normalize_apk_filename=_normalize_apk_filename,
             safe_join=_safe_join,
             cleanup_files=_cleanup_files,
-            acquire_test_devices=acquire_test_devices,
-            release_test_devices=release_test_devices,
             start_cluster_test=start_cluster_test,
+            suite_task_store=SuiteTaskStore(
+                services.settings.data_root
+                / "test_execution/suite_tasks.sqlite3"
+            ),
         )
         configure_redmine_service(services.redmine)
-        configure_redmine_users_provider(
-            services.redmine.list_user_mappings,
-        )
         profiles_path = (
             services.settings.project_root
             / 'configs/automation_profiles.json'
@@ -275,8 +268,10 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
                 / 'configs/automation_profiles.example.json'
             )
 
-        async def query_gerrit(query: str, limit: int):
-            config = config_manager.get_gerrit_dashboard_config()
+        async def query_gerrit(owner_id: str, query: str, limit: int):
+            config = gerrit_config_manager.for_owner(
+                owner_id
+            ).get_gerrit_dashboard_config()
             effective_query = query.strip() or 'status:open'
             if 'limit:' not in effective_query:
                 effective_query = f'{effective_query} limit:{limit}'

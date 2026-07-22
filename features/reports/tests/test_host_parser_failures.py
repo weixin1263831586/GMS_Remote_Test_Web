@@ -17,9 +17,7 @@ class HostLogFailureExtractionTests(unittest.TestCase):
     """
 
     def test_multiline_failure_with_blank_lines_is_kept_intact(self):
-        # Reproduces the SuspendSepolicyTests SELinux report whose body is split
-        # into paragraphs by blank lines. Previously the first blank line
-        # truncated the message, losing the genfscon rules and exit code.
+        # 模拟被空行分段的 SELinux 失败内容。
         log = "\n".join([
             _ts_line("[1/1] RK3576GMS1 SuspendSepolicyTests#SuspendSepolicyTests FAILURE: "),
             "Unlabeled wakeup nodes found, your device is likely missing",
@@ -48,8 +46,7 @@ class HostLogFailureExtractionTests(unittest.TestCase):
         self.assertNotIn("BackgroundDeviceAction", failure.reason)
 
     def test_short_failure_does_not_consume_next_entry(self):
-        # A single-line failure followed immediately by another timestamped log
-        # line must capture only the failure, not the next entry.
+        # 单行失败不得吞掉下一条带时间戳的日志。
         log = "\n".join([
             _ts_line("[1/1] dev SomeModule#someTest FAILURE: short error"),
             "07-02 09:20:18 I/ConsoleReporter: SomeModule completed in 1s. 0 passed, 1 failed",

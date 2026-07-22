@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,19 @@ from features.redmine.service import RedmineService
 
 
 class RepositorySearchTests(unittest.TestCase):
+    def test_redmine_stores_recover_after_runtime_data_directory_deletion(self):
+        root = Path(tempfile.mkdtemp())
+        try:
+            repo = RedmineAgentDB(root / "redmine.sqlite3", root / "docs")
+            knowledge = RedmineKnowledgeDB(root / "knowledge.sqlite3")
+
+            shutil.rmtree(root)
+
+            self.assertEqual(repo.list_all_issues(), [])
+            self.assertIsNone(knowledge.get_case_fact(123))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_list_all_issues_search_matches_issue_id(self):
         repo = RedmineAgentDB(Path(tempfile.mktemp(suffix=".sqlite3")), Path(tempfile.mkdtemp()))
         repo.upsert_issue({

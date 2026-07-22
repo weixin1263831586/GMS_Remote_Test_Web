@@ -13,7 +13,7 @@
     button.danger:hover { background:#991b1b; }
     button:disabled { opacity:.55; cursor:not-allowed; }
     .btn-group { display:flex; gap:6px; flex-wrap:wrap; }
-    /* Header toolbar: freeze layout so text changes (扫描/同步/刷新 中…) don't reflow */
+    /* 固定头部工具栏布局，避免状态文本引发重排。 */
     .header-spacer { min-width:0; }
     header .filter-bar { width:700px; min-width:700px; justify-content:flex-start; flex-wrap:nowrap; }
     header .btn-group { flex-wrap:nowrap; }
@@ -32,10 +32,11 @@
     .modal-title { color:#fff; font-size:15px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .modal-close { color:#fff; font-size:22px; cursor:pointer; line-height:1; background:none; border:none; padding:0; height:auto; }
     .modal-close:hover { color:#ccc; }
-    .modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; min-height:0; }
+    .modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; min-height:0; flex:1; }
     .modal-body label { font-size:13px; font-weight:600; color:var(--muted); margin-bottom:2px; display:block; }
     .modal-body input { width:100%; padding:8px 10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; }
     .modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:6px; }
+    .modal-footer { display:flex; gap:8px; justify-content:flex-end; padding:12px 16px; border-top:1px solid var(--border); flex-shrink:0; }
     .redmine-reply-modal { max-width:760px; }
     .redmine-reply-modal textarea { width:100%; min-height:280px; resize:vertical; padding:10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; line-height:1.5; font-family:"Courier New", monospace; }
     .redmine-reply-drop { width:100%; padding:18px 12px; text-align:center; cursor:pointer; border:2px dashed var(--border); border-radius:6px; background:var(--panel2); color:var(--muted); font-size:12px; transition:border-color .15s, background .15s; }
@@ -205,7 +206,7 @@
     .dept-table a { color:#7bb0ff; text-decoration:none; font-weight:700; }
     .dept-table a:hover { text-decoration:underline; }
     .dept-action-btn { padding:0 10px; text-align:center; white-space:nowrap; }
-    /* Keep the person column compact so numeric columns don't get squeezed. */
+    /* 限制人员列宽，保留数值列空间。 */
     .dept-table .col-person { width:1%; white-space:nowrap; }
     .dept-table td.col-person { padding-right:18px; }
     #trendDetailBody { max-height:calc(85vh - 62px); }

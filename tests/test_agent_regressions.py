@@ -6,22 +6,25 @@ from unittest.mock import ANY, MagicMock, patch
 from fastapi.responses import PlainTextResponse
 
 from features.assistant import api as assistant_api
-from features.assistant.api import _missing_required_params, _parse_user_intent
+from features.assistant.api import _missing_required_params
 from features.assistant.executor import ActionExecutor, _json_body
 from features.assistant.intent import resolve
 from features.assistant.tools import registry
+from features.auth import CurrentUser
 from features.test_execution.api import get_status
 
 
 class AgentRegressionTests(unittest.TestCase):
     @staticmethod
-    def _request():
+    def _request(role="user"):
         return SimpleNamespace(
             headers={},
             cookies={},
             client=SimpleNamespace(host="127.0.0.1"),
             method="POST",
-            state=SimpleNamespace(),
+            state=SimpleNamespace(current_user=CurrentUser(
+                id="owner-1", username="owner", role=role
+            )),
             url="http://test/agent",
             query_params={},
         )
@@ -55,12 +58,6 @@ class AgentRegressionTests(unittest.TestCase):
             "hasFixedPerformance/0_android_hardware_power_IPower_default",
         )
         self.assertEqual(intent.params["devices"], [])
-
-        legacy_intent = _parse_user_intent(
-            "帮我测试VtsHalPowerTargetTest Power/PowerAidl#hasFixedPerformance/0_android_hardware_power_IPower_default"
-        )
-        self.assertEqual(legacy_intent["devices"], [])
-        self.assertEqual(legacy_intent["device_count"], 1)
 
     def test_open_test_page_resolves_to_navigation(self):
         intent = resolve("打开测试界面", {})
@@ -112,11 +109,28 @@ class AgentRegressionTests(unittest.TestCase):
             ANY, "CTS", space_id="", tag="", limit=50
         )
 
+    def test_agent_cannot_bypass_admin_dependency_for_user_listing(self):
+        result = asyncio.run(
+            ActionExecutor().execute({}, self._request(), "users_list", {})
+        )
+
+        self.assertFalse(result.success)
+        self.assertIn("Permission denied", result.error)
+
+    def test_agent_cannot_bypass_elevation_dependency_for_config_update(self):
+        result = asyncio.run(
+            ActionExecutor().execute(
+                {}, self._request(role="admin"), "config_update", {}
+            )
+        )
+
+        self.assertFalse(result.success)
+        self.assertIn("elevation_required", result.error)
+
     def test_required_agent_params_treat_false_as_a_supplied_value(self):
-        cluster_mode = registry.get("cluster_set_mode")
         cancel_run = registry.get("automation_run_cancel")
 
-        self.assertEqual(_missing_required_params(cluster_mode, {"enabled": False}), [])
+        self.assertIsNone(registry.get("cluster_set_mode"))
         self.assertEqual(
             [item["name"] for item in _missing_required_params(cancel_run, {})],
             ["run_id"],

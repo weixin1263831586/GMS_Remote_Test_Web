@@ -17,8 +17,7 @@ from typing import Any
 from .knowledge_repository import RedmineKnowledgeDB
 
 
-# (dimension_key, internal_extractor, reference_extractor) for each of the 11 dims.
-# Extractors map a case dict / reference structured dict to a comparable string.
+# 各评估维度及内部、参考值提取器。
 def _platform(case: dict) -> str:
     return str(case.get("chip_platform") or (case.get("scope") or {}).get("chip_platform") or "")
 
@@ -122,7 +121,7 @@ class CaseEvaluator:
             return False
         if a_norm == b_norm:
             return True
-        # Substring either way covers partial overlaps (e.g. "RK3576" in a longer ref).
+        # 双向子串匹配覆盖部分重叠文本。
         if a_norm in b_norm or b_norm in a_norm:
             return True
         # Semantic overlap for long-form fields (root_cause / solution / ...):
@@ -140,8 +139,7 @@ class CaseEvaluator:
         ta, tb = tokens(a), tokens(b)
         if not ta or not tb:
             return False
-        # Only meaningful for reasonably long text (short labels already handled
-        # by the substring/exact checks above).
+        # 短标签已由精确和子串规则处理。
         if len(ta) < 3 and len(tb) < 3:
             return False
         overlap = len(ta & tb)

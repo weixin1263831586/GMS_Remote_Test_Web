@@ -92,8 +92,7 @@ async def execute_config_host_command(
     """在配置主机上执行命令（本地或远程）"""
     if _is_config_host_local(config):
         return await asyncio.to_thread(run_local_shell_command, command, timeout)
-    # execute_command is a blocking paramiko call — run it off the event loop
-    # so a slow remote host doesn't freeze every other request.
+    # SSH 探测为阻塞调用，在线程中执行。
     return await asyncio.to_thread(_ssh_manager.execute_command, ssh, command, timeout)
 
 

@@ -4,6 +4,7 @@ The worker functions accept injected automation/build services so tests do not
 touch the module-level singletons.
 """
 
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -41,7 +42,7 @@ class _FakeBuildService:
     def __init__(self, store, running_jobs=None):
         self.store = store
         self.polled = []
-        # Optional pre-seeded job dicts returned by list_jobs(status="running")
+        # 可预置 list_jobs 返回的运行任务。
         self._running_override = running_jobs
 
     def list_jobs(self, status="", limit=50):
@@ -354,9 +355,7 @@ class RunTickSyncTests(unittest.TestCase):
             ).to_run_dict("r1"))
             auto_svc = _FakeAutomationService(auto_store)
 
-            # First tick: stale sweep runs, build polled, run advances to completed
-            # (StubAutomationExecutor completes in one advance_next per tick;
-            # worker_tick loops until no run remains, so a single run finishes).
+            # 首轮执行清理、构建轮询并完成任务。
             result = run_tick_sync(cfg, automation_service=auto_svc, build_service=build_svc)
 
             self.assertEqual(result["polled_builds"], 1)
@@ -430,6 +429,36 @@ class WorkerLifecycleTests(unittest.TestCase):
             worker._task = previous_task
             worker._stale_swept = previous_swept
             worker._last_build_poll_at = previous_poll
+
+    def test_maintenance_ticks_continue_while_advancement_is_running(self):
+        from features.automation import worker
+
+        previous_advancement = worker._advancement_task
+        worker._advancement_task = None
+        maintenance_calls = []
+        release = asyncio.Event()
+
+        async def fake_to_thread(function, _cfg):
+            if function is worker.run_maintenance_sync:
+                maintenance_calls.append("maintenance")
+                return {"polled_builds": 1}
+            await release.wait()
+            return {"advanced_runs": 1}
+
+        async def exercise():
+            with patch.object(worker.asyncio, "to_thread", side_effect=fake_to_thread):
+                await worker._tick_once({"executor": "stub"})
+                await asyncio.sleep(0)
+                await worker._tick_once({"executor": "stub"})
+                self.assertEqual(maintenance_calls, ["maintenance", "maintenance"])
+                self.assertTrue(worker._advancement_task)
+                release.set()
+                await worker._advancement_task
+
+        try:
+            asyncio.run(exercise())
+        finally:
+            worker._advancement_task = previous_advancement
 
 
 if __name__ == "__main__":

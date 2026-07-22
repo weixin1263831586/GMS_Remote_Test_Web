@@ -1,5 +1,3 @@
-"""Cluster job lifecycle, event, and artifact endpoints."""
-
 from __future__ import annotations
 
 import hashlib
@@ -12,23 +10,39 @@ from pathlib import Path
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
-from features.auth import get_authenticated_user
+from features.auth import (
+    authentication_required,
+    get_authenticated_user,
+    require_authenticated_user,
+)
 from features.users import owner_id_from_request
 
 from .api import _authenticate, _require_cluster_enabled, service
 from .config import configured_max_bytes
 from .models import ArtifactUploadComplete, ArtifactUploadInit, ClusterJobCreate, JobEventBatch
+from .report_index import index_cluster_report
 from .repository import utc_now
 
 
 router = APIRouter()
 
 
-def _require_job_access(request: Request, job: dict) -> None:
-    """Keep browser users inside their own job boundary; admins can inspect all."""
+def _request_owner_id(request: Request) -> str:
     user = get_authenticated_user(request)
-    if user and user.role != "admin" and job.get("owner_id") != user.username:
-        # Do not disclose whether another user's job id exists.
+    if user:
+        return user.id
+    if authentication_required():
+        return require_authenticated_user(request).id
+    return owner_id_from_request(request)
+
+
+def _require_job_access(request: Request, job: dict) -> None:
+    user = get_authenticated_user(request)
+    if user is None:
+        if authentication_required():
+            require_authenticated_user(request)
+        return
+    if user.role != "admin" and str(job.get("owner_id") or "") != user.id:
         raise HTTPException(404, "job not found")
 
 
@@ -42,12 +56,11 @@ def create_job(body: ClusterJobCreate, request: Request):
         body.worker_id == local_worker_id
         and not service().has_command_agent(local_worker_id)
     ):
-        raise HTTPException(409, "local tests must use /api/test/start")
+        raise HTTPException(503, "local Worker Agent is offline")
     data = body.model_dump()
-    user = get_authenticated_user(request)
-    data["owner_id"] = (
-        user.username if user else (data.get("owner_id") or owner_id_from_request(request, default="legacy"))
-    )
+    data["trace_id"] = str(getattr(request.state, "trace_id", "") or "")
+    # 所有者必须取自认证账户，不接受浏览器传入值。
+    data["owner_id"] = _request_owner_id(request)
     if data["worker_id"] == "auto":
         try:
             data["worker_id"], selected_devices = service().select_worker(
@@ -96,16 +109,39 @@ def create_job(body: ClusterJobCreate, request: Request):
         data["argv"] = [executable, "list", "devices"]
     try:
         job = service().repository.create_job_with_leases(data)
+        request.state.device_lease_tokens = [
+            {
+                "lease_id": lease["id"],
+                "device_id": lease["device_id"],
+                "generation": lease["generation"],
+                "attempt_id": lease["attempt_id"],
+                "owner_id": data["owner_id"],
+            }
+            for lease in job.get("leases") or []
+            if lease.get("status") == "active"
+        ]
         command = service().repository.create_command({
             "worker_id": data["worker_id"],
             "command_type": "start_test",
             "job_id": job["id"],
             "attempt_id": job["current_attempt_id"],
+            "operation_id": f"{job['current_attempt_id']}:start_test",
             "payload": {
                 "worker_job_id": f"wj-{job['id']}",
                 "argv": data["argv"],
                 "env": data["env"],
                 "devices": data["devices"],
+                "trace_id": job.get("trace_id", ""),
+                "lease_tokens": [
+                    {
+                        "lease_id": lease["id"],
+                        "device_id": lease["device_id"],
+                        "generation": lease["generation"],
+                        "attempt_id": lease["attempt_id"],
+                    }
+                    for lease in job.get("leases") or []
+                    if lease.get("status") == "active"
+                ],
             },
         })
         service().repository.attach_command_to_job(job["id"], command)
@@ -121,7 +157,9 @@ def create_job(body: ClusterJobCreate, request: Request):
 @router.get("/jobs")
 def list_jobs(request: Request, limit: int = Query(default=100, ge=1, le=500)):
     user = get_authenticated_user(request)
-    owner_id = user.username if user and user.role != "admin" else ""
+    if user is None and authentication_required():
+        user = require_authenticated_user(request)
+    owner_id = user.id if user and user.role != "admin" else ""
     return {"success": True, "jobs": service().repository.list_jobs(limit, owner_id=owner_id)}
 
 
@@ -132,38 +170,6 @@ def get_job(job_id: str, request: Request):
         raise HTTPException(404, "job not found")
     _require_job_access(request, job)
     return {"success": True, "job": job}
-
-
-@router.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: str, request: Request):
-    job = service().repository.get_job(job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
-    _require_job_access(request, job)
-    if job["status"] in {"completed", "failed", "cancelled"}:
-        return {"success": True, "job": job, "already_terminal": True}
-    # Worker job ids are deterministic, allowing cancellation to be queued
-    # immediately after Start even before the first running ACK arrives.
-    worker_job_id = (
-        (job.get("attempt") or {}).get("worker_job_id", "") or f"wj-{job_id}"
-    )
-    command = service().repository.create_command({
-        "worker_id": job["assigned_worker_id"],
-        "command_type": "stop_test",
-        "job_id": job_id,
-        "attempt_id": job["current_attempt_id"],
-        "payload": {"worker_job_id": worker_job_id},
-    })
-    with service().repository.connect() as conn:
-        conn.execute(
-            "UPDATE cluster_jobs SET status='stopping',updated_at=? WHERE id=?",
-            (utc_now(), job_id),
-        )
-    return {
-        "success": True,
-        "job": service().repository.get_job(job_id),
-        "command": command,
-    }
 
 
 @router.delete("/jobs/{job_id}")
@@ -428,10 +434,10 @@ def complete_artifact_upload(
         conn.execute("""UPDATE cluster_artifact_uploads
             SET status='completed',updated_at=?,completed_at=? WHERE id=?""",
             (completed_at, completed_at, upload_id))
-    shutil.rmtree(_artifact_upload_root() / upload_id / "chunks", ignore_errors=True)
+    shutil.rmtree(_artifact_upload_root() / upload_id, ignore_errors=True)
     if str(upload["artifact_type"]).startswith("report"):
-        _index_cluster_report(_artifact_job(job_id, upload["attempt_id"], worker_id),
-                              destination_dir, artifact)
+        index_cluster_report(_artifact_job(job_id, upload["attempt_id"], worker_id),
+                             destination_dir, artifact)
     return {"success": True, "artifact": artifact}
 
 
@@ -490,79 +496,8 @@ async def upload_artifact(
         "sha256": digest.hexdigest(),
     })
     if artifact_type.startswith("report"):
-        _index_cluster_report(job, destination_dir, artifact)
+        index_cluster_report(job, destination_dir, artifact)
     return {"success": True, "artifact": artifact}
-
-
-def _index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
-    """Expose completed Worker results through the existing Reports page."""
-    from features.reports import test_report_db
-    from features.reports import XMLReportParser
-
-    request_data = job.get("request") or {}
-    suite_key = job.get("suite_key") or "XTS"
-    test_type = suite_key.split(":", 1)[0].upper()
-    timestamp = f"cluster-{job['id']}"
-    attempt_id = artifact.get("attempt_id") or job.get("current_attempt_id", "")
-    existing = test_report_db.get_report_by_timestamp(timestamp) or {}
-    artifact_ids = list(existing.get("artifact_ids") or [])
-    if artifact.get("id") and artifact["id"] not in artifact_ids:
-        artifact_ids.append(artifact["id"])
-    report_info = {
-        **existing,
-        "timestamp": timestamp,
-        "report_id": f"cluster:{job['id']}:{attempt_id}",
-        "test_type": test_type,
-        "test_module": request_data.get("test_module", ""),
-        "test_case": request_data.get("test_case", ""),
-        "client_id": job.get("owner_id", "cluster"),
-        "display_client_id": job.get("owner_id", "cluster"),
-        "devices": [item["device_id"] for item in job.get("leases", [])],
-        "result_dir": str(result_dir),
-        "suite_path": job.get("suite_path", ""),
-        "status": "collecting",
-        "worker_id": job.get("assigned_worker_id", ""),
-        "cluster_job_id": job["id"],
-        "attempt_id": attempt_id,
-        "artifact_id": artifact["id"],
-        "artifact_ids": artifact_ids,
-        "automation_run_id": request_data.get("automation_run_id", ""),
-        "build_id": request_data.get("build_id", ""),
-        "build_artifact_id": request_data.get("build_artifact_id", ""),
-        "gerrit_change_id": request_data.get("gerrit_change_id", ""),
-        "gerrit_patchset": request_data.get("gerrit_patchset", ""),
-        "redmine_issue_id": request_data.get("redmine_issue_id", ""),
-        "source_type": job.get("source_type", "cluster"),
-    }
-    if artifact.get("artifact_type") == "report-archive":
-        report_info["archive_artifact_id"] = artifact["id"]
-    if artifact.get("filename") == "test_result.xml":
-        report_info["report_artifact_id"] = artifact["id"]
-        xml_path = result_dir / artifact["filename"]
-        parsed = XMLReportParser().parse_file(str(xml_path)) if xml_path.is_file() else None
-        if parsed:
-            report_info.update({
-                "pass": parsed.pass_count,
-                "fail": parsed.fail_count,
-                "total": parsed.total,
-                "suite_version": parsed.suite_version,
-                "android_version": parsed.android_version,
-                "source_timestamp": parsed.start_time if parsed.start_time != "未知时间" else "",
-            })
-            # The XML suite name is authoritative only when it is explicit;
-            # XMLReportParser's legacy fallback is GTS for otherwise anonymous XML.
-            if parsed.test_type and parsed.test_type.upper() != "GTS":
-                report_info["test_type"] = parsed.test_type.upper()
-    test_report_db.add_report(report_info)
-
-
-def update_cluster_report_status(job_id: str, status: str, error: str = "") -> None:
-    """Finalize exactly the report indexed for this durable cluster job."""
-    from features.reports import test_report_db
-
-    timestamp = f"cluster-{job_id}"
-    if test_report_db.get_report_by_timestamp(timestamp):
-        test_report_db.update_report_status(timestamp, status, error=error)
 
 
 @router.get("/jobs/{job_id}/artifacts")

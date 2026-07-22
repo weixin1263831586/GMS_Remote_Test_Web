@@ -8,8 +8,10 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Query
+from fastapi import Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
+
+from features.auth import CurrentUser, require_role_when_auth_required
 
 from .api_support import *
 
@@ -53,6 +55,7 @@ async def gms_update_monitor_sources():
 async def start_gms_update_monitor_sync(
     mode: str = Query('incremental', pattern='^(full|incremental)$'),
     source: list[str] = Query(default=[]),
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
 ):
     known_sources = {item.key for item in SOURCES}
     unknown = sorted(set(source) - known_sources)
@@ -84,7 +87,9 @@ async def start_gms_update_monitor_sync(
 
 
 @router.get('/sync/status')
-async def gms_update_monitor_sync_status():
+async def gms_update_monitor_sync_status(
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     with _sync_lock:
         status = dict(_sync_status)
     status['db_exists'] = DB_PATH.exists()
@@ -579,4 +584,3 @@ async def list_gms_update_monitor_requirement_table_rows(
         item['values'] = json.loads(item.pop('values_json') or '[]')
         items.append(item)
     return {'success': True, 'data': {'items': items}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
-

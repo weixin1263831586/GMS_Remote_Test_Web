@@ -1,18 +1,4 @@
-"""Local Worker Bridge — keeps the Controller's own host registered as
-``worker-local`` inside the cluster database.
-
-Without this bridge the cluster tables never contain a row for the
-Controller host.  That breaks single-host mode because the frontend
-queries ``/api/cluster/workers``, ``/api/cluster/devices`` and
-``/api/cluster/suites`` for the local worker but receives empty results,
-causing the host selector, device table and suite list to malfunction.
-
-The bridge runs as a daemon thread started by ``configure_cluster``.  It
-performs an initial registration, then periodically sends a heartbeat
-that refreshes devices, suites and host metrics so that the cluster API
-is always consistent — whether only ``worker-local`` exists (single
-host) or remote Workers are also registered (multi host).
-"""
+"""通过后台心跳将 Controller 主机注册为本地 Worker。"""
 
 from __future__ import annotations
 

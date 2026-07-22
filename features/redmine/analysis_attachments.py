@@ -29,12 +29,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Canonical "is this attachment something we process?" pattern. Single source of
-# truth — imported by the other analysis mixins so PDF (and future types) are
-# handled consistently everywhere, not just in the attachment mixin.
+# 可处理附件类型的统一匹配规则。
 ATTACHMENT_PROCESSABLE_RE = re.compile(r"\.(zip|7z|rar|tar|tgz|gz|xml|txt|log|png|jpg|jpeg|webp|bmp|docx|pdf)$", re.IGNORECASE)
-# Backwards-compatible alias used by older call sites.
-PROCESS_ATTACHMENT_RE = ATTACHMENT_PROCESSABLE_RE
 IMAGE_ATTACHMENT_RE = re.compile(r"\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE)
 
 # Enhanced error patterns for structured extraction
@@ -130,9 +126,7 @@ def _truncate(text: str, limit: int) -> str:
 
 
 class AttachmentAnalysisMixin:
-    # ------------------------------------------------------------------
     # Attachment processing
-    # ------------------------------------------------------------------
 
     async def _process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> dict[str, Any]:
         issue_dir = self.attachments_dir / str(issue_id)
@@ -143,7 +137,7 @@ class AttachmentAnalysisMixin:
         error = ""
         analysis: dict[str, Any] = {"filename": attachment.filename, "failures": []}
 
-        if PROCESS_ATTACHMENT_RE.search(attachment.filename or ""):
+        if ATTACHMENT_PROCESSABLE_RE.search(attachment.filename or ""):
             try:
                 await client.download_attachment(attachment.id, str(local_path), attachment.content_url)
                 analysis = await asyncio.to_thread(self._analyze_local_attachment, str(local_path))
@@ -314,7 +308,7 @@ class AttachmentAnalysisMixin:
                 "reason": _truncate("\n".join(error_blocks), 1200),
                 "stack_trace": "",
             })
-        # Certification errors (e.g. VBMeta test key) become explicit failures too.
+        # 认证错误也作为明确失败项输出。
         for cert_failure in cert_detected.get("failures") or []:
             failures.append(cert_failure)
         interesting = self._extract_failure_like_lines(content)
@@ -404,9 +398,7 @@ class AttachmentAnalysisMixin:
             "failures": failures,
         }
 
-    # ------------------------------------------------------------------
     # Error extraction
-    # ------------------------------------------------------------------
 
     def _extract_failure_like_lines(self, content: str, limit: int = MAX_FAILURE_LINES) -> list[str]:
         """Extract individual error lines from content."""
@@ -433,6 +425,4 @@ class AttachmentAnalysisMixin:
             blocks.append("\n".join(current_block))
         return blocks
 
-    # ------------------------------------------------------------------
     # Issue payload
-    # ------------------------------------------------------------------

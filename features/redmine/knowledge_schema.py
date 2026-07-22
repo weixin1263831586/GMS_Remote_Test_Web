@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -19,23 +20,46 @@ from typing import Any
 class KnowledgeSchemaMixin:
     """Creates the knowledge base tables (idempotent)."""
 
+    _REQUIRED_TABLES = frozenset({
+        "redmine_case_facts",
+        "redmine_mature_cases",
+        "redmine_case_issue_links",
+        "redmine_reference_outputs",
+        "redmine_case_evaluations",
+        "redmine_internal_issue_links",
+    })
+
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
+        self._schema_lock = threading.RLock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
-    def connect(self) -> sqlite3.Connection:
+    def _open_connection(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
-    # ------------------------------------------------------------------
+    def connect(self) -> sqlite3.Connection:
+        conn = self._open_connection()
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self.init_db()
+            conn = self._open_connection()
+        return conn
+
     # Schema
-    # ------------------------------------------------------------------
 
     def init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as conn:
+        with self._schema_lock, self._open_connection() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS redmine_case_facts (
@@ -196,9 +220,7 @@ class KnowledgeSchemaMixin:
             except sqlite3.OperationalError:
                 pass
 
-    # ------------------------------------------------------------------
     # Shared helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _json_value(value: Any) -> str:

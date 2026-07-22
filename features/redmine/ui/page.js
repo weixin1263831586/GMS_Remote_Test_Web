@@ -218,9 +218,7 @@ function renderFormattedContent(text, defaultClass) {
     if (lastIdx < text.length) parts.push({type:'text', content:text.slice(lastIdx), lang:''});
   }
 
-  // If still no blocks, try to auto-detect code-like text (stack traces,
-  // shell commands, key:value logs) so plain problem_description / error_analysis
-  // get formatted as readable code blocks instead of a wall of escaped text.
+  // 自动识别堆栈、命令和键值日志并格式化为代码块。
   if (!parts.length || (parts.length === 1 && parts[0].type === 'text')) {
     var raw = parts.length ? parts[0].content : text;
     var auto = _splitAutoCode(raw);
@@ -246,9 +244,7 @@ function renderFormattedContent(text, defaultClass) {
   return result || _nl2br(linkifyRedmineIssueRefs(esc(text), {stopPropagation: false}));
 }
 
-// Split plain text into alternating {type:'text'|'code'} segments by detecting
-// code-like lines: stack traces (at foo.bar(File.java:123)), shell commands
-// ($/run/adb/fastboot prefixes), file:line failures, and key:value log lines.
+// 将普通文本按可识别的代码行拆分为文本和代码段。
 function _splitAutoCode(text) {
   text = String(text || '');
   if (!text.trim()) return [];
@@ -283,7 +279,7 @@ function _splitAutoCode(text) {
 function _isCodeLikeLine(line, lines, idx) {
   var s = String(line || '');
   if (!s.trim()) return false;
-  // Unified diff blocks, including command + diff output pasted from Redmine.
+  // 识别 Redmine 中粘贴的命令和 unified diff。
   if (/^\s*diff\s+--git\s+/.test(s)) return true;
   if (/^\s*index\s+[0-9a-f]+\.\.[0-9a-f]+/.test(s)) return true;
   if (/^\s*(---|\+\+\+)\s+[ab]\//.test(s)) return true;
@@ -306,7 +302,7 @@ function _isCodeLikeLine(line, lines, idx) {
   // Test result lines: "[1/1] abc def TestRunner"
   if (/^\s*\[\d+\/\d+\]\s/.test(s)) return true;
   if (/\bFAILURE\b|\[\s*FAILED\s*\]|^\s*(Value of:|Actual:|Expected:)/i.test(s)) return true;
-  // "失败模块: / 失败用例: / 关键报错:" key:value analysis lines (only when mixed with code)
+  // 混合代码时识别失败模块、用例和关键报错字段。
   return false;
 }
 
@@ -317,8 +313,7 @@ function _guessCodeLang(codeLines) {
   return '';
 }
 
-// Lightweight markdown rendering for the full issue document (headings,
-// tables, lists, code fences). Avoids pulling in a full markdown lib.
+// 工单文档的轻量 Markdown 渲染。
 function renderMarkdownDoc(text) {
   text = normalizeDisplayText(text);
   if (!text.trim()) return '';
@@ -341,7 +336,7 @@ function renderMarkdownDoc(text) {
       else html += renderGenericCodeBlock(code, lang);
       continue;
     }
-    // HTML <pre><code> blocks (legacy agent docs)
+    // HTML <pre><code> 代码块。
     if (/<pre><code/.test(line)) {
       var hbuf = [];
       while (i < lines.length && !/<\/code><\/pre>/.test(lines[i])) { hbuf.push(lines[i]); i++; }
@@ -888,6 +883,7 @@ function showSettingsModal() {
       document.getElementById('settingWindowDays').value = statsConfig.window_days || 0;
       document.getElementById('settingCacheTtl').value = statsConfig.cache_ttl || 600;
       document.getElementById('settingFreshnessDays').value = statsConfig.freshness_days || 180;
+      document.getElementById('settingRedmineBaseUrl').value = redmineBaseUrl();
       // SMTP fields from statsConfig (returned by get_stats_config)
       var cfg = await api('/api/redmine-agent/config/stats');
       var email = (cfg.dashboard || {}).email || {};
@@ -911,12 +907,13 @@ async function saveSettings() {
   var window_ = parseInt(document.getElementById('settingWindowDays').value) || 60;
   var cacheTtl = parseInt(document.getElementById('settingCacheTtl').value) || 600;
   var freshnessDays = parseInt(document.getElementById('settingFreshnessDays').value) || 180;
+  var redmineBase = document.getElementById('settingRedmineBaseUrl').value.trim();
   try {
     // Save stats config
     var result = await api('/api/redmine-agent/config/stats', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({stale_days: stale, window_days: window_, cache_ttl: cacheTtl, freshness_days: freshnessDays})
+      body: JSON.stringify({base_url: redmineBase, stale_days: stale, window_days: window_, cache_ttl: cacheTtl, freshness_days: freshnessDays})
     });
     if (result) { statsConfig = Object.assign({}, statsConfig, result); _statsConfigCacheTs = Date.now(); }
     // Save SMTP config
@@ -1055,7 +1052,7 @@ function renderIssueCard(item) {
                       ['紧急','Urgent'].includes(item.priority_name) ? 'high' :
                       ['高','High'].includes(item.priority_name) ? 'medium' : '';
 
-  // Build combined error info: test module/case + error stack trace in one code block
+  // 将测试模块、用例和错误堆栈合并为代码块。
   var errorInfoCombined = errorInfoRaw;
   if (failures && failures.length) {
     var f0 = failures[0];
@@ -1229,9 +1226,11 @@ async function saveIssueToWiki(issueId) {
     space_id: 'issues',
     title: `Redmine #${issueId} ${item.subject || ''}`.trim(),
     source: 'redmine',
-    related_module: module || '',
     tags: ['Redmine问题沉淀'].concat(module ? [module] : []),
-    links: { redmine_issue_ids: [Number(issueId)] }
+    links: [
+      {target_type: 'redmine_issue', target_id: String(issueId), title: '#' + String(issueId)},
+      ...(module ? [{target_type: 'test_case', target_id: module, title: module}] : [])
+    ]
   };
   try {
     await api('/api/knowledge/docs', {
@@ -1284,8 +1283,7 @@ function renderAttachmentLinks(issueId, attachments) {
     const kind = lower.endsWith('.diff') || lower.endsWith('.patch') ? '补丁'
       : (/\.(png|jpg|jpeg|webp|bmp)$/i.test(lower) ? '截图' : '报告');
     const patchDir = kind === '补丁' ? '/vendor/rockchip/modules/power_ext' : '';
-    // Same-origin proxy download (no page navigation); falls back to Redmine
-    // link only when we have no attachment_id to proxy through the backend.
+    // 优先使用同源代理下载，缺少附件 ID 时打开 Redmine 链接。
     const attId = a.attachment_id || a.id || '';
     const safeName = esc(name || '-');
     const linkHtml = attId
@@ -1332,7 +1330,7 @@ function renderPagination(total, limit, offset) {
   const current = Math.floor(offset / limit) + 1;
   if (pages <= 1) { box.innerHTML = `<div class="muted">共 ${total} 条</div>`; return; }
 
-  // Build a windowed page-number list: first, last, current ±2, with ellipses.
+  // 页码窗口包含首页、末页和当前页前后两页。
   function pageWindow() {
     const span = 2;            // pages either side of current
     const win = new Set([1, pages, current]);
@@ -1681,6 +1679,14 @@ function renderProjectIssue(item) {
   </div>`;
 }
 
+function renderRedmineNotConfigured() {
+  return `<div class="muted" style="padding:20px;text-align:center">
+    <strong>Redmine尚未配置</strong><br>
+    请先在 Redmine 看板设置中保存 Redmine 地址和账号密码/API 密码。
+    <br><button class="secondary" style="margin-top:12px" onclick="showSettingsModal()">打开设置</button>
+  </div>`;
+}
+
 function renderDepartmentOverdue(data) {
   const summary = data.summary || {};
   window._departmentUsers = data.users || [];
@@ -1788,6 +1794,10 @@ async function loadDepartmentOverdue(force) {
       + '&profile_id=' + encodeURIComponent(departmentProfileId || '');
     if (force) url += '&refresh=true';
     const data = await api(url);
+    if (data && data.configured === false) {
+      box.innerHTML = renderRedmineNotConfigured();
+      return;
+    }
     renderDepartmentOverdue(data);
   } catch (e) {
     box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
@@ -1813,6 +1823,10 @@ async function loadStatistics(force) {
       api('/api/redmine-agent/statistics'),
       api(workloadUrl)
     ]);
+    if (workload && workload.configured === false) {
+      document.getElementById('statsContent').innerHTML = renderRedmineNotConfigured();
+      return;
+    }
     if (force && workload.refresh_warning) {
       notifyUser('Redmine刷新未完全成功', workload.refresh_warning, 'warning');
     }
@@ -1829,7 +1843,7 @@ async function loadStatistics(force) {
 
     document.getElementById('statsContent').innerHTML = `
       <section class="stats-section">
-        ${renderSummaryHeader('Redmine概览', '<div class="filter-bar">' + userSelectHtml + '</div>', '统计身份: ' + ((meta.owner_names || []).map(esc).join(' / ') || '未识别') + ' | 更新时间: ' + esc((meta.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '')))}
+        ${renderSummaryHeader('Redmine概览', '<div class="filter-bar">' + userSelectHtml + '</div>', '统计身份: ' + ((meta.owner_names || []).map(esc).join(' / ') || '未识别') + ' | 统计口径: ' + (meta.count_source === 'redmine_live' ? 'Redmine实时全历史' : '本地同步快照') + ' | 更新时间: ' + esc((meta.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '')))}
         ${renderStatsCards([
           {value: workload.open_count || 0, label: '当前未关闭', className: 'warn'},
           {value: workload.waiting_my_reply || 0, label: '待回复 ⬇', className: 'bad clickable-stat', onclick: "scrollToSection('sec-waiting-reply')"},
@@ -2036,9 +2050,7 @@ async function waitForRun(runId, label, options) {
   notifyUser('RedmineAgent ' + label + '超时', '任务 ' + runId + ' 等待超时，请检查状态', 'warning');
 }
 
-// ===========================================================================
-// Knowledge base: mature cases, batch import, case analysis, reply drafting
-// ===========================================================================
+// 知识库：成熟案例、批量导入、案例分析和回复草稿。
 let currentCaseOffset = 0;
 const casePageSize = 30;
 let pendingReferenceIssueId = 0;
@@ -2488,7 +2500,7 @@ try {
   }
 } catch (_) {}
 
-// Check if a task is already running on page load — reset button state
+// 页面加载时恢复正在运行任务的按钮状态。
 (async function() {
   try {
     const status = await api('/api/redmine-agent/status');

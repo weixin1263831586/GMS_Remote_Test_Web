@@ -118,6 +118,8 @@ async function _apiCallOnce(url, method, data, opts) {
                 (typeof detail === 'string' ? detail : detail && (detail.message || detail.detail)) ||
                 result.error || result.message || 'Request failed'
             );
+            error.status = response.status;
+            if (response.status === 401) error.suppressToast = true;
             if (needsElevation) error.suppressToast = true;
             if (result.need_password) {
                 error.needPassword = true;
@@ -146,14 +148,37 @@ async function fetchAuthStatus() {
     return response.json();
 }
 
+async function resetElevationForNewBrowserTab(status) {
+    const tabKey = 'gms_browser_tab_session_v1';
+    try {
+        if (sessionStorage.getItem(tabKey)) return status;
+        sessionStorage.setItem(tabKey, '1');
+    } catch (error) {
+        // If storage is unavailable, keep the server-side session behavior.
+        debugLog('[Auth] browser tab session storage unavailable:', error);
+        return status;
+    }
+    if (!status.authenticated) return status;
+    try {
+        const response = await fetch('/api/auth/elevation/reset', {
+            method: 'POST',
+            credentials: 'same-origin',
+        });
+        if (response.ok) {
+            return { ...status, elevated: false, elevated_until: null };
+        }
+    } catch (error) {
+        debugLog('[Auth] new browser tab elevation reset failed:', error);
+    }
+    return status;
+}
+
 function showAuthGate(setupRequired = false) {
     const gate = document.getElementById('auth-gate');
     if (!gate) return;
     const active = document.activeElement;
     const focusInsideGate = active && gate.contains(active);
-    // If the gate is already visible, don't re-focus — repeated 401s from
-    // background API calls would otherwise yank focus back to the username
-    // field while the user is typing the password.
+    // 登录层已显示时不重复抢占输入焦点。
     const wasVisible = gate.style.display === 'flex';
     gate.style.display = 'flex';
     gate.classList.toggle('setup-mode', setupRequired);
@@ -165,6 +190,10 @@ function showAuthGate(setupRequired = false) {
     if (displayNameRow) displayNameRow.style.display = setupRequired ? 'flex' : 'none';
     const message = document.getElementById('auth-message');
     if (message) message.textContent = setupRequired ? '首次访问需要创建管理员账户。' : '';
+    // 仅初始化模式允许关闭登录层并匿名进入。
+    const closeBtn = document.getElementById('auth-close');
+    if (closeBtn) closeBtn.style.display = setupRequired ? 'block' : 'none';
+    if (!setupRequired) prefillAuthUsernameFromClient();
     if (!wasVisible && !focusInsideGate) {
         setTimeout(() => {
             if (document.activeElement && gate.contains(document.activeElement)) return;
@@ -175,9 +204,36 @@ function showAuthGate(setupRequired = false) {
     }
 }
 
+async function prefillAuthUsernameFromClient() {
+    const usernameInput = document.getElementById('auth-username');
+    if (!usernameInput || usernameInput.value.trim()) return;
+    try {
+        const response = await fetch('/api/users/current', { credentials: 'same-origin' });
+        if (!response.ok) return;
+        const client = await response.json();
+        const identity = String(
+            client.display_client_id
+            || (client.username && client.ip ? `${client.username}@${client.ip}` : '')
+            || ''
+        ).trim();
+        if (identity && identity !== 'unknown' && identity !== 'unknown@unknown') {
+            usernameInput.value = identity;
+            usernameInput.dataset.autoFilled = 'true';
+        }
+    } catch (error) {
+        debugLog('[Auth] client identity prefill failed:', error);
+    }
+}
+
 function hideAuthGate() {
     const gate = document.getElementById('auth-gate');
     if (gate) gate.style.display = 'none';
+}
+
+function closeAuthGate() {
+    // 不刷新页面，以匿名身份继续初始化应用。
+    hideAuthGate();
+    continueAppInitialization();
 }
 
 async function submitAuthForm() {
@@ -204,9 +260,7 @@ async function submitAuthForm() {
         state.clientId = result.client_id || result.user?.id || null;
         state.authReady = true;
         hideAuthGate();
-        // If the client-host detection modal is already open (e.g. the user was
-        // filling it in when a background 401 raised the auth gate), recover
-        // state incrementally instead of reloading, so that modal survives.
+        // 主机识别弹框已打开时增量恢复状态，不刷新页面。
         const detectOpen = typeof ModalManager !== 'undefined' && ModalManager.isOpen('username-detect-modal');
         if (detectOpen) {
             debugLog('[Auth] Login succeeded with username-detect open; recovering state without reload');
@@ -240,14 +294,21 @@ async function logoutCurrentUser() {
 }
 
 async function ensureAuthenticatedBeforeAppStart() {
-    const status = await fetchAuthStatus();
+    const status = await resetElevationForNewBrowserTab(await fetchAuthStatus());
+    state.authRequired = status.auth_required !== false;
+    state.authSetupRequired = Boolean(status.setup_required);
     if (!status.authenticated) {
         state.currentUser = null;
         state.clientId = null;
-        state.authReady = true;
+        state.authReady = !state.authRequired;
         state.elevated = false;
         state.elevatedUntil = null;
+        if (state.authRequired) {
+            showAuthGate(Boolean(status.setup_required));
+            return false;
+        }
         hideAuthGate();
+        applyRoleBasedUiAccess();
         return true;
     }
     state.currentUser = status.user || null;
@@ -256,7 +317,27 @@ async function ensureAuthenticatedBeforeAppStart() {
     state.elevated = Boolean(status.elevated);
     state.elevatedUntil = status.elevated_until || null;
     hideAuthGate();
+    applyRoleBasedUiAccess();
     return true;
+}
+
+function applyRoleBasedUiAccess() {
+    const isAdmin = isPlatformAdmin();
+    document.querySelectorAll('[data-admin-only]').forEach(element => {
+        if (!isAdmin && element.contains(document.activeElement)) {
+            // Do not hide an element that still owns focus; Chromium reports
+            // this as an aria-hidden accessibility violation. Returning focus
+            // to the document also avoids trapping keyboard users in a menu
+            // item that is no longer available to their role.
+            document.activeElement.blur();
+        }
+        element.hidden = !isAdmin;
+        element.setAttribute('aria-hidden', isAdmin ? 'false' : 'true');
+    });
+}
+
+function isPlatformAdmin() {
+    return !state.authRequired || state.currentUser?.role === 'admin';
 }
 
 window.AnalysisMode = AnalysisMode;
@@ -266,5 +347,10 @@ window.applyClientIdentityHeadersToXhr = applyClientIdentityHeadersToXhr;
 window.apiCall = apiCall;
 window.ensureAuthenticatedBeforeAppStart = ensureAuthenticatedBeforeAppStart;
 window.showAuthGate = showAuthGate;
+window.hideAuthGate = hideAuthGate;
+window.closeAuthGate = closeAuthGate;
 window.submitAuthForm = submitAuthForm;
+window.prefillAuthUsernameFromClient = prefillAuthUsernameFromClient;
 window.logoutCurrentUser = logoutCurrentUser;
+window.applyRoleBasedUiAccess = applyRoleBasedUiAccess;
+window.isPlatformAdmin = isPlatformAdmin;

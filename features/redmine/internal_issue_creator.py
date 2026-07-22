@@ -1,17 +1,4 @@
-"""Create an internal Redmine issue from a customer problem / mature case.
-
-Redmine Textile description layout (Redmine.txt §5.9):
-
-    h1. 问题摘要
-    h1. 根因分析
-    h1. 解决方案
-    h1. 关联历史工单
-
-Creating internal issues / replying to customers is a **two-step, confirmed**
-action: the caller must pass ``confirmed=True`` (and the service enforces the
-``allow_internal_issue_create`` config). On success the mapping is written to
-``redmine_internal_issue_links``.
-"""
+"""经二次确认后从客户问题或成熟案例创建内部 Redmine 工单。"""
 
 from __future__ import annotations
 
@@ -68,9 +55,7 @@ class InternalIssueCreator:
             confirmed=confirmed,
         )
 
-    # ------------------------------------------------------------------
     # Internals
-    # ------------------------------------------------------------------
 
     async def _create(self, *, subject: str, description: str, payload: dict[str, Any], source_issue_id: int | None, case_id: int | None, confirmed: bool) -> dict[str, Any]:
         if not self.allow_create:
@@ -92,7 +77,7 @@ class InternalIssueCreator:
         if self.client is None:
             return {"success": False, "error": "redmine client not configured", "payload": redmine_payload}
 
-        # create_issue is async (python-redmine wrapped in a thread) — must await.
+        # create_issue 是异步接口。
         try:
             issue = await self.client.create_issue(
                 redmine_payload["project_id"],

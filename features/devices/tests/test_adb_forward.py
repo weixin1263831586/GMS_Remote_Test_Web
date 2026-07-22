@@ -39,11 +39,13 @@ class ADBForwardManagerTests(unittest.TestCase):
         )
 
         with patch("features.devices.adb_forward.time.sleep"):
-            result = manager.start_forward("user@192.168.0.2", "pw with spaces")
+            result = manager.start_forward("user@192.168.0.2")
 
         self.assertTrue(result["success"])
         self.assertEqual(commands[0], _adb_tunnel_kill_command())
         self.assertTrue(any("-o ExitOnForwardFailure=yes" in cmd for cmd in commands))
+        self.assertTrue(any("StrictHostKeyChecking=yes" in cmd for cmd in commands))
+        self.assertFalse(any("sshpass" in cmd or "SSHPASS" in cmd for cmd in commands))
         self.assertFalse(any("pkill -f adb" in cmd for cmd in commands))
         self.assertEqual(commands[-1], "__returned__")
 

@@ -7,9 +7,9 @@ from .settings import config_manager as gerrit_config_manager
 
 __all__ = [
     "api",
+    "gerrit_config_manager",
     "get_gerrit_personal_statistics",
     "get_review_queue_count",
-    "gerrit_config_manager",
     "list_department_members",
     "normalize_gerrit_dashboard_config",
     "post_gerrit_review",

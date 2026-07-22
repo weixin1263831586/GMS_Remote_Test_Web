@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # GMS Remote Test - Tailscale network setup helper
-# ==============================================================================
 # Common usage:
 #   Install & connect:  sudo bash scripts/setup_tailscale.sh
 #   Show status:        bash scripts/setup_tailscale.sh --status
 #   Get IP only:        bash scripts/setup_tailscale.sh --ip
-# ==============================================================================
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -99,8 +96,7 @@ do_status() {
     if ! check_tailscale_installed; then
         warn "Tailscale 未安装"
         echo ""
-        echo "安装命令:"
-        echo "  curl -fsSL https://tailscale.com/install.sh | sudo sh"
+        echo "请从组织批准的软件仓库安装经过签名校验的 Tailscale 软件包。"
         return
     fi
 
@@ -124,7 +120,7 @@ do_status() {
 
     ok "Tailscale 已连接"
     echo "  IP:     ${ip}"
-    echo "  访问地址: http://${ip}:${GMS_PORT}"
+    echo "  访问地址: https://${ip}:${GMS_PORT}"
     echo ""
     echo "在 tailnet 内的其他设备访问以上地址即可使用 GMS。"
 }
@@ -149,9 +145,7 @@ do_setup() {
     if check_tailscale_installed; then
         ok "  Tailscale 已安装: $(tailscale version 2>/dev/null | head -1)"
     else
-        info "  未安装 Tailscale，开始安装..."
-        curl -fsSL https://tailscale.com/install.sh | sudo sh
-        ok "  Tailscale 安装完成"
+        fail "未安装 Tailscale；请先从组织批准的软件仓库安装经过签名校验的软件包"
     fi
     echo ""
 
@@ -186,7 +180,7 @@ do_setup() {
     info "========================================"
     echo ""
     echo "GMS 访问地址:"
-    ok "  http://${ip}:${GMS_PORT}"
+    ok "  https://${ip}:${GMS_PORT}"
     echo ""
     echo "在 tailnet 内的其他设备访问以上地址即可使用 GMS。"
 }

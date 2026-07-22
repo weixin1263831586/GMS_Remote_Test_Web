@@ -28,7 +28,12 @@ class VNCManagerTests(unittest.TestCase):
         with patch.object(VNCManager, "_websockify_standalone", "/usr/bin/websockify"):
             self.assertEqual(
                 VNCManager._build_local_websockify_cmd("/opt/noVNC"),
-                ["/usr/bin/websockify", "--web=/opt/noVNC", "6080", "localhost:5900"],
+                [
+                    "/usr/bin/websockify",
+                    "--web=/opt/noVNC",
+                    "127.0.0.1:6080",
+                    "localhost:5900",
+                ],
             )
 
     def test_remote_vnc_commands_quote_user_and_use_scoped_patterns(self):

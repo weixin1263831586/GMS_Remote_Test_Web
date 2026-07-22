@@ -9,21 +9,29 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from fastapi import HTTPException
+
 from features.assistant.tools import AgentTool, registry
+from features.auth import require_authenticated_user
 from features.devices import device_lock_manager, device_manager, get_or_create_user_state
 from features.redmine import (
     _name_keys,
     _norm_name,
     display_names_from_mapping,
     find_user_mapping,
-    load_redmine_user_map,
 )
 from foundation.config import config_manager
+
+from .executor_formatting import (
+    format_payload as _format_payload,
+)
+from .executor_formatting import (
+    json_body as _json_body,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -86,11 +94,10 @@ _UNSUPPORTED_DIRECT_TOOLS = {
     "burn_gsi",
 }
 
-# Request model mapping for tools that accept a body — built once at module level.
+# 请求体模型映射，首次使用时初始化。
 _MODEL_BY_TOOL = None  # lazily initialized to avoid circular imports
 
-# Cache of inspect.signature(func) — a function's signature never changes, so the
-# repeated signature introspection on every tool call (now ~40+ generic tools) is pure waste.
+# 缓存函数签名，避免重复反射。
 _SIGNATURE_CACHE: dict[Any, inspect.Signature] = {}
 
 
@@ -237,6 +244,21 @@ class ActionExecutor:
                 error=f"未知工具: {tool_name}",
             )
 
+        try:
+            principal = require_authenticated_user(request)
+            if principal.role == "worker_service":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Worker service accounts cannot use the assistant",
+                )
+        except HTTPException as exc:
+            return ToolResult(
+                success=False,
+                tool_name=tool_name,
+                error=str(exc.detail),
+                formatted_text=str(exc.detail),
+            )
+
         handler = self._handlers.get(tool_name)
         if handler:
             try:
@@ -267,7 +289,14 @@ class ActionExecutor:
     # ==================== Query Helpers ====================
 
     @staticmethod
-    async def _fetch_router_json(module_path: str, func_name: str, tool_name_for_error: str = "", **kwargs) -> tuple:
+    async def _fetch_router_json(
+        module_path: str,
+        func_name: str,
+        tool_name_for_error: str = "",
+        *,
+        request: Any | None = None,
+        **kwargs,
+    ) -> tuple:
         """Import and call an async router function, returning (error_result | None, payload_dict).
 
         Returns (None, payload) on success, or (error_ToolResult, {}) on failure.
@@ -276,8 +305,64 @@ class ActionExecutor:
         try:
             module = importlib.import_module(module_path)
             func = getattr(module, func_name)
-            response = await func(**kwargs) if kwargs else await func()
-            return None, _json_body(response)
+            signature = _cached_signature(func)
+            if "request" in signature.parameters:
+                if request is None:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Authenticated request context is required",
+                    )
+                kwargs.setdefault("request", request)
+            for name, parameter in signature.parameters.items():
+                default = parameter.default
+                if (
+                    name not in kwargs
+                    and default is not inspect.Parameter.empty
+                    and default.__class__.__module__.startswith("fastapi.params")
+                    and default.__class__.__name__ == "Depends"
+                ):
+                    if request is None or not callable(default.dependency):
+                        raise HTTPException(
+                            status_code=401,
+                            detail="Route authorization context is required",
+                        )
+                    resolved = default.dependency(request)
+                    kwargs[name] = (
+                        await resolved if inspect.isawaitable(resolved) else resolved
+                    )
+                elif (
+                    name not in kwargs
+                    and default is not inspect.Parameter.empty
+                    and default.__class__.__module__.startswith("fastapi.params")
+                ):
+                    value = getattr(default, "default", inspect.Parameter.empty)
+                    if (
+                        value is not inspect.Parameter.empty
+                        and value.__class__.__name__ != "PydanticUndefinedType"
+                    ):
+                        kwargs[name] = value
+            response = (
+                await func(**kwargs)
+                if inspect.iscoroutinefunction(func)
+                else await asyncio.to_thread(func, **kwargs)
+            )
+            payload = _json_body(response)
+            if payload.get("success") is False:
+                detail = payload.get("detail")
+                error = (
+                    payload.get("error")
+                    or payload.get("message")
+                    or (detail.get("message") if isinstance(detail, dict) else detail)
+                    or "Request failed"
+                )
+                label = tool_name_for_error or func_name
+                return ToolResult(
+                    success=False,
+                    tool_name=label,
+                    error=str(error),
+                    formatted_text=f"查询失败: {error}",
+                ), {}
+            return None, payload
         except Exception as e:
             label = tool_name_for_error or func_name
             return ToolResult(
@@ -289,7 +374,7 @@ class ActionExecutor:
 
     async def _query_devices(self, session, request, params) -> ToolResult:
         query = str(params.get("query") or "").strip().lower()
-        details = await self._load_device_summaries()
+        details = await self._load_device_summaries(request)
         if query == "available":
             details = [d for d in details if not d.get("locked")]
         elif query == "locked":
@@ -332,58 +417,21 @@ class ActionExecutor:
             ],
         )
 
-    async def _load_device_summaries(self) -> list[dict[str, Any]]:
-        """Load device summaries, preferring management payload when available."""
-        try:
-            from features.devices import (
-                _build_devices_management_payload,
-                _build_management_props_command,
-                _parse_management_device_props,
-            )
-            from features.system import ssh_manager
+    async def _load_device_summaries(self, request: Any) -> list[dict[str, Any]]:
+        """Load the same owner-sanitized device view exposed by the HTTP API."""
 
-            config = config_manager.load_config()
-            device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
-            device_data: dict[str, dict[str, str]] = {}
-
-            # get_connection + execute_command are blocking paramiko calls
-            # (connect health-check + up to 15s command) — run them off the
-            # event loop so summarising devices doesn't stall the agent.
-            def _fetch_props() -> dict[str, dict[str, str]]:
-                conn = ssh_manager.get_connection(config)
-                if not conn or not device_ids:
-                    if conn:
-                        ssh_manager.return_connection(conn)
-                    return {}
-                try:
-                    command = _build_management_props_command(device_ids)
-                    output, _, _ = ssh_manager.execute_command(conn, command, timeout=15)
-                    return _parse_management_device_props(output)
-                finally:
-                    ssh_manager.return_connection(conn)
-
-            device_data = await asyncio.to_thread(_fetch_props)
-            payload = _build_devices_management_payload(device_ids, device_data, config)
-            items = payload.get("devices") or []
-            if items:
-                for item in items:
-                    item["locked"] = bool(item.get("locked_by"))
-                return items
-        except Exception as e:
-            logger.info("[Agent] device management summary fallback: %s", e)
-
-        device_ids = await asyncio.to_thread(device_manager.get_connected_devices, True)
-        details = []
-        for did in device_ids:
-            lock = device_lock_manager.get_lock_status(did)
-            details.append({
-                "device_id": did,
-                "serial_no": did,
-                "status": "online",
-                "locked": bool(lock),
-                "locked_by": lock.get("locked_by", "") if lock else "",
-            })
-        return details
+        result, payload = await self._fetch_router_json(
+            "features.devices.management_api",
+            "devices_management",
+            tool_name_for_error="devices_list",
+            request=request,
+        )
+        if result is not None:
+            raise PermissionError(result.error or "Unable to load devices")
+        items = list(payload.get("devices") or [])
+        for item in items:
+            item["locked"] = bool(item.get("locked_by"))
+        return items
 
     async def _connect_wifi(self, session, request, params) -> ToolResult:
         """连接设备到 WiFi。未指定设备时默认选择一台空闲设备。"""
@@ -413,7 +461,7 @@ class ActionExecutor:
             ssid=params.get("ssid") or wifi_defaults["ssid"],
             password=params.get("password") or wifi_defaults["password"],
         )
-        response = await connect_wifi(req)
+        response = await connect_wifi(req, request)
         payload = _json_body(response)
         summary = payload.get("summary") or {}
         success_count = summary.get("success", 0)
@@ -563,10 +611,12 @@ class ActionExecutor:
         )
 
     async def _query_reports(self, session, request, params) -> ToolResult:
+        from features.auth import require_authenticated_user
         from features.reports import test_report_db
 
-        reports = test_report_db.get_reports(limit=10)
-        stats = test_report_db.get_statistics()
+        owner_id = require_authenticated_user(request).id
+        reports = test_report_db.get_reports(limit=10, owner_id=owner_id)
+        stats = test_report_db.get_statistics(owner_id=owner_id)
         lines = [
             f"- {r.get('timestamp', '-')} | {r.get('test_type', '?')} | pass {r.get('pass', 0)} fail {r.get('fail', 0)} total {r.get('total', 0)}"
             for r in reports
@@ -587,10 +637,20 @@ class ActionExecutor:
         )
 
     async def _query_users(self, session, request, params) -> ToolResult:
-        from features.users import list_users
+        # Agent calls route functions directly, outside FastAPI's dependency
+        # graph. User enumeration is always admin-only even when the HTTP app
+        # is running in anonymous development mode.
+        from features.auth import require_role
 
-        response = await list_users()
-        payload = _json_body(response)
+        require_role("admin")(request)
+        result, payload = await self._fetch_router_json(
+            "features.users.users_api",
+            "list_users",
+            tool_name_for_error="users_list",
+            request=request,
+        )
+        if result is not None:
+            return result
         users = payload.get("users", [])
         lines = [
             f"- {u.get('username')}@{u.get('ip')} | {'测试中' if u.get('running') else '空闲'} | 设备: {', '.join(u.get('devices') or []) or '-'}"
@@ -622,7 +682,14 @@ class ActionExecutor:
         )
 
     async def _query_config(self, session, request, params) -> ToolResult:
-        config = config_manager.load_config()
+        result, config = await self._fetch_router_json(
+            "features.users.config_api",
+            "get_config",
+            tool_name_for_error="config_read",
+            request=request,
+        )
+        if result is not None:
+            return result
         safe = {
             "ubuntu_host": config.get("ubuntu_host"),
             "ubuntu_user": config.get("ubuntu_user"),
@@ -653,7 +720,9 @@ class ActionExecutor:
         )
 
     async def _query_vnc_status(self, session, request, params) -> ToolResult:
-        result, payload = await self._fetch_router_json("features.system.desktop", "get_desktop_vnc_status")
+        result, payload = await self._fetch_router_json(
+            "features.system.desktop", "get_desktop_vnc_status", request=request
+        )
         if result is not None:
             return result
         text = f"VNC 状态：{payload.get('status', 'unknown')}"
@@ -664,7 +733,9 @@ class ActionExecutor:
         )
 
     async def _query_terminal(self, session, request, params) -> ToolResult:
-        result, payload = await self._fetch_router_json("features.system.terminal_api", "get_ssh_terminal_info")
+        result, payload = await self._fetch_router_json(
+            "features.system.terminal_api", "get_ssh_terminal_info", request=request
+        )
         if result is not None:
             return result
         text = f"终端连接：{payload.get('connection_command', 'ssh ' + payload.get('host', ''))}"
@@ -675,7 +746,9 @@ class ActionExecutor:
         )
 
     async def _query_usbip_status(self, session, request, params) -> ToolResult:
-        result, payload = await self._fetch_router_json("features.devices.integrations_api", "get_usbip_status")
+        result, payload = await self._fetch_router_json(
+            "features.devices.integrations_api", "get_usbip_status", request=request
+        )
         if result is not None:
             return result
         return ToolResult(
@@ -685,7 +758,9 @@ class ActionExecutor:
         )
 
     async def _query_apk_tasks(self, session, request, params) -> ToolResult:
-        result, payload = await self._fetch_router_json("features.firmware.apk_api", "list_apk_tasks")
+        result, payload = await self._fetch_router_json(
+            "features.firmware.apk_api", "list_apk_tasks", request=request
+        )
         if result is not None:
             return result
         tasks = (payload.get("data") or {}).get("tasks", [])
@@ -737,8 +812,11 @@ class ActionExecutor:
         )
 
     async def _query_redmine_stats_config(self, session, request, params) -> ToolResult:
-        cfg = config_manager.get_redmine_stats_config()
-        dashboard = config_manager.get_redmine_dashboard_config()
+        from features.redmine import get_redmine_config_for_request
+
+        owner_config = get_redmine_config_for_request(request)
+        cfg = owner_config.get_redmine_stats_config()
+        dashboard = owner_config.get_redmine_dashboard_config()
         profiles = ", ".join(profile.get("name", "") for profile in dashboard.get("profiles", []))
         text = (
             f"Redmine 统计设置：未回复阈值 {cfg['stale_days']} 天，统计窗口 {cfg['window_days']} 天，"
@@ -758,6 +836,7 @@ class ActionExecutor:
         result, payload = await self._fetch_router_json(
             "features.redmine.api", "get_department_overdue_statistics",
             tool_name_for_error="redmine_department_stats",
+            request=request,
             stale_days=params.get("stale_days"),
             list_limit=None,
             issue_limit=None,
@@ -794,7 +873,12 @@ class ActionExecutor:
         )
 
     async def _query_gerrit_dashboard_config(self, session, request, params) -> ToolResult:
-        cfg = config_manager.get_gerrit_dashboard_config()
+        from features.gerrit import gerrit_config_manager
+        from features.users import owner_id_from_request
+
+        cfg = gerrit_config_manager.for_owner(
+            owner_id_from_request(request)
+        ).get_gerrit_dashboard_config()
         profiles = ", ".join(profile.get("name", "") for profile in cfg.get("dashboard_profiles", []))
         text = (
             f"Gerrit 看板配置：base_url={cfg.get('base_url') or '-'}，ssh={cfg.get('ssh_user') or '-'}@"
@@ -814,6 +898,7 @@ class ActionExecutor:
         result, payload = await self._fetch_router_json(
             "features.gerrit.api", "list_gerrit_changes",
             tool_name_for_error="gerrit_dashboard_changes",
+            request=request,
             profile_id=str(params.get("profile_id") or ""),
             query=str(params.get("query") or ""),
         )
@@ -855,7 +940,8 @@ class ActionExecutor:
             limit = 8
         result, payload = await self._fetch_router_json(
             "features.reports.api", "knowledgebase_search",
-            tool_name_for_error="knowledgebase_search", query=query, limit=limit,
+            tool_name_for_error="knowledgebase_search", request=request,
+            query=query, limit=limit,
         )
         if result is not None:
             return result
@@ -877,6 +963,7 @@ class ActionExecutor:
         result, payload = await self._fetch_router_json(
             "features.reports.api",
             "knowledgebase_stats",
+            request=request,
         )
         if result is not None:
             return result
@@ -897,7 +984,7 @@ class ActionExecutor:
             kwargs["q"] = str(params.get("q"))
         result, payload = await self._fetch_router_json(
             "features.system.audit", "list_security_audit_logs",
-            tool_name_for_error="security_audit_logs", **kwargs,
+            tool_name_for_error="security_audit_logs", request=request, **kwargs,
         )
         if result is not None:
             return result
@@ -918,32 +1005,44 @@ class ActionExecutor:
 
     async def _query_redmine_workload_stats(self, session, request, params) -> ToolResult:
         """统计一个或多个人员的 Redmine 工作量。"""
-        from features.redmine import _resolve_owner_names, redmine_service
+        from features.redmine import (
+            _resolve_owner_names,
+            get_redmine_config_for_request,
+            get_redmine_service_for_request,
+            load_redmine_user_map_for_owner,
+        )
+        from features.users import owner_id_from_request
+
+        redmine_service = get_redmine_service_for_request(request)
+        owner_config = get_redmine_config_for_request(request)
 
         raw_names = params.get("names") or []
         if isinstance(raw_names, str):
             raw_names = [raw_names]
         names = [str(name).strip() for name in raw_names if str(name).strip()]
-        stale_days = int(params.get("stale_days") or config_manager.get_redmine_stats_config()["stale_days"])
+        stale_days = int(
+            params.get("stale_days")
+            or owner_config.get_redmine_stats_config()["stale_days"]
+        )
 
         if not names:
             try:
-                names = await _resolve_owner_names()
+                names = await _resolve_owner_names(request, redmine_service)
             except Exception:
                 names = []
         if not names:
             return ToolResult(
                 success=False,
                 tool_name="redmine_workload_stats",
-                formatted_text="没有识别到要统计的人员，请指定姓名，例如：统计 卞金晨 Redmine 信息。",
+                formatted_text="没有识别到要统计的人员，请指定姓名，例如：统计 张三 Redmine 信息。",
                 page="redmine-agent",
                 error="missing names",
             )
 
-        user_map = load_redmine_user_map()
+        user_map = load_redmine_user_map_for_owner(owner_id_from_request(request))
         resolved = redmine_service.repository.resolve_assignee_names(names)
         try:
-            window_days = int(config_manager.get_redmine_stats_config()["window_days"])
+            window_days = int(owner_config.get_redmine_stats_config()["window_days"])
         except Exception:
             window_days = 0
         rows = []
@@ -984,7 +1083,7 @@ class ActionExecutor:
                 + "、".join(zero_rows)
                 + "。如果 Redmine 禁止用户搜索，需要先同步到这些人的问题，或补充姓名到 Redmine 用户 ID 的映射。"
             )
-        if any(find_user_mapping(row["requested_name"]) for row in rows):
+        if any(find_user_mapping(row["requested_name"], user_map) for row in rows):
             lines.append("")
             lines.append("口径：历史数量、未 Close、已解决/关闭来自 Redmine 实时 count；待回复、超阈值未回复、缺测试报告依赖本地已同步的 journal/附件详情。")
 
@@ -1027,7 +1126,7 @@ class ActionExecutor:
         Returns (matched_names, stats_dict).
         """
         matched_names = resolved.get(requested_name) or [requested_name]
-        mapped_user = find_user_mapping(requested_name) if user_map else {}
+        mapped_user = find_user_mapping(requested_name, user_map) if user_map else {}
         live_counts = {}
 
         if mapped_user:
@@ -1038,11 +1137,14 @@ class ActionExecutor:
             owner_names=matched_names, stale_days=stale_days,
             list_limit=5, display_names=matched_names,
             window_days=window_days,
+            organization_user_map=user_map,
         )
 
         # Fallback: if no local data, try syncing from Redmine
         if not mapped_user and (stats.get("total_owned", 0) == 0 or matched_names == [requested_name]):
-            live_names = await self._sync_redmine_user_for_stats(agent, requested_name)
+            live_names = await self._sync_redmine_user_for_stats(
+                agent, requested_name, user_map
+            )
             if live_names:
                 matched_names = live_names
                 resolved[requested_name] = live_names
@@ -1050,6 +1152,7 @@ class ActionExecutor:
                     owner_names=matched_names, stale_days=stale_days,
                     list_limit=5, display_names=matched_names,
                     window_days=window_days,
+                    organization_user_map=user_map,
                 )
 
         if live_counts:
@@ -1066,10 +1169,15 @@ class ActionExecutor:
             logger.info("[Agent] Redmine user count failed for %s: %s", user.get("id"), exc)
             return {}
 
-    async def _sync_redmine_user_for_stats(self, agent: Any, requested_name: str) -> list[str]:
+    async def _sync_redmine_user_for_stats(
+        self,
+        agent: Any,
+        requested_name: str,
+        user_map: list[dict[str, Any]],
+    ) -> list[str]:
         """Try to find and sync a Redmine user by name. Returns display names on success."""
         client = agent._make_client()
-        mapped_user = find_user_mapping(requested_name)
+        mapped_user = find_user_mapping(requested_name, user_map)
         if mapped_user:
             await self._sync_redmine_user_issues(agent, client, mapped_user)
             return display_names_from_mapping(mapped_user)
@@ -1237,6 +1345,21 @@ class ActionExecutor:
                 kwargs[name] = params[name]
             elif name in query_params:
                 kwargs[name] = query_params[name]
+            elif (
+                parameter.default is not inspect.Parameter.empty
+                and parameter.default.__class__.__module__.startswith("fastapi.params")
+                and parameter.default.__class__.__name__ == "Depends"
+            ):
+                dependency = parameter.default.dependency
+                if not callable(dependency) or request is None:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Route authorization context is required",
+                    )
+                resolved = dependency(request)
+                if inspect.isawaitable(resolved):
+                    raise RuntimeError("Async route dependencies are not supported")
+                kwargs[name] = resolved
             elif parameter.default is not inspect.Parameter.empty:
                 default = parameter.default
                 if default.__class__.__module__.startswith("fastapi.params"):
@@ -1267,130 +1390,6 @@ class ActionExecutor:
         if tool.name == "reports_download" and "report_timestamp" not in query:
             query["report_timestamp"] = query.get("timestamp", "")
         return {k: v for k, v in query.items() if v is not None}
-
-
-# ==================== Helpers ====================
-
-def _json_body(response) -> dict[str, Any]:
-    """Extract JSON body from a FastAPI JSONResponse or similar object."""
-    if isinstance(response, dict):
-        return response
-    if hasattr(response, "model_dump"):
-        return response.model_dump()
-    if response is None:
-        return {"success": False, "error": "Empty response"}
-    try:
-        body = getattr(response, "body", None)
-        if body is None and hasattr(response, "render"):
-            body = response.render(getattr(response, "content", None))
-        if isinstance(body, memoryview):
-            body = body.tobytes()
-        if isinstance(body, bytes):
-            body = body.decode("utf-8")
-        if isinstance(body, str) and body.strip():
-            try:
-                return json.loads(body)
-            except json.JSONDecodeError:
-                return {
-                    "success": False,
-                    "error": body.strip(),
-                    "message": body.strip(),
-                }
-    except Exception as e:
-        logger.warning("[Agent] Failed to parse JSON response from %s: %s", type(response).__name__, e)
-    return {"success": False, "error": f"Invalid JSON response: {type(response).__name__}"}
-
-
-def _format_payload(tool: AgentTool, payload: dict[str, Any]) -> str:
-    if payload.get("error"):
-        return str(payload["error"])
-    if tool.name == "devices_info":
-        return _format_device_info_payload(payload)
-    if payload.get("message"):
-        return str(payload["message"])
-    if "connected" in payload:
-        return f"{tool.display_name}：{'已连接/正常' if payload['connected'] else '未连接'}"
-    data = payload.get("data", payload)
-    if isinstance(data, dict):
-        # Helper to get a list from data or payload
-        def _first_list(*keys):
-            for container in (data, payload):
-                for k in keys:
-                    v = container.get(k)
-                    if isinstance(v, list):
-                        return v
-            return []
-
-        results = _first_list("results")
-        if results:
-            ok = sum(1 for item in results if isinstance(item, dict) and item.get("success"))
-            return f"{tool.display_name}完成：成功 {ok}/{len(results)}"
-        reports = _first_list("reports")
-        if reports:
-            return f"查询到 {len(reports)} 份报告。"
-        devices = _first_list("devices")
-        if devices:
-            return f"查询到 {len(devices)} 台设备。"
-        items = _first_list("items", "jobs", "workers", "docs")
-        if items:
-            return f"{tool.display_name}：查询到 {len(items)} 条记录。"
-    return f"{tool.display_name}已完成。"
-
-
-def _format_device_info_payload(payload: dict[str, Any]) -> str:
-    data = payload.get("data") or payload
-    results = data.get("results") if isinstance(data, dict) else None
-    if not results and isinstance(data, dict):
-        props = data.get("properties") or data.get("info")
-        if isinstance(props, dict):
-            results = [{
-                "device": data.get("device") or data.get("device_id") or payload.get("device_id"),
-                "properties": props,
-            }]
-    if not isinstance(results, list) or not results:
-        return payload.get("message") or "未返回设备详情。"
-
-    preferred_fields = (
-        "Model",
-        "Android Version",
-        "API Level",
-        "SDK Version",
-        "Serial Number",
-        "Boot State",
-        "Security Patch",
-        "Build Type",
-        "Build Tags",
-        "Build Date",
-        "Mali Version",
-        "Total Memory",
-        "Free Memory",
-        "DATA Partition",
-        "Timezone",
-        "Language",
-        "Fingerprint",
-    )
-
-    sections = []
-    for item in results:
-        if not isinstance(item, dict):
-            continue
-        device_id = item.get("device") or item.get("device_id") or item.get("serial_no") or "Unknown"
-        props = item.get("properties") or {}
-        lines = [f"设备 {device_id} 详情："]
-        for field_name in preferred_fields:
-            value = props.get(field_name)
-            if value not in (None, ""):
-                lines.append(f"- {field_name}: {value}")
-        extra_fields = [
-            (key, value)
-            for key, value in props.items()
-            if key not in preferred_fields and value not in (None, "")
-        ]
-        for key, value in extra_fields[:8]:
-            lines.append(f"- {key}: {value}")
-        sections.append("\n".join(lines))
-
-    return "\n\n".join(sections) if sections else "未返回设备详情。"
 
 
 # ==================== Global Instance ====================

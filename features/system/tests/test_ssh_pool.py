@@ -8,7 +8,7 @@ from features.system.ssh_async import SSHAsyncManager
 def test_connection_pool_does_not_reuse_connection_for_another_host():
     manager = SSHManager(pool_size=2)
     pooled = MagicMock()
-    pooled._gms_pool_identity = ('host-a', 'tester')
+    pooled._gms_pool_identity = ('host-a', '22', 'tester')
     manager.return_connection(pooled)
 
     replacement = MagicMock()
@@ -24,7 +24,7 @@ def test_connection_pool_does_not_reuse_connection_for_another_host():
 def test_connection_pool_reuses_matching_healthy_connection():
     manager = SSHManager(pool_size=2)
     pooled = MagicMock()
-    pooled._gms_pool_identity = ('host-a', 'tester')
+    pooled._gms_pool_identity = ('host-a', '22', 'tester')
     stdout = MagicMock()
     stdout.channel.recv_exit_status.return_value = 0
     pooled.exec_command.return_value = (MagicMock(), stdout, MagicMock())

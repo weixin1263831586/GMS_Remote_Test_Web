@@ -53,8 +53,12 @@ INVENTORY_SCRIPT = """
 
 
 CLICK_SCRIPT = """
-(selector) => {
-  const element = document.querySelector(selector);
+(button) => {
+  let element = document.querySelector(button.selector);
+  if (!element && button.onclick) {
+    element = Array.from(document.querySelectorAll('button,[role="button"],input[type="button"],input[type="submit"]'))
+      .find(candidate => candidate.getAttribute('onclick') === button.onclick);
+  }
   if (!element) return {clicked: false, reason: 'missing'};
   element.scrollIntoView({block: 'center', inline: 'center'});
   element.click();
@@ -99,6 +103,7 @@ SKIP_PATTERNS = [
         r'部署脚本|copyDeployCommand',
         r'上传|选择报告|选择 APK|选择文件|打开文件',
         r'保存日志|导出',
+        r'删除|移除|delete|remove|🗑️',
     ]
 ]
 
@@ -126,6 +131,15 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         def fulfill_json(route, payload):
             route.fulfill(status=200, content_type='application/json', body=json.dumps(payload))
 
+        page.route(
+            re.compile(r'.*/public/agents/[^/]+/chat(?:\?.*)?$'),
+            lambda route: route.fulfill(
+                status=200,
+                content_type='text/html',
+                body='<!doctype html><html><body><main>Mock assistant</main></body></html>',
+            ),
+        )
+
         def handle_api(route):
             request = route.request
             parsed = urlparse(request.url)
@@ -138,7 +152,34 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                     body = request.post_data
             requests.append({'method': request.method, 'path': path, 'body': body})
 
-            if path.endswith('/api/system/health'):
+            if path.endswith('/api/auth/status'):
+                fulfill_json(
+                    route,
+                    {
+                        'authenticated': True,
+                        'auth_required': True,
+                        'setup_required': False,
+                        'elevated': True,
+                        'user': {
+                            'id': 'ui-admin',
+                            'username': 'ui-admin',
+                            'display_name': 'UI Smoke Admin',
+                            'role': 'admin',
+                            'permissions': ['*'],
+                        },
+                    },
+                )
+            elif path.endswith('/api/users/current'):
+                fulfill_json(
+                    route,
+                    {
+                        'success': True,
+                        'client_id': 'ui-admin',
+                        'username': 'ui-admin',
+                        'role': 'admin',
+                    },
+                )
+            elif path.endswith('/api/system/health'):
                 fulfill_json(route, {'success': True, 'status': 'healthy'})
             elif path.endswith('/api/system/docs'):
                 fulfill_json(route, {'success': True, 'apis': [], 'total': 0})
@@ -146,6 +187,24 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                 fulfill_json(route, [{'device_id': 'E2E1', 'status': 'online', 'locked': False}])
             elif path.endswith('/api/devices/management'):
                 fulfill_json(route, {'success': True, 'devices': [], 'device_list': []})
+            elif path.endswith('/api/desktop/vnc/status'):
+                fulfill_json(route, {'success': True, 'running': True})
+            elif path.endswith('/api/desktop/novnc/access'):
+                fulfill_json(route, {'success': True, 'url': 'about:blank'})
+            elif path.endswith('/api/cluster/hosts'):
+                fulfill_json(
+                    route,
+                    {
+                        'success': True,
+                        'hosts': [{
+                            'worker_id': 'worker-local',
+                            'name': 'Controller / Local Worker',
+                            'address': '127.0.0.1',
+                            'ssh_user': 'ui-admin',
+                            'status': 'online',
+                        }],
+                    },
+                )
             elif path.endswith('/api/test/suites'):
                 fulfill_json(route, {'success': True, 'suites': [], 'items': []})
             elif path.endswith('/api/reports/list') or path.endswith('/api/reports'):
@@ -173,12 +232,22 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         page.route(re.compile(r'.*/api(?:/.*)?(?:\?.*)?$'), handle_api)
 
     def capture_errors(self, page):
-        captured = {'page_errors': [], 'console_errors': []}
+        captured = {'page_errors': [], 'console_errors': [], 'http_errors': []}
         page.on('pageerror', lambda exc: captured['page_errors'].append(str(exc)))
         page.on(
             'console',
-            lambda msg: captured['console_errors'].append(msg.text)
+            lambda msg: captured['console_errors'].append(
+                {'text': msg.text, 'location': msg.location}
+            )
             if msg.type == 'error' and 'favicon' not in msg.text.lower()
+            else None,
+        )
+        page.on(
+            'response',
+            lambda response: captured['http_errors'].append(
+                {'status': response.status, 'url': response.url}
+            )
+            if response.status >= 400
             else None,
         )
         return captured
@@ -190,6 +259,7 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         unhandled = page.evaluate('window.__e2eUnhandledRejections || []')
         self.assertEqual(captured['page_errors'], [])
         self.assertEqual(captured['console_errors'], [])
+        self.assertEqual(captured['http_errors'], [])
         self.assertEqual(unhandled, [])
 
     def wait_for_shell_scripts(self, page):
@@ -217,7 +287,7 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
             if skip_reason:
                 results.append({**button, 'status': skip_reason})
                 continue
-            clicked = document.evaluate(CLICK_SCRIPT, button['selector'])
+            clicked = document.evaluate(CLICK_SCRIPT, button)
             document.wait_for_timeout(150)
             document.evaluate(
                 """
@@ -229,6 +299,11 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                 }
                 """
             )
+            visible_modals = document.locator('.modal.show').count()
+            if visible_modals:
+                raise AssertionError(
+                    f"{inventory['page']} button left {visible_modals} modal(s) open: {button}"
+                )
             results.append({**button, 'status': 'clicked' if clicked.get('clicked') else clicked.get('reason', 'not_clicked')})
         return results
 
@@ -275,6 +350,11 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
             page.close()
     def test_visible_safe_controls_click_without_browser_errors(self):
         page = self.new_page()
+        elevated = page.request.post(
+            f'{self.base_url}/api/auth/elevate',
+            data={'username': 'ui-admin', 'password': 'UiSmokeAdmin-2026!'},
+        )
+        self.assertTrue(elevated.ok, elevated.text())
         requests = []
         captured = self.capture_errors(page)
         self.install_api_mocks(page, requests)
@@ -319,9 +399,44 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
 
             clicked = [item for item in click_results if item['status'] == 'clicked']
             skipped = [item for item in click_results if item['status'].endswith('current_behavior')]
+            unaccounted = [
+                item for item in click_results
+                if item['status'] != 'clicked' and not item['status'].endswith('current_behavior')
+            ]
             self.assertGreater(len(clicked), 30)
             self.assertGreater(len(skipped), 5)
+            self.assertEqual(unaccounted, [])
             self.assertTrue(requests)
             self.assert_clean_browser(page, captured)
+        finally:
+            page.close()
+
+    def test_every_sidebar_page_survives_full_browser_refresh(self):
+        page = self.new_page()
+        elevated = page.request.post(
+            f'{self.base_url}/api/auth/elevate',
+            data={'username': 'ui-admin', 'password': 'UiSmokeAdmin-2026!'},
+        )
+        self.assertTrue(elevated.ok, elevated.text())
+        captured = self.capture_errors(page)
+        self.install_api_mocks(page, [])
+        try:
+            self.goto_shell(page)
+            self.wait_for_shell_scripts(page)
+            for page_name in ALL_PAGES:
+                with self.subTest(page=page_name):
+                    page.evaluate("name => window.switchPage(name)", page_name)
+                    expect(page.locator(f'#page-{page_name}')).to_have_class(re.compile(r'active'))
+                    page.reload(wait_until='load')
+                    self.wait_for_shell_scripts(page)
+                    expect(page.locator(f'#page-{page_name}')).to_have_class(re.compile(r'active'))
+                    self.assertEqual(
+                        page.evaluate("location.hash.slice(1).split('?')[0]"),
+                        page_name,
+                    )
+                    self.assert_clean_browser(page, captured)
+                    captured['page_errors'].clear()
+                    captured['console_errors'].clear()
+                    captured['http_errors'].clear()
         finally:
             page.close()

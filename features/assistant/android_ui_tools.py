@@ -1,4 +1,4 @@
-"""Android CLI tools exposed to the assistant without growing the legacy registry."""
+"""向助手暴露 Android CLI 工具。"""
 
 from __future__ import annotations
 

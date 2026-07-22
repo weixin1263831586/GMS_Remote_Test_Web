@@ -7,9 +7,10 @@ import re
 import shlex
 import subprocess
 
-from fastapi import APIRouter, Body, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
+from features.auth import require_role_when_auth_required
 from features.devices import DeviceSSHConnection
 from features.system.models import VPNConnectRequest
 from features.system.network import (
@@ -22,6 +23,7 @@ from features.system.network import (
     configure_network_dependencies,
     execute_config_host_command,
     get_primary_vpn_target,
+    has_active_vpn_connection,
     parse_vpn_connection_names,
     resolve_vpn_connection_name,
 )
@@ -40,7 +42,7 @@ from foundation.responses import error_response
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role_when_auth_required("admin"))])
 
 configure_network_dependencies(
     ssh_manager=ssh_manager,
@@ -64,7 +66,7 @@ async def check_ssh_sshd(request: Request, device_host: str | None = Query(None,
 
     config = config_manager.load_config()
     # 优先使用查询参数中的 device_host，否则尝试 Tailscale/配置/当前客户端 IP。
-    # 注意：client_id 现在是平台用户安全边界（裸 ID），不可作为可连接主机；
+    # client_id 是用户安全边界，不能作为连接主机。
     # 可连接主机由 client_hosts 映射的 username@client_ip 构造。
     if not device_host:
         client_id = get_client_id_from_request(request)
@@ -401,8 +403,18 @@ async def get_vpn_status():
                 }
             )
 
-        # 权威判据：是否存在活跃的 VPN 类型连接（与 disconnect 使用同一信号）。
-        active_vpn = await resolve_vpn_connection_name(config, ssh, active_only=True)
+        # 权威判据：查询活跃连接，按 TYPE 列判断是否存在 VPN 类型连接，
+        # 与本地 check_local_vpn_connected 使用同一信号（has_active_vpn_connection）。
+        # 不能用 resolve_vpn_connection_name(active_only=True)——当配置了
+        # vpn_connection_name 时它会直接返回配置名而无视 active_only，导致
+        # connected 恒为 True（即使 VPN 已断开）。
+        active_cmd = "nmcli -t -f NAME,TYPE,STATE connection show --active 2>/dev/null"
+        active_output, _, _ = await execute_config_host_command(
+            config, ssh, active_cmd, timeout=5
+        )
+        connected = has_active_vpn_connection(active_output)
+        active_vpn_names = parse_vpn_connection_names(active_output)
+        active_vpn = active_vpn_names[0] if active_vpn_names else ""
 
         # 可达性补充：ping 目标是否可达（仅作信息，不单独决定 connected）。
         ping_reachable = False
@@ -420,7 +432,6 @@ async def get_vpn_status():
         except Exception as e:
             logger.warning(f"[VPN Status] ping check failed: {e}")
 
-        connected = bool(active_vpn)
         logger.info(
             f"[VPN Status] active_vpn={active_vpn!r}, ping={ping_reachable} -> connected={connected}"
         )
@@ -464,7 +475,11 @@ async def connect_vpn(
                     status_code=400
                 )
 
-            vpn_cmd = f"sudo nmcli connection up {shlex.quote(vpn_name)}"
+            # The web process runs with NoNewPrivileges and must never invoke
+            # sudo.  The connection must be provisioned by the host
+            # administrator and grant this service account permission to
+            # activate it through NetworkManager.
+            vpn_cmd = f"nmcli connection up {shlex.quote(vpn_name)}"
             output, error, code = await execute_config_host_command(
                 config,
                 ssh,
@@ -492,7 +507,13 @@ async def connect_vpn(
                 )
             else:
                 is_connected = False
-                message = f'VPN 连接失败: {error or output}'
+                detail = error or output
+                if 'not authorized' in detail.lower() or 'permission' in detail.lower():
+                    detail = (
+                        '该 VPN 连接未授权给平台运行账号；'
+                        '请由主机管理员在 NetworkManager 中配置连接权限'
+                    )
+                message = f'VPN 连接失败: {detail}'
 
             if ssh:
                 ssh_manager.return_connection(ssh)
@@ -542,7 +563,7 @@ async def disconnect_vpn():
                     status_code=200
                 )
 
-            disconnect_cmd = f"sudo nmcli connection down {shlex.quote(vpn_name)}"
+            disconnect_cmd = f"nmcli connection down {shlex.quote(vpn_name)}"
             output, error, code = await execute_config_host_command(
                 config,
                 ssh,

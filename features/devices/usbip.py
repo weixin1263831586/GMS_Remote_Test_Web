@@ -13,9 +13,10 @@ import shlex
 import time
 from typing import Any
 
-from foundation.networking import parse_host_address as _parse_host_address
-from foundation.networking import split_host_port
+from foundation.networking import parse_host_address, split_host_port
+from foundation.ssh_security import configure_strict_host_keys
 
+from .ssh_credentials import find_device_host_password
 from .usb import (
     parse_usbipd_android_busids,
 )
@@ -24,43 +25,22 @@ from .utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "USBIPManager",
+    "detach_ubuntu_usbip_ports",
+    "find_device_host_password",
+    "parse_adb_device_states",
+    "parse_fastboot_devices",
+    "usbip_manager",
+    "wait_for_adb_serial_ready",
+]
+
 # usbipd 安装命令常量
 USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
 
 USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
 {install_cmd}
 验证安装：usbipd --version'''
-
-
-def find_device_host_password(device_host: str, config: dict[str, Any] | None = None) -> str | None:
-    """Compatibility wrapper for callers that import the USB/IP helper directly."""
-    if config is not None:
-        username, hostname = _parse_host_address(device_host)
-        for credential in config.get('client_ssh_credentials', []):
-            credential_host = str(
-                credential.get('device_host') or ''
-            ).strip()
-            credential_username = str(
-                credential.get('username') or ''
-            ).strip()
-            credential_hostname = str(
-                credential.get('host')
-                or credential.get('hostname')
-                or ''
-            ).strip()
-            if credential_host == device_host or (
-                credential_username == username
-                and credential_hostname == hostname
-            ):
-                return credential.get('password')
-        for credential in config.get('client_ssh_credentials', []):
-            if credential.get('username') == username:
-                return credential.get('password')
-        return None
-    return usbip_manager.config_manager.find_device_host_password(
-        device_host,
-        config,
-    )
 
 
 def detach_ubuntu_usbip_ports(ssh, remote_host: str | None = '127.0.0.1', detach_all: bool = False) -> list[str]:
@@ -202,7 +182,7 @@ class USBIPManager:
                 }
 
             # 连接Windows主机
-            username, hostname = _parse_host_address(device_host)
+            username, hostname = parse_host_address(device_host)
             ssh_hostname, ssh_port = split_host_port(hostname)
             usbip_attach_host = usbip_attach_host or config.get('usbip_attach_host') or ssh_hostname
             win_ssh = self._create_windows_ssh(ssh_hostname, username, device_password, ssh_port)
@@ -340,7 +320,7 @@ class USBIPManager:
         try:
             import paramiko
             ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_strict_host_keys(ssh)
             ssh.connect(
                 hostname=hostname,
                 port=port,
@@ -362,7 +342,7 @@ class USBIPManager:
 
     def _find_android_devices(self, ssh, config: dict[str, Any]) -> list[str]:
         try:
-            # get_pty=True: usbipd list needs an interactive (PTY) session to return the full device table.
+            # usbipd list 需要 PTY 才会返回完整设备表。
             stdout, stderr, code = self.ssh_manager.execute_command(
                 ssh,
                 'usbipd list',
@@ -513,7 +493,7 @@ class USBIPManager:
             new_devices = list(devices_after - devices_before)
             logger.info(f"New devices via USB/IP: {new_devices}")
 
-            # No new devices: still return a previously-recorded USB/IP device if it's still online.
+            # 没有新设备时返回仍在线的已记录 USB/IP 设备。
             if not new_devices:
                 # 检查是否有之前记录的USB/IP设备现在仍然在线
                 for device_id in devices_after:
@@ -622,16 +602,7 @@ class USBIPManager:
             return False, ''
 
     def install_usbipd(self, ssh, config: dict[str, Any]) -> dict[str, Any]:
-        """
-        自动安装 usbipd 到 Windows 主机
-
-        Args:
-            ssh: SSH 连接对象
-            config: 配置字典
-
-        Returns:
-            安装结果字典
-        """
+        """在 Windows 主机自动安装 usbipd。"""
         try:
             # 检查是否已经是管理员权限
             check_admin_cmd = 'whoami /groups | findstr S-1-16-12288'

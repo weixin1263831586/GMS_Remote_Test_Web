@@ -25,23 +25,18 @@ logger = logging.getLogger(__name__)
 # Resource types we know how to read default + effective values for.
 RESOURCE_TYPES = ("bool", "integer", "string", "dimen", "integer-array", "string-array", "array")
 
-# Resource id line: "    resource 0x010e0000 integer/config_shortAnimTime PUBLIC"
+# 匹配 aapt2 资源 ID 行。
 _RESOURCE_RE = re.compile(
     r"^\s*resource\s+0x[0-9a-fA-F]+\s+([a-z-]+)/([A-Za-z0-9_]+)(?:\s+PUBLIC)?\s*$"
 )
-# Default-qualifier value line: '      () 200' / '      () "8.8.8.8"' / '      () (array) size=0'
+# 匹配默认限定符的值行。
 _DEFAULT_VALUE_RE = re.compile(r"^\s*\(\)\s(.*)$")
-# Resource-id reference emitted by `cmd overlay lookup` for unresolvable refs,
-# e.g. "@17040222 ->" (a bare decimal resource id, optionally followed by an
-# empty "->" tail). We can't map the id back to a name here, so overlay status
-# is detected by source package (see _lookup_effective / explore) instead of
-# string-equaling these against the named ref from aapt2.
+# cmd overlay lookup 无法解析资源引用时返回的数字资源 ID。
 _RESID_REF_RE = re.compile(r"^@0x[0-9a-fA-F]+\s*(?:->\s*)?$|^@\d+\s*(?:->\s*)?$")
-# The "Best matching is from ... of <pkg>" marker that precedes the value in
-# `cmd overlay lookup --verbose` output. Everything after this line is the value.
+# 有效值位于 Best matching 标记之后。
 _BEST_MATCH_RE = re.compile(r"Best matching is from .*? of ([\w.]+)\s*$")
 
-# Cache directory for pulled APKs to avoid re-pulling on every request.
+# 已拉取 APK 的缓存目录。
 _APK_CACHE_DIR = str(settings.data_root / "config_explorer_cache")
 
 
@@ -133,7 +128,7 @@ def parse_apk_resources(apk_path: str) -> list[ResourceEntry]:
     Returns ALL resources (not just config_*); callers filter as needed.
     """
     aapt2 = _aapt2_path()
-    # Run directly via subprocess (not shell) to avoid shell-quoting issues with paths.
+    # 直接执行子进程，避免 Shell 路径转义问题。
     try:
         proc = subprocess.run(
             [aapt2, "dump", "resources", apk_path],
@@ -250,7 +245,7 @@ def _lookup_effective(
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
     resource = f"{package}:{entry.type}/{entry.resname}"
-    # cmd overlay lookup prints the value on stdout; errors go to stderr + rc!=0.
+    # 有效值写入 stdout，错误写入 stderr 并返回非零状态。
     stdout, stderr, code = run_local_shell_command(
         f"{adb} {serial}shell cmd overlay lookup --verbose {shlex.quote(package)} {shlex.quote(resource)}",
         timeout=15,
@@ -258,13 +253,7 @@ def _lookup_effective(
     if code != 0:
         entry.lookup_error = (stderr or stdout).strip() or "lookup failed"
         return
-    # `cmd overlay lookup --verbose` output structure:
-    #   <resolution trace lines>
-    #   Best matching is from ... of <source>     <- source marker
-    #   <value lines>                             <- the actual value (0+ lines)
-    # The value lives AFTER the "Best matching" marker. Taking "the last
-    # non-empty line" instead mislabeled empty-valued resources: their trailing
-    # value line is blank, so the marker line itself was captured as the value.
+    # 仅采集 Best matching 标记后的有效值行。
     source_pkg = None
     value_lines: list[str] = []
     seen_marker = False
@@ -280,10 +269,7 @@ def _lookup_effective(
         if ln.strip():
             value_lines.append(ln.strip())
     value = value_lines[-1] if value_lines else ""
-    # `cmd overlay lookup` prints unresolvable resource references as a bare
-    # numeric id (e.g. "@17040222 ->"), which is meaningless to a user. When the
-    # default value is itself a named reference (e.g. "@string/default_browser"),
-    # show that readable form instead of the raw id.
+    # 数字资源 ID 无法展示时回退到可读的默认引用。
     if value and _RESID_REF_RE.match(value) and entry.default_value:
         value = entry.default_value
     if entry.type in {"array", "integer-array", "string-array"} and value:
@@ -304,20 +290,7 @@ def explore(
     effective_limit: int = 0,
     concurrency: int = 8,
 ) -> ExploreResult:
-    """Main entry: list resources of a package.
-
-    Args:
-        package: Android package name, e.g. ``android`` (framework-res).
-        device_id: Optional adb serial. If omitted, uses the default device.
-        name_filter: Substring filter on resource name (case-insensitive).
-        type_filter: Restrict to a single type (bool/integer/string/dimen/array).
-        config_only: If True (default), only ``config_*`` resources.
-        with_effective: If True, also compute overlay-effective values.
-            Expensive: one adb call per resource, run concurrently.
-        effective_limit: If >0 and with_effective, cap how many effective
-            lookups are performed (after filtering). 0 = no cap (compute all).
-        concurrency: Max parallel adb lookups when with_effective.
-    """
+    """按条件列出包资源，并可并发查询 Overlay 生效值。"""
     on_device_path = _resolve_package_apk(device_id, package)
     local_apk = _pull_apk(device_id, on_device_path, package)
     entries = parse_apk_resources(local_apk)
@@ -326,11 +299,7 @@ def explore(
     overlayed = 0
     if with_effective:
         targets = entries if effective_limit <= 0 else entries[:effective_limit]
-        # Short-circuit: if `cmd overlay list` shows no enabled overlay on the
-        # device, every resource's effective value equals its APK default, so we
-        # can skip the expensive per-resource `cmd overlay lookup` calls
-        # entirely (1600+ adb round-trips → 1). If the list call itself fails we
-        # fall back to the full lookup path so results stay correct.
+        # 无启用 Overlay 时直接使用默认值，避免逐资源查询。
         enabled_by_target = _enabled_overlays_by_target(device_id)
         target_overlays = None if enabled_by_target is None else enabled_by_target.get(package, [])
         if target_overlays is not None and not target_overlays:
@@ -391,8 +360,7 @@ def list_packages(device_id: str | None = None) -> list[str]:
     curated set that typically contain ``config_*`` resources, plus verify each
     resolves to an APK via ``pm path``.
     """
-    # Core system packages most likely to carry framework-style config_* resources.
-    # Not exhaustive — the UI also lets users type any package name directly.
+    # 常见的 framework config 资源包，界面仍支持输入任意包名。
     candidates = [
         "android",
         "com.android.systemui",
@@ -507,7 +475,7 @@ def list_packages_with_path(device_id: str | None = None) -> list[dict[str, str]
         if not line.startswith("package:"):
             continue
         body = line[len("package:"):]
-        # format: /path/to.apk=package.name  (path may contain '='? no; '=' is the separator)
+        # 输出格式为 APK 路径和包名，以等号分隔。
         if "=" in body:
             path, pkg = body.rsplit("=", 1)
         else:

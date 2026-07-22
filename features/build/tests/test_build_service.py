@@ -1,13 +1,26 @@
+import asyncio
 import json
+import shutil
 import threading
 import time
 from pathlib import Path
 
 import pytest
+from starlette.requests import Request
 
-from features.build.executor import BuildExecutionError, build_command_from_template
+from features.auth import CurrentUser
+from features.build.executor import BuildExecutionError, SshTmuxBuildBackend, build_command_from_template
 from features.build.repository import JOB_COLUMNS, BuildStore
 from features.build.service import BuildService
+
+
+def test_build_store_recovers_after_runtime_data_directory_deletion(tmp_path):
+    data_dir = tmp_path / "build"
+    store = BuildStore(data_dir / "build.sqlite3")
+
+    shutil.rmtree(data_dir)
+
+    assert store.list_jobs(limit=20) == []
 
 
 def test_build_command_renders_workspace_init_and_command():
@@ -61,6 +74,78 @@ def test_build_command_rejects_parent_segment_workspace_escape():
                 {'workspace_root': '/srv/build'},
                 {},
             )
+
+
+def test_env_password_auth_requires_configured_environment(monkeypatch):
+    monkeypatch.delenv("TEST_BUILD_PASSWORD", raising=False)
+    backend = SshTmuxBuildBackend()
+
+    with pytest.raises(BuildExecutionError, match="TEST_BUILD_PASSWORD"):
+        backend._connect_kwargs({
+            "host": "build-server",
+            "username": "builder",
+            "auth": {"type": "env_password", "env": "TEST_BUILD_PASSWORD"},
+        })
+
+
+def test_env_password_auth_never_falls_back_to_local_keys(monkeypatch):
+    monkeypatch.setenv("TEST_BUILD_PASSWORD", "secret")
+    backend = SshTmuxBuildBackend()
+
+    kwargs = backend._connect_kwargs({
+        "host": "build-server",
+        "username": "builder",
+        "auth": {"type": "env_password", "env": "TEST_BUILD_PASSWORD"},
+    })
+
+    assert kwargs["password"] == "secret"
+    assert kwargs["look_for_keys"] is False
+    assert kwargs["allow_agent"] is False
+
+
+def test_artifact_discovery_searches_only_static_pattern_prefixes():
+    backend = SshTmuxBuildBackend()
+    commands = []
+
+    def fake_run(_server, command, timeout=30):
+        commands.append((command, timeout))
+        return 0, "", ""
+
+    backend._run = fake_run
+    backend.discover_artifacts(
+        server={},
+        workspace="/home/hcq/android",
+        patterns=["rockdev/Image-*/update.img", "out/target/product/*/*.img"],
+    )
+
+    command, timeout = commands[0]
+    assert "find /home/hcq/android/rockdev -maxdepth 2" in command
+    assert "find /home/hcq/android/out/target/product -maxdepth 2" in command
+    assert "find /home/hcq/android -path" not in command
+    assert timeout == 60
+
+
+def test_poll_api_returns_service_unavailable_for_build_connection_error(monkeypatch):
+    from features.build import api as build_api
+
+    class UnavailableBuildService:
+        @staticmethod
+        def get_job(_job_id):
+            return {"id": "build_demo", "owner": "id-alice"}
+
+        @staticmethod
+        def poll_job(_job_id):
+            raise BuildExecutionError("构建服务器暂不可用")
+
+    monkeypatch.setattr(build_api, "build_service", UnavailableBuildService())
+    request = Request({"type": "http", "headers": []})
+    request.state.current_user = CurrentUser(
+        id="id-alice", username="alice", role="user"
+    )
+    response = asyncio.run(build_api.get_build_job("build_demo", request, poll=True))
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["error"] == "构建服务器暂不可用"
 
 
 def test_parse_lunch_options_from_rkbuild_output():
@@ -120,6 +205,12 @@ def test_discover_lunch_options_prefers_rkbuild_menu(tmp_path: Path):
 
         def _run(self, _server, command, timeout=30):
             self.calls += 1
+            if self.calls == 1:
+                assert "device/rockchip" in command
+                assert timeout == 15
+                return 0, """__GMS_LUNCH_BEGIN__
+__GMS_LUNCH_END__
+""", ""
             assert "rkbuild_lunch" in command
             assert timeout == 45
             return 0, """__GMS_LUNCH_BEGIN__
@@ -138,7 +229,51 @@ __GMS_LUNCH_END__
         "rk3576_u-userdebug",
         "rk3576_u-user",
     ]
+    assert backend.calls == 2
+
+
+def test_discover_lunch_options_uses_rockchip_products_and_cache(tmp_path: Path):
+    config_path = tmp_path / "build_servers.json"
+    config_path.write_text(
+        json.dumps({
+            "servers": [{
+                "id": "local",
+                "backend": "local",
+                "workspace_root": str(tmp_path),
+            }],
+            "templates": [],
+        }),
+        encoding="utf-8",
+    )
+    service = BuildService(
+        store=BuildStore(tmp_path / "build.sqlite3"),
+        config_path=config_path,
+    )
+
+    class RockchipBackend:
+        calls = 0
+
+        def _run(self, _server, command, timeout=30):
+            self.calls += 1
+            assert "device/rockchip" in command
+            assert "rkbuild_lunch" not in command
+            return 0, """__GMS_LUNCH_BEGIN__
+rk3576_u-user
+rk3576_u-userdebug
+__GMS_LUNCH_END__
+""", ""
+
+    backend = RockchipBackend()
+    service.backends["local"] = backend
+
+    expected = ["rk3576_u-user", "rk3576_u-userdebug"]
+    assert service.discover_lunch_options("local", str(tmp_path)) == expected
+    assert service.discover_lunch_options("local", str(tmp_path)) == expected
     assert backend.calls == 1
+    assert service.discover_lunch_options(
+        "local", str(tmp_path), force_refresh=True
+    ) == expected
+    assert backend.calls == 2
 
 
 def test_delete_build_history_only_allows_terminal_jobs(tmp_path: Path):

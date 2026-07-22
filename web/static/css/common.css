@@ -65,12 +65,28 @@ body {
 }
 
 .auth-panel {
+    position: relative;
     width: min(380px, 100%);
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 20px;
     box-shadow: var(--shadow-lg);
+}
+
+.auth-close {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 24px;
+    line-height: 1;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.auth-close:hover {
+    color: var(--text-primary);
 }
 
 .auth-title {
@@ -108,8 +124,7 @@ body {
     font-size: 12px;
 }
 
-/* Admin elevation modal — above normal modals (z 1000) but below the auth
-   gate (z 20000), so it never stacks on top of the platform login. */
+/* 管理员验证弹框位于普通弹框之上、登录层之下。 */
 #elevate-modal {
     z-index: 15000;
 }
@@ -122,7 +137,7 @@ body {
     height: 34px;
 }
 
-/* ==================== Main Container with Sidebar ==================== */
+/* 侧边栏与主容器。 */
 .main-container {
     display: flex;
     height: 100vh;
@@ -645,7 +660,7 @@ body {
     margin-top: -3px;
 }
 
-/* ==================== Input Container (参数设置区) ==================== */
+/* 参数设置区。 */
 .input-container {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
@@ -690,7 +705,7 @@ body {
     gap: 8px;
 }
 
-/* ==================== Middle Row (ADB设备区 + 操作控制区) ==================== */
+/* ADB 设备与操作控制区。 */
 .middle-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -3278,7 +3293,7 @@ select option {
 }
 
 
-/* ==================== Responsive Design - 768px 合并块 ==================== */
+/* 768px 响应式布局。 */
 @media (max-width: 768px) {
     /* Layout */
     .container {
@@ -3588,7 +3603,7 @@ select option {
     font-size: 12px;
 }
 
-/* ==================== Report Diagnosis Workbench ==================== */
+/* 报告诊断工作台。 */
 .report-diagnosis-shell {
     width: 96vw;
     max-width: 1500px;
@@ -4038,7 +4053,8 @@ select option {
     font-weight: 500;
 }
 
-.dx-root-cause {
+.dx-root-cause,
+.dx-observed-failure {
     display: grid;
     gap: 6px;
     margin-bottom: 12px;
@@ -4050,10 +4066,29 @@ select option {
     line-height: 1.65;
 }
 
-.dx-root-cause span {
+.dx-observed-failure {
+    border-color: rgba(59, 130, 246, 0.32);
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.dx-root-cause span,
+.dx-observed-failure span {
     color: var(--warning-color);
     font-size: 11px;
     font-weight: 700;
+}
+
+.dx-observed-failure span {
+    color: var(--primary-light);
+}
+
+.dx-root-note {
+    margin: -4px 0 12px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--warning-color);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.6;
 }
 
 .dx-preline,

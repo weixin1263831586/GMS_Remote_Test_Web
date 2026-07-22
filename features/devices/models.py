@@ -6,11 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class ADBForwardStartRequest(BaseModel):
-    device_host: str
-    device_password: str | None = Field(
-        default="",
-        description="设备主机SSH密码",
-    )
+    device_host: str = ""
 
 
 class USBIPStartRequest(BaseModel):

@@ -39,12 +39,12 @@ from workflows.report_to_redmine import (
     strip_redmine_report_prefix,
 )
 
+from .ai_diagnosis import analyze_failure_with_ai
 from .api_models import AnalysisMode, ReportDiagnosisRequest
 from .api_support import (
     REDMINE_ISSUE_ID_CACHE,
     REDMINE_ISSUE_ID_CACHE_MAX_SIZE,
     StackTraceUtils,
-    get_client_id_from_request,
 )
 from .dependencies import dependencies
 from .service import test_report_manager
@@ -94,7 +94,6 @@ __all__ = [
     "extract_filename_from_content_disposition",
     "extract_redmine_issue_id_from_text",
     "extract_report_name_from_upload",
-    "get_client_id_from_request",
     "json",
     "logger",
     "os",
@@ -140,93 +139,17 @@ config_manager = _ReportConfig()
 def _redmine_config_manager_for_request(request: Request | None = None):
     if request is None:
         return config_manager
-    if getattr(getattr(request, "state", None), "current_user", None) is None:
-        return config_manager
     return get_redmine_config_for_request(request)
 
 def _resolve_redmine_knowledge_service(request: Request | None = None):
-    """Resolve a per-user Redmine knowledge service for diagnosis lookups.
-
-    The diagnosis endpoint must reuse the operator's own synced Redmine data —
-    not a missing module. ``RedmineKnowledgeService.search_similar`` already
-    falls back from the (sparse) case_facts table to the local issue snapshot
-    store via the issue-similarity table, so high-value historical tickets
-    (e.g. a verified multi-display CTS root cause) are recalled even before they
-    are promoted to mature cases.
-
-    Resolution order:
-      1. The authenticated owner on ``request`` (per-user isolation).
-      2. The first per-user store that actually holds data, so an unauthenticated
-         or cross-user diagnosis still benefits from the knowledge base instead
-         of silently reporting "no match".
-      3. ``None`` when nothing is available — callers treat that as "no KB".
-    """
-    from features.auth import get_authenticated_user
+    """返回认证用户自己的 Redmine 知识服务，不跨用户回退。"""
+    from features.auth import require_authenticated_user
     from features.redmine import get_redmine_service_for_owner
 
-    if request is not None:
-        try:
-            user = get_authenticated_user(request)
-            if user is not None:
-                return get_redmine_service_for_owner(user.id).knowledge
-        except Exception as exc:
-            logger.debug("Knowledge service resolve from request failed: %s", exc)
-
-    return _fallback_knowledge_service(get_redmine_service_for_owner)
-
-
-# Cached fallback owner resolved once per process; the selected owner only
-# changes when a sync adds data to a different per-user store, so re-scanning
-# the by_user directory + stat'ing every knowledge.sqlite3 on each unauth'd
-# diagnosis request would be wasted work on a hot path.
-_fallback_kb_owner: str | None = None
-_fallback_kb_scanned: bool = False
-
-
-def _fallback_knowledge_service(get_redmine_service_for_owner) -> Any:
-    """Return the knowledge service of the first per-user store with data.
-
-    Memoized across calls so the directory scan + per-store sqlite count only
-    runs once until a process restart.
-    """
-    global _fallback_kb_owner, _fallback_kb_scanned
-    if _fallback_kb_scanned and _fallback_kb_owner:
-        try:
-            return get_redmine_service_for_owner(_fallback_kb_owner).knowledge
-        except Exception as exc:
-            logger.debug("Cached fallback knowledge service stale: %s", exc)
-            _fallback_kb_owner = None
-
-    try:
-        from foundation.config import settings
-
-        root = settings.data_root / "redmine" / "by_user"
-        if root.is_dir():
-            # Pre-filter to dirs that actually have a knowledge DB, then sort by
-            # size once — avoids re-stat'ing the same path inside the loop.
-            candidates = [
-                p for p in root.iterdir()
-                if p.is_dir() and (p / "knowledge.sqlite3").exists()
-            ]
-            candidates.sort(
-                key=lambda p: (p / "knowledge.sqlite3").stat().st_size,
-                reverse=True,
-            )
-            for cand in candidates:
-                owner_id = cand.name
-                try:
-                    service = get_redmine_service_for_owner(owner_id).knowledge
-                    if service and service.list_case_facts(limit=1)["total"] > 0:
-                        _fallback_kb_owner = owner_id
-                        _fallback_kb_scanned = True
-                        return service
-                except Exception as exc:
-                    logger.debug("Knowledge service fallback skip %s: %s", owner_id, exc)
-    except Exception as exc:
-        logger.debug("Knowledge service fallback scan failed: %s", exc)
-
-    _fallback_kb_scanned = True
-    return None
+    if request is None:
+        return None
+    user = require_authenticated_user(request)
+    return get_redmine_service_for_owner(user.id).knowledge
 
 
 def _get_knowledge_base(request: Request | None = None):
@@ -305,16 +228,7 @@ def _extract_failure_keywords(test_name: str, error_message: str, stack_trace: s
 # --- Report analysis endpoints ---
 
 def parse_cts_failure_info(test_name, error_message):
-    """
-    解析CTS失败信息，提取关键信息
-
-    Args:
-        test_name: 测试用例名称，如 com.google.android.gts.multiuser.RestrictedProfileHostTest#testUserIsRestricted
-        error_message: 错误消息
-
-    Returns:
-        dict: 包含解析后的信息
-    """
+    """从 CTS 用例名和错误消息中提取结构化失败信息。"""
     result = {
         'class_name': None,
         'method_name': None,
@@ -370,18 +284,7 @@ def parse_cts_failure_info(test_name, error_message):
 
 
 def _rule_based_analysis(test_name, error_message, stack_trace, module):
-    """
-    基于规则的分析（当AI不可用时）
-
-    Args:
-        test_name: 测试用例名称
-        error_message: 错误消息
-        stack_trace: 堆栈跟踪
-        module: 测试模块
-
-    Returns:
-        dict: 分析结果
-    """
+    """在 AI 不可用时执行规则分析。"""
     failure_info = parse_cts_failure_info(test_name, error_message)
 
     analysis_parts = []
@@ -485,83 +388,16 @@ def _rule_based_analysis(test_name, error_message, stack_trace, module):
 
 
 def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_names=None):
-    """
-    调用大模型API分析测试失败（支持多个AI提供商，自动获取源码）
-
-    Args:
-        test_name: 测试用例名称
-        error_message: 错误消息
-        stack_trace: 堆栈跟踪
-        module: 测试模块名称
-        class_names: 从堆栈中提取的类名列表
-
-    Returns:
-        dict: AI分析结果（包含源码分析）
-    """
-    if class_names is None:
-        class_names = []
-
-    # 从堆栈跟踪中提取失败位置（使用可复用工具）
-    failure_location = StackTraceUtils.extract_failure_location(stack_trace)
-    if failure_location:
-        logger.info(f"从堆栈提取失败位置: {failure_location['file_name']}.{failure_location['file_type']}:{failure_location['line_number']}")
-
-    # 优先使用通用AI分析器（内部会自动进行源码搜索，无需手动重复搜索）
-    try:
-        if dependencies.universal_analyzer_factory is None:
-            raise RuntimeError("Universal AI analyzer is not configured")
-        ai_analyzer = dependencies.universal_analyzer_factory()
-
-        failure_info = parse_cts_failure_info(test_name, error_message)
-
-        # 调用AI分析（自动获取源码）
-        result = ai_analyzer.analyze_test_failure(
-            class_name=failure_info.get('class_name', ''),
-            method_name=failure_info.get('method_name'),
-            error_message=error_message,
-            stack_trace=stack_trace,
-            auto_fetch_source=True  # 启用自动获取源码
-        )
-
-        if result['success']:
-            provider_name = result.get('provider', 'unknown')
-            # 使用统一的配置接口获取 provider 配置
-            provider_config = config_manager.get_ai_provider_config(provider_name)
-            provider_display = provider_config.get('name', f'{provider_name.upper()} AI') if provider_config else f'{provider_name.upper()} AI'
-
-            # 简化响应结构，直接使用AI返回的emoji格式
-            response = {
-                'root_cause': result.get('root_cause', ''),
-                'analysis': result.get('analysis', ''),
-                'suggestions': result.get('suggestions', []),
-                'solution': result.get('solution'),
-                'ai_enabled': True,
-                'ai_model': provider_display,
-                'ai_provider': provider_name,
-                'stack_trace': stack_trace
-            }
-
-            # 添加源码信息（如果成功获取）
-            if result.get('source_info'):
-                source_info = result['source_info']
-                response['source_code_fetched'] = True
-                response['source_file_path'] = source_info.get('file_path', '')
-                response['source_url'] = source_info.get('url', '')
-                response['source_project'] = source_info.get('project', '')
-                logger.info(f"成功获取源码信息: {source_info.get('file_path', 'unknown')}")
-
-            return response
-        else:
-            logger.warning(f"AI分析失败: {result.get('error')}")
-            raise Exception(result.get('error', 'AI分析失败'))
-
-    except ImportError:
-        logger.warning("通用AI分析器未安装，使用基于规则的分析")
-    except Exception as e:
-        logger.warning(f"通用AI分析失败: {e!s}，使用基于规则的分析")
-
-    # AI调用失败，返回基于规则的分析
-    return _rule_based_analysis(test_name, error_message, stack_trace, module)
+    """调用已配置模型分析测试失败并补充源码信息。"""
+    return analyze_failure_with_ai(
+        test_name, error_message, stack_trace, module, class_names,
+        analyzer_factory=dependencies.universal_analyzer_factory,
+        parse_failure_info=parse_cts_failure_info,
+        rule_based_analysis=_rule_based_analysis,
+        config_manager=config_manager,
+        stack_trace_utils=StackTraceUtils,
+        logger=logger,
+    )
 
 
 def _build_patch_draft(diagnosis: dict[str, Any]) -> str:
@@ -579,8 +415,7 @@ def _build_patch_draft(diagnosis: dict[str, Any]) -> str:
     source_hits = diagnosis.get("source_search_results") or []
     kb_results = diagnosis.get("knowledge_base_results") or []
 
-    # If the strongest KB hit points at a non-code (environment/config) root
-    # cause, the correct "patch" is an operational fix, not source edits.
+    # 环境或配置问题应返回操作建议，不生成源码补丁。
     env_note = _kb_environment_patch(kb_results)
     if env_note:
         return env_note
@@ -601,13 +436,24 @@ def _build_patch_draft(diagnosis: dict[str, Any]) -> str:
         if root:
             kb_root = root
             break
+    if not kb_root and ai_result.get("root_cause_status") != "verified":
+        observed = ai_result.get("observed_failure") or diagnosis.get("error_message") or "未提取到明确失败信息"
+        hypothesis = ai_result.get("root_cause") or "尚无可靠根因假设"
+        lines = [
+            "# 暂不生成代码补丁：根因尚未验证",
+            f"# 已观察到: {observed}",
+            f"# 待验证假设: {hypothesis}",
+            "# 下一步: 先复现并采集对应系统服务日志，再依据因果证据确定修改点。",
+        ]
+        lines.extend(f"# - {item}" for item in (ai_result.get("suggestions") or [])[:3])
+        return "\n".join(lines)
     reason = kb_root or ai_result.get("root_cause") or diagnosis.get("summary", "") or "Pending confirmation"
     patch_lines = [
         f"--- a/{target_path}",
         f"+++ b/{target_path}",
         "@@ -1,6 +1,12 @@",
-        f"- // TODO: review failure: {reason}",
-        f"+ // Fix suggestion: {reason}",
+        f"- // Failure: {reason}",
+        f"+ // Suggested fix: {reason}",
     ]
     for line in (ai_result.get("suggestions") or [])[:3]:
         patch_lines.append(f"+ // {line}")
@@ -621,19 +467,12 @@ def _build_patch_draft(diagnosis: dict[str, Any]) -> str:
     return "\n".join(patch_lines)
 
 
-# Markers that a verified root cause is an environment / configuration issue
-# rather than a source-code defect (so no fabricated code diff is emitted).
+# 环境及配置类根因标记。
 _ENV_ROOT_MARKERS = ("副屏", "多屏", "secondary display", "测试环境", "环境配置", "known limitation", "已知限制")
 
 
 def _kb_environment_patch(kb_results: list[dict[str, Any]]) -> str:
-    """Return an operational-fix note when a KB hit is a non-code issue.
-
-    Scans every hit (not just the top one): the strongest environment root
-    cause may live on a lower-ranked reference ticket (e.g. the verified
-    #618660 sitting under the open duplicate #637450), so restricting to the
-    first hit would miss it.
-    """
+    """知识库命中非代码问题时返回操作建议。"""
     if not kb_results:
         return ""
     best: dict[str, Any] | None = None

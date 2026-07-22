@@ -9,12 +9,13 @@ from typing import Any
 import paramiko
 
 from foundation.common_utils import CommonUtils
+from foundation.ssh_security import configure_strict_host_keys
 
 
 class ClientManager:
     """客户端管理器"""
 
-    # SSH connection timeout settings (reduced from 30s for faster failover)
+    # SSH 连接超时设置。
     SSH_TIMEOUT = 3
     SSH_BANNER_TIMEOUT = 3
     SSH_AUTH_TIMEOUT = 3
@@ -42,7 +43,7 @@ class ClientManager:
     def _ssh_whoami(self, client_ip: str, username: str, password: str) -> str:
         """Connect via SSH, run whoami, return username. Raises on failure."""
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_strict_host_keys(ssh)
         try:
             ssh.connect(
                 client_ip,
@@ -77,9 +78,6 @@ class ClientManager:
 
                 # 保存凭据
                 self.client_hosts[client_ip] = detected_username
-
-                if not any(c.get('username') == username for c in self.ssh_credentials):
-                    self.ssh_credentials.insert(0, {'username': username, 'password': password})
 
                 self._save_client_runtime()
 
@@ -126,7 +124,7 @@ class ClientManager:
                     except Exception:
                         continue
 
-        # 注意：不要使用 ubuntu_user 作为客户端用户名的默认值
+        # 客户端用户名不使用 ubuntu_user 默认值。
         # ubuntu_user 只用于服务器端操作，不应该用于客户端身份识别
         return False, '', '无法自动检测用户名'
 

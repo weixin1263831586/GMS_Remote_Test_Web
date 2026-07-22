@@ -1,5 +1,13 @@
 from contextlib import suppress
 
+from features.auth import require_authenticated_user
+from foundation.outbound import (
+    UnsafeOutboundURL,
+    same_http_origin,
+    url_hostname,
+    validate_outbound_url,
+)
+
 from .api_helpers import (
     COMPILED_REDMINE_ATTACHMENT_PATTERN,
     COMPILED_REDMINE_ISSUE_PATTERN,
@@ -20,7 +28,6 @@ from .api_helpers import (
     _rename_downloaded_report_if_needed,
     _save_redmine_credentials,
     aiohttp,
-    config_manager,
     create_basic_auth_header,
     error_response,
     extract_filename_from_content_disposition,
@@ -37,26 +44,22 @@ from .api_helpers import (
 
 
 router = APIRouter()
+MAX_REPORT_URL_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
 
 def _request_redmine_config_manager(request: Request):
-    if getattr(getattr(request, "state", None), "current_user", None) is None:
-        return config_manager
+    require_authenticated_user(request)
     return _redmine_config_manager_for_request(request)
 
 
 async def _load_redmine_credentials_for_request(request: Request):
-    try:
-        return await _load_redmine_credentials(request)
-    except TypeError:
-        return await _load_redmine_credentials()
+    require_authenticated_user(request)
+    return await _load_redmine_credentials(request)
 
 
 async def _save_redmine_credentials_for_request(username: str, password: str, request: Request):
-    try:
-        return await _save_redmine_credentials(username, password, request)
-    except TypeError:
-        return await _save_redmine_credentials(username, password)
+    require_authenticated_user(request)
+    return await _save_redmine_credentials(username, password, request)
 
 
 # ==================== Analyze URL ====================
@@ -64,6 +67,7 @@ async def _save_redmine_credentials_for_request(username: str, password: str, re
 @router.post("/api/reports/analyze-url")
 async def analyze_report_from_url(request: Request):
     """Download and analyze test report from URL (supports Redmine attachment auto-download)."""
+    require_authenticated_user(request)
     try:
         body = await request.json()
         url = body.get("url", "").strip()
@@ -87,12 +91,8 @@ async def analyze_report_from_url(request: Request):
         request_redmine_config = _request_redmine_config_manager(request)
         try:
             redmine_config = request_redmine_config.get_redmine_config()
-            configured_domain = (redmine_config.get("domain") or "").lower()
-            configured_base_host = urlparse(redmine_config.get("base_url", "")).netloc.lower()
-            current_host = parsed_url.netloc.lower()
-            configured_redmine_match = (
-                bool(configured_domain and configured_domain in url.lower())
-                or bool(configured_base_host and configured_base_host == current_host)
+            configured_redmine_match = same_http_origin(
+                url, redmine_config.get("base_url", "")
             )
         except ValueError as exc:
             logger.debug("Redmine config unavailable while classifying report URL: %s", exc)
@@ -198,6 +198,22 @@ async def analyze_report_from_url(request: Request):
         temp_file_path = ""
 
         try:
+            allowed_private_hosts = (
+                {url_hostname(redmine_base_url)} if is_redmine else set()
+            )
+            if is_redmine and not same_http_origin(url, redmine_base_url):
+                return error_response(
+                    "Redmine attachment URL changed to an unauthorized origin",
+                    400,
+                )
+            try:
+                url = validate_outbound_url(
+                    url,
+                    allowed_private_hosts=allowed_private_hosts,
+                )
+            except UnsafeOutboundURL as exc:
+                return error_response(str(exc), 400)
+
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
             if is_redmine:
@@ -219,6 +235,7 @@ async def analyze_report_from_url(request: Request):
                     url,
                     timeout=aiohttp.ClientTimeout(total=120),
                     headers=headers,
+                    allow_redirects=False,
                 ) as response,
             ):
                     if response.status == 401 or response.status == 403:
@@ -226,8 +243,19 @@ async def analyze_report_from_url(request: Request):
                             return error_response("Redmine auth failed", status_code=403, requires_auth=True, is_redmine=True)
                         else:
                             return error_response(f"Download failed, HTTP {response.status}", 400)
+                    elif 300 <= response.status < 400:
+                        return error_response("Download redirects are not allowed", 400)
                     elif response.status != 200:
                         return error_response(f"Download failed, HTTP {response.status}", 400)
+
+                    content_length = response.headers.get("Content-Length")
+                    if content_length:
+                        try:
+                            declared_size = int(content_length)
+                        except ValueError:
+                            declared_size = 0
+                        if declared_size > MAX_REPORT_URL_DOWNLOAD_BYTES:
+                            return error_response("Report download is too large", 413)
 
                     downloaded_size = 0
                     real_filename = extract_filename_from_content_disposition(response.headers.get("Content-Disposition", "")) or filename
@@ -242,8 +270,10 @@ async def analyze_report_from_url(request: Request):
 
                     with open(temp_file_path, "wb") as f:
                         async for chunk in response.content.iter_chunked(262144):
-                            f.write(chunk)
                             downloaded_size += len(chunk)
+                            if downloaded_size > MAX_REPORT_URL_DOWNLOAD_BYTES:
+                                raise ValueError("Report download is too large")
+                            f.write(chunk)
 
                     logger.info(f"[Report Analysis] Download complete: {downloaded_size} bytes")
                     temp_file_path, filename = _rename_downloaded_report_if_needed(temp_file_path, real_filename, content_type)
@@ -357,15 +387,10 @@ async def extract_redmine_attachment(request: Request):
         except ValueError:
             redmine_config = None
 
-        parsed_issue_url = urlparse(issue_url)
         configured_match = False
         if redmine_config:
-            configured_domain = (redmine_config.get("domain") or "").lower()
-            configured_base_host = urlparse(redmine_config.get("base_url", "")).netloc.lower()
-            current_host = parsed_issue_url.netloc.lower()
-            configured_match = (
-                bool(configured_domain and configured_domain in issue_url.lower())
-                or bool(configured_base_host and configured_base_host == current_host)
+            configured_match = same_http_origin(
+                issue_url, redmine_config.get("base_url", "")
             )
 
         if not configured_match:

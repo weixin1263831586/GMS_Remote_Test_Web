@@ -67,22 +67,33 @@ def _preview(doc: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
-def _links_from_legacy(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    links = []
-    raw = payload.get("links") or {}
-    if isinstance(raw, dict):
-        for ts in raw.get("report_timestamps") or []:
-            links.append({"target_type": "test_report", "target_id": str(ts), "title": str(ts)})
-        for iid in raw.get("redmine_issue_ids") or []:
-            links.append({"target_type": "redmine_issue", "target_id": str(iid), "title": f"#{iid}"})
-        for cid in raw.get("gerrit_change_ids") or []:
-            links.append({"target_type": "gerrit_change", "target_id": str(cid), "title": str(cid)})
-    related = str(payload.get("related_module") or "").strip()
-    if related:
-        links.append({"target_type": "test_case", "target_id": related, "title": related})
-    explicit = payload.get("knowledge_links")
-    if isinstance(explicit, list):
-        links.extend([it for it in explicit if isinstance(it, dict)])
+def _validated_links(payload: dict[str, Any]) -> list[dict[str, str]]:
+    raw_links = payload.get("links")
+    if raw_links is None:
+        return []
+    if not isinstance(raw_links, list):
+        raise ValueError("links must be an array")
+    if len(raw_links) > 50:
+        raise ValueError("links cannot contain more than 50 items")
+    allowed_types = {
+        "test_report",
+        "redmine_issue",
+        "gerrit_change",
+        "test_case",
+    }
+    links: list[dict[str, str]] = []
+    for raw in raw_links[:50]:
+        if not isinstance(raw, dict):
+            raise ValueError("each knowledge link must be an object")
+        target_type = str(raw.get("target_type") or "").strip()
+        target_id = str(raw.get("target_id") or "").strip()
+        if target_type not in allowed_types or not target_id:
+            raise ValueError("knowledge link target is invalid")
+        links.append({
+            "target_type": target_type,
+            "target_id": target_id[:256],
+            "title": str(raw.get("title") or target_id).strip()[:256],
+        })
     return links
 
 
@@ -137,6 +148,10 @@ async def create_doc(request: Request):
     data = await request.json()
     user_id = _user(request)
     content = str(data.get("content_md") or data.get("content") or "")
+    try:
+        links = _validated_links(data)
+    except ValueError as exc:
+        return error_response(str(exc), 400)
     note = await asyncio.to_thread(
         _service.create_doc_from_text,
         user_id,
@@ -145,7 +160,7 @@ async def create_doc(request: Request):
         title=str(data.get("title") or ""),
         content=content,
         tags=data.get("tags"),
-        links=_links_from_legacy(data),
+        links=links,
         source=str(data.get("source") or "manual"),
     )
     if note.get("error"):

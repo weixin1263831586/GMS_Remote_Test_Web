@@ -1,37 +1,49 @@
 """System router - WebSocket, health check, docs, help, skills download, root page."""
 
 import asyncio
+import hmac
 import html
 import json
 import logging
 import os
 import re
-import tarfile
-import tempfile
 from datetime import datetime
 from urllib.parse import urlparse
 
 import aiohttp
-from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
-from starlette.background import BackgroundTask
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+)
 
-from features.auth import AUTH_COOKIE_NAME, auth_service
+from features.auth import AUTH_COOKIE_NAME, CurrentUser, auth_service, require_role
 from features.system.api_docs_list import API_DOCS_LIST
+from features.system.health import readiness
+from features.system.metrics import metrics_token, render_metrics
 from features.system.state import global_state
-from features.system.terminal_service import (
-    close_terminal_session_resources,
-    handle_terminal_connect,
-    handle_terminal_input,
-    handle_terminal_resize,
+from features.system.terminal_auxiliary import (
     handle_tradefed_list_results,
     refresh_devices_websocket,
 )
+from features.system.terminal_service import (
+    close_websocket_terminal,
+    handle_terminal_connect,
+    handle_terminal_input,
+    handle_terminal_resize,
+)
 from features.system.vnc import NOVNC_WEB_PORT
-from features.users import get_client_ip
+from features.system.websocket_security import (
+    authorize_websocket_identity,
+)
+from features.system.websocket_security import (
+    get_websocket_client_ip as _get_websocket_client_ip,
+)
 from features.users import runtime as users_runtime
 from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT, config_manager
-from foundation.errors import handle_api_errors
 from foundation.files import FileUtils
 from foundation.responses import error_response
 
@@ -83,46 +95,31 @@ def _gms_assistant_upstream() -> str:
     return str(external.get("gms_assistant_url") or "").strip().rstrip("/")
 
 
-def _get_websocket_client_ip(websocket: WebSocket) -> str:
-    """Resolve browser client IP for WebSocket requests."""
-    return get_client_ip(websocket)
-
-
-def _get_websocket_client_identity(websocket: WebSocket, path_client_id: str) -> tuple[str, str, str]:
-    """Return (state client id, display id, username) for WebSocket state."""
-    user = auth_service.get_user_for_token(websocket.cookies.get(AUTH_COOKIE_NAME))
-    client_ip = _get_websocket_client_ip(websocket)
-    if user:
-        display_id = f"{user.username}@{client_ip}" if client_ip and client_ip != "unknown" else user.username
-        if path_client_id.startswith("terminal_"):
-            return path_client_id, display_id, user.username
-        # HTTP APIs key runtime state by authenticated username.  WebSocket
-        # connections must use the same key or real-time test logs are sent to
-        # a different entry and silently disappear from the browser.
-        return user.username, display_id, user.username
-
-    username = "unknown"
-    try:
-        config = config_manager.load_config()
-        username = str((config.get("client_hosts") or {}).get(client_ip) or "").strip() or "unknown"
-    except Exception:
-        username = "unknown"
-
-    display_id = f"{username}@{client_ip}" if username != "unknown" and client_ip != "unknown" else client_ip
-    if path_client_id.startswith("terminal_"):
-        return path_client_id, display_id or path_client_id, username
-    resolved_id = display_id or path_client_id or "unknown"
-    if path_client_id and path_client_id != resolved_id:
-        logger.debug("WebSocket anonymous client_id adjusted: path=%s resolved=%s", path_client_id, resolved_id)
-    return resolved_id, display_id or resolved_id, username
-
-
 # ==================== Root Page ====================
+
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Serve the browser's conventional favicon URL."""
+    return FileResponse(
+        os.path.join(PROJECT_ROOT, "web", "static", "favicon.svg"),
+        media_type="image/svg+xml",
+    )
+
 
 @router.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     """主页 - 使用FastAPI专用模板"""
-    config = config_manager.load_config()
+    config = dict(config_manager.load_config())
+    # 模板使用解析后的运行时主机和用户名。
+    config["ubuntu_user"] = config_manager.get_ubuntu_user(config)
+    config["ubuntu_host"] = config_manager.get_ubuntu_host(config)
+    request_host = str(request.url.hostname or "").strip()
+    if (
+        str(config["ubuntu_host"]).strip().lower() in {"127.0.0.1", "localhost", "::1"}
+        and request_host
+        and request_host.lower() not in {"127.0.0.1", "localhost", "::1"}
+    ):
+        config["ubuntu_host"] = request_host
     saved_page = request.cookies.get("gms_current_page") or "test"
     initial_title = SHELL_PAGE_TITLES.get(saved_page, SHELL_PAGE_TITLES["test"])
 
@@ -169,6 +166,18 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
     """Same-origin HTTPS proxy for the external HTTP GMS assistant."""
     upstream = _gms_assistant_upstream()
     if not upstream:
+        if path.startswith("public/agents/") and path.endswith("/chat"):
+            return HTMLResponse(
+                """<!doctype html><html lang='zh-CN'><meta charset='utf-8'>
+<title>GMS助手未配置</title><style>
+body{font-family:system-ui,sans-serif;margin:0;padding:32px;color:#243042;background:#f7f8fa}
+main{max-width:640px;margin:8vh auto;padding:28px;background:#fff;border:1px solid #e3e7ed;border-radius:12px}
+code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
+</style><main><h2>GMS助手暂未配置</h2>
+<p>请在服务器配置中设置 <code>external_services.gms_assistant_url</code>，然后刷新此页面。</p>
+</main>""",
+                status_code=200,
+            )
         return JSONResponse(
             content={"success": False, "error": "GMS助手未配置，请设置 external_services.gms_assistant_url"},
             status_code=503,
@@ -343,29 +352,64 @@ async def proxy_gms_assistant_public_api(path: str, request: Request):
 # ==================== Health Check ====================
 
 @router.get("/api/system/health")
-@handle_api_errors
 async def health_check():
-    """健康检查"""
+    """Compatibility liveness probe; dependency readiness has its own route."""
     return JSONResponse(content={
-        "status": "ok",
-        "service": "GMS Auto Test - FastAPI Server (Port 5001)",
-        "framework": "FastAPI",
+        "status": "alive",
+        "service": "gms-remote-test-controller",
         "version": "4.0.0",
         "timestamp": datetime.now().isoformat(),
-        "websocket_connections": len(global_state.websocket_connections),
-        "modules": {
-            "config_manager": "✓",
-            "device_manager": "✓",
-            "test_runner": "✓",
-            "test_report_manager": "✓",
-            "vnc_manager": "✓",
-            "adb_forward_manager": "✓",
-            "usbip_manager": "✓",
-            "client_manager": "✓",
-            "device_lock_manager": "✓",
-            "test_logs_manager": "✓"
-        }
     })
+
+
+@router.get("/api/system/health/live")
+async def liveness_check():
+    return {"status": "alive", "timestamp": datetime.now().isoformat()}
+
+
+@router.get("/api/system/health/ready")
+async def readiness_check(request: Request):
+    result = await asyncio.to_thread(readiness, request.app)
+    return JSONResponse(
+        status_code=200 if result["ready"] else 503,
+        content={
+            "status": "ready" if result["ready"] else "not_ready",
+            "timestamp": datetime.now().isoformat(),
+        },
+    )
+
+
+@router.get("/api/system/health/details")
+async def health_details(
+    request: Request,
+    _admin: CurrentUser = Depends(require_role("admin")),
+):
+    result = await asyncio.to_thread(readiness, request.app, force=True)
+    return JSONResponse(
+        status_code=200 if result["ready"] else 503,
+        content=result,
+    )
+
+
+@router.get("/metrics", include_in_schema=False)
+async def prometheus_metrics(
+    authorization: str = Header(default="", alias="Authorization"),
+):
+    expected = metrics_token()
+    if not expected:
+        raise HTTPException(status_code=503, detail="GMS_METRICS_TOKEN is required")
+    scheme, separator, supplied = authorization.partition(" ")
+    if (
+        not separator
+        or scheme.lower() != "bearer"
+        or not hmac.compare_digest(supplied.strip(), expected)
+    ):
+        raise HTTPException(status_code=401, detail="Invalid metrics credential")
+    return Response(
+        content=await asyncio.to_thread(render_metrics),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ==================== Skills Download ====================
@@ -420,127 +464,6 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
         )
 
 
-# ==================== Install.sh Download ====================
-
-@router.get("/api/system/install-sh")
-async def download_install_sh(request: Request):
-    """下载 install.sh 部署脚本
-
-    Returns:
-        install.sh 脚本文件
-    """
-    try:
-        logger.info("[INSTALL_SH_DOWNLOAD] 请求下载 install.sh")
-
-        install_sh_path = os.path.join(PROJECT_ROOT, 'install.sh')
-
-        if not os.path.exists(install_sh_path):
-            logger.error(f"[INSTALL_SH_DOWNLOAD] 文件不存在：{install_sh_path}")
-            return JSONResponse(
-                content={'success': False, 'error': '部署脚本文件不存在'},
-                status_code=404
-            )
-
-        with open(install_sh_path, encoding='utf-8') as f:
-            content = f.read()
-
-        base_url = str(request.base_url).rstrip('/')
-        lines = content.splitlines(keepends=True)
-        injected = f'export GMS_INSTALL_BASE_URL="{base_url}"\n'
-        if lines and lines[0].startswith('#!'):
-            content = ''.join([lines[0], injected, *lines[1:]])
-        else:
-            content = injected + content
-
-        return Response(
-            content=content,
-            media_type="text/x-shellscript",
-            headers={
-                "Content-Disposition": "attachment; filename=\"install.sh\""
-            }
-        )
-
-    except Exception as e:
-        logger.exception(f"[INSTALL_SH_DOWNLOAD] 下载失败：{e}")
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
-
-
-@router.get("/api/system/install-package")
-async def download_install_package(request: Request):
-    """下载当前 Web App 安装包，用于 curl | bash 远程部署。"""
-    tmp = None
-    try:
-        logger.info("[INSTALL_PACKAGE_DOWNLOAD] 请求下载安装包")
-        with tempfile.NamedTemporaryFile(prefix='gms-web-app-', suffix='.tar.gz', delete=False) as tmp:
-            tmp_path = tmp.name
-
-        root_name = 'gms-web-app'
-        exclude_dirs = {
-            '.git', '.agents', '.codex', '__pycache__', '.pytest_cache',
-            '.certs', '.venv', 'dist', 'logs', 'data/apk_uploads',
-        }
-        exclude_files = {
-            'local.diff',
-            'fastapi.pid',
-            'configs/config_runtime.json',
-            'configs/client_ssh_credentials.local.json',
-            'configs/redmine_auth.json',
-        }
-
-        def should_exclude(rel_path: str) -> bool:
-            rel_path = rel_path.strip('/')
-            if not rel_path:
-                return False
-            parts = rel_path.split('/')
-            if any(part in exclude_dirs for part in parts):
-                return True
-            if rel_path in exclude_files:
-                return True
-            name = parts[-1]
-            if name.endswith(('.pyc', '.pyo', '.log')) or '.log.backup.' in name:
-                return True
-            if rel_path.startswith('data/') and name.endswith('.json'):
-                return True
-            return False
-
-        with tarfile.open(tmp_path, 'w:gz') as tar:
-            for dirpath, dirnames, filenames in os.walk(PROJECT_ROOT):
-                rel_dir = os.path.relpath(dirpath, PROJECT_ROOT)
-                rel_dir = '' if rel_dir == '.' else rel_dir
-                dirnames[:] = [
-                    d for d in dirnames
-                    if not should_exclude(os.path.join(rel_dir, d))
-                ]
-                for filename in filenames:
-                    rel_path = os.path.join(rel_dir, filename) if rel_dir else filename
-                    if should_exclude(rel_path):
-                        continue
-                    full_path = os.path.join(dirpath, filename)
-                    tar.add(full_path, arcname=os.path.join(root_name, rel_path), recursive=False)
-
-        return FileResponse(
-            tmp_path,
-            media_type="application/gzip",
-            filename="gms-web-app.tar.gz",
-            background=BackgroundTask(lambda path: os.path.exists(path) and os.unlink(path), tmp_path),
-        )
-
-    except Exception as e:
-        logger.exception(f"[INSTALL_PACKAGE_DOWNLOAD] 下载失败：{e}")
-        if tmp is not None and os.path.exists(tmp.name):
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
-
-
 # ==================== Architecture Page ====================
 
 @router.get("/templates/architecture.html")
@@ -585,20 +508,7 @@ async def get_api_docs():
 
 @router.get("/api/system/help")
 async def get_api_help(api_path: str | None = None):
-    """获取API帮助信息（统一接口）
-
-    Args:
-        api_path: 可选的API路径（如 'api/test/start'）
-                  - 不提供：返回所有API列表
-                  - 提供：返回指定API的详细帮助
-
-    Examples:
-        # 获取所有API列表
-        curl -s "http://localhost:5001/api/system/help"
-
-        # 获取单个API详细帮助
-        curl -s "http://localhost:5001/api/system/help?api_path=api/test/start"
-    """
+    """返回全部 API 列表或指定路径的详细帮助。"""
     try:
         if api_path:
             # 查找匹配的API
@@ -671,7 +581,10 @@ async def get_api_help(api_path: str | None = None):
 @router.websocket("/api/system/websocket/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """WebSocket连接端点"""
-    client_id, display_client_id, username = _get_websocket_client_identity(websocket, client_id)
+    identity = await authorize_websocket_identity(websocket, client_id)
+    if identity is None:
+        return
+    client_id, display_client_id, username = identity
     client_ip = _get_websocket_client_ip(websocket)
 
     await websocket.accept()
@@ -724,13 +637,42 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 await refresh_devices_websocket(client_id, websocket)
 
             elif message_type == 'terminal_connect':
-                await handle_terminal_connect(client_id, websocket, data)
+                token = websocket.cookies.get(AUTH_COOKIE_NAME)
+                live_user = auth_service.get_user_for_token(token, refresh=False)
+                if live_user is not None and auth_service.get_elevated_until(token):
+                    await handle_terminal_connect(client_id, websocket, data)
+                else:
+                    await websocket.send_json({
+                        'type': 'terminal_error',
+                        'error': '需要已提权的管理员会话',
+                        'elevation_required': True,
+                    })
 
             elif message_type == 'terminal_input':
-                await handle_terminal_input(client_id, websocket, data)
+                token = websocket.cookies.get(AUTH_COOKIE_NAME)
+                live_user = auth_service.get_user_for_token(token, refresh=False)
+                if live_user is not None and auth_service.get_elevated_until(token):
+                    await handle_terminal_input(client_id, websocket, data)
+                else:
+                    close_websocket_terminal(websocket)
+                    await websocket.send_json({
+                        'type': 'terminal_error',
+                        'error': '管理员提权已失效，终端已关闭',
+                        'elevation_required': True,
+                    })
 
             elif message_type == 'terminal_resize':
-                await handle_terminal_resize(client_id, websocket, data)
+                token = websocket.cookies.get(AUTH_COOKIE_NAME)
+                live_user = auth_service.get_user_for_token(token, refresh=False)
+                if live_user is not None and auth_service.get_elevated_until(token):
+                    await handle_terminal_resize(client_id, websocket, data)
+                else:
+                    close_websocket_terminal(websocket)
+                    await websocket.send_json({
+                        'type': 'terminal_error',
+                        'error': '管理员提权已失效，终端已关闭',
+                        'elevation_required': True,
+                    })
 
             elif message_type == 'tradefed_list_results':
                 await handle_tradefed_list_results(client_id, websocket, data)
@@ -745,12 +687,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             if global_state.websocket_connections.get(client_id) is websocket:
                 del global_state.websocket_connections[client_id]
 
-        # 清理终端SSH会话（如果存在）
-        with global_state.terminal_lock:
-            if client_id in global_state.terminal_ssh_sessions:
-                session_info = global_state.terminal_ssh_sessions[client_id]
-                close_terminal_session_resources(session_info)
-                del global_state.terminal_ssh_sessions[client_id]
+        close_websocket_terminal(websocket)
 
 
 # ==================== Helper Functions ====================
@@ -937,12 +874,8 @@ def generate_per_api_help_text(method: str, path: str) -> str | None:
     prefix_length = len(desc_prefix)
     desc_length = len(description)
 
-    # 对于包含中文的行，需要调整填充以确保视觉对齐
-    # 计算中文字符数量
+    # 按中文字符宽度修正填充，保持表格基本对齐。
     chinese_chars = len([c for c in description + desc_prefix if ord(c) > 127])
-    # 每个中文字符的显示宽度比字符长度多1，所以需要减少相应数量的空格
-    # 但不能减少太多，否则字符串长度会不够
-    # 这里我们减少一半的差值作为平衡
     visual_adjustment = chinese_chars // 2
     needed_padding = content_length - prefix_length - desc_length + visual_adjustment
 

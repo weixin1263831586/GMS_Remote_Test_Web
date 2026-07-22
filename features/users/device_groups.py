@@ -12,9 +12,11 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
+from features.auth import get_authenticated_user
 from foundation.responses import error_response, success_response
 
 from . import runtime
+from .clients import get_client_id_from_request
 
 
 router = APIRouter()
@@ -86,42 +88,68 @@ def soc_series(value: str) -> str:
     return re.sub(r'[A-Za-z]+$', '', value).strip() or value
 
 
+def _automatic_group_id(dimension: str, value: str) -> str:
+    suffix = re.sub(r'[^a-zA-Z0-9_-]+', '_', value).strip('_') or 'unknown'
+    return f'auto_{dimension}_{suffix}'
+
+
 def auto_assign_new_devices(
     username: str | None,
     device_props: dict[str, dict[str, str]],
 ) -> list[dict[str, Any]]:
-    """Append newly matching devices to persisted automatic groups."""
+    """Append devices and host/property values to persisted automatic groups."""
     groups = load_device_groups(username)
     if not device_props:
         return groups
 
-    auto_rules: list[tuple[dict[str, Any], str, str]] = []
+    auto_rules: dict[tuple[str, str], dict[str, Any]] = {}
+    active_dimensions: set[str] = set()
     for group in groups:
         if not str(group.get('id', '')).startswith('auto_'):
             continue
         dimension, separator, value = str(group.get('name', '')).partition(': ')
         if separator and dimension in _AUTO_DIM_TO_PROP:
-            auto_rules.append((group, dimension, value))
+            auto_rules[(dimension, value)] = group
+            active_dimensions.add(dimension)
     if not auto_rules:
         return groups
 
     changed = False
-    for group, dimension, target_value in auto_rules:
-        property_name = _AUTO_DIM_TO_PROP[dimension]
-        device_ids = group.get('device_ids') or []
-        existing = set(device_ids)
-        for device_id, properties in device_props.items():
-            if device_id in existing:
+    known_ids = {str(group.get('id') or '') for group in groups}
+    for device_id, properties in device_props.items():
+        for dimension in active_dimensions:
+            raw = str(properties.get(_AUTO_DIM_TO_PROP[dimension]) or '').strip()
+            if not raw:
                 continue
-            raw = str(properties.get(property_name) or '').strip()
             current = soc_series(raw) if dimension == 'soc' else raw
-            if raw and current == target_value:
-                device_ids.append(device_id)
-                existing.add(device_id)
+            rule_key = (dimension, current)
+            group = auto_rules.get(rule_key)
+            if group is None:
+                group_id = _automatic_group_id(dimension, current)
+                if group_id in known_ids:
+                    digest = hashlib.sha256(
+                        f'{dimension}:{current}'.encode()
+                    ).hexdigest()[:8]
+                    group_id = f'{group_id}_{digest}'
+                group = {
+                    'id': group_id,
+                    'name': f'{dimension}: {current}',
+                    'color': _default_group_color(len(groups)),
+                    'device_ids': [],
+                    'followed': False,
+                }
+                groups.append(group)
+                known_ids.add(group_id)
+                auto_rules[rule_key] = group
                 changed = True
-        group['device_ids'] = device_ids
+            device_ids = group.get('device_ids') or []
+            if device_id not in device_ids:
+                device_ids.append(device_id)
+                group['device_ids'] = device_ids
+                changed = True
 
     if changed:
+        groups = normalize_device_groups(groups)
         save_device_groups(username, groups)
     return groups
 
@@ -167,16 +195,10 @@ def cluster_device_properties(service: Any = None) -> dict[str, dict[str, str]]:
         return {}
 
 
-def current_username_for_request(request: Request | None) -> str | None:
-    if request is None:
-        return None
-    try:
-        from features.auth import get_authenticated_user
-
-        user = get_authenticated_user(request)
-    except Exception:
-        return None
-    return getattr(user, 'username', None) if user else None
+def current_username_for_request(request: Request) -> str:
+    """Return the authenticated owner or the anonymous development client id."""
+    user = get_authenticated_user(request)
+    return user.id if user else get_client_id_from_request(request)
 
 
 def _owner_storage_key(username: str) -> str:
@@ -201,19 +223,9 @@ def _device_groups_path(username: str) -> Path:
 
 
 def load_device_groups(username: str | None) -> list[dict[str, Any]]:
-    """Load groups for a user, or the legacy runtime section for anonymous use."""
+    """Load groups for one immutable authenticated owner id."""
     if not username:
-        manager = runtime.config_manager
-        if manager is None:
-            return []
-        try:
-            raw = manager.get_runtime_config().get('device_groups', [])
-        except Exception:
-            return []
-        try:
-            return normalize_device_groups(raw)
-        except HTTPException:
-            return []
+        return []
 
     path = _device_groups_path(username)
     with _storage_lock:
@@ -231,15 +243,7 @@ def save_device_groups(
     groups: list[dict[str, Any]],
 ) -> bool:
     if not username:
-        manager = runtime.config_manager
-        if manager is None:
-            return False
-        try:
-            existing = manager.get_runtime_config()
-            existing['device_groups'] = groups
-            return manager.save_runtime_config(existing)
-        except Exception:
-            return False
+        return False
 
     path = _device_groups_path(username)
     temporary = path.with_suffix(f'{path.suffix}.tmp')
@@ -289,9 +293,7 @@ async def mutate_device_groups(
         )
 
     username = current_username_for_request(request)
-    # Keep the complete read-modify-write transaction serialized. Individual
-    # load/save locking is insufficient because concurrent requests can both
-    # read the same old value and silently overwrite one another.
+    # 串行执行完整读改写事务，避免并发覆盖。
     return _mutate_device_groups(username, req, action)
 
 

@@ -1,4 +1,5 @@
 import json
+import shutil
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -21,6 +22,8 @@ class AutomationModelTests(unittest.TestCase):
         run = req.to_run_dict(run_id="ats_test_001")
 
         self.assertEqual(run["id"], "ats_test_001")
+        self.assertEqual(run["trace_id"], "ats_test_001")
+        self.assertEqual(run["state_version"], "1")
         self.assertEqual(run["source_type"], "manual")
         self.assertEqual(run["status"], RUN_STATUS_QUEUED)
         self.assertEqual(run["current_stage"], RUN_STATUS_QUEUED)
@@ -29,6 +32,17 @@ class AutomationModelTests(unittest.TestCase):
 
 
 class AutomationStoreTests(unittest.TestCase):
+    def test_store_recovers_after_runtime_data_directory_deletion(self):
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "automation"
+            store = AutomationStore(data_dir / "automation.sqlite3")
+
+            shutil.rmtree(data_dir)
+
+            self.assertEqual(store.list_runs(limit=10), [])
+
     def test_store_creates_run_and_appends_events(self):
         from features.automation.models import AutomationRunCreateRequest
         from features.automation.repository import AutomationStore
@@ -49,6 +63,46 @@ class AutomationStoreTests(unittest.TestCase):
             self.assertEqual(event["run_id"], "ats_test_001")
             self.assertEqual(len(store.list_events("ats_test_001")), 1)
             self.assertEqual(store.list_events("ats_test_001")[0]["message"], "Run queued")
+            payload = json.loads(store.list_events("ats_test_001")[0]["payload_json"])
+            self.assertEqual(payload["trace_id"], "ats_test_001")
+
+    def test_compare_and_swap_validates_transition_and_increments_version(self):
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            store.create_run(AutomationRunCreateRequest().to_run_dict("run_1"))
+
+            advanced, applied = store.update_run_if_status(
+                "run_1", "queued", status="waiting_device", current_stage="waiting_device"
+            )
+            self.assertTrue(applied)
+            self.assertEqual(advanced["state_version"], 2)
+            with self.assertRaisesRegex(ValueError, "invalid automation run transition"):
+                store.update_run_if_status(
+                    "run_1", "waiting_device", status="reporting", current_stage="reporting"
+                )
+
+    def test_expired_claim_recovery_is_persisted_and_observable(self):
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            store.create_run(AutomationRunCreateRequest().to_run_dict("run_1"))
+            store.update_run(
+                "run_1", lease_owner="dead-controller",
+                lease_expires_at="2000-01-01T00:00:00Z",
+            )
+
+            self.assertTrue(store.claim_run("run_1", "new-controller"))
+            recovered = store.get_run("run_1")
+            self.assertEqual(recovered["recovery_count"], 1)
+            self.assertTrue(recovered["last_recovered_at"])
+            event = store.list_events("run_1")[-1]
+            self.assertEqual(event["event_type"], "run.recovered")
+            self.assertEqual(event["operation_id"], "new-controller")
 
     def test_store_updates_status_and_lists_runs_newest_first(self):
         from features.automation.models import AutomationRunCreateRequest

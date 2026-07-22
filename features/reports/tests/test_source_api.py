@@ -1,5 +1,9 @@
 import json
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from features.auth import CurrentUser
 
 
 class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
@@ -7,6 +11,12 @@ class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
         from features.reports import source_api
 
         class FakeRequest:
+            state = SimpleNamespace(current_user=CurrentUser(
+                id="owner-1", username="owner", role="user"
+            ))
+            headers = {}
+            cookies = {}
+
             async def json(self):
                 return {
                     "url": "https://redmine.rock-chips.com/attachments/1588042",
@@ -70,7 +80,6 @@ class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
             def get(self, *_args, **_kwargs):
                 return FakeResponse()
 
-        original_config_manager = source_api.config_manager
         original_redmine_client = source_api.RedmineClient
         original_client_session = source_api.aiohttp.ClientSession
         original_analyze = source_api._analyze_report_file
@@ -79,13 +88,12 @@ class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
         source_api.REDMINE_ISSUE_ID_CACHE.clear()
         source_api.REDMINE_ISSUE_ID_CACHE["1588042"] = "1588042"
         try:
-            source_api.config_manager = FakeConfig()
             source_api.RedmineClient = FakeRedmineClient
             source_api.aiohttp.ClientSession = lambda *args, **kwargs: FakeSession()
-            async def fake_load_creds():
+            async def fake_load_creds(_request):
                 return {}
 
-            async def fake_save_creds(_username, _password):
+            async def fake_save_creds(_username, _password, _request):
                 return True
 
             async def fake_analyze_report_file(*_args, **_kwargs):
@@ -94,11 +102,13 @@ class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
             source_api._analyze_report_file = fake_analyze_report_file
             source_api._load_redmine_credentials = fake_load_creds
             source_api._save_redmine_credentials = fake_save_creds
-
-            response = await source_api.analyze_report_from_url(FakeRequest())
+            with patch.object(
+                source_api, "_redmine_config_manager_for_request",
+                return_value=FakeConfig(),
+            ):
+                response = await source_api.analyze_report_from_url(FakeRequest())
             payload = json.loads(response.body.decode("utf-8"))
         finally:
-            source_api.config_manager = original_config_manager
             source_api.RedmineClient = original_redmine_client
             source_api.aiohttp.ClientSession = original_client_session
             source_api._analyze_report_file = original_analyze

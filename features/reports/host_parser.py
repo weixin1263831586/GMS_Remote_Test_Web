@@ -36,7 +36,7 @@ class HostLogParser:
             logger.error(f"HostLog内容解析失败: {e}")
             return None
 
-    # Known host-log filename prefixes ordered by priority (lower = higher priority).
+    # 主机日志文件名前缀按优先级排序，数值越小越优先。
     _HOST_LOG_PREFIXES = (
         'host_log_',
         'invoc_complete_host_log_',
@@ -171,10 +171,7 @@ class HostLogParser:
 
         return 'Unknown'
 
-    # A tradefed host_log line begins with a "MM-DD HH:MM:SS L/Tag:" prefix.
-    # Multi-line failure bodies (e.g. a test's stderr dumped verbatim) have NO
-    # such prefix, so a new timestamped line marks the next log entry and the
-    # end of the current failure body — even when that body contains blank lines.
+    # 新的 Tradefed 时间戳行表示上一段多行失败内容结束。
     _NEW_LOG_LINE_RE = re.compile(r'^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b')
 
     @classmethod
@@ -208,7 +205,7 @@ class HostLogParser:
 
             # 从FAILURE行提取模块名（备用方案）
             if '] PerInstance/' in line or '] ' in line:
-                # 格式: [1/1 arm64-v8a VtsHalBluetoothTargetTest RK3572GMS4] TestName fail: ...
+                # 解析带设备和模块前缀的 fail 行。
                 module_match = re.search(r'\[\d+/\d+\s+\w+\s+(\w+(?:Target)?)\s+\w+\]', line)
                 if module_match:
                     detailed_module = module_match.group(1)
@@ -283,8 +280,7 @@ class HostLogParser:
         failure_line = lines[0]
 
         # 匹配完整的测试名称（包括PerInstance/前缀和instance后缀）
-        # 例如: PerInstance/BluetoothAidlTest#Vsr_Bluetooth5Requirements/0_android_hardware_bluetooth_IBluetoothHci_default
-        # 例如: Supplicant/SupplicantP2pIfaceAidlTest#RegisterCallback/0_android_hardware_wifi_supplicant_ISupplicant_default
+        # 兼容包含实例参数和 HAL 服务名的 VTS 用例。
         full_test_match = re.search(r'(\w+(?:/\w+)*?)/(\w+)#\w+[/\w]*', failure_line)
         if full_test_match:
             # 提取完整路径
@@ -333,7 +329,7 @@ class HostLogParser:
                 reason = parts[1].strip()
 
         # 如果有多行信息，将第二行及以后的内容追加到reason中
-        # 因为完整的失败信息可能跨多行（包括Value of, Actual, Expected等）
+        # 失败信息可能包含 Value、Actual、Expected 等多行内容。
         if len(lines) > 1:
             additional_info = '\n'.join(lines[1:]).strip()
             if additional_info:
@@ -343,7 +339,7 @@ class HostLogParser:
         if len(lines) > 1:
             stack_trace = '\n'.join(lines[1:]).strip()
         else:
-            # 单行情况，stack_trace也为空，因为所有信息都在reason中了
+            # 单行失败信息全部保存在 reason 中。
             stack_trace = ''
 
         return TestFailure(
@@ -407,4 +403,3 @@ class HostLogParser:
             total += module_passed + module_failed
 
         return total, passed, failed
-

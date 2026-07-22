@@ -9,8 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from foundation.device_claims import DeviceClaimRegistry
+
+from .repository_claims import ClusterClaimRepositoryMixin
 from .repository_commands import ClusterCommandRepositoryMixin
 from .repository_inventory import ClusterInventoryRepositoryMixin
+from .repository_observability import ClusterObservabilityRepositoryMixin
 from .repository_reservations import ClusterReservationRepositoryMixin
 from .repository_transfers import ClusterTransferRepositoryMixin
 
@@ -20,26 +24,75 @@ def utc_now() -> str:
 
 
 class ClusterRepository(
+    ClusterObservabilityRepositoryMixin,
+    ClusterClaimRepositoryMixin,
     ClusterCommandRepositoryMixin,
     ClusterInventoryRepositoryMixin,
     ClusterReservationRepositoryMixin,
     ClusterTransferRepositoryMixin,
 ):
-    def __init__(self, db_path: str | Path):
+    _REQUIRED_TABLES = frozenset({
+        "cluster_workers",
+        "cluster_worker_devices",
+        "cluster_worker_suites",
+        "cluster_worker_tests",
+        "cluster_commands",
+        "cluster_job_events",
+        "cluster_jobs",
+        "cluster_timeline_events",
+        "cluster_job_attempts",
+        "device_leases",
+        "cluster_device_reservations",
+        "cluster_job_artifacts",
+        "cluster_artifact_uploads",
+        "cluster_transfers",
+    })
+
+    def __init__(
+        self,
+        db_path: str | Path,
+        claim_db_path: str | Path | None = None,
+        claim_lease_ttl_seconds: int = 90,
+    ):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if claim_db_path is None:
+            claim_db_path = (
+                self.db_path.parent.parent / "device_claims.sqlite3"
+                if self.db_path.parent.name == "cluster"
+                else self.db_path.parent / "device_claims.sqlite3"
+            )
+        self.claims = DeviceClaimRegistry(claim_db_path)
+        self.claim_lease_ttl_seconds = max(30, int(claim_lease_ttl_seconds))
         self._lock = threading.RLock()
         self._init_schema()
 
-    def connect(self) -> sqlite3.Connection:
+    def _open_connection(self) -> sqlite3.Connection:
+        # Self-heal parent dir so a runtime data/ clear-out doesn't turn
+        # every cluster request into a 500 ("unable to open database file").
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
+    def connect(self) -> sqlite3.Connection:
+        conn = self._open_connection()
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self._init_schema()
+            conn = self._open_connection()
+        return conn
+
     def _init_schema(self) -> None:
-        with self.connect() as conn:
+        with self._lock, self._open_connection() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS cluster_workers (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL, hostname TEXT NOT NULL,
@@ -55,6 +108,10 @@ class ClusterRepository(
                     running_jobs INTEGER NOT NULL DEFAULT 0,
                     external_jobs INTEGER NOT NULL DEFAULT 0,
                     unknown_external_jobs INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT NOT NULL DEFAULT '',
+                    connection_generation INTEGER NOT NULL DEFAULT 0,
+                    disconnected_at TEXT NOT NULL DEFAULT '',
+                    last_recovered_at TEXT NOT NULL DEFAULT '',
                     registered_at TEXT NOT NULL, last_heartbeat_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -88,6 +145,8 @@ class ClusterRepository(
                     id TEXT PRIMARY KEY, worker_id TEXT NOT NULL, command_type TEXT NOT NULL,
                     job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
                     dispatch_token TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    operation_id TEXT NOT NULL DEFAULT '',
+                    trace_id TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL, result_json TEXT NOT NULL, error TEXT NOT NULL,
                     created_at TEXT NOT NULL, delivered_at TEXT NOT NULL,
                     acknowledged_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -108,12 +167,25 @@ class ClusterRepository(
                     suite_key TEXT NOT NULL, suite_path TEXT NOT NULL,
                     request_json TEXT NOT NULL, status TEXT NOT NULL,
                     priority INTEGER NOT NULL, current_attempt_id TEXT NOT NULL,
+                    trace_id TEXT NOT NULL DEFAULT '', state_version INTEGER NOT NULL DEFAULT 1,
+                    recovery_count INTEGER NOT NULL DEFAULT 0,
+                    last_transition_at TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL, queued_at TEXT NOT NULL,
                     started_at TEXT NOT NULL, finished_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL, error TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_cluster_jobs_status
                     ON cluster_jobs(status, priority, created_at);
+                CREATE TABLE IF NOT EXISTS cluster_timeline_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL DEFAULT '', attempt_id TEXT NOT NULL DEFAULT '',
+                    trace_id TEXT NOT NULL DEFAULT '', operation_id TEXT NOT NULL DEFAULT '',
+                    worker_id TEXT NOT NULL DEFAULT '', event_type TEXT NOT NULL,
+                    source TEXT NOT NULL, level TEXT NOT NULL,
+                    from_state TEXT NOT NULL DEFAULT '', to_state TEXT NOT NULL DEFAULT '',
+                    message TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS cluster_job_attempts (
                     id TEXT PRIMARY KEY, job_id TEXT NOT NULL,
                     attempt_number INTEGER NOT NULL, worker_id TEXT NOT NULL,
@@ -173,8 +245,12 @@ class ClusterRepository(
             self._migrate_worker_metrics(conn)
             self._migrate_transfers(conn)
             self._migrate_device_lease_unique_constraint(conn)
+            self._migrate_recovery_observability(conn)
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_active_device_lease ON device_leases(device_id) WHERE status='active'")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_active_device_reservation ON cluster_device_reservations(device_id) WHERE status='active'")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cluster_commands_operation ON cluster_commands(worker_id,operation_id) WHERE operation_id!=''")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_timeline_job ON cluster_timeline_events(job_id,id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_timeline_trace ON cluster_timeline_events(trace_id,id)")
 
     @staticmethod
     def _migrate_transfers(conn: sqlite3.Connection) -> None:
@@ -185,6 +261,54 @@ class ClusterRepository(
             conn.execute(
                 "ALTER TABLE cluster_transfers ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'"
             )
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection, table: str, column: str, definition: str
+    ) -> None:
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @classmethod
+    def _migrate_recovery_observability(cls, conn: sqlite3.Connection) -> None:
+        for column, definition in {
+            "session_id": "TEXT NOT NULL DEFAULT ''",
+            "connection_generation": "INTEGER NOT NULL DEFAULT 0",
+            "disconnected_at": "TEXT NOT NULL DEFAULT ''",
+            "last_recovered_at": "TEXT NOT NULL DEFAULT ''",
+        }.items():
+            cls._ensure_column(conn, "cluster_workers", column, definition)
+        for column, definition in {
+            "operation_id": "TEXT NOT NULL DEFAULT ''",
+            "trace_id": "TEXT NOT NULL DEFAULT ''",
+        }.items():
+            cls._ensure_column(conn, "cluster_commands", column, definition)
+        for column, definition in {
+            "trace_id": "TEXT NOT NULL DEFAULT ''",
+            "state_version": "INTEGER NOT NULL DEFAULT 1",
+            "recovery_count": "INTEGER NOT NULL DEFAULT 0",
+            "last_transition_at": "TEXT NOT NULL DEFAULT ''",
+        }.items():
+            cls._ensure_column(conn, "cluster_jobs", column, definition)
+        conn.execute(
+            """UPDATE cluster_jobs SET trace_id=COALESCE(
+                   NULLIF(json_extract(request_json, '$.trace_id'), ''),
+                   NULLIF(json_extract(request_json, '$.automation_run_id'), ''),
+                   'trace-' || id)
+               WHERE trace_id=''"""
+        )
+        conn.execute(
+            "UPDATE cluster_commands SET operation_id=id WHERE operation_id=''"
+        )
+        conn.execute(
+            """UPDATE cluster_commands SET trace_id=COALESCE(
+                   (SELECT NULLIF(trace_id, '') FROM cluster_jobs
+                    WHERE cluster_jobs.id=cluster_commands.job_id),
+                   NULLIF(json_extract(payload_json, '$.automation_run_id'), ''),
+                   'trace-' || id)
+               WHERE trace_id=''"""
+        )
 
     @staticmethod
     def _migrate_device_lease_unique_constraint(conn: sqlite3.Connection) -> None:
@@ -224,230 +348,116 @@ class ClusterRepository(
                     result[key] = {}
         return result
 
-    def register_worker(self, data: dict[str, Any]) -> dict[str, Any]:
-        now = utc_now()
-        with self._lock, self.connect() as conn:
-            conn.execute("""
-                INSERT INTO cluster_workers
-                    (id,name,hostname,address,agent_version,status,capabilities_json,
-                     max_jobs,registered_at,last_heartbeat_at,updated_at)
-                VALUES (?,?,?,?,?,'online',?,?,?,?,?)
-                ON CONFLICT(id) DO UPDATE SET name=excluded.name,
-                    hostname=excluded.hostname,address=excluded.address,
-                    agent_version=excluded.agent_version,status='online',
-                    capabilities_json=excluded.capabilities_json,max_jobs=excluded.max_jobs,
-                    last_heartbeat_at=excluded.last_heartbeat_at,updated_at=excluded.updated_at
-            """, (
-                data["worker_id"], data.get("name", ""), data.get("hostname", ""),
-                data.get("address", ""), data.get("agent_version", ""),
-                json.dumps(data.get("capabilities", {}), separators=(",", ":")),
-                data.get("max_jobs", 1), now, now, now,
-            ))
-        return self.get_worker(data["worker_id"]) or {}
-
-    def get_worker(self, worker_id: str) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            return self._decode(conn.execute(
-                "SELECT * FROM cluster_workers WHERE id=?", (worker_id,)
-            ).fetchone())
-
-    def list_workers(self) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            return [self._decode(row) or {} for row in conn.execute(
-                "SELECT * FROM cluster_workers ORDER BY id"
-            ).fetchall()]
-
-    def delete_worker(self, worker_id: str) -> bool:
-        with self._lock, self.connect() as conn:
-            active = conn.execute("SELECT 1 FROM cluster_jobs WHERE assigned_worker_id=? "
-                                  "AND status NOT IN ('completed','failed','cancelled') LIMIT 1",
-                                  (worker_id,)).fetchone()
-            if active:
-                return False
-            # Commands reference workers without ON DELETE CASCADE. Once no
-            # job is active they are delivery history and must not prevent a
-            # host from being removed; job/event history remains intact.
-            conn.execute("DELETE FROM cluster_commands WHERE worker_id=?", (worker_id,))
-            conn.execute("DELETE FROM cluster_worker_devices WHERE worker_id=?", (worker_id,))
-            conn.execute("DELETE FROM cluster_worker_suites WHERE worker_id=?", (worker_id,))
-            conn.execute("DELETE FROM cluster_worker_tests WHERE worker_id=?", (worker_id,))
-            conn.execute("DELETE FROM cluster_transfers WHERE worker_id=?", (worker_id,))
-            conn.execute("DELETE FROM cluster_workers WHERE id=?", (worker_id,))
-            return conn.total_changes > 0
-
-    def get_command(self, command_id: str) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            return self._decode(conn.execute(
-                "SELECT * FROM cluster_commands WHERE id=?", (command_id,)
-            ).fetchone())
-
-    def find_correlated_command(
-        self, worker_id: str, command_type: str, key: str, value: str
-    ) -> dict[str, Any] | None:
-        if not value or key not in {"automation_run_id", "transfer_id"}:
-            return None
-        with self.connect() as conn:
-            row = conn.execute(
-                """SELECT * FROM cluster_commands
-                   WHERE worker_id=? AND command_type=?
-                     AND json_extract(payload_json, ?) = ?
-                   ORDER BY created_at DESC LIMIT 1""",
-                (worker_id, command_type, f"$.{key}", value),
-            ).fetchone()
-        return self._decode(row)
-
-    def compact_command_result(self, command_id: str, result: dict[str, Any]) -> None:
-        """Replace transient/binary-heavy command output with durable metadata."""
-        with self.connect() as conn:
-            conn.execute("UPDATE cluster_commands SET result_json=?,updated_at=? WHERE id=?",
-                         (json.dumps(result, separators=(",", ":")), utc_now(), command_id))
-
-    def heartbeat(self, worker_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
-        now = utc_now()
-        running_jobs = data.get("running_jobs", [])
-        external_jobs = [item for item in running_jobs if item.get("source") == "external"]
-        unknown_external_jobs = [item for item in external_jobs if not item.get("devices")]
-        external_serials = {
-            (str(device)[len(worker_id) + 1:]
-             if str(device).startswith(f"{worker_id}:") else str(device))
-            for item in external_jobs
-            for device in item.get("devices", [])
-        }
-        status = ("draining" if unknown_external_jobs else
-                  "busy" if running_jobs else "online")
-        with self._lock, self.connect() as conn:
-            cursor = conn.execute("""
-                UPDATE cluster_workers SET status=?,agent_version=?,cpu_percent=?,
-                    memory_percent=?,memory_total_gb=?,memory_available_gb=?,load_1m=?,
-                    disk_free_gb=?,running_jobs=?,external_jobs=?,unknown_external_jobs=?,
-                    last_heartbeat_at=?,updated_at=? WHERE id=?
-            """, (
-                status,
-                data.get("agent_version", ""), data.get("cpu_percent", 0),
-                data.get("memory_percent", 0), data.get("memory_total_gb", 0),
-                data.get("memory_available_gb", 0), data.get("load_1m", 0),
-                data.get("disk_free_gb", 0), len(running_jobs), len(external_jobs),
-                len(unknown_external_jobs), now, now, worker_id,
-            ))
-            if cursor.rowcount == 0:
-                return None
-            self._replace_devices(conn, worker_id, data.get("devices", []), now,
-                                  external_serials)
-            self._replace_worker_tests(conn, worker_id, running_jobs, now)
-            if data.get("suites") is not None:
-                self._replace_suites(conn, worker_id, data["suites"], now)
-            for running in running_jobs:
-                if running.get("source") == "external":
-                    continue
-                attempt_id = running.get("attempt_id", "")
-                worker_job_id = running.get("worker_job_id", "")
-                conn.execute("""UPDATE cluster_job_attempts SET status='running',
-                    worker_job_id=?,heartbeat_at=? WHERE id=? AND worker_id=?""",
-                    (worker_job_id, now, attempt_id, worker_id))
-                job = conn.execute("SELECT job_id FROM cluster_job_attempts WHERE id=?", (attempt_id,)).fetchone()
-                if job:
-                    conn.execute("""UPDATE cluster_jobs SET status='running',updated_at=?,
-                        error=CASE WHEN status='worker_lost' THEN '' ELSE error END
-                        WHERE id=? AND status NOT IN ('completed','failed','cancelled')""",
-                                 (now, job["job_id"]))
-                    # A lost Worker keeps leases orphaned so another task cannot
-                    # silently assume ownership. When that exact Attempt is
-                    # reported running again, atomically restore its leases.
-                    conn.execute("""UPDATE device_leases SET status='active',
-                        heartbeat_at=?,expires_at=datetime('now','+90 seconds'),released_at=''
-                        WHERE attempt_id=? AND worker_id=? AND status='orphaned'""",
-                                 (now, attempt_id, worker_id))
-                    conn.execute("""UPDATE cluster_worker_devices SET state='allocated',updated_at=?
-                        WHERE id IN (SELECT device_id FROM device_leases
-                            WHERE attempt_id=? AND status='active')""", (now, attempt_id))
-                    conn.execute("""UPDATE device_leases SET heartbeat_at=?,
-                        expires_at=datetime('now','+90 seconds')
-                        WHERE attempt_id=? AND status='active'""", (now, attempt_id))
-        return self.get_worker(worker_id)
-
     def delete_job(self, job_id: str) -> bool:
         with self._lock, self.connect() as conn:
             row = conn.execute("SELECT status FROM cluster_jobs WHERE id=?", (job_id,)).fetchone()
             if not row or row["status"] not in {"completed", "failed", "cancelled"}:
                 return False
             for table in ("cluster_job_events", "cluster_job_artifacts", "cluster_artifact_uploads", "device_leases",
-                          "cluster_commands", "cluster_job_attempts"):
+                          "cluster_commands", "cluster_job_attempts", "cluster_timeline_events"):
                 conn.execute(f"DELETE FROM {table} WHERE job_id=?", (job_id,))
             conn.execute("DELETE FROM cluster_jobs WHERE id=?", (job_id,))
             return True
 
-    def create_command(self, data: dict[str, Any]) -> dict[str, Any]:
-        now = utc_now()
-        command_id = f"cmd-{uuid.uuid4().hex}"
-        token = uuid.uuid4().hex
-        with self.connect() as conn:
-            conn.execute("""
-                INSERT INTO cluster_commands
-                    (id,worker_id,command_type,job_id,attempt_id,dispatch_token,
-                     payload_json,status,result_json,error,created_at,delivered_at,
-                     acknowledged_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,'queued','{}','',?,'','',?)
-            """, (command_id, data["worker_id"], data["command_type"],
-                    data.get("job_id", ""), data.get("attempt_id", ""), token,
-                    json.dumps(data.get("payload", {}), separators=(",", ":")), now, now))
-        return self.get_command(command_id) or {}
-
-    def poll_commands(self, worker_id: str, limit: int = 5,
-                      redelivery_seconds: int = 120) -> list[dict[str, Any]]:
-        now = utc_now()
-        with self._lock, self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            # Delivery is at-least-once.  If a Worker disappears after polling
-            # but before ACKing, make the command visible again after a bounded
-            # lease.  Worker-side command persistence makes this idempotent.
-            conn.execute(
-                """UPDATE cluster_commands SET status='queued',updated_at=?
-                   WHERE worker_id=? AND status='delivered'
-                     AND datetime(delivered_at) <= datetime('now', ?)""",
-                (now, worker_id, f'-{max(1, redelivery_seconds)} seconds'),
-            )
-            rows = conn.execute("""
-                SELECT * FROM cluster_commands WHERE worker_id=? AND status='queued'
-                ORDER BY created_at LIMIT ?
-            """, (worker_id, limit)).fetchall()
-            ids = [row["id"] for row in rows]
-            if ids:
-                conn.executemany(
-                    "UPDATE cluster_commands SET status='delivered',delivered_at=?,updated_at=? WHERE id=?",
-                    [(now, now, item) for item in ids],
-                )
-            return [self._decode(row) or {} for row in rows]
-
-    def ack_command(self, worker_id: str, command_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
-        now = utc_now()
-        with self._lock, self.connect() as conn:
-            current = conn.execute(
-                "SELECT * FROM cluster_commands WHERE id=? AND worker_id=?",
-                (command_id, worker_id),
-            ).fetchone()
-            if current is None:
-                return None
-            current_status = current["status"]
-            incoming_status = data["status"]
-            terminal = {"completed", "failed", "cancelled"}
-            progress_rank = {"queued": 0, "delivered": 1, "accepted": 2, "running": 3}
-            if current_status in terminal or progress_rank.get(incoming_status, 4) < progress_rank.get(current_status, 0):
-                return self._decode(current)
-            conn.execute("""
-                UPDATE cluster_commands SET status=?,result_json=?,error=?,
-                    acknowledged_at=?,updated_at=? WHERE id=? AND worker_id=?
-            """, (incoming_status, json.dumps(data.get("result", {}), separators=(",", ":")),
-                    data.get("error", ""), now, now, command_id, worker_id))
-        return self.get_command(command_id)
-
     def create_job_with_leases(self, data: dict[str, Any]) -> dict[str, Any]:
-        now = utc_now()
         job_id = f"job-{uuid.uuid4().hex}"
+        worker_id = data["worker_id"]
+        worker = self.get_worker(worker_id)
+        if worker is None:
+            raise ValueError("worker not found")
+        if worker.get("status") not in {"online", "busy"}:
+            raise ValueError("worker is not online")
+        devices = self._claim_devices(worker_id, data.get("devices", []))
+        owner_id = str(data.get("owner_id") or "").strip()
+        if not owner_id:
+            raise ValueError("authenticated owner_id is required")
+        reservation_id = str(data.get("device_reservation_id") or "")
+        job_source = f"job:{job_id}"
+        reservation_source = f"reservation:{reservation_id}"
+        device_keys = [item["device_key"] for item in devices]
+        transferred = False
+        claim_records: list[dict[str, Any]] = []
+        if reservation_id:
+            reservation = self.get_reservation(reservation_id)
+            if not reservation or reservation.get("status") != "active":
+                raise ValueError("device reservation is missing or expired")
+            if reservation.get("worker_id") != worker_id:
+                raise ValueError("device reservation belongs to another Worker")
+            if reservation.get("owner_id") != owner_id:
+                raise ValueError("device reservation belongs to another owner")
+            automation_run_id = str(data.get("automation_run_id") or "")
+            if automation_run_id and reservation.get("source_id") != automation_run_id:
+                raise ValueError("device reservation belongs to another automation run")
+            reservation_devices = {
+                item["id"] for item in reservation.get("devices") or []
+            }
+            if reservation_devices != set(device_keys):
+                raise ValueError("test devices do not match the active reservation")
+            transferred = self.claims.transfer(
+                reservation_source,
+                job_source,
+                source_type="cluster-job",
+                ttl_seconds=self.claim_lease_ttl_seconds,
+                owner_id=owner_id,
+                device_keys=device_keys,
+            ) > 0
+            if transferred:
+                claim_records = [
+                    claim for key in device_keys
+                    if (claim := self.claims.active_claim(key)) is not None
+                ]
+        if not transferred:
+            acquired, claim_records = self.claims.acquire(
+                devices,
+                owner_id=owner_id,
+                username=owner_id,
+                source_type="cluster-job",
+                source_id=job_source,
+                ttl_seconds=self.claim_lease_ttl_seconds,
+            )
+            if not acquired:
+                owner = claim_records[0].get("username") or claim_records[0].get("owner_id")
+                raise ValueError(f"device is already claimed by {owner}")
+        try:
+            return self._create_job_with_leases_metadata(
+                {**data, "_job_id": job_id, "_claim_records": claim_records}
+            )
+        except Exception:
+            if transferred:
+                restored = self.claims.transfer(
+                    job_source,
+                    reservation_source,
+                    source_type="cluster-reservation",
+                    ttl_seconds=6 * 60 * 60,
+                    owner_id=owner_id,
+                    device_keys=device_keys,
+                )
+                if restored <= 0:
+                    self.claims.release(job_source, status="failed")
+            else:
+                self.claims.release(job_source, status="failed")
+            raise
+
+    def _create_job_with_leases_metadata(self, data: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        job_id = data["_job_id"]
         attempt_id = f"attempt-{uuid.uuid4().hex}"
         lease_ids = []
         worker_id = data["worker_id"]
         requested_devices = data.get("devices", [])
         reservation_id = str(data.get("device_reservation_id") or "")
+        trace_id = str(
+            data.get("trace_id")
+            or data.get("automation_run_id")
+            or f"trace-{uuid.uuid4().hex}"
+        )
+        request_data = {
+            **{key: value for key, value in data.items() if not key.startswith("_")},
+            "trace_id": trace_id,
+        }
+        claim_records = {
+            item["device_key"]: item for item in data.get("_claim_records") or []
+        }
         with self._lock, self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             self._expire_device_reservations(conn, now)
@@ -509,12 +519,13 @@ class ClusterRepository(
             conn.execute("""INSERT INTO cluster_jobs
                 (id,owner_id,source_type,requested_worker_id,assigned_worker_id,
                  suite_key,suite_path,request_json,status,priority,current_attempt_id,
-                 created_at,queued_at,started_at,finished_at,updated_at,error)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'','',?,'')""",
+                 trace_id,state_version,last_transition_at,created_at,queued_at,
+                 started_at,finished_at,updated_at,error)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,'','',?,'')""",
                 (job_id, data.get("owner_id", ""), data.get("source_type", "manual"),
                  worker_id, worker_id, data.get("suite_key", ""), data.get("suite_path", ""),
-                 json.dumps(data, separators=(",", ":")), "assigned", data.get("priority", 100),
-                 attempt_id, now, now, now))
+                 json.dumps(request_data, separators=(",", ":")), "assigned",
+                 data.get("priority", 100), attempt_id, trace_id, now, now, now, now))
             dispatch_token = uuid.uuid4().hex
             conn.execute("""INSERT INTO cluster_job_attempts
                 (id,job_id,attempt_number,worker_id,worker_job_id,dispatch_token,
@@ -533,15 +544,24 @@ class ClusterRepository(
                     raise ValueError(f"device is not available: {raw_id}")
                 if conn.execute("SELECT 1 FROM device_leases WHERE device_id=? AND status='active'", (device_id,)).fetchone():
                     raise ValueError(f"device is already leased: {raw_id}")
-                lease_id = f"lease-{uuid.uuid4().hex}"
+                claim = claim_records.get(device_id) or {}
+                lease_id = str(claim.get("id") or f"lease-{uuid.uuid4().hex}")
                 lease_ids.append(lease_id)
+                generation = int(claim.get("generation") or 0)
+                if generation <= 0:
+                    generation = int(conn.execute(
+                        """SELECT COALESCE(MAX(generation),0)+1
+                           FROM device_leases WHERE device_id=?""",
+                        (device_id,),
+                    ).fetchone()[0] or 1)
                 # SQLite computes expiry to keep lease timestamps consistent.
                 conn.execute("""INSERT INTO device_leases
                     (id,device_id,worker_id,serial,job_id,attempt_id,owner_id,status,
                      generation,acquired_at,heartbeat_at,expires_at,released_at)
-                    VALUES(?,?,?,?,?,?,?,'active',1,?,?,datetime('now','+90 seconds'),'')""",
+                    VALUES(?,?,?,?,?,?,?,'active',?,?,?,datetime('now',?),'')""",
                     (lease_id, device_id, worker_id, device["serial"], job_id, attempt_id,
-                     data.get("owner_id", ""), now, now))
+                     data.get("owner_id", ""), generation, now, now,
+                     f"+{self.claim_lease_ttl_seconds} seconds"))
                 conn.execute("UPDATE cluster_worker_devices SET state='allocated',updated_at=? WHERE id=?", (now, device_id))
             if reservation_id:
                 conn.execute(
@@ -549,6 +569,25 @@ class ClusterRepository(
                        WHERE reservation_id=? AND status='active'""",
                     (now, reservation_id),
                 )
+            self._append_timeline_conn(
+                conn,
+                job_id=job_id,
+                attempt_id=attempt_id,
+                trace_id=trace_id,
+                worker_id=worker_id,
+                event_type="job.created",
+                source="controller",
+                from_state="",
+                to_state="assigned",
+                message="Cluster Job created and device leases acquired",
+                payload={
+                    "device_ids": [
+                        raw if str(raw).startswith(f"{worker_id}:") else f"{worker_id}:{raw}"
+                        for raw in requested_devices
+                    ],
+                    "automation_run_id": data.get("automation_run_id", ""),
+                },
+            )
         job = self.get_job(job_id) or {}
         job["lease_ids"] = lease_ids
         return job
@@ -591,58 +630,6 @@ class ClusterRepository(
                     "SELECT id FROM cluster_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
                 ).fetchall()
         return [job for row in rows if (job := self.get_job(row["id"]))]
-
-    def attach_command_to_job(self, job_id: str, command: dict[str, Any]) -> None:
-        now = utc_now()
-        with self.connect() as conn:
-            job = conn.execute("SELECT current_attempt_id FROM cluster_jobs WHERE id=?", (job_id,)).fetchone()
-            if not job:
-                raise ValueError("job not found")
-            conn.execute("UPDATE cluster_jobs SET status='dispatching',updated_at=? WHERE id=?", (now, job_id))
-            conn.execute("UPDATE cluster_job_attempts SET status='dispatching' WHERE id=?", (job["current_attempt_id"],))
-
-    def sync_job_from_command(self, command: dict[str, Any]) -> None:
-        job_id = command.get("job_id", "")
-        if not job_id:
-            return
-        status = command["status"]
-        if status not in {"running", "completed", "failed", "cancelled"}:
-            return
-        now = utc_now()
-        result = command.get("result", {})
-        job_status = "running" if status == "running" else status
-        if command.get("command_type") == "stop_test" and status == "completed":
-            job_status = status = "cancelled"
-        with self.connect() as conn:
-            job = conn.execute("SELECT current_attempt_id FROM cluster_jobs WHERE id=?", (job_id,)).fetchone()
-            if not job:
-                return
-            worker_job_id = result.get("worker_job_id", "")
-            conn.execute("""UPDATE cluster_job_attempts SET status=?,worker_job_id=?,
-                result_json=?,error=?,started_at=CASE WHEN ?='running' THEN ? ELSE started_at END,
-                finished_at=CASE WHEN ? IN ('completed','failed','cancelled') THEN ? ELSE finished_at END
-                WHERE id=?""", (status, worker_job_id, json.dumps(result, separators=(",", ":")),
-                    command.get("error", ""), status, now, status, now, job["current_attempt_id"]))
-            conn.execute("UPDATE cluster_jobs SET status=?,updated_at=?,error=? WHERE id=?",
-                         (job_status, now, command.get("error", ""), job_id))
-            if status in {"completed", "failed", "cancelled"}:
-                conn.execute("UPDATE cluster_jobs SET finished_at=? WHERE id=?", (now, job_id))
-                leases = conn.execute("SELECT device_id FROM device_leases WHERE job_id=? AND status='active'", (job_id,)).fetchall()
-                conn.execute("UPDATE device_leases SET status='released',released_at=? WHERE job_id=? AND status='active'", (now, job_id))
-                conn.executemany("UPDATE cluster_worker_devices SET state='available',updated_at=? WHERE id=?",
-                                 [(now, item["device_id"]) for item in leases])
-
-    def mark_worker_offline(self, worker_id: str) -> None:
-        now = utc_now()
-        with self._lock, self.connect() as conn:
-            conn.execute("UPDATE cluster_workers SET status='offline',updated_at=? WHERE id=?", (now, worker_id))
-            conn.execute("UPDATE cluster_worker_devices SET state='unknown',updated_at=? WHERE worker_id=?", (now, worker_id))
-            jobs = conn.execute("""SELECT id FROM cluster_jobs WHERE assigned_worker_id=?
-                AND status IN ('assigned','dispatching','running','stopping')""", (worker_id,)).fetchall()
-            for job in jobs:
-                conn.execute("UPDATE cluster_jobs SET status='worker_lost',updated_at=?,error='worker heartbeat lost' WHERE id=?",
-                             (now, job["id"]))
-                conn.execute("UPDATE device_leases SET status='orphaned' WHERE job_id=? AND status='active'", (job["id"],))
 
     def add_events(self, job_id: str, attempt_id: str, events: list[dict[str, Any]]) -> int:
         inserted = 0

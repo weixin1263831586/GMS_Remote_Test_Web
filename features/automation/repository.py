@@ -4,15 +4,21 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from features.automation.models import TERMINAL_STATUSES, utc_now_iso
+from features.automation.models import (
+    TERMINAL_STATUSES,
+    utc_now_iso,
+    validate_run_transition,
+)
 
 
 RUN_COLUMNS = [
-    "id", "source_type", "source_key", "profile_id", "project", "branch",
+    "id", "trace_id", "state_version", "recovery_count", "last_recovered_at",
+    "source_type", "source_key", "profile_id", "project", "branch",
     "gerrit_change_id", "gerrit_patchset", "gerrit_subject", "owner", "created_by",
     "status", "current_stage", "jenkins_job", "jenkins_queue_url", "jenkins_build_number",
     "jenkins_build_url", "artifact_url", "artifact_path", "build_artifact_id",
@@ -24,7 +30,8 @@ RUN_COLUMNS = [
 ]
 
 RUN_SUMMARY_COLUMNS = [
-    "id", "source_type", "source_key", "profile_id", "project", "branch",
+    "id", "trace_id", "state_version", "recovery_count", "last_recovered_at",
+    "source_type", "source_key", "profile_id", "project", "branch",
     "gerrit_change_id", "gerrit_patchset", "gerrit_subject", "owner", "created_by",
     "status", "current_stage", "jenkins_build_number", "artifact_url",
     "artifact_path", "build_artifact_id", "worker_id", "device_reservation_id",
@@ -35,21 +42,47 @@ RUN_SUMMARY_COLUMNS = [
 
 
 class AutomationStore:
+    _REQUIRED_TABLES = frozenset({
+        "automation_runs",
+        "automation_run_events",
+        "automation_run_secrets",
+    })
+
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
+        self._schema_lock = threading.RLock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _open_connection(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _connect(self) -> sqlite3.Connection:
+        conn = self._open_connection()
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self._init_schema()
+            conn = self._open_connection()
+        return conn
+
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with self._schema_lock, self._open_connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS automation_runs (
                     id TEXT PRIMARY KEY,
+                    trace_id TEXT NOT NULL DEFAULT '',
+                    state_version INTEGER NOT NULL DEFAULT 1,
+                    recovery_count INTEGER NOT NULL DEFAULT 0,
+                    last_recovered_at TEXT NOT NULL DEFAULT '',
                     source_type TEXT NOT NULL,
                     source_key TEXT NOT NULL,
                     profile_id TEXT NOT NULL,
@@ -69,7 +102,7 @@ class AutomationStore:
                     artifact_url TEXT NOT NULL,
                     artifact_path TEXT NOT NULL,
                     build_artifact_id TEXT NOT NULL DEFAULT '',
-                    worker_id TEXT NOT NULL DEFAULT 'worker-local',
+                    worker_id TEXT NOT NULL DEFAULT '',
                     device_reservation_id TEXT NOT NULL DEFAULT '',
                     flash_stage_id TEXT NOT NULL DEFAULT '',
                     flash_command_id TEXT NOT NULL DEFAULT '',
@@ -94,7 +127,7 @@ class AutomationStore:
             for column, definition in {
                 "created_by": "TEXT NOT NULL DEFAULT ''",
                 "build_artifact_id": "TEXT NOT NULL DEFAULT ''",
-                "worker_id": "TEXT NOT NULL DEFAULT 'worker-local'",
+                "worker_id": "TEXT NOT NULL DEFAULT ''",
                 "device_reservation_id": "TEXT NOT NULL DEFAULT ''",
                 "flash_stage_id": "TEXT NOT NULL DEFAULT ''",
                 "flash_command_id": "TEXT NOT NULL DEFAULT ''",
@@ -103,6 +136,10 @@ class AutomationStore:
                 "report_id": "TEXT NOT NULL DEFAULT ''",
                 "lease_owner": "TEXT NOT NULL DEFAULT ''",
                 "lease_expires_at": "TEXT NOT NULL DEFAULT ''",
+                "trace_id": "TEXT NOT NULL DEFAULT ''",
+                "state_version": "INTEGER NOT NULL DEFAULT 1",
+                "recovery_count": "INTEGER NOT NULL DEFAULT 0",
+                "last_recovered_at": "TEXT NOT NULL DEFAULT ''",
             }.items():
                 self._ensure_column(conn, "automation_runs", column, definition)
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_source_key ON automation_runs(source_key) WHERE source_key != ''")
@@ -114,10 +151,44 @@ class AutomationStore:
                     level TEXT NOT NULL,
                     message TEXT NOT NULL,
                     payload_json TEXT NOT NULL,
+                    trace_id TEXT NOT NULL DEFAULT '',
+                    event_type TEXT NOT NULL DEFAULT 'log',
+                    operation_id TEXT NOT NULL DEFAULT '',
+                    from_status TEXT NOT NULL DEFAULT '',
+                    to_status TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_automation_events_run ON automation_run_events(run_id, id)")
+            for column, definition in {
+                "trace_id": "TEXT NOT NULL DEFAULT ''",
+                "event_type": "TEXT NOT NULL DEFAULT 'log'",
+                "operation_id": "TEXT NOT NULL DEFAULT ''",
+                "from_status": "TEXT NOT NULL DEFAULT ''",
+                "to_status": "TEXT NOT NULL DEFAULT ''",
+            }.items():
+                self._ensure_column(conn, "automation_run_events", column, definition)
+            conn.execute(
+                "UPDATE automation_runs SET trace_id=id WHERE trace_id=''"
+            )
+            conn.execute(
+                """UPDATE automation_run_events SET trace_id=COALESCE(
+                       (SELECT trace_id FROM automation_runs
+                        WHERE automation_runs.id=automation_run_events.run_id),
+                       run_id)
+                   WHERE trace_id=''"""
+            )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS automation_run_secrets (
+                    run_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    encrypted_value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, name),
+                    FOREIGN KEY (run_id) REFERENCES automation_runs(id) ON DELETE CASCADE
+                )
+            """)
+        self.db_path.chmod(0o600)
 
     @staticmethod
     def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -129,7 +200,12 @@ class AutomationStore:
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
-    def create_run(self, run: dict[str, Any]) -> dict[str, Any]:
+    def create_run(
+        self,
+        run: dict[str, Any],
+        *,
+        encrypted_secrets: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         values = {column: str(run.get(column, "")) for column in RUN_COLUMNS}
         placeholders = ", ".join("?" for _ in RUN_COLUMNS)
         columns_sql = ", ".join(RUN_COLUMNS)
@@ -138,7 +214,28 @@ class AutomationStore:
                 f"INSERT INTO automation_runs ({columns_sql}) VALUES ({placeholders})",
                 [values[column] for column in RUN_COLUMNS],
             )
+            for name, encrypted_value in (encrypted_secrets or {}).items():
+                conn.execute(
+                    """INSERT INTO automation_run_secrets
+                       (run_id, name, encrypted_value, updated_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (
+                        values["id"],
+                        str(name),
+                        str(encrypted_value),
+                        utc_now_iso(),
+                    ),
+                )
         return self.get_run(values["id"])
+
+    def get_run_secret(self, run_id: str, name: str) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT encrypted_value FROM automation_run_secrets
+                   WHERE run_id = ? AND name = ?""",
+                (run_id, name),
+            ).fetchone()
+        return str(row["encrypted_value"]) if row else ""
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -219,7 +316,9 @@ class AutomationStore:
         return [dict(row) for row in rows]
 
     def update_run(self, run_id: str, **updates: Any) -> dict[str, Any]:
-        allowed = set(RUN_COLUMNS) - {"id", "created_at"}
+        allowed = set(RUN_COLUMNS) - {
+            "id", "created_at", "state_version", "recovery_count", "last_recovered_at"
+        }
         clean = {key: str(value) for key, value in updates.items() if key in allowed}
         clean["updated_at"] = utc_now_iso()
         assignments = ", ".join(f"{key} = ?" for key in clean)
@@ -234,10 +333,16 @@ class AutomationStore:
         self, run_id: str, expected_status: str, **updates: Any
     ) -> tuple[dict[str, Any], bool]:
         """Compare-and-swap a transition so cancel and worker races cannot revive a run."""
-        allowed = set(RUN_COLUMNS) - {"id", "created_at"}
+        allowed = set(RUN_COLUMNS) - {
+            "id", "created_at", "state_version", "recovery_count", "last_recovered_at"
+        }
         clean = {key: str(value) for key, value in updates.items() if key in allowed}
+        target_status = clean.get("status", expected_status)
+        validate_run_transition(expected_status, target_status)
         clean["updated_at"] = utc_now_iso()
         assignments = ", ".join(f"{key} = ?" for key in clean)
+        if target_status != expected_status:
+            assignments += ", state_version = state_version + 1"
         with self._connect() as conn:
             cursor = conn.execute(
                 f"UPDATE automation_runs SET {assignments} WHERE id = ? AND status = ?",
@@ -263,7 +368,7 @@ class AutomationStore:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 f"""
-                SELECT id FROM automation_runs
+                SELECT id,lease_owner FROM automation_runs
                 WHERE status NOT IN ({placeholders})
                   AND (lease_owner='' OR lease_expires_at='' OR lease_expires_at < ?)
                 ORDER BY updated_at ASC, created_at ASC, id ASC LIMIT 1
@@ -272,23 +377,56 @@ class AutomationStore:
             ).fetchone()
             if row is None:
                 return None
+            recovered = bool(row["lease_owner"] and row["lease_owner"] != owner)
             cursor = conn.execute(
-                """UPDATE automation_runs SET lease_owner=?,lease_expires_at=?
+                """UPDATE automation_runs SET lease_owner=?,lease_expires_at=?,
+                          recovery_count=recovery_count+?,
+                          last_recovered_at=CASE WHEN ? THEN ? ELSE last_recovered_at END
                    WHERE id=? AND (lease_owner='' OR lease_expires_at='' OR lease_expires_at < ?)""",
-                (owner, expiry, row["id"], now),
+                (owner, expiry, 1 if recovered else 0, 1 if recovered else 0,
+                 now, row["id"], now),
             )
             if cursor.rowcount != 1:
                 return None
+        if recovered:
+            self.append_event(
+                row["id"],
+                "recovery",
+                "warning",
+                "Controller reclaimed an expired automation lease",
+                {"previous_owner": row["lease_owner"], "new_owner": owner},
+                event_type="run.recovered",
+                operation_id=owner,
+            )
         return self.get_run(row["id"])
 
     def claim_run(self, run_id: str, owner: str, lease_seconds: int = 120) -> bool:
         now = utc_now_iso()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute(
+                "SELECT lease_owner FROM automation_runs WHERE id=?", (run_id,)
+            ).fetchone()
+            recovered = bool(
+                current and current["lease_owner"] and current["lease_owner"] != owner
+            )
             cursor = conn.execute(
-                """UPDATE automation_runs SET lease_owner=?,lease_expires_at=?
+                """UPDATE automation_runs SET lease_owner=?,lease_expires_at=?,
+                          recovery_count=recovery_count+?,
+                          last_recovered_at=CASE WHEN ? THEN ? ELSE last_recovered_at END
                    WHERE id=? AND (lease_owner='' OR lease_owner=? OR lease_expires_at='' OR lease_expires_at < ?)""",
-                (owner, self._lease_expiry(lease_seconds), run_id, owner, now),
+                (owner, self._lease_expiry(lease_seconds), 1 if recovered else 0,
+                 1 if recovered else 0, now, run_id, owner, now),
+            )
+        if cursor.rowcount == 1 and recovered:
+            self.append_event(
+                run_id,
+                "recovery",
+                "warning",
+                "Controller reclaimed an expired automation lease",
+                {"previous_owner": current["lease_owner"], "new_owner": owner},
+                event_type="run.recovered",
+                operation_id=owner,
             )
         return cursor.rowcount == 1
 
@@ -308,16 +446,41 @@ class AutomationStore:
             )
         return cursor.rowcount == 1
 
-    def append_event(self, run_id: str, stage: str, level: str, message: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def append_event(
+        self,
+        run_id: str,
+        stage: str,
+        level: str,
+        message: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        event_type: str = "log",
+        operation_id: str = "",
+        from_status: str = "",
+        to_status: str = "",
+    ) -> dict[str, Any]:
         created_at = utc_now_iso()
-        payload_json = json.dumps(payload or {}, ensure_ascii=False, separators=(",", ":"))
+        run = self.get_run(run_id) or {}
+        trace_id = str(run.get("trace_id") or run_id)
+        structured_payload = {
+            "run_id": run_id,
+            "trace_id": trace_id,
+            "operation_id": operation_id,
+            **(payload or {}),
+        }
+        payload_json = json.dumps(
+            structured_payload, ensure_ascii=False, separators=(",", ":")
+        )
         with self._connect() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO automation_run_events (run_id, stage, level, message, payload_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO automation_run_events
+                    (run_id,stage,level,message,payload_json,trace_id,event_type,
+                     operation_id,from_status,to_status,created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, stage, level, message, payload_json, created_at),
+                (run_id, stage, level, message, payload_json, trace_id, event_type,
+                 operation_id, from_status, to_status, created_at),
             )
             event_id = cur.lastrowid
             row = conn.execute("SELECT * FROM automation_run_events WHERE id = ?", (event_id,)).fetchone()

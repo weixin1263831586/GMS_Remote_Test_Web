@@ -127,7 +127,7 @@ class DeviceUtils:
             f"{xauthority} && "
             f"{launcher}{quoted_scrcpy} -s {quoted_device} "
             "--max-size 800 "
-            "--stay-awake "
+            "--no-control "
             f"--window-title {quoted_title} "
             f"--window-x {int(x_offset)} "
             f"--window-y {int(y_offset)} "

@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from scripts.sanitize_release_config import sanitize_file, sanitize_product_config
+from scripts.verify_release_tree import verify_release_tree
 
 
 class ReleasePackagingTests(unittest.TestCase):
@@ -13,12 +14,20 @@ class ReleasePackagingTests(unittest.TestCase):
         for expected in (
             "--exclude '.certs/'",
             "--exclude '.env.production'",
+            "--exclude 'configs/env.production'",
+            "--exclude 'configs/certs/'",
+            "--exclude 'configs/runtime.json'",
             "--exclude 'data/'",
             "--exclude 'configs/config_runtime.json'",
+            "--exclude 'tools/GMS-Host-Tools/gts-rockchip.json'",
             "Environment=GMS_ENV=production",
-            "EnvironmentFile=-${INSTALL_DIR}/.env.production",
+            'verify_release_tree.py" "${package_root}',
         ):
             self.assertIn(expected, source)
+
+        # EnvironmentFile was removed: runtime.json is now loaded in-process
+        # by bootstrap.env_loader, so systemd no longer needs it.
+        self.assertNotIn("EnvironmentFile", source)
 
     def test_product_config_scrubs_nested_secrets_and_source_identity(self):
         source = {
@@ -65,6 +74,52 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertEqual(result["base_url"], "https://search.example")
         self.assertEqual(result["token"], "")
         self.assertEqual(result["default_limit"], 10)
+
+    def test_release_verifier_rejects_runtime_files_and_nested_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "configs").mkdir()
+            (root / "configs/config_runtime.json").write_text("{}", encoding="utf-8")
+            (root / "config.json").write_text(
+                json.dumps({"provider": {"api_key": "leaked"}}),
+                encoding="utf-8",
+            )
+
+            findings = verify_release_tree(root)
+
+        self.assertTrue(any("runtime file" in item for item in findings))
+        self.assertTrue(any("api_key" in item for item in findings))
+
+    def test_release_verifier_accepts_sanitized_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "configs").mkdir()
+            (root / "configs/config.json").write_text(
+                json.dumps({"password": "", "api_key": ""}),
+                encoding="utf-8",
+            )
+            (root / "app.py").write_text("print('ok')\n", encoding="utf-8")
+            (root / "validator.py").write_text(
+                'BEGIN = "-----BEGIN PRIVATE KEY-----"\n'
+                'END = "-----END PRIVATE KEY-----"\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(verify_release_tree(root), [])
+
+    def test_release_verifier_detects_pem_block_without_flagging_marker_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "leaked.pem").write_text(
+                "-----BEGIN PRIVATE KEY-----\n"
+                + ("A" * 96)
+                + "\n-----END PRIVATE KEY-----\n",
+                encoding="utf-8",
+            )
+
+            findings = verify_release_tree(root)
+
+        self.assertTrue(any("private key material" in item for item in findings))
 
 
 if __name__ == "__main__":

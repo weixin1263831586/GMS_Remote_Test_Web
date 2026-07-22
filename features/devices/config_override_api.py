@@ -1,23 +1,4 @@
-"""Config override router.
-
-Exposes the "配置覆盖" tool (RRO-based config_* override) consumed by the
-device-config modal's "⚡ override" tab. Mirrors config_explorer_api
-conventions: ``@handle_api_errors``, ``success_response``/``error_response``,
-``Query`` params, ``asyncio.to_thread`` for blocking adb/aapt2 work. No DI.
-
-Endpoints:
-  GET    /api/config-override/entries        list stored overrides
-  POST   /api/config-override/entries        upsert one override (validates)
-  DELETE /api/config-override/entries        remove one override
-  DELETE /api/config-override/entries/all    clear stored overrides
-  GET    /api/config-override/status         read-only device readiness probe
-  POST   /api/config-override/apply          rebuild APK + push + reboot
-  POST   /api/config-override/revert         delete APK + reboot
-  POST   /api/config-override/disable-verity one-time bootstrap (needs reboot)
-  POST   /api/config-override/enable-verity  restore verified boot (needs reboot)
-  POST   /api/config-override/reboot         reboot device (same adb path)
-  GET    /api/config-override/preview-xml    show XML that would be built (no I/O)
-"""
+"""Android RRO 配置覆盖接口。"""
 
 import asyncio
 import logging
@@ -45,6 +26,7 @@ from .config_override import (
     reboot_device,
     revert_all,
 )
+from .support import device_claim_conflict_response, device_mutation_guard
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +49,24 @@ class UpsertEntryRequest(BaseModel):
 
 def _store_for_request(request: Request) -> OverrideStore:
     return OverrideStore(owner_id=get_client_id_from_request(request))
+
+
+def _mutation_claim_error(request: Request, device_id: str):
+    if not str(device_id or "").strip():
+        return error_response("device_id is required for device changes", status_code=400)
+    return device_claim_conflict_response(
+        [device_id],
+        get_client_id_from_request(request),
+        allow_owner=True,
+    )
+
+
+def _read_claim_error(request: Request, device_id: str):
+    if not str(device_id or "").strip():
+        return error_response("device_id is required", status_code=400)
+    return device_claim_conflict_response(
+        [device_id], get_client_id_from_request(request), allow_owner=True
+    )
 
 
 @router.get("/api/config-override/entries")
@@ -137,11 +137,14 @@ async def api_status(
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
 ):
     """Read-only probe of the device's override-readiness."""
-    status = await asyncio.to_thread(probe_status, device_id or None)
+    if conflict := _read_claim_error(request, device_id):
+        return conflict
+    status = await asyncio.to_thread(probe_status, device_id)
     return success_response(data=_status_dict(status), message="Success")
 
 
 @router.post("/api/config-override/apply")
+@device_mutation_guard("config-override-apply", device_argument="device_id")
 @handle_api_errors
 async def api_apply(
     request: Request,
@@ -152,26 +155,32 @@ async def api_apply(
     Returns once the push completes (rebooting=True). The device is offline for
     ~40s after this call returns; the UI should poll /status afterward.
     """
-    result = await asyncio.to_thread(apply_overrides, device_id or None, _store_for_request(request))
+    if conflict := _mutation_claim_error(request, device_id):
+        return conflict
+    result = await asyncio.to_thread(apply_overrides, device_id, _store_for_request(request))
     if not result.success:
         return error_response(result.message, status_code=400)
     return success_response(data=asdict(result), message=result.message)
 
 
 @router.post("/api/config-override/revert")
+@device_mutation_guard("config-override-revert", device_argument="device_id")
 @handle_api_errors
 async def api_revert(
     request: Request,
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
 ):
     """Delete the overlay APK from the device and reboot (host store kept)."""
-    result = await asyncio.to_thread(revert_all, device_id or None, _store_for_request(request))
+    if conflict := _mutation_claim_error(request, device_id):
+        return conflict
+    result = await asyncio.to_thread(revert_all, device_id, _store_for_request(request))
     if not result.success:
         return error_response(result.message, status_code=400)
     return success_response(data=asdict(result), message=result.message)
 
 
 @router.post("/api/config-override/disable-verity")
+@device_mutation_guard("disable-verity", device_argument="device_id")
 @handle_api_errors
 async def api_disable_verity(
     request: Request,
@@ -180,26 +189,32 @@ async def api_disable_verity(
     """One-time bootstrap: ``adb disable-verity``. Returns needs_reboot; the UI
     then chains POST /api/config-override/reboot (or skips if already disabled).
     Required before apply() on a userdebug device whose verity is enforcing."""
-    result = await asyncio.to_thread(disable_verity, device_id or None)
+    if conflict := _mutation_claim_error(request, device_id):
+        return conflict
+    result = await asyncio.to_thread(disable_verity, device_id)
     if not result.success:
         return error_response(result.message, status_code=400)
     return success_response(data={"action": result.action, "message": result.message, "needs_reboot": result.needs_reboot}, message=result.message)
 
 
 @router.post("/api/config-override/enable-verity")
+@device_mutation_guard("enable-verity", device_argument="device_id")
 @handle_api_errors
 async def api_enable_verity(
     request: Request,
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
 ):
     """Restore verified boot. Returns needs_reboot."""
-    result = await asyncio.to_thread(enable_verity, device_id or None)
+    if conflict := _mutation_claim_error(request, device_id):
+        return conflict
+    result = await asyncio.to_thread(enable_verity, device_id)
     if not result.success:
         return error_response(result.message, status_code=400)
     return success_response(data={"action": result.action, "message": result.message, "needs_reboot": result.needs_reboot}, message=result.message)
 
 
 @router.post("/api/config-override/reboot")
+@device_mutation_guard("config-override-reboot", device_argument="device_id")
 @handle_api_errors
 async def api_reboot(
     request: Request,
@@ -207,7 +222,9 @@ async def api_reboot(
 ):
     """Reboot the device via the local adb connection (same path as
     disable/enable-verity, so the device_id is unambiguous)."""
-    result = await asyncio.to_thread(reboot_device, device_id or None)
+    if conflict := _mutation_claim_error(request, device_id):
+        return conflict
+    result = await asyncio.to_thread(reboot_device, device_id)
     if not result.success:
         return error_response(result.message, status_code=400)
     return success_response(data=asdict(result), message=result.message)

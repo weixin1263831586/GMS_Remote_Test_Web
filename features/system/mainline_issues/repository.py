@@ -13,9 +13,7 @@ DEFAULT_INDEX_URL = 'https://docs.partner.android.com/mainline/release/release-n
 DEFAULT_DB_PATH = Path('data/mainline_known_issues.sqlite3')
 KNOWN_ISSUE_HEADING_RE = re.compile(r'^(MTS|CTS|GTS)\s+known issues\b.*:$', flags=re.IGNORECASE)
 PRODUCT_SECTIONS = ('Android', 'Android Go')
-# Canonical Mainline issue_type whitelist. Both the heading regex, the list
-# endpoint filter, and query_exemption_match refer to the same set, so a future
-# addition (e.g. VTS once it gets release-notes entries) only edits one place.
+# Mainline 问题类型白名单，供解析、查询和豁免匹配共用。
 MAINLINE_ISSUE_TYPES = ('MTS', 'CTS', 'GTS')
 
 
@@ -165,7 +163,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     }
     if 'pages_skipped' not in sync_run_columns:
         conn.execute('ALTER TABLE mainline_known_issue_sync_runs ADD COLUMN pages_skipped INTEGER NOT NULL DEFAULT 0')
-    # 迁移：旧表中 release_year 可能有 NOT NULL 约束，需重建为可空
+    # 确保 release_year 允许空值。
     _migrate_sync_runs_table(conn)
     conn.execute(
         """
@@ -304,7 +302,7 @@ def upsert_issues(conn: sqlite3.Connection, issues: list[KnownIssue], timestamp:
     )
 
 
-# Columns returned to consumers (diagnosis, UI) when matching exemptions.
+# 豁免匹配返回给诊断和界面的字段。
 _EXEMPTION_SELECT_COLUMNS = (
     'exemption_id, issue_type, product_section, test_module, test_case, '
     'android_versions, category, release_label, issue_text, source_url, last_seen_at'
@@ -339,19 +337,7 @@ def query_exemption_match(
     issue_type: str | None = None,
     limit: int = 10,
 ) -> list[dict]:
-    """Find Mainline known-issue exemptions matching a failing test.
-
-    Match priority:
-      1. Exact ``test_module`` + ``test_case`` (case-insensitive module).
-      2. Fallback to ``test_module`` + ``test_case LIKE '...#<method>%'`` to cover
-         parameterized DB variants such as ``renderFormContentWhenEnabled[0]``.
-
-    ``issue_type`` (when provided and in :data:`MAINLINE_ISSUE_TYPES`) tightens
-    both passes; when omitted every issue_type is eligible and the actual type is
-    returned.
-
-    Read-only; reuses the index built by :func:`init_db`.
-    """
+    """按精确用例及参数化方法名匹配 Mainline 豁免记录。"""
     module = (test_module or '').strip()
     case = (test_case or '').strip()
     if not module or not case:
@@ -374,15 +360,14 @@ def query_exemption_match(
     type_clause = 'AND issue_type = ?' if itype else ''
     type_params = [itype] if itype else []
 
-    # Pass 1: exact match. Module is case-insensitive (CTS module casing varies
-    # across report parsers); test_case uses the bare FQN.
+    # 第一轮精确匹配：模块忽略大小写，用例使用基础 FQN。
     bare_case = _strip_test_case_param(case)
     where_exact = f'test_module = ? COLLATE NOCASE AND test_case = ? {type_clause}'
     hits = _run(where_exact, [module, bare_case, *type_params], match_kind='exact')
     if hits:
         return hits
 
-    # Pass 2: fuzzy fallback on the method segment, catching parameterized rows.
+    # 第二轮按方法名模糊匹配参数化用例。
     if '#' in bare_case:
         cls, method = bare_case.split('#', 1)
         like = f'{escape_like(cls)}#{escape_like(method)}%'

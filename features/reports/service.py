@@ -43,31 +43,28 @@ class TestReportManager:
         client_id: str,
         limit: int = 100
     ) -> list[dict[str, Any]]:
-        """
-        获取报告列表 (当前用户的报告)
-
-        Args:
-            client_id: 客户端 ID
-            limit: 返回数量限制
-
-        Returns:
-            报告列表
-        """
+        """返回当前用户的报告列表。"""
         try:
-            all_reports = self.test_report_db.get_reports(limit=limit)
-            user_reports = [r for r in all_reports if r.get('client_id') == client_id]
-            return user_reports
+            return self.test_report_db.get_reports(
+                limit=limit,
+                owner_id=client_id,
+            )
         except Exception as e:
             logger.error(f"Error listing reports: {e}")
             return []
 
     def get_report_files(
         self,
-        report_timestamp: str
+        report_timestamp: str,
+        *,
+        owner_id: str,
     ) -> list[dict[str, Any]]:
         """获取报告文件列表"""
         try:
-            report = self.test_report_db.get_report_by_timestamp(report_timestamp)
+            report = self.test_report_db.get_report_by_timestamp(
+                report_timestamp,
+                owner_id=owner_id,
+            )
             if not report:
                 logger.warning(f"Report not found: {report_timestamp}")
                 return []
@@ -131,13 +128,33 @@ class TestReportManager:
             logger.error(f"Error viewing report file: {e}")
             return None
 
-    def analyze_report(self, report_timestamp: str) -> dict[str, Any] | None:
+    def analyze_report(
+        self,
+        report_timestamp: str,
+        *,
+        report_id: str = "",
+        owner_id: str | None = None,
+        include_all: bool = False,
+    ) -> dict[str, Any] | None:
         """分析测试报告"""
         try:
-            report = self.test_report_db.get_report_by_timestamp(report_timestamp)
+            report = (
+                self.test_report_db.get_report(
+                    report_id,
+                    owner_id=owner_id,
+                    include_all=include_all,
+                )
+                if report_id and hasattr(self.test_report_db, "get_report")
+                else self.test_report_db.get_report_by_timestamp(
+                    report_timestamp,
+                    owner_id=owner_id,
+                    include_all=include_all,
+                )
+            )
             if not report:
                 logger.warning(f"Report not found: {report_timestamp}")
                 return None
+            report_timestamp = str(report.get("timestamp") or report_timestamp)
 
             result_dir = report.get('result_dir')
             if not result_dir or not os.path.exists(result_dir):
@@ -185,7 +202,7 @@ class TestReportManager:
                 except Exception as e:
                     logger.error(f"Error reading invocation summary: {e}")
 
-            # Extract LOG DIRECTORY once (used by both host_log and error extraction)
+            # LOG DIRECTORY 同时供主机日志和错误提取使用。
             if summary_content:
                 log_dir_match = re.search(r'LOG DIRECTORY\s*:\s*(/[^\s]+)', summary_content)
                 if log_dir_match:
@@ -253,6 +270,22 @@ class TestReportManager:
         except Exception as e:
             logger.error(f"Error analyzing report: {e}")
             return None
+
+    def analyze_report_by_id(
+        self,
+        report_id: str,
+        *,
+        owner_id: str | None = None,
+        include_all: bool = False,
+    ) -> dict[str, Any] | None:
+        """Analyze one exact durable report record."""
+
+        return self.analyze_report(
+            "",
+            report_id=report_id,
+            owner_id=owner_id,
+            include_all=include_all,
+        )
 
     def _parse_failures_html(self, html_content: str) -> dict[str, Any]:
         """解析失败用例 HTML"""
@@ -360,7 +393,10 @@ class TestReportManager:
                 return None
 
             timestamp = os.path.basename(result_dir)
-            existing = self.test_report_db.get_report_by_timestamp(timestamp)
+            existing = self.test_report_db.get_report_by_timestamp(
+                timestamp,
+                owner_id=client_id,
+            )
             if existing:
                 logger.info(f"Report already exists: {timestamp}")
                 return timestamp
@@ -368,15 +404,12 @@ class TestReportManager:
             report_info = {
                 'timestamp': timestamp,
                 'test_type': test_params.get('test_type', 'UNKNOWN').upper(),
-                'client_id': client_id,
+                'owner_id': client_id,
                 'devices': test_params.get('devices', []),
                 'result_dir': result_dir,
                 'suite_path': test_params.get('test_suite', ''),
                 'status': 'completed'
             }
-
-            if '@' in client_id:
-                report_info['user'] = client_id.split('@')[0]
 
             xml_path = os.path.join(result_dir, 'test_result.xml')
             if os.path.exists(xml_path):

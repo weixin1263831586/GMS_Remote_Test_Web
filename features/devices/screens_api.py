@@ -4,7 +4,7 @@ import asyncio
 import logging
 import shlex
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from features.system import novnc_url
@@ -13,7 +13,11 @@ from foundation.security import sanitize_device_ids
 
 from . import runtime
 from .models import DeviceActionRequest
-from .support import ssh_connection_failed_response
+from .support import (
+    device_claim_conflict_response,
+    device_mutation_guard,
+    ssh_connection_failed_response,
+)
 from .utils import DeviceUtils
 
 
@@ -22,7 +26,8 @@ router = APIRouter()
 
 
 @router.post("/api/devices/scrcpy")
-async def show_device_screens(req: DeviceActionRequest):
+@device_mutation_guard("scrcpy")
+async def show_device_screens(req: DeviceActionRequest, request: Request):
     """Display device screen (launch scrcpy mirroring)."""
     try:
         devices = sanitize_device_ids(req.devices or [])
@@ -32,27 +37,20 @@ async def show_device_screens(req: DeviceActionRequest):
         ubuntu_host = runtime.config_manager.get_ubuntu_host(config)
 
         if not devices:
-            async with runtime.ssh_manager.async_optional_connection(config) as ssh:
-                if ssh:
-                    try:
-                        stdout, _stderr, code = runtime.ssh_manager.execute_command(
-                            ssh, "adb devices", timeout=5
-                        )
-                        if code == 0 and stdout:
-                            lines = stdout.strip().split("\n")[1:]
-                            devices = [
-                                line.split()[0]
-                                for line in lines
-                                if line.strip() and "\tdevice" in line
-                            ]
-                    except Exception as exc:
-                        logger.warning("Failed to auto-detect adb devices for scrcpy: %s", exc)
-
-        if not devices:
             return JSONResponse(
-                content={"success": False, "error": "No devices selected"},
+                content={
+                    "success": False,
+                    "error": "An explicit device selection is required",
+                },
                 status_code=400,
             )
+        conflict = device_claim_conflict_response(
+            devices,
+            runtime.get_client_id_from_request(request),
+            allow_owner=True,
+        )
+        if conflict:
+            return conflict
 
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:

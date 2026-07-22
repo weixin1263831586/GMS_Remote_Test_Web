@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,6 +41,16 @@ class KnowledgeStoreTests(unittest.TestCase):
         tree = self.store.list_tree("u1", "gms")
         self.assertTrue(any(n["node_id"] == folder["node_id"] for n in tree))
         self.assertTrue(any(n.get("doc_id") == doc["doc_id"] for n in tree))
+
+    def test_recovers_schema_and_default_spaces_after_runtime_data_deletion(self):
+        self.store.list_spaces("u1")
+
+        shutil.rmtree(self.tmp.name)
+
+        spaces = self.store.list_spaces("u1")
+        self.assertGreaterEqual(len(spaces), 3)
+        self.assertTrue(self.store.db_path.exists())
+        self.assertTrue(self.store.attachment_dir.exists())
 
     def test_default_spaces_are_stable_for_multiple_users(self):
         first = self.store.list_spaces("u1")

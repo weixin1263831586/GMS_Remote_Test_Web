@@ -35,7 +35,7 @@ class WorkspaceLocalWorkerTests(unittest.TestCase):
         self.assertEqual(saved["worker_id"], "controller-main")
         self.assertEqual(saved["device_ids"], ["LOCAL"])
 
-    def test_legacy_local_worker_id_is_migrated_in_cluster_context(self):
+    def test_cluster_scope_preserves_explicit_worker_id(self):
         path = workspace_context._context_path("alice")
         path.write_text(
             json.dumps({"scope_mode": "cluster", "worker_id": "worker-local"}),
@@ -47,7 +47,7 @@ class WorkspaceLocalWorkerTests(unittest.TestCase):
         ):
             context = workspace_context.load_workspace_context("alice")
 
-        self.assertEqual(context["worker_id"], "controller-main")
+        self.assertEqual(context["worker_id"], "worker-local")
 
 
 if __name__ == "__main__":

@@ -22,16 +22,7 @@ except ImportError:
 
 
 def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
-    """
-    根据Android版本获取对应的OpenGrok项目
-
-    Args:
-        android_version: Android版本字符串 (如 "16", "16.1", "16_r3")
-        opengrok_config: OpenGrok配置字典
-
-    Returns:
-        对应的OpenGrok项目名，如果无法匹配则返回default_project
-    """
+    """返回 Android 主版本对应的 OpenGrok 项目。"""
     if not android_version or not opengrok_config:
         return opengrok_config.get('default_project', 'Android16')
 
@@ -73,10 +64,7 @@ class TestReport:
     failures: list[TestFailure]
 
 
-# Reusable XML parser — avoids re-creating etree.XMLParser on every call.
-# recover=True: CTS/GTS/VTS 报告里常含未转义的 &、控制字符等不规范 XML，
-# 严格解析会整份报告判废（→ 空结果 → 前端「分析失败」）。开启 recover 让
-# lxml 跳过这些坏实体继续解析，与重构前的行为一致。
+# 复用容错 XML 解析器，跳过报告中的非法实体和控制字符。
 _LXML_PARSER = etree.XMLParser(remove_blank_text=True, huge_tree=True, recover=True) if USE_LXML else None
 
 

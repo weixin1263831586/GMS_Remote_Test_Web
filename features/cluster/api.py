@@ -3,18 +3,27 @@ from __future__ import annotations
 import asyncio
 import base64
 import ipaddress
+import logging
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, Response
+
+from features.auth import (
+    CurrentUser,
+    authentication_required,
+    get_authenticated_user,
+    require_authenticated_user,
+    require_elevated_admin,
+    require_role,
+    require_role_when_auth_required,
+)
 
 from .config import ClusterConfig
 from .models import (
-    ClusterDeviceAction,
     ClusterSuiteDownload,
     ClusterSuiteExtract,
-    CommandAck,
     CommandCreate,
     WorkerHeartbeat,
     WorkerRegistration,
@@ -35,13 +44,23 @@ from .worker_auth import (
 router = APIRouter(prefix="/api/cluster", tags=["cluster"])
 page_router = APIRouter()
 cluster_service: ClusterService | None = None
+logger = logging.getLogger(__name__)
 
 
 def configure_cluster(data_root: str | Path) -> ClusterService:
     global cluster_service
-    repository = ClusterRepository(Path(data_root) / "cluster/cluster.sqlite3")
+    if cluster_service is not None:
+        cluster_service.stop_watchdog()
     config = ClusterConfig.load()
+    repository = ClusterRepository(
+        Path(data_root) / "cluster/cluster.sqlite3",
+        claim_lease_ttl_seconds=config.lease_ttl_seconds,
+    )
+    from features.devices import device_lock_manager
+
+    device_lock_manager.configure_local_worker(config.local_worker_id)
     cluster_service = ClusterService(repository, config=config)
+    cluster_service.start_watchdog()
     from .local_bridge import start_local_bridge
     start_local_bridge(repository, config)
     return cluster_service
@@ -79,17 +98,61 @@ def register_worker(body: WorkerRegistration, request: Request,
         else:
             body = body.model_copy(update={"address": source})
     worker = service().repository.register_worker(body.model_dump())
+    if not service().repository.list_suites(body.worker_id):
+        service().repository.create_command({
+            "worker_id": body.worker_id,
+            "command_type": "refresh_suites",
+            "operation_id": (
+                f"inventory-refresh:{body.worker_id}:"
+                f"{worker.get('connection_generation', 0)}"
+            ),
+            "payload": {},
+        })
     return {"success": True, "worker": worker, "heartbeat_interval_seconds": 15,
-            "device_report_interval_seconds": 10, "suite_report_interval_seconds": 300}
+            "device_report_interval_seconds": 10, "suite_report_interval_seconds": 300,
+            "session_id": worker.get("session_id", ""),
+            "connection_generation": worker.get("connection_generation", 0)}
 
 
 @router.post("/workers/{worker_id}/heartbeat")
 def heartbeat(worker_id: str, body: WorkerHeartbeat, authorization: str | None = Header(default=None)):
     _authenticate(worker_id, authorization)
-    worker = service().repository.heartbeat(worker_id, body.model_dump())
+    try:
+        worker = service().repository.heartbeat(worker_id, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     if worker is None:
         raise HTTPException(404, "worker is not registered")
-    return {"success": True, "worker": worker}
+    reconciled = []
+    from .commands_api import synchronize_command
+
+    for state in body.command_states:
+        command = service().repository.ack_command(
+            worker_id, state.id, state.model_dump(exclude={"id"})
+        )
+        if command is None:
+            continue
+        try:
+            synchronize_command(command)
+        except Exception:
+            logger.warning(
+                "Failed to reconcile Worker command %s during heartbeat",
+                state.id,
+                exc_info=True,
+                extra={
+                    "worker_id": worker_id,
+                    "command_id": state.id,
+                    "session_id": body.session_id,
+                },
+            )
+            continue
+        reconciled.append(state.id)
+    return {
+        "success": True,
+        "worker": worker,
+        "reconciled_command_ids": reconciled,
+        "revoked_attempt_ids": worker.get("revoked_attempt_ids", []),
+    }
 
 
 @router.get("/workers")
@@ -98,7 +161,10 @@ def list_workers():
 
 
 @router.get("/worker-tests")
-def list_worker_tests(worker_id: str = Query(default="")):
+def list_worker_tests(
+    request: Request,
+    worker_id: str = Query(default=""),
+):
     if (worker_id and not service().effective_enabled
             and worker_id != service().config.local_worker_id):
         raise HTTPException(409, "cluster mode is disabled")
@@ -106,13 +172,27 @@ def list_worker_tests(worker_id: str = Query(default="")):
     if not service().effective_enabled:
         tests = [item for item in tests
                  if item["worker_id"] == service().config.local_worker_id]
+    user = get_authenticated_user(request)
+    if user is None and authentication_required():
+        user = require_authenticated_user(request)
+    if user and user.role != "admin":
+        visible = []
+        for item in tests:
+            job_id = str(item.get("job_id") or "")
+            job = service().repository.get_job(job_id) if job_id else None
+            if job and job.get("owner_id") == user.id:
+                visible.append(item)
+        tests = visible
     return {"success": True, "tests": tests,
             "retention": {"automatic_cleanup": False,
                           "policy": "artifacts and test history are retained until explicitly deleted"}}
 
 
 @router.delete("/workers/{worker_id}")
-def delete_worker(worker_id: str):
+async def delete_worker(
+    worker_id: str,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     svc = service()
     if worker_id == svc.config.local_worker_id:
         raise HTTPException(409, "local Worker cannot be deleted")
@@ -124,6 +204,10 @@ def delete_worker(worker_id: str):
             409,
             "Worker has a running platform or external test and cannot be deleted",
         )
+    # Remove the remote Agent first.  This prevents an online host from
+    # reconnecting and recreating its Worker registration after the row is
+    # deleted.  The Agent ACKs before stopping its own systemd unit.
+    await _run_worker_command(worker_id, "uninstall_agent", {}, timeout=15)
     if not svc.repository.delete_worker(worker_id):
         raise HTTPException(409, "Worker has an active job and cannot be deleted")
     tokens = _worker_tokens()
@@ -153,29 +237,6 @@ def cluster_status():
             "local_worker_online": local_online,
             "worker_count": len(workers)}
 
-
-
-@router.post("/mode")
-def set_cluster_mode(body: dict):
-    """Toggle between single-host and cluster mode at runtime."""
-    from pydantic import BaseModel
-
-    class ModeRequest(BaseModel):
-        enabled: bool
-
-    req = ModeRequest(**body)
-    svc = service()
-    svc.set_runtime_enabled(req.enabled)
-    workers = svc.list_workers()
-    local_online = any(
-        w['id'] == svc.config.local_worker_id and w.get('status') in {'online', 'busy'}
-        for w in workers
-    )
-    effective = svc.effective_enabled
-    return {"success": True, "enabled": effective,
-            "runtime_enabled": svc._runtime_enabled,
-            "local_worker_online": local_online,
-            "worker_count": len(workers)}
 
 
 def _require_cluster_enabled(remote: bool = False) -> None:
@@ -225,78 +286,55 @@ def list_devices(worker_id: str = Query(default="")):
     return {"success": True, "devices": svc.repository.list_devices(worker_id)}
 
 
-@router.post("/devices/actions")
-async def device_action(body: ClusterDeviceAction):
-    is_local = body.worker_id == service().config.local_worker_id
-    _require_cluster_enabled(remote=not is_local)
-    worker = service().repository.get_worker(body.worker_id)
-    if not worker or worker.get("status") not in {"online", "busy", "draining"}:
-        raise HTTPException(409, "worker is not online")
-    known = {item["id"]: item for item in service().repository.list_devices(body.worker_id)}
-    # Read-only inspection actions are safe even on external_busy devices.
-    read_only_actions = {
-        "screenshot", "layout", "get_properties", "packages_with_path",
-        "packages_all", "features", "props", "config_explore", "override_status",
-    }
-    is_read_only = body.action in read_only_actions
-    requested = []
-    for value in body.devices:
-        device_id = value if value.startswith(f"{body.worker_id}:") else f"{body.worker_id}:{value}"
-        device = known.get(device_id)
-        if not device:
-            raise HTTPException(409, f"device is not available on worker: {value}")
-        device_state = device.get("state")
-        if device_state in {"offline", "unknown"}:
-            raise HTTPException(409, f"device is offline: {value}")
-        if device_state == "external_busy" and not is_read_only:
-            raise HTTPException(409, f"device is busy with a manual Tradefed test: {value}")
-        requested.append(device_id)
-    # When targeting the local Controller host, execute device actions
-    # directly instead of queuing a command that nobody polls.
-    if is_local:
-        from worker_agent.inventory import execute_device_action as _exec_action
-        result = _exec_action(body.action, requested, body.model_dump())
-        return {"success": True, **result}
-    command = service().repository.create_command({
-        "worker_id": body.worker_id,
-        "command_type": "device_action",
-        "payload": {**body.model_dump(exclude={"worker_id", "devices"}), "devices": requested},
-    })
-    # Device actions are short. Waiting here preserves the existing device API's
-    # completed-result semantics while still using the outbound Worker channel.
-    wait_steps = 1800 if body.action in {
-        "config_explore", "override_apply", "override_revert",
-    } else 350 if body.action in {
-        "screenshot", "layout", "packages_with_path", "packages_all",
-        "features", "props", "override_status",
-    } else 100
-    for _ in range(wait_steps):
-        await asyncio.sleep(0.1)
-        current = service().repository.get_command(command["id"])
-        if current and current["status"] in {"completed", "failed", "cancelled"}:
-            if current["status"] != "completed":
-                raise HTTPException(502, current.get("error") or "worker device action failed")
-            result = current.get("result") or {}
-            if body.action == "screenshot" and result.get("image"):
-                service().repository.compact_command_result(command["id"], {
-                    "serial": result.get("serial", ""), "image_bytes": len(result["image"]),
-                    "transient_result": True,
-                })
-            return {"success": True, **result, "command_id": command["id"]}
-    return {"success": True, "accepted": True, "command_id": command["id"]}
-
-
 @router.get("/commands/{command_id}")
-def get_command(command_id: str):
+def get_command(command_id: str, request: Request):
     command = service().repository.get_command(command_id)
     if not command:
         raise HTTPException(404, "command not found")
+    user = get_authenticated_user(request)
+    if user is None and authentication_required():
+        user = require_authenticated_user(request)
+    if user and user.role != "admin":
+        job_id = str(command.get("job_id") or "")
+        job = service().repository.get_job(job_id) if job_id else None
+        owner_id = str((command.get("payload") or {}).get("owner_id") or "")
+        if not (
+            (job and job.get("owner_id") == user.id)
+            or owner_id == user.id
+        ):
+            raise HTTPException(404, "command not found")
     return {"success": True, "command": command}
 
 
 @router.get("/suites")
 def list_suites(worker_id: str = Query(default="")):
-    return {"success": True, "suites": service().repository.list_suites(worker_id)}
+    raw_suites = service().repository.list_suites(worker_id)
+    local_worker_id = service().config.local_worker_id
+    local_present = any(item.get("worker_id") == local_worker_id for item in raw_suites)
+    if (not local_present and (not worker_id or worker_id == local_worker_id)):
+        # The bridge normally refreshes this inventory. Keep the single-host
+        # page usable during the first heartbeat or after a stale DB refresh.
+        from .local_bridge import _scan_suites, _suite_roots
+
+        raw_suites = list(raw_suites)
+        raw_suites.extend(
+            {**item, "worker_id": local_worker_id}
+            for item in _scan_suites(_suite_roots())
+        )
+    suites = []
+    for item in raw_suites:
+        test_type = str(item.get("suite_type") or "").lower()
+        version = str(item.get("suite_version") or "")
+        full_version = f"android-{test_type}-{version}" if version and not version.startswith("android-") else version
+        suites.append({
+            "test_type": test_type,
+            "version": full_version,
+            "tools_path": item.get("tools_path", ""),
+            "full_path": item.get("tools_path", ""),
+            "suite_key": item.get("suite_key", ""),
+            "available": bool(item.get("available", 1)),
+        })
+    return {"success": True, "suites": suites}
 
 
 def _local_execute(command_type: str, payload: dict) -> dict:
@@ -310,14 +348,67 @@ def _local_execute(command_type: str, payload: dict) -> dict:
         config = WorkerConfig.__new__(WorkerConfig)
         config.suite_roots = _suite_roots()
         return _exec_suite(config, payload)
+    if command_type == "get_config":
+        return _read_local_worker_config()
+    if command_type == "update_config":
+        return _update_local_worker_config(payload)
     raise HTTPException(400, f"local execution not supported for {command_type}")
+
+
+def _worker_config_path() -> Path:
+    import os
+    return Path(os.getenv("GMS_WORKER_CONFIG",
+                          Path.home() / ".config/gms-worker/config.json"))
+
+
+_CONFIG_FIELDS = {"max_jobs": int}
+
+
+def _read_local_worker_config() -> dict:
+    import json
+    path = _worker_config_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raw = {}
+    return {key: raw.get(key) for key in _CONFIG_FIELDS}
+
+
+def _update_local_worker_config(updates: dict) -> dict:
+    import json
+    import subprocess
+    path = _worker_config_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raw = {}
+    changed = {}
+    for key, caster in _CONFIG_FIELDS.items():
+        if key in updates:
+            try:
+                raw[key] = caster(updates[key])
+                changed[key] = raw[key]
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"invalid value for {key}")
+    if changed:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+        subprocess.Popen(["systemctl", "--user", "restart", "gms-worker-agent"])
+    return {"updated": changed, "restarted": bool(changed)}
 
 
 async def _run_worker_command(worker_id: str, command_type: str, payload: dict, timeout: float = 10):
     worker = service().repository.get_worker(worker_id)
+    if worker is None:
+        # 等待运行中的 Worker 在数据清理后重新注册。
+        for _ in range(60):
+            await asyncio.sleep(0.1)
+            worker = service().repository.get_worker(worker_id)
+            if worker is not None:
+                break
     if not worker or worker.get("status") not in {"online", "busy"}:
         raise HTTPException(409, "worker is not online")
-    # Local Controller host: execute directly (no agent polls commands here).
+    # Controller 本机命令直接执行。
     if worker_id == service().config.local_worker_id:
         return await asyncio.to_thread(_local_execute, command_type, payload)
     command = service().repository.create_command({
@@ -355,7 +446,11 @@ async def cluster_suite_search(worker_id: str = Query(...), suite_path: str = Qu
 
 
 @router.post("/suites/results")
-async def cluster_suite_results(worker_id: str = Query(...), suite_path: str = Query(...)):
+async def cluster_suite_results(
+    worker_id: str = Query(...),
+    suite_path: str = Query(...),
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     from features.test_execution import parse_tradefed_list_results
 
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
@@ -374,7 +469,10 @@ async def cluster_suite_results(worker_id: str = Query(...), suite_path: str = Q
 
 
 @router.post("/suites/download")
-def cluster_suite_download(body: ClusterSuiteDownload):
+def cluster_suite_download(
+    body: ClusterSuiteDownload,
+    _admin: CurrentUser = Depends(require_role("admin")),
+):
     _require_cluster_enabled(remote=body.worker_id != service().config.local_worker_id)
     worker = service().repository.get_worker(body.worker_id)
     if not worker or worker.get("status") not in {"online", "busy"}:
@@ -388,71 +486,20 @@ def cluster_suite_download(body: ClusterSuiteDownload):
 
 
 @router.get("/suites/archives")
-async def cluster_suite_archives(worker_id: str = Query(...)):
+async def cluster_suite_archives(
+    worker_id: str = Query(...),
+    _admin: CurrentUser = Depends(require_role("admin")),
+):
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     result = await _run_worker_command(worker_id, "suite_action", {"action": "list_archives"})
     return {"success": True, **result}
 
 
-def _controller_suite_archives() -> list[Path]:
-    """Return archives directly inside configured Controller suite roots."""
-    from .local_bridge import _suite_roots
-    extensions = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2")
-    archives: list[Path] = []
-    for root in _suite_roots():
-        resolved = root.expanduser().resolve()
-        if resolved.is_dir():
-            archives.extend(path for path in resolved.iterdir()
-                            if path.is_file() and path.name.lower().endswith(extensions))
-    return archives
-
-
-@router.get("/suite-library")
-def controller_suite_library():
-    archives = []
-    for path in _controller_suite_archives():
-        stat = path.stat()
-        archives.append({"name": path.name, "size": stat.st_size,
-                         "modified": int(stat.st_mtime)})
-    archives.sort(key=lambda item: item["modified"], reverse=True)
-    return {"success": True, "archives": archives}
-
-
-@router.get("/suite-library/{filename}")
-def download_controller_suite_archive(filename: str):
-    if Path(filename).name != filename:
-        raise HTTPException(400, "invalid archive filename")
-    path = next((item for item in _controller_suite_archives() if item.name == filename), None)
-    if path is None:
-        raise HTTPException(404, "suite archive not found")
-    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
-
-
-@router.get("/suite-library-download/{safe_filename}")
-def download_controller_suite_archive_compat(safe_filename: str, filename: str = Query(...)):
-    """Serve an original archive through an old-Worker-compatible URL name."""
-    if not re.fullmatch(r"[A-Za-z0-9._+-]+", safe_filename) or Path(filename).name != filename:
-        raise HTTPException(400, "invalid archive filename")
-    path = next((item for item in _controller_suite_archives() if item.name == filename), None)
-    if path is None:
-        raise HTTPException(404, "suite archive not found")
-    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
-
-
-@router.get("/suite-library-download/{safe_filename}/{filename}")
-def download_controller_suite_archive_named(safe_filename: str, filename: str):
-    """Keep the original name as the URL's final segment for older Workers."""
-    if (not re.fullmatch(r"[A-Za-z0-9._+-]+", safe_filename)
-            or Path(filename).name != filename):
-        raise HTTPException(400, "invalid archive filename")
-    path = next((item for item in _controller_suite_archives() if item.name == filename), None)
-    if path is None:
-        raise HTTPException(404, "suite archive not found")
-    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
-
-
 @router.post("/suites/extract")
-def cluster_suite_extract(body: ClusterSuiteExtract):
+def cluster_suite_extract(
+    body: ClusterSuiteExtract,
+    _admin: CurrentUser = Depends(require_role("admin")),
+):
     _require_cluster_enabled(remote=body.worker_id != service().config.local_worker_id)
     worker = service().repository.get_worker(body.worker_id)
     if not worker or worker.get("status") not in {"online", "busy"}:
@@ -484,14 +531,63 @@ async def cluster_suite_download_file(worker_id: str = Query(...), suite_path: s
 
 
 @router.post("/commands")
-def create_command(body: CommandCreate):
+def create_command(
+    body: CommandCreate,
+    _admin: CurrentUser = Depends(require_role("admin")),
+):
     if service().repository.get_worker(body.worker_id) is None:
         raise HTTPException(404, "worker not found")
     return {"success": True, "command": service().repository.create_command(body.model_dump())}
 
 
+@router.get("/workers/{worker_id}/config")
+async def get_worker_config(
+    worker_id: str,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """Return the configurable parameters of a Worker."""
+    worker = service().repository.get_worker(worker_id)
+    if worker is None:
+        raise HTTPException(404, "worker not found")
+    if worker_id == service().config.local_worker_id:
+        return {"success": True, "config": _read_local_worker_config()}
+    result = await _run_worker_command(worker_id, "get_config", {}, timeout=15)
+    return {"success": True, "config": result}
+
+
+@router.post("/workers/{worker_id}/config")
+async def update_worker_config(
+    worker_id: str,
+    body: dict,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """Update configurable Worker parameters and restart the agent to apply."""
+    worker = service().repository.get_worker(worker_id)
+    if worker is None:
+        raise HTTPException(404, "worker not found")
+    if worker.get("status") not in {"online", "busy"}:
+        raise HTTPException(409, "worker is not online")
+    max_jobs = body.get("max_jobs")
+    if max_jobs is not None:
+        try:
+            max_jobs = int(max_jobs)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "max_jobs must be an integer")
+        if not (1 <= max_jobs <= 32):
+            raise HTTPException(400, "max_jobs must be between 1 and 32")
+        body["max_jobs"] = max_jobs
+    if worker_id == service().config.local_worker_id:
+        result = _update_local_worker_config(body)
+    else:
+        result = await _run_worker_command(worker_id, "update_config", body, timeout=15)
+    return {"success": True, **result}
+
+
 @router.post("/workers/{worker_id}/restart-vnc")
-async def restart_worker_vnc(worker_id: str):
+async def restart_worker_vnc(
+    worker_id: str,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     """Restart x11vnc/websockify on a worker to recover from zombie VNC processes."""
     worker = service().repository.get_worker(worker_id)
     if worker is None:
@@ -511,56 +607,27 @@ async def restart_worker_vnc(worker_id: str):
         raise HTTPException(502, f"restart_vnc failed: {exc}") from exc
 
 
-@router.post("/workers/{worker_id}/commands/poll")
-async def poll_commands(worker_id: str, authorization: str | None = Header(default=None)):
-    _authenticate(worker_id, authorization)
-    if service().repository.get_worker(worker_id) is None:
-        raise HTTPException(404, "worker is not registered")
-    # Short long-poll. Keeping DB reads bounded makes shutdown/reload responsive.
-    for _ in range(20):
-        commands = service().repository.poll_commands(worker_id)
-        if commands:
-            return {"success": True, "commands": commands}
-        await asyncio.sleep(0.5)
-    return {"success": True, "commands": []}
-
-
-@router.post("/workers/{worker_id}/commands/{command_id}/ack")
-def ack_command(worker_id: str, command_id: str, body: CommandAck,
-                authorization: str | None = Header(default=None)):
-    _authenticate(worker_id, authorization)
-    command = service().repository.ack_command(worker_id, command_id, body.model_dump())
-    if command is None:
-        raise HTTPException(404, "command not found")
-    service().repository.sync_job_from_command(command)
-    if command.get("job_id") and command.get("command_type") == "start_test" \
-            and command.get("status") in {"completed", "failed", "cancelled"}:
-        from .jobs_api import update_cluster_report_status
-
-        update_cluster_report_status(
-            command["job_id"], command["status"], command.get("error", "")
-        )
-    from .transfers_api import cleanup_staged_firmware
-
-    cleanup_staged_firmware(command)
-    if command.get("command_type") in {"suite_export", "device_export"} \
-            and command.get("status") in {"failed", "cancelled"}:
-        transfer_id = (command.get("payload") or {}).get("transfer_id", "")
-        if transfer_id:
-            service().repository.update_transfer(transfer_id, status="failed",
-                error=command.get("error") or "worker export failed")
-    return {"success": True, "command": command}
-
-
 def _mount_subrouters() -> None:
     """Mount split routers after this module's shared dependencies exist."""
+    global device_action
+    from .commands_api import router as commands_router
     from .deployment_api import router as deployment_router
+    from .device_actions_api import device_action as device_action
+    from .device_actions_api import router as device_actions_router
+    from .job_control_api import router as job_control_router
     from .jobs_api import router as jobs_router
+    from .suite_library_api import router as suite_library_router
+    from .timeline_api import router as timeline_router
     from .transfers_api import router as transfers_router
 
     router.include_router(deployment_router)
+    router.include_router(device_actions_router)
+    router.include_router(commands_router)
     router.include_router(transfers_router)
     router.include_router(jobs_router)
+    router.include_router(job_control_router)
+    router.include_router(timeline_router)
+    router.include_router(suite_library_router)
 
 
 _mount_subrouters()

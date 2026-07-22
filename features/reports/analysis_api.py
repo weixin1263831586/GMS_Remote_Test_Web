@@ -1,7 +1,11 @@
 import sqlite3
 
-from features.auth import get_authenticated_user
-from features.users import get_client_id_from_request
+from features.auth import (
+    authentication_required,
+    require_authenticated_user,
+    require_authenticated_user_when_auth_required,
+)
+from features.reports.access import can_access_report, get_accessible_report_by_timestamp
 from foundation.config import settings
 
 from .api_helpers import (
@@ -37,8 +41,8 @@ from .api_helpers import (
     test_report_db,
     test_report_manager,
 )
-from .uploads import ReportUploadTooLargeError, stage_report_uploads
 from .knowledge_ranking import android_version_from_request, rank_kb_hits
+from .uploads import ReportUploadTooLargeError, stage_report_uploads
 
 
 router = APIRouter()
@@ -63,7 +67,7 @@ def _query_mainline_exemptions(request: "ReportDiagnosisRequest") -> list[dict]:
     conn.row_factory = sqlite3.Row
     try:
         init_mainline_issues_db(conn)
-        # test_type is validated against MAINLINE_ISSUE_TYPES inside the matcher
+        # 匹配器负责校验 test_type。
         # (VTS/unknown → ''), so no separate mapping layer is needed here.
         return query_mainline_exemption_match(
             conn,
@@ -116,6 +120,7 @@ def _is_safe_report_delete_dir(result_dir: str) -> bool:
 async def analyze_reports(
     request: Request,
     mode: AnalysisMode = Form(default=AnalysisMode.UPLOAD),
+    report_id: str | None = Form(default=None),
     report_timestamp: str | None = Form(default=None),
     test_name: str | None = Form(default=None),
     error_message: str | None = Form(default=None),
@@ -127,23 +132,46 @@ async def analyze_reports(
     files_array: list[UploadFile] | None = File(default=None, alias="files[]"),
 ):
     """Unified report analysis API."""
+    principal = require_authenticated_user(request)
     try:
         if mode == AnalysisMode.SAVED:
-            if not report_timestamp:
-                return error_response("Missing report_timestamp", 400)
+            if not report_id and not report_timestamp:
+                return error_response("Missing report_id or report_timestamp", 400)
 
-            report = test_report_db.get_report_by_timestamp(report_timestamp)
+            report = (
+                test_report_db.get_report(
+                    report_id,
+                    owner_id=None if principal.role == "admin" else principal.id,
+                    include_all=principal.role == "admin",
+                )
+                if report_id and hasattr(test_report_db, "get_report")
+                else get_accessible_report_by_timestamp(
+                    test_report_db, request, report_timestamp
+                )
+            )
             if not report:
                 return error_response("Report not found", 404)
-            user = get_authenticated_user(request)
-            if user and user.role != "admin" and report.get("client_id") != user.username:
+            if not can_access_report(request, report):
                 return error_response("Report not found", 404)
 
             result_dir = report.get("result_dir")
             if not result_dir:
                 return error_response("Report directory not found", 404)
 
-            result = await asyncio.to_thread(test_report_manager.analyze_report, report_timestamp)
+            report_timestamp = str(report.get("timestamp") or report_timestamp or "")
+            result = await asyncio.to_thread(
+                test_report_manager.analyze_report_by_id,
+                str(report.get("report_id") or report_id),
+                owner_id=None if principal.role == "admin" else principal.id,
+                include_all=principal.role == "admin",
+            ) if report.get("report_id") and hasattr(
+                test_report_manager, "analyze_report_by_id"
+            ) else await asyncio.to_thread(
+                test_report_manager.analyze_report,
+                report_timestamp,
+                owner_id=None if principal.role == "admin" else principal.id,
+                include_all=principal.role == "admin",
+            )
             if not result:
                 return error_response("Report analysis failed", 500)
 
@@ -177,8 +205,14 @@ async def analyze_reports(
 
             try:
                 ai_result = await asyncio.to_thread(analyze_with_ai, test_name, error_message or "", stack_trace or "", module or "", parsed_class_names)
-            except Exception:
-                ai_result = {"root_cause": "AI analysis unavailable", "analysis": "N/A"}
+            except Exception as exc:
+                ai_result = {
+                    "root_cause": "AI analysis unavailable",
+                    "analysis": "N/A",
+                    "ai_enabled": False,
+                    "ai_attempted": True,
+                    "ai_error": str(exc)[:1000],
+                }
 
             return JSONResponse(content={"success": True, "data": ai_result, "mode": "ai"})
 
@@ -286,7 +320,7 @@ async def analyze_reports(
         return error_response("Report analysis failed", 500, message=str(e))
 
 
-# ==================== Analyze Suite Log Directory ====================
+# 套件日志目录分析。
 
 def _resolve_suite_log_dir(suite_path: str, rel_path: str, config) -> tuple[str, str | None]:
     """Resolve a browsed suite-relative path to an absolute log directory.
@@ -301,8 +335,9 @@ def _resolve_suite_log_dir(suite_path: str, rel_path: str, config) -> tuple[str,
     if not raw or not raw.startswith("/"):
         return "", "无效的测试套件路径"
 
-    # suite_path points at the .../tools dir; the suite root is its parent.
+    # suite_path 指向 tools 目录，其父目录为套件根目录。
     suite_root = raw[:-len("/tools")] if raw.endswith("/tools") else raw
+    suite_root = os.path.realpath(os.path.expanduser(suite_root))
 
     rel = (rel_path or "").replace("\\", "/").strip().strip("/")
     parts = [p for p in rel.split("/") if p and p != "."]
@@ -310,10 +345,16 @@ def _resolve_suite_log_dir(suite_path: str, rel_path: str, config) -> tuple[str,
         return "", "非法路径"
 
     base = (config.get("suites_path") or "").replace("\\", "/").strip().rstrip("/")
+    if base:
+        base = os.path.realpath(os.path.expanduser(base))
     if base and not (suite_root == base or suite_root.startswith(base + "/")):
         return "", "测试套件不在配置的套件目录内"
 
-    abs_path = suite_root if not parts else f"{suite_root}/{'/'.join(parts)}"
+    abs_path = os.path.realpath(
+        suite_root if not parts else f"{suite_root}/{'/'.join(parts)}"
+    )
+    if abs_path != suite_root and not abs_path.startswith(suite_root + os.sep):
+        return "", "非法路径"
     return abs_path, None
 
 
@@ -340,21 +381,12 @@ def _suite_result_dir_for_log_dir(suite_path: str, log_dir: str) -> str | None:
 
 @router.post("/api/reports/analyze-log-dir")
 async def analyze_suite_log_dir(
+    request: Request,
     suite_path: str = Form(...),
     path: str = Form(default=""),
 ):
-    """Analyze a test-run log folder browsed from the suite browser.
-
-    Triggered by the per-folder "报告分析" button inside a ``.../logs`` dir.
-    Resolves ``suite_path``+``path`` to an absolute directory (same semantics
-    as the suite file browser) and runs the host-log analyzer over it. The
-    analyzer walks the tree recursively, so pointing it at a
-    ``logs/<timestamp>`` folder finds the nested ``inv_*/host_log_*.txt``.
-
-    The suite directory must be readable from the web host itself. When the
-    configured test host is remote and the path is not mounted locally, the
-    caller gets a clear error instead of a silent failure.
-    """
+    """递归分析套件浏览器选中的本地测试日志目录。"""
+    principal = require_authenticated_user_when_auth_required(request)
     config = config_manager.load_config()
     abs_path, err = _resolve_suite_log_dir(suite_path, path, config)
     if err:
@@ -373,6 +405,21 @@ async def analyze_suite_log_dir(
     try:
         analyzer = ReportAnalyzer()
         result_dir = _suite_result_dir_for_log_dir(suite_path, abs_path)
+        report_timestamp = (
+            os.path.basename(result_dir.rstrip(os.sep))
+            if result_dir
+            else os.path.basename(abs_path.rstrip(os.sep))
+        )
+        if authentication_required():
+            report = (
+                get_accessible_report_by_timestamp(
+                    test_report_db, request, report_timestamp
+                )
+                if report_timestamp
+                else None
+            )
+            if not can_access_report(request, report):
+                return error_response("Report log directory not found", 404)
         if result_dir:
             result = await asyncio.to_thread(
                 analyzer.analyze_file,
@@ -405,6 +452,7 @@ async def analyze_suite_log_dir(
 @router.post("/api/reports/diagnose")
 async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request: Request):
     """Diagnose one report failure and locate matching suite APK/JAR source."""
+    require_authenticated_user(http_request)
     try:
         failure_location = StackTraceUtils.extract_failure_location(request.stack_trace or "", request.test_name)
         class_names = [c for c in (request.class_names or []) if c]
@@ -445,8 +493,14 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
         async def _run_ai_analysis():
             try:
                 return await asyncio.to_thread(analyze_with_ai, request.test_name, request.error_message or "", request.stack_trace or "", request.module or "", class_names)
-            except Exception:
-                return {"root_cause": "AI analysis unavailable", "analysis": "N/A"}
+            except Exception as exc:
+                return {
+                    "root_cause": "AI analysis unavailable",
+                    "analysis": "N/A",
+                    "ai_enabled": False,
+                    "ai_attempted": True,
+                    "ai_error": str(exc)[:1000],
+                }
 
         async def _search_knowledge_base():
             try:
@@ -588,21 +642,38 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
 # ==================== Delete Report ====================
 
 @router.delete("/api/reports/delete")
-async def delete_report(request: Request, timestamp: str = Query(...)):
+async def delete_report(
+    request: Request,
+    report_id: str = Query(default=""),
+    timestamp: str = Query(default=""),
+):
     """Delete test report (owner or admin only)."""
+    principal = require_authenticated_user(request)
     try:
-        client_id = get_client_id_from_request(request)
-        user = get_authenticated_user(request)
-        report = test_report_db.get_report_by_timestamp(timestamp)
+        if not report_id and not timestamp:
+            return error_response("report_id is required", 400)
+        report = (
+            test_report_db.get_report(
+                report_id,
+                owner_id=None if principal.role == "admin" else principal.id,
+                include_all=principal.role == "admin",
+            )
+            if report_id and hasattr(test_report_db, "get_report")
+            else get_accessible_report_by_timestamp(
+                test_report_db, request, timestamp
+            )
+        )
 
         if not report:
             return error_response("Report not found", 404)
 
-        report_client_id = report.get("client_id")
-        is_admin = bool(user and getattr(user, "role", None) == "admin")
-        if report_client_id != client_id and not is_admin:
-            logger.warning(f"[DELETE] Permission denied: {client_id} tried to delete {report_client_id}'s report")
-            return error_response("No permission to delete this report", 403)
+        if not can_access_report(request, report):
+            logger.warning(
+                "[DELETE] Permission denied: %s tried to delete report %s",
+                principal.id,
+                timestamp,
+            )
+            return error_response("Report not found", 404)
 
         result_dir = report.get("result_dir")
         if result_dir and os.path.exists(result_dir):
@@ -616,7 +687,18 @@ async def delete_report(request: Request, timestamp: str = Query(...)):
                 logger.error(f"Failed to delete report directory: {e}")
                 return error_response(f"Failed to delete directory: {e!s}", 500)
 
-        success = test_report_db.delete_report(timestamp)
+        success = (
+            test_report_db.delete_report_by_id(
+                str(report.get("report_id")),
+                owner_id=None if principal.role == "admin" else principal.id,
+                include_all=principal.role == "admin",
+            )
+            if report.get("report_id") and hasattr(test_report_db, "delete_report_by_id")
+            else test_report_db.delete_report(
+                str(report.get("timestamp") or timestamp),
+                owner_id=str(report.get("owner_id") or principal.id),
+            )
+        )
         if success:
             return success_response(message="Report deleted")
         else:
@@ -632,6 +714,7 @@ async def delete_report(request: Request, timestamp: str = Query(...)):
 @router.get("/api/knowledgebase/search")
 async def knowledgebase_search(request: Request, query: str = Query(..., min_length=1, max_length=256), limit: int = Query(8, ge=1, le=20)):
     """Search the local Redmine-derived GMS knowledge base."""
+    require_authenticated_user(request)
     try:
         kb = _get_knowledge_base(request)
         if not kb:
@@ -646,6 +729,7 @@ async def knowledgebase_search(request: Request, query: str = Query(..., min_len
 @router.get("/api/knowledgebase/stats")
 async def knowledgebase_stats(request: Request):
     """Return local Redmine-derived GMS knowledge base stats."""
+    require_authenticated_user(request)
     try:
         kb = _get_knowledge_base(request)
         if not kb:
@@ -657,4 +741,3 @@ async def knowledgebase_stats(request: Request):
     except Exception as e:
         logger.error(f"Knowledge base stats failed: {e}", exc_info=True)
         return error_response(str(e), status_code=500)
-

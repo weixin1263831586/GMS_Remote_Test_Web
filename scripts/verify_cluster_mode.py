@@ -41,7 +41,7 @@ def main() -> int:
     )
     svc = ClusterService(repo, config=config)
 
-    # Manually register worker-local (simulating the bridge without threads)
+    # 手动注册本地 Worker，避免启动桥接线程。
     repo.register_worker({
         "worker_id": "worker-local",
         "name": "Controller Local",
@@ -87,7 +87,7 @@ def main() -> int:
                      "available": True}],
     })
 
-    # Set up FastAPI test app with only GET endpoints (avoid TestClient hang)
+    # 测试应用仅注册 GET 接口。
     cluster_api.cluster_service = svc
     app = FastAPI()
     app.include_router(cluster_api.router)

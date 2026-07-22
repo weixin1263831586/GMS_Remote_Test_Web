@@ -18,7 +18,6 @@ class AgentCoverageTests(unittest.TestCase):
             "cluster_devices",
             "cluster_jobs",
             "cluster_job_cancel",
-            "cluster_set_mode",
             "build_jobs",
             "knowledge_search",
             "knowledge_ask",

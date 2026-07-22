@@ -1,9 +1,7 @@
 """
 配置管理器 - 核心业务逻辑
 """
-import base64
 import getpass
-import hashlib
 import json
 import logging
 import os
@@ -12,62 +10,15 @@ import socket
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from foundation.config_persistence import ConfigPersistenceMixin
 from foundation.networking import is_local_host
+from foundation.runtime_settings import RuntimeSettings
 
 
 logger = logging.getLogger(__name__)
-
-
-def _env_bool(value: str) -> bool:
-    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
-
-
-def _env_int(value: str, default: int) -> int:
-    try:
-        return int(value.strip())
-    except (AttributeError, TypeError, ValueError):
-        return default
-
-
-@dataclass(frozen=True)
-class RuntimeSettings:
-    project_root: Path
-    data_root: Path
-    server_host: str
-    server_port: int
-    environment: str
-    proxy_headers_enabled: bool
-    forwarded_allow_ips: str
-
-    @classmethod
-    def from_environment(
-        cls,
-        *,
-        project_root: Path | None = None,
-        environ: dict[str, str] | None = None,
-    ) -> "RuntimeSettings":
-        env = os.environ if environ is None else environ
-        root = Path(project_root).resolve() if project_root else Path(__file__).resolve().parents[1]
-        environment = env.get('GMS_ENV', 'development').strip().lower()
-        return cls(
-            project_root=root,
-            data_root=Path(env.get('GMS_DATA_ROOT', str(root / 'data'))).resolve(),
-            server_host=env.get(
-                'GMS_SERVER_HOST',
-                '127.0.0.1' if environment == 'production' else '0.0.0.0',
-            ),
-            server_port=_env_int(env.get('GMS_PORT', '5001'), 5001),
-            environment=environment,
-            proxy_headers_enabled=_env_bool(
-                env.get('GMS_PROXY_HEADERS', 'true' if environment == 'production' else 'false')
-            ),
-            forwarded_allow_ips=env.get('GMS_FORWARDED_ALLOW_IPS', '127.0.0.1'),
-        )
 
 
 settings = RuntimeSettings.from_environment()
@@ -116,14 +67,13 @@ APK_MAX_SOURCE_FILE_SIZE = 2 * 1024 * 1024
 APK_MAX_TASKS = 50
 JADX_TIMEOUT = 600
 REDMINE_ISSUE_ID_CACHE_MAX_SIZE = 100
-TOOLS_DATA_FILE = os.path.join(PROJECT_ROOT, 'data', 'user_tools_data.json')
+TOOLS_DATA_FILE = os.path.join(PROJECT_ROOT, 'configs', 'user_tools_data.json')
 
-# 测试用 WiFi 默认 SSID/密码统一在 config.json 的 wifi 节点配置，
-# 经 config_manager.get_wifi_defaults() 读取（避免在代码里硬编码）。
+# 测试 Wi-Fi 默认值统一从 config.json 的 wifi 节点读取。
 DEFAULT_WIFI_SSID = ""
 DEFAULT_WIFI_PASSWORD = ""
 
-# Precompile regex pattern for placeholder replacement (efficiency)
+# 预编译配置占位符正则。
 PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
 
@@ -145,7 +95,7 @@ class ConfigManager(ConfigPersistenceMixin):
 
         self.base_dir = base_dir
         self.project_root = Path(base_dir).resolve().parent
-        # 配置文件已移动到 configs/ 目录
+        # 配置文件位于 configs 目录。
         self.config_path = os.path.join(base_dir, '..', 'configs', 'config.json')
         self.runtime_config_path = os.path.join(base_dir, '..', 'configs', 'config_runtime.json')
 
@@ -216,8 +166,7 @@ class ConfigManager(ConfigPersistenceMixin):
 
         config = self._load_static_config()
 
-        # Runtime config (deploy identity + user data) overrides the static defaults
-        # shipped with the source, but the static ai_models block is preserved.
+        # 运行配置覆盖静态默认值，但保留静态 ai_models 配置。
         runtime_config = self._load_runtime_config()
         if runtime_config:
             ai_config = config.get('ai_models', {})
@@ -473,7 +422,7 @@ class ConfigManager(ConfigPersistenceMixin):
 
     def save_redmine_stats_config(self, stats_config: dict[str, Any]) -> bool:
         """Save Redmine stats settings to runtime config so UI changes take effect immediately."""
-        # redmine_stats 只在 runtime 维护，current 从 runtime 取，故 merge_from_runtime=True
+        # redmine_stats 仅由运行配置维护。
         return self._save_section('redmine_stats', stats_config, merge_from_runtime=True)
 
     def get_redmine_dashboard_config(self) -> dict[str, Any]:
@@ -493,7 +442,7 @@ class ConfigManager(ConfigPersistenceMixin):
         return self._save_section('gerrit_dashboard', dashboard_config)
 
     def save_client_ssh_credentials(self, credentials: list) -> bool:
-        """保存客户端 SSH 凭据到运行时配置文件。"""
+        """Persist host-scoped SSH credentials encrypted at rest."""
         try:
             if credentials is None:
                 credentials = []
@@ -501,11 +450,26 @@ class ConfigManager(ConfigPersistenceMixin):
                 raise ValueError("client_ssh_credentials must be a list")
 
             return self.update_runtime_config(
-                {'client_ssh_credentials': credentials},
+                {'client_ssh_credentials': self._encrypt_ssh_credentials(credentials)},
             )
         except Exception as e:
             logger.error(f"Error saving client SSH credentials: {e}")
             return False
+
+    @staticmethod
+    def _encrypt_ssh_credentials(credentials: list) -> list[dict[str, Any]]:
+        from foundation.secrets import encrypt_secret
+
+        protected: list[dict[str, Any]] = []
+        for raw in credentials or []:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            plaintext = str(item.pop("password", "") or "")
+            if plaintext:
+                item["encrypted_password"] = encrypt_secret(plaintext)
+            protected.append(item)
+        return protected
 
     def prepare_client_config(self, updates: dict[str, Any]) -> dict[str, Any]:
         """Merge *updates* into the existing client_hosts/client_ssh_credentials and return the full client config."""
@@ -514,9 +478,8 @@ class ConfigManager(ConfigPersistenceMixin):
 
         runtime_config = existing.copy()
         runtime_config['client_hosts'] = updates.get('client_hosts', existing.get('client_hosts', {}))
-        runtime_config['client_ssh_credentials'] = updates.get(
-            'client_ssh_credentials',
-            existing_credentials
+        runtime_config['client_ssh_credentials'] = self._encrypt_ssh_credentials(
+            updates.get('client_ssh_credentials', existing_credentials)
         )
 
         # 只有在明确提供local_server时才保存（避免空值覆盖）
@@ -548,13 +511,25 @@ class ConfigManager(ConfigPersistenceMixin):
         return config.get('ubuntu_user') or get_ubuntu_user()
 
     def get_wifi_defaults(self, config: dict[str, Any] = None) -> dict[str, str]:
-        """读取测试用 WiFi 默认 SSID/密码（config.wifi 覆盖内置默认值）"""
+        """Read Wi-Fi settings from the plaintext config, with an env override."""
         if config is None:
             config = self.load_config()
         wifi_cfg = config.get("wifi") or {}
+        password = os.getenv("GMS_WIFI_PASSWORD", "")
+        if not password:
+            # 优先读取明文 password，缺失时读取 encrypted_password。
+            password = str(wifi_cfg.get("password") or "")
+        encrypted_password = str(wifi_cfg.get("encrypted_password") or "")
+        if not password and encrypted_password:
+            from foundation.secrets import decrypt_secret
+
+            try:
+                password = decrypt_secret(encrypted_password)
+            except RuntimeError:
+                logger.warning("Stored Wi-Fi credential cannot be decrypted; rotate it")
         return {
             "ssid": str(wifi_cfg.get("ssid") or DEFAULT_WIFI_SSID),
-            "password": str(wifi_cfg.get("password") or DEFAULT_WIFI_PASSWORD),
+            "password": password or DEFAULT_WIFI_PASSWORD,
         }
 
     def get_ubuntu_host(self, config: dict[str, Any] = None) -> str:
@@ -576,7 +551,7 @@ class ConfigManager(ConfigPersistenceMixin):
         return username.strip(), hostname.strip()
 
     def find_device_host_password(self, device_host: str, config: dict[str, Any] = None) -> str | None:
-        """Return the stored SSH password for *device_host* (user@ip) from client_ssh_credentials, or None; reloads config when *config* is omitted."""
+        """Return an exact host-scoped SSH secret decrypted at use time."""
         if config is None:
             config = self.load_config()
 
@@ -585,29 +560,36 @@ class ConfigManager(ConfigPersistenceMixin):
 
         username, hostname = self._split_device_host(device_host)
 
-        # 优先用完整 device_host 或 username+host 匹配，避免同一用户名多台客户端串用密码。
+        from foundation.secrets import decrypt_secret
+
         for cred in config.get('client_ssh_credentials', []):
             cred_device_host = str(cred.get('device_host') or '').strip()
             cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
             cred_username = str(cred.get('username') or '').strip()
             if cred_device_host and cred_device_host == device_host:
-                logger.debug(f"[Config] Found SSH credential for device_host={device_host}")
-                return cred.get('password')
-            if cred_username == username and cred_host == hostname:
-                logger.debug(f"[Config] Found SSH credential for username={username}, host={hostname}")
-                return cred.get('password')
-
-        # 兼容旧配置：只保存 username 的凭据仍可用于同名用户。
-        for cred in config.get('client_ssh_credentials', []):
-            if cred.get('username') == username:
-                logger.debug(f"[Config] Found SSH credential for username={username}")
-                return cred.get('password')
+                matched = True
+            else:
+                matched = cred_username == username and cred_host == hostname
+            if not matched:
+                continue
+            encrypted = str(cred.get("encrypted_password") or "")
+            if encrypted:
+                try:
+                    return decrypt_secret(encrypted)
+                except RuntimeError:
+                    logger.warning("SSH credential for %s cannot be decrypted; rotate it", device_host)
+                    return None
+            if cred.get("password"):
+                logger.warning("Ignoring plaintext SSH credential for %s; rotate it", device_host)
+            return None
 
         logger.debug(f"[Config] No SSH credential found for {device_host}")
         return None
 
     def upsert_device_host_password(self, device_host: str, password: str) -> bool:
         """Insert or update one Windows client SSH password in runtime config."""
+        from foundation.secrets import encrypt_secret
+
         device_host = str(device_host or '').strip()
         password = str(password or '')
         username, hostname = self._split_device_host(device_host)
@@ -637,7 +619,7 @@ class ConfigManager(ConfigPersistenceMixin):
                         "device_host": device_host,
                         "username": username,
                         "host": hostname,
-                        "password": password,
+                        "encrypted_password": encrypt_secret(password),
                     }
                     updated = True
                 next_credentials.append(cred)
@@ -647,7 +629,7 @@ class ConfigManager(ConfigPersistenceMixin):
                     "device_host": device_host,
                     "username": username,
                     "host": hostname,
-                    "password": password,
+                    "encrypted_password": encrypt_secret(password),
                 })
 
             runtime['client_ssh_credentials'] = next_credentials
@@ -656,17 +638,12 @@ class ConfigManager(ConfigPersistenceMixin):
                 preserve_redmine_auth=False,
             )
 
-    def _get_redmine_cipher_suite(self):
-        """获取 Redmine 凭证加密用的 Fernet 实例"""
-        from cryptography.fernet import Fernet
-        encryption_key = base64.urlsafe_b64encode(hashlib.sha256(b'gms_remote_test_redmine_2024').digest())
-        return Fernet(encryption_key)
-
     def save_redmine_credentials(self, username: str, password: str) -> bool:
-        """加密保存 Redmine 凭证到 config_runtime.json"""
+        """Encrypt Redmine credentials with the deployment-managed key."""
         try:
-            cipher_suite = self._get_redmine_cipher_suite()
-            encrypted_password = cipher_suite.encrypt(password.encode()).decode()
+            from foundation.secrets import encrypt_secret
+
+            encrypted_password = encrypt_secret(password)
 
             runtime = self._load_runtime_config() or {}
             runtime['redmine_auth'] = {
@@ -692,8 +669,9 @@ class ConfigManager(ConfigPersistenceMixin):
             if not data or 'encrypted_password' not in data:
                 return None
 
-            cipher_suite = self._get_redmine_cipher_suite()
-            decrypted_password = cipher_suite.decrypt(data['encrypted_password'].encode()).decode()
+            from foundation.secrets import decrypt_secret
+
+            decrypted_password = decrypt_secret(data['encrypted_password'])
             return {
                 'username': data['username'],
                 'password': decrypted_password
@@ -708,7 +686,7 @@ config_manager = ConfigManager()
 
 # ==================== 本地主机信息自动获取 ====================
 
-# Cache for local host info (avoid repeated system calls)
+# 缓存本地主机信息。
 _cached_ubuntu_user: str | None = None
 _cached_ubuntu_host: str | None = None
 

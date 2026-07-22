@@ -10,7 +10,6 @@ from .agent import RedmineAgent
 from .knowledge_repository import RedmineKnowledgeDB
 from .knowledge_service import RedmineKnowledgeService
 from .repository import RedmineAgentDB
-from .users import load_redmine_user_map
 
 
 class RedmineService:
@@ -29,10 +28,7 @@ class RedmineService:
         self.task = SingleFlightTask()
         self.active_run_id: str | None = None
         self._stale_runs_marked = False
-        # Knowledge base lives in a separate sqlite; reuses the issue scan
-        # store as its read-side source of already-analyzed issues. When the
-        # repository exposes no on-disk path (e.g. a test fake), fall back to a
-        # temporary database so the service is still constructible.
+        # 知识库使用独立数据库；无持久化路径时使用临时数据库。
         if knowledge_db is not None:
             self.knowledge_db = knowledge_db
         else:
@@ -179,7 +175,3 @@ class RedmineService:
             "active_run_id": self.active_run_id,
             "last_result": last_result,
         }
-
-    def list_user_mappings(self) -> list[dict[str, Any]]:
-        """Return configured Redmine users through the public service API."""
-        return list(load_redmine_user_map() or [])

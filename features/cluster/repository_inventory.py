@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from typing import Any
+
+from .state_machine import InvalidJobTransitionError
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class ClusterInventoryRepositoryMixin:
@@ -23,6 +30,280 @@ class ClusterInventoryRepositoryMixin:
                 conn.execute(
                     f"ALTER TABLE cluster_workers ADD COLUMN {name} {definition}"
                 )
+
+    def register_worker(self, data: dict[str, Any]) -> dict[str, Any]:
+        now = _utc_now()
+        with self._lock, self.connect() as conn:
+            existing = conn.execute(
+                "SELECT status,session_id,connection_generation FROM cluster_workers WHERE id=?",
+                (data["worker_id"],),
+            ).fetchone()
+            reported_session = str(data.get("session_id") or "")
+            previous_session = str(existing["session_id"] or "") if existing else ""
+            session_id = reported_session or previous_session
+            generation = int(existing["connection_generation"] or 0) if existing else 0
+            if reported_session and reported_session != previous_session:
+                generation += 1
+            recovered = bool(
+                existing
+                and (
+                    existing["status"] == "offline"
+                    or (reported_session and reported_session != previous_session)
+                )
+            )
+            conn.execute("""
+                INSERT INTO cluster_workers
+                    (id,name,hostname,address,agent_version,status,capabilities_json,
+                     max_jobs,session_id,connection_generation,disconnected_at,
+                     last_recovered_at,registered_at,last_heartbeat_at,updated_at)
+                VALUES (?,?,?,?,?,'online',?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET name=excluded.name,
+                    hostname=excluded.hostname,address=excluded.address,
+                    agent_version=excluded.agent_version,status='online',
+                    capabilities_json=excluded.capabilities_json,max_jobs=excluded.max_jobs,
+                    session_id=excluded.session_id,
+                    connection_generation=excluded.connection_generation,
+                    disconnected_at='',last_recovered_at=excluded.last_recovered_at,
+                    last_heartbeat_at=excluded.last_heartbeat_at,updated_at=excluded.updated_at
+            """, (
+                data["worker_id"], data.get("name", ""), data.get("hostname", ""),
+                data.get("address", ""), data.get("agent_version", ""),
+                json.dumps(data.get("capabilities", {}), separators=(",", ":")),
+                data.get("max_jobs", 1), session_id, generation, "",
+                now if recovered else "", now, now, now,
+            ))
+            self._append_timeline_conn(
+                conn,
+                worker_id=data["worker_id"],
+                event_type="worker.reconnected" if recovered else "worker.registered",
+                source="worker",
+                message=("Worker reconnected" if recovered else "Worker registered"),
+                payload={
+                    "session_id": session_id,
+                    "connection_generation": generation,
+                    "previous_session_id": previous_session,
+                },
+            )
+        return self.get_worker(data["worker_id"]) or {}
+
+    def get_worker(self, worker_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            return self._decode(conn.execute(
+                "SELECT * FROM cluster_workers WHERE id=?", (worker_id,)
+            ).fetchone())
+
+    def list_workers(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return [self._decode(row) or {} for row in conn.execute(
+                "SELECT * FROM cluster_workers ORDER BY id"
+            ).fetchall()]
+
+    def delete_worker(self, worker_id: str) -> bool:
+        with self._lock, self.connect() as conn:
+            active = conn.execute(
+                """SELECT 1 FROM cluster_jobs WHERE assigned_worker_id=?
+                   AND status NOT IN ('completed','failed','cancelled') LIMIT 1""",
+                (worker_id,),
+            ).fetchone()
+            if active:
+                return False
+            conn.execute("DELETE FROM cluster_commands WHERE worker_id=?", (worker_id,))
+            conn.execute("DELETE FROM cluster_worker_devices WHERE worker_id=?", (worker_id,))
+            conn.execute("DELETE FROM cluster_worker_suites WHERE worker_id=?", (worker_id,))
+            conn.execute("DELETE FROM cluster_worker_tests WHERE worker_id=?", (worker_id,))
+            conn.execute("DELETE FROM cluster_transfers WHERE worker_id=?", (worker_id,))
+            conn.execute("DELETE FROM cluster_workers WHERE id=?", (worker_id,))
+            return conn.total_changes > 0
+
+    def heartbeat(self, worker_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        now = _utc_now()
+        running_jobs = data.get("running_jobs", [])
+        external_jobs = [item for item in running_jobs if item.get("source") == "external"]
+        unknown_external_jobs = [item for item in external_jobs if not item.get("devices")]
+        external_serials = {
+            (str(device)[len(worker_id) + 1:]
+             if str(device).startswith(f"{worker_id}:") else str(device))
+            for item in external_jobs
+            for device in item.get("devices", [])
+        }
+        status = ("draining" if unknown_external_jobs else
+                  "busy" if running_jobs else "online")
+        revoked_attempt_ids: set[str] = set()
+        with self._lock, self.connect() as conn:
+            session = conn.execute(
+                "SELECT session_id,connection_generation FROM cluster_workers WHERE id=?",
+                (worker_id,),
+            ).fetchone()
+            if session is not None and session["session_id"] and (
+                str(session["session_id"]) != str(data.get("session_id") or "")
+                or int(session["connection_generation"] or 0)
+                != int(data.get("connection_generation") or 0)
+            ):
+                raise ValueError("stale worker session")
+            cursor = conn.execute("""
+                UPDATE cluster_workers SET status=?,agent_version=?,cpu_percent=?,
+                    memory_percent=?,memory_total_gb=?,memory_available_gb=?,load_1m=?,
+                    disk_free_gb=?,running_jobs=?,external_jobs=?,unknown_external_jobs=?,
+                    last_heartbeat_at=?,updated_at=? WHERE id=?
+            """, (
+                status,
+                data.get("agent_version", ""), data.get("cpu_percent", 0),
+                data.get("memory_percent", 0), data.get("memory_total_gb", 0),
+                data.get("memory_available_gb", 0), data.get("load_1m", 0),
+                data.get("disk_free_gb", 0), len(running_jobs), len(external_jobs),
+                len(unknown_external_jobs), now, now, worker_id,
+            ))
+            if cursor.rowcount == 0:
+                return None
+            self._expire_device_reservations(conn, now)
+            self._replace_devices(
+                conn, worker_id, data.get("devices", []), now, external_serials
+            )
+            self._replace_worker_tests(conn, worker_id, running_jobs, now)
+            if data.get("suites") is not None:
+                self._replace_suites(conn, worker_id, data["suites"], now)
+            for running in running_jobs:
+                if running.get("source") == "external":
+                    continue
+                attempt_id = running.get("attempt_id", "")
+                worker_job_id = running.get("worker_job_id", "")
+                job = conn.execute(
+                    """SELECT a.job_id,j.owner_id FROM cluster_job_attempts a
+                       JOIN cluster_jobs j ON j.id=a.job_id
+                       WHERE a.id=? AND a.worker_id=?""",
+                    (attempt_id, worker_id),
+                ).fetchone()
+                if not job:
+                    continue
+                lease_rows = conn.execute(
+                    """SELECT device_id FROM device_leases
+                       WHERE attempt_id=? AND status IN ('active','orphaned')""",
+                    (attempt_id,),
+                ).fetchall()
+                if not self.renew_job_device_claim(
+                    job["job_id"],
+                    job["owner_id"],
+                    [item["device_id"] for item in lease_rows],
+                ):
+                    revoked_attempt_ids.add(attempt_id)
+                    try:
+                        self._transition_job_conn(
+                            conn,
+                            job["job_id"],
+                            "failed",
+                            source="controller-fencing",
+                            message="Rejected running Attempt after its device claim expired",
+                            error="device fencing claim expired or was superseded",
+                            worker_id=worker_id,
+                            payload={"attempt_id": attempt_id},
+                        )
+                    except InvalidJobTransitionError:
+                        pass
+                    conn.execute(
+                        """UPDATE cluster_job_attempts
+                           SET status='failed',finished_at=?,error=? WHERE id=?""",
+                        (now, "device fencing claim expired or was superseded", attempt_id),
+                    )
+                    conn.execute(
+                        """UPDATE device_leases SET status='revoked',released_at=?
+                           WHERE attempt_id=? AND status IN ('active','orphaned')""",
+                        (now, attempt_id),
+                    )
+                    self.claims.release(f"job:{job['job_id']}", status="failed")
+                    continue
+                conn.execute("""UPDATE cluster_job_attempts SET status='running',
+                    worker_job_id=?,heartbeat_at=? WHERE id=? AND worker_id=?""",
+                    (worker_job_id, now, attempt_id, worker_id))
+                try:
+                    self._transition_job_conn(
+                        conn,
+                        job["job_id"],
+                        "running",
+                        source="worker-heartbeat",
+                        message="Worker reported the persisted Attempt running",
+                        worker_id=worker_id,
+                        payload={
+                            "worker_job_id": worker_job_id,
+                            "session_id": data.get("session_id", ""),
+                            "connection_generation": data.get(
+                                "connection_generation", 0
+                            ),
+                        },
+                    )
+                except InvalidJobTransitionError:
+                    continue
+                conn.execute("""UPDATE device_leases SET status='active',
+                    heartbeat_at=?,expires_at=datetime('now',?),released_at=''
+                    WHERE attempt_id=? AND worker_id=? AND status='orphaned'""",
+                    (now, f"+{self.claim_lease_ttl_seconds} seconds", attempt_id, worker_id))
+                conn.execute("""UPDATE cluster_worker_devices SET state='allocated',updated_at=?
+                    WHERE id IN (SELECT device_id FROM device_leases
+                        WHERE attempt_id=? AND status='active')""", (now, attempt_id))
+                conn.execute("""UPDATE device_leases SET heartbeat_at=?,
+                    expires_at=datetime('now',?)
+                    WHERE attempt_id=? AND status='active'""", (
+                        now, f"+{self.claim_lease_ttl_seconds} seconds", attempt_id,
+                    ))
+        worker = self.get_worker(worker_id)
+        if worker is not None:
+            worker["revoked_attempt_ids"] = sorted(revoked_attempt_ids)
+        return worker
+
+    def mark_worker_offline(self, worker_id: str) -> None:
+        now = _utc_now()
+        with self._lock, self.connect() as conn:
+            worker = conn.execute(
+                "SELECT session_id,connection_generation FROM cluster_workers WHERE id=?",
+                (worker_id,),
+            ).fetchone()
+            conn.execute(
+                """UPDATE cluster_workers SET status='offline',disconnected_at=?,
+                   updated_at=? WHERE id=?""",
+                (now, now, worker_id),
+            )
+            conn.execute(
+                "UPDATE cluster_worker_devices SET state='unknown',updated_at=? WHERE worker_id=?",
+                (now, worker_id),
+            )
+            jobs = conn.execute("""SELECT id FROM cluster_jobs WHERE assigned_worker_id=?
+                AND status IN ('assigned','dispatching','running','stopping')""",
+                (worker_id,)).fetchall()
+            for job in jobs:
+                try:
+                    self._transition_job_conn(
+                        conn,
+                        job["id"],
+                        "worker_lost",
+                        source="controller-watchdog",
+                        message="Worker heartbeat timed out; waiting for the same Attempt to reconnect",
+                        error="worker heartbeat lost",
+                        worker_id=worker_id,
+                        payload={
+                            "session_id": worker["session_id"] if worker else "",
+                            "connection_generation": (
+                                worker["connection_generation"] if worker else 0
+                            ),
+                        },
+                    )
+                except InvalidJobTransitionError:
+                    continue
+                conn.execute(
+                    "UPDATE device_leases SET status='orphaned' WHERE job_id=? AND status='active'",
+                    (job["id"],),
+                )
+            self._append_timeline_conn(
+                conn,
+                worker_id=worker_id,
+                event_type="worker.disconnected",
+                source="controller-watchdog",
+                level="warning",
+                message="Worker heartbeat timed out",
+                payload={
+                    "session_id": worker["session_id"] if worker else "",
+                    "connection_generation": worker["connection_generation"] if worker else 0,
+                    "affected_jobs": [item["id"] for item in jobs],
+                },
+            )
 
     def _replace_devices(
         self,
@@ -83,9 +364,7 @@ class ClusterInventoryRepositoryMixin:
             )
         if seen:
             placeholders = ",".join("?" for _ in seen)
-            # Ghost USB/IP devices (serial "localhost:XXXXX") accumulate because
-            # each USB/IP attach uses a different TCP port.  Once the real device
-            # disappears from adb they must be purged, not merely marked offline.
+            # 删除 ADB 中已消失的 USB/IP 临时端口记录。
             conn.execute(
                 f"DELETE FROM cluster_worker_devices "
                 f"WHERE worker_id=? AND id NOT IN ({placeholders}) "
@@ -188,6 +467,19 @@ class ClusterInventoryRepositoryMixin:
                     now,
                 ),
             )
+
+    def replace_worker_suites(self, worker_id: str, suites: list[dict]) -> None:
+        """Replace one Worker's suite inventory from a refresh command ACK."""
+        if not worker_id:
+            raise ValueError("worker_id is required")
+        now = _utc_now()
+        with self._lock, self.connect() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM cluster_workers WHERE id=?", (worker_id,)
+            ).fetchone()
+            if exists is None:
+                raise ValueError("worker not found")
+            self._replace_suites(conn, worker_id, suites, now)
 
     def list_devices(self, worker_id: str = "") -> list[dict[str, Any]]:
         sql = "SELECT * FROM cluster_worker_devices"

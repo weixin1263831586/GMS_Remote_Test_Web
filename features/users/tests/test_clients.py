@@ -23,13 +23,13 @@ def _request(peer, headers=None):
 
 
 class ClientIpResolutionTests(unittest.TestCase):
-    def test_direct_client_cannot_spoof_forwarded_or_fallback_ip(self):
+    def test_direct_client_cannot_spoof_forwarded_headers(self):
         request = _request(
             '192.0.2.10',
             {'X-Forwarded-For': '198.51.100.20', 'X-Real-IP': '198.51.100.21'},
         )
         with patch.object(clients.runtime, 'config_manager', _ConfigManager()):
-            resolved = clients.get_client_ip(request, '198.51.100.22')
+            resolved = clients.get_client_ip(request)
 
         self.assertEqual(resolved, '192.0.2.10')
 

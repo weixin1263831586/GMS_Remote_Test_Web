@@ -394,7 +394,7 @@ def prepare_device_export(payload: dict[str, Any]) -> Path:
     if len(devices) != 1:
         raise ValueError("device export requires exactly one device")
     serial = str(devices[0]).split(":", 1)[-1]
-    # Re-probe inside the Worker immediately before reading the device file.
+    # 读取设备文件前再次确认设备状态。
     from .inventory import probe_devices
 
     if serial not in {item["serial"] for item in probe_devices()}:

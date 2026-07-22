@@ -5,8 +5,20 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet
+
 
 class GerritConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.secret_env = patch.dict(
+            "os.environ",
+            {"GMS_SECRET_KEY": Fernet.generate_key().decode("ascii")},
+        )
+        self.secret_env.start()
+
+    def tearDown(self):
+        self.secret_env.stop()
+
     def test_profile_update_preserves_unrelated_profiles(self):
         from features.gerrit.config import (
             add_gerrit_personal_profile,
@@ -81,8 +93,7 @@ class GerritConfigTests(unittest.TestCase):
         self.assertEqual(personal["department_id"], "platform")
 
     def test_redmine_user_sync_overwrites_stale_personal_name(self):
-        # 已存在的 personal profile 残留旧 name 时，同步必须用 redmine 权威 name 覆盖，
-        # 否则姓名与邮箱会不同步（残留旧名永远短路 `or`）。
+        # Redmine 用户映射是姓名的权威来源。
         from features.gerrit.config import (
             normalize_gerrit_dashboard_config,
             sync_gerrit_members_from_redmine_users,
@@ -144,8 +155,7 @@ class GerritConfigTests(unittest.TestCase):
             self.assertEqual(runtime["sidebar_order"], ["test"])
             self.assertEqual(runtime["gerrit_dashboard"]["base_url"], "https://10.10.10.29")
 
-    def test_gerrit_request_config_uses_shared_runtime_config(self):
-        """Gerrit 看板配置统一写到 configs/config_runtime.json，不生成 per-user 配置目录。"""
+    def test_gerrit_request_config_is_isolated_per_platform_owner(self):
         import features.gerrit.api as gerrit_api
         from features.auth import CurrentUser
         from features.gerrit.settings import GerritConfig
@@ -160,18 +170,24 @@ class GerritConfigTests(unittest.TestCase):
             root = Path(tmp)
             (root / "configs").mkdir()
             (root / "foundation").mkdir()
-            with patch.object(gerrit_api, "config_manager", GerritConfig(root)):
+            fake_settings = SimpleNamespace(data_root=root / "data")
+            with patch("features.gerrit.settings.settings", fake_settings), patch.object(
+                gerrit_api, "config_manager", GerritConfig(root)
+            ):
                 alice_cfg = gerrit_api._config_for_request(request_for("alice-isolated"))
                 bob_cfg = gerrit_api._config_for_request(request_for("bob-isolated"))
-                self.assertEqual(
+                self.assertNotEqual(
                     str(alice_cfg.runtime_config_path),
                     str(bob_cfg.runtime_config_path),
                 )
                 self.assertEqual(
                     Path(alice_cfg.runtime_config_path),
-                    root / "configs" / "config_runtime.json",
+                    root / "data/gerrit/by_user/alice-isolated/config_runtime.json",
                 )
-                self.assertFalse((root / "configs" / "redmine_by_user").exists())
+                self.assertEqual(
+                    Path(bob_cfg.runtime_config_path),
+                    root / "data/gerrit/by_user/bob-isolated/config_runtime.json",
+                )
 
     def test_gerrit_department_config_is_derived_from_redmine_user_map_when_runtime_config_empty(self):
         import features.gerrit.api as gerrit_api
@@ -191,7 +207,7 @@ class GerritConfigTests(unittest.TestCase):
         old_manager = gerrit_api.config_manager
         try:
             gerrit_api.config_manager = FakeManager()
-            # _redmine_users_for_request 现读 per-user user_map（load_redmine_user_map_for_owner）。
+            # 使用当前用户的 Redmine 用户映射。
             with patch.object(gerrit_api, "load_redmine_user_map_for_owner", return_value=[
                 {
                     "name": "Alice",

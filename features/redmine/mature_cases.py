@@ -49,7 +49,7 @@ class MatureCaseBuilder:
         signatures = [f.get("error_signature") for f in facts if f.get("error_signature")]
         canonical_signature = self._majority(signatures) if signatures else ""
 
-        # Order facts: closed first (richest resolution), then confirmed, then others.
+        # 排序：已关闭、已确认、其他。
         ordered = sorted(
             facts,
             key=lambda f: (
@@ -65,7 +65,7 @@ class MatureCaseBuilder:
         problem_summary = first_meaningful([f.get("problem_summary") for f in ordered]) or anchor.get("problem_summary") or ""
 
         # Fallback to the signature knowledge base when the issues had no
-        # explicit root_cause/verification (common for freshly-imported facts).
+        # 新导入事实缺少明确根因或验证时补充结构化信息。
         sig_knowledge = _SIG_KNOWLEDGE.get(canonical_signature, {})
         if not is_meaningful(root_cause):
             root_cause = sig_knowledge.get("root_cause", "")
@@ -124,9 +124,7 @@ class MatureCaseBuilder:
         stored = self.db.get_mature_case(case_id) or {}
         return {"case_id": case_id, **stored}
 
-    # ------------------------------------------------------------------
     # Helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _majority(values: list[Any]) -> str:
@@ -157,7 +155,7 @@ class MatureCaseBuilder:
                     merged.append(value)
         return merged
 
-    # Journal/AI metadata lines, filtered out before structuring solution.steps (Redmine.txt §4).
+    # 构造解决步骤前过滤日志和 AI 元数据行。
     _META_PREFIXES = (
         "✓ 已解决", "✓已解决", "已解决:", "已解决：",
         "方案说明:", "方案说明：", "方案说明 ",

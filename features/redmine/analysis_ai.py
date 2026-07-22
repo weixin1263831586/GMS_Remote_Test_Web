@@ -216,9 +216,7 @@ class AiAnalysisMixin:
         # Delegate response parsing to the analyzer's robust parser
         return analyzer._parse_response_raw(resp.json(), api_format)
 
-    # ------------------------------------------------------------------
     # AI Prompt — structured seven-field output
-    # ------------------------------------------------------------------
 
     def _build_ai_prompt(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> str:
         journals = issue_payload.get("journals_json") or []
@@ -275,9 +273,7 @@ Redmine: #{issue_payload.get('issue_id')} {issue_payload.get('subject')}
 7. 代码块格式：diff内容用```diff（必须有--- a/file, +++ b/file, @@...@@, -/+行），shell命令用```shell（$前缀），XML配置用```xml，纯报错堆栈用```
 """
 
-    # ------------------------------------------------------------------
     # Code block formatting helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _ensure_code_block(text: str, lang: str = "") -> str:

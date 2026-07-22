@@ -17,6 +17,7 @@ import uuid
 from typing import Any
 
 from foundation.common_utils import CommonUtils
+from foundation.networking import is_local_host
 from foundation.config import config_manager, get_ubuntu_user
 from foundation.processes import command_reports_running, start_detached_process
 
@@ -87,18 +88,7 @@ class VNCManager:
         vnc_password: str = None,
         force_restart: bool = False
     ) -> dict[str, Any]:
-        """
-        启动VNC服务
-
-        Args:
-            host: 主机地址（如果不提供则使用配置）
-            password: SSH密码
-            vnc_password: VNC密码
-            force_restart: 强制重启VNC进程（杀死旧的x11vnc/websockify）
-
-        Returns:
-            结果字典
-        """
+        """在本机或指定主机启动 VNC 服务。"""
         try:
             config = self.config_manager.load_config()
 
@@ -111,7 +101,7 @@ class VNCManager:
 
             # 提取IP部分并检查是否本地
             host_ip = CommonUtils.extract_ip_from_host(host)
-            is_local = CommonUtils.is_local_host(host_ip)
+            is_local = is_local_host(host_ip)
 
             if is_local:
                 return self._start_local_vnc(force_restart=force_restart)
@@ -163,7 +153,7 @@ class VNCManager:
 
             local_ip = CommonUtils.get_local_ip() or 'localhost'
 
-            # 强制重启模式：杀死所有旧进程，清理环境
+            # 强制重启时清理现有 VNC 进程。
             if force_restart:
                 logger.info("[VNC] Force restart: killing old x11vnc and websockify processes...")
                 self._kill_local_processes(LOCAL_X11VNC_PATTERN, force=True)
@@ -206,6 +196,7 @@ class VNCManager:
                 '-forever',
                 '-shared',
                 '-rfbport', str(VNC_PORT),
+                '-localhost',
                 '-nopw',
                 '-bg'
             ]
@@ -269,7 +260,7 @@ class VNCManager:
         command.extend(['-f', pattern])
         subprocess.run(command, capture_output=True)
 
-    # Cached at class level: websockify availability doesn't change at runtime
+    # websockify 可用性在进程内缓存。
     _websockify_available: bool | None = None
     _websockify_standalone: str | None = None
 
@@ -300,7 +291,11 @@ class VNCManager:
         base = [cls._websockify_standalone or 'python3']
         if not cls._websockify_standalone:
             base.extend(['-m', 'websockify'])
-        base.extend([f'--web={novnc_web_dir}', str(NOVNC_WEB_PORT), f'localhost:{VNC_PORT}'])
+        base.extend([
+            f'--web={novnc_web_dir}',
+            f'127.0.0.1:{NOVNC_WEB_PORT}',
+            f'localhost:{VNC_PORT}',
+        ])
         return base
 
     def _start_remote_vnc(
@@ -374,8 +369,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     'warning': '需要在主机桌面环境中运行'
                 }
 
-            # x11vnc/websockify 都会写日志；目录不存在时后台启动命令会直接
-            # 退出，但旧实现忽略了这个错误并继续返回连接 URL。
+            # 预先创建日志目录，避免后台服务因目录缺失启动失败。
             self.ssh_manager.execute_command(ssh, "mkdir -p ~/logs ~/.vnc", timeout=5)
 
             # 检查并启动x11vnc
@@ -520,7 +514,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             if not host:
                 host = config.get('ubuntu_host', '')
 
-            is_local = CommonUtils.is_local_host(host)
+            is_local = is_local_host(host)
 
             if is_local:
                 # 停止本地VNC

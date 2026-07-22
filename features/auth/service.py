@@ -11,9 +11,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException, Request
-
 from foundation.config import settings
+
+from .rate_limit import AuthRateLimitMixin, initialize_auth_attempt_schema
 
 
 AUTH_COOKIE_NAME = "gms_session"
@@ -21,9 +21,30 @@ PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
 SESSION_ABSOLUTE_HOURS = int(os.getenv("GMS_SESSION_ABSOLUTE_HOURS", "8"))
 SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "2"))
-# How long a "sensitive operation" elevation (re-auth as admin) stays valid on a
-# session before the user must re-enter admin credentials. Short by design.
-ELEVATION_MINUTES = int(os.getenv("GMS_ELEVATION_MINUTES", "15"))
+# 二次认证状态绑定当前会话，并随会话失效或重新登录清除。
+ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
+    "user": frozenset({
+        "tests.execute",
+        "resources.read_own",
+        "resources.write_own",
+        "devices.use_leased",
+    }),
+    "device_operator": frozenset({
+        "tests.execute",
+        "resources.read_own",
+        "resources.write_own",
+        "devices.use_leased",
+        "devices.inventory",
+        "devices.lease",
+    }),
+    "admin": frozenset({"*"}),
+    "worker_service": frozenset({
+        "worker.register",
+        "worker.heartbeat",
+        "worker.commands",
+        "worker.artifacts",
+    }),
+}
 
 
 def _utcnow() -> datetime:
@@ -48,16 +69,23 @@ class CurrentUser:
     role: str
     display_name: str = ""
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "username": self.username,
             "role": self.role,
             "display_name": self.display_name,
+            "permissions": sorted(ROLE_PERMISSIONS.get(self.role, frozenset())),
         }
 
+    def has_permission(self, permission: str) -> bool:
+        granted = ROLE_PERMISSIONS.get(self.role, frozenset())
+        return "*" in granted or permission in granted
 
-class AuthService:
+
+class AuthService(AuthRateLimitMixin):
+    _REQUIRED_TABLES = frozenset({"platform_users", "platform_sessions", "platform_auth_attempts"})
+
     def __init__(self, db_path: Path | None = None):
         self.db_path = db_path or (settings.data_root / "platform_auth.sqlite3")
         self._lock = threading.RLock()
@@ -82,7 +110,7 @@ class AuthService:
                         id TEXT PRIMARY KEY,
                         username TEXT NOT NULL UNIQUE,
                         password_hash TEXT NOT NULL,
-                        role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+                        role TEXT NOT NULL CHECK(role IN ('admin', 'device_operator', 'user')),
                         display_name TEXT NOT NULL DEFAULT '',
                         disabled INTEGER NOT NULL DEFAULT 0,
                         created_at TEXT NOT NULL,
@@ -90,6 +118,45 @@ class AuthService:
                     )
                     """
                 )
+                user_table_sql = str(
+                    (
+                        conn.execute(
+                            "SELECT sql FROM sqlite_master WHERE type='table' AND name='platform_users'"
+                        ).fetchone()
+                        or ("",)
+                    )[0]
+                    or ""
+                )
+                if "device_operator" not in user_table_sql:
+                    conn.execute("PRAGMA legacy_alter_table=ON")
+                    conn.execute("ALTER TABLE platform_users RENAME TO platform_users_legacy")
+                    conn.execute(
+                        """
+                        CREATE TABLE platform_users (
+                            id TEXT PRIMARY KEY,
+                            username TEXT NOT NULL UNIQUE,
+                            password_hash TEXT NOT NULL,
+                            role TEXT NOT NULL CHECK(role IN ('admin', 'device_operator', 'user')),
+                            display_name TEXT NOT NULL DEFAULT '',
+                            disabled INTEGER NOT NULL DEFAULT 0,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )
+                        """
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO platform_users (
+                            id, username, password_hash, role, display_name,
+                            disabled, created_at, updated_at
+                        )
+                        SELECT id, username, password_hash, role, display_name,
+                               disabled, created_at, updated_at
+                        FROM platform_users_legacy
+                        """
+                    )
+                    conn.execute("DROP TABLE platform_users_legacy")
+                    conn.execute("PRAGMA legacy_alter_table=OFF")
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS platform_sessions (
@@ -107,6 +174,7 @@ class AuthService:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_platform_sessions_user ON platform_sessions(user_id)"
                 )
+                initialize_auth_attempt_schema(conn)
                 # Migration: add elevated_until to track temporary admin elevation
                 # for sensitive operations (remove user / disconnect device).
                 existing_cols = {
@@ -114,6 +182,8 @@ class AuthService:
                 }
                 if "elevated_until" not in existing_cols:
                     conn.execute("ALTER TABLE platform_sessions ADD COLUMN elevated_until TEXT")
+                if "elevated_by_user_id" not in existing_cols:
+                    conn.execute("ALTER TABLE platform_sessions ADD COLUMN elevated_by_user_id TEXT")
                 conn.commit()
             self._initialized = True
 
@@ -123,9 +193,20 @@ class AuthService:
 
     def _connect(self) -> sqlite3.Connection:
         self._ensure_initialized()
+        # Recreate the schema if data/ was removed after startup.
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=30)
         conn.execute('PRAGMA busy_timeout=30000')
         conn.row_factory = sqlite3.Row
+        existing_tables = {str(row[0]) for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()}
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self.initialize()
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            conn.execute('PRAGMA busy_timeout=30000')
+            conn.row_factory = sqlite3.Row
         return conn
 
     def users_exist(self) -> bool:
@@ -195,8 +276,8 @@ class AuthService:
     ) -> CurrentUser:
         username = self._validate_username(username)
         self._validate_password(password)
-        if role not in {"admin", "user"}:
-            raise ValueError("角色必须是 admin 或 user")
+        if role not in {"admin", "device_operator", "user"}:
+            raise ValueError("角色必须是 admin、device_operator 或 user")
         now = _to_iso(_utcnow())
         user_id = secrets.token_urlsafe(16)
         with self._lock, self._connect() as conn:
@@ -263,6 +344,45 @@ class AuthService:
             return None
         return self._row_to_user(row)
 
+    def get_enabled_user(self, username: str) -> CurrentUser | None:
+        """Look up an enabled platform account without checking its password."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM platform_users WHERE username = ? AND disabled = 0",
+                ((username or "").strip(),),
+            ).fetchone()
+        return self._row_to_user(row)
+
+    def user_exists(self, username: str) -> bool:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT 1 FROM platform_users WHERE username = ?",
+                ((username or "").strip(),),
+            ).fetchone() is not None
+
+    def create_client_user(self, username: str) -> CurrentUser:
+        """Create the session identity for an SSH-authenticated client.
+
+        The client password remains the host-scoped SSH credential. A random
+        internal password is stored only to satisfy the session table's user
+        model; it is never accepted as a browser credential.
+        """
+        existing = self.get_enabled_user(username)
+        if existing:
+            return existing
+        try:
+            return self.create_user(
+                username,
+                secrets.token_urlsafe(32),
+                role="user",
+                display_name=username,
+            )
+        except ValueError:
+            existing = self.get_enabled_user(username)
+            if existing:
+                return existing
+            raise
+
     def create_session(self, user_id: str) -> str:
         token = secrets.token_urlsafe(32)
         token_hash = self.hash_token(token)
@@ -312,28 +432,145 @@ class AuthService:
             )
             conn.commit()
 
+    def revoke_user_sessions(self, user_id: str) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE platform_sessions
+                SET revoked_at = ?
+                WHERE user_id = ? AND revoked_at IS NULL
+                """,
+                (_to_iso(_utcnow()), user_id),
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def update_user(
+        self,
+        user_id: str,
+        *,
+        role: str | None = None,
+        display_name: str | None = None,
+        disabled: bool | None = None,
+    ) -> CurrentUser:
+        if role is not None and role not in {"admin", "device_operator", "user"}:
+            raise ValueError("角色必须是 admin、device_operator 或 user")
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM platform_users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("用户不存在")
+            removes_admin = row["role"] == "admin" and (
+                (role is not None and role != "admin") or disabled is True
+            )
+            if removes_admin:
+                active_admins = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM platform_users
+                    WHERE role = 'admin' AND disabled = 0
+                    """
+                ).fetchone()[0]
+                if int(active_admins) <= 1:
+                    raise ValueError("不能停用或降级最后一个管理员")
+            next_role = role if role is not None else str(row["role"])
+            next_display_name = (
+                str(display_name).strip()
+                if display_name is not None
+                else str(row["display_name"] or "")
+            )
+            next_disabled = int(bool(disabled)) if disabled is not None else int(row["disabled"])
+            conn.execute(
+                """
+                UPDATE platform_users
+                SET role = ?, display_name = ?, disabled = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    next_role,
+                    next_display_name,
+                    next_disabled,
+                    _to_iso(_utcnow()),
+                    user_id,
+                ),
+            )
+            updated = conn.execute(
+                "SELECT * FROM platform_users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            conn.commit()
+        if role is not None or disabled is not None:
+            self.revoke_user_sessions(user_id)
+        user = self._row_to_user(updated)
+        if user is None:
+            raise ValueError("用户不存在")
+        return user
+
+    def set_user_password(self, user_id: str, password: str) -> None:
+        self._validate_password(password)
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE platform_users
+                SET password_hash = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (self._hash_password(password), _to_iso(_utcnow()), user_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("用户不存在")
+            conn.commit()
+        self.revoke_user_sessions(user_id)
+
     def elevate_session(self, token: str, admin_user: CurrentUser, *, minutes: int | None = None) -> bool:
-        """Stamp a temporary admin elevation onto the current session.
+        """Stamp an admin verification onto the current session.
 
         Called after the caller has re-authenticated with admin credentials
-        (verified via :meth:`authenticate`). Marks the session as elevated for
-        :data:`ELEVATION_MINUTES` by default. Pass ``minutes`` to override the
-        window (e.g. admin login grants elevation for the whole session so the
-        user is not re-prompted for sensitive operations). Returns True if the
-        session was found/updated.
+        (verified via :meth:`authenticate`). The caller may be an ordinary
+        client: the client keeps its own identity while this session records
+        which admin verified it. By default the grant stays valid for the
+        remainder of the session's lifetime and clears when the session
+        expires or is revoked.
         """
         if admin_user.role != "admin":
             return False
         token_hash = self.hash_token(token)
-        elevated_until = _utcnow() + timedelta(minutes=minutes if minutes is not None else ELEVATION_MINUTES)
+        now = _utcnow()
         with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT expires_at FROM platform_sessions
+                WHERE token_hash = ?
+                  AND revoked_at IS NULL
+                  AND expires_at > ?
+                  AND idle_expires_at > ?
+                """,
+                (
+                    token_hash,
+                    _to_iso(now),
+                    _to_iso(now),
+                ),
+            ).fetchone()
+            if not row:
+                return False
+            if minutes is not None:
+                elevated_until = now + timedelta(minutes=minutes)
+            else:
+                # Elevation lasts for the rest of the session's absolute lifetime.
+                elevated_until = _from_iso(str(row["expires_at"]))
             cur = conn.execute(
                 """
                 UPDATE platform_sessions
-                SET elevated_until = ?
-                WHERE token_hash = ? AND revoked_at IS NULL
+                SET elevated_until = ?, elevated_by_user_id = ?
+                WHERE token_hash = ?
+                  AND revoked_at IS NULL
                 """,
-                (_to_iso(elevated_until), token_hash),
+                (
+                    _to_iso(elevated_until),
+                    admin_user.id,
+                    token_hash,
+                ),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -364,6 +601,23 @@ class AuthService:
         except Exception:
             return None
         return row["elevated_until"]
+
+    def clear_elevation(self, token: str | None) -> bool:
+        """Clear admin verification from one live browser session."""
+        if not token:
+            return False
+        token_hash = self.hash_token(token)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE platform_sessions
+                SET elevated_until = NULL, elevated_by_user_id = NULL
+                WHERE token_hash = ? AND revoked_at IS NULL
+                """,
+                (token_hash,),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
 
     def get_user_for_token(self, token: str | None, *, refresh: bool = True) -> CurrentUser | None:
         if not token:
@@ -406,73 +660,22 @@ class AuthService:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, username, role, display_name, disabled, created_at, updated_at
-                FROM platform_users
+                SELECT u.id, u.username, u.role, u.display_name, u.disabled,
+                       u.created_at, u.updated_at,
+                       COUNT(CASE WHEN s.revoked_at IS NULL
+                                   AND s.expires_at > ?
+                                   AND s.idle_expires_at > ?
+                                  THEN 1 END) AS active_session_count,
+                       MAX(CASE WHEN s.revoked_at IS NULL
+                                THEN s.last_seen_at END) AS last_seen_at
+                FROM platform_users u
+                LEFT JOIN platform_sessions s ON s.user_id = u.id
+                GROUP BY u.id
                 ORDER BY username
-                """
+                """,
+                (_to_iso(_utcnow()), _to_iso(_utcnow())),
             ).fetchall()
         return [dict(row) for row in rows]
 
 
 auth_service = AuthService()
-
-
-def get_authenticated_user(request: Request) -> CurrentUser | None:
-    user = getattr(request.state, "current_user", None)
-    if isinstance(user, CurrentUser):
-        return user
-    token = request.cookies.get(AUTH_COOKIE_NAME)
-    user = auth_service.get_user_for_token(token)
-    if user:
-        request.state.current_user = user
-    return user
-
-
-def require_authenticated_user(request: Request) -> CurrentUser:
-    user = get_authenticated_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return user
-
-
-def require_role(*roles: str):
-    allowed = set(roles)
-
-    def dependency(request: Request) -> CurrentUser:
-        user = require_authenticated_user(request)
-        if user.role not in allowed:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        return user
-
-    return dependency
-
-
-def is_elevated(request: Request) -> bool:
-    """Whether the current session has a live admin elevation for this request.
-
-    Cached on request.state so multiple dependency checks within one request
-    don't each hit the DB.
-    """
-    if getattr(request.state, "is_elevated", None) is not None:
-        return bool(request.state.is_elevated)
-    token = request.cookies.get(AUTH_COOKIE_NAME)
-    elevated_until = auth_service.get_elevated_until(token)
-    request.state.is_elevated = bool(elevated_until)
-    return bool(elevated_until)
-
-
-def require_elevated_admin(request: Request) -> CurrentUser:
-    """Dependency for sensitive operations (remove user / disconnect device).
-
-    Requires an authenticated admin session that has been recently elevated
-    (re-confirmed admin credentials within :data:`ELEVATION_MINUTES`). A
-    non-elevated or non-admin caller gets 403 with ``elevation_required`` so the
-    frontend can prompt for admin credentials and replay the request.
-    """
-    user = require_authenticated_user(request)
-    if user.role != "admin" or not is_elevated(request):
-        raise HTTPException(
-            status_code=403,
-            detail={"message": "Elevation required", "elevation_required": True},
-        )
-    return user

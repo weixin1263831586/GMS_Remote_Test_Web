@@ -1,16 +1,7 @@
-"""Background worker that drives the automation pipeline.
+"""后台 worker 驱动自动化流水线。
 
-Mirrors ``features/redmine/scheduler.py``: an asyncio task that periodically
-runs the automation state machine and polls in-flight build jobs, so runs
-advance without a human clicking "Worker Tick". Everything heavy
-(``worker_tick`` can flash devices for up to 3600s) runs in a worker thread
-via :func:`asyncio.to_thread` so the event loop is never blocked.
-
-``automation_service`` / ``build_service`` are module-level singletons set
-during route inclusion, which happens before the lifespan (and thus this
-loop) starts. We re-resolve them lazily on every tick rather than capturing a
-reference at startup, matching how :class:`HttpAutomationExecutor` already
-resolves ``build_service``.
+定期执行状态机推进和构建任务轮询，重操作通过 asyncio.to_thread
+在独立线程运行避免阻塞事件循环。
 """
 
 from __future__ import annotations
@@ -28,6 +19,7 @@ from foundation.config import config_manager
 logger = logging.getLogger(__name__)
 
 _task: asyncio.Task | None = None
+_advancement_task: asyncio.Task | None = None
 _stale_swept: bool = False
 _last_build_poll_at: float = 0.0
 _last_tick_at: float = 0.0
@@ -35,7 +27,7 @@ _last_tick_result: dict[str, Any] = {}
 
 
 def _load_worker_config() -> dict[str, Any]:
-    """Load automation_worker settings from config.json with env overrides."""
+    """从 config.json 加载 automation_worker 配置，支持环境变量覆盖。"""
     cfg = config_manager.load_config().get("automation_worker", {})
     return {
         "enabled": os.getenv("ATS_WORKER_ENABLED", str(cfg.get("enabled", True))).lower()
@@ -63,11 +55,7 @@ def _load_worker_config() -> dict[str, Any]:
 
 
 def _resolve_services():
-    """Lazily resolve the module-level service singletons.
-
-    Returns ``(automation_service, build_service)`` or ``(None, None)`` if the
-    API modules have not been configured yet.
-    """
+    """惰性解析模块级 service 单例。"""
     try:
         from features.automation.api import automation_service
         from features.build import get_build_service
@@ -105,13 +93,7 @@ def stale_sweep_once(
     automation_service: Any | None = None,
     build_service: Any | None = None,
 ) -> dict[str, Any]:
-    """Mark pre-existing in-flight jobs/runs as failed/cancelled.
-
-    Runs once per process (guarded by ``_stale_swept`` from the loop) so a
-    restart after a crash does not leave orphaned ``running`` build jobs and
-    half-advanced automation runs that the new worker would otherwise never
-    reconcile.
-    """
+    """将重启前遗留的 in-flight 构建任务和自动化 run 标记为失败/取消。"""
     auto_svc = automation_service
     build_svc = build_service
     if auto_svc is None or build_svc is None:
@@ -161,12 +143,7 @@ def stale_sweep_once(
 
 
 def poll_running_builds_sync(build_service: Any | None = None) -> int:
-    """Probe every running build job's remote ``.done`` file and update status.
-
-    This is the missing piece today: nothing polled the 4 stuck ``running``
-    jobs, so finished remote builds never transitioned. Returns the number of
-    jobs polled.
-    """
+    """轮询 running 构建任务的远程 .done 文件并更新状态。"""
     build_svc = build_service or _resolve_services()[1]
     if build_svc is None:
         return 0
@@ -197,8 +174,7 @@ def sweep_waiting_device_timeouts(
     timeout = cfg["waiting_device_timeout_seconds"]
     cancelled = 0
     for run in auto_svc.list_runs(status="waiting_device", limit=100):
-        # Poll retries touch updated_at for fair scheduling, so timeout from
-        # the first waiting_device event (the status-entry transition).
+        # 从 waiting_device 状态进入事件开始计时，不受轮询刷新影响
         entered_at = ""
         try:
             entered_at = next(
@@ -226,7 +202,7 @@ def sweep_waiting_device_timeouts(
 def _stage_entry_age_seconds(
     automation_service: Any, run: dict[str, Any], stage: str
 ) -> float | None:
-    """Return time in the current stage without being reset by poll events."""
+    """返回当前阶段的停留时间，不受轮询事件影响。"""
     entered_at = ""
     try:
         entered_at = next(
@@ -247,7 +223,7 @@ def sweep_active_stage_timeouts(
     *,
     automation_service: Any | None = None,
 ) -> dict[str, int]:
-    """Cancel safely interruptible ATS stages that exceed their wall timeout."""
+    """取消超时可安全中断的 ATS 阶段。"""
     auto_svc = automation_service or _resolve_services()[0]
     counts = {"test_running": 0, "report_collecting": 0}
     if auto_svc is None:
@@ -280,13 +256,13 @@ def sweep_active_stage_timeouts(
     return counts
 
 
-def run_tick_sync(
+def run_maintenance_sync(
     cfg: dict[str, Any],
     *,
     automation_service: Any | None = None,
     build_service: Any | None = None,
 ) -> dict[str, Any]:
-    """One synchronous tick — runs in a worker thread, never on the loop."""
+    """轮询构建任务和超时清理，独立于 run 推进。"""
     auto_svc = automation_service
     build_svc = build_service
     if auto_svc is None or build_svc is None:
@@ -294,7 +270,6 @@ def run_tick_sync(
     if auto_svc is None or build_svc is None:
         return {
             "polled_builds": 0,
-            "advanced_runs": 0,
             "device_timeouts": 0,
             "stage_timeouts": {"test_running": 0, "report_collecting": 0},
             "skipped": True,
@@ -331,9 +306,23 @@ def run_tick_sync(
     except Exception:
         logger.exception("[AutomationWorker] active-stage timeout sweep failed")
 
-    # Advance runs. Cap iterations per tick so a single tick (which may block
-    # inside a 3600s flash) does not loop indefinitely. worker_tick returns
-    # None when no non-terminal run remains.
+    return {
+        "polled_builds": polled_builds,
+        "device_timeouts": device_timeouts,
+        "stage_timeouts": stage_timeouts,
+    }
+
+
+def advance_runs_sync(
+    cfg: dict[str, Any],
+    *,
+    automation_service: Any | None = None,
+) -> dict[str, int]:
+    """在单航班长任务通道中推进持久化 run。"""
+
+    auto_svc = automation_service or _resolve_services()[0]
+    if auto_svc is None:
+        return {"advanced_runs": 0}
     advanced_runs = 0
     cap = 25
     previous_signature: tuple[str, str] | None = None
@@ -347,27 +336,58 @@ def run_tick_sync(
             break
         advanced_runs += 1
         signature = (str(advanced.get("id") or ""), str(advanced.get("status") or ""))
-        # Polling stages deliberately return the same durable state while the
-        # external build/test is still running. Do not hammer the same API 25
-        # times in one worker tick; the next scheduled tick will poll again.
+        # 轮询阶段会返回相同的持久状态，避免对同一 API 连续调用 25 次
         if signature == previous_signature:
             break
         previous_signature = signature
 
-    return {
-        "polled_builds": polled_builds,
-        "advanced_runs": advanced_runs,
-        "device_timeouts": device_timeouts,
-        "stage_timeouts": stage_timeouts,
-    }
+    return {"advanced_runs": advanced_runs}
+
+
+def run_tick_sync(
+    cfg: dict[str, Any],
+    *,
+    automation_service: Any | None = None,
+    build_service: Any | None = None,
+) -> dict[str, Any]:
+    """兼容/手动 tick，合并维护和推进。"""
+
+    maintenance = run_maintenance_sync(
+        cfg,
+        automation_service=automation_service,
+        build_service=build_service,
+    )
+    advancement = advance_runs_sync(
+        cfg,
+        automation_service=automation_service,
+    )
+    return {**maintenance, **advancement}
 
 
 async def _tick_once(cfg: dict[str, Any]) -> None:
-    global _last_tick_at, _last_tick_result
-    # Run the blocking tick off the event loop — flash can take up to 3600s.
-    result = await asyncio.to_thread(run_tick_sync, cfg)
+    global _advancement_task, _last_tick_at, _last_tick_result
+    # 维护任务持续运行，同时长推进任务（如刷机/分析）占用单航班通道
+    maintenance = await asyncio.to_thread(run_maintenance_sync, cfg)
+    completed_advancement: dict[str, Any] = {}
+    if _advancement_task and _advancement_task.done():
+        try:
+            completed_advancement = _advancement_task.result()
+        except asyncio.CancelledError:
+            completed_advancement = {}
+        except Exception:
+            logger.exception("[AutomationWorker] advancement lane failed")
+            completed_advancement = {"advancement_error": True}
+        _advancement_task = None
+    if _advancement_task is None:
+        _advancement_task = asyncio.create_task(
+            asyncio.to_thread(advance_runs_sync, cfg)
+        )
     _last_tick_at = asyncio.get_event_loop().time()
-    _last_tick_result = result
+    _last_tick_result = {
+        **maintenance,
+        **completed_advancement,
+        "advancement_running": not _advancement_task.done(),
+    }
 
 
 async def _loop() -> None:
@@ -392,7 +412,7 @@ async def _loop() -> None:
 
 
 def start_automation_worker() -> asyncio.Task | None:
-    global _last_build_poll_at, _stale_swept, _task
+    global _advancement_task, _last_build_poll_at, _stale_swept, _task
     if _task and not _task.done():
         return _task
     cfg = _load_worker_config()
@@ -401,19 +421,26 @@ def start_automation_worker() -> asyncio.Task | None:
         return None
     _stale_swept = False
     _last_build_poll_at = 0.0
+    _advancement_task = None
     _task = asyncio.create_task(_loop())
     return _task
 
 
 async def stop_automation_worker() -> None:
-    global _task
-    if not _task:
-        return
-    _task.cancel()
-    try:
-        await _task
-    except asyncio.CancelledError:
-        pass
+    global _advancement_task, _task
+    if _task:
+        _task.cancel()
+        try:
+            await _task
+        except asyncio.CancelledError:
+            pass
+    if _advancement_task:
+        _advancement_task.cancel()
+        try:
+            await _advancement_task
+        except asyncio.CancelledError:
+            pass
+        _advancement_task = None
     _task = None
     logger.info("[AutomationWorker] stopped")
 
@@ -428,4 +455,7 @@ def get_worker_status() -> dict[str, Any]:
         "executor": cfg["executor"],
         "last_tick_result": _last_tick_result,
         "last_tick_seconds_ago": round(last_ago, 1) if last_ago is not None else None,
+        "advancement_running": (
+            _advancement_task is not None and not _advancement_task.done()
+        ),
     }

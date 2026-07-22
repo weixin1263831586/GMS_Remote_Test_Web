@@ -23,15 +23,32 @@ class WorkerRuntime:
         with self.connect() as conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS commands (
                 id TEXT PRIMARY KEY, status TEXT NOT NULL, result_json TEXT NOT NULL,
-                error TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+                error TEXT NOT NULL, controller_synced INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
             conn.execute("""CREATE TABLE IF NOT EXISTS jobs (
                 worker_job_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
                 pid INTEGER, pgid INTEGER, status TEXT NOT NULL, devices_json TEXT NOT NULL,
                 work_dir TEXT NOT NULL, exit_code INTEGER, error TEXT NOT NULL,
-                command_id TEXT NOT NULL DEFAULT '')""")
+                command_id TEXT NOT NULL DEFAULT '', trace_id TEXT NOT NULL DEFAULT '',
+                operation_id TEXT NOT NULL DEFAULT '')""")
             columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
             if "command_id" not in columns:
                 conn.execute("ALTER TABLE jobs ADD COLUMN command_id TEXT NOT NULL DEFAULT ''")
+            if "trace_id" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
+            if "operation_id" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN operation_id TEXT NOT NULL DEFAULT ''")
+            command_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(commands)").fetchall()
+            }
+            if "controller_synced" not in command_columns:
+                conn.execute(
+                    "ALTER TABLE commands ADD COLUMN controller_synced INTEGER NOT NULL DEFAULT 0"
+                )
+            conn.execute("""CREATE TABLE IF NOT EXISTS device_fences (
+                device_id TEXT PRIMARY KEY, generation INTEGER NOT NULL,
+                lease_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
 
     def connect(self):
         conn = sqlite3.connect(self.db_path)
@@ -50,8 +67,144 @@ class WorkerRuntime:
             conn.execute("""INSERT INTO commands(id,status,result_json,error) VALUES(?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET status=excluded.status,
                 result_json=excluded.result_json,error=excluded.error,
-                updated_at=CURRENT_TIMESTAMP""",
+                controller_synced=0,updated_at=CURRENT_TIMESTAMP""",
                 (command_id, status, json.dumps(result or {}, separators=(",", ":")), error))
+
+    def mark_command_synced(self, command_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE commands SET controller_synced=1 WHERE id=?", (command_id,)
+            )
+
+    def mark_commands_synced(self, command_ids: list[str]) -> None:
+        if not command_ids:
+            return
+        with self.connect() as conn:
+            conn.executemany(
+                "UPDATE commands SET controller_synced=1 WHERE id=?",
+                [(command_id,) for command_id in command_ids],
+            )
+
+    def unsynced_commands(self, limit: int = 200) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT id,status,result_json,error FROM commands
+                   WHERE controller_synced=0
+                   ORDER BY updated_at,id LIMIT ?""",
+                (max(1, min(int(limit or 200), 200)),),
+            ).fetchall()
+        result = []
+        for row in rows:
+            try:
+                payload = json.loads(row["result_json"] or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            result.append(
+                {
+                    "id": row["id"],
+                    "status": row["status"],
+                    "result": payload,
+                    "error": row["error"],
+                }
+            )
+        return result
+
+    def validate_fencing(self, command: dict[str, Any]) -> None:
+        payload = command.get("payload") or {}
+        tokens = payload.get("lease_tokens") or []
+        command_type = str(command.get("command_type") or "")
+        protected_types = {
+            "start_test", "device_action", "flash_firmware", "flash_gsi",
+            "device_export",
+        }
+        require_fencing = os.getenv(
+            "GMS_WORKER_REQUIRE_DEVICE_FENCING", "true"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        requested_devices = {
+            value if value.startswith(f"{self.config.worker_id}:")
+            else f"{self.config.worker_id}:{value}"
+            for item in payload.get("devices") or []
+            if (value := str(item or "").strip())
+        }
+        if require_fencing and command_type in protected_types and requested_devices:
+            if not tokens:
+                raise ValueError(
+                    f"{command_type} requires a valid device fencing token"
+                )
+            token_devices = {
+                str(token.get("device_id") or "") for token in tokens
+            }
+            if token_devices != requested_devices:
+                raise ValueError("device fencing tokens do not match requested devices")
+        if not tokens:
+            return
+        revoked_attempts: set[str] = set()
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for token in tokens:
+                device_id = str(token.get("device_id") or "")
+                lease_id = str(token.get("lease_id") or "")
+                attempt_id = str(token.get("attempt_id") or "")
+                generation = int(token.get("generation") or 0)
+                if not device_id or not lease_id or not attempt_id or generation <= 0:
+                    raise ValueError("invalid device fencing token")
+                current = conn.execute(
+                    "SELECT * FROM device_fences WHERE device_id=?", (device_id,)
+                ).fetchone()
+                if current and (
+                    generation < int(current["generation"])
+                    or (
+                        generation == int(current["generation"])
+                        and (
+                            current["lease_id"] != lease_id
+                            or current["attempt_id"] != attempt_id
+                        )
+                    )
+                ):
+                    raise ValueError(
+                        f"stale fencing token for device {device_id}: generation {generation}"
+                    )
+                if current and generation > int(current["generation"]):
+                    revoked_attempts.add(str(current["attempt_id"] or ""))
+                conn.execute(
+                    """INSERT INTO device_fences
+                       (device_id,generation,lease_id,attempt_id,updated_at)
+                       VALUES(?,?,?,?,CURRENT_TIMESTAMP)
+                       ON CONFLICT(device_id) DO UPDATE SET
+                           generation=excluded.generation,
+                           lease_id=excluded.lease_id,
+                           attempt_id=excluded.attempt_id,
+                           updated_at=CURRENT_TIMESTAMP""",
+                    (device_id, generation, lease_id, attempt_id),
+                )
+        for attempt_id in revoked_attempts:
+            if attempt_id:
+                self.revoke_attempt(
+                    attempt_id,
+                    "superseded by a newer device fencing generation",
+                )
+
+    def revoke_attempt(self, attempt_id: str, reason: str) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT worker_job_id,pid,pgid FROM jobs
+                   WHERE attempt_id=? AND status='running'""",
+                (attempt_id,),
+            ).fetchall()
+        revoked = []
+        for row in rows:
+            try:
+                os.killpg(int(row["pgid"]), signal.SIGINT)
+            except ProcessLookupError:
+                pass
+            revoked.append(row["worker_job_id"])
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE jobs SET status='cancelled',error=?
+                   WHERE attempt_id=? AND status='running'""",
+                (reason, attempt_id),
+            )
+        return revoked
 
     def fail_interrupted_commands(self) -> list[dict[str, Any]]:
         """Fail non-recoverable background commands left running by a restart.
@@ -75,7 +228,8 @@ class WorkerRuntime:
             ).fetchall()
             conn.executemany(
                 """UPDATE commands SET status='failed',error=?,
-                   updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'""",
+                   controller_synced=0,updated_at=CURRENT_TIMESTAMP
+                   WHERE id=? AND status='running'""",
                 [(error, row["id"]) for row in rows],
             )
         return [
@@ -100,6 +254,8 @@ class WorkerRuntime:
                            "attempt_id": row["attempt_id"], "pid": row["pid"],
                            "status": row["status"], "devices": json.loads(row["devices_json"]),
                            "source": "managed", "log_path": str(work_dir / "stdout.log"),
+                           "trace_id": row["trace_id"],
+                           "operation_id": row["operation_id"],
                            "last_output_age_seconds": log_age, "warning": warning})
         return result
 
@@ -127,8 +283,7 @@ class WorkerRuntime:
         exit_code_path = work_dir / "exit_code"
         wrapper = '"$@"; rc=$?; printf "%s" "$rc" > "$GMS_EXIT_CODE_FILE"; exit "$rc"'
         env["GMS_EXIT_CODE_FILE"] = str(exit_code_path)
-        # Popen duplicates these descriptors for the child.  Closing the
-        # parent's copies immediately prevents one FD leak per log per job.
+        # 子进程已复制描述符，父进程立即关闭自身副本。
         with (work_dir / "stdout.log").open("ab", buffering=0) as stdout_file, \
                 (work_dir / "stderr.log").open("ab", buffering=0) as stderr_file:
             process = subprocess.Popen(
@@ -144,10 +299,12 @@ class WorkerRuntime:
         with self.connect() as conn:
             conn.execute("""INSERT OR REPLACE INTO jobs
                 (worker_job_id,job_id,attempt_id,pid,pgid,status,devices_json,
-                 work_dir,exit_code,error,command_id) VALUES(?,?,?,?,?,'running',?,?,NULL,'',?)""",
+                 work_dir,exit_code,error,command_id,trace_id,operation_id)
+                 VALUES(?,?,?,?,?,'running',?,?,NULL,'',?,?,?)""",
                 (worker_job_id, command.get("job_id", ""), command.get("attempt_id", ""),
                  process.pid, os.getpgid(process.pid), json.dumps(payload.get("devices", [])),
-                 str(work_dir), command["id"]))
+                 str(work_dir), command["id"], command.get("trace_id", ""),
+                 command.get("operation_id", "")))
         return {"worker_job_id": worker_job_id, "pid": process.pid, "work_dir": str(work_dir)}
 
     def stop_process(self, worker_job_id: str) -> dict[str, Any]:

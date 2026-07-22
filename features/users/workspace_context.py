@@ -135,12 +135,6 @@ def load_workspace_context(owner_id: str) -> dict:
     if context.get("scope_mode") != "cluster":
         context["scope_mode"] = "single"
         context["worker_id"] = _local_worker_id()
-    elif (
-        context.get("worker_id") == "worker-local"
-        and _local_worker_id() != "worker-local"
-    ):
-        # Migrate contexts persisted before local_worker_id became configurable.
-        context["worker_id"] = _local_worker_id()
     return context
 
 
@@ -180,20 +174,20 @@ def save_workspace_context(owner_id: str, patch: WorkspaceContextPatch) -> dict:
 
 @router.get("")
 async def get_workspace_context(request: Request):
-    owner_id = owner_id_from_request(request, default="anonymous")
+    owner_id = owner_id_from_request(request)
     return success_response({"context": load_workspace_context(owner_id), "owner_id": owner_id})
 
 
 @router.patch("")
 async def patch_workspace_context(request: Request, patch: WorkspaceContextPatch):
-    owner_id = owner_id_from_request(request, default="anonymous")
+    owner_id = owner_id_from_request(request)
     context = save_workspace_context(owner_id, patch)
     return success_response({"context": context, "owner_id": owner_id})
 
 
 @router.delete("")
 async def reset_workspace_context(request: Request):
-    owner_id = owner_id_from_request(request, default="anonymous")
+    owner_id = owner_id_from_request(request)
     path = _context_path(owner_id)
     with _storage_lock:
         path.unlink(missing_ok=True)

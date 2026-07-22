@@ -25,40 +25,13 @@ class SidebarNavigationConfigTests(unittest.TestCase):
 
         self.assertEqual(visible_pages, ["test", "redmine-agent"])
 
-    def test_sidebar_order_endpoint_persists_visible_pages(self):
-        import asyncio
-        config_router = import_module("features.users.config_api")
-
-        runtime = {"sidebar_order": ["test", "redmine-agent"]}
-
-        class FakeConfigManager:
-            def get_runtime_config(self):
-                return runtime.copy()
-
-            def save_runtime_config(self, data):
-                runtime.clear()
-                runtime.update(data)
-                return True
-
-        with patch.object(config_router, "config_manager", FakeConfigManager()):
-            save_result = asyncio.run(config_router.save_sidebar_order({
-                "order": ["redmine-agent", "test"],
-                "visible_pages": ["redmine-agent", "bad-page", "redmine-agent"],
-            }))
-            get_result = asyncio.run(config_router.get_sidebar_order())
-
-        self.assertEqual(save_result.body.decode("utf-8").count("redmine-agent"), 2)
-        self.assertEqual(runtime["sidebar_order"], ["redmine-agent", "test"])
-        self.assertEqual(runtime["sidebar_visible_pages"], ["redmine-agent"])
-        self.assertIn('"visible_pages":["redmine-agent"]', get_result.body.decode("utf-8"))
-
     def test_sidebar_visibility_modal_is_wired_in_template(self):
         template = Path("web/shell/shell.html").read_text(encoding="utf-8")
         self.assertIn('onclick="openSidebarVisibilityModal()"', template)
         self.assertIn('id="sidebar-visibility-modal"', template)
         for marker in ('id="sidebar-settings-panel-guide"', "function switchSidebarSettingsTab", "function openGuideImageLightbox", 'id="guide-image-modal"'):
             self.assertIn(marker, template)
-        for image_name in "test-parameters.png device-screen.png usbip-local-device.png report-management.png report-analysis.png apk-analysis.png test-suites.png ats-create-run.png device-flashing.png".split():
+        for image_name in ["test-parameters.png", "device-screen.png", "usbip-local-device.png", "report-management.png", "report-analysis.png", "apk-analysis.png", "test-suites.png", "ats-create-run.png", "device-flashing.png"]:
             self.assertIn(f'/static/images/guide/{image_name}', template)
             self.assertTrue(Path(f"web/static/images/guide/{image_name}").is_file())
         for marker in ("function applySidebarVisibility", "function saveSidebarVisibilityFromModal", "visible_pages"):

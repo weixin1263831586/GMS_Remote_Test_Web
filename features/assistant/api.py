@@ -16,13 +16,6 @@ from pydantic import BaseModel, Field
 from features.assistant.cluster_runtime import ACTIVE_CLUSTER_JOB_STATUSES as _ACTIVE_CLUSTER_JOB_STATUSES
 from features.assistant.context import _parse_chinese_number, record_user_message, update_context
 from features.assistant.executor import _json_body, executor
-from features.assistant.intent import (
-    _extract_device_ids,
-    _extract_module_and_case,
-    _extract_retry_count,
-    _extract_test_type,
-    _is_run_test_request,
-)
 from features.assistant.response import (
     generate as gen_response,
 )
@@ -108,7 +101,7 @@ def _local_worker_id() -> str:
 
 
 def _is_local_worker_id(worker_id: str | None) -> bool:
-    return not worker_id or worker_id in {"worker-local", _local_worker_id()}
+    return not worker_id or worker_id == _local_worker_id()
 
 
 def _normalize_workspace_context(raw: dict[str, Any] | None) -> dict[str, Any]:
@@ -131,8 +124,6 @@ def _normalize_workspace_context(raw: dict[str, Any] | None) -> dict[str, Any]:
         context["worker_id"] = _local_worker_id()
     elif context.get("scope_mode") == "cluster":
         context["worker_id"] = context.get("worker_id") or _local_worker_id()
-        if context["worker_id"] == "worker-local":
-            context["worker_id"] = _local_worker_id()
     return context
 
 
@@ -277,35 +268,6 @@ def _extract_device_count(text: str) -> int:
     return 1
 
 
-def _parse_user_intent(message: str) -> dict[str, Any]:
-    text = message.strip()
-    lowered = text.lower()
-    module, case = _extract_module_and_case(text)
-    test_type = _extract_test_type(text)
-    retry_count = _extract_retry_count(text)
-    module_case_tokens = set(
-        re.findall(r"[A-Za-z0-9_.:-]{2,}", f"{module} {case}".replace("/", " "))
-    )
-    explicit_devices = [
-        device_id for device_id in _extract_device_ids(text)
-        if device_id not in module_case_tokens
-    ]
-
-    return {
-        "raw": text,
-        "intent": "run_test" if _is_run_test_request(text) else "chat",
-        "test_type": test_type,
-        "test_module": module,
-        "test_case": case,
-        "devices": explicit_devices,
-        "device_count": len(explicit_devices) or _extract_device_count(text),
-        "retry_count": retry_count,
-        "analyze_on_failure": bool(re.search(r"报告分析|分析报告|报错分析|失败|fail|analy", lowered)),
-        "apk_source_analysis": bool(re.search(r"apk|反编译|源码|source", lowered)),
-        "connect_wifi": bool(re.search(r"wifi|wi-fi|无线网络|连接网络", lowered)),
-    }
-
-
 def _select_devices(
     intent: dict[str, Any], workspace_context: dict[str, Any] | None = None
 ) -> tuple[list[str], list[dict[str, Any]]]:
@@ -351,7 +313,7 @@ def _select_devices(
 
     requested = intent.get("devices") or [
         item.split(":", 1)[1]
-        if item.startswith(("worker-local:", f"{_local_worker_id()}:")) else item
+        if item.startswith(f"{_local_worker_id()}:") else item
         for item in workspace_devices
     ]
     if requested:
@@ -453,6 +415,7 @@ def _build_plan(
         steps.append({"title": "APK/源码分析", "detail": "根据失败信息定位套件 APK/JAR 并建议反编译入口"})
 
     return {
+        "type": "test_execution",
         "intent": intent,
         "steps": steps,
         "request": {
@@ -549,7 +512,7 @@ def _request_missing_params(session: dict[str, Any], missing: list[dict[str, Any
 
 
 def _latest_report_for_client(client_id: str, exclude_timestamp: str | None = None) -> dict[str, Any] | None:
-    reports = test_report_db.get_reports(limit=20, user_only=client_id)
+    reports = test_report_db.get_reports(limit=20, owner_id=client_id)
     if exclude_timestamp:
         for report in reports:
             if report.get("timestamp") == exclude_timestamp:
@@ -569,11 +532,18 @@ def _report_failed(report: dict[str, Any] | None) -> bool:
         return False
 
 
-def _report_for_cluster_job(job_id: str, attempt_id: str = "") -> dict[str, Any] | None:
+def _report_for_cluster_job(
+    job_id: str,
+    attempt_id: str = "",
+    owner_id: str = "",
+) -> dict[str, Any] | None:
     """Resolve only the report produced by one durable Worker attempt."""
-    if not job_id:
+    if not job_id or not owner_id:
         return None
-    report = test_report_db.get_report_by_timestamp(f"cluster-{job_id}")
+    report = test_report_db.get_report_by_timestamp(
+        f"cluster-{job_id}",
+        owner_id=owner_id,
+    )
     if not report or report.get("cluster_job_id") != job_id:
         return None
     if attempt_id and report.get("attempt_id") != attempt_id:
@@ -602,7 +572,22 @@ async def _analyze_saved_report(session: dict[str, Any], report_timestamp: str) 
 
     _append_step(session, "报告分析", "running", f"正在分析报告 {report_timestamp}")
     try:
-        analysis = await asyncio.to_thread(test_report_manager.analyze_report, report_timestamp)
+        owner_id = str(session.get("client_id") or "")
+        if not owner_id:
+            _append_step(session, "报告分析", "warning", "缺少当前用户身份")
+            return None
+        report = test_report_db.get_report_by_timestamp(
+            report_timestamp,
+            owner_id=owner_id,
+        )
+        if not report:
+            _append_step(session, "报告分析", "warning", "报告不存在或不属于当前用户")
+            return None
+        analysis = await asyncio.to_thread(
+            test_report_manager.analyze_report_by_id,
+            str(report["report_id"]),
+            owner_id=owner_id,
+        )
         if not analysis:
             _append_step(session, "报告分析", "warning", "报告存在，但未能解析 test_result.xml")
             return None
@@ -895,7 +880,11 @@ async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequ
     return payload
 
 
-async def _run_pre_actions(session: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+async def _run_pre_actions(
+    session: dict[str, Any],
+    plan: dict[str, Any],
+    request: AgentRequestShim,
+) -> dict[str, Any]:
     actions = plan.get("pre_actions") or []
     if not actions:
         return {"success": True}
@@ -915,7 +904,7 @@ async def _run_pre_actions(session: dict[str, Any], plan: dict[str, Any]) -> dic
                 action="wifi",
                 ssid=action.get("ssid") or "",
                 password=action.get("password") or "",
-            ))
+            ), request)
             payload = _jsonable(response)
             wifi_ssid = action.get("ssid") or ""
         else:
@@ -926,7 +915,7 @@ async def _run_pre_actions(session: dict[str, Any], plan: dict[str, Any]) -> dic
                 ssid=action.get("ssid"),
                 password=action.get("password"),
             )
-            response = await connect_wifi(wifi_req)
+            response = await connect_wifi(wifi_req, request)
             payload = _json_body(response)
             wifi_ssid = wifi_req.ssid
         summary = payload.get("summary") or {}
@@ -982,7 +971,11 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                 attempt_id = active_run.get("attempt_id") or job.get("current_attempt_id", "")
                 report = None
                 for _ in range(20):
-                    report = _report_for_cluster_job(cluster_job_id, attempt_id)
+                    report = _report_for_cluster_job(
+                        cluster_job_id,
+                        attempt_id,
+                        str(client_id or ""),
+                    )
                     if report and report.get("status") != "collecting":
                         break
                     if job.get("status") != "completed" and not report:
@@ -1133,7 +1126,7 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
     }
     request_shim = AgentRequestShim(request)
 
-    pre_result = await _run_pre_actions(session, plan)
+    pre_result = await _run_pre_actions(session, plan, request_shim)
     if not pre_result.get("success"):
         session["status"] = "error"
         return pre_result
@@ -1157,7 +1150,7 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
 @router.post("/api/agent/chat")
 async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     """Chat with the local GMS workflow Agent."""
-    # Probabilistic session cleanup (~2% of requests) to avoid O(N) lock on every message
+    # 按约 2% 概率清理会话，避免每次请求执行全量扫描。
     if time.time() % 50 < 1:
         await _cleanup_sessions()
     message = (req.message or "").strip()
@@ -1177,11 +1170,10 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
 
     record_user_message(session, message)
 
-    # --- 1. Check pending plan confirmation (existing behavior) ---
+    # --- 1. Check pending plan confirmation ---
     pending_plan = session.get("pending_plan")
     wants_execute = req.execute or bool(re.search(r"^(确认执行|开始执行|执行|确认|start|run)$", message, re.IGNORECASE))
     if pending_plan and wants_execute:
-        # Check if this is a generic action plan (new) or a test plan (legacy)
         if pending_plan.get("type") == "generic_action":
             intent_data = pending_plan.get("intent")
 
@@ -1215,11 +1207,14 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             _append_message(session, "assistant", resp.content, kind=resp.kind, data=resp.to_message_data())
             session["pending_plan"] = None
             session["status"] = "idle"
-        else:
-            # Legacy test execution plan
+        elif pending_plan.get("type") == "test_execution":
             result = await _execute_plan(session, request, pending_plan)
             if not result.get("success"):
                 _append_message(session, "assistant", f"执行失败：{result.get('error') or result.get('message')}")
+        else:
+            session["pending_plan"] = None
+            session["status"] = "idle"
+            _append_message(session, "assistant", "待执行计划格式已失效，请重新发起操作。")
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
     # --- 2. Resolve intent through multi-stage router ---
@@ -1328,13 +1323,16 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         session["pending_plan"] = None
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
-    # --- 2d. Run test: generate plan (existing behavior) ---
+    # --- 2d. Run test: generate an explicit test-execution plan ---
     if intent.is_run_test:
-        legacy_intent = _parse_user_intent(message)
-        selected_devices, device_details = _select_devices(legacy_intent, workspace)
-        suite = _select_suite(legacy_intent, workspace)
+        test_intent = dict(intent.params)
+        test_intent["device_count"] = (
+            len(test_intent.get("devices") or []) or _extract_device_count(message)
+        )
+        selected_devices, device_details = _select_devices(test_intent, workspace)
+        suite = _select_suite(test_intent, workspace)
         plan = _build_plan(
-            legacy_intent, selected_devices, device_details, suite, workspace
+            test_intent, selected_devices, device_details, suite, workspace
         )
         session["pending_plan"] = plan
         session["status"] = "planning"
@@ -1456,7 +1454,7 @@ async def get_agent_capabilities():
             "automation_dashboard", "automation_runs", "automation_run_cancel",
             "automation_run_retry", "cluster_status", "cluster_workers",
             "cluster_devices", "cluster_jobs", "cluster_job_cancel",
-            "cluster_set_mode", "build_jobs", "knowledge_search",
+            "build_jobs", "knowledge_search",
             "knowledge_ask", "knowledge_create",
         ],
         "tool_catalog": tools_by_category,

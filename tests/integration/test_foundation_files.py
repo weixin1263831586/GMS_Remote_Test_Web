@@ -37,11 +37,14 @@ class SafePathTests(unittest.TestCase):
                 )
             self.assertFalse(destination.exists())
 
-    def test_upload_temp_root_keeps_namespace_under_system_temp(self):
+    def test_upload_temp_root_keeps_namespace_under_managed_root(self):
         root = Path(upload_temp_root('../custom-gms'))
 
         self.assertEqual(root.name, 'custom-gms')
-        self.assertEqual(root.parent, Path(tempfile.gettempdir()))
+        # upload_temp_root prefers the managed data_root/uploads directory so
+        # large uploads survive system /tmp cleanup; the namespace basename
+        # is still sanitized and kept under that managed root.
+        self.assertEqual(root.parent.name, 'uploads')
 
     def test_remote_home_file_path_rejects_unsafe_parts(self):
         self.assertEqual(

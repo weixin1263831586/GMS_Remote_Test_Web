@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -94,7 +95,11 @@ def test_artifact_chunks_resume_and_complete_atomically(tmp_path):
     content = b"A" * 65536 + b"B" * 65536 + b"tail"
     digest = hashlib.sha256(content).hexdigest()
     try:
-        with patch.dict("os.environ", {"GMS_CLUSTER_WORKER_TOKENS": "worker-1:token"}):
+        tokens_path = tmp_path / "cluster.json"
+        tokens_path.write_text(
+            json.dumps({"worker_tokens": {"worker-1": "token"}}), encoding="utf-8"
+        )
+        with patch.dict("os.environ", {"GMS_CLUSTER_CONFIG": str(tokens_path)}):
             initialized = client.post(
                 f"/api/cluster/jobs/{job['id']}/artifacts/uploads",
                 headers=headers,
@@ -128,9 +133,10 @@ def test_artifact_chunks_resume_and_complete_atomically(tmp_path):
             )
             assert completed.status_code == 200, completed.text
     finally:
+        client.close()
         cluster_api.cluster_service = previous
 
     artifact = repository.list_artifacts(job["id"])[0]
     stored = repository.db_path.parent / "artifacts" / artifact["relative_path"]
     assert stored.read_bytes() == content
-    assert not (repository.db_path.parent / "artifact-uploads" / upload_id / "chunks").exists()
+    assert not (repository.db_path.parent / "artifact-uploads" / upload_id).exists()

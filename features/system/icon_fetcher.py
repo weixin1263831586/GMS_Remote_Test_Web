@@ -71,7 +71,6 @@ class IconFetcher:
     # 必须与该处保持一致（PROJECT_ROOT / 'web/static'），否则下载的图标
     # 会落进一个未被 serve 的目录，前端通过 /static/... 永远访问不到。
     WEB_STATIC_DIR = os.path.join(str(PROJECT_ROOT), "web", "static")
-    BASE_DIR = WEB_STATIC_DIR  # 向后兼容：历史代码以 BASE_DIR 为基准拼接
 
     # 常量配置
     ICON_VALIDATION_TIMEOUT = 5  # 图标验证超时时间（秒）
@@ -817,16 +816,7 @@ async def get_icon_fetcher(timeout: int = 10, use_cache: bool = True):
 
 # 便捷函数
 async def fetch_website_icon(url: str, timeout: int = 10) -> dict[str, Any]:
-    """
-    获取网站图标的便捷函数
-
-    Args:
-        url: 网站URL
-        timeout: 超时时间（秒）
-
-    Returns:
-        包含图标信息的字典
-    """
+    """获取网站图标并返回字典结果。"""
     fetcher = IconFetcher(timeout=timeout)
     try:
         result = await fetcher.fetch_icon_async(url)

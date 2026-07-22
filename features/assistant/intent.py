@@ -430,7 +430,7 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
 
     scored = registry.find(text, top_k=5, min_score=1.0)
     if scored:
-        # Pick best non-test_start result first (test_start is handled separately)
+        # 优先选择非 test_start 结果。
         best_non_test = next((s for s in scored if s.tool.name != "test_start"), None)
         best = best_non_test or scored[0]
 
@@ -451,23 +451,11 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
             stage="keyword",
         )
 
-    # --- Stage 4: Regex fallback ---
-    fallback = _legacy_intent_detect(text)
-    if fallback:
-        tool = registry.get(fallback)
-        if tool:
-            params = _extract_params_for_tool(text, tool)
-            return ResolvedIntent(
-                tool_name=fallback, tool=tool, confidence=0.6,
-                params=params, needs_confirm=tool.requires_confirm,
-                is_run_test=False, context_entities={}, stage="regex",
-            )
-
-    # --- Stage 5: Run test detection ---
+    # --- Stage 4: Run test detection ---
     if _is_run_test_request(text):
         return _resolve_run_test(text, session)
 
-    # --- Stage 6: Fallback ---
+    # --- Stage 5: Unknown ---
     return ResolvedIntent.unknown()
 
 
@@ -602,35 +590,3 @@ def _extract_params_for_tool(text: str, tool: AgentTool) -> dict[str, Any]:
             params["query"] = keyword
 
     return params
-
-
-def _legacy_intent_detect(text: str) -> str:
-    """保留旧版正则意图检测作为回退。"""
-    lowered = text.lower().strip()
-    query_words = r"多少|几个|有哪些|列表|列出|查看|查询|显示|状态|统计|最近|当前"
-
-    if re.search(r"测试状态|运行状态|正在跑|是否.*运行|status", lowered):
-        return "test_status"
-    if re.search(r"系统健康|健康检查|服务状态|health", lowered):
-        return "system_health"
-    if re.search(r"测试套件|suite", lowered):
-        return "test_suites"
-    if re.search(r"设备|adb|device|rk\d{3,5}", lowered) and re.search(query_words + r"|空闲|可用|占用|锁定|rk\d{3,5}", lowered):
-        return "devices_list"
-    if re.search(r"报告|report", lowered):
-        return "reports_list"
-    if re.search(r"apk|反编译|jadx", lowered):
-        return "apk_tasks"
-    if re.search(r"用户|在线|user", lowered):
-        return "users_list"
-    if re.search(r"配置|config", lowered):
-        return "config_read"
-    if re.search(r"vpn", lowered):
-        return "vpn_status"
-    if re.search(r"烧写|烧录|burn|flash|固件|刷机", lowered):
-        return "burn_firmware"
-    if re.search(r"桌面|vnc|desktop", lowered):
-        return "desktop_vnc_status"
-    if re.search(r"终端|terminal|ssh", lowered):
-        return "terminal_open"
-    return ""

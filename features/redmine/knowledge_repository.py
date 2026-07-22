@@ -17,9 +17,7 @@ from .users import _now
 class RedmineKnowledgeDB(KnowledgeSchemaMixin):
     """SQLite repository for the Redmine knowledge base."""
 
-    # ------------------------------------------------------------------
     # case_facts
-    # ------------------------------------------------------------------
 
     def upsert_case_fact(self, payload: dict[str, Any]) -> None:
         issue_id = int(payload.get("issue_id") or 0)
@@ -180,9 +178,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
                 ).fetchall()
         return [self._decode_row(row) for row in rows]
 
-    # ------------------------------------------------------------------
     # mature_cases
-    # ------------------------------------------------------------------
 
     def upsert_mature_case(self, payload: dict[str, Any]) -> int:
         case_id = payload.get("case_id")
@@ -279,9 +275,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             )
             return cur.rowcount > 0
 
-    # ------------------------------------------------------------------
     # case_issue_links
-    # ------------------------------------------------------------------
 
     def link_case_issue(self, case_id: int, issue_id: int, score: float = 0, reason: str = "", evidence: dict | None = None) -> None:
         with self.connect() as conn:
@@ -311,9 +305,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             ).fetchall()
         return [self._decode_row(row, default_obj=True) for row in rows]
 
-    # ------------------------------------------------------------------
     # reference_outputs
-    # ------------------------------------------------------------------
 
     def insert_reference_output(self, issue_id: int, source: str, payload: dict[str, Any]) -> int:
         now = _now()
@@ -345,9 +337,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             ).fetchall()
         return [self._decode_row(row, default_obj=True) for row in rows]
 
-    # ------------------------------------------------------------------
     # case_evaluations
-    # ------------------------------------------------------------------
 
     def insert_case_evaluation(self, issue_id: int, payload: dict[str, Any]) -> int:
         with self.connect() as conn:
@@ -379,9 +369,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             ).fetchone()
         return self._decode_row(row, default_obj=True) if row else None
 
-    # ------------------------------------------------------------------
     # internal_issue_links
-    # ------------------------------------------------------------------
 
     def insert_internal_issue_link(self, payload: dict[str, Any]) -> int:
         with self.connect() as conn:

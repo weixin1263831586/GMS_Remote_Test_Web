@@ -207,7 +207,7 @@
 
 <!-- Settings Modal -->
 <div id="settingsModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content" style="max-width:600px">
     <div class="modal-header" style="background:linear-gradient(135deg,#3b82f6,#6366f1)">
       <span class="modal-title">⚙️ 统计设置</span>
       <span class="modal-close" onclick="hideSettingsModal()">&times;</span>
@@ -234,6 +234,11 @@
         <div style="font-size:11px;color:var(--muted);margin-top:2px">近 N 天的已解决趋势每次实时拉取；更早的趋势走 7 天长期缓存，加快首屏。设大（如 3650）即全部实时</div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+      <div>
+        <label>Redmine 地址</label>
+        <input type="url" id="settingRedmineBaseUrl" placeholder="例如：https://redmine.example.com">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">请输入包含协议的完整地址，不要填写 /issues 等路径</div>
+      </div>
       <div>
         <label>Redmine 账号</label>
         <input type="text" id="settingRedmineUser" placeholder="Redmine 登录用户名">
@@ -268,10 +273,10 @@
           <input type="password" id="settingSmtpPass" placeholder="企业邮箱SMTP授权码或密码">
         </div>
       </div>
-      <div class="modal-buttons">
-        <button class="secondary" onclick="hideSettingsModal()">取消</button>
-        <button onclick="saveSettings()">保存并刷新</button>
-      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="secondary" onclick="hideSettingsModal()">取消</button>
+      <button onclick="saveSettings()">保存并刷新</button>
     </div>
   </div>
 </div>

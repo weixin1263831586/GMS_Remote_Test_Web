@@ -632,8 +632,7 @@ def _get_cache(cache_key: str, ttl: int, refresh: bool) -> dict[str, Any] | None
 
 
 def _set_cache(cache_key: str, data: dict[str, Any]) -> None:
-    # Only update this key — clearing the whole dict would evict other users'
-    # freshly-written entries under concurrent requests.
+    # 仅更新当前键，避免清除其他用户缓存。
     _STATS_CACHE[cache_key] = {"cached_at_ts": datetime.now().timestamp(), "data": data}
 
 

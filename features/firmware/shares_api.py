@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import getpass
+import json
 import os
 import re
 import threading
@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
+from foundation.ssh_security import configure_strict_host_keys
 
 from . import runtime
 
@@ -125,8 +126,7 @@ def _host_credentials(host: str, user: str | None, config: dict[str, Any]) -> di
         or config.get("firmware_share_password")
         or config.get("firmware_share_pswd")
     )
-    # ubuntu_pswd is a host-specific legacy credential. Never send it to an
-    # arbitrary host supplied by an API caller.
+    # ubuntu_pswd 仅限配置中的固定主机使用。
     if not password and host == str(config.get("ubuntu_host") or ""):
         password = config.get("ubuntu_pswd")
 
@@ -146,7 +146,7 @@ def _sftp_client(host: str, user: str | None, config: dict[str, Any], password: 
     if password:
         creds["password"] = password
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_strict_host_keys(client)
     connect_kwargs = {
         "hostname": creds["hostname"],
         "port": creds["port"],

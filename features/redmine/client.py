@@ -402,17 +402,10 @@ class RedmineClient(RedmineAttachmentMixin):
         freshness_days: int = 180,
         limit: int = 5000,
     ) -> dict[str, list[dict[str, Any]]]:
-        """Aggregate closed issue trends for a Redmine user, split by freshness.
+        """按数据新鲜度聚合用户已关闭工单趋势。
 
-        近 ``freshness_days`` 天关闭的工单每次实时拉取（``closed_on>=cutoff``
-        服务端过滤，通常仅 1~2 页），结果进短期缓存（``_CACHE_TTL_SECONDS``）。
-        更早关闭的工单趋势基本冻结，故拉全量一次后冻结进长期缓存
-        （``_ASSIGNEE_TREND_HISTORICAL_CACHE``，7 天）。两段按 granularity
-        合并后返回，与原单段返回结构一致。
-
-        ``freshness_days`` 越大，历史段越小、实时段越大；设为 3650 即等同
-        旧行为（全部实时）。任一段拉取失败时回退到另一段已有结果，保证
-        Redmine 抖动时不至于整片空白。
+        近期数据使用短期缓存，较早数据使用七天缓存；任一查询失败时返回
+        另一部分可用结果。
         """
         granularity_fields = {
             "day": "resolved_daily",
@@ -425,12 +418,7 @@ class RedmineClient(RedmineAttachmentMixin):
         cache_key = int(assignee_id)
         cutoff_date = (datetime.now() - timedelta(days=int(freshness_days))).date()
 
-        # 近期段与历史段共用同一份「按 closed_on 拉取并分桶」逻辑，差异仅在
-        # 过滤条件、缓存表与 TTL；抽取为 _fetch_trend_segment 避免两份近似副本。
-        # python-redmine 的 ``closed_on`` 在本部署只接受 ``><start|end`` 区间语法，
-        # 单边 ``>=``/``<`` 比较会抛 ValidationError 被分段逻辑静默吞掉，导致历史段
-        # 永远为空、趋势图只剩近 freshness_days 天（参考 fetch_resolved_issues_by_assignee
-        # 已用区间形式）。这里两段统一改成区间，keep_predicate 仍作二次防御。
+        # 近期和较早数据共用区间查询，并用谓词再次校验边界。
         cutoff_iso = cutoff_date.isoformat()
         recent_data = await self._fetch_trend_segment(
             cache_key,

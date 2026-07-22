@@ -1,5 +1,3 @@
-"""Cluster firmware staging and Worker-to-Controller file transfers."""
-
 from __future__ import annotations
 
 import asyncio
@@ -15,26 +13,25 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from features.auth import get_authenticated_user
-from features.users import get_client_id_from_request
+from features.auth import (
+    principal_owner_id,
+    require_resource_owner,
+)
 
 from .api import _authenticate, _require_cluster_enabled, service
 from .config import configured_max_bytes
 from .models import TransferComplete
+from .operation_claims import operation_claim_payload
 from .repository import utc_now
 
 
 router = APIRouter()
-
-
 def _transfer_root() -> Path:
     return service().repository.db_path.parent / "transfers"
 
 
 def _firmware_root() -> Path:
     return service().repository.db_path.parent / "firmware"
-
-
 def _online_worker(worker_id: str) -> dict:
     worker = service().repository.get_worker(worker_id)
     if not worker or worker.get("status") not in {"online", "busy"}:
@@ -45,11 +42,11 @@ def _online_worker(worker_id: str) -> dict:
 
 
 def _require_transfer_access(request: Request, transfer: dict) -> None:
-    user = get_authenticated_user(request)
-    if user and user.role != "admin" and transfer.get("owner_id") != user.username:
-        raise HTTPException(404, "transfer not found")
-
-
+    require_resource_owner(
+        request,
+        transfer.get("owner_id"),
+        not_found_detail="transfer not found",
+    )
 def _worker_device(
     worker_id: str, devices: str, operation: str,
     reservation_id: str = "", automation_run_id: str = "",
@@ -84,8 +81,29 @@ def _worker_device(
     return device_id
 
 
+def _operation_claim_payload(
+    request: Request,
+    worker_id: str,
+    device_id: str,
+    operation_id: str,
+    *,
+    reservation_id: str = "",
+) -> dict:
+    owner_id = principal_owner_id(request)
+    payload = operation_claim_payload(
+        service().repository, worker_id, device_id, operation_id, owner_id,
+        reservation_id=reservation_id,
+    )
+    request.state.device_lease_tokens = [
+        {**token, "owner_id": owner_id}
+        for token in payload.get("lease_tokens") or []
+    ]
+    return payload
+
+
 @router.post("/firmware/stage")
 async def stage_worker_firmware(
+    request: Request,
     worker_id: str = Form(...),
     devices: str = Form(...),
     reservation_id: str = Form(default=""),
@@ -115,6 +133,13 @@ async def stage_worker_firmware(
         Path(firmware_file.filename or "firmware.img").name,
     )
     stage_id = "fw-" + os.urandom(16).hex()
+    claim_payload = _operation_claim_payload(
+        request,
+        worker_id,
+        device_id,
+        stage_id,
+        reservation_id=reservation_id,
+    )
     directory = _firmware_root() / stage_id
     directory.mkdir(parents=True, exist_ok=False)
     target = directory / filename
@@ -144,10 +169,15 @@ async def stage_worker_firmware(
                 "devices": [device_id],
                 "reservation_id": reservation_id,
                 "automation_run_id": automation_run_id,
+                **claim_payload,
             },
         })
     except Exception:
         shutil.rmtree(directory, ignore_errors=True)
+        if claim_payload["release_claim_on_terminal"]:
+            service().repository.claims.release(
+                claim_payload["claim_source_id"], status="failed"
+            )
         raise
     return {
         "success": True,
@@ -176,6 +206,7 @@ def download_staged_firmware(
 
 @router.post("/gsi/stage")
 async def stage_worker_gsi(
+    request: Request,
     worker_id: str = Form(...),
     devices: str = Form(...),
     system_file: UploadFile = File(...),
@@ -185,6 +216,9 @@ async def stage_worker_gsi(
     _online_worker(worker_id)
     device_id = _worker_device(worker_id, devices, "GSI flashing")
     stage_id = "fw-" + os.urandom(16).hex()
+    claim_payload = _operation_claim_payload(
+        request, worker_id, device_id, stage_id
+    )
     directory = _firmware_root() / stage_id
     directory.mkdir(parents=True, exist_ok=False)
     files = []
@@ -223,10 +257,14 @@ async def stage_worker_gsi(
                 "stage_id": stage_id,
                 "files": files,
                 "devices": [device_id],
+                **claim_payload,
             },
         })
     except Exception:
         shutil.rmtree(directory, ignore_errors=True)
+        service().repository.claims.release(
+            claim_payload["claim_source_id"], status="failed"
+        )
         raise
     return {"success": True, "stage_id": stage_id, "command_id": command["id"]}
 
@@ -254,7 +292,7 @@ def create_suite_export(
     _online_worker(worker_id)
     transfer = service().repository.create_transfer(
         worker_id,
-        owner_id=get_client_id_from_request(request),
+        owner_id=principal_owner_id(request),
         metadata={"suite_path": suite_path, "path": path, "directory": directory},
     )
     command = service().repository.create_command({
@@ -286,22 +324,44 @@ def create_device_export(
         safe_path = validate_export_path(path)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    owner_id = get_client_id_from_request(request)
-    transfer = service().repository.create_transfer(
-        worker_id,
-        transfer_type="device_export",
-        owner_id=owner_id,
-        metadata={"device_id": device, "source_path": safe_path},
+    owner_id = principal_owner_id(request)
+    operation_id = f"device-export-{uuid.uuid4().hex}"
+    claim_source = f"operation:{operation_id}"
+    try:
+        records = service().repository.acquire_device_operation_claim(
+            worker_id, [device], owner_id=owner_id,
+            source_type="cluster-device-export", source_id=claim_source,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    lease_tokens = service().repository.claim_fencing_tokens(
+        records, operation_id
     )
-    command = service().repository.create_command({
-        "worker_id": worker_id,
-        "command_type": "device_export",
-        "payload": {
-            "transfer_id": transfer["id"],
-            "devices": [device],
-            "path": safe_path,
-        },
-    })
+    request.state.device_lease_tokens = [
+        {**token, "owner_id": owner_id} for token in lease_tokens
+    ]
+    try:
+        transfer = service().repository.create_transfer(
+            worker_id,
+            transfer_type="device_export",
+            owner_id=owner_id,
+            metadata={"device_id": device, "source_path": safe_path},
+        )
+        command = service().repository.create_command({
+            "worker_id": worker_id,
+            "command_type": "device_export",
+            "operation_id": operation_id,
+            "payload": {
+                "transfer_id": transfer["id"], "devices": [device],
+                "path": safe_path, "owner_id": owner_id,
+                "claim_source_id": claim_source,
+                "release_claim_on_terminal": True,
+                "lease_tokens": lease_tokens,
+            },
+        })
+    except Exception:
+        service().repository.claims.release(claim_source, status="failed")
+        raise
     return {"success": True, "transfer": transfer, "command_id": command["id"]}
 
 
@@ -409,7 +469,17 @@ def download_transfer(transfer_id: str, request: Request):
     path = (_transfer_root() / transfer["relative_path"]).resolve()
     if not path.is_relative_to(_transfer_root().resolve()) or not path.is_file():
         raise HTTPException(404, "transfer file not found")
-    return FileResponse(path, filename=transfer["filename"])
+    # 下载文件名：去掉 transfer_id 前缀；logs/results 目录导出追加类型后缀
+    download_name = transfer["filename"]
+    prefix = f"{transfer_id}-"
+    if download_name.startswith(prefix):
+        download_name = download_name[len(prefix):]
+    segments = [s for s in str((transfer.get("metadata") or {}).get("path") or "").split("/") if s]
+    kind = segments[0].lower() if segments else ""
+    if kind in {"logs", "results"}:
+        stem, dot, ext = download_name.rpartition(".")
+        download_name = f"{stem}-{kind}.{ext}" if dot else f"{download_name}-{kind}"
+    return FileResponse(path, filename=download_name)
 
 
 @router.post("/transfers/{transfer_id}/apk-analysis")
@@ -445,7 +515,7 @@ def import_transfer_for_apk_analysis(transfer_id: str, request: Request):
         os.makedirs(task_dir, exist_ok=False)
         target = test_runtime.safe_join(task_dir, filename)
         shutil.copy2(source, target)
-        owner_id = get_client_id_from_request(request)
+        owner_id = principal_owner_id(request)
         test_runtime.create_apk_task(task_id, target, filename, owner_id)
         with test_runtime.global_state.apk_analysis_tasks_lock:
             task = test_runtime.global_state.apk_analysis_tasks.get(task_id, {})

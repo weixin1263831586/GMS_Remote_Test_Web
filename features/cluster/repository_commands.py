@@ -1,4 +1,4 @@
-"""Command delivery and job synchronization persistence."""
+"""Idempotent Worker command delivery and Cluster Job synchronization."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+
+from .state_machine import InvalidJobTransitionError
 
 
 def _utc_now() -> str:
@@ -37,7 +39,6 @@ class ClusterCommandRepositoryMixin:
     def compact_command_result(
         self, command_id: str, result: dict[str, Any]
     ) -> None:
-        """Replace transient or binary-heavy output with durable metadata."""
         with self.connect() as conn:
             conn.execute(
                 "UPDATE cluster_commands SET result_json=?,updated_at=? WHERE id=?",
@@ -48,19 +49,53 @@ class ClusterCommandRepositoryMixin:
         now = _utc_now()
         command_id = f"cmd-{uuid.uuid4().hex}"
         token = uuid.uuid4().hex
-        with self.connect() as conn:
-            conn.execute(
-                """INSERT INTO cluster_commands
+        requested_operation_id = str(data.get("operation_id") or "")
+        operation_id = requested_operation_id or command_id
+        job_id = str(data.get("job_id") or "")
+        attempt_id = str(data.get("attempt_id") or "")
+        with self._lock, self.connect() as conn:
+            if requested_operation_id:
+                existing = conn.execute(
+                    """SELECT * FROM cluster_commands
+                       WHERE worker_id=? AND operation_id=?""",
+                    (data["worker_id"], requested_operation_id),
+                ).fetchone()
+                if existing is not None:
+                    return self._decode(existing) or {}
+            job = conn.execute(
+                "SELECT trace_id FROM cluster_jobs WHERE id=?", (job_id,)
+            ).fetchone() if job_id else None
+            trace_id = str(
+                data.get("trace_id")
+                or (job["trace_id"] if job else "")
+                or (data.get("payload") or {}).get("automation_run_id")
+                or f"trace-{uuid.uuid4().hex}"
+            )
+            conn.execute("""
+                INSERT INTO cluster_commands
                     (id,worker_id,command_type,job_id,attempt_id,dispatch_token,
-                     payload_json,status,result_json,error,created_at,delivered_at,
-                     acknowledged_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,'queued','{}','',?,'','',?)""",
-                (
-                    command_id, data["worker_id"], data["command_type"],
-                    data.get("job_id", ""), data.get("attempt_id", ""), token,
-                    json.dumps(data.get("payload", {}), separators=(",", ":")),
-                    now, now,
-                ),
+                     payload_json,operation_id,trace_id,status,result_json,error,created_at,
+                     delivered_at,acknowledged_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,'queued','{}','',?,'','',?)
+            """, (
+                command_id, data["worker_id"], data["command_type"], job_id,
+                attempt_id, token,
+                json.dumps(data.get("payload", {}), separators=(",", ":")),
+                operation_id, trace_id, now, now,
+            ))
+            self._append_timeline_conn(
+                conn,
+                job_id=job_id,
+                attempt_id=attempt_id,
+                trace_id=trace_id,
+                operation_id=operation_id,
+                worker_id=data["worker_id"],
+                event_type="command.queued",
+                source="controller",
+                from_state="",
+                to_state="queued",
+                message=f"Queued Worker command {data['command_type']}",
+                payload={"command_id": command_id, "command_type": data["command_type"]},
             )
         return self.get_command(command_id) or {}
 
@@ -89,6 +124,21 @@ class ClusterCommandRepositoryMixin:
                        delivered_at=?,updated_at=? WHERE id=?""",
                     [(now, now, item) for item in ids],
                 )
+                for row in rows:
+                    self._append_timeline_conn(
+                        conn,
+                        job_id=row["job_id"],
+                        attempt_id=row["attempt_id"],
+                        trace_id=row["trace_id"],
+                        operation_id=row["operation_id"],
+                        worker_id=worker_id,
+                        event_type="command.delivered",
+                        source="controller",
+                        from_state="queued",
+                        to_state="delivered",
+                        message=f"Delivered Worker command {row['command_type']}",
+                        payload={"command_id": row["id"]},
+                    )
             return [self._decode(row) or {} for row in rows]
 
     def ack_command(
@@ -105,36 +155,54 @@ class ClusterCommandRepositoryMixin:
             current_status = current["status"]
             incoming_status = data["status"]
             terminal = {"completed", "failed", "cancelled"}
-            rank = {"queued": 0, "delivered": 1, "accepted": 2, "running": 3}
+            progress_rank = {"queued": 0, "delivered": 1, "accepted": 2, "running": 3}
             if (
                 current_status in terminal
-                or rank.get(incoming_status, 4) < rank.get(current_status, 0)
+                or progress_rank.get(incoming_status, 4)
+                < progress_rank.get(current_status, 0)
             ):
                 return self._decode(current)
-            conn.execute(
-                """UPDATE cluster_commands SET status=?,result_json=?,error=?,
-                   acknowledged_at=?,updated_at=? WHERE id=? AND worker_id=?""",
-                (
-                    incoming_status,
-                    json.dumps(data.get("result", {}), separators=(",", ":")),
-                    data.get("error", ""), now, now, command_id, worker_id,
-                ),
+            conn.execute("""
+                UPDATE cluster_commands SET status=?,result_json=?,error=?,
+                    acknowledged_at=?,updated_at=? WHERE id=? AND worker_id=?
+            """, (
+                incoming_status,
+                json.dumps(data.get("result", {}), separators=(",", ":")),
+                data.get("error", ""), now, now, command_id, worker_id,
+            ))
+            self._append_timeline_conn(
+                conn,
+                job_id=current["job_id"],
+                attempt_id=current["attempt_id"],
+                trace_id=current["trace_id"],
+                operation_id=current["operation_id"],
+                worker_id=worker_id,
+                event_type="command.acknowledged",
+                source="worker",
+                level="error" if incoming_status == "failed" else "info",
+                from_state=current_status,
+                to_state=incoming_status,
+                message=f"Worker command {current['command_type']} is {incoming_status}",
+                payload={"command_id": command_id, "error": data.get("error", "")},
             )
         return self.get_command(command_id)
 
-    def attach_command_to_job(
-        self, job_id: str, command: dict[str, Any]
-    ) -> None:
-        now = _utc_now()
-        with self.connect() as conn:
+    def attach_command_to_job(self, job_id: str, command: dict[str, Any]) -> None:
+        with self._lock, self.connect() as conn:
             job = conn.execute(
                 "SELECT current_attempt_id FROM cluster_jobs WHERE id=?", (job_id,)
             ).fetchone()
             if not job:
                 raise ValueError("job not found")
-            conn.execute(
-                "UPDATE cluster_jobs SET status='dispatching',updated_at=? WHERE id=?",
-                (now, job_id),
+            self._transition_job_conn(
+                conn,
+                job_id,
+                "dispatching",
+                source="controller",
+                message="Start command attached to Cluster Job",
+                operation_id=str(command.get("operation_id") or command.get("id") or ""),
+                worker_id=str(command.get("worker_id") or ""),
+                payload={"command_id": command.get("id", "")},
             )
             conn.execute(
                 "UPDATE cluster_job_attempts SET status='dispatching' WHERE id=?",
@@ -146,51 +214,79 @@ class ClusterCommandRepositoryMixin:
         status = command["status"]
         if not job_id or status not in {"running", "completed", "failed", "cancelled"}:
             return
-        now = _utc_now()
         result = command.get("result", {})
         job_status = "running" if status == "running" else status
         if command.get("command_type") == "stop_test" and status == "completed":
             job_status = status = "cancelled"
-        with self.connect() as conn:
+        now = _utc_now()
+        release_claim = False
+        with self._lock, self.connect() as conn:
             job = conn.execute(
                 "SELECT current_attempt_id FROM cluster_jobs WHERE id=?", (job_id,)
             ).fetchone()
             if not job:
                 return
-            conn.execute(
-                """UPDATE cluster_job_attempts SET status=?,worker_job_id=?,
-                   result_json=?,error=?,
-                   started_at=CASE WHEN ?='running' THEN ? ELSE started_at END,
-                   finished_at=CASE WHEN ? IN ('completed','failed','cancelled')
-                       THEN ? ELSE finished_at END WHERE id=?""",
-                (
-                    status, result.get("worker_job_id", ""),
-                    json.dumps(result, separators=(",", ":")),
-                    command.get("error", ""), status, now, status, now,
-                    job["current_attempt_id"],
-                ),
-            )
-            conn.execute(
-                "UPDATE cluster_jobs SET status=?,updated_at=?,error=? WHERE id=?",
-                (job_status, now, command.get("error", ""), job_id),
-            )
-            if status not in {"completed", "failed", "cancelled"}:
+            if command.get("attempt_id") and command["attempt_id"] != job["current_attempt_id"]:
+                self._append_timeline_conn(
+                    conn,
+                    job_id=job_id,
+                    attempt_id=str(command.get("attempt_id") or ""),
+                    trace_id=str(command.get("trace_id") or ""),
+                    operation_id=str(command.get("operation_id") or ""),
+                    worker_id=str(command.get("worker_id") or ""),
+                    event_type="command.stale_attempt",
+                    source="controller",
+                    level="warning",
+                    message="Ignored command result from a stale Attempt",
+                    payload={"command_id": command.get("id", "")},
+                )
                 return
-            conn.execute(
-                "UPDATE cluster_jobs SET finished_at=? WHERE id=?", (now, job_id)
-            )
-            leases = conn.execute(
-                """SELECT device_id FROM device_leases
-                   WHERE job_id=? AND status='active'""",
-                (job_id,),
-            ).fetchall()
-            conn.execute(
-                """UPDATE device_leases SET status='released',released_at=?
-                   WHERE job_id=? AND status='active'""",
-                (now, job_id),
-            )
-            conn.executemany(
-                """UPDATE cluster_worker_devices
-                   SET state='available',updated_at=? WHERE id=?""",
-                [(now, item["device_id"]) for item in leases],
+            try:
+                transitioned = self._transition_job_conn(
+                    conn,
+                    job_id,
+                    job_status,
+                    source="worker-ack",
+                    message=f"Worker command moved Cluster Job to {job_status}",
+                    error=str(command.get("error") or ""),
+                    operation_id=str(command.get("operation_id") or ""),
+                    worker_id=str(command.get("worker_id") or ""),
+                    payload={
+                        "command_id": command.get("id", ""),
+                        "command_type": command.get("command_type", ""),
+                    },
+                )
+            except InvalidJobTransitionError:
+                return
+            worker_job_id = result.get("worker_job_id", "")
+            conn.execute("""UPDATE cluster_job_attempts SET status=?,worker_job_id=?,
+                result_json=?,error=?,
+                started_at=CASE WHEN ?='running' THEN ? ELSE started_at END,
+                finished_at=CASE WHEN ? IN ('completed','failed','cancelled')
+                    THEN ? ELSE finished_at END WHERE id=?""", (
+                status, worker_job_id, json.dumps(result, separators=(",", ":")),
+                command.get("error", ""), status, now, status, now,
+                job["current_attempt_id"],
+            ))
+            if transitioned and status in {"completed", "failed", "cancelled"}:
+                release_claim = True
+                leases = conn.execute(
+                    """SELECT device_id FROM device_leases
+                       WHERE job_id=? AND status='active'""",
+                    (job_id,),
+                ).fetchall()
+                conn.execute(
+                    """UPDATE device_leases SET status='released',released_at=?
+                       WHERE job_id=? AND status='active'""",
+                    (now, job_id),
+                )
+                conn.executemany(
+                    """UPDATE cluster_worker_devices
+                       SET state='available',updated_at=? WHERE id=?""",
+                    [(now, item["device_id"]) for item in leases],
+                )
+        if release_claim:
+            self.claims.release(
+                f"job:{job_id}",
+                status="cancelled" if status == "cancelled" else "released",
             )

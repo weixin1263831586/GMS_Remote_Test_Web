@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "controller_url": "https://172.16.14.233:5001",
+  "controller_url": "https://127.0.0.1:5001",
   "local_worker_id": "worker-local",
   "heartbeat_interval_seconds": 15,
   "worker_offline_seconds": 45,
@@ -12,5 +12,11 @@
   "log_analysis_max_bytes": 5368709120,
   "remote_dispatch_enabled": true,
   "global_device_pool_enabled": true,
-  "lease_enforcement_enabled": true
+  "lease_enforcement_enabled": true,
+  "worker_tokens": {
+    "ats-worker-118": "096601526b5ffb7a52b4b9d253e8c863269742821768baf5dbdd633a7883420a",
+    "ats-worker-244": "e6e346b5f50aa7b663a44a395de82d6e1a4d7521d7ae75bd97e60e4c2ae07f02",
+    "ats-worker-246": "b847f8dec51a2fb8bc947e1517a24bfed641de9d22199dbca6d07f1687fdb7d0",
+    "worker-local": "2e6fd9caf0c841a1986ec2d0c3b0ab94"
+  }
 }

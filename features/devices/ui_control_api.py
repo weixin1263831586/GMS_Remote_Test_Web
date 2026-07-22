@@ -1,20 +1,6 @@
-"""设备「智能 UI 操控」API —— 结构化截图 / 布局 / 点按。
+"""设备截图、结构化 UI 布局和坐标点按接口。
 
-能力来源（真机验证 2026-07-10）：
-- 截图：``adb -s <serial> exec-out screencap -p`` —— 原生 adb，多设备安全。
-- UI 元素 + 坐标：``android layout --device=<serial> -p`` —— Android CLI 的
-  ``layout`` 子命令支持 ``--device``，返回每个元素的 text/content-desc/
-  bounds/center/interactions。
-- 点按：``adb -s <serial> shell input tap <x> <y>``，坐标取自 ``layout``。
-
-为何不用 ``android screen capture --annotate`` + ``screen resolve``：
-Android CLI 1.0 的 ``screen capture`` 子命令无法指定设备（无 ``--device``，
-``ANDROID_SERIAL`` 亦无效），多设备同时在线时报 "Multiple devices are currently
-online"。``layout`` 则正常支持 ``--device``，且本身已给出元素坐标，故直接用
-``layout`` + 原生 adb 截图/点按，绕开标注缺陷。
-
-注意：Android CLI 即便报错也返回 exit code 0，因此不能用 exit code 判成败，
-需检测输出是否以 "Error:" 开头或含 "Multiple devices"。
+Android CLI 错误时可能仍返回 0，因此需同时检查错误输出。
 """
 from __future__ import annotations
 
@@ -37,8 +23,11 @@ from foundation.networking import is_local_host
 from foundation.responses import error_response
 
 from . import runtime
-from .locks import device_lock_manager
-from .support import SSHConnection
+from .support import (
+    SSHConnection,
+    device_claim_conflict_response,
+    device_mutation_guard,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -214,6 +203,13 @@ async def ui_screenshot(req: UiControlRequest, request: Request):
     serial = (req.serial or "").strip()
     if not serial:
         return error_response("serial is required", 400)
+    conflict = device_claim_conflict_response(
+        [serial],
+        runtime.get_client_id_from_request(request),
+        allow_owner=True,
+    )
+    if conflict:
+        return conflict
 
     config = runtime.config_manager.load_config()
     safe_serial = re.sub(r"[^A-Za-z0-9_.-]+", "_", serial)[:120] or "device"
@@ -253,6 +249,13 @@ async def ui_layout(req: UiControlRequest, request: Request):
     serial = (req.serial or "").strip()
     if not serial:
         return error_response("serial is required", 400)
+    conflict = device_claim_conflict_response(
+        [serial],
+        runtime.get_client_id_from_request(request),
+        allow_owner=True,
+    )
+    if conflict:
+        return conflict
 
     config = runtime.config_manager.load_config()
     android = _android_cli_path(config)
@@ -334,6 +337,7 @@ def _parse_center(center):
 
 
 @router.post("/api/devices/ui/tap")
+@device_mutation_guard("ui-tap", device_field="serial")
 async def ui_tap(req: UiTapRequest, request: Request):
     """点按指定坐标。坐标通常取自 /ui/layout 返回的 element.center。"""
     serial = (req.serial or "").strip()
@@ -342,10 +346,12 @@ async def ui_tap(req: UiTapRequest, request: Request):
     if req.x is None or req.y is None:
         return error_response("x and y are required", 400)
 
-    lock = device_lock_manager.get_lock_status(serial)
     client_id = runtime.get_client_id_from_request(request)
-    if lock and lock.get("client_id") != client_id:
-        return error_response(f"device {serial} is locked by {lock.get('username') or 'another user'}", 409)
+    conflict = device_claim_conflict_response(
+        [serial], client_id, allow_owner=True
+    )
+    if conflict:
+        return conflict
 
     config = runtime.config_manager.load_config()
     cmd = f"adb -s {shlex.quote(serial)} shell input tap {int(req.x)} {int(req.y)}"

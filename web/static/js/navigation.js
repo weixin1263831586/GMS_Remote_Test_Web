@@ -83,6 +83,7 @@ const CURL_SPECIAL_PARAMS = ['force_refresh', 'log_type', 'report_timestamp'];
 const VIEWPORT_HEIGHT_OFFSET = 150;
 let pendingUsbipDeviceHost = '';
 let pendingDevicePasswordAction = 'usbip';
+let pendingDevicePasswordRetry = null;
 let usbipReconnectTimer = null;
 let usbipReconnectAttempts = 0;
 let usbipManualDisconnectUntil = 0;
@@ -120,7 +121,7 @@ const DEFAULT_API_DETAILS = Object.freeze({
     usage: '使用该接口完成相关操作'
 });
 
-// Module-level constants for server info (never change during page lifetime)
+// 页面生命周期内不变的服务端信息。
 const BASE_URL = window.location.origin;
 const WS_BASE_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
 
@@ -136,6 +137,8 @@ const STATUS_POLL_INTERVAL = 2000; // 2 秒
 const REPORTS_REFRESH_INTERVAL = 15000; // 15 秒
 // 最大进度轮询错误次数
 const MAX_PROGRESS_ERRORS = 3;
+let wakeTestStatusPolling = () => {};
+let stopTestStatusPolling = () => {};
 
 // 辅助函数
 function validateDeviceSelection() {
@@ -269,15 +272,15 @@ function selectedClusterWorker() {
 }
 
 // ==================== Initialization ====================
-document.addEventListener('DOMContentLoaded', async () => {
-    const authenticated = await ensureAuthenticatedBeforeAppStart().catch(error => {
-        console.error('[Auth] Failed to check auth status:', error);
-        showAuthGate(false);
-        return false;
-    });
-    if (!authenticated) {
-        return;
-    }
+// 认证完成或匿名进入后执行一次应用初始化。
+let _appInitStarted = false;
+async function continueAppInitialization() {
+    if (_appInitStarted) return;
+    _appInitStarted = true;
+    // 文件浏览和传输功能依赖服务端路径配置。
+    await loadConfig();
+    // 通知页面恢复逻辑认证状态已就绪。
+    window.dispatchEvent(new CustomEvent('gms:auth-ready'));
 
     initEventListeners();
     initDragDrop();
@@ -303,10 +306,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     loadNotifications();
                     // 已获取到正确的用户名，延迟检查 USB/IP 和 VPN 状态（避免阻塞关键请求）
                     setTimeout(() => {
-                        Promise.all([
-                            checkUsbipStatus(),
-                            checkVpnStatus()
-                        ]).catch(error => {
+                        const statusChecks = [checkUsbipStatus()];
+                        if (isPlatformAdmin()) statusChecks.push(checkVpnStatus());
+                        Promise.all(statusChecks).catch(error => {
                             debugLog('[Init] Background status check failed:', error);
                         });
                     }, 3000);  // 3秒后再检查
@@ -330,17 +332,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const initialPage = window.__targetPage || 'test';
     const needsTestWorkspace = initialPage === 'test';
 
-    // 📱 设备列表是测试页的关键数据，立即触发，避免 F5 后空等（之前被埋在
-    // 1s 延迟里，叠加后端扫描耗时，导致 ADB 设备区显示很慢）。
+    // 📱 测试页优先加载设备列表，缩短首屏等待时间。
     if (needsTestWorkspace) {
         loadDevices();
     }
 
     // ⚙️ 延迟加载非关键数据（避免阻塞关键请求）
     setTimeout(() => {
-        loadConfig().catch(error => {
-            console.warn('[Init] Config load failed, using defaults:', error);
-        });
         if (needsTestWorkspace) {
             loadTestSuites();
             checkInitialTestStatus().catch(error => {
@@ -367,12 +365,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (needsTestWorkspace) setTimeout(async () => {
 
         // 加载用户列表
-        try {
-            await loadUsers();
-        } catch (error) {
-            console.warn('[Init] Failed to load users:', error);
+        if (isPlatformAdmin()) {
+            try {
+                await loadUsers();
+            } catch (error) {
+                console.warn('[Init] Failed to load users:', error);
+            }
         }
     }, 100);  // 减少延迟时间，更快获取客户端信息
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    const authenticated = await ensureAuthenticatedBeforeAppStart().catch(error => {
+        console.error('[Auth] Failed to check auth status:', error);
+        showAuthGate(false);
+        return false;
+    });
+    if (!authenticated) {
+        return;
+    }
+    await continueAppInitialization();
 });
 
 // ==================== Firmware Upload Recovery ====================
@@ -445,15 +457,27 @@ async function loadConfig() {
         state.config = config;
     } catch (error) {
         debugLog('Failed to load config:', error);
-        state.config = { ubuntu_user: 'gms' };  // Fallback
+        state.config = {};
     }
 }
 
 function getDefaultUbuntuUser() {
-    return state.config?.ubuntu_user || 'gms';
+    return state.config?.effective_ubuntu_user || state.config?.ubuntu_user || 'gms';
 }
 
-// ==================== WebSocket Connection (FastAPI) ====================
+function getDefaultSuitesPath() {
+    const configured = String(
+        state.config?.effective_suites_path || state.config?.suites_path || ''
+    ).trim();
+    if (configured === '~') return `/home/${getDefaultUbuntuUser()}`;
+    if (configured.startsWith('~/')) {
+        return `/home/${getDefaultUbuntuUser()}/${configured.slice(2)}`;
+    }
+    const resolved = configured || `/home/${getDefaultUbuntuUser()}/GMS-Suite`;
+    return resolved === '/' ? resolved : resolved.replace(/\/+$/, '');
+}
+
+// FastAPI WebSocket 连接。
 function initWebSocket() {
     if (state.websocket && (
         state.websocket.readyState === WebSocket.OPEN
@@ -497,7 +521,11 @@ function initWebSocket() {
                 if (typeof s.log_count === 'number') {
                     state.lastLogCount = Math.max(state.lastLogCount || 0, s.log_count);
                 }
-                if (typeof s.running === 'boolean') {
+                if (
+                    typeof s.running === 'boolean'
+                    && isLocalWorkspaceWorker(workspaceWorkerId())
+                    && !state.clusterJobId
+                ) {
                     state.testing = s.running;
                     updateTestToggleButton(s.running);
                 }
@@ -514,6 +542,7 @@ function initWebSocket() {
             state.websocket = null;
             updateConnectionStatus(false);
             addLogEntry('WebSocket连接已断开', 'warning');
+            wakeTestStatusPolling();
             // 5秒后重连
             state.websocketReconnectTimer = setTimeout(() => {
                 state.websocketReconnectTimer = null;
@@ -547,6 +576,7 @@ function initWebSocket() {
                         break;
 
                     case 'test_complete':
+                        if (!isLocalWorkspaceWorker(workspaceWorkerId()) || state.clusterJobId) break;
                         state.testing = false;
                         state.currentBurningProgress = 0;  // 重置进度
                         updateTestToggleButton(false);
@@ -564,11 +594,13 @@ function initWebSocket() {
                         break;
 
                     case 'devices_updated':
+                        if (!isLocalWorkspaceWorker(workspaceWorkerId())) break;
                         state.devices = data.devices;
                         renderDevices();
                         break;
 
                     case 'device_lock_update':
+                        if (!isLocalWorkspaceWorker(workspaceWorkerId())) break;
                         // 快速更新设备锁定状态（不需要重新查询设备列表）
                         debugLog('[WebSocket] device_lock_update:', data);
                         if (data.devices && Array.isArray(data.devices)) {
@@ -621,6 +653,7 @@ function initWebSocket() {
                         break;
 
                     case 'devices_changed':
+                        if (!isLocalWorkspaceWorker(workspaceWorkerId())) break;
                         // USB 设备插拔事件，自动刷新设备列表
                         debugLog('[WebSocket] devices_changed received:', data);
                         debugLog('[WebSocket] devices_changed:', data.devices);
@@ -628,17 +661,8 @@ function initWebSocket() {
                             handleRealtimeNotification(data.notification, { toast: false });
                         }
 
-                        // 优先使用后端提供的 connected/disconnected 信息（更准确、更快）
-                        let connected = data.connected || [];
-                        let disconnected = data.disconnected || [];
-
-                        // 如果没有提供 connected/disconnected，则通过比较计算（向后兼容）
-                        if (connected.length === 0 && disconnected.length === 0) {
-                            const oldDevices = new Set(state.devices.map(d => typeof d === 'string' ? d : d.device_id));
-                            const newDevicesSet = new Set(data.devices || []);
-                            connected = [...newDevicesSet].filter(d => !oldDevices.has(d));
-                            disconnected = [...oldDevices].filter(d => !newDevicesSet.has(d));
-                        }
+                        const connected = data.connected || [];
+                        const disconnected = data.disconnected || [];
 
                         // 刷新设备列表
                         loadDevices(true).then(() => {
@@ -661,7 +685,7 @@ function initWebSocket() {
                             }
                             showToast(message, 'success');
 
-                            // USB/IP 设备重启会短暂断开，优先自动重连，不立即把连接状态清掉。
+                            // USB/IP 设备重启时优先自动重连。
                             if (
                                 data.source !== 'usbip_disconnect'
                                 && state.usbipConnected
@@ -693,6 +717,7 @@ function initWebSocket() {
                         break;
 
                     case 'firmware_burn_complete':
+                        if (!isLocalWorkspaceWorker(workspaceWorkerId())) break;
                         // 固件/GSI 烧写完成且设备锁已释放：自动刷新 ADB 设备状态，
                         // 避免界面仍显示"锁定/Allocated"需手动点刷新。
                         debugLog('[WebSocket] firmware_burn_complete:', data);
@@ -805,7 +830,7 @@ function enforceFieldExclusion(mode) {
 }
 
 function onInputChange() {
-    // Handle mutual exclusivity between test module, test case, and retry report
+    // 测试模块、用例和重试报告互斥。
     const testModule = $('test-module').value.trim();
     const testCase = $('test-case').value.trim();
     const retryResult = $('retry-result').value.trim();
@@ -944,7 +969,7 @@ function onDeviceHostConfirm() {
     const deviceHost = document.getElementById('device-host').value.trim();
     addLogEntry(`设备主机地址暂不支持动态更新: ${deviceHost}`, 'warning');
     showToast('设备主机地址需要直接编辑config.json文件', 'warning');
-    // 注意：device_host不是动态配置字段，无法通过API更新
+    // device_host 不支持通过 API 动态更新。
     // 如需修改，请直接编辑configs/config.json文件
 }
 
@@ -1128,6 +1153,7 @@ function updateClusterToggleUI(enabled) {
 }
 
 function applyClusterMode(enabled) {
+    document.body?.classList.toggle('workspace-scope-single', !enabled);
     document.querySelectorAll('.sidebar-item[data-page="cluster"]').forEach(item => {
         // 集群管理页也是启用集群模式和接入 Worker 的入口，单机模式下也必须可见。
         item.style.display = '';
@@ -1139,14 +1165,21 @@ function applyClusterMode(enabled) {
             ? '选择执行测试的 Cluster Worker'
             : '当前为单机模式；切换到集群模式后可选择远端测试主机';
     }
-    for (const id of ['suite-worker-select', 'reports-worker-filter']) {
-        const select = document.getElementById(id);
-        if (select?.closest('label')) select.closest('label').style.display = enabled ? '' : 'none';
+    const suiteWorkerSelect = document.getElementById('suite-worker-select');
+    if (suiteWorkerSelect?.closest('label')) suiteWorkerSelect.closest('label').style.display = enabled ? '' : 'none';
+    const reportsWorkerSelect = document.getElementById('reports-worker-filter');
+    const reportsHostFilter = reportsWorkerSelect?.closest('label');
+    if (reportsHostFilter) {
+        reportsHostFilter.style.visibility = enabled ? 'visible' : 'hidden';
+        reportsHostFilter.style.pointerEvents = enabled ? '' : 'none';
     }
     const terminalControl = document.getElementById('terminal-worker-control');
     if (terminalControl) terminalControl.style.display = enabled ? 'contents' : 'none';
     if (!enabled) {
         syncWorkspaceWorkerSelectors(workspaceLocalWorkerId());
+    }
+    if (typeof window.applyHostWorkspaceScopeMode === 'function') {
+        window.applyHostWorkspaceScopeMode(enabled);
     }
     updateTestHostScopedControls(enabled
         ? (window.GmsWorkspace?.get?.().worker_id || workspaceLocalWorkerId())
@@ -1218,20 +1251,51 @@ async function initializeClusterMode() {
 
 window.addEventListener('gms:workspace-context', event => {
     const context = event.detail?.context || {};
+    const previous = event.detail?.previous || {};
     const enabled = Boolean(state.clusterStatus?.enabled && context.scope_mode === 'cluster');
+    const workerId = enabled ? (context.worker_id || workspaceLocalWorkerId()) : workspaceLocalWorkerId();
     applyClusterMode(enabled);
-    syncWorkspaceWorkerSelectors(enabled ? (context.worker_id || workspaceLocalWorkerId()) : workspaceLocalWorkerId());
+    syncWorkspaceWorkerSelectors(workerId);
+    updateTestHostScopedControls(workerId);
+    if (previous.scope_mode !== context.scope_mode
+            && typeof currentPage !== 'undefined' && currentPage === 'devices'
+            && typeof loadDevicesManagement === 'function') {
+        // 模式切换后立即刷新对应设备清单。
+        setTimeout(() => loadDevicesManagement().catch(error =>
+            debugLog('[Devices] Scope refresh failed:', error)), 0);
+    }
+    const contextJobId = String(context.cluster_job_id || '');
+    if (contextJobId && contextJobId !== state.clusterJobId) {
+        state.clusterJobId = contextJobId;
+        state.clusterEventSequence = -1;
+        sessionStorage.setItem('active_cluster_job', contextJobId);
+        wakeTestStatusPolling();
+    }
 
+    const previousWorker = previous.scope_mode === 'cluster'
+        ? (previous.worker_id || workspaceLocalWorkerId())
+        : workspaceLocalWorkerId();
+    if (previousWorker !== workerId) {
+        // 先清空主机数据，再由刷新请求重新填充。
+        state.selectedDevices.clear();
+        state.devices = [];
+        testSuitesCache = [];
+        testSuitesWorkerId = '';
+        renderDevices();
+        renderTestSuitesDropdown();
+    }
 });
+
+let testWorkerSwitchGeneration = 0;
 
 async function switchTestWorker() {
     const workerId = document.getElementById('cluster-worker')?.value || workspaceLocalWorkerId();
+    const switchGeneration = ++testWorkerSwitchGeneration;
     state.selectedDevices.clear();
     window.GmsWorkspace?.update({
         scope_mode: isLocalWorkspaceWorker(workerId) ? window.GmsWorkspace.get().scope_mode : 'cluster',
         worker_id: workerId,
-        device_ids: [],
-        cluster_job_id: ''
+        device_ids: []
     }, {source: 'test'});
     syncWorkspaceWorkerSelectors(workerId);
     updateTestHostScopedControls(workerId);
@@ -1239,6 +1303,10 @@ async function switchTestWorker() {
         testSuitesCache = [];
         testSuitesWorkerId = '';
         await Promise.all([loadDevices(true), loadTestSuites(true)]);
+        if (
+            switchGeneration !== testWorkerSwitchGeneration
+            || workspaceWorkerId() !== workerId
+        ) return;
         showToast(isLocalWorkspaceWorker(workerId)
             ? '已切换到本机测试主机'
             : `已切换到 ${workerId}，发现 ${state.devices.length} 台设备`, 'success');
@@ -1249,41 +1317,63 @@ async function switchTestWorker() {
 
 window.switchTestWorker = switchTestWorker;
 
-async function loadDevices(forceRefresh = false) {
-    if (state.isRefreshingDevices) {
-        state.pendingDeviceRefresh = Boolean(state.pendingDeviceRefresh || forceRefresh);
-        return state.deviceRefreshPromise || Promise.resolve(state.devices);
-    }
+let deviceRefreshGeneration = 0;
+const deviceRefreshFlights = new Map();
 
-    state.isRefreshingDevices = true;
-    state.pendingDeviceRefresh = null;
+function fetchDevicesForWorker(workerId, forceRefresh) {
+    const requestKey = `${workerId}\n${forceRefresh ? 'force' : 'cached'}`;
+    const existing = deviceRefreshFlights.get(requestKey);
+    if (existing) return existing;
 
-    state.deviceRefreshPromise = (async () => {
-        const workerId = workspaceWorkerId();
-        let devices;
+    const request = (async () => {
         if (isLocalWorkspaceWorker(workerId)) {
             const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
-            devices = await apiCall(url);
-        } else {
-            const response = await fetch(`/api/cluster/devices?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
-            if (!response.ok) throw new Error(`Worker ${workerId} 设备加载失败 (HTTP ${response.status})`);
-            const payload = await response.json();
-            devices = (payload.devices || [])
-                .filter(device => !['offline', 'unknown'].includes(device.state))
-                .map(device => ({
+            return apiCall(url);
+        }
+        const response = await fetch(`/api/cluster/devices?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
+        if (!response.ok) throw new Error(`Worker ${workerId} 设备加载失败 (HTTP ${response.status})`);
+        const payload = await response.json();
+        return (payload.devices || [])
+            .filter(device => !['offline', 'unknown'].includes(device.state))
+            .map(device => {
+                const lockedStates = ['allocated', 'leased', 'busy', 'external_busy', 'reserved'];
+                const isLocked = lockedStates.includes(device.state);
+                return {
                     ...(device.properties || {}),
                     device_id: device.id,
                     serial: device.serial,
+                    worker_id: workerId,
                     cluster_worker_id: workerId,
-                    locked: ['allocated', 'leased', 'busy', 'external_busy'].includes(device.state),
-                    locked_by: device.lease_owner || device.state,
+                    locked: isLocked,
+                    locked_by: isLocked ? device.state : '',
                     locked_by_self: false,
                     state: device.state,
-                    status: device.state
-                }));
+                    status: device.state === 'available' ? 'online' : device.state
+                };
+            });
+    })();
+    deviceRefreshFlights.set(requestKey, request);
+    const clearFlight = () => {
+        if (deviceRefreshFlights.get(requestKey) === request) {
+            deviceRefreshFlights.delete(requestKey);
         }
-        // A late response from a previous Worker must never replace the new selection.
-        if (workspaceWorkerId() !== workerId) return state.devices;
+    };
+    request.then(clearFlight, clearFlight);
+    return request;
+}
+
+async function loadDevices(forceRefresh = false) {
+    const workerId = workspaceWorkerId();
+    const generation = ++deviceRefreshGeneration;
+    state.isRefreshingDevices = true;
+    state.deviceRefreshPromise = fetchDevicesForWorker(workerId, forceRefresh);
+
+    try {
+        const devices = await state.deviceRefreshPromise;
+        // 丢弃非当前 Worker 的延迟响应。
+        if (generation !== deviceRefreshGeneration || workspaceWorkerId() !== workerId) {
+            return state.devices;
+        }
         state.devices = devices;
         // 设备列表更新后，清理选中集合里已消失的设备。否则 USB 抖动导致设备断开时，
         // 它仍残留在 state.selectedDevices 中，会被烧写/重启等批量操作一起送进后端，
@@ -1321,25 +1411,16 @@ async function loadDevices(forceRefresh = false) {
         // 不再自动检查 USB/IP 状态，避免覆盖连接状态
         // USB/IP 状态只在连接/断开操作时更新
         return devices;
-    })();
-
-    try {
-        return await state.deviceRefreshPromise;
     } catch (error) {
+        if (generation !== deviceRefreshGeneration || workspaceWorkerId() !== workerId) {
+            return state.devices;
+        }
         addLogEntry('加载设备列表失败: ' + error.message, 'error');
         throw error;
     } finally {
-        state.isRefreshingDevices = false;
-        state.deviceRefreshPromise = null;
-
-        if (state.pendingDeviceRefresh !== null) {
-            const pendingForceRefresh = state.pendingDeviceRefresh;
-            state.pendingDeviceRefresh = null;
-            setTimeout(() => {
-                loadDevices(pendingForceRefresh).catch((error) => {
-                    debugLog('[Devices] Pending refresh failed:', error);
-                });
-            }, 100);
+        if (generation === deviceRefreshGeneration) {
+            state.isRefreshingDevices = false;
+            state.deviceRefreshPromise = null;
         }
     }
 }
@@ -1380,9 +1461,8 @@ async function loadTestSuites(forceRefresh = false) {
                     count: (payload.suites || []).length,
                     suites: (payload.suites || []).filter(suite => suite.available).map(suite => ({
                         tools_path: suite.tools_path,
-                        test_type: String(suite.suite_type || '').toLowerCase(),
-                        version: suite.suite_version,
-                        name: `${suite.suite_type} ${suite.suite_version}`,
+                        test_type: String(suite.test_type || '').toLowerCase(),
+                        version: suite.version,
                         suite_key: suite.suite_key,
                         worker_id: requestedWorker
                     }))
@@ -1546,6 +1626,7 @@ function getSuiteBrowserRouteParams() {
     const suitePath = params.get('suite_path') || params.get('suite') || '';
     const filePath = params.get('file') || '';
     const directoryPath = params.get('path') || (filePath ? getParentSuitePath(filePath) : '');
+    const workerId = params.get('worker_id') || params.get('host') || '';
 
     if (!suitePath) {
         return null;
@@ -1554,7 +1635,8 @@ function getSuiteBrowserRouteParams() {
     return {
         suitePath,
         directoryPath,
-        filePath
+        filePath,
+        workerId: workerId && !isLocalWorkspaceWorker(workerId) ? workerId : ''
     };
 }
 
@@ -1565,6 +1647,12 @@ function buildSuiteBrowserLink(path = '', type = 'file') {
         params.set('path', path || '');
     } else {
         params.set('file', path || '');
+    }
+    // 集群报告链接携带所在 Worker ID。
+    const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    const workerId = suite?.worker_id || testSuitesWorkerId;
+    if (workerId && !isLocalWorkspaceWorker(workerId)) {
+        params.set('worker_id', workerId);
     }
 
     return `${window.location.origin}${window.location.pathname}${window.location.search}#test-suites?${params.toString()}`;
@@ -1582,6 +1670,24 @@ async function initTestSuiteBrowserPage() {
 
     const routeParams = getSuiteBrowserRouteParams();
     if (routeParams) {
+        // A shared link may target a remote worker host. Switch the dropdown
+        // to that worker and reload its suites before restoring the report,
+        // otherwise the file lookup falls back to the local host and the
+        // report can't be found.
+        if (routeParams.workerId) {
+            const workerSelect = $('suite-worker-select');
+            const supported = workerSelect
+                && Array.from(workerSelect.options).some(opt => opt.value === routeParams.workerId);
+            if (workerSelect && supported) {
+                if (workerSelect.value !== routeParams.workerId) {
+                    workerSelect.value = routeParams.workerId;
+                    await loadSuitesForBrowserWorker(true);
+                    renderTestSuiteBrowserList();
+                }
+            } else {
+                debugLog('[Suites] Shared link targets unknown worker:', routeParams.workerId);
+            }
+        }
         state.suiteBrowser.highlightPath = routeParams.filePath || '';
         await selectTestSuiteForBrowser(
             routeParams.suitePath,
@@ -1603,11 +1709,15 @@ async function initTestSuiteBrowserPage() {
     resumeSuiteDownloadIfNeeded();
 }
 
+let _suiteWorkerSelectorPromise = null;
 async function loadSuiteWorkerSelector() {
     const select = $('suite-worker-select');
     if (!select || select.dataset.loaded === '1') return;
-    try {
+    if (_suiteWorkerSelectorPromise) return _suiteWorkerSelectorPromise;
+    select.disabled = true;
+    _suiteWorkerSelectorPromise = (async () => { try {
         const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
         await (window.GmsWorkspace?.ready || Promise.resolve());
         const workspace = window.GmsWorkspace?.get?.() || {};
@@ -1622,8 +1732,16 @@ async function loadSuiteWorkerSelector() {
         }
         if (Array.from(select.options).some(option => option.value === saved)) select.value = saved;
         select.dataset.loaded = '1';
+        select.disabled = false;
     } catch (error) {
         debugLog('[Suites] Worker selector unavailable:', error);
+        select.innerHTML = `<option value="${escapeHtml(workspaceLocalWorkerId())}">本机 ${escapeHtml(workspaceLocalWorkerId())}</option>`;
+        select.disabled = false;
+    } })();
+    try {
+        await _suiteWorkerSelectorPromise;
+    } finally {
+        _suiteWorkerSelectorPromise = null;
     }
 }
 
@@ -1642,9 +1760,8 @@ async function loadSuitesForBrowserWorker(force = false) {
     const payload = await response.json();
     testSuitesCache = (payload.suites || []).filter(item => item.available).map(item => ({
         tools_path: item.tools_path,
-        test_type: String(item.suite_type || '').toLowerCase(),
-        version: item.suite_version,
-        name: `${item.suite_type} ${item.suite_version}`,
+        test_type: String(item.test_type || '').toLowerCase(),
+        version: item.version,
         suite_key: item.suite_key || item.tools_path,
         worker_id: workerId
     }));
@@ -1785,7 +1902,7 @@ window.downloadTestSuite = async function downloadTestSuite() {
         }
         const result = await apiCall('/api/test/suites/download-url', 'POST', {
             url: url,
-            save_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`
+            save_dir: getDefaultSuitesPath()
         });
         debugLog('[downloadTestSuite] 响应结果:', result);
 
@@ -1963,8 +2080,7 @@ window.browseLocalSuitePath = async function browseLocalSuitePath() {
     document.getElementById('file-browser-title').textContent = '选择测试套件目录';
     ModalManager.open('file-browser-modal');
 
-    const defaultUser = getDefaultUbuntuUser();
-    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
+    await loadFileDirectory(getDefaultSuitesPath());
 };
 
 // 处理 Esc 键关闭弹框
@@ -2050,7 +2166,7 @@ window.showExtractSuiteModal = async function showExtractSuiteModal() {
             const option = Array.from(select.options).find(opt => opt.value === defaultPath);
             if (option) select.value = defaultPath;
         } else if (urlInput && urlInput.value) {
-            pathInput.value = `/home/${getDefaultUbuntuUser()}/GMS-Suite/${urlInput.value.split('/').pop()}`;
+            pathInput.value = `${getDefaultSuitesPath()}/${urlInput.value.split('/').pop()}`;
         } else {
             pathInput.value = '';
         }
@@ -2137,7 +2253,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(isLocalWorkspaceWorker(suiteWorkerId) ? {
                 archive_path: archivePath,
-                extract_dir: `/home/${getDefaultUbuntuUser()}/GMS-Suite`,
+                extract_dir: getDefaultSuitesPath(),
                 target_dir_name: folderName
             } : {worker_id: suiteWorkerId, archive_path: archivePath, target_dir_name: folderName})
         });
@@ -2494,7 +2610,7 @@ async function loadSuiteBrowserDirectory(path = '') {
     }
 }
 
-// ==================== Test Results (tradefed list results) ====================
+// Tradefed 测试结果。
 window.openTestResultsModal = function openTestResultsModal() {
     if (!state.suiteBrowser.selectedSuitePath) {
         showToast('请先选择一个测试套件', 'warning');
@@ -2899,7 +3015,7 @@ function createSuiteFileRow(item) {
         const isRunnableFolder = Boolean(runKind);
         const inResults = runKind === 'results';
         const inLogs = runKind === 'logs';
-        // 「报告分析」沿用原宽松语义：只要当前位于 logs 目录树内即可（含 inv_* 子目录）。
+        // 报告分析适用于 logs 目录树，包括 inv_* 子目录。
         const inLogsTree = !item.isParent && isSuiteLogsFolderPath(state.suiteBrowser.currentPath);
 
         const openBtn = document.createElement('button');
@@ -3168,10 +3284,7 @@ async function downloadSuiteDir(path, name = '') {
 }
 
 function jumpSuiteSiblingFolder(itemPath, sibling) {
-    // 在 results/<ts> 与 logs/<ts> 之间互跳。itemPath 是相对套件根的完整路径，
-    // 形如 "results/2026.06.25_10.57.05"——把首段(results/logs)替换为 sibling
-    // 即得目标 "logs/2026.06.25_10.57.05"。注意 currentPath 仅是当前所在目录
-    // (如 "results")，不能拿来推同级，必须用 item 自身的完整 path。
+    // 替换完整相对路径的首段，在 results 和 logs 同名目录间跳转。
     const parts = (itemPath || '').split('/').filter(Boolean);
     if (parts.length < 2) {
         showToast('无法定位同级目录', 'warning');
@@ -3375,7 +3488,7 @@ function renderDevices() {
     });
 
     // 使用DocumentFragment优化DOM操作
-    // Event delegation is used on the containers (setup below), so no individual onclick needed
+    // 容器统一使用事件委托。
     const renderDeviceItem = (info) => buildDeviceItemEl(info);
 
     // 渲染左侧栏
@@ -3394,7 +3507,7 @@ function renderDevices() {
     rightContainer.innerHTML = '';
     rightContainer.appendChild(rightFragment);
 
-    // Setup event delegation on containers (only once, using data attributes)
+    // 按 data 属性初始化一次事件委托。
     const setupDeviceDelegation = (container) => {
         if (container._delegated) return;
         container._delegated = true;
@@ -3454,7 +3567,7 @@ function buildDeviceItemEl({ deviceId, isLocked, lockedBy }) {
 async function loadDeviceGroups() {
     try {
         const res = await apiCall('/api/device-groups', 'GET');
-        state.deviceGroups = (res && (res.data?.groups || res.groups)) || [];
+        state.deviceGroups = res?.data?.groups || [];
     } catch (e) {
         debugLog('[loadDeviceGroups] error:', e);
         state.deviceGroups = [];
@@ -3483,7 +3596,7 @@ function syncFollowFilterBtn() {
 window.toggleFollowFilter = toggleFollowFilter;
 
 // 设备分组的交互逻辑（视图切换/筛选/弹框/自动分组）由设备管理页面提供，
-// 因为它们绑定设备管理页的 allDevices 与表格渲染，不属于主页 ADB 设备区。
+// 以下函数仅供设备管理页的 allDevices 表格使用。
 
 function toggleDevice(deviceId) {
     if (state.selectedDevices.has(deviceId)) {
@@ -3612,7 +3725,11 @@ async function connectWifi() {
     const ssidInput = document.getElementById('wifi-ssid');
     const pwdInput = document.getElementById('wifi-password');
     if (ssidInput) ssidInput.value = wifi.ssid || '';
-    if (pwdInput) pwdInput.value = wifi.password || '';
+    if (pwdInput) {
+        // 默认回显 config.wifi.password（明文存储），便于直接连接。
+        pwdInput.value = wifi.password || '';
+        pwdInput.placeholder = '请输入 Wi-Fi 密码';
+    }
     ModalManager.open('wifi-modal');
 }
 
@@ -3834,8 +3951,7 @@ async function browseRemoteFileForFirmware() {
     document.getElementById('file-browser-title').textContent = '选择服务器固件';
     ModalManager.open('file-browser-modal');
 
-    const defaultUser = getDefaultUbuntuUser();
-    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
+    await loadFileDirectory(getDefaultSuitesPath());
 }
 
 function firmwareShareSetValidation(message, type = 'info') {
@@ -3979,7 +4095,7 @@ function submitFirmwareSharePassword() {
 }
 
 // 带认证重试的固件分享 API 调用：
-// body 为普通对象（不含 password）；首次用会话缓存密码，遇 401 弹框让用户输入后重试一次。
+// 使用会话密码发送 body；401 时提示输入并重试一次。
 // host 用于缓存密码与弹框展示。返回与 firmwareShareApi 一致的成功数据；失败抛 Error。
 async function firmwareShareApiWithAuth(path, body, host) {
     const buildOptions = (password) => ({
@@ -4331,7 +4447,7 @@ async function submitFirmwareBurn() {
 
                 xhr.open('POST', `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`);
                 applyClientIdentityHeadersToXhr(xhr);
-                // 烧写是阻塞请求（完成后才返回），「已启动」必须在发出请求时立即提示，
+                // 烧写请求发出时立即提示已启动。
                 // 否则会被后端烧写完成的通知晚到，导致时序颠倒。
                 notifyOperationResult('固件烧写已启动', '烧写任务已开始', 'info', 'firmware-burn');
                 addLogEntry(`固件烧写任务已启动，设备: ${devices.join(', ')}`, 'success');
@@ -4357,10 +4473,9 @@ async function burnGsiImage() {
     }
 
     // Set default script path
-    const defaultUser = getDefaultUbuntuUser();
     const scriptInput = document.getElementById('gsi-script');
     if (scriptInput && !scriptInput.value) {
-        scriptInput.value = `/home/${defaultUser}/GMS-Suite/run_GSI_Burn.sh`;
+        scriptInput.value = `${getDefaultSuitesPath()}/run_GSI_Burn.sh`;
     }
 
     // Show GSI configuration modal
@@ -4387,8 +4502,7 @@ async function browseLocalFileForGsiScript() {
     ModalManager.open('file-browser-modal');
 
     // Load initial directory (GMS-Suite)
-    const defaultUser = getDefaultUbuntuUser();
-    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
+    await loadFileDirectory(getDefaultSuitesPath());
 }
 
 // Browse remote file for GSI system image
@@ -4417,8 +4531,7 @@ async function browseLocalFileForGsiSystem() {
     ModalManager.open('file-browser-modal');
 
     // Load initial directory (GMS-Suite)
-    const defaultUser = getDefaultUbuntuUser();
-    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
+    await loadFileDirectory(getDefaultSuitesPath());
 }
 
 // Browse local file for GSI vendor image
@@ -4464,13 +4577,11 @@ async function browseRemoteFileForGsiVendor() {
     document.getElementById('file-browser-title').textContent = title;
     ModalManager.open('file-browser-modal');
 
-    const defaultUser = getDefaultUbuntuUser();
-    await loadFileDirectory(`/home/${defaultUser}/GMS-Suite`);
+    await loadFileDirectory(getDefaultSuitesPath());
 }
 
 async function uploadGsiVendorBootToTestHost(file) {
-    const defaultUser = getDefaultUbuntuUser();
-    const targetDir = `/home/${defaultUser}/GMS-Suite`;
+    const targetDir = getDefaultSuitesPath();
     const formData = new FormData();
     formData.append('file', file);
     formData.append('path', targetDir);
@@ -4659,12 +4770,14 @@ async function initAndStartVnc(forceRestart = false) {
             : '🔄 正在启动VNC环境...';
         addLogEntry(logMsg, 'info');
         const request = {force_restart: forceRestart};
+        request.worker_id = workerId;
         if (!isLocalWorkspaceWorker(workerId)) {
             const host = await resolveClusterHost(workerId);
-            request.host = `${host.ssh_user}@${host.address}`;
             addLogEntry(`目标测试主机: ${workerId} (${host.address})`, 'info');
         }
-        const result = await apiCall('/api/desktop/vnc/start', 'POST', request);
+        const result = isLocalWorkspaceWorker(workerId)
+            ? await apiCall('/api/desktop/vnc/start', 'POST', request)
+            : await apiCall(`/api/cluster/workers/${encodeURIComponent(workerId)}/restart-vnc`, 'POST');
         if (!result.success) {
             throw new Error(result.error || 'VNC 启动失败');
         }
@@ -4673,30 +4786,6 @@ async function initAndStartVnc(forceRestart = false) {
     } catch (error) {
         addLogEntry('启动 VNC 失败: ' + error.message, 'error');
         throw error;
-    }
-}
-
-// 启动默认主机VNC服务的共享函数
-async function startDefaultHostVNC(defaultHost, defaultPassword, vncPassword, fallbackUrl) {
-    try {
-        showToast('正在启动默认主机VNC服务...', 'info');
-        const result = await apiCall('/api/desktop/vnc/start', 'POST', {
-            host: defaultHost,
-            password: defaultPassword,
-            vnc_password: vncPassword || ''
-        });
-
-        if (result.success && result.url) {
-            debugLog('[Desktop] Default host VNC started');
-            return result.url;
-        } else {
-            // API失败，使用备用URL
-            return fallbackUrl;
-        }
-    } catch (e) {
-        console.error('[Desktop] Failed to start default host VNC:', e);
-        // 异常时也使用备用URL
-        return fallbackUrl;
     }
 }
 
@@ -4714,14 +4803,8 @@ async function showDeviceScreen() {
                 worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'scrcpy_start'
             });
             addLogEntry(`已在 ${workerId} 启动 ${result.summary?.success || state.selectedDevices.size} 个投屏窗口`, 'success');
-            const host = (window.desktopHosts || desktopHosts || []).find(item => item.worker_id === workerId);
-            if (host) {
-                currentHost = host;
-                saveHostsToStorage();
-                updateHostSelector();
-            }
+            window.GmsWorkspace?.update({worker_id: workerId, origin_page: 'desktop'}, {source: 'device-screen'});
             switchPage('desktop');
-            await loadVNCConnection();
             return;
         }
         addLogEntry('正在检查 VNC 服务...', 'info');
@@ -5017,9 +5100,10 @@ async function attemptUsbipReconnect() {
 }
 
 // ==================== 设备主机密码输入 ====================
-function showDevicePasswordModal(deviceHost, action = 'usbip') {
+function showDevicePasswordModal(deviceHost, action = 'usbip', onSaved = null) {
     pendingUsbipDeviceHost = deviceHost || pendingUsbipDeviceHost || '';
     pendingDevicePasswordAction = action || 'usbip';
+    pendingDevicePasswordRetry = typeof onSaved === 'function' ? onSaved : null;
     // 显示层用可读的主机地址；后端回退值若是裸 client_id（非 user@ip）则优先
     // 用配置里的 device_host/usbip_device_host，仍无可读值时给友好提示。
     const displayHost = (() => {
@@ -5029,7 +5113,13 @@ function showDevicePasswordModal(deviceHost, action = 'usbip') {
         if (configured && configured.includes('@')) return configured;
         return deviceHost || configured || '（未配置主机）';
     })();
-    document.getElementById('device-host-display').value = displayHost;
+    const hostInput = document.getElementById('device-host-display');
+    hostInput.value = displayHost;
+    hostInput.readOnly = pendingDevicePasswordAction === 'terminal';
+    const title = document.getElementById('device-password-modal-title');
+    if (title) title.textContent = pendingDevicePasswordAction === 'terminal'
+        ? '主机终端 SSH 密码'
+        : '设备主机 SSH 密码';
     document.getElementById('device-pswd').value = '';
     ModalManager.open('device-password-modal');
     document.getElementById('device-pswd').focus();
@@ -5037,13 +5127,12 @@ function showDevicePasswordModal(deviceHost, action = 'usbip') {
 
 function closeDevicePasswordModal() {
     ModalManager.close('device-password-modal');
+    pendingDevicePasswordRetry = null;
 }
 
 // ==================== Username Detection Modal ====================
 function showUsernameDetectModal(clientIp) {
-    // Platform login takes priority: if the auth gate (platform login) is up,
-    // don't stack the client-host detection modal on top of it. The client-host
-    // detection will be re-triggered by the next API call once authenticated.
+    // 登录层显示时不叠加客户端主机识别弹框。
     const authGate = document.getElementById('auth-gate');
     if (authGate && authGate.style.display === 'flex') {
         debugLog('[UsernameDetect] Skipped: platform auth-gate is showing');
@@ -5060,7 +5149,7 @@ function closeUsernameDetectModal() {
     ModalManager.close('username-detect-modal');
 }
 
-// ==================== Admin elevation (sensitive operations) ====================
+// 敏感操作管理员二次认证。
 
 let _elevationExpiryTimer = null;
 
@@ -5095,10 +5184,19 @@ function _markElevated(elevatedUntilIso) {
  * @param {string} actionLabel - what the elevation is for (shown in the modal)
  * @returns {Promise<boolean>}
  */
+let _elevationRequestPromise = null;
 async function requestElevatedAccess(actionLabel = '需要管理员权限') {
     if (state.elevated) {
         debugLog('[Elevation] already elevated, skipping prompt');
         return true;
+    }
+    if (!state.currentUser && state.authSetupRequired) {
+        showAuthGate(true);
+        return false;
+    }
+    if (_elevationRequestPromise) {
+        debugLog('[Elevation] sharing the active credential prompt');
+        return _elevationRequestPromise;
     }
     const modal = document.getElementById('elevate-modal');
     if (!modal) {
@@ -5114,9 +5212,11 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限') {
     if (pwdEl) pwdEl.value = '';
     if (msgEl) msgEl.textContent = '';
     // Prefill the current username for convenience.
-    if (userEl && state.currentUser?.username) userEl.value = state.currentUser.username;
+    if (userEl && state.currentUser?.role === 'admin' && state.currentUser.username) {
+        userEl.value = state.currentUser.username;
+    }
 
-    return new Promise(resolve => {
+    _elevationRequestPromise = new Promise(resolve => {
         const onGranted = (elevatedUntilIso) => {
             _markElevated(elevatedUntilIso);
             ModalManager.close('elevate-modal');
@@ -5137,6 +5237,11 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限') {
         ModalManager.open('elevate-modal');
         setTimeout(() => pwdEl && pwdEl.focus(), 0);
     });
+    try {
+        return await _elevationRequestPromise;
+    } finally {
+        _elevationRequestPromise = null;
+    }
 }
 
 async function submitElevateForm() {
@@ -5161,6 +5266,11 @@ async function submitElevateForm() {
         if (!response.ok || result.success === false) {
             if (msgEl) msgEl.textContent = result.error || result.message || '管理员凭证无效';
             return;
+        }
+        if (result.user) {
+            state.currentUser = result.user;
+            state.clientId = result.client_id || result.user.id || state.clientId;
+            applyRoleBasedUiAccess();
         }
         const resolve = window._elevateResolve;
         if (resolve) {
@@ -5347,7 +5457,9 @@ async function submitDevicePassword() {
         return;
     }
 
-    if (pendingDevicePasswordAction === 'sshd') {
+    if (pendingDevicePasswordAction === 'sshd' || pendingDevicePasswordAction === 'terminal') {
+        const action = pendingDevicePasswordAction;
+        const retry = pendingDevicePasswordRetry;
         try {
             await apiCall('/api/config/client-ssh-credentials', 'POST', {
                 device_host: deviceHost,
@@ -5355,9 +5467,14 @@ async function submitDevicePassword() {
             });
             closeDevicePasswordModal();
             showToast('SSH 凭据已保存', 'success');
-            addLogEntry(`已保存 ${deviceHost} 的 SSH 凭据，重新检查 SSHD...`, 'info');
+            addLogEntry(`已保存 ${deviceHost} 的 SSH 凭据`, 'success');
             pendingDevicePasswordAction = 'usbip';
-            await checkSshd();
+            if (action === 'terminal') {
+                if (retry) await retry();
+            } else {
+                addLogEntry('正在重新检查 SSHD...', 'info');
+                await checkSshd();
+            }
         } catch (error) {
             addLogEntry('保存 SSH 凭据失败: ' + error.message, 'error');
             showToast('保存失败: ' + error.message, 'error');
@@ -5382,14 +5499,14 @@ async function submitDevicePassword() {
             throw new Error(result.error || result.message || 'USB/IP 连接后尚未识别到 ADB 设备');
         }
 
-        // 不在这里设置状态，让主按钮处理
+        // 状态由主按钮处理。
         addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
         showToast('USB/IP 连接成功', 'success');
 
         // 刷新设备列表（使用防抖版本）
         setTimeout(() => debouncedRefreshDevices(), 3500);
 
-        // 手动更新按钮状态（因为主函数已经返回了）
+        // 主函数返回后更新按钮状态。
         const btn = $('usbip-btn');
         if (btn) {
             state.usbipConnected = true;
@@ -5561,7 +5678,7 @@ async function checkRouting() {
                 const sameNetwork = (testNetwork === clientNetwork);
 
                 // 生成路由命令
-                // 注意：这些命令应该在测试主机上执行
+                // 命令需在测试主机执行。
                 // 需要通过测试主机的网关来访问客户端网段
                 const testGateway = testNetwork.split('.').slice(0, 3).join('.') + '.1';
 
@@ -5892,7 +6009,15 @@ async function handleUploadFile() {
 
         xhr.addEventListener('load', () => {
             if (xhr.status === 200) {
-                const response = JSON.parse(xhr.responseText);
+                let response;
+                try {
+                    response = JSON.parse(xhr.responseText);
+                } catch (e) {
+                    addLogEntry('上传失败: 服务端返回非 JSON 响应', 'error');
+                    progressFill.style.width = '0%';
+                    progressInfo.textContent = '';
+                    return;
+                }
                 if (response.success) {
                     progressFill.style.width = '100%';
                     progressInfo.textContent = `上传完成 (${formatBytes(file.size)})`;
@@ -5935,7 +6060,7 @@ async function handleUploadFile() {
     }
 }
 
-// ==================== Firmware Upload State Management ====================
+// 固件上传状态管理。
 
 /**
  * 保存固件上传状态到 sessionStorage
@@ -6049,8 +6174,7 @@ async function browseRemoteFile(mode) {
     ModalManager.open('file-browser-modal');
 
     // Load initial directory - use test suite results directory
-    const defaultUser = getDefaultUbuntuUser();
-    let defaultPath = `/home/${defaultUser}/GMS-Suite`;
+    let defaultPath = getDefaultSuitesPath();
 
     // Get current test suite selection
     const testSuiteSelect = document.getElementById('test-suite');
@@ -6274,7 +6398,7 @@ function confirmFileSelection() {
     let fullPath;
     if (state.fileBrowser.mode === 'retry') {
         if (isDirectory) {
-            // For directory selection in retry mode, use current path (already the directory)
+            // 重试模式选择目录时使用当前路径。
             fullPath = state.fileBrowser.currentPath;
         } else {
             // For file selection, include the filename
@@ -6286,7 +6410,7 @@ function confirmFileSelection() {
             addLogEntry(`已选择测试报告: ${fullPath}`, 'info');
         }
 
-        // Clear test module and test case inputs when retry report is selected
+        // 选择重试报告后清空模块和用例。
         const testModuleInput = $('test-module');
         const testCaseInput = $('test-case');
         if (testModuleInput) {
@@ -6428,8 +6552,7 @@ function navigateToRoot() {
         return;
     }
 
-    const defaultUser = getDefaultUbuntuUser();
-    const rootPath = `/home/${defaultUser}/GMS-Suite`;
+    const rootPath = getDefaultSuitesPath();
 
     // Always navigate to GMS-Suite root directory
     loadFileDirectory(rootPath);
@@ -6523,11 +6646,13 @@ async function startTest() {
         }
 
         debugLog('[startTest] API call successful, setting testing = true');
+        state.testStopping = false;
         state.testing = true;
         updateTestToggleButton(true);
         addLogEntry('测试已启动', 'success');
         showToast('测试已启动', 'success');
         switchLogTab('module');
+        wakeTestStatusPolling();
 
         // 刷新设备列表以更新锁定状态
         await refreshDevices();
@@ -6547,6 +6672,12 @@ async function stopTest() {
 
         if (state.clusterJobId) {
             await apiCall(`/api/cluster/jobs/${encodeURIComponent(state.clusterJobId)}/cancel`, 'POST');
+            state.testStopping = true;
+            updateTestToggleButton(true);
+            addLogEntry('停止请求已发送，正在等待 Worker 结束任务...', 'warning');
+            showToast('停止请求已发送', 'warning');
+            wakeTestStatusPolling();
+            return;
         } else {
             // 使用新的 stop 接口（支持多用户隔离）
             await apiCall('/api/test/stop', 'POST');
@@ -6554,6 +6685,7 @@ async function stopTest() {
 
         // Update test state
         state.testing = false;
+        state.testStopping = false;
         state.clusterJobId = '';
         state.clusterEventSequence = -1;
         sessionStorage.removeItem('active_cluster_job');
@@ -6566,6 +6698,8 @@ async function stopTest() {
         // Refresh devices (强制刷新以获取最新状态)
         await loadDevices(true);
     } catch (error) {
+        state.testStopping = false;
+        updateTestToggleButton(state.testing);
         addLogEntry('停止测试失败: ' + error.message, 'error');
     }
 }
@@ -6574,7 +6708,11 @@ function updateTestToggleButton(isTesting) {
     const btn = $('test-toggle-btn');
     if (!btn) return;
 
-    if (isTesting) {
+    btn.disabled = Boolean(state.testStopping);
+    if (state.testStopping) {
+        btn.textContent = '⏳ 停止中';
+        btn.className = 'btn-danger btn-lg';
+    } else if (isTesting) {
         btn.textContent = '⏹ 停止测试';
         btn.className = 'btn-danger btn-lg';
     } else {
@@ -6755,7 +6893,42 @@ async function showConfig() {
     loadClientCredentials();
 }
 
-// ==================== Client SSH Credentials Management ====================
+async function showGmsAssistantConfig() {
+    const input = document.getElementById('gms-assistant-url');
+    if (!input) return;
+    try {
+        const result = await apiCall('/api/config/external-services', 'GET');
+        const data = result?.data || result || {};
+        input.value = String(data.gms_assistant_url || '').trim();
+        ModalManager.open('gms-assistant-config-modal');
+    } catch (error) {
+        showToast('读取 GMS助手配置失败: ' + error.message, 'error');
+    }
+}
+
+async function saveGmsAssistantConfig() {
+    const input = document.getElementById('gms-assistant-url');
+    const url = String(input?.value || '').trim();
+    if (url && !/^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(url)) {
+        showToast('请输入完整的 http(s) 地址', 'warning');
+        return;
+    }
+    try {
+        await apiCall('/api/config/external-services', 'POST', {gms_assistant_url: url});
+        ModalManager.close('gms-assistant-config-modal');
+        showToast('GMS助手配置已保存', 'success');
+        const frame = document.getElementById('gms-assistant-frame');
+        const dataSrc = frame?.getAttribute('data-src');
+        if (frame && dataSrc) {
+            frame.removeAttribute('src');
+            setTimeout(() => frame.setAttribute('src', dataSrc), 0);
+        }
+    } catch (error) {
+        showToast('保存 GMS助手配置失败: ' + error.message, 'error');
+    }
+}
+
+// 客户端 SSH 凭据管理。
 async function loadClientCredentials() {
     const tbody = document.getElementById('client-creds-table-body');
     if (!tbody) return;
@@ -6919,11 +7092,11 @@ async function saveConfig() {
 }
 
 // ==================== Logging ====================
-// Log batching queue for performance - coalesces multiple log entries into a single DOM update
+// 批量合并日志，减少 DOM 更新。
 const _logQueue = [];
 let _logFlushScheduled = false;
 
-// Returns the DOM container for a given log source ("system" | "module").
+// 返回系统或模块日志容器。
 function getLogContainer(source = 'system') {
     return document.getElementById(`${source === 'module' ? 'module' : 'system'}-log-output`);
 }
@@ -6974,7 +7147,7 @@ function addLogEntry(message, type = 'info', showTimestamp = true, source = 'sys
         timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false })
     });
 
-    // Cap queue size to prevent memory spikes during rapid WebSocket bursts
+    // 限制队列大小，避免 WebSocket 突发日志占满内存。
     if (_logQueue.length > 500) _logQueue.splice(0, _logQueue.length - 500);
 
     // Schedule a flush if not already scheduled
@@ -7035,7 +7208,7 @@ function isLogScrolledNearBottom(logOutput) {
     return distance <= 24;
 }
 
-// Switch between the system-operations log tab and the module-test log tab.
+// 切换系统操作和模块测试日志。
 function switchLogTab(tabName) {
     const target = tabName === 'module' ? 'module' : 'system';
     state.currentLogTab = target;
@@ -7106,17 +7279,36 @@ function updateProgressBar(percentage, message = '', title = '进度') {
 // 上传文件进度
 // ==================== Status Polling ====================
 function startStatusPolling() {
+    stopTestStatusPolling();
     // 轮询状态和日志
     let shownPyudevWarning = false;  // 标记是否已显示过 pyudev 警告
     let pollInterval = 2000;  // 初始轮询间隔：2秒
     const maxPollInterval = 30000;  // 最大轮询间隔：30秒
     let pollTimer = null;
+    let pollRunning = false;
+    let pollRequested = false;
+    let stopped = false;
     // WebSocket 是实时日志主通道，但 client_id 不一致或推送丢失时它会静默丢日志。
     // wsLogStallTicks 检测"服务端日志在涨、本地却没收到"的停滞后回退到增量拉取。
     // 必须使用全局 state.wsLogStallTicks，WebSocket onmessage 才能正确重置计数。
     let lastSeenServerLogCount = 0; // 最近一次观测到的服务端日志总数
 
+    const schedulePoll = delay => {
+        if (stopped) return;
+        if (pollTimer) clearTimeout(pollTimer);
+        pollTimer = setTimeout(() => {
+            pollTimer = null;
+            void pollStatus();
+        }, delay);
+    };
+
     const pollStatus = async () => {
+        if (stopped) return;
+        if (pollRunning) {
+            pollRequested = true;
+            return;
+        }
+        pollRunning = true;
         try {
             if (state.clusterJobId) {
                 const jobId = encodeURIComponent(state.clusterJobId);
@@ -7130,12 +7322,16 @@ function startStatusPolling() {
                     cluster_job_id: job.id || state.clusterJobId,
                     attempt_id: job.current_attempt_id || ''
                 }, {source: 'test-poll'});
-                const events = eventResponse.events || [];
+                const currentSequence = Number(state.clusterEventSequence ?? -1);
+                const events = (eventResponse.events || []).filter(
+                    event => Number(event.sequence) > currentSequence
+                );
                 events.forEach(event => addNormalizedLogEntry({message: event.message,
                     type: event.level === 'error' ? 'error' : 'info',
-                    source: event.source === 'stderr' ? 'system' : undefined}));
+                    source: ['stdout', 'stderr'].includes(event.source) ? 'module' : undefined}));
                 if (events.length) state.clusterEventSequence = Math.max(...events.map(event => Number(event.sequence)));
                 const active = ['created', 'queued', 'leasing', 'assigned', 'dispatching', 'running', 'stopping', 'collecting', 'worker_lost'].includes(job.status);
+                state.testStopping = job.status === 'stopping';
                 state.testing = active;
                 updateTestToggleButton(active);
                 if (!active) {
@@ -7143,9 +7339,12 @@ function startStatusPolling() {
                     addLogEntry(`分布式测试 ${job.status}${job.error ? `: ${job.error}` : ''}`, level);
                     showToast(`分布式测试${job.status === 'completed' ? '完成' : '结束'}: ${job.status}`, level);
                     state.clusterJobId = '';
+                    state.testStopping = false;
                     state.clusterEventSequence = -1;
                     sessionStorage.removeItem('active_cluster_job');
                     window.GmsWorkspace?.update({
+                        cluster_job_id: '',
+                        attempt_id: '',
                         report_id: `cluster-${job.id}`,
                         report_timestamp: `cluster-${job.id}`,
                         origin_page: 'test'
@@ -7153,8 +7352,6 @@ function startStatusPolling() {
                     loadDevices(true).catch(() => {});
                 }
                 pollInterval = active ? 1000 : 3000;
-                if (pollTimer) clearTimeout(pollTimer);
-                pollTimer = setTimeout(pollStatus, pollInterval);
                 return;
             }
             // 检查是否有 WebSocket 连接
@@ -7172,6 +7369,26 @@ function startStatusPolling() {
                 ? `/api/test/status?since=${encodeURIComponent(String(state.lastLogCount || 0))}`
                 : '/api/test/status?logs=false';
             const status = await apiCall(statusUrl);
+
+            // Durable jobs survive a Controller restart and do not depend on
+            // sessionStorage.  Recover the newest active job for the selected
+            // Worker when a tab or workspace has lost its current job id.
+            const activeJobs = Array.isArray(status.active_jobs) ? status.active_jobs : [];
+            if (!state.clusterJobId && activeJobs.length) {
+                const recoveredJob = activeJobs.find(job => job.worker_id === workspaceWorkerId()) || activeJobs[0];
+                state.clusterJobId = recoveredJob.id;
+                state.clusterEventSequence = -1;
+                state.testStopping = recoveredJob.status === 'stopping';
+                sessionStorage.setItem('active_cluster_job', recoveredJob.id);
+                window.GmsWorkspace?.update({
+                    worker_id: recoveredJob.worker_id || workspaceWorkerId(),
+                    device_ids: recoveredJob.devices || [],
+                    cluster_job_id: recoveredJob.id,
+                    attempt_id: recoveredJob.attempt_id || ''
+                }, {source: 'test-durable-recovery'});
+                pollRequested = true;
+                return;
+            }
 
             // 检测 WebSocket 日志停滞：服务端 log_count 在涨、本地却没有跟进时累计计数。
             if (typeof status.log_count === 'number' && hasRealtimeConnection && state.testing) {
@@ -7219,9 +7436,9 @@ function startStatusPolling() {
             if (status.logs && status.logs.length > 0) {
                 status.logs.forEach(addNormalizedLogEntry);
                 state.lastLogCount = status.log_count || (state.lastLogCount + status.logs.length);
-                // 增量拉取成功补回了日志，说明 WebSocket 推送确实在丢，重置停滞计数避免反复回退。
+                // 增量拉取补回日志后重置停滞计数。
                 state.wsLogStallTicks = 0;
-            } else if (typeof status.log_count === 'number') {
+            } else if (typeof status.log_count === 'number' && shouldFetchLogs) {
                 state.lastLogCount = Math.max(state.lastLogCount || 0, status.log_count);
             }
 
@@ -7242,15 +7459,30 @@ function startStatusPolling() {
 
         } catch (error) {
             console.error('Status polling error:', error);
+        } finally {
+            pollRunning = false;
+            const nextDelay = pollRequested ? 0 : pollInterval;
+            pollRequested = false;
+            schedulePoll(nextDelay);
         }
-
-        // 使用动态间隔重新调度
-        if (pollTimer) clearTimeout(pollTimer);
-        pollTimer = setTimeout(pollStatus, pollInterval);
     };
 
-    // 启动轮询
-    pollStatus();
+    stopTestStatusPolling = () => {
+        stopped = true;
+        if (pollTimer) clearTimeout(pollTimer);
+        pollTimer = null;
+    };
+    wakeTestStatusPolling = () => {
+        if (stopped) return;
+        pollInterval = 250;
+        if (pollRunning) {
+            pollRequested = true;
+            return;
+        }
+        schedulePoll(0);
+    };
+
+    wakeTestStatusPolling();
 }
 
 async function checkInitialTestStatus() {
@@ -7258,19 +7490,49 @@ async function checkInitialTestStatus() {
         const workspace = await (window.GmsWorkspace?.ready || Promise.resolve({}));
         const savedClusterJob = sessionStorage.getItem('active_cluster_job') || workspace.cluster_job_id || '';
         if (savedClusterJob) {
-            state.clusterJobId = savedClusterJob;
-            state.clusterEventSequence = -1;
+            if (state.clusterJobId !== savedClusterJob) {
+                state.clusterJobId = savedClusterJob;
+                state.clusterEventSequence = -1;
+            }
             const response = await apiCall(`/api/cluster/jobs/${encodeURIComponent(savedClusterJob)}`);
             const active = ['created', 'queued', 'leasing', 'assigned', 'dispatching', 'running', 'stopping', 'collecting', 'worker_lost'].includes(response.job.status);
+            state.testStopping = response.job.status === 'stopping';
             state.testing = active;
             updateTestToggleButton(active);
-            if (active) return;
+            if (active) {
+                wakeTestStatusPolling();
+                return;
+            }
             sessionStorage.removeItem('active_cluster_job');
             state.clusterJobId = '';
+            window.GmsWorkspace?.update(
+                {cluster_job_id: '', attempt_id: ''},
+                {source: 'test-recovery-terminal'}
+            );
         }
         const status = await apiCall('/api/test/status');
+        const activeJobs = Array.isArray(status.active_jobs) ? status.active_jobs : [];
+        if (activeJobs.length) {
+            const recoveredJob = activeJobs.find(job => job.worker_id === workspaceWorkerId()) || activeJobs[0];
+            state.clusterJobId = recoveredJob.id;
+            state.clusterEventSequence = -1;
+            state.testStopping = recoveredJob.status === 'stopping';
+            state.testing = true;
+            sessionStorage.setItem('active_cluster_job', recoveredJob.id);
+            window.GmsWorkspace?.update({
+                worker_id: recoveredJob.worker_id || workspaceWorkerId(),
+                device_ids: recoveredJob.devices || [],
+                cluster_job_id: recoveredJob.id,
+                attempt_id: recoveredJob.attempt_id || ''
+            }, {source: 'test-initial-durable-recovery'});
+            updateTestToggleButton(true);
+            wakeTestStatusPolling();
+            return;
+        }
         state.testing = status.running;
+        state.testStopping = false;
         updateTestToggleButton(status.running);
+        if (status.running) wakeTestStatusPolling();
         // 重置停滞计数：页面刚加载，WebSocket 可能尚未就绪或尚未投递日志。
         state.wsLogStallTicks = 0;
 
@@ -7431,7 +7693,7 @@ window.showSnackbar = function showSnackbar(title, message, level = 'info', dura
     }, duration);
 };
 
-// Close modal when clicking outside - optimized with mapping to avoid repeated DOM lookups
+// 点击弹框外部时关闭，并复用弹框映射。
 const _modalCloseHandlers = {
     'config-modal': closeModal,
     'firmware-modal': closeFirmwareModal,
@@ -7499,7 +7761,7 @@ function reportsListUrl(userOnly) {
     return `/api/reports/list${query ? `?${query}` : ''}`;
 }
 
-// Cleanup reports interval when leaving page (memory leak prevention)
+// 离开页面时清理报告轮询定时器。
 function cleanupReportsPolling() {
     if (reportsRefreshInterval) {
         clearInterval(reportsRefreshInterval);
@@ -7693,13 +7955,13 @@ function handleReportAction(event) {
 
     switch (action) {
         case 'analyze':
-            analyzeReport(timestamp);
+            analyzeReport(timestamp, reportContext.report_id);
             break;
         case 'retry':
             retryReportWithSuite(timestamp, testType, suitePath, reportContext);
             break;
         case 'download':
-            downloadReport(timestamp);
+            downloadReport(timestamp, reportContext.report_id);
             break;
         case 'results':
             openReportSuiteDirectory(timestamp, suitePath, testType, 'results', reportContext);
@@ -7708,7 +7970,7 @@ function handleReportAction(event) {
             openReportSuiteDirectory(timestamp, suitePath, testType, 'logs', reportContext);
             break;
         case 'delete':
-            deleteReport(timestamp);
+            deleteReport(timestamp, reportContext.report_id);
             break;
     }
 }
@@ -7741,7 +8003,7 @@ async function openReportSuiteDirectory(timestamp, suitePath, testType, kind, re
     await selectTestSuiteForBrowser(resolvedSuitePath, targetPath);
 }
 
-async function deleteReport(timestamp) {
+async function deleteReport(timestamp, reportId = '') {
     const confirmed = await showConfirmDialog(
         '删除报告',
         `确定要删除报告 ${timestamp} 吗？此操作不可恢复。`
@@ -7750,7 +8012,10 @@ async function deleteReport(timestamp) {
     if (!confirmed) return;
 
     try {
-        const response = await fetch(`/api/reports/delete?timestamp=${encodeURIComponent(timestamp)}`, {
+        const identity = reportId
+            ? `report_id=${encodeURIComponent(reportId)}`
+            : `timestamp=${encodeURIComponent(timestamp)}`;
+        const response = await fetch(`/api/reports/delete?${identity}`, {
             method: 'DELETE'
         });
 
@@ -7940,10 +8205,10 @@ async function retryReportWithSuite(timestamp, testType, suitePath, reportContex
     }
 }
 
-async function downloadReport(timestamp) {
+async function downloadReport(timestamp, reportId = '') {
     try {
         debugLog('[downloadReport] Starting download for timestamp:', timestamp);
-        await downloadReportAsZip(timestamp);
+        await downloadReportAsZip(timestamp, reportId);
     } catch (error) {
         console.error('Download report error:', error);
         notifyOperationResult('报告下载失败', error.message, 'error', 'report-download', { timestamp });
@@ -7951,9 +8216,12 @@ async function downloadReport(timestamp) {
 }
 
 // 回退方案：下载为 ZIP
-async function downloadReportAsZip(timestamp) {
+async function downloadReportAsZip(timestamp, reportId = '') {
     try {
-        const response = await fetch(`/api/reports/download?report_timestamp=${timestamp}&download=true`);
+        const identity = reportId
+            ? `report_id=${encodeURIComponent(reportId)}`
+            : `report_timestamp=${encodeURIComponent(timestamp)}`;
+        const response = await fetch(`/api/reports/download?${identity}&download=true`);
 
         if (!response.ok) {
             let errorMsg = `HTTP ${response.status}`;
@@ -8024,7 +8292,7 @@ function openReportAnalysis(timestamp) {
     }, 300);
 }
 
-async function analyzeReport(timestamp) {
+async function analyzeReport(timestamp, reportId = '') {
     try {
         // 从报告列表行中提前回写 Worker 上下文，确保分析结果跳转和后续操作
         // 能正确继承来源 Worker / Cluster Job 信息。
@@ -8057,7 +8325,10 @@ async function analyzeReport(timestamp) {
         setTimeout(async () => {
             showToast('正在分析报告...', 'info');
 
-            const formData = createFormData(AnalysisMode.SAVED, { report_timestamp: timestamp });
+            const formData = createFormData(AnalysisMode.SAVED, {
+                report_timestamp: timestamp,
+                report_id: reportId || reportRow?.dataset.reportId || ''
+            });
             const resp = await fetch('/api/reports/analyze', {
                 method: 'POST',
                 body: formData
@@ -8330,7 +8601,7 @@ async function handleReportDataTransfer(dataTransfer) {
         }
     }
 
-    // 回退到使用 files 属性（单文件或旧浏览器）
+    // 不支持目录条目 API 时使用 files 属性。
     const files = dataTransfer.files;
     if (files.length > 0) {
         if (files.length === 1) {
@@ -9291,7 +9562,18 @@ async function runReportDiagnosis(failureIndex = 0) {
             throw new Error(result.error || result.message || '诊断失败');
         }
         renderReportDiagnosis(result.data || {});
-        notifyOperationResult('报告诊断完成', `${testName} 诊断已完成`, 'success', 'report-diagnosis', {
+        const aiFallback = result.data?.ai_result?.ai_enabled === false;
+        const providerFallback = Boolean(result.data?.ai_result?.ai_fallback_used);
+        notifyOperationResult(
+            aiFallback
+                ? '报告诊断已降级'
+                : providerFallback ? '报告诊断使用备用模型' : '报告诊断完成',
+            aiFallback
+                ? `${testName} 本地 AI 不可用，当前显示规则分析`
+                : providerFallback
+                ? `${testName} 本地 AI 不可用，已由备用模型完成`
+                : `${testName} 诊断已完成`,
+            (aiFallback || providerFallback) ? 'warning' : 'success', 'report-diagnosis', {
             report_name: report.report_name || '',
             failure_index: failureIndex
         });
@@ -9377,6 +9659,7 @@ function getReportIssueIdFromName() {
 function buildReportDiagnosisReplyText(data, patchDraft) {
     const aiResult = data.ai_result || {};
     const lines = [];
+    const rootVerified = aiResult.root_cause_status === 'verified';
     const exemptions = Array.isArray(data.mainline_exemptions) ? data.mainline_exemptions : [];
     if (exemptions.length) {
         const ids = exemptions.map(item => item.exemption_id).filter(Boolean).join(', ');
@@ -9390,15 +9673,19 @@ function buildReportDiagnosisReplyText(data, patchDraft) {
         '',
         `**测试用例**: ${data.test_name || '-'}`,
         '',
-        '**初步分析**:',
+        '**已观察到的失败**:',
+        aiResult.observed_failure || data.error_message || '-',
+        '',
+        rootVerified ? '**已验证根因**:' : '**初步判断（待验证）**:',
         aiResult.root_cause || data.summary || aiResult.analysis || '-',
     );
+    if (aiResult.root_cause_note) lines.push('', `> ${aiResult.root_cause_note}`);
     const suggestions = aiResult.suggestions || [];
     if (suggestions.length) {
         lines.push('', '**处理建议**:', suggestions.map((item, idx) => `${idx + 1}. ${item}`).join('\n'));
     }
     if (patchDraft) {
-        lines.push('', '**补丁方向**:', '<pre>', patchDraft, '</pre>');
+        lines.push('', rootVerified ? '**补丁方向**:' : '**排查方向**:', '<pre>', patchDraft, '</pre>');
     }
     return lines.join('\n');
 }
@@ -9425,6 +9712,31 @@ function renderReportDiagnosis(data) {
     const suggestions = aiResult.suggestions || [];
     const issueIdFromReport = getReportIssueIdFromName();
     const currentFailure = getReportFailureByIndex(currentFailureIndex) || {};
+    const aiFallback = aiResult.ai_enabled === false && aiResult.ai_attempted;
+    const providerFallback = Boolean(aiResult.ai_fallback_used);
+    const rootCauseStatus = aiResult.root_cause_status || 'hypothesis';
+    const rootCauseVerified = rootCauseStatus === 'verified';
+    const rootCauseLabel = rootCauseVerified ? '已验证根因' : '初步判断';
+    const rootCauseTag = rootCauseVerified ? 'Verified root cause' : 'Hypothesis';
+    const confidenceLabels = {high: '高置信度', medium: '中置信度', low: '低置信度'};
+    const rootConfidence = confidenceLabels[aiResult.root_cause_confidence] || '低置信度';
+    const observedFailure = aiResult.observed_failure || data.error_message || stackTrace.split('\n').find(Boolean) || '未提取到明确失败信息';
+    const patchDraftTitle = rootCauseVerified ? '补丁草案' : '排查草案';
+    const aiStatusLabel = aiFallback
+        ? '规则分析（AI 不可用）'
+        : `${aiResult.ai_model || 'AI'}${providerFallback ? '（备用）' : ''}`;
+    const aiFallbackNotice = aiFallback
+        ? `<div class="dx-error">
+            <b>本地 AI 未完成分析，当前结果来自规则降级</b>
+            <div>${escapeHtml(String(aiResult.ai_error || '模型调用失败').slice(0, 260))}</div>
+        </div>`
+        : '';
+    const providerFallbackNotice = providerFallback
+        ? `<div class="dx-error">
+            <b>本地 AI 未完成分析，本次已由 ${escapeHtml(aiResult.ai_model || aiResult.ai_provider || '备用模型')} 完成</b>
+            <div>${escapeHtml(String((aiResult.ai_provider_errors || []).join('; ') || '本地模型调用失败').slice(0, 260))}</div>
+        </div>`
+        : '';
     const reportTestType = (window.currentReportAnalysisData?.details && window.currentReportAnalysisData.details.test_type) || data.test_type || suiteTarget.test_type || '';
     const replyDraft = buildReportDiagnosisReplyText(data, patchDraft);
     const hasExactArtifact = Boolean(suiteArtifact && (
@@ -9450,10 +9762,12 @@ function renderReportDiagnosis(data) {
             `构件: ${suiteArtifact ? suiteArtifact.path : ''}`,
             `源码路径: ${displaySourcePath || sourcePath}`,
             `Mainline 豁免: ${exemptions.length ? exemptions.map(i => `${i.exemption_id}(${i.issue_type || ''})`).join(', ') : '无'}`,
-            `根因: ${aiResult.root_cause || data.summary || ''}`,
+            `失败现象: ${observedFailure}`,
+            `${rootCauseLabel}: ${aiResult.root_cause || data.summary || ''}`,
+            `结论置信度: ${rootConfidence}`,
             `分析: ${aiResult.analysis || ''}`,
             `建议: ${(aiResult.suggestions || []).join('\n')}`,
-            `补丁草案:\n${patchDraft}`,
+            `${patchDraftTitle}:\n${patchDraft}`,
             `堆栈:\n${stackTrace || '无'}`
         ].join('\n\n'),
         replyDraft,
@@ -9466,7 +9780,7 @@ function renderReportDiagnosis(data) {
                 <div class="dx-title-row">
                     <div class="dx-title-main">${escapeHtml(data.test_name || data.report_name || '诊断工作台')}</div>
                     <div class="dx-pill-row">
-                        <span class="dx-status-pill">${escapeHtml(aiResult.ai_model || (aiResult.ai_enabled === false ? '规则分析' : 'AI'))}</span>
+                        <span class="dx-status-pill">${escapeHtml(aiStatusLabel)}</span>
                         <span class="dx-status-pill">${escapeHtml(suiteTarget.test_type || data.test_type || '未知类型')}</span>
                         <span class="dx-status-pill">${escapeHtml(suiteTarget.suite_version || data.suite_version || '未知版本')}</span>
                     </div>
@@ -9557,6 +9871,8 @@ function renderReportDiagnosis(data) {
 
     diagnosticResult.innerHTML = `
         <div class="dx-workbench-vertical">
+            ${aiFallbackNotice}
+            ${providerFallbackNotice}
             ${exemptionBanner}
             ${actionPanel}
             <div class="dx-workflow">
@@ -9565,16 +9881,21 @@ function renderReportDiagnosis(data) {
                     <span>1</span>
                     <div>
                         <b>详细分析</b>
-                        <em>先看根因，再看失败上下文</em>
+                        <em>先区分失败现象，再验证上游原因</em>
                     </div>
                 </div>
                 <div class="dx-two-col">
                     <div class="dx-section dx-section-large">
-                        <div class="dx-section-title">根因判断</div>
+                        <div class="dx-section-title">${rootCauseLabel}</div>
+                        <div class="dx-observed-failure">
+                            <span>已观察到的失败</span>
+                            <div>${escapeHtml(observedFailure)}</div>
+                        </div>
                         <div class="dx-root-cause">
-                            <span>Root cause</span>
+                            <span>${rootCauseTag} · ${rootConfidence}</span>
                             <div>${escapeHtml(aiResult.root_cause || data.summary || '待分析')}</div>
                         </div>
+                        ${aiResult.root_cause_note ? `<div class="dx-root-note">${escapeHtml(aiResult.root_cause_note)}</div>` : ''}
                         <div class="dx-preline">${escapeHtml(aiResult.analysis || '无')}</div>
                     </div>
                     <div class="dx-section dx-context-section">
@@ -9625,7 +9946,7 @@ function renderReportDiagnosis(data) {
                         <div class="dx-list">${suggestionCards}</div>
                     </div>
                     <div class="dx-section">
-                        <div class="dx-section-title">补丁草案</div>
+                        <div class="dx-section-title">${patchDraftTitle}</div>
                         <pre class="dx-code">${escapeHtml(patchDraft || '无')}</pre>
                     </div>
                     <div class="dx-section">
@@ -9706,22 +10027,24 @@ async function saveDiagnosisToWiki() {
         '```',
         (data.error_message || '').slice(0, 4000),
         '```',
-        aiResult.root_cause ? `\n## 根因\n${aiResult.root_cause}` : '',
+        aiResult.observed_failure ? `\n## 已观察到的失败\n${aiResult.observed_failure}` : '',
+        aiResult.root_cause ? `\n## ${aiResult.root_cause_status === 'verified' ? '已验证根因' : '初步判断（待验证）'}\n${aiResult.root_cause}` : '',
+        aiResult.root_cause_note ? `\n> ${aiResult.root_cause_note}` : '',
         aiResult.analysis ? `\n## 分析\n${aiResult.analysis}` : '',
         aiResult.suggestions && aiResult.suggestions.length ? `\n## 建议\n${aiResult.suggestions.map(s => '- ' + s).join('\n')}` : '',
         kbHit ? `\n## 知识库命中\n${kbHit}` : '',
     ].filter(Boolean).join('\n');
 
-    const links = {};
-    if (reportTimestamp) links.report_timestamps = [String(reportTimestamp)];
-    if (issueId) links.redmine_issue_ids = [parseInt(issueId, 10) || issueId];
+    const links = [];
+    if (reportTimestamp) links.push({target_type:'test_report', target_id:String(reportTimestamp), title:String(reportTimestamp)});
+    if (issueId) links.push({target_type:'redmine_issue', target_id:String(issueId), title:'#' + String(issueId)});
+    if (moduleName) links.push({target_type:'test_case', target_id:moduleName + (testName ? '::' + testName : ''), title:moduleName});
 
     try {
         await window.saveToWiki({
             content,
             notebook: '测试问题库',
-            related_module: moduleName ? (moduleName + (testName ? '::' + testName : '')) : '',
-            links: Object.keys(links).length ? links : undefined
+            links
         });
         showToast('已存入知识库「测试问题库」', 'success');
     } catch (e) {
@@ -9963,8 +10286,7 @@ function extractFailureLocation(errorMessage) {
                 const location = {
                     file_name: fileName,
                     file_type: fileType,  // 'kt' 或 'java'
-                    line_number: lineNumber,
-                    extension: fileType  // 兼容字段
+                    line_number: lineNumber
                 };
 
                 debugLog(`[源码搜索] 📍 从堆栈跟踪提取失败位置:`, location);
@@ -10659,9 +10981,7 @@ function applyAgentSessionWorkspace(session) {
     const context = session?.workspace_context;
     if (!context || typeof context !== 'object') return;
     const current = getAgentWorkspaceContext();
-    // An idle historical session is descriptive, not authoritative. Applying
-    // its old worker-local value here used to undo the Worker selected on the
-    // test/device page as soon as Agent opened.
+    // 空闲会话仅供展示，不覆盖当前工作区选择。
     const authoritative = ['planning', 'running', 'monitoring', 'analyzing'].includes(session?.status)
         || Boolean(context.cluster_job_id || context.automation_run_id);
     if (authoritative) {
@@ -11141,7 +11461,7 @@ function initAgentPage() {
                     event.preventDefault();
                     sendAgentMessage(false);
                 } else if (event.key === 'ArrowUp') {
-                    // Only navigate history when cursor is at the start or input is empty
+                    // 光标在开头或输入为空时才浏览历史命令。
                     if (agentInputHistory.length === 0) return;
                     // Save draft on first history navigation
                     if (agentHistoryIndex === -1) {
@@ -11203,6 +11523,7 @@ window.closeVpnCredentialModal = closeVpnCredentialModal;
 window.handleVpnCredentialKeyPress = handleVpnCredentialKeyPress;
 window.submitVpnCredential = submitVpnCredential;
 window.startTest = startTest;
+window.wakeTestStatusPolling = () => wakeTestStatusPolling();
 window.stopTest = stopTest;
 window.selectReportSource = selectReportSource;
 window.deleteReport = deleteReport;
@@ -11250,20 +11571,15 @@ window.copyTailscaleAccessUrl = copyTailscaleAccessUrl;
  * 复制部署脚本命令
  */
 function copyDeployCommand() {
-    const protocol = window.location.protocol;
-    const host = window.location.hostname;
-    const port = window.location.port || (protocol === 'https:' ? '443' : '80');
-
-    // 构建 curl 命令（直接执行安装）
-    const tlsOption = protocol === 'https:' ? '-k ' : '';
-    const deployCommand = `curl ${tlsOption}-s ${protocol}//${host}:${port}/api/system/install-sh | bash`;
+    // 发布包由 CI 生成并签名。
+    const deployCommand = 'sha256sum -c gms-web-app-<VERSION>.tar.gz.sha256 && gpg --verify gms-web-app-<VERSION>.tar.gz.sig gms-web-app-<VERSION>.tar.gz && tar -xzf gms-web-app-<VERSION>.tar.gz && cd gms-web-app && sudo ./install.sh';
 
     const clipboardWrite = navigator.clipboard && navigator.clipboard.writeText
         ? navigator.clipboard.writeText(deployCommand)
         : Promise.reject(new Error('Clipboard API unavailable'));
 
     clipboardWrite.then(() => {
-        showToast('✓ 部署命令已复制', 'success');
+        showToast('✓ 已复制签名发布包部署命令', 'success');
     }).catch(() => {
         // 备用复制方案
         const textArea = document.createElement('textarea');
@@ -11274,7 +11590,7 @@ function copyDeployCommand() {
         textArea.select();
         try {
             document.execCommand('copy');
-            showToast('✓ 部署命令已复制', 'success');
+            showToast('✓ 已复制签名发布包部署命令', 'success');
         } catch (e) {
             showToast('复制失败', 'error');
         }
@@ -11532,7 +11848,7 @@ async function confirmAndSendRedmineReply(modalId) {
     .then(response => response.json())
     .then(result => {
         if (result.success) {
-            const replyData = result.data || result;
+            const replyData = result.data || {};
             const attachMsg = replyData.attachments ? `，携带 ${replyData.attachments} 个附件` : '';
             showToast(`✅ 回复已成功发送到 Redmine #${issueId}${attachMsg}`, 'success');
             if (replyData.issue_url) {
@@ -11556,7 +11872,7 @@ function resetReportAnalysis() {
     const failuresDiv = $('report-failures');
     const failureList = $('report-failure-list');
 
-    // Clear all analysis results without deleting the result container structure.
+    // 清空分析结果但保留容器结构。
     if (resultDiv) resultDiv.style.display = 'none';
     if (summaryDiv) summaryDiv.innerHTML = '';
     if (detailsDiv) detailsDiv.innerHTML = '';
@@ -11835,7 +12151,7 @@ function updateApiStats(apis) {
     if (skillsCountEl) skillsCountEl.textContent = skillsCount;
 }
 
-// ==================== API Documentation Constants ====================
+// API 文档常量。
 /**
  * Badge HTML generation utility
  */
@@ -11935,7 +12251,7 @@ function generateCurlCommand(api, details) {
         const displayCmd = cmd.includes('\\') ? cmd.split('\n')[0] : cmd;
         return { display: displayCmd, full: cmd };
     } else if (api.method === 'POST') {
-        // Check if any parameter is of type FILE - if so, use FormData format
+        // 包含文件参数时使用 FormData。
         const hasFileParam = details.params && details.params.some(p => p.type === PARAM_TYPES.FILE);
 
         if (hasFileParam) {
@@ -12072,7 +12388,7 @@ function displayApiDocs(apis) {
     const tbody = document.getElementById('api-docs-table-body');
     if (!tbody) return;
 
-    // Use array.join() instead of string concatenation for better performance
+    // 批量拼接 HTML。
     const htmlParts = [];
     apis.forEach((api, index) => {
         const methodClass = api.method === 'GET' ? 'color: var(--success-color);' :
@@ -12960,7 +13276,7 @@ async function viewApkFile(filePath) {
     return viewApkFileAt(filePath, null);
 }
 
-// Java syntax highlighting constants (shared across renderApkCodeContent calls)
+// Java 语法高亮常量。
 const JAVA_KEYWORDS = new Set([
     'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class',
     'const', 'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'final',

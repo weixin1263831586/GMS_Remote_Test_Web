@@ -1,25 +1,7 @@
-"""Config override via Runtime Resource Overlay (RRO).
+"""通过 RRO 构建、安装和撤销 Android framework 配置覆盖。
 
-Builds a single static overlay APK that re-defines selected ``config_*``
-resources of the ``android`` (framework-res) package, pushes it to the device's
-trusted overlay path (``/product/overlay``), and reboots so the framework
-registers it — overriding the framework defaults at runtime **without
-recompiling or reflashing firmware**.
-
-Validated technique (manual run on a userdebug + unlocked device):
-    1. aapt2 build a tiny overlay APK from a manifest + res/values/config.xml
-    2. adb disable-verity (once) → reboot → adb root → adb remount /product
-    3. adb push Overlay.apk /product/overlay/ + chcon system_file:s0
-    4. adb reboot → framework applies the static overlay (high priority)
-
-This module is the host-side logic + orchestration. ``config_override_api.py``
-exposes it over HTTP; the device-config modal UI consumes that API.
-
-State model: ONE overlay APK on the device = a snapshot of ALL current
-overrides. The host store (``config_overrides.json``) is the source of truth,
-keyed by resource name (de-duplicated). ``apply()`` rebuilds the whole APK from
-the full entry set → push → reboot; idempotent. ``revert()`` deletes the APK →
-reboot.
+``config_overrides.json`` 保存全部配置项；应用时重建单个 Overlay APK，推送到
+``/product/overlay`` 并重启设备。
 """
 
 import json
@@ -43,12 +25,9 @@ from .network import run_local_shell_command
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
-# Resource types we can override. Mirrors config_explorer.RESOURCE_TYPES plus
-# fraction (a numeric-with-suffix type that framework-res config_* also uses).
+# 支持覆盖的 Android 资源类型。
 ALLOWED_TYPES = (
     "string", "bool", "integer", "dimen", "fraction",
     "integer-array", "string-array", "array",
@@ -60,14 +39,11 @@ _ARRAY_TYPES = ("integer-array", "string-array", "array")
 _DIMEN_UNITS = ("dp", "dip", "sp", "sip", "px", "in", "mm", "pt")
 # Fraction suffixes.
 _FRACTION_SUFFIXES = ("%", "%p")
-# Pre-sorted longest-first so _parse_number_unit matches the longest unit first
-# (e.g. "dip" before "dp") without re-sorting on every value validated.
+# 单位按长度降序，确保优先匹配 dip 等较长单位。
 _DIMEN_UNITS_SORTED = tuple(sorted(_DIMEN_UNITS, key=len, reverse=True))
 _FRACTION_SUFFIXES_SORTED = tuple(sorted(_FRACTION_SUFFIXES, key=len, reverse=True))
 
-# v1 target scope: only the framework package. The state schema carries
-# target_package per entry and the manifest builder accepts it, so v2
-# multi-package grouping is a small change. See apply_overrides.
+# 当前仅允许覆盖 framework 资源包。
 DEFAULT_TARGET_PACKAGE = "android"
 OVERLAY_PACKAGE = "com.rockchip.configoverrides"
 OVERLAY_PRIORITY = 9999
@@ -81,13 +57,11 @@ OVERLAY_DIR = "/product/overlay"
 # Host-side persistent store of pending/applied overrides.
 _STORE_PATH = Path(settings.data_root) / "config_overrides.json"
 
-# Resource name must match a PUBLIC framework resource: letters, digits, _, . -
+# 资源名仅允许 PUBLIC framework 资源使用的安全字符。
 _RESOURCE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 
 
-# ---------------------------------------------------------------------------
 # Data types
-# ---------------------------------------------------------------------------
 
 @dataclass
 class OverrideEntry:
@@ -138,9 +112,7 @@ class ApplyResult:
     rebooting: bool = False
 
 
-# ---------------------------------------------------------------------------
 # Validation & parsing (pure functions — unit-tested, no I/O)
-# ---------------------------------------------------------------------------
 
 def _escape(value: str) -> str:
     """XML-escape a user value for safe insertion into res/values/config.xml."""
@@ -190,20 +162,7 @@ def _parse_number_unit(value: str, allowed_units: tuple[str, ...], type_label: s
 
 
 def validate_override(rtype: str, value: str) -> str:
-    """Validate a user-supplied raw string value for resource type ``rtype``.
-
-    Returns the normalized value on success; raises ``ValueError`` with a
-    Chinese message on failure.
-
-      string:        any text (escaping done at render time).
-      bool:          'true'/'false' (case-insensitive) → lowercase.
-      integer:       base-10 integer (rejects hex/float).
-      dimen:         '<float><unit>', unit in _DIMEN_UNITS.
-      fraction:      '<float><suffix>', suffix '%' or '%p'.
-      integer-array: newline-separated items, each a base-10 integer.
-      string-array:  newline-separated items (any text).
-      array:         newline-separated items (any text; generic TypedArray).
-    """
+    """校验并规范化指定类型的资源覆盖值。"""
     if rtype not in ALLOWED_TYPES:
         raise ValueError(f"不支持的资源类型: {rtype}")
     if value is None:
@@ -236,9 +195,7 @@ def validate_override(rtype: str, value: str) -> str:
     return "\n".join(items)
 
 
-# ---------------------------------------------------------------------------
 # RRO XML / APK generation (pure-ish; build_overlay_apk runs aapt2)
-# ---------------------------------------------------------------------------
 
 def render_resource_xml(rtype: str, name: str, value: str) -> str:
     """Return one ``<...>`` element for res/values/config.xml.
@@ -344,7 +301,7 @@ def build_overlay_apk(
     out_apk = os.path.join(work_dir, "Overlay.apk")
     compiled = os.path.join(work_dir, "compiled.zip")
 
-    # compile (cwd=work_dir: aapt2 records res/values/config.xml into the zip)
+    # 在工作目录编译资源 XML。
     proc = subprocess.run(
         [aapt2, "compile", "-o", compiled, "res/values/config.xml"],
         cwd=work_dir, capture_output=True, text=True, timeout=120,
@@ -352,7 +309,7 @@ def build_overlay_apk(
     if proc.returncode != 0:
         raise RuntimeError(f"aapt2 compile 失败: {proc.stderr.strip()}")
 
-    # link: -I provides the symbol table so overlay refs resolve to PUBLIC ids.
+    # 链接时通过 -I 解析 PUBLIC 资源 ID。
     proc = subprocess.run(
         [
             aapt2, "link",
@@ -369,9 +326,7 @@ def build_overlay_apk(
     return out_apk
 
 
-# ---------------------------------------------------------------------------
 # Persistent store
-# ---------------------------------------------------------------------------
 
 class OverrideStore:
     """JSON-backed store of overrides, per device.
@@ -477,9 +432,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# ---------------------------------------------------------------------------
 # Device probing (read-only — never disable-verity / reboot / push)
-# ---------------------------------------------------------------------------
 
 def _run_adb(device_id: str | None, args: str, timeout: int = 15) -> tuple[str, int]:
     """Run an adb command on the host; return (combined output, return code)."""
@@ -514,8 +467,7 @@ def probe_status(device_id: str | None) -> OverrideStatus:
     verity = _getprop(device_id, "ro.boot.veritymode")
     status.verity_disabled = verity == "disabled"
 
-    # Read-only probes only. Do not run `adb root` or `adb remount` here; opening
-    # the status tab must not restart adbd or mutate mount state.
+    # 状态探测必须只读，不重启 adbd 或修改挂载状态。
     id_out, id_code = _run_adb(device_id, "shell id", timeout=10)
     status.rooted = id_code == 0 and ("uid=0(" in id_out or id_out.startswith("uid=0"))
 
@@ -529,16 +481,14 @@ def probe_status(device_id: str | None) -> OverrideStatus:
     if status.overlay_installed:
         status.overlay_apk_path = apk_remote
 
-    # Best-effort: how many overrides does the store say should be applied?
+    # 尽力读取预期生效的覆盖数量。
     store = OverrideStore()
     entries = store.list_entries(device_id)
     status.applied_entry_count = len(entries) if entries else 0
     return status
 
 
-# ---------------------------------------------------------------------------
 # dm-verity control (one-time bootstrap for apply)
-# ---------------------------------------------------------------------------
 
 @dataclass
 class VerityResult:
@@ -594,24 +544,13 @@ def reboot_device(device_id: str | None) -> ApplyResult:
     return ApplyResult(True, "rebooting", "设备正在重启，约 40 秒后刷新状态。", rebooting=True)
 
 
-# ---------------------------------------------------------------------------
 # Orchestration: apply / revert
-# ---------------------------------------------------------------------------
 
 def apply_overrides(
     device_id: str | None,
     store: OverrideStore | None = None,
 ) -> ApplyResult:
-    """Rebuild the single overlay APK from ALL stored entries, push, reboot.
-
-    Ordering guarantees atomicity (a failure at any stage leaves the device's
-    previous overlay untouched):
-      1. load + validate all entries  (no device I/O)
-      2. build APK locally            (no device I/O)
-      3. adb root + remount /product  (fails ⇒ raise, device untouched)
-      4. adb push + chcon
-      5. adb reboot (fire-and-forget) ⇒ return rebooting=True
-    """
+    """从全部已存配置重建 Overlay APK，推送并重启设备。"""
     store = store or OverrideStore()
     entries = store.list_entries(device_id)
     if not entries:

@@ -21,7 +21,7 @@ class ClusterReservationRepositoryMixin:
     def _expire_device_reservations(self, conn, now: str | None = None) -> int:
         now = now or _now()
         rows = conn.execute(
-            """SELECT device_id FROM cluster_device_reservations
+            """SELECT reservation_id,device_id FROM cluster_device_reservations
                WHERE status='active' AND expires_at<=?""",
             (now,),
         ).fetchall()
@@ -42,6 +42,20 @@ class ClusterReservationRepositoryMixin:
                      AND NOT EXISTS(SELECT 1 FROM cluster_device_reservations
                                     WHERE device_id=? AND status='active')""",
                 (now, row["device_id"], row["device_id"], row["device_id"]),
+            )
+        reservation_ids = {
+            row["reservation_id"]
+            for row in conn.execute(
+                """SELECT DISTINCT reservation_id
+                   FROM cluster_device_reservations
+                   WHERE status='expired' AND released_at=?""",
+                (now,),
+            ).fetchall()
+        }
+        for reservation_id in reservation_ids:
+            self.claims.release(
+                f"reservation:{reservation_id}",
+                status="expired",
             )
         return len(rows)
 
@@ -85,6 +99,18 @@ class ClusterReservationRepositoryMixin:
                        WHERE reservation_id=? AND status='active'""",
                     (now, _expires(ttl_seconds), reservation_id),
                 )
+                claim_devices = self._claim_devices(worker_id, existing_ids)
+                acquired, conflicts = self.claims.acquire(
+                    claim_devices,
+                    owner_id=owner_id,
+                    username=owner_id,
+                    source_type="cluster-reservation",
+                    source_id=f"reservation:{reservation_id}",
+                    ttl_seconds=ttl_seconds,
+                )
+                if not acquired:
+                    owner = conflicts[0].get("username") or conflicts[0].get("owner_id")
+                    raise ValueError(f"device is already claimed by {owner}")
                 return self._reservation_payload(conn, reservation_id)
             if existing:
                 raise ValueError("automation run already has a different active reservation")
@@ -107,23 +133,43 @@ class ClusterReservationRepositoryMixin:
                 rows.append(device)
 
             reservation_id = f"reservation-{uuid.uuid4().hex}"
-            for device in rows:
-                conn.execute(
-                    """INSERT INTO cluster_device_reservations
-                       (id,reservation_id,device_id,worker_id,serial,owner_id,source_id,
-                        status,acquired_at,heartbeat_at,expires_at,released_at)
-                       VALUES(?,?,?,?,?,?,?,'active',?,?,?,'')""",
-                    (
-                        f"reservation-item-{uuid.uuid4().hex}", reservation_id,
-                        device["id"], worker_id, device["serial"], owner_id,
-                        source_id, now, now, _expires(ttl_seconds),
-                    ),
+            claim_devices = self._claim_devices(
+                worker_id, [row["id"] for row in rows]
+            )
+            acquired, conflicts = self.claims.acquire(
+                claim_devices,
+                owner_id=owner_id,
+                username=owner_id,
+                source_type="cluster-reservation",
+                source_id=f"reservation:{reservation_id}",
+                ttl_seconds=ttl_seconds,
+            )
+            if not acquired:
+                owner = conflicts[0].get("username") or conflicts[0].get("owner_id")
+                raise ValueError(f"device is already claimed by {owner}")
+            try:
+                for device in rows:
+                    conn.execute(
+                        """INSERT INTO cluster_device_reservations
+                           (id,reservation_id,device_id,worker_id,serial,owner_id,source_id,
+                            status,acquired_at,heartbeat_at,expires_at,released_at)
+                           VALUES(?,?,?,?,?,?,?,'active',?,?,?,'')""",
+                        (
+                            f"reservation-item-{uuid.uuid4().hex}", reservation_id,
+                            device["id"], worker_id, device["serial"], owner_id,
+                            source_id, now, now, _expires(ttl_seconds),
+                        ),
+                    )
+                    conn.execute(
+                        "UPDATE cluster_worker_devices SET state='reserved',updated_at=? WHERE id=?",
+                        (now, device["id"]),
+                    )
+                return self._reservation_payload(conn, reservation_id)
+            except Exception:
+                self.claims.release(
+                    f"reservation:{reservation_id}", status="failed"
                 )
-                conn.execute(
-                    "UPDATE cluster_worker_devices SET state='reserved',updated_at=? WHERE id=?",
-                    (now, device["id"]),
-                )
-            return self._reservation_payload(conn, reservation_id)
+                raise
 
     @staticmethod
     def _reservation_payload(conn, reservation_id: str) -> dict[str, Any]:
@@ -169,14 +215,51 @@ class ClusterReservationRepositoryMixin:
 
     def renew_reservation(self, reservation_id: str, ttl_seconds: int = 6 * 60 * 60) -> bool:
         now = _now()
-        with self.connect() as conn:
-            cursor = conn.execute(
+        with self._lock, self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._expire_device_reservations(conn, now)
+            rows = conn.execute(
+                """SELECT * FROM cluster_device_reservations
+                   WHERE reservation_id=? AND status='active'
+                   ORDER BY device_id""",
+                (reservation_id,),
+            ).fetchall()
+            if not rows:
+                return False
+            acquired, _conflicts = self.claims.acquire(
+                self._claim_devices(
+                    rows[0]["worker_id"], [row["device_id"] for row in rows]
+                ),
+                owner_id=rows[0]["owner_id"],
+                username=rows[0]["owner_id"],
+                source_type="cluster-reservation",
+                source_id=f"reservation:{reservation_id}",
+                ttl_seconds=ttl_seconds,
+            )
+            if not acquired:
+                conn.execute(
+                    """UPDATE cluster_device_reservations
+                       SET status='expired',released_at=?
+                       WHERE reservation_id=? AND status='active'""",
+                    (now, reservation_id),
+                )
+                for row in rows:
+                    conn.execute(
+                        """UPDATE cluster_worker_devices
+                           SET state='available',updated_at=?
+                           WHERE id=? AND state='reserved'
+                             AND NOT EXISTS(SELECT 1 FROM device_leases
+                                            WHERE device_id=? AND status='active')""",
+                        (now, row["device_id"], row["device_id"]),
+                    )
+                return False
+            conn.execute(
                 """UPDATE cluster_device_reservations
                    SET heartbeat_at=?,expires_at=?
                    WHERE reservation_id=? AND status='active'""",
                 (now, _expires(ttl_seconds), reservation_id),
             )
-        return cursor.rowcount > 0
+            return True
 
     def release_reservation(self, reservation_id: str, status: str = "released") -> bool:
         if status not in {"released", "cancelled", "converted", "expired"}:
@@ -206,4 +289,8 @@ class ClusterReservationRepositoryMixin:
                                         WHERE device_id=? AND status='active')""",
                     (now, row["device_id"], row["device_id"], row["device_id"]),
                 )
+        self.claims.release(
+            f"reservation:{reservation_id}",
+            status=status,
+        )
         return True

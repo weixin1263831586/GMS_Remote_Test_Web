@@ -131,9 +131,7 @@ class ReportingAnalysisMixin:
             return f"<pre><code{cls}>\n{code}</code></pre>"
         return re.sub(r"```(\w*)\n([\s\S]*?)```", _replace, str(text or ""))
 
-    # ------------------------------------------------------------------
     # Document generation
-    # ------------------------------------------------------------------
 
     def _build_issue_document(self, item: dict[str, Any]) -> str:
         failures = item.get("failures_json") or []
@@ -246,8 +244,7 @@ class ReportingAnalysisMixin:
         # Reply draft at the end
         lines.extend(["", "## 建议回复草稿", item.get("reply_draft") or "", ""])
 
-        # Defensive flatten: AI/stored fields (notes, solution, reply_draft, ...)
-        # can occasionally be a list instead of a str, which would break the join.
+        # 将 AI 和存储字段统一转换为字符串。
         # Coerce every item to a single str so the document always builds.
         return "\n".join(_doc_line(x) for x in lines).strip() + "\n"
 
@@ -295,9 +292,7 @@ class ReportingAnalysisMixin:
 
         return "\n".join(lines).strip() + "\n"
 
-    # ------------------------------------------------------------------
     # Shared helpers (used by router for field enrichment)
-    # ------------------------------------------------------------------
 
     @staticmethod
     def extract_error_from_failures(failures: list) -> str:

@@ -12,7 +12,6 @@ from foundation.config import settings
 
 DB_PATH = settings.data_root / "redmine/redmine.sqlite3"
 DOCS_DIR = settings.data_root / "redmine/docs"
-USER_MAP_PATH = settings.project_root / "configs/redmine_user_map.json"
 
 
 def owner_redmine_root(owner_id: str) -> Path:
@@ -33,11 +32,11 @@ def owner_attachments_dir(owner_id: str) -> Path:
 
 
 def owner_runtime_config_path(owner_id: str) -> Path:
-    return settings.project_root / "configs/config_runtime.json"
+    return owner_redmine_root(owner_id) / "config_runtime.json"
 
 
 def owner_user_map_path(owner_id: str) -> Path:
-    return USER_MAP_PATH
+    return owner_redmine_root(owner_id) / "redmine_user_map.json"
 
 
 def owner_knowledge_db_path(owner_id: str) -> Path:
@@ -161,12 +160,7 @@ def _name_matches_keys(value: Any, owner_keys: set) -> bool:
     return False
 
 
-# ------------------------------------------------------------------
 # User-map helpers (shared by executor and router)
-# ------------------------------------------------------------------
-
-_user_map_cache: tuple = (0.0, [])  # (mtime, parsed_list)
-
 
 def _name_display_variants(value: Any) -> list[str]:
     text = str(value or "").strip()
@@ -200,23 +194,6 @@ def _flatten_departments(payload: Any) -> list[dict[str, Any]]:
     return result
 
 
-def load_redmine_user_map() -> list[dict[str, Any]]:
-    global _user_map_cache
-    if not USER_MAP_PATH.exists():
-        _user_map_cache = (0.0, [])
-        return []
-    try:
-        mtime = USER_MAP_PATH.stat().st_mtime
-        if _user_map_cache[0] == mtime:
-            return _user_map_cache[1]
-        payload = json.loads(USER_MAP_PATH.read_text(encoding="utf-8"))
-        result = _flatten_departments(payload)
-        _user_map_cache = (mtime, result)
-        return result
-    except Exception:
-        return []
-
-
 def _load_user_map_payload_from(path) -> dict[str, Any]:
     """Load the raw user-map JSON payload (for mutation + save round-trips)."""
     if not path.exists():
@@ -233,19 +210,8 @@ def _load_user_map_payload_from(path) -> dict[str, Any]:
 
 def _save_user_map_payload_to(path, payload: dict[str, Any]) -> None:
     """Write the raw user-map JSON payload to disk."""
-    global _user_map_cache
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    if path == USER_MAP_PATH:
-        _user_map_cache = (0.0, [])
-
-
-def load_user_map_payload() -> dict[str, Any]:
-    return _load_user_map_payload_from(USER_MAP_PATH)
-
-
-def save_user_map_payload(payload: dict[str, Any]) -> None:
-    _save_user_map_payload_to(USER_MAP_PATH, payload)
 
 
 def load_redmine_user_map_for_owner(owner_id: str) -> list[dict[str, Any]]:
@@ -256,11 +222,7 @@ def load_user_map_payload_for_owner(owner_id: str) -> dict[str, Any]:
     owner_path = owner_user_map_path(owner_id)
     if owner_path.exists():
         return _load_user_map_payload_from(owner_path)
-    # 无 per-user 副本时直接返回全局 payload，不在此处落盘——避免任意
-    # owner（含测试用假用户）首次访问就在 configs/ 下产生残留副本。
-    # per-user 副本只在用户显式保存自己的 user_map 时由
-    # save_user_map_payload_for_owner 写入。
-    return _load_user_map_payload_from(USER_MAP_PATH)
+    return {"departments": []}
 
 
 def save_user_map_payload_for_owner(owner_id: str, payload: dict[str, Any]) -> None:
@@ -278,13 +240,13 @@ def display_names_from_mapping(item: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
 
 
-def find_user_mapping(name: str, user_map: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
-    """Find the user_map entry matching ``name``.
+def find_user_mapping(
+    name: str,
+    user_map: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Find ``name`` in an explicitly owner-scoped user map."""
 
-    ``user_map`` defaults to the global map; pass a per-owner map to match
-    against an isolated user list.
-    """
-    return find_user_mapping_for_names(user_map if user_map is not None else load_redmine_user_map(), [name])
+    return find_user_mapping_for_names(user_map, [name])
 
 
 def find_user_mapping_for_names(user_map: list[dict[str, Any]], names: list[str]) -> dict[str, Any] | None:
@@ -328,7 +290,10 @@ def _looks_like_report_attachment(attachment: dict[str, Any]) -> bool:
     return has_report_word or (has_report_ext and any(token in filename for token in ("log", "result", "report", "cts", "gts", "vts", "gms")))
 
 
-def _looks_like_rk_actor(actor: Any) -> bool:
+def _looks_like_rk_actor(
+    actor: Any,
+    user_map: list[dict[str, Any]] | None = None,
+) -> bool:
     if isinstance(actor, dict):
         email = str(actor.get("user_email") or actor.get("email") or actor.get("mail") or "").strip().lower()
         if email.endswith("@rock-chips.com"):
@@ -345,7 +310,7 @@ def _looks_like_rk_actor(actor: Any) -> bool:
     if "fae" in lowered or "瑞芯" in text:
         return True
     actor_keys = _name_keys(text)
-    for item in load_redmine_user_map():
+    for item in user_map or []:
         for value in display_names_from_mapping(item):
             value_keys = _name_keys(value)
             if actor_keys.intersection(value_keys) or _name_matches_keys(text, value_keys):
@@ -411,6 +376,7 @@ async def compute_user_overdue_stats(
     issue_limit: int = 500,
     window_days: int = 0,
     force_refresh: bool = False,
+    organization_user_map: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compute workload + overdue stats for a single mapped user.
 
@@ -429,6 +395,7 @@ async def compute_user_overdue_stats(
         list_limit=min(issue_limit, 100),
         display_names=owner_names,
         window_days=window_days,
+        organization_user_map=organization_user_map,
     )
     if force_refresh or (counts.get("open_count") and int(workload.get("open_count") or 0) == 0):
         changed = await refresh_assignee_issue_snapshots(
@@ -445,6 +412,7 @@ async def compute_user_overdue_stats(
                 list_limit=min(issue_limit, 100),
                 display_names=owner_names,
                 window_days=window_days,
+                organization_user_map=organization_user_map,
             )
     if force_refresh and hasattr(client, "fetch_issue_metadata_snapshot"):
         stale_items = list((workload.get("lists") or {}).get("no_reply_3_days") or [])
@@ -469,11 +437,9 @@ async def compute_user_overdue_stats(
                 list_limit=min(issue_limit, 100),
                 display_names=owner_names,
                 window_days=window_days,
+                organization_user_map=organization_user_map,
             )
-    # Resolve trends live from Redmine (per assignee) so the department view
-    # reflects every member, independent of which issues were synced to the
-    # local DB (the DB only holds issues assigned to the configured sync user).
-    # Fall back to the local-DB trends if the live fetch fails.
+    # 实时读取成员趋势，失败时保留本地数据库结果。
     try:
         live_trends = await client.resolved_trends_by_assignee(user_id)
     except Exception:

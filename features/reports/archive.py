@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import glob
-import io
 import logging
 import os
 import re
@@ -154,8 +153,8 @@ class ReportAnalyzer:
                 if result:
                     return result
             except Exception as e:
-                logger.warning("ReportAnalysisAgent failed, falling back to legacy archive parser: %s", e)
-            report = self._analyze_archive(file_path)
+                logger.error("ReportAnalysisAgent failed: %s", e)
+            return None
         elif lower_path.endswith('.xml'):
             report = self.parser.parse_file(file_path)
         else:
@@ -165,155 +164,6 @@ class ReportAnalyzer:
         if report:
             self.report = report
             return self._report_to_dict(report)
-        return None
-
-    @staticmethod
-    def _archive_basename(member_name: str) -> str:
-        return os.path.basename(member_name.replace('\\', '/'))
-
-    @classmethod
-    def _is_test_result_member(cls, member_name: str) -> bool:
-        return cls._archive_basename(member_name) == 'test_result.xml'
-
-    @classmethod
-    def _is_host_log_member(cls, member_name: str) -> bool:
-        return HostLogParser._is_host_log_filename(cls._archive_basename(member_name))
-
-    def _parse_host_log_stream(self, stream, member_name: str) -> TestReport | None:
-        with io.TextIOWrapper(stream, encoding='utf-8', errors='ignore') as text_stream:
-            return self.host_log_parser.parse_content(
-                text_stream.read(),
-                os.path.dirname(member_name.replace('\\', '/'))
-            )
-
-    def _analyze_archive(self, archive_path: str) -> TestReport | None:
-        """直接从压缩包中读取目标文件，避免完整解压大报告。"""
-        lower_path = archive_path.lower()
-        try:
-            if lower_path.endswith('.zip'):
-                return self._analyze_zip_archive(archive_path)
-            if lower_path.endswith(('.rar', '.7z')):
-                return self._analyze_7z_archive(archive_path)
-            return self._analyze_tar_archive(archive_path)
-        except Exception as e:
-            logger.error(f"压缩包分析失败: {e}")
-            return None
-
-    def _analyze_zip_archive(self, archive_path: str) -> TestReport | None:
-        with zipfile.ZipFile(archive_path, 'r') as zf:
-            file_infos = [info for info in zf.infolist() if not info.is_dir()]
-
-            xml_info = next((info for info in file_infos if self._is_test_result_member(info.filename)), None)
-            if xml_info:
-                with zf.open(xml_info) as stream:
-                    return self.parser.parse_stream(stream)
-
-            host_log_info = next((info for info in file_infos if self._is_host_log_member(info.filename)), None)
-            if host_log_info:
-                with zf.open(host_log_info) as stream:
-                    return self._parse_host_log_stream(stream, host_log_info.filename)
-
-        return None
-
-    def _list_7z_members(self, archive_path: str) -> list[str]:
-        if archive_path.lower().endswith('.rar') and shutil.which('rar'):
-            return self._list_rar_members(archive_path)
-        if not shutil.which('7z'):
-            raise RuntimeError('7z command not found, cannot read RAR archive')
-        result = subprocess.run(
-            ['7z', 'l', '-slt', archive_path],
-            check=True,
-            capture_output=True,
-            text=True,
-            errors='replace',
-            timeout=60,
-        )
-        members = []
-        current_path = ''
-        current_is_file = False
-        for line in [*result.stdout.splitlines(), '']:
-            if line.startswith('Path = '):
-                if current_path and current_is_file:
-                    members.append(current_path)
-                current_path = line.split(' = ', 1)[1].strip()
-                current_is_file = False
-            elif line == 'Folder = -':
-                current_is_file = True
-            elif line == 'Folder = +':
-                current_is_file = False
-            elif line.startswith('Attributes = '):
-                current_is_file = not line.split(' = ', 1)[1].startswith('D')
-            elif not line and current_path:
-                if current_is_file:
-                    members.append(current_path)
-                current_path = ''
-                current_is_file = False
-        return members
-
-    def _open_7z_member_bytes(self, archive_path: str, member_name: str) -> io.BytesIO:
-        if archive_path.lower().endswith('.rar') and shutil.which('rar'):
-            return self._open_rar_member_bytes(archive_path, member_name)
-        result = subprocess.run(
-            ['7z', 'x', '-so', archive_path, member_name],
-            check=True,
-            capture_output=True,
-            timeout=60,
-        )
-        return io.BytesIO(result.stdout)
-
-    def _list_rar_members(self, archive_path: str) -> list[str]:
-        result = subprocess.run(
-            ['rar', 'lb', archive_path],
-            check=True,
-            capture_output=True,
-            text=True,
-            errors='replace',
-            timeout=60,
-        )
-        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
-
-    def _open_rar_member_bytes(self, archive_path: str, member_name: str) -> io.BytesIO:
-        result = subprocess.run(
-            ['rar', 'p', archive_path, member_name],
-            check=True,
-            capture_output=True,
-            timeout=60,
-        )
-        return io.BytesIO(result.stdout)
-
-    def _analyze_7z_archive(self, archive_path: str) -> TestReport | None:
-        members = self._list_7z_members(archive_path)
-
-        xml_member = next((member for member in members if self._is_test_result_member(member)), None)
-        if xml_member:
-            with self._open_7z_member_bytes(archive_path, xml_member) as stream:
-                return self.parser.parse_stream(stream)
-
-        host_log_member = next((member for member in members if self._is_host_log_member(member)), None)
-        if host_log_member:
-            with self._open_7z_member_bytes(archive_path, host_log_member) as stream:
-                return self._parse_host_log_stream(stream, host_log_member)
-
-        return None
-
-    def _analyze_tar_archive(self, archive_path: str) -> TestReport | None:
-        with tarfile.open(archive_path, 'r:*') as tf:
-            file_members = [member for member in tf.getmembers() if member.isfile()]
-
-            xml_member = next((member for member in file_members if self._is_test_result_member(member.name)), None)
-            if xml_member:
-                stream = tf.extractfile(xml_member)
-                if stream:
-                    with stream:
-                        return self.parser.parse_stream(stream)
-
-            host_log_member = next((member for member in file_members if self._is_host_log_member(member.name)), None)
-            if host_log_member:
-                stream = tf.extractfile(host_log_member)
-                if stream:
-                    with stream:
-                        return self._parse_host_log_stream(stream, host_log_member.name)
-
         return None
 
     def analyze_log_dir(self, log_dir: str) -> dict | None:
@@ -504,7 +354,7 @@ class ReportAnalyzer:
             logger.error(f"代码搜索异常：{e}")
             return []
     def _report_to_dict(self, report: TestReport) -> dict:
-        """将报告对象转换为字典（兼容旧格式）"""
+        """将报告对象转换为 API 字典。"""
         return {
             'summary': {
                 'total': report.total,

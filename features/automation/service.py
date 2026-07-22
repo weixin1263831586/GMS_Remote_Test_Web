@@ -15,15 +15,16 @@ from features.automation.executors import (
 from features.automation.gerrit_trigger import (
     match_profiles,
     normalize_gerrit_event,
-    profile_matches_event,
 )
-from features.automation.models import AutomationRunCreateRequest, TERMINAL_STATUSES
+from features.automation.models import TERMINAL_STATUSES, AutomationRunCreateRequest
 from features.automation.orchestrator import AutomationOrchestrator
+from features.automation.profile_dry_run import dry_run_profile
 from features.automation.profiles import load_profiles, upsert_profile
 from features.automation.repository import AutomationStore
+from foundation.secrets import decrypt_secret, encrypt_secret
 
 
-GerritQuery = Callable[[str, int], Awaitable[list[dict[str, Any]]]]
+GerritQuery = Callable[[str, str, int], Awaitable[list[dict[str, Any]]]]
 
 
 class AutomationNotFoundError(LookupError):
@@ -44,7 +45,6 @@ class AutomationService:
         self.store = store
         self.profiles_path = profiles_path
         self.gerrit_query = gerrit_query
-        self._build_passwords: dict[str, str] = {}
         self._device_selector = device_selector
         self._device_manager = device_manager
         self._cluster_provider = cluster_provider
@@ -66,7 +66,8 @@ class AutomationService:
         return AutomationOrchestrator(self.store, executor)
 
     def get_build_password(self, run_id: str) -> str:
-        return self._build_passwords.get(run_id, "")
+        encrypted = self.store.get_run_secret(run_id, "build_server_password")
+        return decrypt_secret(encrypted) if encrypted else ""
 
     def list_profiles(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         return load_profiles(self.profiles_path, enabled_only=enabled_only)
@@ -79,53 +80,17 @@ class AutomationService:
         profile_id: str,
         request: dict[str, Any],
     ) -> dict[str, Any]:
-        profile = next(
-            (
-                item
-                for item in self.list_profiles()
-                if item.get('id') == profile_id
-            ),
-            None,
+        return dry_run_profile(
+            self,
+            profile_id,
+            request,
+            not_found_error=AutomationNotFoundError,
         )
-        if profile is None:
-            raise AutomationNotFoundError('Automation profile not found')
-        event = normalize_gerrit_event(
-            {
-                'type': 'dry-run',
-                'change': {
-                    'project': request.get('project', ''),
-                    'branch': request.get('branch', ''),
-                    'number': (
-                        request.get('change_id')
-                        or request.get('number')
-                        or ''
-                    ),
-                    'subject': request.get('subject', ''),
-                    'owner': {'email': request.get('owner', '')},
-                },
-                'patchSet': {
-                    'number': request.get('patchset', ''),
-                    'revision': request.get('revision', ''),
-                },
-            }
-        )
-        matched = profile_matches_event(profile, event)
-        run_request = (
-            self._run_request_from_gerrit_event(event, profile).model_dump()
-            if matched
-            else {}
-        )
-        return {
-            'matched': matched,
-            'event': event,
-            'profile': profile,
-            'run_request': run_request,
-        }
 
     def create_run(
         self, request: dict[str, Any], *, created_by: str = ""
     ) -> dict[str, Any]:
-        # Password removal below must never mutate the caller's nested request.
+        # 深拷贝后再移除密码，避免修改调用方请求。
         # API bodies are usually disposable, but programmatic callers reuse
         # these dictionaries after validation errors and for audit logging.
         body = copy.deepcopy(request or {})
@@ -148,15 +113,16 @@ class AutomationService:
         create_request = AutomationRunCreateRequest(**body)
         run_data = create_request.to_run_dict(self.new_run_id())
         run_data["created_by"] = str(created_by or "")
-        run = self.store.create_run(run_data)
+        encrypted_secrets = {}
         if build_password:
-            self._build_passwords[run['id']] = build_password
+            encrypted_secrets["build_server_password"] = encrypt_secret(build_password)
+        run = self.store.create_run(run_data, encrypted_secrets=encrypted_secrets)
         self.store.append_event(
-            run['id'],
-            run['status'],
-            'info',
-            'Automation run queued',
+            run['id'], run['status'], 'info', 'Automation run queued',
             {'profile_id': run['profile_id']},
+            event_type='run.created', operation_id=f"{run['id']}:create",
+            from_status='',
+            to_status=run['status'],
         )
         return run
 
@@ -253,9 +219,6 @@ class AutomationService:
         worker_id = str(
             plan.get('worker_id') or cluster.config.local_worker_id
         ).strip()
-        if worker_id == 'worker-local':
-            # Compatibility for profiles saved before local_worker_id was configurable.
-            worker_id = cluster.config.local_worker_id
         auto_selected = worker_id == 'auto'
         suite_path = str(plan.get('test_suite') or '').strip()
         selector = plan.get('device_selector') if isinstance(
@@ -473,10 +436,11 @@ class AutomationService:
         run_data['devices_json'] = old['devices_json']
         run_data['test_plan_json'] = old['test_plan_json']
         run_data['created_by'] = old.get('created_by', '')
-        run = self.store.create_run(run_data)
-        retry_password = self._build_passwords.get(run_id, "")
+        retry_password = self.get_build_password(run_id)
+        encrypted_secrets = {}
         if retry_password:
-            self._build_passwords[run["id"]] = retry_password
+            encrypted_secrets["build_server_password"] = encrypt_secret(retry_password)
+        run = self.store.create_run(run_data, encrypted_secrets=encrypted_secrets)
         self.store.append_event(
             run['id'],
             run['status'],
@@ -489,15 +453,35 @@ class AutomationService:
     def worker_tick(self, executor_name: str = 'stub'):
         return self.orchestrator(executor_name).advance_next()
 
-    def handle_gerrit_webhook(self, payload: dict[str, Any]):
+    @staticmethod
+    def _require_owner_id(owner_id: str) -> str:
+        owner = str(owner_id or "").strip()
+        if not owner:
+            raise ValueError("Automation owner id is required")
+        return owner
+
+    def handle_gerrit_webhook(
+        self,
+        payload: dict[str, Any],
+        *,
+        created_by: str,
+    ):
+        owner_id = self._require_owner_id(created_by)
         event = normalize_gerrit_event(payload or {})
         result = self._create_runs_for_event(
             event,
             self.list_profiles(enabled_only=True),
+            created_by=owner_id,
         )
         return {'event': event, **result}
 
-    async def poll_gerrit_changes(self, limit: int = 100):
+    async def poll_gerrit_changes(
+        self,
+        limit: int = 100,
+        *,
+        created_by: str,
+    ):
+        owner_id = self._require_owner_id(created_by)
         if self.gerrit_query is None:
             raise RuntimeError('Gerrit query provider is not configured')
         created = []
@@ -513,10 +497,14 @@ class AutomationService:
             query = str(gerrit.get('query') or '').strip()
             if not query:
                 continue
-            for change in await self.gerrit_query(query, limit):
+            for change in await self.gerrit_query(owner_id, query, limit):
                 event = self._gerrit_change_to_event(change)
                 events.append(event)
-                result = self._create_runs_for_event(event, [profile])
+                result = self._create_runs_for_event(
+                    event,
+                    [profile],
+                    created_by=owner_id,
+                )
                 created.extend(result['created'])
                 existing.extend(result['existing'])
                 rejected.extend(result['rejected'])
@@ -658,7 +646,10 @@ class AutomationService:
         self,
         event: dict[str, Any],
         profiles: list[dict[str, Any]],
+        *,
+        created_by: str,
     ) -> dict[str, Any]:
+        owner_id = self._require_owner_id(created_by)
         matches = match_profiles(event, profiles)
         created = []
         existing = []
@@ -684,7 +675,7 @@ class AutomationService:
             try:
                 run = self.create_run(
                     request_data,
-                    created_by=str(event.get('owner') or 'gerrit'),
+                    created_by=owner_id,
                 )
             except ValueError as exc:
                 rejected.append({

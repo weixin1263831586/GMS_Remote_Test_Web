@@ -97,7 +97,7 @@ def test_simplify_layout_filters_noise_and_keeps_clickable():
     texts = {it["text"] for it in items}
     assert "Chrome" in texts
     assert "Home" in texts
-    # 无 text 但有 interaction 的节点 resource_id 回填为空字符串，text 为空，靠 interactions 保留。
+    # 无文本节点通过 interactions 保留。
     assert any(it["interactions"] == ["scrollable"] for it in items)
 
 

@@ -17,10 +17,7 @@ from typing import Any
 from .cert_rules import detect_certification_errors, detect_certification_type
 
 
-# Placeholder texts the rule-based fallbacks emit when no real analysis is
-# available. They carry no knowledge and must never win over the signature KB.
-# Shared by the mature-case builder, reply drafter and knowledge service so the
-# list stays in one place (Redmine.txt §5.4).
+# 无有效分析时的占位文本，不参与知识匹配。
 MEANINGLESS_PLACEHOLDERS = (
     "暂无分析结果",
     "暂无",
@@ -94,7 +91,7 @@ def decode_json_obj(value, default=None):
     return default if default is not None else {}
 
 
-# Module detection rules: (module_name, compiled regex on the issue text).
+# 模块名称及工单文本匹配规则。
 _MODULE_RULES = [
     ("AVB/VBMeta", re.compile(r"vbmeta|avb\b|verified\s*boot", re.I)),
     ("Power HAL", re.compile(r"VtsHalPower|PowerAidl|power_ext|power\s*hal", re.I)),
@@ -109,9 +106,7 @@ _MODULE_RULES = [
     ("Boot/Wifi", re.compile(r"无法.*开机|boot.*fail|wifi", re.I)),
 ]
 
-# Canonical error signatures. Each entry: (signature, list of patterns).
-# When any pattern matches, that signature is recorded — it is what the
-# similarity search uses to cluster duplicate problems (Redmine.txt §5.3).
+# 错误签名及其匹配规则，用于聚合同类问题。
 _ERROR_SIGNATURES = [
     (
         "VBMeta test key",
@@ -302,9 +297,7 @@ class RedmineCaseExtractor:
             "source_quality": source_quality,
         }
 
-    # ------------------------------------------------------------------
     # Detection rules
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _detect_chip_platform(subject: str, description: str, fixed_version: str) -> str:
@@ -350,12 +343,10 @@ class RedmineCaseExtractor:
                 return name
         return ""
 
-    # product_form reuses region rules for now (no separate detection yet).
+    # product_form 使用与 region 相同的识别规则。
     _detect_product_form = _detect_region
 
-    # ------------------------------------------------------------------
     # Text composition
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _collect_attachment_failure_text(attachments: list) -> str:

@@ -13,6 +13,7 @@ class WorkerRegistration(BaseModel):
     agent_version: str = ""
     max_jobs: int = Field(default=1, ge=1, le=32)
     capabilities: dict[str, Any] = Field(default_factory=dict)
+    session_id: str = Field(default="", max_length=128)
 
 
 class WorkerDevice(BaseModel):
@@ -50,6 +51,15 @@ class RunningWorkerJob(BaseModel):
     log_path: str = ""
     last_output_age_seconds: int | None = Field(default=None, ge=0)
     warning: str = ""
+    trace_id: str = ""
+    operation_id: str = ""
+
+
+class WorkerCommandState(BaseModel):
+    id: str = Field(min_length=1, max_length=128)
+    status: Literal["accepted", "running", "completed", "failed", "cancelled"]
+    result: dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
 
 
 class WorkerHeartbeat(BaseModel):
@@ -63,6 +73,9 @@ class WorkerHeartbeat(BaseModel):
     running_jobs: list[RunningWorkerJob] = Field(default_factory=list)
     devices: list[WorkerDevice] = Field(default_factory=list)
     suites: list[WorkerSuite] | None = None
+    session_id: str = Field(default="", max_length=128)
+    connection_generation: int = Field(default=0, ge=0)
+    command_states: list[WorkerCommandState] = Field(default_factory=list, max_length=200)
     timestamp: str = ""
 
 
@@ -77,6 +90,8 @@ class CommandCreate(BaseModel):
     command_type: str
     job_id: str = ""
     attempt_id: str = ""
+    operation_id: str = ""
+    trace_id: str = ""
     payload: dict[str, Any] = Field(default_factory=dict)
 
 

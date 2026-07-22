@@ -1,27 +1,26 @@
-import asyncio
-import shlex
+from features.auth import (
+    authentication_required,
+    require_authenticated_user,
+)
+from features.users import get_client_display_id_from_request
 
+from .access import (
+    can_access_report,
+    filter_accessible_reports,
+    get_accessible_report_by_timestamp,
+    report_request_user,
+)
 from .api_helpers import (
     APIRouter,
     JSONResponse,
     Query,
     Request,
-    config_manager,
     dependencies,
     error_response,
-    get_client_id_from_request,
     logger,
     os,
     test_report_db,
 )
-
-
-try:
-    from features.users import get_client_display_id_from_request as _user_display_id_from_request
-    from features.users import get_client_id_from_request as _user_id_from_request
-except Exception:  # pragma: no cover - import fallback for isolated tests
-    _user_display_id_from_request = None
-    _user_id_from_request = None
 
 
 router = APIRouter()
@@ -29,15 +28,25 @@ REPORT_FILE_VIEW_MAX_BYTES = 1024 * 1024
 
 
 def _is_path_under(path: str, root: str) -> bool:
-    target = os.path.abspath(path)
-    base = os.path.abspath(root)
+    target = os.path.realpath(path)
+    base = os.path.realpath(root)
     return target == base or target.startswith(base + os.sep)
 
 
-def _is_registered_report_file_path(path: str) -> bool:
+def _is_registered_report_file_path(
+    path: str,
+    request: Request,
+) -> bool:
     if not path:
         return False
-    for report in test_report_db.get_reports(limit=500):
+    principal = require_authenticated_user(request)
+    for report in test_report_db.get_reports(
+        limit=500,
+        owner_id=None if principal.role == "admin" else principal.id,
+        include_all=principal.role == "admin",
+    ):
+        if not can_access_report(request, report):
+            continue
         result_dir = report.get("result_dir")
         if result_dir and _is_path_under(path, result_dir):
             return True
@@ -50,56 +59,21 @@ def _is_registered_report_file_path(path: str) -> bool:
     return False
 
 
-def _client_identity_aliases(request: Request) -> tuple[str, set[str]]:
-    display_id = ""
-    aliases: set[str] = set()
-    try:
-        if _user_id_from_request:
-            aliases.add(str(_user_id_from_request(request) or "").strip())
-    except Exception:
-        pass
-    try:
-        display_id = str(_user_display_id_from_request(request) or "").strip() if _user_display_id_from_request else ""
-        aliases.add(display_id)
-    except Exception:
-        pass
-    try:
-        legacy_id = str(get_client_id_from_request(request) or "").strip()
-        aliases.add(legacy_id)
-    except Exception:
-        pass
-    try:
-        config = config_manager.load_config()
-        configured_ip = str(config.get("client_ip") or "").strip()
-        username = str(config.get("client_username") or "").strip()
-        if configured_ip and username:
-            aliases.add(f"{username}@{configured_ip}")
-            display_id = display_id or f"{username}@{configured_ip}"
-    except Exception:
-        pass
-    return display_id, {item for item in aliases if item}
+def _decorate_report_for_client(
+    report: dict,
+    display_id: str = "",
+) -> dict:
+    """Return a browser-safe report record without host paths or owner keys."""
 
-
-def _decorate_report_for_client(report: dict, display_id: str, aliases: set[str]) -> dict:
     item = dict(report)
-    client_id = str(item.get("client_id") or "").strip()
     stored_display = str(item.get("display_client_id") or item.get("client_name") or "").strip()
     if stored_display:
         item["display_client_id"] = stored_display
-    elif display_id and client_id in aliases:
+    elif display_id:
         item["display_client_id"] = display_id
-    elif item.get("user") and "@" in client_id:
-        item["display_client_id"] = client_id
+    for private_key in ("owner_id", "client_id", "result_dir"):
+        item.pop(private_key, None)
     return item
-
-
-def _report_matches_aliases(report: dict, aliases: set[str]) -> bool:
-    values = {
-        str(report.get("client_id") or "").strip(),
-        str(report.get("display_client_id") or "").strip(),
-        str(report.get("client_name") or "").strip(),
-    }
-    return bool(aliases.intersection({item for item in values if item}))
 
 # ==================== List Reports ====================
 
@@ -116,66 +90,71 @@ async def list_reports(
     """Get test report list from database."""
     import time
     start_time = time.time()
+    principal = report_request_user(request)
+    if principal is None and authentication_required():
+        principal = require_authenticated_user(request)
 
     try:
-        display_id, aliases = _client_identity_aliases(request)
-        if user_only:
-            client_id_filter = next(iter(aliases), None)
-        else:
-            client_id_filter = None
+        display_id = (
+            (
+                str(getattr(principal, "display_name", "") or "")
+                or principal.username
+            )
+            if principal
+            else get_client_display_id_from_request(request)
+        )
 
         db_start = time.time()
         exact_filter = any((cluster_job_id, attempt_id, automation_run_id, report_timestamp))
+        owner_filter = (
+            None
+            if principal is None or (principal.role == "admin" and not user_only)
+            else principal.id
+        )
         if report_timestamp:
-            exact = test_report_db.get_report_by_timestamp(report_timestamp)
+            exact = get_accessible_report_by_timestamp(
+                test_report_db, request, report_timestamp
+            )
             candidate_reports = [exact] if exact else []
         elif exact_filter:
-            candidate_reports = test_report_db.get_reports(limit=500)
+            candidate_reports = test_report_db.get_reports(
+                limit=500,
+                owner_id=owner_filter,
+                include_all=owner_filter is None,
+            )
         else:
             candidate_reports = []
-        if user_only and not aliases:
-            all_reports = []
-        elif exact_filter:
-            all_reports = [
-                _decorate_report_for_client(report, display_id, aliases)
-                for report in candidate_reports
-                if report
-                and (not cluster_job_id or report.get("cluster_job_id") == cluster_job_id)
-                and (not attempt_id or report.get("attempt_id") == attempt_id)
-                and (not automation_run_id or report.get("automation_run_id") == automation_run_id)
-                and (not user_only or _report_matches_aliases(report, aliases))
+        if not exact_filter:
+            candidate_reports = test_report_db.get_reports(
+                limit=500,
+                owner_id=owner_filter,
+                include_all=owner_filter is None,
+            )
+        accessible = (
+            candidate_reports
+            if principal is None
+            else filter_accessible_reports(request, candidate_reports)
+        )
+        if principal and principal.role == "admin" and user_only:
+            accessible = [
+                report for report in accessible
+                if str(report.get("owner_id") or "") == principal.id
             ]
-        elif user_only:
-            candidate_reports = test_report_db.get_reports(limit=200)
-            all_reports = [
-                _decorate_report_for_client(report, display_id, aliases)
-                for report in candidate_reports
-                if _report_matches_aliases(report, aliases)
-            ][:30]
-        else:
-            all_reports = [
-                _decorate_report_for_client(report, display_id, aliases)
-                for report in test_report_db.get_reports(limit=30, user_only=client_id_filter)
-            ]
+        all_reports = [
+            report for report in accessible
+            if (not cluster_job_id or report.get("cluster_job_id") == cluster_job_id)
+            and (not attempt_id or report.get("attempt_id") == attempt_id)
+            and (not automation_run_id or report.get("automation_run_id") == automation_run_id)
+        ]
         if worker_id:
-            local_worker_id = "worker-local"
-            try:
-                from features.cluster import get_cluster_service
-
-                local_worker_id = get_cluster_service().config.local_worker_id
-            except (AttributeError, RuntimeError):
-                pass
-            local_aliases = {"", "worker-local", local_worker_id}
             all_reports = [
                 report for report in all_reports
-                if (
-                    str(report.get("worker_id") or "") == worker_id
-                    or (
-                        worker_id in local_aliases
-                        and str(report.get("worker_id") or "") in local_aliases
-                    )
-                )
+                if str(report.get("worker_id") or "") == worker_id
             ]
+        all_reports = [
+            _decorate_report_for_client(report, display_id)
+            for report in all_reports[:30]
+        ]
         db_time = (time.time() - db_start) * 1000
 
         total_time = (time.time() - start_time) * 1000
@@ -184,7 +163,7 @@ async def list_reports(
         return JSONResponse(content={"reports": all_reports, "worker_id": worker_id})
     except Exception as e:
         logger.error(f"Failed to get report list: {e}")
-        return JSONResponse(content={"reports": []})
+        return error_response("Failed to load reports", 500)
 
 
 # ==================== Download Report ====================
@@ -192,21 +171,44 @@ async def list_reports(
 @router.get("/api/reports/download")
 async def download_report(
     request: Request,
+    report_id: str = Query(None),
     report_timestamp: str = Query(None),
     download: bool = Query(False),
-    path: str = Query(None),
+    file: str = Query(None),
+    path: str = Query(None, include_in_schema=False),
 ):
     """Unified report interface: list files, download ZIP, or view file content."""
     FileUtils = dependencies.file_utils
     if FileUtils is None:
         return error_response("Report file service is not configured", 500)
 
+    require_authenticated_user(request)
     try:
-        if report_timestamp:
-            report = test_report_db.get_report_by_timestamp(report_timestamp)
+        if path:
+            return error_response(
+                "Absolute report paths are no longer accepted; use report_timestamp and file",
+                410,
+            )
+        if report_id or report_timestamp:
+            principal = require_authenticated_user(request)
+            report = (
+                test_report_db.get_report(
+                    report_id,
+                    owner_id=None if principal.role == "admin" else principal.id,
+                    include_all=principal.role == "admin",
+                )
+                if report_id and hasattr(test_report_db, "get_report")
+                else get_accessible_report_by_timestamp(
+                    test_report_db, request, report_timestamp
+                )
+            )
             if not report:
-                logger.error(f"[DOWNLOAD] Report not found: {report_timestamp}")
-                return error_response(f"Report not found: {report_timestamp}", 404)
+                logger.error("[DOWNLOAD] Report not found")
+                return error_response("Report not found", 404)
+            if not can_access_report(request, report):
+                return error_response("Report not found", 404)
+
+            report_timestamp = str(report.get("timestamp") or report_timestamp or "")
 
             report_dir = report.get("result_dir")
             if not report_dir or not os.path.exists(report_dir):
@@ -238,6 +240,35 @@ async def download_report(
                     headers={"Content-Disposition": f'attachment; filename="{report_timestamp}.zip"'},
                 )
 
+            if file:
+                relative = str(file or "").strip().replace("\\", "/")
+                if not relative or relative.startswith("/") or ".." in relative.split("/"):
+                    return error_response("Report file not found", 404)
+                if relative.startswith("logs/"):
+                    candidate = os.path.join(logs_dir, relative[5:])
+                else:
+                    candidate = os.path.join(report_dir, relative)
+                if not _is_registered_report_file_path(candidate, request) or not os.path.isfile(candidate):
+                    return error_response("Report file not found", 404)
+                with open(candidate, "rb") as report_file:
+                    raw_content = report_file.read(REPORT_FILE_VIEW_MAX_BYTES + 1)
+                truncated = len(raw_content) > REPORT_FILE_VIEW_MAX_BYTES
+                output = raw_content[:REPORT_FILE_VIEW_MAX_BYTES].decode(
+                    "utf-8", errors="replace"
+                )
+                file_ext = os.path.splitext(candidate)[1].lower()
+                content_type = (
+                    "text/html" if file_ext in {".xml", ".html"}
+                    else "application/json" if file_ext == ".json"
+                    else "text/plain"
+                )
+                return JSONResponse(content={
+                    "success": True,
+                    "content": output,
+                    "content_type": content_type,
+                    "truncated": truncated,
+                })
+
             logger.info(f"[DOWNLOAD] Get report file list: timestamp='{report_timestamp}'")
             all_files = []
             result_files = FileUtils.list_directory_files(report_dir, max_files=100, relative_to=report_dir)
@@ -251,39 +282,15 @@ async def download_report(
                 all_files.extend(log_files)
 
             logger.info(f"[DOWNLOAD] Found {len(all_files)} files (results: {len(result_files)}, logs: {len(log_files) if has_logs else 0})")
-            return JSONResponse(content={"success": True, "files": all_files})
-
-        elif path:
-            logger.info(f"[DOWNLOAD] View file content: path='{path}'")
-            if not _is_registered_report_file_path(path):
-                return error_response("File path is not part of a registered report", 403)
-            config = config_manager.load_config()
-            async with dependencies.ssh_manager.async_optional_connection(config) as ssh:
-                if not ssh:
-                    return error_response("SSH connection failed", 500)
-
-                cat_cmd = f"head -c {REPORT_FILE_VIEW_MAX_BYTES + 1} -- {shlex.quote(path)} 2>/dev/null"
-                output, _error, _code = await asyncio.to_thread(
-                    dependencies.ssh_manager.execute_command,
-                    ssh,
-                    cat_cmd,
-                    timeout=30,
-                )
-                truncated = len(output.encode("utf-8", errors="ignore")) > REPORT_FILE_VIEW_MAX_BYTES
-                if truncated:
-                    output = output[:REPORT_FILE_VIEW_MAX_BYTES]
-
-                file_ext = os.path.splitext(path)[1].lower()
-                if file_ext in [".xml", ".html"]:
-                    content_type = "text/html"
-                elif file_ext == ".json":
-                    content_type = "application/json"
-                else:
-                    content_type = "text/plain"
-
-                return JSONResponse(content={"success": True, "content": output, "content_type": content_type, "truncated": truncated})
+            safe_files = []
+            for file_info in all_files:
+                item = dict(file_info)
+                item.pop("path", None)
+                item["file"] = item.get("relative_path", "")
+                safe_files.append(item)
+            return JSONResponse(content={"success": True, "files": safe_files})
         else:
-            return error_response("Please provide report_timestamp or path parameter", 400)
+            return error_response("Please provide report_id or report_timestamp", 400)
 
     except Exception as e:
         logger.error(f"[DOWNLOAD] Request failed: {e}", exc_info=True)

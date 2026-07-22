@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from pathlib import Path
 
 from .adb_forward import adb_forward_manager
 from .manager import device_manager
@@ -10,19 +11,19 @@ from .usbip import usbip_manager
 
 def configure_device_dependencies(
     *,
-    ssh_manager: Any,
-    config_manager: Any,
-    global_state: Any,
-    store_notification: Any,
-    generate_help_or_continue: Any,
-    get_client_id_from_request: Any,
-    probe_windows_usbipd: Any,
-    resolve_tailscale_device_host: Any,
-    safe_websocket_send: Any,
-    get_client_ip: Any,
-    client_manager: Any,
-    run_local_shell_command: Any,
-    project_root: Any,
+    ssh_manager: object,
+    config_manager: object,
+    global_state: object,
+    store_notification: Callable[..., object],
+    generate_help_or_continue: Callable[..., object],
+    get_client_id_from_request: Callable[..., object],
+    probe_windows_usbipd: Callable[..., object],
+    resolve_tailscale_device_host: Callable[..., object],
+    safe_websocket_send: Callable[..., object],
+    get_client_ip: Callable[..., object],
+    client_manager: object,
+    run_local_shell_command: Callable[..., object],
+    project_root: Path,
     device_cache_ttl: float,
 ) -> None:
     usbip_manager.ssh_manager = ssh_manager

@@ -1,4 +1,4 @@
-from .locks import device_lock_manager
+from .locks import DeviceLockManager, device_lock_manager
 from .manager import device_manager
 from .models import (
     ADBForwardStartRequest,
@@ -34,9 +34,12 @@ _LAZY_API_EXPORTS = {
 def __getattr__(name: str):
     if name not in _LAZY_API_EXPORTS:
         raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
-    from . import api
+    if name == 'connect_wifi':
+        from .operations_api import connect_wifi as value
+    else:
+        from . import management_api
 
-    value = getattr(api, name)
+        value = getattr(management_api, name)
     globals()[name] = value
     return value
 
@@ -44,6 +47,7 @@ def __getattr__(name: str):
 __all__ = [
     "ADBForwardStartRequest",
     "DeviceActionRequest",
+    "DeviceLockManager",
     "DeviceLockRequest",
     "DeviceSSHConnection",
     "DeviceService",

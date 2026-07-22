@@ -5,8 +5,11 @@ from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.devices import operations_api
-from features.devices.models import WifiConnectRequest
+from starlette.requests import Request
+
+from features.auth import CurrentUser
+from features.devices import device_lock_manager, management_api, operations_api
+from features.devices.models import DeviceActionRequest, WifiConnectRequest
 
 
 class _ConfigManager:
@@ -50,10 +53,24 @@ class _SshManager:
 
 
 class DeviceOperationsTests(unittest.TestCase):
+    @staticmethod
+    def request_for(username="alice"):
+        request = Request({
+            "type": "http",
+            "method": "POST",
+            "path": "/",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+        })
+        request.state.current_user = CurrentUser(
+            id=f"id-{username}", username=username, role="user"
+        )
+        return request
+
     def test_management_payload_uses_request_client_id_for_self_lock(self):
         with (
             patch.object(
-                operations_api.device_lock_manager,
+                management_api.device_lock_manager,
                 "get_all_locks",
                 return_value={
                     "ABC-123": {
@@ -63,12 +80,12 @@ class DeviceOperationsTests(unittest.TestCase):
                 },
             ),
             patch.object(
-                operations_api.runtime,
+                management_api.runtime,
                 "config_manager",
                 _ConfigManager(),
             ),
             patch.object(
-                operations_api.runtime,
+                management_api.runtime,
                 "global_state",
                 SimpleNamespace(
                     usbip_devices_source={},
@@ -76,7 +93,7 @@ class DeviceOperationsTests(unittest.TestCase):
                 ),
             ),
         ):
-            payload = operations_api._build_devices_management_payload(
+            payload = management_api._build_devices_management_payload(
                 ["ABC-123"],
                 {"ABC-123": {"serial_no": "ABC-123"}},
                 {},
@@ -85,13 +102,38 @@ class DeviceOperationsTests(unittest.TestCase):
 
         self.assertTrue(payload["devices"][0]["locked_by_self"])
 
+    def test_management_payload_hides_another_users_identity_and_lease(self):
+        payload = {
+            "devices": [{
+                "device_id": "ABC-123",
+                "locked_by": "bob",
+                "locked_username": "bob",
+                "locked_client_id": "id-bob",
+                "locked_by_self": False,
+                "lease_id": "lease-secret",
+                "lease_generation": 7,
+            }]
+        }
+
+        sanitized = management_api._sanitize_management_payload(
+            payload,
+            principal=CurrentUser(id="id-alice", username="alice", role="user"),
+        )
+
+        device = sanitized["devices"][0]
+        self.assertEqual(device["locked_by"], "occupied")
+        self.assertEqual(device["locked_username"], "")
+        self.assertEqual(device["locked_client_id"], "")
+        self.assertEqual(device["lease_id"], "")
+        self.assertEqual(device["lease_generation"], 0)
+
     def test_management_payload_uses_persisted_usbip_source(self):
         with (
-            patch.object(operations_api.device_lock_manager, "get_all_locks", return_value={}),
-            patch.object(operations_api.runtime, "config_manager", _ConfigManager()),
-            patch.object(operations_api, "_active_usbip_serials", return_value={"USBIP001"}),
+            patch.object(management_api.device_lock_manager, "get_all_locks", return_value={}),
+            patch.object(management_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(management_api, "_active_usbip_serials", return_value={"USBIP001"}),
             patch.object(
-                operations_api.runtime,
+                management_api.runtime,
                 "global_state",
                 SimpleNamespace(
                     usbip_devices_source={},
@@ -99,7 +141,7 @@ class DeviceOperationsTests(unittest.TestCase):
                 ),
             ),
         ):
-            payload = operations_api._build_devices_management_payload(
+            payload = management_api._build_devices_management_payload(
                 ["USBIP001", "LOCAL001"],
                 {
                     "USBIP001": {"serial_no": "USBIP001"},
@@ -139,12 +181,12 @@ class DeviceOperationsTests(unittest.TestCase):
         )
 
         with (
-            patch.object(operations_api.device_lock_manager, "get_all_locks", return_value={}),
-            patch.object(operations_api.runtime, "config_manager", ConfigManager()),
-            patch.object(operations_api.runtime, "global_state", global_state),
-            patch.object(operations_api, "_active_usbip_serials", return_value=set()),
+            patch.object(management_api.device_lock_manager, "get_all_locks", return_value={}),
+            patch.object(management_api.runtime, "config_manager", ConfigManager()),
+            patch.object(management_api.runtime, "global_state", global_state),
+            patch.object(management_api, "_active_usbip_serials", return_value=set()),
         ):
-            payload = operations_api._build_devices_management_payload(
+            payload = management_api._build_devices_management_payload(
                 ["USBIP001"],
                 {"USBIP001": {"serial_no": "USBIP001"}},
                 {},
@@ -163,7 +205,10 @@ class DeviceOperationsTests(unittest.TestCase):
         operations_api.runtime.ssh_manager = ssh_manager
         try:
             response = asyncio.run(
-                operations_api.connect_wifi(WifiConnectRequest(devices=["ABC-123"]))
+                operations_api.connect_wifi(
+                    WifiConnectRequest(devices=["ABC-123"]),
+                    self.request_for(),
+                )
             )
         finally:
             operations_api.runtime.config_manager = original_config_manager
@@ -173,6 +218,46 @@ class DeviceOperationsTests(unittest.TestCase):
         self.assertEqual(len(ssh_manager.commands), 1)
         self.assertIn("'Lab Wifi'", ssh_manager.commands[0])
         self.assertIn("'lab password'", ssh_manager.commands[0])
+
+    def test_local_mutation_holds_fenced_claim_until_side_effect_finishes(self):
+        serial = "MUTATION-CLAIM-DEVICE"
+        device_lock_manager.force_unlock_device(serial)
+        observed = {}
+
+        def reboot(device_id, _ssh=None, _wait_for_online=True):
+            claim = device_lock_manager.get_lock_status(device_id)
+            observed.update(claim or {})
+            return {"success": True}
+
+        with (
+            patch.object(
+                operations_api.device_manager,
+                "reboot_device",
+                side_effect=reboot,
+            ),
+            patch.object(operations_api, "_known_usbip_device_ids", return_value=set()),
+            patch.object(operations_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(
+                operations_api.runtime,
+                "global_state",
+                SimpleNamespace(
+                    usbip_devices_source={},
+                    usbip_devices_source_lock=threading.RLock(),
+                ),
+            ),
+        ):
+            response = asyncio.run(
+                operations_api.reboot_devices(
+                    DeviceActionRequest(devices=[serial]),
+                    self.request_for("alice"),
+                )
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(observed["client_id"], "id-alice")
+        self.assertTrue(observed["lease_id"].startswith("claim-"))
+        self.assertGreaterEqual(observed["generation"], 1)
+        self.assertIsNone(device_lock_manager.get_lock_status(serial))
 
 
 if __name__ == "__main__":

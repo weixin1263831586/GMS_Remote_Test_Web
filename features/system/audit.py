@@ -6,9 +6,10 @@ import os
 from collections import deque
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse
 
+from features.auth import CurrentUser, require_role_when_auth_required
 from features.system.models import SecurityPageViewRequest
 from features.system.security_audit import security_audit_logger
 from features.system.security_audit_utils import AUDIT_PAGE_VIEW_SKIP_PAGES
@@ -58,7 +59,8 @@ async def list_security_audit_logs(
     offset: int = Query(0, ge=0),
     source: str | None = Query(None),
     action_type: str | None = Query(None),
-    q: str | None = Query(None, max_length=120)
+    q: str | None = Query(None, max_length=120),
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
 ):
     """查询安全审计记录（支持分页）。"""
     if source and source not in {'web', 'cli'}:
@@ -104,7 +106,10 @@ def get_related_logs_for_audit(record: dict[str, Any], limit: int = 80) -> dict[
 
 @router.get("/api/security-audit/detail/{event_id}")
 @handle_api_errors
-async def get_security_audit_detail(event_id: str):
+async def get_security_audit_detail(
+    event_id: str,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     """获取单条安全审计详情，包括请求摘要、响应摘要和关联日志。"""
     record = await asyncio.to_thread(security_audit_logger.get_event, event_id)
     if not record:
@@ -119,7 +124,9 @@ async def get_security_audit_detail(event_id: str):
 
 @router.get("/api/security-audit/export")
 @handle_api_errors
-async def export_security_audit_logs():
+async def export_security_audit_logs(
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     """导出安全审计 JSONL 文件。"""
     if not os.path.exists(security_audit_logger.log_path):
         return ApiResponse.error("暂无审计记录", status_code=404)
@@ -128,3 +135,19 @@ async def export_security_audit_logs():
         media_type='application/x-ndjson',
         filename='security_audit.json'
     )
+
+
+@router.get("/api/security-audit/verify")
+@handle_api_errors
+async def verify_security_audit_chain(
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """Verify the HMAC chain and report its current signed head."""
+    result = await asyncio.to_thread(security_audit_logger.verify_chain)
+    if not result.get('valid'):
+        return ApiResponse.error(
+            "审计日志完整性校验失败",
+            status_code=409,
+            data=result,
+        )
+    return ApiResponse.success(result)

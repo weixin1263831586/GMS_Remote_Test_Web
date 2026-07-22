@@ -12,6 +12,8 @@
         'redmine-agent': 'redmine-agent-frame', 'gerrit-dashboard': 'gerrit-dashboard-frame'
     });
     let persistTimer = null;
+    let persistPromise = null;
+    let persistQueued = false;
     let revision = 0;
     let localWorkerId = 'worker-local';
     let context = {...DEFAULT_CONTEXT};
@@ -22,9 +24,7 @@
         const next = {...DEFAULT_CONTEXT, ...(raw || {})};
         next.scope_mode = next.scope_mode === 'cluster' ? 'cluster' : 'single';
         const requestedWorker = String(raw?.worker_id || '');
-        next.worker_id = requestedWorker && !(
-            requestedWorker === 'worker-local' && localWorkerId !== 'worker-local'
-        ) ? requestedWorker : localWorkerId;
+        next.worker_id = requestedWorker || localWorkerId;
         next.device_ids = Array.from(new Set((Array.isArray(next.device_ids) ? next.device_ids : [])
             .map(value => String(value || '').trim()).filter(Boolean))).slice(0, 32);
         if (next.scope_mode === 'single') {
@@ -55,18 +55,42 @@
 
     async function persist() {
         persistTimer = null;
+        if (persistPromise) {
+            persistQueued = true;
+            return persistPromise;
+        }
+
+        const persistedRevision = revision;
+        const persistedContext = {...context, device_ids: [...context.device_ids]};
+        persistPromise = (async () => {
+            try {
+                const response = await fetch('/api/users/workspace-context', {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(persistedContext)
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const payload = await response.json();
+                const serverContext = payload?.data?.context;
+                // A response for an older host selection is only an ACK. It
+                // must never roll the browser context back after another
+                // Worker has already been selected.
+                if (serverContext && revision === persistedRevision) {
+                    context = normalize(serverContext);
+                }
+            } catch (error) {
+                console.debug('[WorkspaceContext] persist failed:', error);
+            }
+        })();
+
         try {
-            const response = await fetch('/api/users/workspace-context', {
-                method: 'PATCH',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(context)
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const payload = await response.json();
-            const serverContext = payload?.data?.context;
-            if (serverContext) context = normalize(serverContext);
-        } catch (error) {
-            console.debug('[WorkspaceContext] persist failed:', error);
+            await persistPromise;
+        } finally {
+            persistPromise = null;
+            if (persistQueued || revision !== persistedRevision) {
+                persistQueued = false;
+                schedulePersist();
+            }
         }
     }
 

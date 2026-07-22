@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""Seed the per-user Redmine knowledge base with verified IME/CTS cases.
-
-Background: the diagnosis "知识库" panel only reported "未命中知识库" because the
-curated ``redmine_case_facts`` table was empty even though the synced Redmine
-issue store held verified tickets. This script promotes two high-value issues
-into ``case_facts`` (with FTS) so the mature-case / reply-drafting pipeline can
-recall the real, verified root cause:
-
-  #618660 — closed, verified. Root cause: CTS run with a secondary display
-            attached routes showSoftInput/hideSoftInput to the wrong Display,
-            causing the ImeEventStream timeout (ImeEventStreamTestUtils.java:138).
-            Fix: disconnect the secondary display, single-display rerun.
-
-  #637450 — confirmed, open. The exact testTapThenSetQuery failure; reuses the
-            #618660 root cause and points at the verified reference tickets.
-
-Idempotent: re-running upserts the same rows. Targets the per-user knowledge
-store that already holds synced data (the one ``_resolve_redmine_knowledge_service``
-falls back to when no request owner is present).
-"""
+"""将已验证的 IME/CTS 工单写入用户 Redmine 知识库，可重复执行。"""
 
 from __future__ import annotations
 
@@ -26,12 +7,11 @@ import sys
 
 from features.redmine.case_extractor import RedmineCaseExtractor
 
-# Resolve the active per-user knowledge service (largest populated store).
+# 使用已有数据最多的用户知识库。
 from features.reports.api_helpers import _resolve_redmine_knowledge_service
 
 
-# Verified root cause + solution for the multi-display IME timeout family.
-# Sourced from the closed/verified Redmine ticket #618660.
+# 多屏 IME 超时问题的已验证根因和方案。
 MULTI_DISPLAY_ROOT_CAUSE = (
     "测试环境问题：CTS 测试时设备连接了副屏。多屏环境下 WindowManager 与 "
     "InputMethodManagerService(IMMS) 会把 showSoftInput / hideSoftInput 事件"
@@ -59,7 +39,7 @@ MULTI_DISPLAY_VERIFICATION = (
     "已验证于历史单 #618660(朱珂汉/黄超群)。"
 )
 
-# issue_id -> override fields applied on top of the auto-extracted fact.
+# 工单事实覆盖字段。
 _OVERRIDES: dict[int, dict] = {
     618660: {
         "root_cause": MULTI_DISPLAY_ROOT_CAUSE,
@@ -101,7 +81,7 @@ def seed(target_issue_ids: list[int] | None = None) -> dict:
             continue
         fact = RedmineCaseExtractor.extract(issue)
         fact.update(_OVERRIDES.get(issue_id, {}))
-        # Stamp keywords so FTS reliably matches IME/showSoftInput/SearchView probes.
+        # 补充全文检索关键词。
         kws = set(fact.get("keywords") or [])
         kws.update({
             "showSoftInput", "TimeoutException", "ImeEventStreamTestUtils",

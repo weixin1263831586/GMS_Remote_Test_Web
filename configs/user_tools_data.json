@@ -35,7 +35,7 @@
                 {
                     "icon": "/static/icons/site-default.svg",
                     "title": "路由器端口转发",
-                    "url": "http://172.16.14.130:8080/Advanced_VirtualServer_Content.asp"
+                    "url": "http://172.16.14.112:8080/Advanced_VirtualServer_Content.asp"
                 },
                 {
                     "icon": "http://10.10.10.205:8091/assets/common/images/gitbucket.png?20260330150942",
@@ -123,7 +123,7 @@
                 }
             ]
         },
-        "last_updated": "2026-07-03T17:26:59.370683",
+        "last_updated": "2026-07-21T14:19:18.870633",
         "client_ip": "172.16.14.66"
     }
 }

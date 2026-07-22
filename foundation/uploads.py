@@ -50,9 +50,22 @@ def safe_upload_target_path(
 
 
 def upload_temp_root(namespace: str = "gms_uploads") -> str:
-    """Return the local temp root used for transient upload state."""
+    """Return the local temp root used for transient upload state.
+
+    Prefers GMS_UPLOAD_DIR, then data_root/uploads, then OS temp dir.
+    """
     safe_namespace = os.path.basename(str(namespace or "gms_uploads").strip()) or "gms_uploads"
-    return str(Path(tempfile.gettempdir()) / safe_namespace)
+    override = os.getenv("GMS_UPLOAD_DIR", "").strip()
+    if override:
+        base = Path(override)
+    else:
+        try:
+            from foundation.config import settings
+
+            base = settings.data_root / "uploads"
+        except Exception:
+            base = Path(tempfile.gettempdir())
+    return str(base / safe_namespace)
 
 
 def remote_home_file_path(username: str, filename: str) -> str:

@@ -41,7 +41,7 @@ def configure_bashrc(path: Path) -> None:
         END,
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines + [""] + block) + "\n", encoding="utf-8")
+    path.write_text("\n".join([*lines, "", *block]) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
