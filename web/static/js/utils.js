@@ -48,7 +48,7 @@ function safeHeaderPercentEncode(value) {
     try {
         return encodeURIComponent(text);
     } catch (error) {
-        // Drop invalid surrogate code units before encoding; header values must stay ASCII.
+        // 编码前移除无效代理字符，确保 Header 为 ASCII。
         return encodeURIComponent(text.replace(/[\uD800-\uDFFF]/g, ''));
     }
 }

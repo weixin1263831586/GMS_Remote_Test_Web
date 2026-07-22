@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import re
 import socket
 import subprocess
@@ -39,6 +39,8 @@ class RuntimeUiHarness(unittest.TestCase):
         env["GMS_PORT"] = str(cls.port)
         env["GMS_DATA_ROOT"] = cls.runtime_dir.name
         env["ATS_WORKER_ENABLED"] = "0"
+        env["GMS_AUTH_REQUIRED"] = "true"
+        env["GMS_SECURE_COOKIES"] = "false"
         cls.server = subprocess.Popen(
             ["python", "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(cls.port)],
             cwd=Path(__file__).resolve().parents[1],
@@ -112,6 +114,18 @@ class RuntimeUiHarness(unittest.TestCase):
         page = self.browser.new_page(viewport={"width": 1440, "height": 960})
         page.set_default_timeout(8000)
         page.set_default_navigation_timeout(15000)
+        status = page.request.get(f"{self.base_url}/api/auth/status")
+        self.assertTrue(status.ok, status.text())
+        endpoint = "setup" if status.json().get("setup_required") else "login"
+        authenticated = page.request.post(
+            f"{self.base_url}/api/auth/{endpoint}",
+            data={
+                "username": "ui-admin",
+                "password": "UiSmokeAdmin-2026!",
+                "display_name": "UI Smoke Admin",
+            },
+        )
+        self.assertTrue(authenticated.ok, authenticated.text())
         page.route(
             "**/api/websites/load",
             lambda route: route.fulfill(
@@ -209,6 +223,129 @@ class RuntimeUiHarness(unittest.TestCase):
 
 
 class RuntimeUiSmokeTests(RuntimeUiHarness):
+    def test_auth_status_failure_does_not_stack_terminal_elevation_dialog(self):
+        page = self.new_page()
+        page.route(
+            "**/api/auth/status",
+            lambda route: route.fulfill(
+                status=500,
+                content_type="application/json",
+                body='{"success":false,"error":"auth unavailable"}',
+            ),
+        )
+        page.add_init_script(
+            "localStorage.setItem('gms_current_page', 'terminal')"
+        )
+        try:
+            page.goto(self.base_url, wait_until="load")
+            expect(page.locator("#auth-gate")).to_be_visible()
+            expect(page.locator("#elevate-modal")).not_to_have_class(
+                re.compile(r"\bshow\b")
+            )
+            self.assertFalse(page.evaluate("state.authReady"))
+        finally:
+            page.close()
+
+    def test_anonymous_mode_opens_elevation_dialog_before_desktop_request(self):
+        page = self.new_page()
+        protected_requests = []
+        page.on(
+            "request",
+            lambda request: protected_requests.append(request.url)
+            if "/api/desktop/" in request.url
+            else None,
+        )
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """
+                () => {
+                  state.currentUser = null;
+                  state.authRequired = false;
+                  state.authSetupRequired = false;
+                  state.elevated = false;
+                  state.elevatedUntil = null;
+                  switchPage('desktop', null);
+                }
+                """
+            )
+            expect(page.locator("#elevate-modal")).to_have_class(re.compile(r"show"))
+            expect(page.locator("#elevate-username")).to_be_editable()
+            expect(page.locator("#elevate-password")).to_be_editable()
+            self.assertEqual(protected_requests, [])
+        finally:
+            page.close()
+
+    def test_desktop_prompts_before_protected_vnc_requests(self):
+        page = self.new_page()
+        protected_responses = []
+        page.on(
+            "response",
+            lambda response: protected_responses.append(response.status)
+            if "/api/desktop/" in response.url
+            else None,
+        )
+        page.route(
+            "**/api/desktop/vnc/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"running":true}',
+            ),
+        )
+        page.route(
+            "**/api/desktop/novnc/access",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"url":"about:blank"}',
+            ),
+        )
+        try:
+            self.goto_shell(page)
+            page.evaluate("state.elevated = false; state.elevatedUntil = null")
+            page.evaluate("switchPage('desktop', null)")
+            expect(page.locator("#elevate-modal")).to_have_class(re.compile(r"show"))
+            page.locator("#elevate-password").fill("UiSmokeAdmin-2026!")
+            page.locator("#elevate-modal .btn-primary").click()
+            expect(page.locator("#host-workspace-grid iframe")).to_have_count(1)
+            self.assertTrue(protected_responses)
+            self.assertNotIn(403, protected_responses)
+        finally:
+            page.close()
+
+    def test_expired_terminal_elevation_prompts_and_reconnects_after_auth(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof recoverTerminalElevation === 'function'")
+            page.evaluate(
+                """
+                () => {
+                  window.__terminalElevationReconnect = false;
+                  recoverTerminalElevation(
+                    {disposed: false},
+                    '重新连接主机终端',
+                    () => { window.__terminalElevationReconnect = true; }
+                  );
+                  window.__parallelElevationResult = null;
+                  requestElevatedAccess('并发桌面授权').then(result => {
+                    window.__parallelElevationResult = result;
+                  });
+                }
+                """
+            )
+            expect(page.locator("#elevate-modal")).to_have_class(re.compile(r"show"))
+            expect(page.locator("#elevate-username")).to_have_value("ui-admin")
+            page.locator("#elevate-password").fill("UiSmokeAdmin-2026!")
+            page.locator("#elevate-modal .btn-primary").click()
+            page.wait_for_function(
+                "state.elevated && window.__terminalElevationReconnect && window.__parallelElevationResult === true"
+            )
+            expect(page.locator("#elevate-modal")).not_to_have_class(re.compile(r"show"))
+        finally:
+            page.close()
+
     def test_sidebar_pages_switch_without_runtime_errors(self):
         page = self.new_page()
         page_errors = []
@@ -227,9 +364,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.close()
 
     def test_first_visit_defaults_to_test_page(self):
-        page = self.browser.new_page(viewport={"width": 1440, "height": 960})
-        page.set_default_timeout(8000)
-        page.set_default_navigation_timeout(15000)
+        page = self.new_page()
         page_errors = []
         page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         try:
@@ -264,6 +399,188 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 re.compile(r"\bactive\b")
             )
             self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_start_test_wakes_cluster_log_polling_immediately(self):
+        page = self.new_page()
+        event_requests = []
+
+        def handle_job(route):
+            if "/events?" in route.request.url:
+                event_requests.append(time.monotonic())
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({
+                        "success": True,
+                        "events": [{
+                            "sequence": 0,
+                            "level": "info",
+                            "source": "stdout",
+                            "message": "wrapper output without suite keyword",
+                        }, {
+                            "sequence": 1,
+                            "level": "info",
+                            "source": "stdout",
+                            "message": "VTS immediate polling log",
+                        }],
+                    }),
+                )
+                return
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "job": {
+                        "id": "job-immediate",
+                        "status": "running",
+                        "assigned_worker_id": "worker-local",
+                        "current_attempt_id": "attempt-immediate",
+                    },
+                }),
+            )
+
+        try:
+            self.goto_shell(page)
+            page.route(
+                "**/api/test/start",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({
+                        "success": True,
+                        "data": {
+                            "cluster_job_id": "job-immediate",
+                            "attempt_id": "attempt-immediate",
+                        },
+                    }),
+                ),
+            )
+            page.route("**/api/cluster/jobs/job-immediate**", handle_job)
+            page.evaluate(
+                """async () => {
+                    startStatusPolling();
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    state.selectedDevices = new Set(['SERIAL-1']);
+                    document.querySelector('#test-module').value = 'MockModule';
+                    document.querySelector('#test-case').value = 'MockClass#testCase';
+                    const suite = document.querySelector('#test-suite');
+                    suite.replaceChildren(new Option('/tmp/mock-suite', '/tmp/mock-suite'));
+                    await startTest();
+                }"""
+            )
+            page.wait_for_timeout(750)
+            diagnostic = page.evaluate(
+                """() => {
+                    flushLogQueue();
+                    return {
+                        clusterJobId: state.clusterJobId,
+                        testing: state.testing,
+                        stopping: state.testStopping,
+                        systemLog: document.querySelector('#system-log-output').textContent,
+                        moduleLog: document.querySelector('#module-log-output').textContent
+                    };
+                }"""
+            )
+            self.assertTrue(event_requests, diagnostic)
+            self.assertIn("wrapper output without suite keyword", diagnostic["moduleLog"], diagnostic)
+            self.assertNotIn("wrapper output without suite keyword", diagnostic["systemLog"], diagnostic)
+            self.assertIn("VTS immediate polling log", diagnostic["moduleLog"], diagnostic)
+
+            page.evaluate("checkInitialTestStatus()")
+            page.wait_for_timeout(1100)
+            recovered = page.evaluate(
+                """() => {
+                    flushLogQueue();
+                    const text = document.querySelector('#module-log-output').textContent;
+                    return {
+                        sequence: state.clusterEventSequence,
+                        occurrences: text.split('VTS immediate polling log').length - 1
+                    };
+                }"""
+            )
+            self.assertEqual(recovered["sequence"], 1)
+            self.assertEqual(recovered["occurrences"], 1)
+            self.assertTrue(event_requests)
+        finally:
+            page.close()
+
+    def test_cluster_stop_keeps_polling_until_job_is_terminal(self):
+        page = self.new_page()
+        terminal = {"value": False}
+
+        def handle_job(route):
+            if "/events?" in route.request.url:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body='{"success":true,"events":[]}',
+                )
+                return
+            status = "cancelled" if terminal["value"] else "stopping"
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "job": {
+                        "id": "job-stopping",
+                        "status": status,
+                        "error": "",
+                        "assigned_worker_id": "worker-local",
+                        "current_attempt_id": "attempt-stopping",
+                    },
+                }),
+            )
+
+        try:
+            self.goto_shell(page)
+            page.route(
+                "**/api/cluster/jobs/job-stopping/cancel",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body='{"success":true}',
+                ),
+            )
+            page.route("**/api/cluster/jobs/job-stopping**", handle_job)
+            page.evaluate(
+                """async () => {
+                    startStatusPolling();
+                    state.clusterJobId = 'job-stopping';
+                    state.clusterEventSequence = -1;
+                    state.testing = true;
+                    updateTestToggleButton(true);
+                    await stopTest();
+                }"""
+            )
+            page.wait_for_timeout(400)
+            stopping = page.evaluate(
+                """() => ({
+                    job: state.clusterJobId,
+                    stopping: state.testStopping,
+                    disabled: document.querySelector('#test-toggle-btn').disabled,
+                    label: document.querySelector('#test-toggle-btn').textContent
+                })"""
+            )
+            self.assertEqual(stopping["job"], "job-stopping")
+            self.assertTrue(stopping["stopping"])
+            self.assertTrue(stopping["disabled"])
+            self.assertIn("停止中", stopping["label"])
+
+            terminal["value"] = True
+            page.evaluate("wakeTestStatusPolling()")
+            page.wait_for_function("state.clusterJobId === '' && !state.testStopping")
+            completed = page.evaluate(
+                """() => ({
+                    disabled: document.querySelector('#test-toggle-btn').disabled,
+                    label: document.querySelector('#test-toggle-btn').textContent
+                })"""
+            )
+            self.assertFalse(completed["disabled"])
+            self.assertIn("开始测试", completed["label"])
         finally:
             page.close()
 
@@ -582,6 +899,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
         try:
             self.goto_shell(page)
+            page.wait_for_function("state.clusterStatus?.enabled === true")
+            page.evaluate(
+                "GmsWorkspace.update({scope_mode: 'cluster', worker_id: 'worker-1'})"
+            )
             page.evaluate("switchPage('devices')")
             page.evaluate("loadDevicesManagement()")
             row = page.locator('#devices-table-body tr').filter(has_text="REMOTE-1")
@@ -599,6 +920,319 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             row.locator("button", has_text="UI 操控").click()
             expect(page.locator("#page-devices")).to_be_visible()
             expect(page.locator("#ui-control-modal")).to_have_class(re.compile(r"\bshow\b"))
+        finally:
+            page.evaluate(
+                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'worker-local'})"
+            )
+            page.wait_for_timeout(200)
+            page.close()
+
+    def test_device_management_inventory_follows_single_and_cluster_mode(self):
+        page = self.new_page()
+        cluster_device_requests = []
+
+        def json_response(route, payload):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+        page.route(
+            "**/api/devices/management",
+            lambda route: json_response(route, {
+                "success": True,
+                "devices": [{
+                    "device_id": "LOCAL-1",
+                    "serial_no": "LOCAL-1",
+                    "source_type": "local",
+                    "source_host": "ui-admin@127.0.0.1",
+                    "status": "online",
+                }],
+            }),
+        )
+        page.route(
+            "**/api/cluster/status",
+            lambda route: json_response(route, {
+                "success": True,
+                "enabled": True,
+                "local_worker_id": "worker-local",
+            }),
+        )
+
+        def cluster_devices(route):
+            cluster_device_requests.append(route.request.url)
+            json_response(route, {
+                "success": True,
+                "devices": [{
+                    "id": "worker-1:REMOTE-1",
+                    "serial": "REMOTE-1",
+                    "worker_id": "worker-1",
+                    "state": "available",
+                    "properties": {"model": "Remote Model"},
+                }],
+            })
+
+        page.route("**/api/cluster/devices", cluster_devices)
+        page.route(
+            "**/api/cluster/hosts",
+            lambda route: json_response(route, {
+                "success": True,
+                "hosts": [{
+                    "worker_id": "worker-1",
+                    "name": "Worker 1",
+                    "status": "online",
+                    "address": "192.0.2.10",
+                    "ssh_user": "tester",
+                    "capabilities": {"device_inspection": True},
+                }],
+            }),
+        )
+        page.route(
+            "**/api/device-groups",
+            lambda route: json_response(route, {
+                "success": True,
+                "data": {"groups": [
+                    {
+                        "id": "local-group",
+                        "name": "Local Group",
+                        "color": "#00aa00",
+                        "device_ids": ["LOCAL-1"],
+                    },
+                    {
+                        "id": "remote-group",
+                        "name": "Remote Group",
+                        "color": "#0000aa",
+                        "device_ids": ["worker-1:REMOTE-1"],
+                    },
+                ]},
+            }),
+        )
+
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("state.clusterStatus?.enabled === true")
+            page.evaluate(
+                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'worker-local'})"
+            )
+            page.evaluate("switchPage('devices')")
+            expect(page.locator("#devices-table-body")).to_contain_text("LOCAL-1")
+            expect(page.locator("#devices-table-body")).not_to_contain_text("REMOTE-1")
+            expect(page.locator("#devices-table-body")).to_contain_text("Local Group")
+            expect(page.locator("#devices-table-body")).not_to_contain_text("Remote Group")
+            expect(page.locator("#cluster-devices-count").locator("..")).to_be_hidden()
+            self.assertEqual(cluster_device_requests, [])
+
+            page.evaluate(
+                "GmsWorkspace.update({scope_mode: 'cluster', worker_id: 'worker-1'})"
+            )
+            expect(page.locator("#devices-table-body")).to_contain_text("REMOTE-1")
+            expect(page.locator("#devices-table-body")).to_contain_text("Remote Group")
+            expect(page.locator("#cluster-devices-count").locator("..")).to_be_visible()
+            expect(page.locator("#cluster-devices-count")).to_have_text("1")
+            self.assertGreaterEqual(len(cluster_device_requests), 1)
+        finally:
+            page.evaluate(
+                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'worker-local'})"
+            )
+            page.wait_for_timeout(200)
+            page.close()
+
+    def test_rapid_test_host_switch_keeps_latest_context_and_devices(self):
+        page = self.new_page()
+
+        def json_response(route, payload):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+        page.route(
+            "**/api/cluster/status",
+            lambda route: json_response(route, {
+                "success": True,
+                "enabled": True,
+                "local_worker_id": "worker-local",
+            }),
+        )
+        page.route(
+            "**/api/cluster/workers",
+            lambda route: json_response(route, {
+                "success": True,
+                "workers": [
+                    {"id": "worker-local", "name": "Local", "status": "online"},
+                    {"id": "worker-a", "name": "Worker A", "status": "online"},
+                    {"id": "worker-b", "name": "Worker B", "status": "online"},
+                ],
+            }),
+        )
+        page.route(
+            "**/api/devices/list*",
+            lambda route: json_response(route, []),
+        )
+        page.route(
+            "**/api/test/suites*",
+            lambda route: json_response(route, {"success": True, "suites": []}),
+        )
+
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("window.GmsWorkspace && window.state")
+            result = page.evaluate(
+                """async () => {
+                    const originalFetch = window.fetch.bind(window);
+                    const jsonResponse = value => new Response(JSON.stringify(value), {
+                        status: 200,
+                        headers: {'Content-Type': 'application/json'}
+                    });
+                    window.fetch = (input, options = {}) => {
+                        const url = String(input);
+                        if (url.includes('/api/cluster/devices?worker_id=')) {
+                            const worker = new URL(url, location.origin).searchParams.get('worker_id');
+                            const delay = worker === 'worker-a' ? 250 : 20;
+                            const payload = {success: true, devices: [{
+                                id: `${worker}:DEVICE-${worker.slice(-1).toUpperCase()}`,
+                                serial: `DEVICE-${worker.slice(-1).toUpperCase()}`,
+                                worker_id: worker,
+                                state: 'available',
+                                properties: {model: worker}
+                            }]};
+                            return new Promise(resolve => setTimeout(
+                                () => resolve(jsonResponse(payload)), delay
+                            ));
+                        }
+                        if (url.includes('/api/cluster/suites?worker_id=')) {
+                            return Promise.resolve(jsonResponse({success: true, suites: []}));
+                        }
+                        if (url.endsWith('/api/users/workspace-context')
+                                && String(options.method || '').toUpperCase() === 'PATCH') {
+                            const body = JSON.parse(options.body || '{}');
+                            const delay = body.worker_id === 'worker-a' ? 250 : 20;
+                            return new Promise(resolve => setTimeout(
+                                () => resolve(jsonResponse({
+                                    success: true, data: {context: body}
+                                })), delay
+                            ));
+                        }
+                        return originalFetch(input, options);
+                    };
+
+                    state.clusterStatus = {enabled: true, local_worker_id: 'worker-local'};
+                    const select = document.getElementById('cluster-worker');
+                    select.innerHTML = '<option value="worker-a">A</option><option value="worker-b">B</option>';
+
+                    // Start persisting A, then select B while A is in flight.
+                    GmsWorkspace.update({scope_mode: 'cluster', worker_id: 'worker-a'});
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    GmsWorkspace.update({scope_mode: 'cluster', worker_id: 'worker-b'});
+                    await new Promise(resolve => setTimeout(resolve, 550));
+
+                    select.value = 'worker-a';
+                    const first = switchTestWorker();
+                    await new Promise(resolve => setTimeout(resolve, 25));
+                    select.value = 'worker-b';
+                    await switchTestWorker();
+                    await first;
+                    return {
+                        contextWorker: GmsWorkspace.get().worker_id,
+                        selectedWorker: select.value,
+                        deviceIds: state.devices.map(device => device.device_id),
+                        deviceWorkers: state.devices.map(device => device.cluster_worker_id),
+                    };
+                }"""
+            )
+
+            self.assertEqual(result["contextWorker"], "worker-b")
+            self.assertEqual(result["selectedWorker"], "worker-b")
+            self.assertEqual(result["deviceIds"], ["worker-b:DEVICE-B"])
+            self.assertEqual(result["deviceWorkers"], ["worker-b"])
+        finally:
+            page.close()
+
+    def test_report_diagnosis_labels_rule_fallback_with_ai_error(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """() => {
+                    window.currentReportAnalysisData = {
+                        report_name: 'mock-report',
+                        failures: [{name: 'Example#testFailure', module: 'MockModule'}],
+                        details: {test_type: 'CTS'}
+                    };
+                    renderReportDiagnosis({
+                        test_name: 'Example#testFailure',
+                        module: 'MockModule',
+                        failure_index: 0,
+                        ai_result: {
+                            ai_enabled: false,
+                            ai_attempted: true,
+                            ai_error: 'glm_local quota exceeded',
+                            root_cause: '待验证：规则判断',
+                            root_cause_status: 'hypothesis',
+                            root_cause_confidence: 'low',
+                            observed_failure: 'AssertionError: expected true',
+                            root_cause_note: '当前直接证据只证明断言失败。',
+                            analysis: '规则分析内容',
+                            suggestions: []
+                        },
+                        suite_target: {},
+                        source_search_results: [],
+                        knowledge_base_results: []
+                    });
+                }"""
+            )
+            expect(page.locator("#report-diagnostic-summary")).to_contain_text(
+                "规则分析（AI 不可用）"
+            )
+            expect(page.locator("#report-diagnostic-result")).to_contain_text(
+                "本地 AI 未完成分析"
+            )
+            expect(page.locator("#report-diagnostic-result")).to_contain_text(
+                "glm_local quota exceeded"
+            )
+            expect(page.locator("#report-diagnostic-result")).to_contain_text(
+                "已观察到的失败"
+            )
+            expect(page.locator("#report-diagnostic-result")).to_contain_text(
+                "初步判断"
+            )
+            expect(page.locator("#report-diagnostic-result")).to_contain_text(
+                "Hypothesis · 低置信度"
+            )
+            expect(page.locator("#report-diagnostic-result")).not_to_contain_text(
+                "Root cause"
+            )
+            page.evaluate(
+                """() => renderReportDiagnosis({
+                    test_name: 'Example#testFailure',
+                    module: 'MockModule',
+                    failure_index: 0,
+                    ai_result: {
+                        ai_enabled: true,
+                        ai_model: 'Backup AI',
+                        ai_provider: 'zhipu',
+                        ai_fallback_used: true,
+                        ai_provider_errors: ['glm_local：本地模型额度已用尽。'],
+                        root_cause: '待验证：备用模型结论',
+                        root_cause_status: 'hypothesis',
+                        root_cause_confidence: 'low',
+                        observed_failure: 'AssertionError: expected true',
+                        analysis: '备用模型分析',
+                        suggestions: []
+                    },
+                    suite_target: {},
+                    source_search_results: [],
+                    knowledge_base_results: []
+                })"""
+            )
+            expect(page.locator("#report-diagnostic-summary")).to_contain_text(
+                "Backup AI（备用）"
+            )
+            expect(page.locator("#report-diagnostic-result")).to_contain_text(
+                "本次已由 Backup AI 完成"
+            )
         finally:
             page.close()
 
@@ -668,6 +1302,186 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(modal).to_have_class(re.compile(r"show"))
             page.keyboard.press("Escape")
             expect(modal).not_to_have_class(re.compile(r"show"))
+        finally:
+            page.close()
+
+    def test_sidebar_visibility_options_each_have_an_explanation(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.locator(".sidebar-brand").click()
+            options = page.locator("#sidebar-visibility-list .sidebar-visibility-option")
+            descriptions = page.locator("#sidebar-visibility-list .sidebar-description")
+            self.assertGreater(options.count(), 0)
+            self.assertEqual(descriptions.count(), options.count())
+            for index in range(descriptions.count()):
+                self.assertTrue(descriptions.nth(index).inner_text().strip())
+                self.assertEqual(
+                    descriptions.nth(index).evaluate(
+                        "element => getComputedStyle(element).whiteSpace"
+                    ),
+                    "nowrap",
+                )
+            first_icon = options.first.locator(".sidebar-icon").bounding_box()
+            first_title = options.first.locator(".sidebar-text").bounding_box()
+            first_description = descriptions.first.bounding_box()
+            self.assertAlmostEqual(first_icon["y"], first_title["y"], delta=4)
+            self.assertAlmostEqual(first_title["y"], first_description["y"], delta=5)
+        finally:
+            page.close()
+
+    def test_single_mode_simplifies_host_workspaces_and_report_header_is_stable(self):
+        page = self.new_page()
+        novnc_access_requests = []
+
+        def grant_novnc_access(route):
+            novnc_access_requests.append(route.request.url)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"url":"about:blank"}',
+            )
+
+        page.route(
+            "**/api/desktop/vnc/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"running":true}',
+            ),
+        )
+        page.route(
+            "**/api/desktop/novnc/access",
+            grant_novnc_access,
+        )
+        try:
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                },
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            self.goto_shell(page)
+            page.evaluate("state.elevated = true; applyClusterMode(false)")
+            page.evaluate("() => { switchPage('desktop', null); return true; }")
+            expect(page.locator("#host-workspace-grid .host-workspace-pane")).to_have_count(1)
+            expect(page.locator("#host-workspace-grid iframe")).to_have_count(1)
+            expect(page.locator("[data-workspace-layout]").first).to_be_hidden()
+            expect(page.locator("#host-workspace-grid [data-multi-host-control]").first).to_be_hidden()
+
+            page.evaluate("() => { switchPage('reports', null); return true; }")
+            page.evaluate("() => { switchPage('desktop', null); return true; }")
+            expect(page.locator("#host-workspace-grid iframe")).to_have_count(1)
+            page.wait_for_timeout(500)
+            self.assertEqual(len(novnc_access_requests), 1)
+
+            page.evaluate("() => { switchPage('reports', null); return true; }")
+            checkbox = page.locator("#filter-user-checkbox")
+            before = checkbox.bounding_box()
+            page.evaluate("applyClusterMode(true)")
+            after_cluster = checkbox.bounding_box()
+            page.evaluate("applyClusterMode(false)")
+            after_single = checkbox.bounding_box()
+            self.assertIsNotNone(before)
+            self.assertAlmostEqual(before["x"], after_cluster["x"], delta=1)
+            self.assertAlmostEqual(before["x"], after_single["x"], delta=1)
+        finally:
+            page.close()
+
+    def test_terminal_page_switch_reuses_websocket_and_buffer(self):
+        page = self.new_page()
+        terminal_websockets = []
+        page.on(
+            "websocket",
+            lambda websocket: terminal_websockets.append(websocket.url)
+            if "/api/system/websocket/terminal_workspace_" in websocket.url
+            else None,
+        )
+        try:
+            self.goto_shell(page)
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                },
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            page.evaluate("state.elevated = true; state.elevatedUntil = Date.now() + 60000")
+            page.evaluate("switchPage('terminal', null)")
+            page.wait_for_function(
+                """() => {
+                  const instance = terminalWorkspace.instances.get(0);
+                  return instance?.socket?.readyState === WebSocket.OPEN && instance.shellReady;
+                }"""
+            )
+            before = page.evaluate(
+                """() => {
+                  const instance = terminalWorkspace.instances.get(0);
+                  window.__terminalWorkspaceInstance = instance;
+                  return instance.terminal.buffer.active.getLine(
+                    instance.terminal.buffer.active.cursorY
+                  )?.translateToString(true) || '';
+                }"""
+            )
+            self.assertEqual(len(terminal_websockets), 1)
+
+            page.evaluate("switchPage('reports', null)")
+            page.evaluate("switchPage('terminal', null)")
+            page.wait_for_timeout(500)
+            after = page.evaluate(
+                """() => {
+                  const instance = terminalWorkspace.instances.get(0);
+                  return {
+                    same: instance === window.__terminalWorkspaceInstance,
+                    line: instance.terminal.buffer.active.getLine(
+                      instance.terminal.buffer.active.cursorY
+                    )?.translateToString(true) || ''
+                  };
+                }"""
+            )
+            self.assertTrue(after["same"])
+            self.assertEqual(after["line"], before)
+            self.assertEqual(len(terminal_websockets), 1)
+        finally:
+            page.close()
+
+    def test_terminal_credential_dialog_saves_then_retries(self):
+        page = self.new_page()
+        saved = []
+
+        def save_credential(route):
+            saved.append(route.request.post_data_json)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true}',
+            )
+
+        page.route("**/api/config/client-ssh-credentials", save_credential)
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """() => {
+                  window.__terminalCredentialRetried = false;
+                  showDevicePasswordModal(
+                    'hcq@172.16.14.118',
+                    'terminal',
+                    () => { window.__terminalCredentialRetried = true; }
+                  );
+                }"""
+            )
+            expect(page.locator("#device-password-modal")).to_have_class(re.compile(r"show"))
+            expect(page.locator("#device-password-modal-title")).to_have_text("主机终端 SSH 密码")
+            expect(page.locator("#device-host-display")).to_have_value("hcq@172.16.14.118")
+            expect(page.locator("#device-host-display")).not_to_be_editable()
+            page.locator("#device-pswd").fill("temporary-password")
+            page.locator("#device-password-modal .btn-primary").click()
+            page.wait_for_function("window.__terminalCredentialRetried === true")
+            self.assertEqual(saved[0]["device_host"], "hcq@172.16.14.118")
+            self.assertEqual(saved[0]["password"], "temporary-password")
         finally:
             page.close()
 
@@ -857,6 +1671,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "current_stage": "queued",
                     "artifact_path": "/tmp/update.img",
                     "devices_json": '["TESTSERIAL001"]',
+                    "report_timestamp": "2026-07-16T10:00:00Z",
+                    "report_id": "report-ui-smoke",
                 }
                 runs[:] = [run]
                 data = run
@@ -864,8 +1680,15 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 data = {"items": runs}
             elif path.endswith("/api/automation/worker/tick"):
                 data = runs[0] if runs else None
-            elif path.endswith("/events"):
-                data = {"items": []}
+            elif path.endswith("/timeline"):
+                data = {"items": [{
+                    "created_at": "2026-07-16T09:59:00Z",
+                    "stage": "testing",
+                    "domain": "cluster",
+                    "event_type": "command.acknowledged",
+                    "level": "info",
+                    "message": "Tradefed started",
+                }]}
             elif path.endswith("/api/automation/worker/status"):
                 data = {"running": False, "interval_seconds": 5, "last_tick_seconds_ago": None}
             route.fulfill(
@@ -875,16 +1698,47 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
 
         page.route("**/api/automation/**", fulfill_automation)
+        page.route(
+            "**/api/cluster/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"enabled":false,"local_worker_id":"worker-local"}',
+            ),
+        )
+        page.route(
+            "**/api/devices/list*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='[{"id":"TESTSERIAL001","status":"device","locked":false}]',
+            ),
+        )
+        page.route(
+            "**/api/test/suites",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"suites":[]}',
+            ),
+        )
         try:
             page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
             page.wait_for_function("document.body.dataset.automationReady === 'true'")
             page.evaluate("document.querySelector('button[data-workflow=\"create\"]').click()")
             page.wait_for_selector("#automation-create-run")
             page.fill("#automation-artifact", "/tmp/update.img")
-            page.fill("#automation-devices", "TESTSERIAL001")
-            page.uncheck("#automation-enable-build", force=True)
+            expect(page.locator("#artifact-mode-hint")).to_contain_text("直接使用已有固件")
+            expect(page.locator("#build-server")).to_be_disabled()
+            page.check('#automation-device-list input[value="TESTSERIAL001"]', force=True)
             page.evaluate("document.getElementById('automation-create-run').click()")
             expect(page.locator("#automation-toast")).to_contain_text("已创建")
+            expect(page.locator("#automation-events .event")).to_have_count(1)
+            expect(page.locator("#automation-events .event-message")).to_have_text("Tradefed started")
+            page.evaluate("switchWorkflowPane('reports')")
+            expect(page.locator("#automation-runs-report .report-card")).to_have_count(1)
+            expect(page.locator("#automation-runs-report")).to_contain_text("打开报告")
+            page.evaluate("switchWorkflowPane('runs')")
             page.evaluate(
                 """async () => {
                     const response = await fetch('/api/automation/worker/tick?executor=stub', {method: 'POST'});
@@ -930,9 +1784,31 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "id": "mock-build",
                     "name": "Mock Build",
                     "workspace_root": "/src",
+                    "auth": {"type": "env_password"},
                 }]}
             elif path.endswith("/api/build/templates"):
-                data = {"items": [{"id": "mock-template", "name": "Mock Template"}]}
+                data = {"items": [
+                    {
+                        "id": "mock-template",
+                        "name": "Mock Template",
+                        "server_id": "mock-build",
+                        "init_commands": ["source build/envsetup.sh", "lunch {lunch_target}"],
+                        "command": "{build_command}",
+                        "parameters_schema": {
+                            "build_command": {"default": "./build.sh -UCKApu -J 8"}
+                        },
+                    },
+                    {
+                        "id": "mock-clean-template",
+                        "name": "Mock Clean Template",
+                        "server_id": "mock-build",
+                        "init_commands": ["source build/envsetup.sh", "lunch {lunch_target}"],
+                        "command": "{build_command}",
+                        "parameters_schema": {
+                            "build_command": {"default": "./build.sh -UACKApu -J 8"}
+                        },
+                    },
+                ]}
             elif path.endswith("/api/build/discover/workspaces"):
                 data = {"items": ["6_Android16_0623", "other_Android16"]}
             elif path.endswith("/api/build/discover/lunch-options"):
@@ -985,18 +1861,33 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.evaluate("document.querySelector('button[data-workflow=\"create\"]').click()")
             expect(page.locator("#automation-profile")).to_have_value("manual")
             expect(page.locator("#build-server")).to_have_value("mock-build")
-            page.check("#automation-enable-build", force=True)
+            expect(page.locator("#build-template-hint")).to_contain_text("source build/envsetup.sh")
+            expect(page.locator(".build-panel-actions")).to_contain_text("编译固件")
+            expect(page.locator(".build-panel-actions")).to_contain_text("查看日志")
+            page.select_option("#build-template", "mock-clean-template")
+            expect(page.locator("#build-command")).to_have_value("./build.sh -UACKApu -J 8")
+            command_and_workspace = page.locator("#automation-build-fields").evaluate(
+                """element => {
+                    const command = element.querySelector('#build-command').getBoundingClientRect();
+                    const workspace = element.querySelector('#build-workspace').getBoundingClientRect();
+                    return {commandBottom: command.bottom, workspaceTop: workspace.top};
+                }"""
+            )
+            self.assertLess(command_and_workspace["commandBottom"], command_and_workspace["workspaceTop"])
+            self.assertEqual(
+                page.locator(".workflow-tab").all_text_contents(),
+                ["概览", "创建运行", "运行监控", "构建日志", "事件诊断", "测试报告"],
+            )
             page.wait_for_function("!document.querySelector('#build-workspace-refresh').disabled")
             page.evaluate("document.querySelector('#build-workspace-refresh').click()")
-            page.fill("#build-password-input", "test-password")
-            page.evaluate("document.querySelector('#build-password-ok').click()")
+            expect(page.locator("#build-password-input")).to_have_count(0)
 
             expect(page.locator("#build-lunch-status")).to_have_class(re.compile(r"\bready\b"))
             self.assertEqual(
                 page.locator("#build-lunch-target option").all_text_contents(),
                 ["rk3576_u-userdebug", "rk3576_u-user"],
             )
-            expect(page.locator("#build-lunch-status")).to_contain_text("/src/6_Android16_0623")
+            expect(page.locator("#build-lunch-status")).to_contain_text("当前源码树")
 
             page.select_option("#build-workspace", "/src/other_Android16")
             page.wait_for_function(
@@ -1006,7 +1897,95 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 page.locator("#build-lunch-target option").all_text_contents(),
                 ["rk3566_rgo-userdebug"],
             )
-            expect(page.locator("#build-lunch-status")).to_contain_text("/src/other_Android16")
+            expect(page.locator("#build-lunch-status")).to_contain_text("当前源码树")
+        finally:
+            page.close()
+
+    def test_automation_shows_local_controller_and_two_column_device_picker(self):
+        page = self.new_page()
+
+        def json_response(route, payload):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+        def fulfill_automation(route):
+            path = route.request.url.split("?", 1)[0]
+            if path.endswith("/api/automation/dashboard"):
+                data = {"run_total": 0, "run_by_status": {}, "run_by_profile": {}}
+            elif path.endswith("/api/automation/profiles"):
+                data = {"items": []}
+            elif path.endswith("/api/automation/worker/status"):
+                data = {"running": False, "interval_seconds": 5, "last_tick_seconds_ago": None}
+            else:
+                data = {"items": []}
+            json_response(route, {"success": True, "data": data})
+
+        def fulfill_cluster(route):
+            path = route.request.url.split("?", 1)[0]
+            if path.endswith("/api/cluster/status"):
+                payload = {
+                    "success": True,
+                    "enabled": True,
+                    "remote_dispatch_enabled": True,
+                    "local_worker_id": "worker-local",
+                }
+            elif path.endswith("/api/cluster/workers"):
+                payload = {
+                    "success": True,
+                    "workers": [
+                        {
+                            "id": "worker-local",
+                            "name": "hcq@172.16.14.233",
+                            "address": "172.16.14.233",
+                            "status": "online",
+                            "agent_version": "controller-0.1.0",
+                        },
+                        {
+                            "id": "worker-1",
+                            "name": "ATS Worker",
+                            "address": "172.16.14.246",
+                            "status": "online",
+                            "agent_version": "0.3.1",
+                        },
+                    ],
+                }
+            elif path.endswith("/api/cluster/devices"):
+                payload = {
+                    "success": True,
+                    "devices": [
+                        {"id": f"worker-1:DEVICE-{index}", "state": "available"}
+                        for index in range(1, 5)
+                    ],
+                }
+            elif path.endswith("/api/cluster/suites"):
+                payload = {"success": True, "suites": []}
+            else:
+                payload = {"success": True}
+            json_response(route, payload)
+
+        page.route("**/api/automation/**", fulfill_automation)
+        page.route("**/api/cluster/**", fulfill_cluster)
+        try:
+            page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.wait_for_function("document.body.dataset.automationReady === 'true'")
+            page.evaluate("document.querySelector('button[data-workflow=\"create\"]').click()")
+            page.wait_for_function(
+                "document.querySelectorAll('#automation-device-list input').length === 4"
+            )
+
+            local_option = page.locator('#automation-worker option[value="worker-local"]')
+            expect(local_option).to_have_attribute("disabled", "")
+            expect(local_option).to_contain_text("172.16.14.233")
+            expect(local_option).to_contain_text("未安装 ATS Agent")
+            expect(page.locator("#automation-worker")).to_have_value("worker-1")
+            expect(page.locator("#automation-devices")).to_have_count(0)
+            columns = page.locator("#automation-device-list").evaluate(
+                "element => getComputedStyle(element).gridTemplateColumns.split(' ').length"
+            )
+            self.assertEqual(columns, 2)
         finally:
             page.close()
 

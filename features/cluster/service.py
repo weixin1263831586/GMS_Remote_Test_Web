@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,16 +18,41 @@ class ClusterService:
                                               lease_enforcement_enabled=True,
                                               worker_offline_seconds=offline_seconds)
         self.offline_seconds = self.config.worker_offline_seconds
-        self._runtime_enabled: bool | None = None
+        self._watchdog_stop = threading.Event()
+        self._watchdog_thread: threading.Thread | None = None
+
+    def start_watchdog(self) -> None:
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            return
+        self._watchdog_stop.clear()
+
+        def monitor() -> None:
+            interval = max(5.0, min(15.0, self.offline_seconds / 3))
+            while not self._watchdog_stop.wait(interval):
+                try:
+                    self.list_workers()
+                except Exception:
+                    # The next pass retries; never terminate the watchdog on a
+                    # transient SQLite or clock parsing failure.
+                    continue
+
+        self._watchdog_thread = threading.Thread(
+            target=monitor,
+            name="ClusterWorkerWatchdog",
+            daemon=True,
+        )
+        self._watchdog_thread.start()
+
+    def stop_watchdog(self) -> None:
+        self._watchdog_stop.set()
+        if self._watchdog_thread:
+            self._watchdog_thread.join(timeout=1)
+        self._watchdog_thread = None
 
     @property
     def effective_enabled(self) -> bool:
-        """True when the runtime override or the config flag is set."""
-        return self._runtime_enabled if self._runtime_enabled is not None else self.config.enabled
-
-    def set_runtime_enabled(self, enabled: bool) -> None:
-        """Toggle cluster mode at runtime without restarting the service."""
-        self._runtime_enabled = enabled
+        """Whether this deployment exposes remote cluster capability."""
+        return self.config.enabled
 
     def list_workers(self) -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc)

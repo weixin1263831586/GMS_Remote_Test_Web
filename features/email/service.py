@@ -1,14 +1,4 @@
-"""通用邮件发送服务。
-
-综合参考：
-- ``features/redmine/api.py:_send_reminder_email`` —— SMTP 配置读取、163 企业邮兼容
-  （授权码 ≠ 登录密码、发件人必须 = 登录账号、SSL 端口自动判定）与错误兜底。
-- ``rk-skills/06-workflow-tools/rk-email/scripts/send_email.py`` —— 多收件人/抄送、
-  HTML 正文、附件、发件人昵称。
-
-凭证复用 ``config_runtime.json → redmine_dashboard.email``，与 Redmine 部门提醒
-共用同一套 SMTP 设置；阻塞调用应交由调用方通过 ``asyncio.to_thread`` 包裹。
-"""
+"""支持多收件人、抄送、HTML 和附件的通用 SMTP 服务。"""
 
 from __future__ import annotations
 
@@ -110,9 +100,7 @@ def send_email(
     use_tls = bool(email_cfg.get("use_tls", not use_ssl and smtp_port != 465))
     timeout = int(email_cfg.get("timeout") or 10)
 
-    # 注意：SMTP 授权码 与 Redmine 网页登录/API 密码是两回事，不能互相兜底。
-    # 163 企业邮用错误凭据会被服务器直接断开连接（而非返回认证失败码），
-    # 因此这里必须用专门的 SMTP 授权码；为空时直接返回明确错误，引导用户填写。
+    # 163 企业邮必须使用独立 SMTP 授权码。
     if is_qiye_163 and (not username or not password):
         return {
             "sent": False,

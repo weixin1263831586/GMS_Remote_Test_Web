@@ -148,26 +148,11 @@ class ResolutionAnalysisMixin:
 
     @staticmethod
     def _analyze_resolution_from_journals(journals: list[dict[str, Any]]) -> dict[str, Any]:
-        """Analyze journal history to determine the correct resolution for a closed issue.
-
-        Returns a structured resolution summary:
-        {
-            "has_resolution": bool,
-            "status": "verified" | "resolved" | "unclear",
-            "provider": str,   # who provided the solution
-            "provider_time": str,
-            "confirmer": str,  # who confirmed the solution
-            "confirmer_time": str,
-            "confirm_note": str,
-            "patches": [...],  # extracted diff/patch blocks
-            "solution_text": str,  # plain text solution from provider
-            "summary": str,    # one-line resolution summary
-        }
-        """
+        """从工单日志提取解决状态、提供者、确认者、补丁和方案。"""
         patches = ResolutionAnalysisMixin._extract_patch_from_journals(journals)
         confirmed = ResolutionAnalysisMixin._detect_confirmed_in_journals(journals)
 
-        # Walk journals forward to find: provider (has code/diff) -> confirmer (says "ok")
+        # 按时间查找补丁提供者和确认者。
         provider = ""
         provider_time = ""
         provider_notes = ""
@@ -246,9 +231,7 @@ class ResolutionAnalysisMixin:
             return "SDK"
         return "-"
 
-    # ------------------------------------------------------------------
     # Structured field extraction
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _format_journal_patches(patches: list[dict[str, str]]) -> str:
@@ -305,7 +288,7 @@ class ResolutionAnalysisMixin:
                 solution = self._rule_solution(issue_payload, failures, references)
 
         # 6. patch_direction
-        # Priority: verified journal patches > AI result > journal patches > rule-based
+        # 优先级：已验证补丁、AI 结果、日志补丁、规则结果。
         journal_patch_html = self._format_journal_patches(resolution.get("patches") or [])
         patch_direction = ai_result.get("patch_direction") or ai_result.get("risk") or ""
 
@@ -357,8 +340,7 @@ class ResolutionAnalysisMixin:
         references = issue.get("references_json") or []
         journals = issue.get("journals_json") or []
         resolution = cls._analyze_resolution_from_journals(journals)
-        # Extract error evidence once and thread it through the rule methods so
-        # they don't each re-scan attachments/description on the list endpoint.
+        # 错误证据只提取一次并复用于各规则。
         extracted_evidence = cls._extract_error_from_issue_evidence(issue)
 
         if not cls._meaningful_field(issue.get("problem_description")):

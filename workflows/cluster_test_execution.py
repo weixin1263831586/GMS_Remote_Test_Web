@@ -16,9 +16,10 @@ def start_cluster_test(request: Any, client_id: str):
         reservation = repository.get_reservation(request.device_reservation_id)
         if not reservation:
             return error_response("Device reservation is missing or expired", 409)
+        if reservation.get("owner_id") != owner_id:
+            return error_response("Device reservation belongs to another owner", 409)
         if request.automation_run_id and reservation.get("source_id") != request.automation_run_id:
             return error_response("Device reservation belongs to another automation run", 409)
-        owner_id = reservation.get("owner_id") or owner_id
     if request.automation_run_id:
         existing = repository.get_job_by_automation_run(request.automation_run_id)
         if existing:
@@ -88,8 +89,17 @@ def start_cluster_test(request: Any, client_id: str):
         command = repository.create_command({
             "worker_id": request.worker_id, "command_type": "start_test",
             "job_id": job["id"], "attempt_id": job["current_attempt_id"],
+            "operation_id": f"{job['current_attempt_id']}:start_test",
             "payload": {"worker_job_id": f"wj-{job['id']}", "argv": cmd_parts,
-                        "env": {}, "devices": request.devices},
+                        "env": {}, "devices": request.devices,
+                        "trace_id": job.get("trace_id", ""),
+                        "lease_tokens": [{
+                            "lease_id": lease["id"],
+                            "device_id": lease["device_id"],
+                            "generation": lease["generation"],
+                            "attempt_id": lease["attempt_id"],
+                        } for lease in job.get("leases") or []
+                            if lease.get("status") == "active"]},
         })
         repository.attach_command_to_job(job["id"], command)
         return success_response({"cluster_job_id": job["id"],

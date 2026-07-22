@@ -8,9 +8,10 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from features.auth import CurrentUser, require_role_when_auth_required
 from foundation.config import settings
 
 from .repository import escape_like, init_db
@@ -91,6 +92,7 @@ def _run_sync_job(mode: str):
 @router.post('/api/mainline-known-issues/sync')
 async def start_mainline_known_issues_sync(
     mode: str = Query('incremental', pattern='^(full|incremental)$'),
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
 ):
     with _sync_lock:
         if _sync_status['running']:
@@ -108,7 +110,9 @@ async def start_mainline_known_issues_sync(
 
 
 @router.get('/api/mainline-known-issues/sync/status')
-async def mainline_known_issues_sync_status():
+async def mainline_known_issues_sync_status(
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     with _sync_lock:
         status = dict(_sync_status)
     status['db_exists'] = DB_PATH.exists()
@@ -232,4 +236,3 @@ async def mainline_known_issues_summary():
 async def mainline_known_issues_page():
     page_path = Path(__file__).with_name('ui') / 'page.html'
     return HTMLResponse(page_path.read_text(encoding='utf-8'))
-

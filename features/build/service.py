@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,8 @@ class BuildService:
             "local": LocalBuildBackend(),
         }
         self._runtime_passwords: dict[str, str] = {}
+        self._lunch_options_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
+        self._lunch_options_cache_ttl = 300.0
 
     @staticmethod
     def new_job_id() -> str:
@@ -81,10 +84,7 @@ class BuildService:
         if template.get("server_id") and template["server_id"] != server["id"]:
             raise BuildExecutionError("template is not allowed on selected server")
 
-        # Concurrency control: respect server.max_concurrent_jobs. Only servers
-        # using non-password auth (SSH key / env_password from environment) are
-        # allowed to queue, because the runtime password is keyed by job id and
-        # is lost on restart — a queued-then-restarted job could never start.
+        # 并发控制：非密码认证的服务器才允许排队（密码在重启后丢失）
         start = self._maybe_defer_for_capacity(server, start)
 
         prepared = build_command_from_template(template, server, req.parameters)
@@ -117,12 +117,7 @@ class BuildService:
         return self._decorate_job(job)
 
     def _maybe_defer_for_capacity(self, server: dict[str, Any], start: bool) -> bool:
-        """Decide whether a new job can start now or must queue.
-
-        Queuing is only allowed for servers whose auth is not a per-request
-        runtime password (queued jobs survive restart only when the server can
-        be reached without a job-bound secret). Returns the effective `start`.
-        """
+        """达到并发上限时将任务排队（仅非密码认证服务器支持排队）。"""
         if not start:
             return False
         max_concurrent = int(server.get("max_concurrent_jobs") or 1)
@@ -135,7 +130,7 @@ class BuildService:
         ]
         if len(in_flight) < max_concurrent:
             return True
-        # At capacity. Only queue if the server does not need a runtime password.
+        # 达到容量时，仅无运行时密码的服务器允许排队。
         auth = server.get("auth") if isinstance(server.get("auth"), dict) else {}
         queueable = auth.get("type") in {"key", "env_password", ""}
         if queueable:
@@ -306,10 +301,50 @@ class BuildService:
         server_id: str,
         workspace: str,
         server_password: str = "",
+        force_refresh: bool = False,
     ) -> list[str]:
         server = self._with_runtime_password(self._get_server(server_id), server_password)
         workspace = validate_workspace(workspace, str(server.get("workspace_root") or ""))
+        cache_key = (server_id, workspace)
+        cached = self._lunch_options_cache.get(cache_key)
+        if (
+            not force_refresh
+            and cached
+            and time.monotonic() - cached[0] < self._lunch_options_cache_ttl
+        ):
+            return list(cached[1])
+
+        def remember(options: list[str]) -> list[str]:
+            self._lunch_options_cache[cache_key] = (time.monotonic(), list(options))
+            return options
+
         backend = self._backend(server)
+        # Rockchip Android trees register the SDK-specific products below
+        # device/rockchip (and occasionally vendor/rockchip). Reading those
+        # declarations is much faster and more precise than asking Soong for
+        # COMMON_LUNCH_CHOICES, which also includes dozens of generic AOSP
+        # products that are not useful firmware targets for this SDK.
+        rockchip_products_command = (
+            f"cd {workspace!r} && "
+            "timeout 12s bash --noprofile --norc -c '"
+            "printf \"__GMS_LUNCH_BEGIN__\\n\"; "
+            "{ find device/rockchip -type f -name AndroidProducts.mk -exec "
+            "grep -hEo \"[A-Za-z0-9_.-]+-(userdebug|user|eng)\" {} + 2>/dev/null; "
+            "find vendor/rockchip -type f -name AndroidProducts.mk -exec "
+            "grep -hEo \"[A-Za-z0-9_.-]+-(userdebug|user|eng)\" {} + 2>/dev/null; "
+            "} 2>/dev/null | sort -u; "
+            "printf \"__GMS_LUNCH_END__\\n\"'"
+        )
+        rockchip_code, rockchip_out, _rockchip_err = backend._run(
+            server,
+            rockchip_products_command,
+            timeout=15,
+        )
+        if rockchip_code == 0:
+            options = self._parse_scoped_lunch_options(rockchip_out)
+            if options:
+                return remember(options)
+
         # Rockchip 的 rkbuild_lunch 会在 COMMON_LUNCH_CHOICES 之上再按当前
         # SDK/板级配置生成菜单。优先解析该菜单，避免把源码树中的通用产品
         # 全部展示成可用于当前 SDK 的选项。命令运行在独立 shell 中，即使
@@ -334,7 +369,7 @@ class BuildService:
         if rkbuild_code == 0:
             options = self._parse_scoped_lunch_options(rkbuild_out)
             if options:
-                return options
+                return remember(options)
 
         # 标准 Android 源码没有 rkbuild_lunch，回退到 envsetup 为当前源码树
         # 计算出的 COMMON_LUNCH_CHOICES，并用哨兵隔离 shell/profile 噪声。
@@ -357,7 +392,7 @@ class BuildService:
             raise BuildExecutionError(f"读取 {workspace} 的 lunch 选项失败{': ' + detail[0][:240] if detail[0] else ''}")
         options = self._parse_scoped_lunch_options(out)
         if options:
-            return options
+            return remember(options)
 
         fallback_command = (
             f"cd {workspace!r} && "
@@ -377,7 +412,7 @@ class BuildService:
         if not options:
             logger.warning("No lunch options discovered for workspace %s", workspace)
             raise BuildExecutionError(f"源码目录 {workspace} 未发现可用 lunch 选项，请检查 envsetup 和 AndroidProducts.mk")
-        return options
+        return remember(options)
 
     @classmethod
     def _parse_scoped_lunch_options(cls, output: str) -> list[str]:

@@ -10,6 +10,11 @@ LOG_FILE="$SCRIPT_LOG_FILE"
 
 export PATH="$HOME/Software/platform-tools:$PATH"
 
+# 未显式设置时从固定凭据文件加载 GTS 认证。
+if [[ -z "${APE_API_KEY:-}" && -f "$HOME/Software/gts-rockchip.json" ]]; then
+    export APE_API_KEY="$HOME/Software/gts-rockchip.json"
+fi
+
 # 运行状态
 REMOTE_HOST=""
 REMOTE_USER=""
@@ -21,6 +26,8 @@ MODE="run"
 PASS_COUNT=0
 FAIL_COUNT=0
 RESULT_TIMESTAMP=""
+RESULT_DIR=""
+RUN_STARTED_EPOCH=0
 RETRY_FAIL="false"
 COPY_TO_REMOTE="false"
 PROCESS_GROUP_ID=""  # 进程组ID，用于多用户隔离
@@ -247,6 +254,7 @@ run_tradefed() {
 
     log "📋 测试命令: $command"
     log "⏱️ 开始时间: $(date)"
+    RUN_STARTED_EPOCH=$(date +%s)
 
     # 如果设置了进程组ID，将其导出为环境变量，便于进程识别和管理
     if [[ -n "$PROCESS_GROUP_ID" ]]; then
@@ -262,6 +270,63 @@ run_tradefed() {
     log "⏱️ 结束时间: $(date)"
     log "📊 退出代码: $exit_code"
     return $exit_code
+}
+
+result_matches_current_run() {
+    local xml_file="$1"
+    [[ -f "$xml_file" ]] || return 1
+
+    # 仅接受命令参数与当前任务一致的 VTS 结果。
+    if [[ -n "$TEST_COMMAND" ]] && ! grep -Fq "command_line_args=\"$TEST_COMMAND" "$xml_file"; then
+        return 1
+    fi
+    if [[ -n "$Test_Module" ]] && ! grep -Fq -- "-m $Test_Module" "$xml_file"; then
+        return 1
+    fi
+    if [[ -n "$Test_Case" ]] && ! grep -Fq -- "-t $Test_Case" "$xml_file"; then
+        return 1
+    fi
+
+    local device_tokens=()
+    local index serial
+    read -r -a device_tokens <<< "$DEVICE_ARGS"
+    for ((index = 0; index < ${#device_tokens[@]}; index++)); do
+        if [[ "${device_tokens[$index]}" == "-s" ]] && ((index + 1 < ${#device_tokens[@]})); then
+            serial="${device_tokens[$((index + 1))]}"
+            grep -Fq "$serial" "$xml_file" || return 1
+        fi
+    done
+    return 0
+}
+
+resolve_result_dir() {
+    local result_dir=""
+    result_dir=$(awk -F': ' '/RESULT DIRECTORY/ {d=$2} END{print d}' "$LOG_FILE" | awk '{print $1}')
+    if [[ -n "$result_dir" && -d "$result_dir" ]]; then
+        printf '%s\n' "$result_dir"
+        return 0
+    fi
+
+    local suite_root results_root candidate
+    suite_root=$(cd "$SUITE_PATH/.." && pwd)
+    results_root="$suite_root/results"
+    if [[ -n "$RESULT_TIMESTAMP" && -d "$results_root/$RESULT_TIMESTAMP" ]]; then
+        printf '%s\n' "$results_root/$RESULT_TIMESTAMP"
+        return 0
+    fi
+    [[ -d "$results_root" && "$RUN_STARTED_EPOCH" -gt 0 ]] || return 1
+
+    while IFS= read -r candidate; do
+        if result_matches_current_run "$candidate"; then
+            dirname "$candidate"
+            return 0
+        fi
+    done < <(
+        find "$results_root" -mindepth 2 -maxdepth 2 -type f -name test_result.xml \
+            -newermt "@$((RUN_STARTED_EPOCH - 2))" -printf '%T@ %p\n' 2>/dev/null \
+            | sort -nr | sed 's/^[^ ]* //'
+    )
+    return 1
 }
 
 ## 重新测试
@@ -283,9 +348,13 @@ analyze_result() {
     log "🔍 解析结果..."
     cd "$SUITE_PATH" || die "无法进入测试套件目录 $SUITE_PATH"
 
-    local result_dir=$(awk -F': ' '/RESULT DIRECTORY/ {d=$2} END{print d}' "$LOG_FILE" | awk '{print $1}')
-    [[ -d "$result_dir" ]] || die "未找到 RESULT DIRECTORY"
-    log "📁 结果目录: ${result_dir:-<none>}"
+    local result_dir=""
+    result_dir=$(resolve_result_dir) || die "未找到 RESULT DIRECTORY"
+    RESULT_DIR="$result_dir"
+    if ! grep -Fq "RESULT DIRECTORY: $result_dir" "$LOG_FILE"; then
+        log "RESULT DIRECTORY: $result_dir"
+    fi
+    log "📁 结果目录: $result_dir"
     RESULT_TIMESTAMP=$(basename "$result_dir")
 
     if [[ -f "$result_dir/test_result.xml" ]]; then
@@ -305,9 +374,17 @@ copy_to_remote_server() {
         return 0
     fi
 
-    local logs_dir=$(awk -F': ' '/LOG DIRECTORY/ {d=$2} END{print d}' "$LOG_FILE" | awk '{print $1}')
-    local result_dir=$(awk -F': ' '/RESULT DIRECTORY/ {d=$2} END{print d}' "$LOG_FILE" | awk '{print $1}')
-    [[ -z "$logs_dir" || -z "$result_dir" ]] && die "未找到 RESULT DIRECTORY"
+    local logs_dir result_dir suite_root
+    logs_dir=$(awk -F': ' '/LOG DIRECTORY/ {d=$2} END{print d}' "$LOG_FILE" | awk '{print $1}')
+    result_dir="${RESULT_DIR:-}"
+    if [[ -z "$result_dir" ]]; then
+        result_dir=$(resolve_result_dir) || die "未找到 RESULT DIRECTORY"
+    fi
+    suite_root=$(cd "$SUITE_PATH/.." && pwd)
+    if [[ -z "$logs_dir" && -d "$suite_root/logs/$(basename "$result_dir")" ]]; then
+        logs_dir="$suite_root/logs/$(basename "$result_dir")"
+    fi
+    [[ -d "$logs_dir" && -d "$result_dir" ]] || die "未找到 RESULT DIRECTORY"
     log "📁 日志目录: ${logs_dir:-<none>}"
     log "📁 结果目录: ${result_dir:-<none>}"
 
@@ -317,15 +394,14 @@ copy_to_remote_server() {
     local remote_target_dir="/home/$REMOTE_USER/gms_test_results/$timestamp"
     log "🌐 本地主机: ${REMOTE_USER}@${REMOTE_HOST}:${remote_target_dir}"
 
-    # 可选路由：不同网段回传结果时通过环境变量配置，避免绑定某台测试主机。
-    # 示例: GMS_COPY_ROUTE_NETWORK=10.10.10.0/24 GMS_COPY_ROUTE_GATEWAY=172.16.14.1
+    # 可选路由：运行期绝不提权修改主机网络。如果需要跨网段回传，
+    # 由主机管理员在启动 Worker 前配置持久路由；环境变量仅用于校验前置条件。
+    # 路由目标网络和网关均由环境变量配置。
     if [[ -n "${GMS_COPY_ROUTE_NETWORK:-}" && -n "${GMS_COPY_ROUTE_GATEWAY:-}" ]]; then
-        if ! ip route show | grep -q "${GMS_COPY_ROUTE_NETWORK}"; then
-            log "🛠️ 添加路由: ${GMS_COPY_ROUTE_NETWORK} via ${GMS_COPY_ROUTE_GATEWAY}"
-            sudo -n ip route add "${GMS_COPY_ROUTE_NETWORK}" via "${GMS_COPY_ROUTE_GATEWAY}" || {
-                log "❌ 无法添加路由（请检查安装脚本配置的 sudoers 或手动配置 NOPASSWD）"
-                return 1
-            }
+        if ! ip route show "${GMS_COPY_ROUTE_NETWORK}" | grep -Fq "via ${GMS_COPY_ROUTE_GATEWAY}"; then
+            log "❌ 缺少回传路由: ${GMS_COPY_ROUTE_NETWORK} via ${GMS_COPY_ROUTE_GATEWAY}"
+            log "❌ 请由主机管理员配置持久路由后重试；Worker 不允许在任务期间修改网络。"
+            return 1
         fi
     else
         log "ℹ️ 未配置 GMS_COPY_ROUTE_NETWORK/GMS_COPY_ROUTE_GATEWAY，跳过回传路由添加"
@@ -378,7 +454,11 @@ main() {
         analyze_result
         retry_if_needed
         copy_to_remote_server
-        log "✅ GMS 测试成功完成"
+        if (( FAIL_COUNT > 0 )); then
+            log "⚠️ GMS 测试执行完成，报告包含失败项 (PASS: $PASS_COUNT FAIL: $FAIL_COUNT)"
+        else
+            log "✅ GMS 测试执行完成，报告无失败项"
+        fi
     else
         log "❌ GMS 测试执行失败"
         copy_to_remote_server

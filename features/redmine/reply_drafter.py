@@ -1,15 +1,4 @@
-"""Draft FAE replies from the knowledge base.
-
-Strategy (Redmine.txt §5.7):
-
-1. Build the case fact for the target issue (re-extract from its stored row).
-2. Find similar case facts in the knowledge base.
-3. If a mature case matches, render the reply from it.
-4. Otherwise render from the best similar issues.
-
-The reply does NOT depend on the reference_outputs table — that is the
-evaluation-only channel (§1, §5.8).
-"""
+"""根据成熟案例或相似工单生成 FAE 回复草稿。"""
 
 from __future__ import annotations
 
@@ -27,8 +16,7 @@ from .case_search import RedmineCaseSearch
 from .knowledge_repository import RedmineKnowledgeDB
 
 
-# Historical owner (黄超群) reply block from generated Redmine docs. Compiled
-# once at import instead of on every _extract_owner_reply call.
+# 匹配文档中的黄超群回复块，正则在模块加载时编译。
 _OWNER_REPLY_RE = re.compile(r"^###\s+[^\n]*黄\s*超群[^\n]*\n(?P<body>.*?)(?=^###\s+|^##\s+|\Z)", re.M | re.S)
 
 
@@ -51,10 +39,7 @@ class ReplyDrafter:
         issue_id = int(issue.get("issue_id") or exclude_issue_id or 0)
         exclude = exclude_issue_id or issue_id
 
-        # Prefer a curated case fact for the target issue when one exists: it
-        # carries the verified, hand-distilled root cause / solution rather than
-        # the raw auto-extracted error_analysis. Fall back to extraction so an
-        # un-curated issue still drafts from its snapshot.
+        # 优先使用人工整理的案例事实，否则从工单快照提取。
         issue_id_for_fact = int(issue.get("issue_id") or 0)
         stored_fact = self.db.get_case_fact(issue_id_for_fact) if issue_id_for_fact else None
         if stored_fact and self._meaningful_root_case(stored_fact):
@@ -63,7 +48,7 @@ class ReplyDrafter:
             fact = RedmineCaseExtractor.extract(issue)
         similar = self.search.search_similar(fact, limit=5, exclude_issue_id=exclude)
 
-        # Resolve a mature case: caller may pass one, else find by signature/module.
+        # 优先使用传入案例，否则按签名和模块查找。
         resolved_case = mature_case
         if resolved_case is None:
             resolved_case = self.find_best_mature_case(fact, similar)
@@ -99,17 +84,14 @@ class ReplyDrafter:
         """True when a curated fact carries a distilled root cause worth using."""
         return len(meaningful_text(fact.get("root_cause"))) >= 20
 
-    # ------------------------------------------------------------------
     # Mature case resolution
-    # ------------------------------------------------------------------
 
     def find_best_mature_case(self, fact: dict[str, Any], similar: list[dict[str, Any]]) -> dict[str, Any] | None:
         signature = fact.get("error_signature") or ""
         module = fact.get("module") or ""
         if not signature and not module:
             return None
-        # Fetch the mature-case pool ONCE and index it by case_id, so candidate
-        # lookup is a dict read instead of one DB query per candidate (N+1 → 1).
+        # 一次读取成熟案例并按 ID 建立索引。
         cases_by_id: dict[int, dict[str, Any]] = {
             int(c.get("case_id") or 0): c for c in self.db.list_mature_cases(limit=200) if c.get("case_id")
         }
@@ -156,9 +138,7 @@ class ReplyDrafter:
             score += 5
         return score
 
-    # ------------------------------------------------------------------
     # Rendering
-    # ------------------------------------------------------------------
 
     def _render_from_mature_case(self, case: dict[str, Any], issue_id: int, similar: list[dict[str, Any]]) -> str:
         module = case.get("module") or "-"
@@ -207,7 +187,7 @@ class ReplyDrafter:
         signature = fact.get("error_signature") or ""
         root_cause = self._meaningful_text(fact.get("root_cause"))
         solution = self._meaningful_text(fact.get("solution"))
-        # Evaluate each candidate's text once (avoids double work in a `next(... if ...)` filter).
+        # 每个候选文本只解析一次。
         candidate_solutions = [self._candidate_solution_text(s) for s in similar]
         best_solution = next((t for t in candidate_solutions if t), "")
         candidate_roots = [self._meaningful_text(s.get("root_cause")) for s in similar]
@@ -257,7 +237,7 @@ class ReplyDrafter:
         text = str(excerpt or "").strip()
         if not text:
             return ""
-        # Prefer the historical 黄超群 reply block from generated Redmine docs.
+        # 优先提取文档中的黄超群回复块。
         pattern = _OWNER_REPLY_RE
         matches = [m.group("body").strip() for m in pattern.finditer(text)]
         candidates = [cls._redmine_pre_to_markdown(m) for m in matches if cls._meaningful_text(m)]

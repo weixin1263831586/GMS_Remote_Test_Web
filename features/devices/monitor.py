@@ -1,10 +1,4 @@
-"""
-USB设备监控模块 - 监听USB插拔事件并自动刷新设备列表
-
-支持两种模式:
-1. udev模式: 通过pyudev库监听Linux内核的udev事件 (推荐，实时性高，CPU占用低)
-2. 轮询模式: 定期轮询adb设备变化 (兼容性好，无需额外依赖)
-"""
+"""通过 udev 或 ADB 轮询监控 USB 设备变化。"""
 import logging
 import threading
 import time
@@ -21,20 +15,7 @@ def invalidate_device_cache(global_state) -> None:
 
 
 class USBMonitor:
-    """
-    USB设备监控器
-
-    特性:
-    - 监听USB设备插拔事件
-    - 自动检测设备列表变化
-    - 回调通知机制
-    - 支持udev和轮询两种模式
-    - 智能防抖，避免频繁触发
-
-    性能对比:
-    - udev模式: 事件驱动，~0% CPU，实时响应
-    - 轮询模式: 定期检查，~0.1% CPU，2秒延迟
-    """
+    """带防抖和变化回调的 USB 设备监控器。"""
 
     def __init__(
         self,
@@ -44,16 +25,7 @@ class USBMonitor:
         use_udev: bool = True,
         debounce_count: int = 2  # 需要连续检测到变化的次数
     ):
-        """
-        初始化USB监控器
-
-        Args:
-            device_getter: 获取当前设备列表的函数
-            on_devices_changed: 设备变化时的回调函数
-            check_interval: 轮询模式的检查间隔(秒)，默认2秒
-            use_udev: 是否优先使用udev模式
-            debounce_count: 防抖计数，连续N次检测到变化才触发（避免抖动）
-        """
+        """初始化 USB 监控、轮询间隔和防抖阈值。"""
         self.device_getter = device_getter
         self.on_devices_changed = on_devices_changed
         self.check_interval = check_interval
@@ -314,18 +286,7 @@ def init_usb_monitor(
     check_interval: float = 2.0,
     use_udev: bool = True
 ) -> USBMonitor:
-    """
-    初始化全局USB监控器
-
-    Args:
-        device_getter: 获取当前设备列表的函数
-        on_devices_changed: 设备变化时的回调函数
-        check_interval: 轮询模式的检查间隔(秒)
-        use_udev: 是否优先使用udev模式
-
-    Returns:
-        USBMonitor实例
-    """
+    """初始化全局 USB 监控器。"""
     global _usb_monitor
 
     if _usb_monitor is not None:

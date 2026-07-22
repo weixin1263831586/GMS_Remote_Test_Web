@@ -10,6 +10,7 @@ from collections.abc import Callable
 import paramiko
 
 from foundation.common_utils import CommonUtils
+from foundation.ssh_security import configure_strict_host_keys
 
 
 logger = logging.getLogger(__name__)
@@ -41,19 +42,7 @@ class SSHAsyncManager:
         port: int = 22,
         timeout: int = 10
     ) -> paramiko.SSHClient:
-        """
-        异步建立 SSH 连接
-
-        Args:
-            host: 主机地址
-            username: 用户名
-            password: 密码
-            port: SSH 端口
-            timeout: 连接超时时间
-
-        Returns:
-            SSHClient 对象
-        """
+        """在线程中建立 SSH 连接并按目标身份缓存。"""
         connection_key = (host, port, username)
         async with self._lock:
             # 检查是否已有连接
@@ -72,7 +61,7 @@ class SSHAsyncManager:
 
             def _connect():
                 ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                configure_strict_host_keys(ssh)
                 ssh.connect(
                     hostname=host,
                     username=username,
@@ -101,18 +90,7 @@ class SSHAsyncManager:
         log_callback: Callable[[str, str], None],
         timeout: int = 300
     ) -> int:
-        """
-        执行命令并实时流式输出日志
-
-        Args:
-            ssh: SSH 连接对象
-            command: 要执行的命令
-            log_callback: 日志回调函数 (message, type) -> None
-            timeout: 命令超时时间（秒）
-
-        Returns:
-            命令退出码
-        """
+        """执行 SSH 命令，通过回调输出日志并返回退出码。"""
         logger.info(f"[SSH] Executing command: {command[:100]}")
 
         try:
@@ -188,19 +166,7 @@ class SSHAsyncManager:
         command: str,
         timeout: int = 30
     ) -> tuple[int, str, str]:
-        """
-        简单执行命令（非流式）
-
-        Args:
-            host: 主机地址
-            username: 用户名
-            password: 密码
-            command: 命令
-            timeout: 超时时间
-
-        Returns:
-            (退出码, 标准输出, 标准错误)
-        """
+        """执行非流式 SSH 命令并返回退出码及输出。"""
         ssh = await self.connect(host, username, password, timeout=timeout)
 
         def _exec():

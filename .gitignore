@@ -1,0 +1,6 @@
+# Secrets & certificates — never commit
+.env.production
+.certs/
+configs/env.production
+configs/certs/
+configs/runtime.json

@@ -12,8 +12,7 @@ from pathlib import Path
 
 
 def _project_root() -> Path:
-    # The project places feature packages under web_app/features; walk up from
-    # features/redmine/tesseract_finder.py to reach the repository root.
+    # 从模块路径定位项目根目录，不依赖进程工作目录。
     return Path(__file__).resolve().parents[2]
 
 
@@ -46,9 +45,7 @@ def bundled_tesseract_env() -> dict[str, str]:
     return env
 
 
-# The bundled binary path and its env are constant for the process lifetime, so
-# configure once and remember the result. Avoids re-probing (stat) and re-copying
-# os.environ on every OCR call (each image attachment during a scan).
+# Tesseract 路径和环境在进程内只探测一次。
 _configured: bool | None = None
 
 

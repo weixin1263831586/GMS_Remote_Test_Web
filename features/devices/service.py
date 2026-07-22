@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -25,15 +26,18 @@ class DeviceService:
             for device_id in device_ids
             if str(device_id or "").strip()
         ))
+        source_id = f"operation:{client_id}:{uuid.uuid4().hex}"
         acquired: list[str] = []
         for device_id in selected:
             success, message = self.lock_manager.lock_device(
                 device_id,
                 client_id,
                 username,
+                source_id=source_id,
+                source_type="device-operation",
             )
             if not success:
-                self._release(acquired, client_id)
+                self._release(acquired, client_id, source_id)
                 return {
                     "success": False,
                     "error": message,
@@ -49,12 +53,17 @@ class DeviceService:
             ]
             return {"success": True, "results": results}
         finally:
-            self._release(acquired, client_id)
+            self._release(acquired, client_id, source_id)
 
     def _release(
         self,
         device_ids: Iterable[str],
         client_id: str,
+        source_id: str,
     ) -> None:
         for device_id in device_ids:
-            self.lock_manager.unlock_device(device_id, client_id)
+            self.lock_manager.unlock_device(
+                device_id,
+                client_id,
+                source_id=source_id,
+            )

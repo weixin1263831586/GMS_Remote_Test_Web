@@ -6,7 +6,13 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import get_authenticated_user, require_elevated_admin
+from features.auth import (
+    CurrentUser,
+    get_authenticated_user,
+    require_elevated_admin,
+    require_authenticated_user_when_auth_required,
+    require_role_when_auth_required,
+)
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
 
@@ -61,7 +67,7 @@ async def get_client_info(request: Request):
 @router.post("/api/users/detect")
 async def detect_client(req: ClientInfoRequest, request: Request):
     """自动检测客户端用户名"""
-    client_ip = get_client_ip(request, req.ip)
+    client_ip = get_client_ip(request)
 
     success, username, error = client_manager.detect_username(
         client_ip,
@@ -90,7 +96,7 @@ async def detect_client(req: ClientInfoRequest, request: Request):
 @router.post("/api/users/set-username")
 async def set_client_username(req: ClientInfoRequest, request: Request):
     """手动设置客户端用户名（不需要SSH密码）"""
-    client_ip = get_client_ip(request, req.ip)
+    client_ip = get_client_ip(request)
     username = req.username
 
     if not username or username == 'unknown':
@@ -171,7 +177,9 @@ async def remove_configured_user(request: Request, _elevated=Depends(require_ele
 
 @router.get("/api/users/list")
 @handle_api_errors
-async def list_users():
+async def list_users(
+    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
+):
     """获取所有在线用户列表"""
     now = datetime.now()
     config = runtime.config_manager.load_config()
@@ -264,9 +272,7 @@ async def list_users():
 
         users = list(temp_users.values())
 
-    # Durable Worker jobs live outside the process-local user_states map. Merge
-    # their owners and leases so the Users page remains truthful after a
-    # Controller restart and for tests running on remote hosts.
+    # 合并持久化 Worker 任务的所有者和设备租约。
     try:
         from features.cluster import get_cluster_service
 

@@ -21,7 +21,7 @@ let lunchDiscoveryRequest = 0;
 let lunchOptionsContext = '';
 
 function isLocalAutomationWorker(workerId) {
-    return !workerId || workerId === 'worker-local' || workerId === atsLocalWorkerId;
+    return !workerId || workerId === atsLocalWorkerId;
 }
 
 function workspaceDeviceSerial(value) {
@@ -37,13 +37,11 @@ function syncAutomationWorkspaceSelection(extra = {}) {
     const checked = Array.from(document.querySelectorAll(
         '#automation-device-list input[type="checkbox"]:checked'
     )).map(input => input.value);
-    const typed = String(qs('automation-devices')?.value || '')
-        .split(/[,\s]+/).map(value => value.trim()).filter(Boolean);
     const suitePath = qs('automation-test-suite')?.value || '';
     const suite = testSuites.find(item => (item.tools_path || item.full_path) === suitePath);
     window.GmsEmbeddedWorkspace?.update({
         worker_id: workerId,
-        device_ids: [...new Set([...typed, ...checked])].map(value =>
+        device_ids: [...new Set(checked)].map(value =>
             isLocalAutomationWorker(workerId) || value.startsWith(`${workerId}:`)
                 ? value : `${workerId}:${value}`),
         suite_key: suite?.suite_key || suitePath,
@@ -60,7 +58,10 @@ async function applyAutomationWorkspaceContext(next, navigate = false) {
         const worker = atsWorkspaceContext.scope_mode === 'cluster'
             ? (atsWorkspaceContext.worker_id || atsLocalWorkerId) : atsLocalWorkerId;
         const workerSelect = qs('automation-worker');
-        if (workerSelect && Array.from(workerSelect.options).some(option => option.value === worker)) {
+        const workerOption = workerSelect
+            ? Array.from(workerSelect.options).find(option => option.value === worker && !option.disabled)
+            : null;
+        if (workerSelect && workerOption) {
             const changed = workerSelect.value !== worker;
             workerSelect.value = worker;
             if (changed) {
@@ -75,9 +76,6 @@ async function applyAutomationWorkspaceContext(next, navigate = false) {
         document.querySelectorAll('#automation-device-list input[type="checkbox"]').forEach(input => {
             input.checked = !input.disabled && selected.has(workspaceDeviceSerial(input.value));
         });
-        if (qs('automation-devices') && selected.size) {
-            qs('automation-devices').value = [...selected].join(', ');
-        }
         if (atsWorkspaceContext.gerrit_change_id) {
             if (qs('dryrun-change-id')) qs('dryrun-change-id').value = atsWorkspaceContext.gerrit_change_id;
             if (qs('dryrun-patchset')) qs('dryrun-patchset').value = atsWorkspaceContext.gerrit_patchset || '';
@@ -122,17 +120,36 @@ async function loadClusterWorkers() {
         }
         const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
         const payload = await response.json();
-        const workers = (payload.workers || []).filter(worker => {
-            if (['offline', 'draining'].includes(worker.status)) return false;
-            if (isLocalAutomationWorker(worker.id)) {
-                return !String(worker.agent_version || '').startsWith('controller-');
+        const workers = payload.workers || [];
+        const workerAvailability = worker => {
+            if (!['online', 'busy'].includes(worker.status)) return '离线';
+            if (
+                isLocalAutomationWorker(worker.id)
+                && String(worker.agent_version || '').startsWith('controller-')
+            ) return '未安装 ATS Agent';
+            if (!isLocalAutomationWorker(worker.id) && !status.remote_dispatch_enabled) {
+                return '未启用远程派发';
             }
-            return Boolean(status.remote_dispatch_enabled);
-        });
-        select.innerHTML = workers.map(worker => `<option value="${esc(worker.id)}">${esc(worker.name || worker.id)}</option>`).join('');
-        select.disabled = !workers.length;
-        select.title = workers.length ? '' : '没有安装持久化 Agent 的在线 Worker';
-        if (workers.some(worker => worker.id === previous)) select.value = previous;
+            return '';
+        };
+        const labelForWorker = worker => {
+            const name = String(worker.name || worker.id);
+            const host = String(worker.address || worker.hostname || '');
+            return host && !name.includes(host) ? `${name} / ${host}` : name;
+        };
+        const eligible = workers.filter(worker => !workerAvailability(worker));
+        select.innerHTML = workers.map(worker => {
+            const reason = workerAvailability(worker);
+            const label = `${labelForWorker(worker)}${reason ? `（${reason}）` : ''}`;
+            return `<option value="${esc(worker.id)}"${reason ? ' disabled' : ''}>${esc(label)}</option>`;
+        }).join('');
+        select.disabled = !eligible.length;
+        const unavailable = workers.filter(workerAvailability).map(labelForWorker);
+        select.title = eligible.length
+            ? (unavailable.length ? `${unavailable.join('、')} 当前不可用` : '')
+            : '没有安装持久化 Agent 的在线 Worker';
+        const selected = eligible.find(worker => worker.id === previous) || eligible[0];
+        if (selected) select.value = selected.id;
     } catch (_) {
         select.innerHTML = `<option value="${esc(atsLocalWorkerId)}">Controller / Local Worker</option>`;
         select.disabled = true;
@@ -235,20 +252,27 @@ function renderStageBar(status, currentStage) {
 }
 async function api(path, options) {
     const resp = await fetch(path, options);
-    const data = await resp.json();
-    if (!data.success) throw new Error(data.error || data.message || '请求失败');
+    const text = await resp.text();
+    let data;
+    try {
+        data = text ? JSON.parse(text) : {};
+    } catch (_error) {
+        data = {success: false, error: text || `HTTP ${resp.status}`};
+    }
+    if (!resp.ok || !data.success) {
+        throw new Error(data.error || data.message || `请求失败 (HTTP ${resp.status})`);
+    }
     return data.data;
 }
 
 async function loadProfiles() {
-    const data = await api('/api/automation/profiles');
+    const data = await api('/api/automation/profiles?enabled_only=true');
     atsProfiles = data.items || [];
     const select = qs('automation-profile');
-    select.innerHTML = atsProfiles.map(p => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+    select.innerHTML = atsProfiles.length
+        ? atsProfiles.map(p => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('')
+        : '<option value="">手动配置（未套用 Profile）</option>';
     select.onchange = applySelectedProfile;
-    qs('automation-profiles').innerHTML = atsProfiles.length
-        ? atsProfiles.map(p => `<div><span class="badge">${esc(p.enabled ? 'enabled' : 'disabled')}</span> <strong>${esc(p.name || p.id)}</strong><div class="muted">${esc(p.id)} / ${esc((p.jenkins || {}).job || 'manual')}</div></div>`).join('')
-        : '<div class="muted">未配置 automation_profiles.json，当前使用 example 配置。</div>';
     applySelectedProfile();
 }
 
@@ -264,17 +288,43 @@ function setSelectValue(id, value) {
         select.insertAdjacentHTML('beforeend', `<option value="${esc(text)}">${esc(text)}</option>`);
     }
     select.value = text;
+    if (id === 'build-command') select.title = text;
+}
+
+function renderSelectedProfileSummary(profile) {
+    const summary = qs('automation-profile-summary');
+    const dryrun = document.querySelector('.profile-dryrun');
+    if (!profile?.id) {
+        summary.textContent = '未套用 Profile；使用下方手动参数';
+        if (dryrun) dryrun.hidden = true;
+        return;
+    }
+    const build = profile.build || {};
+    const plan = profile.test_plan || {};
+    const selector = profile.device_selector || {};
+    const parts = [];
+    if (build.server_id || build.template_id) parts.push('构建默认值');
+    if (plan.test_type) parts.push(String(plan.test_type).toUpperCase());
+    if (plan.test_module || (plan.modules || []).length) parts.push('模块测试');
+    parts.push(`设备 ${Math.max(1, Number(selector.min_count || 1))} 台`);
+    summary.textContent = `已套用：${parts.join(' · ')}`;
+    if (dryrun) dryrun.hidden = false;
 }
 
 function applySelectedProfile() {
     const profile = selectedProfile();
+    renderSelectedProfileSummary(profile);
+    if (!profile.id) {
+        syncArtifactMode();
+        syncBuildSectionState();
+        return;
+    }
     const build = profile.build || {};
     const parameters = build.parameters || {};
     pendingBuildWorkspace = String(parameters.workspace || '');
     pendingBuildLunchTarget = String(parameters.lunch_target || '');
-    qs('automation-enable-build').checked = Boolean(build.server_id || build.template_id || build.provider);
     setSelectValue('build-server', build.server_id);
-    setSelectValue('build-template', build.template_id);
+    renderBuildTemplates(build.template_id);
     setSelectValue('build-workspace', pendingBuildWorkspace);
     invalidateLunchOptions(pendingBuildLunchTarget
         ? `请读取源码目录，确认 Profile 中的 ${pendingBuildLunchTarget} 是否可用`
@@ -295,16 +345,63 @@ async function loadBuildConfig() {
     buildServers = servers.items || [];
     buildTemplates = templates.items || [];
     qs('build-server').innerHTML = buildServers.map(s => `<option value="${esc(s.id)}">${esc(s.name || s.id)}</option>`).join('');
-    qs('build-template').innerHTML = buildTemplates.map(t => `<option value="${esc(t.id)}">${esc(t.name || t.id)}</option>`).join('');
+    renderBuildTemplates();
     renderBuildWorkspaces([]);
     invalidateLunchOptions('选择源码目录后自动读取该目录的 Lunch Target');
     qs('build-server').onchange = handleBuildServerChange;
+    qs('build-template').onchange = () => applyBuildTemplateDefaults();
     qs('build-workspace').onchange = handleBuildWorkspaceChange;
+    qs('build-command').onchange = syncBuildCommandTitle;
+    syncBuildCommandTitle();
+    syncArtifactMode();
     syncBuildSectionState();
 }
 
-function collectBuildPlan() {
-    if (!qs('automation-enable-build').checked) return null;
+function selectedBuildTemplate() {
+    return buildTemplates.find(template => template.id === qs('build-template')?.value) || {};
+}
+
+function renderBuildTemplates(preferredTemplate = '') {
+    const select = qs('build-template');
+    if (!select) return;
+    const serverId = qs('build-server')?.value || '';
+    const matching = buildTemplates.filter(template => !template.server_id || template.server_id === serverId);
+    select.innerHTML = matching.length
+        ? matching.map(template => `<option value="${esc(template.id)}">${esc(template.name || template.id)}</option>`).join('')
+        : '<option value="">当前服务器无可用模板</option>';
+    if (preferredTemplate && matching.some(template => template.id === preferredTemplate)) {
+        select.value = preferredTemplate;
+    }
+    syncBuildTemplateHint();
+}
+
+function syncBuildTemplateHint() {
+    const hint = qs('build-template-hint');
+    if (!hint) return;
+    const template = selectedBuildTemplate();
+    if (!template.id) {
+        hint.textContent = '模板限定初始化、编译超时和产物规则';
+        return;
+    }
+    const defaultCommand = template.parameters_schema?.build_command?.default || template.command || '';
+    const init = (template.init_commands || []).join(' → ');
+    hint.textContent = [init, defaultCommand ? `默认 ${defaultCommand}` : ''].filter(Boolean).join('；');
+}
+
+function applyBuildTemplateDefaults() {
+    const template = selectedBuildTemplate();
+    const defaultCommand = template.parameters_schema?.build_command?.default;
+    if (defaultCommand) setSelectValue('build-command', defaultCommand);
+    syncBuildTemplateHint();
+}
+
+function syncBuildCommandTitle() {
+    const command = qs('build-command');
+    if (command) command.title = command.value || '';
+}
+
+function collectBuildPlan({forceBuild = false} = {}) {
+    if (!forceBuild && qs('automation-artifact')?.value.trim()) return null;
     const serverId = qs('build-server').value;
     const templateId = qs('build-template').value;
     const workspace = qs('build-workspace').value;
@@ -359,6 +456,8 @@ function promptBuildPassword() {
 }
 
 async function getBuildPassword(serverId) {
+    const server = buildServers.find(item => item.id === serverId);
+    if (server?.auth?.type === 'env_password') return '';
     if (buildPasswordCache[serverId]) return buildPasswordCache[serverId];
     const password = await promptBuildPassword();
     if (password) buildPasswordCache[serverId] = password;
@@ -387,7 +486,7 @@ function setBuildControlBusy(id, busy) {
 }
 
 function syncBuildSectionState() {
-    const enabled = Boolean(qs('automation-enable-build')?.checked);
+    const enabled = !Boolean(qs('automation-artifact')?.value.trim());
     qs('automation-build-fields')?.classList.toggle('is-disabled', !enabled);
     const server = qs('build-server');
     const template = qs('build-template');
@@ -410,7 +509,18 @@ function syncBuildSectionState() {
     if (lunchRefresh) {
         lunchRefresh.disabled = !enabled || !workspace?.value || lunchRefresh.dataset.loading === 'true';
     }
-    if (qs('automation-build-only')) qs('automation-build-only').disabled = !enabled;
+}
+
+function syncArtifactMode() {
+    const artifact = qs('automation-artifact')?.value.trim() || '';
+    const hint = qs('artifact-mode-hint');
+    if (hint) {
+        hint.textContent = artifact
+            ? '本次运行将直接使用已有固件，下方源码编译参数已忽略'
+            : '留空时按下方参数从源码编译；填写后直接使用该固件';
+        hint.classList.toggle('ready', Boolean(artifact));
+    }
+    syncBuildSectionState();
 }
 
 function renderBuildWorkspaces(items, preferredWorkspace = '') {
@@ -451,6 +561,8 @@ function invalidateLunchOptions(message = '选择源码目录后自动读取该�
 
 async function handleBuildServerChange() {
     workspaceDiscoveryRequest += 1;
+    renderBuildTemplates();
+    applyBuildTemplateDefaults();
     renderBuildWorkspaces([]);
     invalidateLunchOptions();
     setBuildFieldStatus('build-workspace-status', '正在扫描所选服务器的源码目录…', 'loading');
@@ -505,7 +617,7 @@ async function refreshBuildWorkspaces() {
     }
 }
 
-async function refreshLunchOptions({silent = false, preferredTarget = ''} = {}) {
+async function refreshLunchOptions({silent = false, preferredTarget = '', forceRefresh = false} = {}) {
     const serverId = qs('build-server').value;
     const workspace = qs('build-workspace').value;
     if (!workspace) {
@@ -525,7 +637,12 @@ async function refreshLunchOptions({silent = false, preferredTarget = ''} = {}) 
         const data = await api('/api/build/discover/lunch-options', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({server_id: serverId, workspace, server_password: password}),
+            body: JSON.stringify({
+                server_id: serverId,
+                workspace,
+                server_password: password,
+                force_refresh: forceRefresh,
+            }),
         });
         if (requestId !== lunchDiscoveryRequest || context !== buildSelectionContext()) return;
         const items = data.items || [];
@@ -534,7 +651,7 @@ async function refreshLunchOptions({silent = false, preferredTarget = ''} = {}) 
         setBuildFieldStatus(
             'build-lunch-status',
             items.length
-                ? `仅显示 ${workspace} 中发现的 ${items.length} 个 Lunch Target`
+                ? `已从当前源码树发现 ${items.length} 个 Lunch Target`
                 : `${workspace} 中未发现 Lunch Target`,
             items.length ? 'ready' : 'error',
         );
@@ -614,14 +731,15 @@ function renderSuiteOptions() {
 }
 
 async function loadRuns() {
-    const query = atsStatus ? `?status=${encodeURIComponent(atsStatus)}&limit=100` : '?limit=100';
+    const effectiveStatus = activeWorkflowPane === 'reports' ? '' : atsStatus;
+    const query = effectiveStatus ? `?status=${encodeURIComponent(effectiveStatus)}&limit=100` : '?limit=100';
     const data = await api('/api/automation/runs' + query);
     atsRuns = data.items || [];
     const list = qs('automation-runs');
     const reportList = qs('automation-runs-report');
     if (!atsRuns.length) {
         list.innerHTML = '<div class="muted">暂无运行记录。</div>';
-        if (reportList) reportList.innerHTML = '<div class="muted">暂无运行记录。</div>';
+        if (reportList) reportList.innerHTML = '<div class="empty-state">暂无已生成的测试报告。</div>';
         return;
     }
     const html = atsRuns.map(run => `
@@ -669,7 +787,29 @@ async function loadRuns() {
         </article>
     `).join('');
     list.innerHTML = html;
-    if (reportList) reportList.innerHTML = html;
+    if (reportList) {
+        const reportRuns = atsRuns.filter(run => run.report_timestamp);
+        reportList.innerHTML = reportRuns.length
+            ? reportRuns.map(run => `
+                <article class="report-card">
+                    <div class="report-card-main">
+                        <div class="run-title">
+                            <span class="badge ${esc(run.status)}">${esc(run.status)}</span>
+                            <strong>${esc(run.profile_id || 'manual')}</strong>
+                            <span class="muted">${esc(run.source_type || 'manual')}</span>
+                        </div>
+                        ${runMeta(run) ? `<div class="muted">${esc(runMeta(run))}</div>` : ''}
+                        <div class="report-card-meta">
+                            <span>报告：${esc(compactTime(run.report_timestamp))}</span>
+                            <span>设备：${esc(formatDevices(run.devices_json))}</span>
+                            <span>运行：${esc(run.id)}</span>
+                        </div>
+                    </div>
+                    <button type="button" class="primary" onclick="openRunReport(event, '${esc(run.id)}')">打开报告</button>
+                </article>
+            `).join('')
+            : '<div class="empty-state">暂无已生成的测试报告。</div>';
+    }
 }
 
 async function loadEvents(runId) {
@@ -686,14 +826,33 @@ async function loadEvents(runId) {
         gerrit_patchset: run?.gerrit_patchset || '',
         origin_page: 'automation'
     });
-    qs('events-title').textContent = run ? `事件 / ${run.profile_id || run.id}` : '事件';
+    qs('events-title').textContent = run ? `全链路时间线 / ${run.profile_id || run.id}` : '全链路时间线';
     qs('automation-runs').querySelectorAll('.run-card').forEach(el => el.classList.remove('active'));
     const card = qs('automation-runs').querySelector(`.run-card[onclick="loadEvents('${runId}')"]`);
     if (card) card.classList.add('active');
-    const data = await api(`/api/automation/runs/${encodeURIComponent(runId)}/events`);
+    const data = await api(`/api/automation/runs/${encodeURIComponent(runId)}/timeline`);
     const items = data.items || [];
     qs('automation-events').innerHTML = items.length
-        ? items.map(ev => `<div class="event"><div class="event-meta">${esc(ev.created_at)} / ${esc(ev.stage)} / ${esc(ev.level)}</div><div>${esc(ev.message)}</div></div>`).join('')
+        ? items.map(ev => {
+            const level = String(ev.level || 'info').toLowerCase();
+            const levelClass = level.includes('error') || level.includes('fail')
+                ? 'error' : level.includes('warn') ? 'warning' : 'info';
+            return `<article class="event">
+                <div class="event-meta">
+                    <span class="event-time">${esc(compactTime(ev.created_at))}</span>
+                    <span class="badge">${esc(ev.domain || 'automation')}</span>
+                    <span class="badge">${esc(ev.stage || ev.to_state || ev.event_type || '-')}</span>
+                    <span class="event-level ${levelClass}">${esc(level)}</span>
+                </div>
+                <div class="event-body">
+                    <div class="event-message">${esc(ev.message)}</div>
+                    ${(ev.operation_id || ev.from_state || ev.to_state) ? `<div class="muted">${esc([
+                        ev.from_state && ev.to_state ? `${ev.from_state} → ${ev.to_state}` : '',
+                        ev.operation_id ? `operation ${ev.operation_id}` : '',
+                    ].filter(Boolean).join(' · '))}</div>` : ''}
+                </div>
+            </article>`;
+        }).join('')
         : '<div class="muted">暂无事件。</div>';
     switchWorkflowPane('events');
 }
@@ -712,14 +871,22 @@ function switchWorkflowPane(pane) {
     const panes = ['overview', 'create', 'runs', 'build', 'events', 'reports'];
     panes.forEach(key => {
         const el = qs(`workflow-pane-${key}`);
-        if (el) el.classList.toggle('active', key === pane);
+        if (el) {
+            el.classList.toggle('active', key === pane);
+            el.setAttribute('aria-hidden', key === pane ? 'false' : 'true');
+        }
     });
     document.querySelectorAll('.workflow-tab').forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.workflow === pane);
+        const active = tab.dataset.workflow === pane;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        tab.tabIndex = active ? 0 : -1;
     });
     if (pane === 'overview') loadDashboard().catch(err => toast(err.message));
-    if (pane === 'runs' || pane === 'reports') loadRuns();
-    if (pane === 'build') loadBuildJobs();
+    if (pane === 'runs' || pane === 'reports') {
+        loadRuns().catch(err => toast(err.message));
+    }
+    if (pane === 'build') loadBuildJobs().catch(err => toast(err.message));
 }
 
 function collectTestPlan() {
@@ -774,7 +941,7 @@ async function deleteBuildJob(jobId) {
 
 async function createBuildJob() {
     try {
-        const build = collectBuildPlan();
+        const build = collectBuildPlan({forceBuild: true});
         if (!build) throw new Error('请填写编译服务器、模板、源码目录和 lunch target');
         const serverPassword = await getBuildPassword(build.server_id);
         const job = await api('/api/build/jobs', {
@@ -838,14 +1005,10 @@ function refreshSelectedBuildLog() {
 async function createRun() {
     try {
         const artifact = qs('automation-artifact').value.trim();
-        const typedDevices = qs('automation-devices').value
-            .split(/[,\s]+/)
-            .map(item => item.trim())
-            .filter(Boolean);
         const checkedDevices = Array.from(qs('automation-device-list').querySelectorAll('input[type="checkbox"]:checked'))
             .map(opt => opt.value)
             .filter(Boolean);
-        const devices = [...new Set([...typedDevices, ...checkedDevices])];
+        const devices = [...new Set(checkedDevices)];
         const testPlan = collectTestPlan();
         if (atsWorkspaceContext.redmine_issue_id) {
             testPlan.redmine_issue_id = atsWorkspaceContext.redmine_issue_id;
@@ -999,6 +1162,9 @@ async function loadTrace(runId) {
         ].join('') || '<div class="muted">（无固件产物）</div>';
 
         qs('trace-test').innerHTML = [
+            traceField('Trace ID', data.trace_id),
+            traceField('状态版本', data.state_version),
+            traceField('恢复次数', data.recovery_count),
             traceField('Cluster Job', data.cluster_job_id),
             traceField('Attempt', data.attempt_id),
             traceField('任务状态', data.cluster_job?.status),

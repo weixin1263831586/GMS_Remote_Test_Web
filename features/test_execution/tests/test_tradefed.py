@@ -1,6 +1,12 @@
+import os
+import tempfile
 import unittest
 
-from features.test_execution.tradefed import find_tradefed_binary, sanitize_tradefed_console_command
+from features.test_execution.tradefed import (
+    find_tradefed_binary,
+    find_tradefed_binary_local,
+    sanitize_tradefed_console_command,
+)
 
 
 class FakeRuntimeSshManager:
@@ -31,6 +37,16 @@ class TradefedTests(unittest.TestCase):
         self.assertEqual(sanitize_tradefed_console_command(" list results "), "list results")
         with self.assertRaises(ValueError):
             sanitize_tradefed_console_command("list results\nexit")
+
+    def test_find_tradefed_binary_local_requires_executable_launcher(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            disabled = os.path.join(tmp, "cts-tradefed")
+            enabled = os.path.join(tmp, "vts-tradefed")
+            for path in (disabled, enabled):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("#!/bin/sh\n")
+            os.chmod(enabled, 0o755)
+            self.assertEqual(find_tradefed_binary_local(tmp), enabled)
 
 
 if __name__ == "__main__":

@@ -41,10 +41,7 @@ CERT_ERROR_PATTERNS: list[tuple[str, list[re.Pattern[str]]]] = [
 
 _PARTITION_RE = re.compile(r"\b(vbmeta|boot|system|vendor|odm|dtbo|product|system_ext|vbmeta_system|recovery)\b", re.I)
 
-# Certification/test type keywords in priority order (first match wins).
-# Single source of truth for both attachment analysis and the case extractor —
-# note CTS-Verifier/MCTS are matched *before* the bare CTS/GMS so a more
-# specific type wins (e.g. "CTS-Verifier" beats "CTS").
+# 认证类型按优先级匹配，具体类型必须排在通用类型之前。
 _CERT_TYPE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("BTS", re.compile(r"\bBTS\b", re.I)),
     ("EDLA", re.compile(r"\bEDLA\b", re.I)),
@@ -70,19 +67,7 @@ def detect_certification_type(text: str) -> str:
 
 
 def detect_certification_errors(text: str) -> dict[str, Any]:
-    """Scan ``text`` (OCR / log / description) for certification error signals.
-
-    Returns::
-
-        {
-            "errors": ["VBMeta test key", ...],   # matched signatures
-            "partitions": ["system", "vbmeta"],   # partitions referenced
-            "certification_type": "BTS",          # best-guess test type
-            "failures": [                          # ready-to-consume failure dicts
-                {"name": "...", "module": "BTS", "reason": "..."},
-            ],
-        }
-    """
+    """从 OCR、日志或描述中提取认证错误、分区和测试类型。"""
     text = str(text or "")
     errors: list[str] = []
     seen: set[str] = set()

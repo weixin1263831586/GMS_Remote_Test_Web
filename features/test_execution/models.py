@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field
 
 
 class TestStartRequest(BaseModel):
-    worker_id: str = "worker-local"
+    # 空值表示部署配置中的本地 Worker。
+    worker_id: str = ""
     test_type: str = ""
     test_module: str = ""
     test_case: str = ""

@@ -11,11 +11,14 @@ from tempfile import TemporaryDirectory
 from features.test_execution import transfers_api
 from features.test_execution.models import TestSuiteExtractRequest as SuiteExtractRequest
 from features.test_execution.transfers_api import (
+    _curl_resolve_arguments,
     _extract_archive_local_with_progress,
     _path_within_suite_root,
+    _resolve_suite_download_target,
     _validate_suite_download_url,
     extract_test_suite_archive,
 )
+from foundation.outbound import ResolvedOutboundTarget
 
 
 class SuiteExtractTests(unittest.TestCase):
@@ -26,6 +29,27 @@ class SuiteExtractTests(unittest.TestCase):
         self.assertEqual(
             _validate_suite_download_url('https://example.com/suite.zip'),
             'https://example.com/suite.zip',
+        )
+        with self.assertRaises(ValueError):
+            _validate_suite_download_url(
+                'https://user:password@example.com/suite.zip'
+            )
+
+    def test_download_blocks_private_targets_and_pins_resolved_addresses(self):
+        with self.assertRaises(ValueError):
+            _resolve_suite_download_target('http://127.0.0.1/suite.zip')
+        target = ResolvedOutboundTarget(
+            url='https://example.com/suite.zip',
+            hostname='example.com',
+            port=443,
+            addresses=('93.184.216.34', '2001:db8::1'),
+        )
+        self.assertEqual(
+            _curl_resolve_arguments(target),
+            [
+                '--resolve', 'example.com:443:93.184.216.34',
+                '--resolve', 'example.com:443:[2001:db8::1]',
+            ],
         )
 
     def test_suite_paths_cannot_escape_configured_root(self):

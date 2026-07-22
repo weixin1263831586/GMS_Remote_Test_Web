@@ -1,20 +1,13 @@
-"""
-通用工具函数 - 提供项目范围内的通用工具方法
-
-整合重复的主机地址解析、本地检查等逻辑
-"""
+"""项目通用工具函数。"""
 import logging
 import re
 import socket
 from typing import Any
 from urllib.parse import urlparse
 
-from foundation import networking
-
-
 logger = logging.getLogger(__name__)
 
-# Pre-compiled regex for stripping ANSI escape sequences (CSI, OSC, and other VT100 codes)
+# ANSI 转义序列匹配（CSI、OSC、VT100 码）
 _ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]|\x1b\].*?\x07|\x1b\[.*?[a-zA-Z]')
 
 
@@ -36,16 +29,9 @@ class CommonUtils:
                 continue
         return data.decode('utf-8', errors='replace')
 
-    # NOTE: 本机 IP 探测/缓存已在 foundation.networking 中实现为唯一权威版本
-    # （get_local_ips / is_local_host），这里仅做转发以保持旧调用兼容。
     @classmethod
     def get_local_ip(cls) -> str | None:
-        """
-        获取本机IP地址
-
-        Returns:
-            本机IP地址，失败返回None
-        """
+        """获取本机 IP，失败时返回 None。"""
         try:
             return socket.gethostbyname(socket.gethostname())
         except Exception as e:
@@ -53,49 +39,21 @@ class CommonUtils:
             return None
 
     @classmethod
-    def get_local_ips(cls) -> set:
-        """获取本机所有可识别 IP 地址（带 60 秒缓存）。委托给 foundation.networking。"""
-        return networking.get_local_ips()
-
-    @classmethod
-    def is_local_host(cls, host: str) -> bool:
-        """
-        检查是否为本地主机。委托给 foundation.networking 的权威实现。
-        """
-        return networking.is_local_host(host)
-
-    @classmethod
     def sanitize_url(cls, url: str) -> str:
-        """
-        清理和标准化URL
-
-        Args:
-            url: 原始URL
-
-        Returns:
-            清理后的URL
-
-        Examples:
-            >>> CommonUtils.sanitize_url("view-source:https://example.com")
-            'https://example.com'
-            >>> CommonUtils.sanitize_url("https://example.com/")
-            'https://example.com/'
-        """
+        """清理浏览器前缀并补全 URL 协议。"""
         if not url:
             return url
 
-        # 移除常见的浏览器前缀
+        # 移除浏览器前缀。
         prefixes_to_remove = ['view-source:', 'view-source://', 'about:', 'about://']
         for prefix in prefixes_to_remove:
             if url.startswith(prefix):
                 url = url[len(prefix):]
                 break
 
-        # 验证URL格式
         try:
             parsed = urlparse(url)
             if not parsed.scheme:
-                # 如果没有协议，尝试添加https
                 url = f"https://{url}"
             elif parsed.scheme not in ['http', 'https']:
                 logger.warning(f"Unexpected URL scheme: {parsed.scheme}")
@@ -106,24 +64,7 @@ class CommonUtils:
 
     @classmethod
     def parse_host_address(cls, host: str) -> tuple[str | None, str]:
-        """
-        解析主机地址
-
-        Args:
-            host: 主机地址，可能包含 username@ 前缀
-
-        Returns:
-            (username, host_ip) 元组
-            如果没有 username，返回 (None, host)
-
-        Examples:
-            >>> CommonUtils.parse_host_address('user@192.168.1.1')
-            ('user', '192.168.1.1')
-            >>> CommonUtils.parse_host_address('192.168.1.1')
-            (None, '192.168.1.1')
-        """
-        # Delegate to the canonical implementation in networking to avoid a
-        # second copy of the same '@'-split logic drifting out of sync.
+        """将 ``username@host`` 解析为用户名和主机。"""
         from foundation.networking import parse_host_address
         return parse_host_address(host)
 
@@ -135,18 +76,7 @@ class CommonUtils:
         error: str = '',
         data: Any = None
     ) -> dict[str, Any]:
-        """
-        创建标准结果字典
-
-        Args:
-            success: 是否成功
-            message: 消息
-            error: 错误信息
-            data: 附加数据
-
-        Returns:
-            标准格式的结果字典
-        """
+        """创建标准结果字典。"""
         result = {'success': success}
 
         if message:
@@ -168,16 +98,7 @@ class CommonUtils:
         message: str = '',
         data: Any = None
     ) -> dict[str, Any]:
-        """
-        创建成功结果字典
-
-        Args:
-            message: 成功消息
-            data: 附加数据
-
-        Returns:
-            标准成功结果字典
-        """
+        """创建成功结果字典。"""
         return cls.create_result_dict(True, message, '', data)
 
     @classmethod
@@ -186,35 +107,12 @@ class CommonUtils:
         error: str,
         data: Any = None
     ) -> dict[str, Any]:
-        """
-        创建错误结果字典
-
-        Args:
-            error: 错误信息
-            data: 附加数据
-
-        Returns:
-            标准错误结果字典
-        """
+        """创建错误结果字典。"""
         return cls.create_result_dict(False, '', error, data)
 
     @staticmethod
     def extract_ip_from_host(host: str) -> str:
-        """
-        从主机地址中提取 IP 部分
-
-        Args:
-            host: 主机地址，可能包含 username@ 前缀
-
-        Returns:
-            IP 地址部分
-
-        Examples:
-            >>> extract_ip_from_host('user@192.168.1.1')
-            '192.168.1.1'
-            >>> extract_ip_from_host('192.168.1.1')
-            '192.168.1.1'
-        """
+        """从 ``username@host`` 中提取主机部分。"""
         if '@' in host:
             return host.split('@', 1)[1]
         return host
@@ -239,20 +137,7 @@ class StackTraceUtils:
 
     @classmethod
     def extract_failure_location(cls, stack_trace: str) -> dict[str, str] | None:
-        """
-        从堆栈跟踪中提取失败位置信息（优先提取测试类，排除工具类）
-
-        Args:
-            stack_trace: 堆栈跟踪字符串
-
-        Returns:
-            dict with keys: file_name, file_type, line_number
-            或 None（如果无法提取）
-
-        Examples:
-            >>> extract_failure_location("at com.android.gpu.vts.OpenGlEsTest.checkOpenGlEsDeqpLevelIsHighEnough(OpenGlEsTest.java:77)")
-            {'file_name': 'OpenGlEsTest', 'file_type': 'java', 'line_number': '77'}
-        """
+        """提取首个非工具类失败位置。"""
         if not stack_trace:
             return None
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -19,16 +20,30 @@ JOB_COLUMNS = [
 class BuildStore:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
+        self._schema_lock = threading.RLock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _open_connection(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _connect(self) -> sqlite3.Connection:
+        conn = self._open_connection()
+        schema_exists = conn.execute(
+            """SELECT 1 FROM sqlite_master
+               WHERE type='table' AND name='build_jobs'"""
+        ).fetchone() is not None
+        if not schema_exists:
+            conn.close()
+            self._init_schema()
+            conn = self._open_connection()
+        return conn
+
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with self._schema_lock, self._open_connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS build_jobs (
                     id TEXT PRIMARY KEY,

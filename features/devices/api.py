@@ -2,43 +2,35 @@
 
 import asyncio
 import logging
-import os
 import re
-import shlex
-import time
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.test_execution import get_default_suites_path
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
-from foundation.security import sanitize_device_ids
 
 from . import reconnect, runtime
+from .bootloader_api import (
+    check_bootloader_status as check_bootloader_status,
+)
+from .bootloader_api import (
+    get_device_info as get_device_info,
+)
+from .bootloader_api import (
+    lock_bootloader as lock_bootloader,
+)
+from .bootloader_api import (
+    router as bootloader_router,
+)
+from .bootloader_api import (
+    unlock_bootloader as unlock_bootloader,
+)
 from .locks import device_lock_manager
+from .management_api import _known_usbip_sources, _prune_inactive_usbip_sources
 from .manager import device_manager
-from .models import (
-    DeviceActionRequest,
-    DeviceLockRequest,
-    VerifiedBootState,
-)
-from .operations_api import (
-    _build_devices_management_payload as _build_devices_management_payload,
-)
-from .operations_api import (
-    _build_management_props_command as _build_management_props_command,
-)
-from .operations_api import (
-    _known_usbip_sources as _known_usbip_sources,
-)
-from .operations_api import (
-    _parse_management_device_props as _parse_management_device_props,
-)
-from .operations_api import (
-    _prune_inactive_usbip_sources as _prune_inactive_usbip_sources,
-)
 from .operations_api import (
     connect_wifi as connect_wifi,
 )
@@ -49,11 +41,7 @@ from .operations_api import (
     router as operations_router,
 )
 from .screens_api import show_device_screens as show_device_screens
-from .support import (
-    SSHConnection,
-    get_device_properties_optimized,
-    get_or_create_user_state,
-)
+from .support import SSHConnection, get_or_create_user_state
 from .ui_control_api import router as ui_control_router
 
 
@@ -109,8 +97,8 @@ def _known_usbip_device_ids() -> set:
 @handle_api_errors
 async def get_connected_devices(
     request: Request,
-    help: bool = Query(False),
-    force_refresh: bool = Query(False),
+    help: Annotated[bool, Query()] = False,
+    force_refresh: Annotated[bool, Query()] = False,
 ):
     """Get all connected device list (same as adb devices)."""
     resp = _help_or_continue(help, "GET", "/api/devices/list")
@@ -122,48 +110,42 @@ async def get_connected_devices(
     get_or_create_user_state(client_id)
 
     now = datetime.now().timestamp()
-    if not force_refresh:
-        with runtime.global_state.device_cache_lock:
-            cached_devices = runtime.global_state.device_cache.get("devices") or []
-            cache_timestamp = runtime.global_state.device_cache.get("timestamp", 0)
-        if cached_devices and now - cache_timestamp < runtime.device_cache_ttl:
-            return JSONResponse(content=cached_devices)
+    with runtime.global_state.device_cache_lock:
+        cached_devices = runtime.global_state.device_cache.get("devices") or []
+        cache_timestamp = runtime.global_state.device_cache.get("timestamp", 0)
+    cached_ids = [
+        item.get("device_id")
+        for item in cached_devices
+        if isinstance(item, dict) and item.get("device_id")
+    ]
+    cache_fresh = bool(
+        cached_ids
+        and not force_refresh
+        and now - cache_timestamp < runtime.device_cache_ttl
+    )
 
-    # Refresh device list first
-    raw_devices = await asyncio.to_thread(device_manager.get_connected_devices, force_refresh)
+    # 共享缓存仅保存主机和设备事实，用户状态按请求合并。
+    raw_devices = (
+        cached_ids
+        if cache_fresh
+        else await asyncio.to_thread(device_manager.get_connected_devices, force_refresh)
+    )
     if not raw_devices:
-        with runtime.global_state.device_cache_lock:
-            cached_devices = runtime.global_state.device_cache.get("devices") or []
-        if cached_devices:
+        if cached_ids:
             logger.warning("[Device] ADB scan returned no devices; keeping cached device list")
-            return JSONResponse(content=cached_devices)
+            raw_devices = cached_ids
 
     reconnect.reconcile_observed_usbip_devices(raw_devices)
     devices = reconnect.filter_suppressed_usbip_devices(raw_devices)
 
-    # Keep USB/IP source records for disconnected devices. They are needed for
-    # server-side auto reconnect after device reboot; manual USB/IP disconnect
-    # is responsible for clearing them.
-    current_device_set = set(devices)
-
-    # Check cache
-    if not force_refresh and now - runtime.global_state.device_cache["timestamp"] < runtime.device_cache_ttl:
-        cached_devices = runtime.global_state.device_cache["devices"]
-        cached_device_set = {
-            item.get("device_id")
-            for item in cached_devices
-            if isinstance(item, dict) and item.get("device_id")
-        }
-        if cached_device_set == current_device_set:
-            return JSONResponse(content=cached_devices)
-
+    # 保留断线设备来源，供 USB/IP 自动重连使用。
     devices_with_status = []
+    cache_records = []
 
     # 设备 -> 所属分组 id 列表（按当前用户读取其 per-user 分组；局部 import 规避循环依赖）
     from features.users import (
         build_device_group_map,
         current_username_for_request,
-        cluster_device_properties,
         load_device_groups,
     )
     group_map = build_device_group_map(
@@ -185,8 +167,6 @@ async def get_connected_devices(
         device_info["groups"] = group_map.get(device_id, [])
 
         # Check lock status
-        client_ip = runtime.get_client_ip(request)
-        client_id_from_ip = runtime.client_manager.get_client_id(client_ip)
         lock_status = device_lock_manager.get_lock_status(device_id)
 
         if lock_status:
@@ -194,7 +174,7 @@ async def get_connected_devices(
             device_info["locked_by"] = lock_status["locked_by"]
             device_info["locked_username"] = lock_status.get("username", "")
             device_info["locked_client_id"] = lock_status.get("client_id", "")
-            device_info["locked_by_self"] = lock_status.get("client_id") == client_id_from_ip
+            device_info["locked_by_self"] = lock_status.get("client_id") == client_id
             device_info["locked_at"] = lock_status["locked_at"]
         else:
             device_info["locked_by"] = ""
@@ -209,252 +189,25 @@ async def get_connected_devices(
             device_info["is_usbip"] = True
 
         devices_with_status.append(device_info)
+        cache_records.append(
+            {
+                key: device_info[key]
+                for key in ("device_id", "status", "source", "is_usbip")
+                if key in device_info
+            }
+        )
 
     # Update cache
     with runtime.global_state.device_cache_lock:
-        runtime.global_state.device_cache = {"devices": devices_with_status, "timestamp": now}
+        runtime.global_state.device_cache = {
+            "devices": cache_records,
+            "timestamp": cache_timestamp if cache_fresh else now,
+        }
 
     return JSONResponse(content=devices_with_status)
 
 
-async def _manage_bootloader_lock(devices: list[str], action: str) -> JSONResponse:
-    """Common bootloader lock/unlock handler."""
-    try:
-        if not devices:
-            return _api_error("No devices selected", status_code=400)
-
-        valid_device_pattern = re.compile(r"^[a-zA-Z0-9.:-]+$")
-        for device_id in devices:
-            if not valid_device_pattern.match(device_id):
-                return _api_error(
-                    f"Invalid device ID format: {device_id}", status_code=400
-                )
-
-        config = runtime.config_manager.load_config()
-
-        with runtime.ssh_manager.connection(config) as ssh:
-            results = []
-
-            local_script = os.path.join(
-                runtime.project_root, "scripts", "run_Device_Lock.sh"
-            )
-            remote_script = os.path.join(get_default_suites_path(config), "run_Device_Lock.sh")
-
-            if not os.path.exists(local_script):
-                return _api_error(
-                    f"Script file not found: {local_script}", status_code=404
-                )
-
-            try:
-                with ssh.open_sftp() as sftp:
-                    sftp.put(local_script, remote_script)
-                runtime.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
-            except Exception as e:
-                return _api_error(
-                    f"Script upload failed: {e!s}", status_code=500
-                )
-
-            for device_id in devices:
-                try:
-                    cmd = f"bash '{remote_script}' '{device_id}' '{action}'"
-                    output, error, code = runtime.ssh_manager.execute_command(ssh, cmd)
-
-                    if code == 0:
-                        start_time = time.time()
-                        while time.time() - start_time < 60:
-                            check_cmd = f"adb -s {device_id} get-state"
-                            check_output, _, _check_code = runtime.ssh_manager.execute_command(
-                                ssh, check_cmd
-                            )
-                            if "device" in check_output.lower():
-                                break
-                    await asyncio.sleep(2)
-
-                    results.append(
-                        {
-                            "device": device_id,
-                            "success": code == 0,
-                            "output": output[-200:] if output else error,
-                        }
-                    )
-                except Exception as e:
-                    results.append({"device": device_id, "success": False, "error": str(e)})
-
-            success_count = sum(1 for r in results if r.get("success", False))
-            failed_count = len(results) - success_count
-
-            response_data = {
-                "results": results,
-                "summary": {
-                    "total": len(results),
-                    "success": success_count,
-                    "failed": failed_count,
-                },
-            }
-
-            action_text = "unlock" if action == "unlock" else "lock"
-            return _api_success(response_data, f"Device {action_text} operation completed")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error managing device lock: {e}")
-        return _api_error(str(e), status_code=500)
-
-
-def _resolve_device_lock_devices(req: DeviceLockRequest) -> list[str]:
-    """Extract device list from a lock/unlock request."""
-    if req.device_id:
-        return [req.device_id]
-    return req.devices or []
-
-
-@router.post("/api/devices/bootloader-lock")
-async def lock_bootloader(
-    help: bool = Query(False),
-    req: DeviceLockRequest = Body(None),
-):
-    """Lock device Bootloader."""
-    resp = _help_or_continue(help, "POST", "/api/devices/bootloader-lock")
-    if resp:
-        return resp
-    return await _manage_bootloader_lock(_resolve_device_lock_devices(req), "lock")
-
-
-@router.post("/api/devices/bootloader-unlock")
-async def unlock_bootloader(
-    help: bool = Query(False),
-    req: DeviceLockRequest = Body(None),
-):
-    """Unlock device Bootloader."""
-    resp = _help_or_continue(help, "POST", "/api/devices/bootloader-unlock")
-    if resp:
-        return resp
-    return await _manage_bootloader_lock(_resolve_device_lock_devices(req), "unlock")
-
-
-@router.post("/api/devices/bootloader-status")
-async def check_bootloader_status(req: DeviceActionRequest):
-    """Check device Bootloader lock status (GREEN=locked, ORANGE=unlocked)."""
-    try:
-        devices = sanitize_device_ids(req.devices)
-        if not devices:
-            return _api_error("No valid device serials", status_code=400)
-        with SSHConnection() as ssh:
-            # Synchronous per-device SSH check — run serially off the event loop
-            # (see get_device_info for why gather was false concurrency here).
-            def check_single_device(device_id: str) -> dict:
-                output, _error, _code = runtime.ssh_manager.execute_command(
-                    ssh,
-                    f"adb -s {device_id} shell getprop ro.boot.verifiedbootstate",
-                )
-                state = output.strip()
-
-                try:
-                    boot_state = VerifiedBootState(state)
-                    is_locked = boot_state.is_locked
-                    status_text = boot_state.display_text
-                except ValueError:
-                    is_locked = False
-                    status_text = f"Unknown state ({state})"
-
-                return {
-                    "device": device_id,
-                    "locked": is_locked,
-                    "state": state,
-                    "status": status_text,
-                }
-
-            results = []
-            for device_id in devices:
-                results.append(await asyncio.to_thread(check_single_device, device_id))
-
-            return _api_success({"results": results}, "Lock status check completed")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error checking lock status: {e}")
-        return _api_error(str(e), status_code=500)
-
-
-@router.post("/api/devices/info")
-async def get_device_info(req: DeviceActionRequest):
-    """Get device detailed information."""
-    try:
-        devices = sanitize_device_ids(req.devices)
-        if not devices:
-            return _api_error("No valid device serials", status_code=400)
-        with SSHConnection() as ssh:
-            # Per-device work is fully synchronous (get_device_info +
-            # get_device_properties_optimized both do blocking SSH). The old
-            # asyncio.gather looked concurrent but had no await suspension
-            # point inside, so it ran serially while blocking the event loop.
-            # Run each device off the loop in turn — same serial behaviour,
-            # but the loop is freed between devices and the shared ssh
-            # connection is never used by two threads at once (paramiko is not
-            # thread-safe).
-            def get_single_device_info(device_id: str) -> dict:
-                device_info = {"device": device_id, "properties": {}}
-
-                base_info = device_manager.get_device_info(device_id, ssh)
-
-                field_mapping = {
-                    "serial_no": "Serial Number",
-                    "model": "Model",
-                    "android_version": "Android Version",
-                    "fingerprint": "Fingerprint",
-                    "build_type": "Build Type",
-                    "build_tags": "Build Tags",
-                    "build_date": "Build Date",
-                    "sdk_version": "SDK Version",
-                    "security_patch": "Security Patch",
-                }
-
-                for key, label in field_mapping.items():
-                    if key in base_info:
-                        device_info["properties"][label] = base_info[key]
-
-                extra_props = get_device_properties_optimized(device_id, ssh)
-
-                prop_mapping = {
-                    "boot_state": ("Boot State", lambda x: x if x else "Unknown"),
-                    "api_level": (
-                        "API Level",
-                        lambda x: x.split("[")[-1].replace("]", "")
-                        if "[" in x
-                        else (x or "Unknown"),
-                    ),
-                    "mali_version": ("Mali Version", lambda x: x or "Unknown"),
-                    "mem_total": ("Total Memory", lambda x: f"{x} KB" if x else "Unknown"),
-                    "mem_free": ("Free Memory", lambda x: f"{x} KB" if x else "Unknown"),
-                    "timezone": ("Timezone", lambda x: x or "Unknown"),
-                    "locale": ("Language", lambda x: x or "Unknown"),
-                    "data_partition": (
-                        "DATA Partition",
-                        lambda x: x.split()[-1] if x and "userdata" in x else "Unknown",
-                    ),
-                }
-
-                for key, (label, formatter) in prop_mapping.items():
-                    if key in extra_props:
-                        device_info["properties"][label] = formatter(extra_props[key])
-
-                return device_info
-
-            results = []
-            for device_id in devices:
-                results.append(await asyncio.to_thread(get_single_device_info, device_id))
-
-            return _api_success({"results": results}, "Device info retrieved")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting device info: {e}")
-        return _api_error(str(e), status_code=500)
-
-
+router.include_router(bootloader_router)
 router.include_router(operations_router)
 router.include_router(ui_control_router)
 

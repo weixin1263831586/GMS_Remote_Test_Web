@@ -4,7 +4,7 @@ import ipaddress
 import logging
 from typing import Any
 
-from features.auth import get_authenticated_user, require_authenticated_user
+from features.auth import get_authenticated_user
 from foundation.networking import parse_host_address
 
 from . import runtime
@@ -48,34 +48,18 @@ def _valid_ip(value: str) -> str | None:
 
 
 def get_client_id_from_request(request) -> str:
-    """Return a stable client id for runtime state.
-
-    Platform login is optional for ordinary client usage. Authenticated users
-    are identified by their account ``username`` (stable across networks and
-    machines); anonymous clients fall back to username@ip resolved from
-    server-side client host config and request metadata.
-    """
+    """返回稳定的运行时客户端 ID；匿名模式使用用户名和 IP。"""
     user = get_authenticated_user(request)
-    if user:
-        return user.username
-    return get_client_display_id_from_request(request)
+    return user.id if user else get_client_display_id_from_request(request)
 
 
-def owner_id_from_request(request, *, default: str = "legacy") -> str:
-    """Resolve a per-owner storage key for the current request.
-
-    Authenticated requests use the account ``username``; unauthenticated (or internal/no-request) callers fall
-    back to the anonymous client id, then ``default``. Centralizes the ``try/except`` resolution that redmine/gerrit previously triplicated.
-    """
-    if request is None:
-        return default
-    try:
-        return require_authenticated_user(request).username
-    except Exception:
-        return get_client_id_from_request(request) or default
+def owner_id_from_request(request) -> str:
+    """Return an account id, or the stable anonymous client id in development."""
+    user = get_authenticated_user(request)
+    return user.id if user else get_client_display_id_from_request(request)
 
 
-def get_client_ip(request, fallback_ip: str | None = None) -> str:
+def get_client_ip(request) -> str:
     """Resolve client IP without trusting forwarding headers from browsers."""
     peer = request.client.host if request.client else 'unknown'
     networks = _trusted_proxy_networks()
@@ -93,8 +77,7 @@ def get_client_ip(request, fallback_ip: str | None = None) -> str:
     real_ip = _valid_ip(request.headers.get('X-Real-IP', ''))
     if real_ip:
         return real_ip
-    supplied = _valid_ip(fallback_ip or '')
-    return supplied or (_valid_ip(peer) or peer)
+    return _valid_ip(peer) or peer
 
 
 def get_client_username_from_request(request, fallback: str | None = None) -> str:
@@ -232,10 +215,7 @@ def hide_sensitive_info(config: dict) -> dict:
         return config
     safe = {}
     for key, value in config.items():
-        # wifi 节点是测试台共享的 SSID/密码，前端「连接 Wi-Fi」弹框需要明文预填，故整段保留。
-        if key == "wifi" and isinstance(value, dict):
-            safe[key] = value
-        elif any(s in key.lower() for s in _SENSITIVE_FIELDS) and isinstance(value, str) and value:
+        if any(s in key.lower() for s in _SENSITIVE_FIELDS) and isinstance(value, str) and value:
             safe[key] = _mask_value(value)
         elif isinstance(value, dict):
             safe[key] = hide_sensitive_info(value)

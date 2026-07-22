@@ -20,6 +20,7 @@ from features.automation.executor_contract import (
     StubAutomationExecutor as StubAutomationExecutor,
 )
 from features.automation.jenkins_client import JenkinsClient
+from foundation.ssh_security import configure_strict_host_keys
 
 
 def _run_devices(run: dict[str, Any]) -> list[str]:
@@ -169,7 +170,7 @@ class HttpAutomationExecutor:
                         "parameters": parameters,
                         "source_type": run.get("source_type", "automation"),
                         "source_key": f"automation-build:{run.get('id', '')}",
-                        "owner": run.get("owner", ""),
+                        "owner": run.get("created_by") or run.get("owner", ""),
                         "automation_run_id": run.get("id", ""),
                     },
                     start=True,
@@ -270,8 +271,6 @@ class HttpAutomationExecutor:
                 plan.get("worker_id") or run.get("worker_id")
                 or cluster.config.local_worker_id
             )
-            if worker_id == "worker-local":
-                worker_id = cluster.config.local_worker_id
             selector = plan.get("device_selector") if isinstance(
                 plan.get("device_selector"), dict
             ) else {}
@@ -393,8 +392,6 @@ class HttpAutomationExecutor:
             run.get("worker_id") or plan.get("worker_id")
             or cluster.config.local_worker_id
         )
-        if worker_id == "worker-local":
-            worker_id = cluster.config.local_worker_id
         command_id = str(run.get("flash_command_id") or "")
         recovered_stage_id = str(run.get("flash_stage_id") or "")
         finder = getattr(cluster.repository, "find_correlated_command", None)
@@ -539,7 +536,7 @@ class HttpAutomationExecutor:
             backend = build_service._backend(server)
             connect_kwargs = backend._connect_kwargs(server)
             source_ssh = paramiko.SSHClient()
-            source_ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_strict_host_keys(source_ssh)
             source_ssh.connect(**connect_kwargs)
             source_sftp = source_ssh.open_sftp()
             try:
@@ -775,13 +772,13 @@ class HttpAutomationExecutor:
     def start_test(self, run: dict[str, Any]) -> dict[str, Any]:
         plan = _run_test_plan(run)
         worker_id = str(run.get("worker_id") or plan.get("worker_id") or "")
-        if not worker_id or worker_id == "worker-local":
+        if not worker_id:
             from features.cluster import get_cluster_service
 
             try:
                 worker_id = get_cluster_service().config.local_worker_id
             except (AttributeError, RuntimeError):
-                worker_id = "worker-local"
+                return {"success": False, "error": "Local Worker is not configured"}
         redmine = plan.get("redmine") if isinstance(plan.get("redmine"), dict) else {}
         payload = {
             "worker_id": worker_id,
@@ -968,9 +965,7 @@ class HttpAutomationExecutor:
         return self._json_response(response)
 
     def report_result(self, run: dict[str, Any]) -> dict[str, Any]:
-        # Fire completion notifications (email/Gerrit/Redmine), each gated by the
-        # profile's reporting block. Never raises — a missing transport must not
-        # block the run from completing.
+        # 按配置发送完成通知；通知失败不阻断任务完成。
         notifications = {"sent": [], "reason": "no reporting config"}
         try:
             from features.automation.notifier import notify_run_completion

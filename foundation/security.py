@@ -10,9 +10,7 @@ def safe_int(value: str | None, default: int = 0) -> int:
         return default
 
 
-# ADB/USB serial numbers are alphanumeric plus . _ : -. Anything else (shell
-# metacharacters, whitespace, path separators) is rejected so a device id can
-# never be interpolated into a shell command, a file path, or a log name.
+# 设备序列号仅允许安全字符，禁止 Shell 元字符、空白和路径分隔符。
 _DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
@@ -36,4 +34,3 @@ def sanitize_device_ids(values) -> list[str]:
     if not values:
         return []
     return [str(v) for v in values if is_safe_device_id(v)]
-

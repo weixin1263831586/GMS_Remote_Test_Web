@@ -13,22 +13,39 @@ from foundation.networking import split_host_port
 from foundation.responses import error_response
 
 from . import reconnect, runtime
-from .adb_forward import adb_forward_manager
-from .manager import device_manager
-from .models import ADBForwardStartRequest, USBIPDisconnectRequest, USBIPStartRequest
-from .support import DeviceSSHConnection, format_device_list_info, notify_device_change
-from .usbip import (
-    USBIPD_INSTALL_CMD,
-    USBIPD_INSTALL_GUIDE,
-    detach_ubuntu_usbip_ports,
-    find_device_host_password,
-    usbip_manager,
+from .adb_forward_api import (
+    router as adb_forward_router,
 )
+from .adb_forward_api import (
+    start_adb_forward as start_adb_forward,
+)
+from .adb_forward_api import (
+    stop_adb_forward as stop_adb_forward,
+)
+from .locks import device_lock_manager
+from .manager import device_manager
+from .models import USBIPDisconnectRequest, USBIPStartRequest
+from .support import (
+    DeviceSSHConnection,
+    acquire_device_operation_claim,
+    audit_device_operation,
+    format_device_list_info,
+    notify_device_change,
+    release_device_operation_claim,
+)
+from .usbip import detach_ubuntu_usbip_ports, find_device_host_password, usbip_manager
+from .usbip_access import enforce_usbip_host_access, usbip_request_user
+from .usbip_install_api import install_usbipd
+from .usbip_install_api import router as usbip_install_router
 from .utils import DeviceUtils
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+router.include_router(adb_forward_router)
+router.include_router(usbip_install_router)
+
+__all__ = ["install_usbipd", "router"]
 
 
 def _resolve_usbip_device_host(request: Request, config: dict | None = None, explicit: str | None = None) -> str:
@@ -41,6 +58,9 @@ def _resolve_usbip_device_host(request: Request, config: dict | None = None, exp
         tunnel_host, _ = runtime.resolve_tailscale_device_host(request, client_id)
         if tunnel_host:
             return tunnel_host
+    user = usbip_request_user(request)
+    if user and user.role != "admin":
+        return get_client_display_id_from_request(request) or ""
     return (
         selected_config.get("usbip_device_host")
         or selected_config.get("device_host")
@@ -96,32 +116,6 @@ def _detach_ubuntu_usbip_for_devices(
         "remaining_devices": sorted(remaining),
     }
 
-@router.post("/api/adb-forward/start")
-async def start_adb_forward(req: ADBForwardStartRequest):
-    """Start ADB port forwarding to the configured device host."""
-    try:
-        result = adb_forward_manager.start_forward(req.device_host, req.device_password)
-        if result.get('success'):
-            return JSONResponse(content=result)
-        return error_response(result.get('error', 'ADB转发启动失败'), status_code=500)
-    except Exception as e:
-        logger.error(f"Error starting ADB forward: {e}")
-        return error_response(f"{e!s}. 请检查配置和参数是否正确。", status_code=500)
-
-
-@router.post("/api/adb-forward/stop")
-async def stop_adb_forward():
-    """Stop the active ADB port forwarding."""
-    try:
-        result = adb_forward_manager.stop_forward('test_client')
-        if result.get('success'):
-            return JSONResponse(content=result)
-        return error_response(result.get('error', 'ADB转发停止失败'), status_code=500)
-    except Exception as e:
-        logger.error(f"Error stopping ADB forward: {e}")
-        return error_response(f"{e!s}. 请检查配置和参数是否正确。", status_code=500)
-
-
 # ==================== USB/IP Status ====================
 
 @router.get("/api/usbip/status")
@@ -131,7 +125,9 @@ async def get_usbip_status(
 ):
     """Get USB/IP status (supports specifying host)."""
     config = runtime.config_manager.load_config()
-    client_id = _resolve_usbip_device_host(request, config, device_host)
+    request_host = _resolve_usbip_device_host(request, config)
+    enforce_usbip_host_access(request, device_host, request_host)
+    client_id = device_host or request_host
 
     with runtime.global_state.usbip_states_lock:
         state_info = runtime.global_state.usbip_states.get(client_id, {"connected": False, "timestamp": 0})
@@ -175,6 +171,7 @@ async def start_usbip(
     request: Request,
     req: USBIPStartRequest | None = Body(default=None),
     help: bool = Query(False),
+    _elevated=Depends(require_elevated_admin),
 ):
     resp = (
         runtime.generate_help_or_continue(help, "POST", "/api/usbip/connect")
@@ -195,6 +192,11 @@ async def start_usbip(
 
         explicit_device_host = request_data.get("device_host")
         if explicit_device_host:
+            if usbip_request_user(request):
+                enforce_usbip_host_access(
+                    request, explicit_device_host,
+                    _resolve_usbip_device_host(request, config),
+                )
             device_host = explicit_device_host
         else:
             tunnel_host, tunnel_usbip_host = runtime.resolve_tailscale_device_host(request, client_id)
@@ -204,7 +206,7 @@ async def start_usbip(
                 logger.info(f"[USB/IP] Tailscale direct mode: {device_host} attach={usbip_attach_host}")
             else:
                 # 可连接主机优先级：显式配置 > 当前客户端 username@ip（client_hosts 映射）。
-                # 注意：client_id 现在是平台用户安全边界（裸 ID），不可作为主机；
+                # client_id 是用户安全边界，不能作为连接主机。
                 # 可连接主机由 client_hosts 映射的 username@client_ip 构造。
                 device_host = _resolve_usbip_device_host(request, config)
                 if not device_host or '@' not in device_host:
@@ -446,6 +448,8 @@ async def stop_usbip(
     usbip_attach_host = config.get("usbip_attach_host")
     ubuntu_detached_ports: list[str] = []
     remaining_devices_after_detach: list[str] = []
+    claim_source_id = ""
+    claim_records: list[dict] = []
 
     try:
         from features.devices.reconnect import (
@@ -454,6 +458,24 @@ async def stop_usbip(
         )
 
         devices_to_remove = _usbip_devices_for_host(config["device_host"])
+        if not devices_to_remove and device_lock_manager.get_all_locks():
+            return JSONResponse(
+                content={
+                    "success": False,
+                    "error": (
+                        "USB/IP inventory is incomplete while device leases are active; "
+                        "disconnect was refused"
+                    ),
+                },
+                status_code=409,
+            )
+        claim_source_id, claim_records, conflict = acquire_device_operation_claim(
+            request,
+            devices_to_remove,
+            "usbip-disconnect",
+        )
+        if conflict:
+            return conflict
         suppress_usbip_reconnect(config["device_host"], devices_to_remove)
         stop_usbip_reconnect_for_host(config["device_host"], timeout=2)
 
@@ -495,7 +517,7 @@ async def stop_usbip(
                 "protocol_status": {},
             }
 
-        # 失效设备列表缓存，否则断开后短时间内 /api/devices/list 仍返回带 is_usbip 标记的旧设备。
+        # 失效缓存，避免返回已断开的 USB/IP 设备。
         _invalidate_device_cache()
 
         disconnected_devices_info = format_device_list_info(devices_to_remove)
@@ -508,15 +530,22 @@ async def stop_usbip(
 
         await notify_device_change(devices_to_remove, "USB/IP Stop")
 
-        return JSONResponse(content={
+        response = JSONResponse(content={
             "success": True,
             "message": f"Local devices disconnected{disconnected_devices_info}",
             "detached_ports": ubuntu_detached_ports,
             "remaining_devices": remaining_devices_after_detach,
         })
+        audit_device_operation(
+            request,
+            "usbip-disconnect",
+            claim_records,
+            response.status_code,
+        )
+        return response
 
     except HTTPException:
-        # Cannot connect to Windows, just clear connection state and device source records
+        # Windows 不可连接时仅清理连接和设备来源状态。
         if not devices_to_remove:
             devices_to_remove = _usbip_devices_for_host(config["device_host"])
         try:
@@ -536,7 +565,7 @@ async def stop_usbip(
                 "protocol_status": {},
             }
 
-        # 失效设备列表缓存，否则断开后短时间内 /api/devices/list 仍返回带 is_usbip 标记的旧设备。
+        # 失效缓存，避免返回已断开的 USB/IP 设备。
         _invalidate_device_cache()
 
         disconnected_devices_info = format_device_list_info(devices_to_remove)
@@ -544,63 +573,26 @@ async def stop_usbip(
 
         await notify_device_change(devices_to_remove, "USB/IP Stop")
 
-        return JSONResponse(content={"success": True, "message": f"Local devices disconnected{disconnected_devices_info}"})
-
-
-# ==================== USB/IP Install ====================
-
-@router.post("/api/usbip/install")
-async def install_usbipd(
-    request: Request,
-    device_host: str | None = None,
-):
-    """Install usbipd to Windows host."""
-    try:
-        config = runtime.config_manager.load_config()
-        client_id = runtime.get_client_id_from_request(request)
-
-        if device_host:
-            config["device_host"] = device_host
-        else:
-            tunnel_host, _ = runtime.resolve_tailscale_device_host(request, client_id)
-            if tunnel_host:
-                windows_usbipd = await runtime.probe_windows_usbipd(tunnel_host)
-                installed = bool(windows_usbipd.get("installed"))
-                logger.info(f"[USB/IP Install] Tailscale SSH check: {tunnel_host}, installed={installed}")
-                if installed:
-                    return JSONResponse(content={
-                        "success": True,
-                        "installed": True,
-                        "running": True,
-                        "version": windows_usbipd.get("version") or "",
-                        "message": f"usbipd installed{(', version: ' + windows_usbipd.get('version')) if windows_usbipd.get('version') else ''}",
-                    })
-                return JSONResponse(content={
-                    "success": False,
-                    "installed": False,
-                    "running": False,
-                    "install_guide": USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD),
-                    "error": "Windows host does not have usbipd installed",
-                })
-
-            config["device_host"] = _resolve_usbip_device_host(request, config)
-            if not config["device_host"] or "@" not in config["device_host"]:
-                logger.error(f"[USB/IP Install] No reachable Windows device_host resolved (client_id={client_id})")
-                return error_response(
-                    "无法识别 Windows 设备主机，请在前端页面完成客户端信息识别，或在请求中指定 device_host",
-                    status_code=400,
-                )
-
-        device_password = find_device_host_password(config["device_host"], config)
-        if not device_password:
-            device_password = config.get("device_pswd", "")
-        if device_password:
-            config["device_pswd"] = device_password
-
-        with DeviceSSHConnection(config) as win_ssh:
-            result = usbip_manager.install_usbipd(win_ssh, config)
-            return JSONResponse(content=result)
-
-    except Exception as e:
-        logger.error(f"Error installing usbipd: {e}")
-        return error_response(str(e), status_code=500)
+        response = JSONResponse(content={
+            "success": True,
+            "message": f"Local devices disconnected{disconnected_devices_info}",
+        })
+        audit_device_operation(
+            request,
+            "usbip-disconnect",
+            claim_records,
+            response.status_code,
+        )
+        return response
+    except Exception as exc:
+        if claim_records:
+            audit_device_operation(
+                request,
+                "usbip-disconnect",
+                claim_records,
+                500,
+                error=str(exc),
+            )
+        raise
+    finally:
+        release_device_operation_claim(claim_source_id)

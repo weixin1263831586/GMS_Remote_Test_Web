@@ -1,7 +1,5 @@
 #!/bin/bash
-# ==============================================================================
 # GMS Auto Test 服务管理脚本
-# ==============================================================================
 
 set -euo pipefail
 
@@ -18,16 +16,23 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 cd "$PROJECT_DIR"
 
-ENV_FILE="${PROJECT_DIR}/.env.production"
-# 加载生产环境变量（含 worker token 等配置），保证手动启动与 systemd 行为一致
+ENV_FILE="${PROJECT_DIR}/configs/runtime.json"
+# 加载生产环境变量（含 worker token 等配置），保证手动启动与 systemd 行为一致。
+# runtime.json 是 JSON 格式，由 app.py 启动时通过 bootstrap.env_loader 加载到
+# 将 JSON 环境配置导出为 Shell 变量供后台进程继承。
 if [[ -f "${ENV_FILE}" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "${ENV_FILE}"
-    set +a
+    while IFS='=' read -r key value; do
+        [[ -n "$key" ]] && export "$key=$value"
+    done < <("${PYTHON_BIN}" -c '
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+for key, value in data.items():
+    if isinstance(value, str) and not key.startswith("_"):
+        print(f"{key}={value}")
+' "$ENV_FILE")
 fi
 
-CERT_DIR="${PROJECT_DIR}/.certs"
+CERT_DIR="${PROJECT_DIR}/configs/certs"
 CERT_KEY="${CERT_DIR}/gms-local.key"
 CERT_CRT="${CERT_DIR}/gms-local.crt"
 PORT="${GMS_PORT:-5001}"
@@ -144,7 +149,7 @@ echo -e "${YELLOW}[4/4] 启动新服务...${NC}"
 
 ensure_https_cert
 
-# 优先通过 systemd 启动（自带 .env.production 和自动重启）
+# 优先通过 systemd 启动（自带 configs/env.production 和自动重启）
 # 直接检测 unit 文件是否存在，避免非交互式 shell 中 systemctl 连不上 D-Bus
 USE_SYSTEMD=false
 if [[ -f "${SYSTEMD_UNIT_FILE}" ]]; then
@@ -164,8 +169,8 @@ if [[ "${USE_SYSTEMD}" == "true" ]]; then
 else
     echo -e "${YELLOW}  systemd 服务未安装，使用 nohup 方式启动...${NC}"
 
-    # 无远程 Worker 时 token 可以为空；首次部署 Worker 后会自动写入环境文件。
-    if [[ -z "${GMS_CLUSTER_WORKER_TOKENS:-}" ]]; then
+    # 无远程 Worker 时 token 可以为空；首次部署 Worker 后会自动写入 cluster.json。
+    if ! "${PYTHON_BIN}" -c "import json,sys; d=json.load(open('${PROJECT_DIR}/configs/cluster.json')); sys.exit(0 if d.get('worker_tokens') else 1)" 2>/dev/null; then
         echo -e "${YELLOW}  ⚠ 尚未配置远程 Worker token，远程 Worker 接口暂不可用${NC}"
     fi
 
@@ -174,7 +179,8 @@ else
         GMS_ENV="${GMS_ENV:-production}" \
         GMS_DATA_ROOT="${GMS_DATA_ROOT:-${PROJECT_DIR}/data}" \
         PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${PROJECT_DIR}/data/pycache}" \
-        GMS_CLUSTER_WORKER_TOKENS="${GMS_CLUSTER_WORKER_TOKENS:-}" \
+        GMS_SOFTWARE_ROOT="${GMS_SOFTWARE_ROOT:-${HOME}/Software}" \
+        APE_API_KEY="${APE_API_KEY:-${HOME}/Software/gts-rockchip.json}" \
         "${PYTHON_BIN}" -m uvicorn app:app \
         --host 0.0.0.0 --port "${PORT}" --log-level info --access-log \
         --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \

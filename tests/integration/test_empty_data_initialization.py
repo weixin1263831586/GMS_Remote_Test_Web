@@ -27,7 +27,7 @@ class EmptyDataInitializationTests(unittest.TestCase):
             self.assertTrue((data_root / 'redmine/docs').is_dir())
             self.assertTrue((data_root / 'redmine/attachments').is_dir())
             self.assertTrue((data_root / 'automation/automation.sqlite3').is_file())
-            self.assertTrue((data_root / 'test_reports.json').is_file())
+            self.assertTrue((data_root / 'reports/reports.sqlite3').is_file())
             self.assertTrue((data_root / 'gms_update_monitor.sqlite3').is_file())
             self.assertTrue((data_root / 'mainline_known_issues.sqlite3').is_file())
 

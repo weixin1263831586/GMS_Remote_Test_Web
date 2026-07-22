@@ -46,11 +46,11 @@ ignore = [
     "B008",   # function call in default argument (FastAPI Depends pattern)
     "B905",   # zip without strict
     "SIM108", # ternary operator (可读性优先)
-    "SIM102", # collapsible if (迁移期避免大面积重排旧逻辑)
-    "SIM103", # needless bool (迁移期避免无收益行为表达改写)
-    "SIM105", # suppressible exception (旧代码保留显式 try/except 语义)
-    "RUF012", # mutable class defaults (旧工具类常量迁移后再细分处理)
-    "RUF013", # implicit optional (旧 Python API 保持兼容写法)
+    "SIM102", # collapsible if（保持分支结构清晰）
+    "SIM103", # needless bool（保持返回值语义直观）
+    "SIM105", # suppressible exception（保留显式异常处理）
+    "RUF012", # mutable class defaults（兼容现有工具类定义）
+    "RUF013", # implicit optional（兼容现有 Python API）
     "RUF001", # unicode characters in strings (中文字符串)
     "RUF002", # unicode characters in docstrings (中文文档)
     "RUF003", # unicode characters in comments (中文注释)

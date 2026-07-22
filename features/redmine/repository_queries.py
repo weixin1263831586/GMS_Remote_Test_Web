@@ -19,12 +19,7 @@ from .users import (
 
 
 def _dedupe_display_names(names: list[str]) -> list[str]:
-    """Keep one display name per person, drop emails.
-
-    - emails (含 @) 仅用于查询匹配，不作为显示名；
-    - 同一人的多个写法（“卞 金晨”/“卞金晨”）按去空格归一，优先保留带空格的写法；
-    - 过滤后人名为空时退回原列表，避免显示成“未识别”。
-    """
+    """Keep one display name per person, drop emails."""
     fallback = [n for n in names if n]
     persons = [n for n in fallback if "@" not in n]
     if not persons:
@@ -206,6 +201,7 @@ class RepositoryQueryMixin:
         list_limit: int = 30,
         display_names: list[str] | None = None,
         window_days: int = 0,
+        organization_user_map: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Return Redmine workload metrics for the statistics dashboard.
 
@@ -271,7 +267,9 @@ class RepositoryQueryMixin:
             if not self._is_issue_waiting_action(issue):
                 continue
 
-            reply_info = self._reply_wait_info(issue, owner_keys)
+            reply_info = self._reply_wait_info(
+                issue, owner_keys, organization_user_map
+            )
             if reply_info.get("waiting"):
                 summary = self._issue_summary(issue, reply_info=reply_info)
                 waiting_my_reply.append(summary)
@@ -334,11 +332,6 @@ class RepositoryQueryMixin:
                 "open_issues": [self._issue_summary(item) for item in open_issues[:list_limit]],
             },
             "meta": {
-                # 显示名只保留人名，过滤掉邮箱/login 等匹配键（它们只用于查询匹配，
-                # 不应出现在“统计身份”里）。同一人的多个写法（如“卞 金晨”与“卞金晨”，
-                # 由 _name_display_variants 为匹配而生）按去空格归一，只保留一个，
-                # 优先带空格的规范写法。若过滤后为空（例如只有邮箱可用），则退回原列表，
-                # 避免显示成“未识别”。
                 "owner_names": _dedupe_display_names(list(display_names or owner_names or [])),
                 "stale_days": stale_days,
                 "list_limit": list_limit,
@@ -414,7 +407,12 @@ class RepositoryQueryMixin:
         return max(activity_journals, key=lambda item: _parse_dt(item.get("created_on")) or datetime.min)
 
     @classmethod
-    def _reply_wait_info(cls, issue: dict[str, Any], owner_keys: set) -> dict[str, Any]:
+    def _reply_wait_info(
+        cls,
+        issue: dict[str, Any],
+        owner_keys: set,
+        organization_user_map: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         last_activity = cls._last_activity_journal(issue)
         if not last_activity:
             return {"waiting": False, "reason": "no_journal_notes"}
@@ -428,7 +426,7 @@ class RepositoryQueryMixin:
                 "last_owner_reply_by": last_user,
                 "last_owner_reply": str(last_activity.get("notes") or "")[:260],
             }
-        if _looks_like_rk_actor(last_activity):
+        if _looks_like_rk_actor(last_activity, organization_user_map):
             return {
                 "waiting": True,
                 "last_reply_side": "rk_colleague",

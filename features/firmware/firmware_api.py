@@ -247,7 +247,7 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
     uploaded_chunks = _read_uploaded_chunks(session_dir)
     uploaded_chunks.add(chunk_index)
     chunk_paths = _firmware_chunk_paths(session_dir, total_chunks)
-    # Reconcile with the filesystem in case chunks arrived out of order / via resume.
+    # 按文件系统状态校准乱序或续传分片。
     present_paths = {idx: path for idx, path in enumerate(chunk_paths) if os.path.exists(path)}
     uploaded_chunks.update(present_paths.keys())
     _write_uploaded_chunks(session_dir, uploaded_chunks)
@@ -326,16 +326,7 @@ async def _lock_devices(request: Request, client_id: str, devices: list, error_p
 
 
 def _partition_devices_by_adb_state(ssh, devices: list[str]) -> tuple[list[str], list[str]]:
-    """把待烧写设备按 adb 在线状态分成 (online, offline) 两组。
-
-    烧写脚本的第一步是 ``adb -s <serial> reboot bootloader``，要求设备烧写前
-    处于 adb 可用状态（state == "device"）。若选中集合里混入离线/未授权设备，
-    脚本会因 ``set -euo pipefail`` 整体非 0 退出，最终报"部分设备失败"却看不出
-    是哪台。这里在锁设备前用一次 ``adb devices`` 预检，把离线设备提前剔除，
-    避免用户等整轮 fastboot 超时（最长 600s）才知道失败。
-
-    offline/unauthorized/recovery 等非 ``device`` 状态都视为不可烧写。
-    """
+    """按 ADB 在线状态拆分可烧写和不可烧写设备。"""
     output, _error, _code = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
     states = parse_adb_device_states(output)
     online, offline = [], []

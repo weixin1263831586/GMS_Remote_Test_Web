@@ -6,11 +6,12 @@ import os
 import re
 import subprocess
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import CurrentUser, require_elevated_admin
+from features.auth import CurrentUser, require_elevated_admin, require_role_when_auth_required
 from foundation.responses import error_response, success_response
 
 from . import runtime
@@ -18,7 +19,12 @@ from .clients import (
     get_client_display_id_from_request,
     get_client_id_from_request,
     hide_sensitive_info,
+    owner_id_from_request,
     parse_client_id,
+)
+from .navigation_preferences import (
+    load_navigation_preferences,
+    save_navigation_preferences,
 )
 
 
@@ -33,14 +39,14 @@ def get_effective_local_server(
 ) -> str:
     if requested_local_server:
         return requested_local_server
-    runtime_config = config_manager.get_runtime_config()
-    runtime_local_server = str(runtime_config.get("local_server") or "").strip()
-    if "@" in runtime_local_server:
-        return runtime_local_server
     if request is not None:
         display_id = get_client_display_id_from_request(request)
         if "@" in display_id:
             return display_id
+    runtime_config = config_manager.get_runtime_config()
+    runtime_local_server = str(runtime_config.get("local_server") or "").strip()
+    if "@" in runtime_local_server:
+        return runtime_local_server
     return client_id
 
 
@@ -164,6 +170,43 @@ _tailscale_start_lock = asyncio.Lock()
 
 # ==================== Routes ====================
 
+@router.get("/api/config/external-services")
+async def get_external_services_config(
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """Return user-editable external service addresses without exposing secrets."""
+    config = config_manager.load_config()
+    external = config.get("external_services") or {}
+    return success_response({
+        "gms_assistant_url": str(external.get("gms_assistant_url") or "").strip().rstrip("/"),
+    })
+
+
+@router.post("/api/config/external-services")
+async def update_external_services_config(
+    req: dict[str, Any],
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """Save the GMS Assistant upstream address in runtime configuration.
+
+    The assistant app is reached same-origin via the /public, /assets, ...
+    proxy routes, which prepend this value as the upstream origin. Storing a
+    full page URL (e.g. .../public/agents/<id>/chat) makes the proxy fetch
+    <origin>/<page-path>/assets/... and 404, so any path/query/fragment is
+    stripped down to the scheme://netloc origin.
+    """
+    url = str(req.get("gms_assistant_url") or "").strip().rstrip("/")
+    if url:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return error_response("GMS助手地址必须是完整的 http(s) URL", status_code=400)
+        url = f"{parsed.scheme}://{parsed.netloc}"
+    external = dict(config_manager.load_config().get("external_services") or {})
+    external["gms_assistant_url"] = url
+    if not _update_runtime_sections({"external_services": external}):
+        return error_response("保存 GMS助手配置失败", status_code=500)
+    return success_response({"gms_assistant_url": url})
+
 @router.get("/api/config/read")
 async def get_config(request: Request):
     """获取配置 - 隐藏敏感信息后返回配置对象"""
@@ -177,6 +220,29 @@ async def get_config(request: Request):
 
     # 隐藏敏感信息
     safe_config = hide_sensitive_info(config.copy())
+    effective_ubuntu_user = config_manager.get_ubuntu_user(config)
+    configured_suites_path = str(config.get("suites_path") or "").strip()
+    if configured_suites_path == "~":
+        effective_suites_path = f"/home/{effective_ubuntu_user}"
+    elif configured_suites_path.startswith("~/"):
+        effective_suites_path = f"/home/{effective_ubuntu_user}/{configured_suites_path[2:]}"
+    else:
+        effective_suites_path = configured_suites_path or f"/home/{effective_ubuntu_user}/GMS-Suite"
+    # 编辑值保持原样，操作值使用解析后的运行时默认配置。
+    safe_config["effective_ubuntu_user"] = effective_ubuntu_user
+    safe_config["effective_suites_path"] = effective_suites_path
+    wifi = config.get("wifi") if isinstance(config.get("wifi"), dict) else {}
+    if isinstance(safe_config.get("wifi"), dict):
+        # Never return a WiFi credential to the browser. The UI can use
+        # ``has_password`` to decide whether to preserve the stored value;
+        # operations obtain it server-side when needed.
+        safe_config["wifi"]["password"] = ""
+        safe_config["wifi"].pop("encrypted_password", None)
+        safe_config["wifi"]["has_password"] = bool(
+            os.getenv("GMS_WIFI_PASSWORD")
+            or wifi.get("encrypted_password")
+            or wifi.get("password")
+        )
     return JSONResponse(content=safe_config)
 
 
@@ -219,7 +285,10 @@ async def get_tailscale_status(request: Request):
 
 
 @router.post("/api/tailscale/ensure")
-async def ensure_tailscale_url(request: Request):
+async def ensure_tailscale_url(
+    request: Request,
+    _admin: CurrentUser = Depends(require_elevated_admin),
+):
     """检查 Tailscale 连接状态，未连接时尝试启动，返回内网访问地址。"""
     status = await asyncio.to_thread(_get_tailscale_status)
 
@@ -242,20 +311,19 @@ async def ensure_tailscale_url(request: Request):
                 'connected': status.get('connected', False)
             })
         try:
-            # 先检查 tailscaled 服务是否运行，未运行则启动
+            # Privilege escalation is never performed by the web process.
+            # Installation enables tailscaled; interactive account enrollment
+            # remains an explicit host-administration action.
             svc_check = await asyncio.to_thread(
                 subprocess.run,
                 ["systemctl", "is-active", "--quiet", "tailscaled"],
                 capture_output=True, text=True, timeout=5
             )
             if svc_check.returncode != 0:
-                # 尝试启动 tailscaled（需要 sudoers 免密）
-                await asyncio.to_thread(
-                    subprocess.run,
-                    ["sudo", "systemctl", "enable", "--now", "tailscaled"],
-                    capture_output=True, text=True, timeout=15
+                return error_response(
+                    'tailscaled 服务未运行；请由主机管理员执行 systemctl enable --now tailscaled',
+                    status_code=503,
                 )
-                await asyncio.sleep(2)
 
             # 尝试获取 IP（可能已经 authenticated）
             status = await asyncio.to_thread(_get_tailscale_status)
@@ -269,7 +337,7 @@ async def ensure_tailscale_url(request: Request):
             # 未 authenticated，需要用户手动登录
             return error_response(
                 'Tailscale 已安装但未连接。请在终端执行 sudo tailscale up 完成账号授权，'
-                '或确认 sudoers 已配置 Tailscale 免密命令。',
+                '再刷新此页面。',
                 status_code=503
             )
         except Exception as e:
@@ -283,10 +351,8 @@ async def update_config(
 ):
     """更新配置 - 只修改运行时配置，禁止修改config.json"""
     # 运行时配置字段（保存在 config_runtime.json）
-    # 注意：client_ip 和 client_username 是运行时状态，不应保存到配置文件
-    runtime_keys = {
-        'client_hosts', 'client_ssh_credentials', 'local_server', 'sidebar_order', 'sidebar_visible_pages'
-    }
+    # client_ip 和 client_username 属于运行时状态，不持久化。
+    runtime_keys = {'client_hosts', 'local_server'}
 
     # 检查是否有不允许修改的字段
     invalid_fields = set(req.keys()) - runtime_keys
@@ -318,7 +384,9 @@ def _public_credentials(credentials: list) -> list:
             "device_host": str(cred.get("device_host") or "").strip(),
             "username": str(cred.get("username") or "").strip(),
             "host": str(cred.get("host") or cred.get("hostname") or "").strip(),
-            "has_password": bool(cred.get("password")),
+            "has_password": bool(
+                cred.get("encrypted_password") or cred.get("password")
+            ),
         }
         public.append(item)
     return public
@@ -400,46 +468,39 @@ async def delete_client_ssh_credential(
 
 
 @router.get("/api/sidebar-order")
-async def get_sidebar_order():
+async def get_sidebar_order(request: Request):
     """获取侧边栏导航顺序。"""
-    existing_runtime = config_manager.get_runtime_config()
-    order = existing_runtime.get('sidebar_order', [])
-    if not isinstance(order, list):
-        order = []
-    # 过滤掉重构改名前的历史残留页名（如 ai-assistant），否则前端 F5 重排时
-    # 会把不存在的页面当成排序键，导致真实页面被挤到末尾、导航栏乱跳。
+    owner_id = owner_id_from_request(request)
+    preferences = load_navigation_preferences(owner_id)
+    order = preferences["order"]
     order = [page for page in order if isinstance(page, str) and page in SIDEBAR_PAGES]
-    visible_pages = normalize_sidebar_visible_pages(existing_runtime.get('sidebar_visible_pages'))
+    visible_pages = normalize_sidebar_visible_pages(preferences["visible_pages"])
     return success_response({'order': order, 'visible_pages': visible_pages})
 
 
 @router.post("/api/sidebar-order")
-async def save_sidebar_order(req: dict = Body(default={})):
+async def save_sidebar_order(
+    request: Request,
+    req: dict = Body(default={}),
+):
     """保存侧边栏导航顺序和可见页面。"""
-    existing_runtime = config_manager.get_runtime_config()
-    order = existing_runtime.get('sidebar_order', [])
+    owner_id = owner_id_from_request(request)
+    existing = load_navigation_preferences(owner_id)
+    order = existing["order"]
+    updates = {}
 
     if 'order' in req:
         order = normalize_sidebar_order(req.get('order'))
-        existing_runtime['sidebar_order'] = order
+        updates['order'] = order
 
     if 'visible_pages' in req:
         visible_pages = normalize_sidebar_visible_pages(req.get('visible_pages'))
         if not visible_pages:
             return error_response("侧边栏至少需要保留一个可见页面", status_code=400)
-        existing_runtime['sidebar_visible_pages'] = visible_pages
+        updates['visible_pages'] = visible_pages
 
     if 'order' not in req and 'visible_pages' not in req:
         return error_response("缺少可保存的侧边栏配置", status_code=400)
 
-    updates = {}
-    if 'order' in req:
-        updates['sidebar_order'] = existing_runtime['sidebar_order']
-    if 'visible_pages' in req:
-        updates['sidebar_visible_pages'] = existing_runtime['sidebar_visible_pages']
-    if _update_runtime_sections(updates):
-        return success_response({
-            'order': order if isinstance(order, list) else [],
-            'visible_pages': existing_runtime.get('sidebar_visible_pages', []),
-        })
-    return error_response("保存侧边栏排序失败", status_code=500)
+    saved = save_navigation_preferences(owner_id, updates)
+    return success_response(saved)

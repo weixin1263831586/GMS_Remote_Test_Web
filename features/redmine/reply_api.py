@@ -16,19 +16,7 @@ router = APIRouter()
 
 @router.post("/api/redmine/reply")
 async def redmine_reply(request: Request):
-    """
-    向 Redmine Issue 发送回复（支持附件）
-
-    参数：
-        issue_id: Redmine Issue ID
-        reply_text: 回复内容
-        files: 可选附件列表
-
-    返回：
-        success: 是否成功
-        message: 成功消息
-        error: 错误信息（如果失败）
-    """
+    """向 Redmine 工单发送文本回复和可选附件。"""
     try:
         content_type = (request.headers.get("content-type") or "").lower()
         files: list[UploadFile] = []

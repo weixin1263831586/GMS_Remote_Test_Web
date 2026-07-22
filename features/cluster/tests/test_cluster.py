@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import json
+import shutil
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from features.auth import CurrentUser
 from features.cluster import api as cluster_api
+from features.cluster import commands_api
+from features.cluster.config import ClusterConfig
 from features.cluster.repository import ClusterRepository
 from features.cluster.service import ClusterService
 
@@ -28,6 +34,26 @@ class ClusterRepositoryTests(unittest.TestCase):
             "capabilities": {"adb": True},
         })
 
+    def test_recreates_schema_after_runtime_data_directory_is_deleted(self):
+        self.register()
+        shutil.rmtree(self.temp.name)
+        self.assertEqual(self.repo.list_workers(), [])
+        with sqlite3.connect(self.repo.db_path) as conn:
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()}
+        self.assertTrue(self.repo._REQUIRED_TABLES.issubset(tables))
+        acquired, claims = self.repo.claims.acquire(
+            [{"device_key": "worker-local:ABC", "worker_id": "worker-local", "serial": "ABC"}],
+            owner_id="alice",
+            username="Alice",
+            source_type="test",
+            source_id="test:runtime-recovery",
+            ttl_seconds=90,
+        )
+        self.assertTrue(acquired)
+        self.assertEqual(claims[0]["device_key"], "worker-local:ABC")
+
     def test_heartbeat_persists_namespaced_devices_and_suites(self):
         self.register()
         worker = self.repo.heartbeat("worker-246", {
@@ -45,6 +71,85 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(device["properties"]["product"], "rk")
         self.assertEqual(self.repo.list_suites("worker-246")[0]["suite_key"], "CTS:17_r1")
 
+    def test_refresh_command_result_restores_suite_inventory(self):
+        self.register()
+        command = self.repo.create_command({
+            "worker_id": "worker-246",
+            "command_type": "refresh_suites",
+            "payload": {},
+        })
+        command = self.repo.ack_command("worker-246", command["id"], {
+            "status": "completed",
+            "result": {"suites": [{
+                "suite_type": "CTS",
+                "suite_version": "17_r1",
+                "suite_key": "CTS:17_r1",
+                "tools_path": "/suite/tools",
+                "available": True,
+            }]},
+            "error": "",
+        })
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            commands_api.synchronize_command(command)
+        finally:
+            cluster_api.cluster_service = previous
+        self.assertEqual(
+            self.repo.list_suites("worker-246")[0]["suite_key"], "CTS:17_r1"
+        )
+
+    def test_registration_without_inventory_queues_suite_refresh(self):
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            app = FastAPI()
+            app.include_router(cluster_api.router)
+            tokens_path = Path(self.temp.name) / "cluster.json"
+            tokens_path.write_text(
+                json.dumps({"worker_tokens": {"worker-246": "token"}}),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                "os.environ", {"GMS_CLUSTER_CONFIG": str(tokens_path)}
+            ), TestClient(app) as client:
+                response = client.post(
+                    "/api/cluster/workers/register",
+                    headers={"Authorization": "Bearer token"},
+                    json={
+                        "worker_id": "worker-246",
+                        "hostname": "ats-246",
+                        "address": "172.16.14.246",
+                    },
+                )
+        finally:
+            cluster_api.cluster_service = previous
+        self.assertEqual(response.status_code, 200, response.text)
+        queued = self.repo.poll_commands("worker-246")
+        self.assertEqual([item["command_type"] for item in queued], ["refresh_suites"])
+
+    def test_suite_results_allows_anonymous_development_mode(self):
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            app = FastAPI()
+            app.include_router(cluster_api.router)
+            with patch.dict(
+                "os.environ",
+                {"GMS_ENV": "development", "GMS_AUTH_REQUIRED": "false"},
+            ), patch(
+                "features.cluster.api._run_worker_command",
+                new=AsyncMock(return_value={"raw_output": "", "launcher": "vts-tradefed"}),
+            ), TestClient(app) as client:
+                response = client.post(
+                    "/api/cluster/suites/results",
+                    params={"worker_id": "worker-246", "suite_path": "/suite/tools"},
+                )
+        finally:
+            cluster_api.cluster_service = previous
+
+        self.assertEqual(response.status_code, 200, response.text)
+
     def test_commands_are_delivered_once_and_acknowledged(self):
         self.register()
         command = self.repo.create_command({
@@ -59,6 +164,69 @@ class ClusterRepositoryTests(unittest.TestCase):
         })
         self.assertEqual(ack["status"], "completed")
         self.assertEqual(ack["result"]["count"], 3)
+
+    def test_operation_id_deduplicates_command_and_records_timeline(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        })
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246", "owner_id": "tester",
+            "devices": ["ABC"], "suite_key": "CTS:17_r1",
+            "automation_run_id": "ats-trace-1",
+        })
+        request = {
+            "worker_id": "worker-246", "command_type": "start_test",
+            "job_id": job["id"], "attempt_id": job["current_attempt_id"],
+            "operation_id": f"{job['current_attempt_id']}:start_test",
+            "payload": {},
+        }
+        command = self.repo.create_command(request)
+        duplicate = self.repo.create_command(request)
+        self.assertEqual(duplicate["id"], command["id"])
+        self.repo.attach_command_to_job(job["id"], command)
+        running = self.repo.ack_command("worker-246", command["id"], {
+            "status": "running", "result": {"worker_job_id": "wj-1"}, "error": "",
+        })
+        self.repo.sync_job_from_command(running)
+
+        current = self.repo.get_job(job["id"])
+        self.assertEqual(current["trace_id"], "ats-trace-1")
+        self.assertEqual(current["state_version"], 3)
+        timeline = self.repo.list_timeline(job_id=job["id"])
+        self.assertEqual(
+            [item["event_type"] for item in timeline],
+            ["job.created", "command.queued", "job.transition",
+             "command.acknowledged", "job.transition"],
+        )
+
+    def test_worker_session_generation_rejects_stale_agent(self):
+        first = self.repo.register_worker({
+            "worker_id": "worker-246", "name": "remote", "hostname": "ats-246",
+            "address": "172.16.14.246", "agent_version": "1", "max_jobs": 1,
+            "session_id": "session-a", "capabilities": {},
+        })
+        self.assertEqual(first["connection_generation"], 1)
+        same = self.repo.register_worker({
+            "worker_id": "worker-246", "name": "remote", "hostname": "ats-246",
+            "address": "172.16.14.246", "agent_version": "1", "max_jobs": 1,
+            "session_id": "session-a", "capabilities": {},
+        })
+        self.assertEqual(same["connection_generation"], 1)
+        replacement = self.repo.register_worker({
+            "worker_id": "worker-246", "name": "remote", "hostname": "ats-246",
+            "address": "172.16.14.246", "agent_version": "1", "max_jobs": 1,
+            "session_id": "session-b", "capabilities": {},
+        })
+        self.assertEqual(replacement["connection_generation"], 2)
+        self.assertFalse(self.repo.validate_worker_session("worker-246", "session-a", 1))
+        self.assertTrue(self.repo.validate_worker_session("worker-246", "session-b", 2))
+        with self.assertRaisesRegex(ValueError, "stale worker session"):
+            self.repo.heartbeat("worker-246", {
+                "session_id": "session-a", "connection_generation": 1,
+                "running_jobs": [], "devices": [], "suites": None,
+            })
 
     def test_unacknowledged_command_is_redelivered_after_delivery_lease(self):
         self.register()
@@ -139,8 +307,17 @@ class ClusterRepositoryTests(unittest.TestCase):
         cluster_api.cluster_service = ClusterService(self.repo)
         try:
             app = FastAPI()
+
+            @app.middleware("http")
+            async def tester_identity(request, call_next):
+                request.state.current_user = CurrentUser(
+                    id="tester", username="tester", role="user"
+                )
+                return await call_next(request)
+
             app.include_router(cluster_api.router)
-            host = TestClient(app).get("/api/cluster/hosts").json()["hosts"][0]
+            with TestClient(app) as client:
+                host = client.get("/api/cluster/hosts").json()["hosts"][0]
         finally:
             cluster_api.cluster_service = previous
         self.assertEqual(host["ssh_connection"], "wlq@172.16.14.246")
@@ -151,8 +328,16 @@ class ClusterRepositoryTests(unittest.TestCase):
         try:
             app = FastAPI()
             app.include_router(cluster_api.router)
-            with patch.dict("os.environ", {"GMS_CLUSTER_WORKER_TOKENS": "worker-246:token"}):
-                response = TestClient(app, client=("172.16.14.246", 50000)).post(
+            tokens_path = Path(self.temp.name) / "cluster.json"
+            tokens_path.write_text(
+                json.dumps({"worker_tokens": {"worker-246": "token"}}),
+                encoding="utf-8",
+            )
+            with patch.dict("os.environ", {"GMS_CLUSTER_CONFIG": str(tokens_path)}), TestClient(
+                app,
+                client=("172.16.14.246", 50000),
+            ) as client:
+                response = client.post(
                     "/api/cluster/workers/register",
                     headers={"Authorization": "Bearer token"},
                     json={"worker_id": "worker-246", "hostname": "ats-043056-64g",
@@ -179,23 +364,22 @@ class ClusterRepositoryTests(unittest.TestCase):
             "devices": [{"serial": "REMOTE", "state": "available"}], "suites": [],
         })
         previous = cluster_api.cluster_service
-        svc = ClusterService(self.repo)
-        svc.set_runtime_enabled(False)
+        svc = ClusterService(self.repo, config=ClusterConfig(enabled=False))
         cluster_api.cluster_service = svc
         try:
             app = FastAPI()
             app.include_router(cluster_api.router)
-            client = TestClient(app)
-            self.assertFalse(client.get("/api/cluster/status").json()["enabled"])
-            self.assertEqual(
-                [item["worker_id"] for item in client.get("/api/cluster/hosts").json()["hosts"]],
-                ["worker-local"],
-            )
-            self.assertEqual(
-                [item["id"] for item in client.get("/api/cluster/devices").json()["devices"]],
-                ["worker-local:LOCAL"],
-            )
-            self.assertEqual(client.get("/api/cluster/devices?worker_id=worker-246").status_code, 409)
+            with TestClient(app) as client:
+                self.assertFalse(client.get("/api/cluster/status").json()["enabled"])
+                self.assertEqual(
+                    [item["worker_id"] for item in client.get("/api/cluster/hosts").json()["hosts"]],
+                    ["worker-local"],
+                )
+                self.assertEqual(
+                    [item["id"] for item in client.get("/api/cluster/devices").json()["devices"]],
+                    ["worker-local:LOCAL"],
+                )
+                self.assertEqual(client.get("/api/cluster/devices?worker_id=worker-246").status_code, 409)
         finally:
             cluster_api.cluster_service = previous
 
@@ -276,6 +460,10 @@ class ClusterRepositoryTests(unittest.TestCase):
             "devices": ["worker-246:ABC"], "suite_key": "CTS:17_r1",
         })
         self.assertEqual(second["leases"][0]["status"], "active")
+        self.assertEqual(
+            second["leases"][0]["generation"],
+            finished["leases"][0]["generation"] + 1,
+        )
 
     def test_automation_reservation_survives_heartbeat_and_converts_to_job_lease(self):
         self.register()
@@ -335,8 +523,15 @@ class ClusterRepositoryTests(unittest.TestCase):
         cluster_api.cluster_service = ClusterService(self.repo)
         try:
             app = FastAPI()
+            @app.middleware("http")
+            async def identify_test_owner(request, call_next):
+                request.state.current_user = CurrentUser(
+                    id="tester", username="tester", role="user"
+                )
+                return await call_next(request)
             app.include_router(cluster_api.router)
-            response = TestClient(app).post(f"/api/cluster/jobs/{job['id']}/cancel")
+            with TestClient(app) as client:
+                response = client.post(f"/api/cluster/jobs/{job['id']}/cancel")
         finally:
             cluster_api.cluster_service = previous
         self.assertEqual(response.status_code, 200)
@@ -369,8 +564,44 @@ class ClusterRepositoryTests(unittest.TestCase):
         recovered = self.repo.get_job(job["id"])
         assert recovered["status"] == "running"
         assert recovered["error"] == ""
+        assert recovered["state_version"] == 3
+        assert recovered["recovery_count"] == 1
         assert recovered["leases"][0]["status"] == "active"
         assert self.repo.list_devices("worker-246")[0]["state"] == "allocated"
+        transitions = [
+            (item["from_state"], item["to_state"])
+            for item in self.repo.list_timeline(job_id=job["id"])
+            if item["event_type"] == "job.transition"
+        ]
+        assert transitions == [("assigned", "worker_lost"), ("worker_lost", "running")]
+
+    def test_running_attempt_is_revoked_when_unified_claim_was_lost(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        })
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246", "owner_id": "tester",
+            "devices": ["ABC"], "suite_key": "CTS:17_r1",
+        })
+        attempt_id = job["current_attempt_id"]
+        self.repo.mark_worker_offline("worker-246")
+        self.repo.claims.release(f"job:{job['id']}", status="expired")
+
+        response = self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "devices": [{"serial": "ABC", "state": "available"}],
+            "suites": None, "running_jobs": [{
+                "worker_job_id": "wj-old", "job_id": job["id"],
+                "attempt_id": attempt_id, "status": "running",
+                "devices": ["ABC"],
+            }],
+        })
+
+        revoked = self.repo.get_job(job["id"])
+        assert response["revoked_attempt_ids"] == [attempt_id]
+        assert revoked["status"] == "failed"
+        assert revoked["leases"][0]["status"] == "revoked"
 
 
 if __name__ == "__main__":

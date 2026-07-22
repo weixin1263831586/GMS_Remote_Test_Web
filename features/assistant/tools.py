@@ -44,7 +44,7 @@ class ScoredTool:
 
 
 # ==================== Keyword Supplements ====================
-# api_docs_list 只有 description，这里按 category 补充高频关键词
+# 按接口分类补充检索关键词。
 
 _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "device": ["设备", "device", "adb", "设备列表", "设备管理", "设备信息", "连接设备",
@@ -176,7 +176,7 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/users/set-username": "features.users.users_api:set_client_username",
     "/api/users/list": "features.users.users_api:list_users",
     "/api/devices/list": "features.devices.api:get_connected_devices",
-    "/api/devices/management": "features.devices.operations_api:devices_management",
+    "/api/devices/management": "features.devices.management_api:devices_management",
     "/api/devices/user-locked": "features.devices.operations_api:list_user_locks",
     "/api/devices/bootloader-lock": "features.devices.api:lock_bootloader",
     "/api/devices/bootloader-unlock": "features.devices.api:unlock_bootloader",
@@ -878,21 +878,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=False,
             is_dangerous=False,
             requires_confirm=True,
-            executor_ref="features.cluster.jobs_api:cancel_job",
-            response_type="status",
-        ),
-        AgentTool(
-            name="cluster_set_mode",
-            category="cluster",
-            description="切换单机或集群运行模式",
-            api_path="/api/cluster/mode",
-            method="POST",
-            params=[{"name": "enabled", "type": "boolean", "required": True, "desc": "是否启用集群模式"}],
-            keywords=_kw("cluster", "启用集群", "关闭集群", "切换集群模式", "单机模式"),
-            is_readonly=False,
-            is_dangerous=False,
-            requires_confirm=True,
-            executor_ref="features.cluster.api:set_cluster_mode",
+            executor_ref="features.cluster.job_control_api:cancel_job",
             response_type="status",
         ),
         AgentTool(

@@ -12,6 +12,8 @@ import paramiko
 
 from foundation.common_utils import CommonUtils
 from foundation.config import get_ubuntu_user
+from foundation.networking import split_host_port
+from foundation.ssh_security import configure_strict_host_keys
 
 
 logger = logging.getLogger(__name__)
@@ -58,34 +60,14 @@ Restart-Computer
 
 
 class SSHManager:
-    """
-    SSH管理器（同步版本）
-
-    特性：
-    - SSH连接池
-    - 命令执行
-    - 超时控制
-    """
+    """提供连接池、命令执行和超时控制的同步 SSH 管理器。"""
 
     def __init__(self, pool_size: int = 5):
-        """
-        初始化SSH管理器
-
-        Args:
-            pool_size: 连接池大小
-        """
+        """初始化指定容量的连接池。"""
         self.pool: queue.Queue = queue.Queue(maxsize=pool_size)
 
     def _load_ssh_key(self, key_path: str) -> paramiko.PKey | None:
-        """
-        加载SSH私钥，尝试多种密钥类型
-
-        Args:
-            key_path: 密钥文件路径
-
-        Returns:
-            加载的密钥对象，失败返回 None
-        """
+        """尝试按多种密钥类型加载 SSH 私钥。"""
         key_path = os.path.expanduser(key_path)
         key_error = None
 
@@ -104,20 +86,14 @@ class SSHManager:
     def create_connection(
         self, config: dict, *, raise_on_error: bool = False
     ) -> paramiko.SSHClient | None:
-        """
-        创建SSH连接
-
-        Args:
-            config: 配置字典，包含 host, username, password 等
-
-        Returns:
-            SSHClient 对象，失败则返回 None
-        """
+        """根据配置创建 SSH 连接，失败时按需返回 None 或抛出异常。"""
         try:
             ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_strict_host_keys(ssh)
 
             host = config.get('host') or config.get('hostname') or config.get('ubuntu_host')
+            host, parsed_port = split_host_port(str(host or ''))
+            port = int(config.get('port') or parsed_port)
             username = config.get('username') or config.get('ubuntu_user') or get_ubuntu_user()
             password = config.get('password') or config.get('ubuntu_pswd', '')
 
@@ -127,6 +103,7 @@ class SSHManager:
                     return None
                 ssh.connect(
                     host,
+                    port=port,
                     username=username,
                     pkey=key,
                     timeout=10
@@ -137,6 +114,7 @@ class SSHManager:
                     return None
                 ssh.connect(
                     host,
+                    port=port,
                     username=username,
                     password=password,
                     timeout=10,
@@ -146,10 +124,8 @@ class SSHManager:
                 )
 
             logger.info(f"[SSH] Connected to {host}")
-            # The pool is shared by all callers.  Keep the destination on the
-            # client so a healthy connection for host A is never handed to a
-            # request for host B.
-            ssh._gms_pool_identity = (str(host), str(username))
+            # 保存目标身份，防止跨主机复用连接。
+            ssh._gms_pool_identity = (str(host), str(port), str(username))
             return ssh
 
         except Exception as e:
@@ -159,17 +135,13 @@ class SSHManager:
             return None
 
     def get_connection(self, config: dict) -> paramiko.SSHClient | None:
-        """
-        从连接池获取或创建连接（带健康检查）
-
-        Args:
-            config: 配置字典
-
-        Returns:
-            SSHClient 对象
-        """
+        """从连接池获取健康连接，必要时新建。"""
+        requested_host, requested_port = split_host_port(str(
+            config.get('host') or config.get('hostname') or config.get('ubuntu_host') or ''
+        ))
         requested_identity = (
-            str(config.get('host') or config.get('hostname') or config.get('ubuntu_host') or ''),
+            requested_host,
+            str(requested_port),
             str(config.get('username') or config.get('ubuntu_user') or get_ubuntu_user()),
         )
 
@@ -206,12 +178,7 @@ class SSHManager:
         return self.create_connection(config)
 
     def return_connection(self, ssh: paramiko.SSHClient):
-        """
-        归还连接到连接池
-
-        Args:
-            ssh: SSHClient 对象
-        """
+        """将连接归还连接池，池满时关闭连接。"""
         try:
             self.pool.put_nowait(ssh)
         except queue.Full:
@@ -224,18 +191,7 @@ class SSHManager:
         timeout: int = 30,
         get_pty: bool = False
     ) -> tuple[str, str, int]:
-        """
-        执行SSH命令
-
-        Args:
-            ssh: SSHClient 对象
-            command: 要执行的命令
-            timeout: 超时时间（秒）
-            get_pty: 是否获取伪终端
-
-        Returns:
-            (stdout, stderr, exit_code)
-        """
+        """执行 SSH 命令并返回标准输出、错误输出和退出码。"""
         try:
             _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=get_pty)
 
@@ -250,15 +206,7 @@ class SSHManager:
             return '', str(e), -1
 
     def check_sshd_installed(self, ssh) -> tuple[bool, str]:
-        """
-        检查 SSHD 是否已安装
-
-        Args:
-            ssh: SSH 连接对象
-
-        Returns:
-            (是否安装, 状态信息)
-        """
+        """检查 Windows SSHD 是否已安装。"""
         try:
             stdout, _stderr, code = self.execute_command(ssh, 'Get-Service sshd')
             if code == 0 and stdout.strip():
@@ -269,16 +217,7 @@ class SSHManager:
             return False, ''
 
     def install_sshd(self, ssh, config: dict[str, Any]) -> dict[str, Any]:
-        """
-        自动安装 SSHD 到 Windows 主机
-
-        Args:
-            ssh: SSH 连接对象
-            config: 配置字典
-
-        Returns:
-            安装结果字典
-        """
+        """在 Windows 主机安装并启动 SSHD。"""
         try:
             # 检查 SSHD 是否已安装
             installed, status = self.check_sshd_installed(ssh)
@@ -342,22 +281,7 @@ class SSHManager:
 
     @contextmanager
     def connection(self, config: dict):
-        """
-        SSH连接上下文管理器
-
-        自动获取和归还SSH连接，确保资源正确释放
-
-        Args:
-            config: 配置字典
-
-        Yields:
-            SSHClient 对象
-
-        Example:
-            >>> with ssh_manager.connection(config) as ssh:
-            ...     stdout, stderr, code = ssh_manager.execute_command(ssh, "ls -la")
-            # 连接自动归还到池中
-        """
+        """获取 SSH 连接，并在退出时归还连接池。"""
         ssh = self.get_connection(config)
         if not ssh:
             raise RuntimeError("Failed to get SSH connection")
@@ -369,12 +293,7 @@ class SSHManager:
 
     @contextmanager
     def optional_connection(self, config: dict):
-        """None-safe SSH 连接上下文管理器。
-
-        与 connection() 的区别：拿不到连接时不抛异常，而是 yield None，
-        由调用方按各自的语义处理（返回错误响应 / 跳过 / 记日志等）。
-        连接正常时同样在退出时归还到连接池。
-        """
+        """允许连接为空，并在退出时归还有效连接。"""
         ssh = self.get_connection(config)
         try:
             yield ssh
@@ -393,17 +312,7 @@ class SSHManager:
                 await asyncio.to_thread(self.return_connection, ssh)
 
     def optimize_sftp_performance(self, sftp):
-        """
-        优化SFTP传输性能
-
-        Args:
-            sftp: Paramiko SFTPClient对象
-
-        优化内容包括：
-        - 增加超时时间
-        - 使用更大的窗口大小提高传输速度
-        - 减少重新密钥协商频率
-        """
+        """配置 SFTP 超时、窗口和重新密钥阈值。"""
         sftp.get_channel().settimeout(SFTP_TIMEOUT_SECONDS)
         sftp.get_channel().transport.window_size = SFTP_WINDOW_SIZE
         sftp.get_channel().transport.packetizer.REKEY_BYTES = SFTP_REKEY_BYTES

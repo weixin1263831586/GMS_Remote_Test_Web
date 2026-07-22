@@ -36,13 +36,11 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
             db.upsert_issue(_issue(1, "张三", journals=[{"user": "客户", "created_on": "2026-06-01T00:00:00", "notes": "请处理"}]))
             db.upsert_issue(_issue(2, "张三", journals=[{"user": "客户", "created_on": "2026-06-12T00:00:00", "notes": "请处理"}]))
-
             with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
                 stats = db.get_workload_statistics(owner_names=["张三"], stale_days=3, list_limit=10)
-
             self.assertEqual(stats["waiting_my_reply"], 2)
             self.assertEqual(stats["no_reply_3_days"], 1)
             self.assertEqual([item["issue_id"] for item in stats["lists"]["no_reply_3_days"]], [1])
@@ -57,7 +55,6 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 status_name="HangUp",
                 journals=[{"user": "客户", "created_on": "2026-06-01T00:00:00", "notes": "目前是没有问题了，后续再 closed。"}],
             ))
-
             with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
@@ -130,7 +127,10 @@ class RedmineDashboardStatsTests(unittest.TestCase):
     def test_redmine_user_map_name_with_site_suffix_marks_last_replier_as_rk_colleague(self):
         from features.redmine.repository import _looks_like_rk_actor
 
-        self.assertTrue(_looks_like_rk_actor({"user": "吴 良清（福州）", "user_email": ""}))
+        self.assertTrue(_looks_like_rk_actor(
+            {"user": "吴 良清（福州）", "user_email": ""},
+            [{"id": 1, "name": "吴 良清（福州）"}],
+        ))
         self.assertTrue(_looks_like_rk_actor({"user": "", "user_email": "dev@rock-chips.com"}))
 
     def test_unmapped_department_suffix_actor_is_counted_as_customer_reply(self):
@@ -430,7 +430,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 cookies={},
             )
             stats_api = redmine_router._statistics_api
-            with patch.object(stats_api, "_service_for_request", return_value=service), patch.object(
+            with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
+                stats_api, "_service_for_request", return_value=service
+            ), patch.object(
                 stats_api,
                 "_user_map_for_request",
                 return_value=[{"id": 1, "name": "黄 超群"}],
@@ -507,7 +509,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 cookies={},
             )
             stats_api = redmine_router._statistics_api
-            with patch.object(stats_api, "_service_for_request", return_value=service), patch.object(
+            with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
+                stats_api, "_service_for_request", return_value=service
+            ), patch.object(
                 stats_api,
                 "_user_map_for_request",
                 return_value=[{"id": 1, "name": "黄 超群", "aliases": ["黄超群"]}],
@@ -574,7 +578,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 cookies={},
             )
             stats_api = redmine_router._statistics_api
-            with patch.object(stats_api, "_service_for_request", return_value=service), patch.object(
+            with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
+                stats_api, "_service_for_request", return_value=service
+            ), patch.object(
                 stats_api,
                 "_user_map_for_request",
                 return_value=[{"id": 1, "name": "黄 超群"}],
@@ -630,7 +636,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 cookies={},
             )
             stats_api = redmine_router._statistics_api
-            with patch.object(stats_api, "_service_for_request", return_value=service), patch.object(
+            with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
+                stats_api, "_service_for_request", return_value=service
+            ), patch.object(
                 stats_api,
                 "_user_map_for_request",
                 return_value=[{"id": 1, "name": "黄 超群"}],
@@ -647,10 +655,75 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 ))
 
             self.assertTrue(result["success"])
-            # Live fetch failed → local-DB trend (1 closed issue on 2026-06-12) survives.
+            # 实时读取失败时保留本地趋势数据。
             self.assertEqual(result["data"]["resolved_daily"], [{"date": "2026-06-12", "count": 1}])
 
+    def test_synthetic_current_user_name_keeps_live_full_history_counts(self):
+        """A current user absent from user_map remains a live Redmine user.
 
+        The users endpoint exposes that account as a synthetic name option, so
+        selecting it must not silently switch the dashboard to the partial DB.
+        """
+        import asyncio
+
+        import features.redmine.api as redmine_router
+        from features.auth import CurrentUser
+
+        class CurrentRedmineUser:
+            id = 77
+            firstname = "超群"
+            lastname = "黄"
+            login = "chaoqun.huang"
+            mail = "chaoqun.huang@example.com"
+
+        class Client:
+            async def get_current_user(self):
+                return CurrentRedmineUser()
+
+            async def count_issues_by_assignee(self, user_id):
+                self.user_id = user_id
+                return {"total_owned": 2413, "open_count": 28, "closed_count": 2385}
+
+            async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
+                return {"resolved_yearly": [{"year": "2026", "count": 103}]}
+
+            async def close(self):
+                pass
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db.upsert_issue(_issue(700003, "黄 超群", status_name="已解决", closed_on="2026-06-12"))
+            service = SimpleNamespace(
+                repository=db,
+                agent=SimpleNamespace(_make_client=lambda: Client()),
+            )
+            request = SimpleNamespace(
+                state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
+                cookies={},
+            )
+            stats_api = redmine_router._statistics_api
+            with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
+                stats_api, "_service_for_request", return_value=service
+            ), patch.object(
+                stats_api, "_user_map_for_request", return_value=[]
+            ), patch.object(
+                stats_api,
+                "_get_redmine_stats_config",
+                return_value={"stale_days": 3, "window_days": 60, "cache_ttl": 600},
+            ):
+                result = asyncio.run(stats_api.get_workload_statistics(
+                    request,
+                    stale_days=3,
+                    list_limit=30,
+                    name="黄 超群",
+                ))
+
+            self.assertEqual(result["data"]["total_owned"], 2413)
+            self.assertEqual(result["data"]["closed_count"], 2385)
+            self.assertEqual(result["data"]["meta"]["count_source"], "redmine_live")
+
+    def test_department_resolved_detail_uses_profile_members(self):
         import asyncio
 
         import features.redmine.api as redmine_router
@@ -969,90 +1042,6 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(data["trends"]["daily"][0], {"date": "2025-12-31", "count": 1})
         self.assertIn({"month": "2026-06", "count": 3}, data["trends"]["monthly"])
         self.assertEqual([item["number"] for item in data["lists"]["pending_review"]], ["102"])
-
-    def test_gerrit_created_date_detail_filter_matches_trend_buckets(self):
-        filter_gerrit_changes_by_created_date = import_module(
-            "features.gerrit.config"
-        ).filter_gerrit_changes_by_created_date
-
-        changes = [
-            {
-                "number": 101,
-                "subject": "created in range but updated later",
-                "status": "NEW",
-                "created": "2026-06-12 10:00:00.000000000",
-                "updated": "2026-06-20 10:00:00.000000000",
-            },
-            {
-                "number": 102,
-                "subject": "created before range but updated in range",
-                "status": "NEW",
-                "created": "2026-06-11 10:00:00.000000000",
-                "updated": "2026-06-12 10:00:00.000000000",
-            },
-        ]
-
-        items = filter_gerrit_changes_by_created_date(changes, "2026-06-12", "2026-06-13")
-
-        self.assertEqual([item["number"] for item in items], ["101"])
-
-    def test_gerrit_department_stats_merge_members(self):
-        summarize_gerrit_department_results = import_module(
-            "features.gerrit.config"
-        ).summarize_gerrit_department_results
-
-        data = summarize_gerrit_department_results([
-            {
-                "owner": "a@example.com",
-                "summary": {"total_count": 2, "merged_count": 1, "open_count": 1, "abandoned_count": 0, "pending_review_count": 1},
-                "trends": {"daily": [{"date": "2026-06-01", "count": 2}], "weekly": [], "monthly": [], "yearly": []},
-            },
-            {
-                "owner": "b@example.com",
-                "summary": {"total_count": 3, "merged_count": 2, "open_count": 1, "abandoned_count": 0, "pending_review_count": 0},
-                "trends": {"daily": [{"date": "2026-06-01", "count": 1}], "weekly": [], "monthly": [], "yearly": []},
-            },
-        ])
-
-        self.assertEqual(data["summary"]["total_count"], 5)
-        self.assertEqual(data["summary"]["pending_review_count"], 1)
-        self.assertEqual(data["trends"]["daily"], [{"date": "2026-06-01", "count": 3}])
-
-    def test_gerrit_ssh_query_removes_status_any_and_adds_start(self):
-        _query_for_ssh = import_module(
-            "features.gerrit.service"
-        )._query_for_ssh
-
-        self.assertEqual(
-            _query_for_ssh("owner:a@example.com status:any limit:500", limit=200, start=400),
-            "owner:a@example.com limit:200 --start 400",
-        )
-
-    def test_gerrit_effective_limits_support_unbounded_history(self):
-        _effective_history_limit = import_module(
-            "features.gerrit.api"
-        )._effective_history_limit
-
-        self.assertIsNone(_effective_history_limit({"max_history_changes": 0, "query_limit": 500}, {"max_history_changes": 0}))
-        self.assertEqual(_effective_history_limit({"max_history_changes": 300, "query_limit": 500}, {}), 300)
-
-    def test_gerrit_all_department_uses_all_department_owners(self):
-        _owners_for_department_profile = import_module(
-            "features.gerrit.api"
-        )._owners_for_department_profile
-
-        cfg = {
-            "department_profiles": [
-                {"id": "all", "name": "全部部门", "owners": ["all@example.com"]},
-                {"id": "sys-1", "name": "系统一部", "owners": ["a@example.com"]},
-                {"id": "sys-2", "name": "系统二部", "owners": ["a@example.com", "b@example.com"]},
-            ]
-        }
-
-        self.assertEqual(
-            _owners_for_department_profile(cfg, cfg["department_profiles"][0]),
-            ["all@example.com", "a@example.com", "b@example.com"],
-        )
 
     def test_redmine_department_profiles_are_derived_from_user_map_when_runtime_config_empty(self):
         dashboard = import_module("features.redmine.dashboard")

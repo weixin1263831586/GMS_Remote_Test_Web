@@ -3,6 +3,7 @@
 const state = {
     connected: false,
     testing: false,
+    testStopping: false,
     devices: [],
     selectedDevices: new Set(),
     socket: null,
@@ -13,9 +14,11 @@ const state = {
     clientId: null,
     clientDisplayId: null,
     currentUser: null,
+    authRequired: false,
+    authSetupRequired: false,
     authReady: false,
     usernameDetectShown: false,
-    // Temporary admin elevation for sensitive operations (remove user/device).
+    // 敏感操作使用当前会话的管理员二次认证状态。
     // Populated from /api/auth/status (elevated/elevated_until).
     elevated: false,
     elevatedUntil: null,
@@ -23,7 +26,7 @@ const state = {
     fileBrowser: { currentPath: '', selectedFile: null, targetInputId: null, mode: null },
     gsiVendorFile: null,
     suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '', suiteRoot: '' },
-    // 设备分组：groups 是分组定义数组；groupView 开关分组视图；groupFilter 筛选的组 id（''=全部）
+    // 设备分组定义、视图开关和当前筛选。
     deviceGroups: [],
     deviceGroupsLoaded: false,
     groupView: localStorage.getItem('gms_group_view') === '1',

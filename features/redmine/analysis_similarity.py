@@ -159,7 +159,7 @@ class SimilarityAnalysisMixin:
                         "updated_on": row.get("updated_on") or "",
                     }
 
-        # 3. AI semantic similarity for top candidates (optional, limited to save API calls)
+        # 3. 对高分候选执行可选的 AI 语义匹配。
         top_candidates = sorted(candidates.values(), key=lambda item: item["score"], reverse=True)[:TOP_CANDIDATES_FOR_AI]
         if top_candidates and failures:
             semantic_scores = await self._ai_semantic_similarity(issue_payload, top_candidates)
@@ -362,6 +362,4 @@ class SimilarityAnalysisMixin:
 
         return results
 
-    # ------------------------------------------------------------------
     # AI model interaction
-    # ------------------------------------------------------------------

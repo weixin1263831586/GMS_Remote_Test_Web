@@ -6,10 +6,12 @@ import logging
 import os
 import shutil
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
 
+from features.auth import CurrentUser, require_elevated_admin
 from features.system.ssh import ssh_manager
+from features.system.terminal_service import resolve_authorized_terminal_target
 from foundation.config import config_manager
 from foundation.responses import error_response
 from foundation.uploads import (
@@ -29,7 +31,9 @@ router = APIRouter()
 # ==================== SSH Terminal Info ====================
 
 @router.get("/api/terminal/open")
-async def get_ssh_terminal_info():
+async def get_ssh_terminal_info(
+    _admin: CurrentUser = Depends(require_elevated_admin),
+):
     """Get SSH terminal connection info."""
     try:
         config = config_manager.load_config()
@@ -62,6 +66,7 @@ async def get_ssh_terminal_info():
 @router.head("/api/terminal/push")
 async def upload_file(
     request: Request,
+    _admin: CurrentUser = Depends(require_elevated_admin),
     file: UploadFile | None = File(None),
     path: str = Form(""),
     chunk_index: int | None = Form(None),
@@ -102,23 +107,22 @@ async def upload_file(
             return error_response("No file selected", 400)
 
         config = config_manager.load_config()
-        local_worker_id = "worker-local"
         try:
-            from features.cluster import get_cluster_service
-
-            local_worker_id = get_cluster_service().config.local_worker_id
-        except (AttributeError, RuntimeError):
-            pass
-        if (
-            worker_id
-            and worker_id not in {"worker-local", local_worker_id}
-            and host
-            and user
-        ):
-            password = config_manager.find_device_host_password(f"{user}@{host}", config) or ""
-            config = {**config, "ubuntu_host": host, "ubuntu_user": user,
-                      "ubuntu_pswd": password, "host": host, "username": user,
-                      "password": password}
+            resolved_worker, resolved_host, resolved_user, password, _serial = (
+                resolve_authorized_terminal_target(worker_id, mode="ssh")
+            )
+        except ValueError as exc:
+            return error_response(str(exc), 400)
+        config = {
+            **config,
+            "ubuntu_host": resolved_host,
+            "ubuntu_user": resolved_user,
+            "ubuntu_pswd": password,
+            "host": resolved_host,
+            "username": resolved_user,
+            "password": password,
+            "worker_id": resolved_worker,
+        }
 
         upload_dir = upload_temp_root()
         os.makedirs(upload_dir, exist_ok=True)

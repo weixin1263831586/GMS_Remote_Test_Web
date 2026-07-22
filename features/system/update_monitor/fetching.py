@@ -17,8 +17,7 @@ from foundation import partner_android as fetch_partner_android
 DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
 SCHEMA_VERSION = 1
 
-# How many recent months of Mainline PRELOAD notes to crawl per scan. Keeps the
-# number of authenticated child-page fetches bounded (one per PRELOAD build).
+# 单次扫描的 Mainline PRELOAD 月份上限。
 MAINLINE_MONTH_DEPTH = 12
 MAINLINE_INDEX_URL = 'https://docs.partner.android.com/mainline/release/release-notes?authuser=2'
 

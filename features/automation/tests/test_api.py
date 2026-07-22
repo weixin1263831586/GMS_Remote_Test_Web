@@ -71,12 +71,12 @@ class AutomationApiTests(unittest.TestCase):
                 response = asyncio.run(automation_api.create_automation_run({
                     'devices': ['ABC123'],
                     'test_plan': {'test_type': 'CTS'},
-                }))
+                }, self.request_for('alice')))
 
             self.assertEqual(response.status_code, 400)
             self.assertIn('Firmware artifact', response.body.decode())
 
-    def test_retry_keeps_ephemeral_build_password_without_persisting_it(self):
+    def test_build_password_survives_restart_and_retry_without_plaintext_storage(self):
         with TemporaryDirectory() as tmp:
             service = build_service(tmp)
             original = service.create_run({
@@ -90,10 +90,23 @@ class AutomationApiTests(unittest.TestCase):
                 original['id'], status='completed', current_stage='completed'
             )
 
-            retried = service.retry_run(original['id'])
+            restarted_service = build_service(tmp)
+            self.assertEqual(
+                restarted_service.get_build_password(original['id']),
+                'session-secret',
+            )
 
-            self.assertEqual(service.get_build_password(retried['id']), 'session-secret')
+            retried = restarted_service.retry_run(original['id'])
+
+            self.assertEqual(
+                restarted_service.get_build_password(retried['id']),
+                'session-secret',
+            )
             self.assertNotIn('session-secret', retried['test_plan_json'])
+            self.assertNotIn(
+                b'session-secret',
+                (Path(tmp) / 'automation.sqlite3').read_bytes(),
+            )
 
     def test_retry_rejects_active_run(self):
         with TemporaryDirectory() as tmp:
@@ -102,10 +115,12 @@ class AutomationApiTests(unittest.TestCase):
                 'artifact_path': '/tmp/update.img',
                 'devices': ['ABC123'],
                 'test_plan': {'test_type': 'CTS'},
-            })
+            }, created_by='id-alice')
             with patch.object(automation_api, 'automation_service', service):
                 response = asyncio.run(
-                    automation_api.retry_automation_run(original['id'])
+                    automation_api.retry_automation_run(
+                        original['id'], self.request_for('alice')
+                    )
                 )
 
             self.assertEqual(response.status_code, 409)
@@ -122,18 +137,25 @@ class AutomationApiTests(unittest.TestCase):
                             'artifact_path': '/tmp/update.img',
                             'devices': ['ABC123'],
                             'test_plan': {'test_type': 'CTS'},
-                        }
+                        },
+                        self.request_for('alice'),
                     )
                 )
                 run_id = created['data']['id']
                 listed = asyncio.run(
-                    automation_api.list_automation_runs(status='', limit=50)
+                    automation_api.list_automation_runs(
+                        self.request_for('alice'), status='', limit=50
+                    )
                 )
                 fetched = asyncio.run(
-                    automation_api.get_automation_run(run_id)
+                    automation_api.get_automation_run(
+                        run_id, self.request_for('alice')
+                    )
                 )
                 events = asyncio.run(
-                    automation_api.get_automation_run_events(run_id)
+                    automation_api.get_automation_run_events(
+                        run_id, self.request_for('alice')
+                    )
                 )
 
             self.assertTrue(created['success'])
@@ -141,6 +163,38 @@ class AutomationApiTests(unittest.TestCase):
             self.assertEqual(len(listed['data']['items']), 1)
             self.assertEqual(fetched['data']['id'], run_id)
             self.assertEqual(events['data']['items'][0]['stage'], 'queued')
+
+    def test_timeline_merges_automation_and_cluster_events_by_trace(self):
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            run = service.create_run({
+                'artifact_path': '/tmp/update.img',
+                'devices': ['ABC123'],
+                'test_plan': {'test_type': 'CTS'},
+            }, created_by='id-alice')
+            service.store.update_run(run['id'], cluster_job_id='job-1')
+            repository = SimpleNamespace(list_timeline=lambda **_kwargs: [{
+                'id': 10,
+                'created_at': '2099-01-01T00:00:01Z',
+                'event_type': 'job.transition',
+                'message': 'Worker recovered',
+                'trace_id': run['id'],
+            }])
+            with patch.object(automation_api, 'automation_service', service), patch.object(
+                automation_api, 'get_cluster_service',
+                return_value=SimpleNamespace(repository=repository),
+            ):
+                timeline = asyncio.run(
+                    automation_api.get_automation_run_timeline(
+                        run['id'], self.request_for('alice')
+                    )
+                )
+
+            self.assertEqual(timeline['data']['trace_id'], run['id'])
+            self.assertEqual(
+                [item['domain'] for item in timeline['data']['items']],
+                ['automation', 'cluster'],
+            )
 
     def test_worker_tick_advances_run(self):
         with TemporaryDirectory() as tmp:
@@ -153,7 +207,8 @@ class AutomationApiTests(unittest.TestCase):
                             'artifact_path': '/tmp/update.img',
                             'devices': ['ABC123'],
                             'test_plan': {'test_type': 'CTS'},
-                        }
+                        },
+                        self.request_for('alice'),
                     )
                 )
                 ticked = asyncio.run(automation_api.automation_worker_tick('stub'))
@@ -194,6 +249,21 @@ class AutomationApiTests(unittest.TestCase):
 
             self.assertEqual(denied.status_code, 404)
             self.assertEqual([item['id'] for item in visible['data']['items']], [created['data']['id']])
+
+    def test_admin_created_run_is_owned_by_admin_not_global(self):
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            with patch.object(automation_api, 'automation_service', service):
+                created = asyncio.run(automation_api.create_automation_run(
+                    {
+                        'artifact_path': '/tmp/update.img',
+                        'devices': ['ABC'],
+                        'test_plan': {'test_type': 'CTS'},
+                    },
+                    self.request_for('admin', role='admin'),
+                ))
+
+            self.assertEqual(created['data']['created_by'], 'id-admin')
 
     def test_live_preflight_resolves_worker_suite_and_devices(self):
         class Repository:
@@ -259,7 +329,7 @@ class AutomationApiTests(unittest.TestCase):
         response = asyncio.run(automation_api.automation_page())
         html = response.body.decode('utf-8')
         self.assertIn(
-            'Gerrit -> Jenkins -> 刷机 -> GMS 测试 -> 报告分析',
+            'Gerrit → 构建 → 刷机 → GMS 测试 → 报告',
             html,
         )
         self.assertIn('id="automation-create-run"', html)
@@ -295,16 +365,29 @@ class AutomationApiTests(unittest.TestCase):
         }
         with TemporaryDirectory() as tmp:
             service = build_service(tmp, profiles=profiles)
-            with patch.object(automation_api, 'automation_service', service):
+            with patch.object(automation_api, 'automation_service', service), patch.dict(
+                'os.environ', {
+                    'GMS_AUTOMATION_WEBHOOK_TOKEN': 'test-webhook-token',
+                    'GMS_AUTOMATION_OWNER_ID': 'service-automation',
+                }
+            ):
                 first = asyncio.run(
-                    automation_api.handle_gerrit_webhook(payload)
+                    automation_api.handle_gerrit_webhook(
+                        payload, automation_token='test-webhook-token'
+                    )
                 )
                 second = asyncio.run(
-                    automation_api.handle_gerrit_webhook(payload)
+                    automation_api.handle_gerrit_webhook(
+                        payload, automation_token='test-webhook-token'
+                    )
                 )
             self.assertEqual(len(first['data']['created']), 1)
             self.assertEqual(len(second['data']['created']), 0)
             self.assertEqual(len(second['data']['existing']), 1)
+            self.assertEqual(
+                first['data']['created'][0]['created_by'],
+                'service-automation',
+            )
 
     def test_gerrit_poll_creates_runs_from_query_results(self):
         profiles = [
@@ -333,7 +416,8 @@ class AutomationApiTests(unittest.TestCase):
             }
         ]
 
-        async def query(_query, _limit):
+        async def query(owner_id, _query, _limit):
+            self.assertEqual(owner_id, 'id-admin')
             return changes
 
         with TemporaryDirectory() as tmp:
@@ -343,7 +427,13 @@ class AutomationApiTests(unittest.TestCase):
                 gerrit_query=query,
             )
             with patch.object(automation_api, 'automation_service', service):
-                result = asyncio.run(automation_api.poll_gerrit_changes())
+                result = asyncio.run(
+                    automation_api.poll_gerrit_changes(
+                        admin=self.request_for(
+                            'admin', role='admin'
+                        ).state.current_user
+                    )
+                )
             self.assertEqual(result['data']['created_count'], 1)
             self.assertEqual(result['data']['rejected_count'], 0)
             self.assertEqual(
@@ -359,7 +449,7 @@ class AutomationApiTests(unittest.TestCase):
             'test_plan': {'test_type': 'CTS'},
         }]
 
-        async def query(_query, _limit):
+        async def query(_owner_id, _query, _limit):
             return [{
                 'project': 'android',
                 'branch': 'main',
@@ -370,7 +460,9 @@ class AutomationApiTests(unittest.TestCase):
 
         with TemporaryDirectory() as tmp:
             service = build_service(tmp, profiles=profiles, gerrit_query=query)
-            result = asyncio.run(service.poll_gerrit_changes())
+            result = asyncio.run(
+                service.poll_gerrit_changes(created_by='service-automation')
+            )
 
         self.assertEqual(result['created_count'], 0)
         self.assertEqual(result['rejected_count'], 1)

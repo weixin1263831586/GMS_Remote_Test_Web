@@ -37,9 +37,7 @@ def _coerce_optional_int(value: Any) -> int | None:
         return None
 
 
-# ------------------------------------------------------------------
 # Batch import + case facts
-# ------------------------------------------------------------------
 
 @router.post("/issues/batch-import")
 async def batch_import_issues(request: Request):
@@ -88,9 +86,7 @@ async def get_case_fact(issue_id: int, request: Request):
     return {"success": True, "data": fact}
 
 
-# ------------------------------------------------------------------
 # Similarity search
-# ------------------------------------------------------------------
 
 @router.post("/search/similar")
 async def search_similar(request: Request, limit: int = Query(10, ge=1, le=50)):
@@ -114,10 +110,7 @@ async def issue_workbench(issue_id: int, request: Request, similar_limit: int = 
     try:
         return {"success": True, "data": _knowledge(request).issue_workbench(issue_id, similar_limit=similar_limit)}
     except Exception as exc:
-        # Surface the failure as a real error (non-2xx + success:false) so the
-        # frontend's catch branch shows "知识面板加载失败". The previous body
-        # returned 200/success:true with a degraded payload, which made a crash
-        # indistinguishable from genuinely-empty data.
+        # 返回非 2xx 状态，便于前端区分失败和空数据。
         return JSONResponse(
             status_code=502,
             content={
@@ -128,9 +121,7 @@ async def issue_workbench(issue_id: int, request: Request, similar_limit: int = 
         )
 
 
-# ------------------------------------------------------------------
 # Mature cases
-# ------------------------------------------------------------------
 
 @router.post("/mature-cases/build")
 async def build_mature_case(request: Request):
@@ -169,9 +160,7 @@ async def approve_mature_case(case_id: int, request: Request):
     return {"success": True}
 
 
-# ------------------------------------------------------------------
 # Reply drafting
-# ------------------------------------------------------------------
 
 @router.post("/issues/{issue_id}/draft-reply")
 async def draft_reply(issue_id: int, request: Request):
@@ -198,9 +187,7 @@ async def agent_reply(issue_id: int, request: Request):
     return {"success": True, "data": data}
 
 
-# ------------------------------------------------------------------
 # Reference outputs + evaluation (off the production path)
-# ------------------------------------------------------------------
 
 @router.post("/issues/{issue_id}/reference-output")
 async def import_reference_output(issue_id: int, request: Request):
@@ -226,9 +213,7 @@ async def latest_evaluation(issue_id: int, request: Request):
     return {"success": True, "data": evaluation}
 
 
-# ------------------------------------------------------------------
 # Internal issue creation (confirmed, configurable)
-# ------------------------------------------------------------------
 
 @router.post("/issues/{issue_id}/create-internal")
 async def create_internal_from_issue(issue_id: int, request: Request):
@@ -248,9 +233,7 @@ async def create_internal_from_case(case_id: int, request: Request):
     return await _knowledge(request).create_internal_from_case(case_id, payload, confirmed=confirmed)
 
 
-# ------------------------------------------------------------------
 # Helpers
-# ------------------------------------------------------------------
 
 def _coerce_issue_ids(raw: Any) -> list[int]:
     if not raw:

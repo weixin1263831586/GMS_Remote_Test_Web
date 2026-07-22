@@ -1,11 +1,15 @@
 import asyncio
 import json
+import tempfile
 import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from starlette.requests import Request
+
+from features.auth import CurrentUser
 from features.devices.models import DeviceActionRequest, USBIPStartRequest
 from features.devices.runtime import configure_runtime
 from features.devices.usbip import (
@@ -27,12 +31,21 @@ global_state = SimpleNamespace(
     user_states={},
     user_states_lock=threading.RLock(),
 )
-
+def _authenticated_request() -> Request:
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "headers": [],
+        "client": ("127.0.0.1", 1234),
+    })
+    request.state.current_user = CurrentUser(
+        id="id-alice", username="alice", role="user"
+    )
+    return request
 class EmptyConfigManager:
     def get_runtime_config(self):
         return {}
-
-
 configure_runtime(
     selected_config_manager=EmptyConfigManager(),
     selected_global_state=global_state,
@@ -43,13 +56,14 @@ configure_runtime(
     selected_probe_windows_usbipd=None,
     selected_resolve_tailscale_device_host=None,
 )
-
-
 class UsbipCredentialTests(unittest.TestCase):
     def setUp(self):
         import features.devices.reconnect as reconnect
-
+        from features.users import runtime as user_runtime
         reconnect.stop_usbip_reconnect_tasks(timeout=1)
+        self.user_data = tempfile.TemporaryDirectory()
+        self.addCleanup(self.user_data.cleanup)
+        user_runtime.configure_runtime(data_root=Path(self.user_data.name))
         configure_runtime(
             selected_config_manager=EmptyConfigManager(),
             selected_global_state=global_state,
@@ -60,12 +74,9 @@ class UsbipCredentialTests(unittest.TestCase):
             selected_probe_windows_usbipd=None,
             selected_resolve_tailscale_device_host=None,
         )
-
     def tearDown(self):
         import features.devices.reconnect as reconnect
-
         reconnect.stop_usbip_reconnect_tasks(timeout=1)
-
     def test_usbipd_persisted_guid_is_not_treated_as_busid(self):
         output = """
 Connected:
@@ -75,9 +86,7 @@ Persisted:
 GUID                                  DEVICE
 85aba5e0-8dbc-4d80-9d24-23778558f81e  Android ADB Interface
 """
-
         self.assertEqual(parse_usbipd_android_busids(output), [])
-
     def test_usbipd_connected_android_adb_shared_busid_is_detected(self):
         output = """
 Connected:
@@ -89,7 +98,6 @@ Persisted:
 GUID                                  DEVICE
 466f3f47-c2c9-4ea1-bb28-333847ee3c00  Android ADB Interface
 """
-
         self.assertEqual(parse_usbipd_android_busids(output), ["1-1"])
 
     def test_usbipd_legacy_table_without_connected_header_is_detected(self):
@@ -98,7 +106,6 @@ BUSID  VID:PID    DEVICE                                                        
 1-1    2207:0006  Android ADB Interface                                         Shared
 1-13   0403:6001  USB Serial Converter                                          Not shared
 """
-
         self.assertEqual(parse_usbipd_android_busids(output), ["1-1"])
 
     def test_protocol_state_parsers_include_recovery_and_fastboot(self):
@@ -110,7 +117,6 @@ OFF001	offline
 UNAUTH001	unauthorized
 """
         fastboot_output = "FB001\tfastboot\n"
-
         self.assertEqual(parse_adb_device_states(adb_output), {
             "ADB001": "device",
             "REC001": "recovery",
@@ -131,10 +137,8 @@ UNAUTH001	unauthorized
                     "1-1    2207:0006  Android ADB Interface                                         Shared\n",
                     0,
                 )
-
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-
         self.assertEqual(manager._find_android_devices(object(), {}), ["1-1"])
 
     def test_attach_devices_reports_only_successful_attach_commands(self):
@@ -145,12 +149,9 @@ UNAUTH001	unauthorized
                 if cmd.startswith("sudo usbip attach"):
                     return ("", "failed to attach", 1)
                 return ("", "", 0)
-
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-
         attached, devices = manager._attach_devices(object(), "172.16.14.66", ["85aba5e0-8dbc"])
-
         self.assertEqual(attached, [])
         self.assertEqual(devices, [])
 
@@ -162,12 +163,9 @@ UNAUTH001	unauthorized
                 if cmd.startswith("sudo usbip attach"):
                     return ("", "device already attached", 1)
                 return ("", "", 0)
-
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-
         attached, devices = manager._attach_devices(object(), "172.16.14.64", ["1-1"])
-
         self.assertEqual(attached, ["1-1"])
         self.assertEqual(devices, ["USBIP001"])
 
@@ -185,13 +183,10 @@ UNAUTH001	unauthorized
                 if cmd.startswith("sudo usbip attach"):
                     return ("attached", "", 0)
                 return ("", "", 0)
-
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-
         with patch("features.devices.usbip.time.sleep", return_value=None):
             attached, devices = manager._attach_devices(object(), "172.16.14.66", ["1-1"])
-
         self.assertEqual(attached, ["1-1"])
         self.assertEqual(devices, ["USBIP001"])
         self.assertGreaterEqual(manager.ssh_manager.adb_calls, 4)
@@ -212,13 +207,10 @@ UNAUTH001	unauthorized
                 if cmd.startswith("sudo usbip attach"):
                     return ("attached", "", 0)
                 return ("", "", 0)
-
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-
         with patch("features.devices.usbip.time.sleep", return_value=None):
             attached, devices = manager._attach_devices(object(), "172.16.14.66", ["1-1"])
-
         self.assertEqual(attached, ["1-1"])
         self.assertEqual(devices, [])
         self.assertEqual(manager.ssh_manager.fastboot_calls, 2)
@@ -237,13 +229,10 @@ UNAUTH001	unauthorized
                 if cmd.startswith("sudo usbip attach"):
                     return ("attached", "", 0)
                 return ("", "", 0)
-
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-
         with patch("features.devices.usbip.time.sleep", return_value=None):
             attached, devices = manager._attach_devices(object(), "172.16.14.66", ["1-1"])
-
         self.assertEqual(attached, ["1-1"])
         self.assertEqual(devices, [])
         self.assertEqual(manager.ssh_manager.adb_calls, 2)
@@ -263,28 +252,29 @@ UNAUTH001	unauthorized
             },
             ["USBIP001"],
         )
-
         self.assertEqual(scoped["adb"], {"USBIP001": "device"})
         self.assertEqual(scoped["adb_ready"], ["USBIP001"])
 
-    def test_device_host_password_matches_full_host_before_username_fallback(self):
+    def test_device_host_password_requires_exact_encrypted_host_record(self):
         config = {
             "client_ssh_credentials": [
-                {"device_host": "hcq@172.16.14.66", "username": "hcq", "host": "172.16.14.66", "password": "pw66"},
-                {"device_host": "hcq@172.16.14.67", "username": "hcq", "host": "172.16.14.67", "password": "pw67"},
+                {"device_host": "hcq@172.16.14.66", "username": "hcq", "host": "172.16.14.66", "encrypted_password": "enc66"},
+                {"device_host": "hcq@172.16.14.67", "username": "hcq", "host": "172.16.14.67", "encrypted_password": "enc67"},
                 {"username": "legacy", "password": "legacy-pw"},
             ]
         }
-
-        self.assertEqual(find_device_host_password("hcq@172.16.14.66", config), "pw66")
-        self.assertEqual(find_device_host_password("hcq@172.16.14.67", config), "pw67")
-        self.assertEqual(find_device_host_password("legacy@10.0.0.8", config), "legacy-pw")
+        with patch(
+            "features.devices.ssh_credentials.decrypt_secret",
+            side_effect=lambda value: {"enc66": "pw66", "enc67": "pw67"}[value],
+        ):
+            self.assertEqual(find_device_host_password("hcq@172.16.14.66", config), "pw66")
+            self.assertEqual(find_device_host_password("hcq@172.16.14.67", config), "pw67")
+        self.assertIsNone(find_device_host_password("legacy@10.0.0.8", config))
 
     def test_usbip_connect_persists_submitted_password_after_success(self):
         import features.devices.integrations_api as integrations
 
         saved = {}
-
         class FakeConfigManager:
             def load_config(self):
                 return {"device_pswd": "", "client_ssh_credentials": []}
@@ -305,15 +295,12 @@ UNAUTH001	unauthorized
             def start_usbip(self, device_host, device_password, usbip_attach_host=None):
                 saved["start_args"] = (device_host, device_password, usbip_attach_host)
                 return {"success": True, "message": "ok", "device_list": ["USBIP001"]}
-
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         req = USBIPStartRequest(device_host="hcq@172.16.14.66", device_password="secret")
-
         with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
                 patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
                 patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
             response = asyncio.run(integrations.start_usbip(req=req, request=request, help=False))
-
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.body.decode("utf-8"))
         self.assertTrue(body["success"])
@@ -699,6 +686,9 @@ UNAUTH001	unauthorized
                 patch.object(integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)), \
                 patch.object(integrations, "DeviceSSHConnection", FakeDeviceSSHConnection), \
                 patch.object(integrations, "notify_device_change", AsyncMock()), \
+                patch.object(integrations, "acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "worker-local:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
+                patch.object(integrations, "release_device_operation_claim"), \
+                patch.object(integrations, "audit_device_operation"), \
                 patch("features.devices.reconnect.stop_usbip_reconnect_for_host") as stop_reconnect, \
                 patch.object(integrations, "detach_ubuntu_usbip_ports", return_value=["00"] ) as detach:
             response = asyncio.run(integrations.stop_usbip(request=request, req=None))
@@ -765,6 +755,9 @@ UNAUTH001	unauthorized
                 patch.object(integrations, "get_client_display_id_from_request", return_value="hcq@172.16.14.66"), \
                 patch.object(integrations, "DeviceSSHConnection", FakeDeviceSSHConnection), \
                 patch.object(integrations, "notify_device_change", AsyncMock()), \
+                patch.object(integrations, "acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "worker-local:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
+                patch.object(integrations, "release_device_operation_claim"), \
+                patch.object(integrations, "audit_device_operation"), \
                 patch("features.devices.reconnect.stop_usbip_reconnect_for_host"), \
                 patch.object(integrations, "detach_ubuntu_usbip_ports", return_value=["00"]) as detach:
             response = asyncio.run(integrations.stop_usbip(request=request, req=None))
@@ -823,7 +816,7 @@ UNAUTH001	unauthorized
             with global_state.device_cache_lock:
                 global_state.device_cache = {"devices": [], "timestamp": 0}
 
-            request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+            request = _authenticated_request()
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001"]), \
                     patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
                     patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
@@ -847,7 +840,7 @@ UNAUTH001	unauthorized
             with global_state.device_cache_lock:
                 global_state.device_cache = {"devices": [], "timestamp": 0}
             reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
-            request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+            request = _authenticated_request()
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001", "USBIP001"]), \
                     patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
                     patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
@@ -872,7 +865,7 @@ UNAUTH001	unauthorized
             with global_state.device_cache_lock:
                 global_state.device_cache = {"devices": [], "timestamp": 0}
 
-            request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+            request = _authenticated_request()
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001", "USBIP001"]), \
                     patch.object(devices_router.runtime.config_manager, "get_runtime_config", return_value={
                         "usbip_devices_source": {
@@ -916,7 +909,10 @@ UNAUTH001	unauthorized
                 }
             })), patch.object(operations.device_manager, "reboot_device", side_effect=fake_reboot_device), \
                     patch.object(operations.reconnect, "schedule_usbip_reconnect", return_value=True):
-                response = asyncio.run(operations.reboot_devices(DeviceActionRequest(devices=["USBIP001"])))
+                response = asyncio.run(operations.reboot_devices(
+                    DeviceActionRequest(devices=["USBIP001"]),
+                    _authenticated_request(),
+                ))
 
             body = json.loads(response.body.decode("utf-8"))
             self.assertTrue(body["success"])
@@ -947,7 +943,10 @@ UNAUTH001	unauthorized
 
             with patch.object(operations.device_manager, "reboot_device", side_effect=fake_reboot_device), \
                     patch.object(operations.reconnect, "schedule_usbip_reconnect", side_effect=lambda host, reason="", expected_devices=(): scheduled.append((host, reason, tuple(expected_devices))) or True):
-                response = asyncio.run(operations.reboot_devices(DeviceActionRequest(devices=["USBIP001"])))
+                response = asyncio.run(operations.reboot_devices(
+                    DeviceActionRequest(devices=["USBIP001"]),
+                    _authenticated_request(),
+                ))
 
             body = json.loads(response.body.decode("utf-8"))
             self.assertTrue(body["success"])

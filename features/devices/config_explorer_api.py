@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from features.users import get_client_id_from_request
@@ -30,6 +30,7 @@ from .config_explorer import (
     list_props,
     pull_device_file,
 )
+from .locks import device_lock_manager
 
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,26 @@ def _decompile_dependencies_ready() -> bool:
     )
 
 
+def _readable_device(request: Request, device_id: str) -> str:
+    selected = str(device_id or "").strip()
+    if not selected:
+        online = [
+            str(item.get("serial") or "")
+            for item in list_devices()
+            if item.get("state") == "device" and item.get("serial")
+        ]
+        if len(online) != 1:
+            raise HTTPException(
+                400, "device_id is required when zero or multiple devices are online"
+            )
+        selected = online[0]
+    claim = device_lock_manager.get_lock_status(selected)
+    client_id = get_client_id_from_request(request)
+    if claim and claim.get("client_id") != client_id:
+        raise HTTPException(409, "device is reserved by another active operation")
+    return selected
+
+
 @router.get("/api/config-explorer/devices")
 @handle_api_errors
 async def api_list_devices(request: Request, help: bool = Query(False)):
@@ -104,7 +125,7 @@ async def api_list_packages(
     resp = _help_or_continue(help, "GET", "/api/config-explorer/packages")
     if resp:
         return resp
-    packages = list_packages(device_id or None)
+    packages = list_packages(_readable_device(request, device_id))
     return success_response(data={"packages": packages}, message="Success")
 
 
@@ -119,7 +140,7 @@ async def api_list_all_packages(
     resp = _help_or_continue(help, "GET", "/api/config-explorer/packages/all")
     if resp:
         return resp
-    packages = list_all_packages(device_id or None)
+    packages = list_all_packages(_readable_device(request, device_id))
     return success_response(
         data={"packages": packages, "count": len(packages)}, message="Success"
     )
@@ -138,7 +159,7 @@ async def api_list_packages_with_path(
     )
     if resp:
         return resp
-    rows = list_packages_with_path(device_id or None)
+    rows = list_packages_with_path(_readable_device(request, device_id))
     return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
 
 
@@ -153,7 +174,7 @@ async def api_list_features(
     resp = _help_or_continue(help, "GET", "/api/config-explorer/features")
     if resp:
         return resp
-    rows = list_features(device_id or None)
+    rows = list_features(_readable_device(request, device_id))
     return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
 
 
@@ -168,7 +189,7 @@ async def api_list_props(
     resp = _help_or_continue(help, "GET", "/api/config-explorer/props")
     if resp:
         return resp
-    rows = list_props(device_id or None)
+    rows = list_props(_readable_device(request, device_id))
     return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
 
 
@@ -197,7 +218,7 @@ async def api_explore(
     try:
         result = explore(
             package=package or "android",
-            device_id=device_id or None,
+            device_id=_readable_device(request, device_id),
             name_filter=name or None,
             type_filter=type or None,
             config_only=config_only,
@@ -243,7 +264,7 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
         return error_response("缺少 APK 路径", status_code=400)
     on_device_path = req.path.strip()
 
-    # Derive a friendly filename from the package base name or the path tail.
+    # 从包名或路径末段生成下载文件名。
     base = os.path.basename(on_device_path.rstrip("/")) or "app.apk"
     if "." not in base:
         base += ".apk"
@@ -260,7 +281,10 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
     try:
         # Pull on a worker thread (blocking adb transfer).
         await asyncio.to_thread(
-            pull_device_file, req.device_id or None, on_device_path, apk_path
+            pull_device_file,
+            _readable_device(request, req.device_id),
+            on_device_path,
+            apk_path,
         )
     except Exception as e:
         _cleanup_files([apk_path])

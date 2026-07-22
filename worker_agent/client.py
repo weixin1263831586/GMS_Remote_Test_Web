@@ -16,19 +16,24 @@ from .config import WorkerConfig
 class ControllerClient:
     def __init__(self, config: WorkerConfig):
         self.config = config
-        # Every request is pinned to the configured Controller URL. Prefer its
-        # explicit CA; deployments without a CA commonly use an internal
-        # self-signed certificate and must still be able to register.
-        self.ssl_context = (ssl.create_default_context(cafile=config.controller_ca)
-                            if config.controller_ca else ssl._create_unverified_context())
+        self.session_id = ""
+        self.connection_generation = 0
+        # 始终验证证书和主机名；内网部署可固定 Controller CA。
+        self.ssl_context = ssl.create_default_context(
+            cafile=config.controller_ca or None
+        )
 
     def request(self, method: str, path: str, payload: dict[str, Any] | None = None,
                 timeout: int = 35) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
+        headers = {"Authorization": f"Bearer {self.config.token}",
+                   "Content-Type": "application/json"}
+        if self.session_id:
+            headers["X-GMS-Worker-Session"] = self.session_id
+            headers["X-GMS-Worker-Generation"] = str(self.connection_generation)
         request = urllib.request.Request(
             f"{self.config.controller_url}{path}", data=body, method=method,
-            headers={"Authorization": f"Bearer {self.config.token}",
-                     "Content-Type": "application/json"},
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout, context=self.ssl_context) as response:
@@ -38,11 +43,19 @@ class ControllerClient:
             raise RuntimeError(f"controller HTTP {exc.code}: {detail}") from exc
 
     def register(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.request("POST", "/api/cluster/workers/register", payload)
+        result = self.request("POST", "/api/cluster/workers/register", payload)
+        self.session_id = str(result.get("session_id") or payload.get("session_id") or "")
+        self.connection_generation = int(result.get("connection_generation") or 0)
+        return result
 
     def download(self, path: str, destination: Path) -> None:
-        request = urllib.request.Request(f"{self.config.controller_url}{path}",
-            headers={"Authorization": f"Bearer {self.config.token}"})
+        headers = {"Authorization": f"Bearer {self.config.token}"}
+        if self.session_id:
+            headers["X-GMS-Worker-Session"] = self.session_id
+            headers["X-GMS-Worker-Generation"] = str(self.connection_generation)
+        request = urllib.request.Request(
+            f"{self.config.controller_url}{path}", headers=headers
+        )
         with urllib.request.urlopen(request, timeout=3600, context=self.ssl_context) as response, destination.open("wb") as output:
             while block := response.read(4 * 1024 * 1024):
                 output.write(block)
@@ -63,7 +76,7 @@ class ControllerClient:
     def events(self, job_id: str, attempt_id: str, events: list[dict[str, Any]]):
         path = f"/api/cluster/jobs/{quote(job_id)}/events"
         body = {"attempt_id": attempt_id, "events": events}
-        # The events endpoint additionally binds the authenticated token to an id.
+        # 事件接口还会校验令牌绑定的 Worker ID。
         return self._request_with_worker_header("POST", path, json.dumps(body, separators=(",", ":")).encode(),
                                                 "application/json")
 
@@ -133,8 +146,7 @@ class ControllerClient:
                 self._request_with_worker_header("PUT", endpoint, block, "application/octet-stream")
                 count += 1
         if count == 0:
-            # The transport requires non-empty chunks; represent an empty file
-            # with one byte is incorrect, so reject it explicitly.
+            # 传输协议不接受空分块，因此明确拒绝空文件。
             raise ValueError("cannot upload an empty transfer")
         payload = json.dumps({"filename": filename or path.name, "size_bytes": size,
                               "sha256": digest.hexdigest(), "chunk_count": count},
@@ -154,6 +166,9 @@ class ControllerClient:
         headers = {"Authorization": f"Bearer {self.config.token}",
                    "X-GMS-Worker-ID": self.config.worker_id,
                    "Content-Type": content_type}
+        if self.session_id:
+            headers["X-GMS-Worker-Session"] = self.session_id
+            headers["X-GMS-Worker-Generation"] = str(self.connection_generation)
         headers.update(extra_headers or {})
         request = urllib.request.Request(
             f"{self.config.controller_url}{path}", data=body, method=method,

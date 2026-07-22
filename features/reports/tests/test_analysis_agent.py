@@ -167,7 +167,7 @@ class ReportAnalysisAgentTests(unittest.TestCase):
         self.assertGreaterEqual(result["device_log_errors"]["total_errors"], 2)
         self.assertEqual(len(result["failures_html"]["failures"]), 1)
 
-    def test_legacy_report_analyzer_uses_agent_for_nested_archives(self):
+    def test_report_analyzer_uses_agent_for_nested_archives(self):
         from features.reports import ReportAnalyzer
 
         with TemporaryDirectory() as tmp:

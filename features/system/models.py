@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 
 class VNCStartRequest(BaseModel):
+    worker_id: str | None = None
+    # 请求可携带该字段，但服务端不信任其内容。
     host: str | None = None
     password: str | None = None
     vnc_password: str | None = None

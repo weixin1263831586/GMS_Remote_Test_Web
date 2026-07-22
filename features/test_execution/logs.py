@@ -47,29 +47,110 @@ class TestLogsManager:
     def _allowed_log_roots(self) -> list[Path]:
         return [path.resolve() for path in self.log_dirs if path.exists()]
 
-    def _resolve_allowed_log_path(self, file_path: str) -> Path:
+    def _owner_log_dir(self, owner_id: str) -> Path:
+        return self.saved_logs_dir / self._safe_log_token(owner_id)
+
+    def log_id_for_path(self, file_path: str | Path) -> str:
+        """Return a storage-relative opaque identifier, never a server path."""
+
+        resolved = Path(file_path).resolve()
+        root = self.saved_logs_dir.resolve()
+        if not resolved.is_relative_to(root) or resolved.suffix != '.log':
+            raise ValueError('日志文件不属于受管日志存储')
+        return resolved.relative_to(root).as_posix()
+
+    def _resolve_log_id(
+        self,
+        log_id: str,
+        *,
+        owner_id: str,
+        is_admin: bool,
+    ) -> Path:
+        token = str(log_id or '').strip().replace('\\', '/')
+        if not token or token.startswith('/') or '..' in Path(token).parts:
+            raise ValueError('无效的日志标识')
+        candidate = (self.saved_logs_dir / token).resolve()
+        root = self.saved_logs_dir.resolve()
+        if not candidate.is_relative_to(root) or candidate.suffix != '.log':
+            raise ValueError('无效的日志标识')
+        if not is_admin and not candidate.is_relative_to(
+            self._owner_log_dir(owner_id).resolve()
+        ):
+            raise ValueError('日志文件不属于当前用户')
+        return candidate
+
+    def _resolve_allowed_log_path(
+        self,
+        file_path: str,
+        *,
+        owner_id: str | None = None,
+        is_admin: bool = False,
+    ) -> Path:
         candidate = Path(file_path).expanduser().resolve()
         if candidate.suffix != '.log':
             raise ValueError('仅允许访问 .log 文件')
-        for root in self._allowed_log_roots():
-            if candidate == root or root in candidate.parents:
-                return candidate
-        raise ValueError(f'日志路径不在允许目录内: {file_path}')
+        if not any(candidate == root or root in candidate.parents for root in self._allowed_log_roots()):
+            raise ValueError(f'日志路径不在允许目录内: {file_path}')
 
-    def list_log_files(self) -> dict[str, Any]:
+        if owner_id and not is_admin:
+            owner_root = self._owner_log_dir(owner_id).resolve()
+            if owner_root not in candidate.parents:
+                raise ValueError('日志文件不属于当前用户')
+        return candidate
+
+    def resolve_log_path(
+        self,
+        file_path: str,
+        *,
+        owner_id: str,
+        is_admin: bool = False,
+    ) -> Path:
+        """Resolve a log path after applying the caller's ownership boundary."""
+        return self._resolve_allowed_log_path(
+            file_path,
+            owner_id=owner_id,
+            is_admin=is_admin,
+        )
+
+    def list_log_files(
+        self,
+        *,
+        owner_id: str | None = None,
+        is_admin: bool = False,
+    ) -> dict[str, Any]:
         """列出所有日志文件"""
         log_files = []
+        seen_paths: set[Path] = set()
 
-        for base_dir in self.log_dirs:
+        # Browser-visible logs are always records from managed per-owner
+        # storage. Administrators may enumerate every owner below that root,
+        # but never arbitrary .log files from host-wide allowlisted folders.
+        base_dirs = (
+            [self.saved_logs_dir]
+            if is_admin
+            else [self._owner_log_dir(owner_id or '')]
+        )
+        for base_dir in base_dirs:
             base_path = Path(base_dir)
             if not base_path.exists():
                 continue
 
             for log_file in base_path.rglob('*.log'):
-                stat = log_file.stat()
+                try:
+                    resolved = self._resolve_allowed_log_path(
+                        str(log_file),
+                        owner_id=owner_id,
+                        is_admin=is_admin,
+                    )
+                    if resolved in seen_paths or not resolved.is_file():
+                        continue
+                    seen_paths.add(resolved)
+                    stat = resolved.stat()
+                except (OSError, ValueError):
+                    continue
                 log_files.append({
-                    'name': log_file.name,
-                    'path': str(log_file),
+                    'id': self.log_id_for_path(resolved),
+                    'name': resolved.name,
                     'size': stat.st_size,
                     'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
                     'base_dir': str(base_path)
@@ -83,10 +164,21 @@ class TestLogsManager:
             'files': log_files[:100]
         }
 
-    def get_log_file(self, file_path: str, max_lines: int = 1000) -> dict[str, Any]:
+    def get_log_file(
+        self,
+        file_path: str,
+        max_lines: int = 1000,
+        *,
+        owner_id: str | None = None,
+        is_admin: bool = False,
+    ) -> dict[str, Any]:
         """读取日志文件内容"""
         try:
-            log_path = self._resolve_allowed_log_path(file_path)
+            log_path = self._resolve_allowed_log_path(
+                file_path,
+                owner_id=owner_id,
+                is_admin=is_admin,
+            )
         except ValueError as e:
             return {
                 'success': False,
@@ -129,7 +221,7 @@ class TestLogsManager:
     ) -> dict[str, Any]:
         """保存当前日志"""
         try:
-            save_dir = self.saved_logs_dir
+            save_dir = self._owner_log_dir(client_id)
             save_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -152,11 +244,14 @@ class TestLogsManager:
 
     def download_logs(
         self,
-        file_paths: list[str],
-        output_path: str | None = None
+        log_ids: list[str],
+        output_path: str | None = None,
+        *,
+        owner_id: str | None = None,
+        is_admin: bool = False,
     ) -> dict[str, Any]:
         """打包下载日志文件"""
-        if not file_paths:
+        if not log_ids:
             return {
                 'success': False,
                 'error': '未选择任何文件'
@@ -165,20 +260,30 @@ class TestLogsManager:
         try:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             if output_path is None:
-                zip_dir = self.downloads_dir
+                zip_dir = (
+                    self.downloads_dir / self._safe_log_token(owner_id)
+                    if owner_id
+                    else self.downloads_dir
+                )
                 zip_dir.mkdir(parents=True, exist_ok=True)
                 output_path = str(zip_dir / f'logs_{timestamp}.zip')
 
+            archived = 0
             with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for file_path_str in file_paths:
-                    file_path = self._resolve_allowed_log_path(file_path_str)
+                for log_id in log_ids:
+                    file_path = self._resolve_log_id(
+                        log_id,
+                        owner_id=owner_id,
+                        is_admin=is_admin,
+                    )
                     if file_path.exists() and file_path.is_file():
                         zipf.write(file_path, file_path.name)
+                        archived += 1
 
             return {
                 'success': True,
                 'zip_path': output_path,
-                'file_count': len(file_paths)
+                'file_count': archived
             }
         except Exception as e:
             return {

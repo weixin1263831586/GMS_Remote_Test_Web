@@ -28,13 +28,11 @@ from features.test_execution import (
 from foundation.responses import error_response, success_response
 from foundation.time import parse_datetime
 
+from .weekly_config import android17_sheet_url
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-from .weekly_config import android17_sheet_url
-
 
 def _last_week_range(today: date | None = None) -> tuple[date, date]:
     """返回上一个完整自然周的 (周一, 周日)。"""
@@ -122,9 +120,7 @@ async def _gather_weekly_sources(
     return sources
 
 
-# ---------------------------------------------------------------------------
 # Android17 腾讯文档解析
-# ---------------------------------------------------------------------------
 
 def _parse_tencent_docs_ssr(html: str) -> list[dict[str, Any]]:
     """解析腾讯文档 SSR 画布的 record JSON，按列坐标重建成表格行。
@@ -288,9 +284,7 @@ async def _collect_android17(start: date, end: date, owner: str = "黄超群") -
     }
 
 
-# ---------------------------------------------------------------------------
 # GMS_Test 进展聚合（复用 tradefed list results，不再扫描本地 results 目录）
-# ---------------------------------------------------------------------------
 
 
 def _parse_result_timestamp(basename: str) -> datetime | None:
@@ -310,9 +304,7 @@ def _parse_result_timestamp(basename: str) -> datetime | None:
 # 模块（测试套件）识别：把 suite_plan / suite_name 归一成周报展示用的模块名。
 # GMS 完整模块清单（用于 AI 周报提示识别「未测试模块」）。
 # 各模块 plan 形态：
-#   CTS / CTS-ON-GSI(烧Google签名system.img) / CTS-Verifier(手动测试,plan=cts-verifier)
-#   GTS / GTS-ROOT(烧vendor_boot-debug.img,plan=gts-root) / GTS-Interactive(plan=gts-interactive,Android13+新增)
-#   STS(plan=sts-dynamic-full,userdebug固件) / VTS(烧签名system.img+vendor_boot-debug.img)
+# 覆盖 CTS、GTS、STS、VTS 及其交互、Root 和 GSI 变体。
 # 注：GTS-Verifier 仅 Android 13 需要，Android 17 不再纳入。GTS-ROOT/CTS-ON-GSI 是
 # GTS/CTS 的子套件，单独成列。未命中映射时回退为 suite_name 大写。
 _ALL_GMS_MODULES = ["CTS", "CTS-ON-GSI", "GTS", "GTS-ROOT", "GTS-Interactive", "STS", "VTS"]
@@ -344,7 +336,7 @@ def _gms_module(suite_plan: str | None, suite_name: str | None) -> str:
 
 
 # 芯片平台识别：从 device_serial / build_fingerprint 提取 RKxxxx 主型号。
-# tradefed list results 的 device_serial 形如 "RK3576GMS2, RK357603"，同一正则即可命中。
+# device_serial 可包含逗号分隔的多个序列号。
 # 只取前 4 位数字（RK3572/RK3576/RK3562/RK3326 等主型号），忽略 GMS1-5、03、05 等板级后缀。
 _PLATFORM_RE = re.compile(r"(RK\d{4})", re.IGNORECASE)
 
@@ -515,9 +507,7 @@ async def _collect_redmine(request: Request, start: date, end: date, name: str =
 
     lists = data.get("lists") or {}
     owner_names = (data.get("meta") or {}).get("owner_names") or ([name] if name else [])
-    # 本周已解决工单明细：用于周报「已解决/待解决」分类展示。
-    # 从本地 DB 按 owner + closed_on 区间直接查（与 _collect_representative_issues 同逻辑，
-    # 但只取摘要字段，避免把整行喂给前端）。
+    # 按所有者和关闭时间查询周报所需摘要。
     resolved_list = _resolved_issues_summary(request, owner_names, start, end, limit=30)
 
     return {
@@ -623,10 +613,7 @@ async def get_weekly_report(
         return resolved  # error_response
     start_date, end_date, is_default = resolved
 
-    # 四路采集互不依赖，asyncio.gather 并发（耗时 ≈ 最慢一路，而非四者之和）。
-    # gms_test 现在走 tradefed list results（paramiko socket IO，每次阻塞系统调用
-    # 释放 GIL），不再是旧的 etree.parse 1.5GB CPU 密集任务，故可与 redmine/gerrit
-    # 安全同池并发，不会像旧版那样把 redmine 从 0.02s 拖到 96s。
+    # 四路数据互不依赖，可在线程池中并发采集。
     want_rm = _bool_param(include_redmine)
     want_gr = _bool_param(include_gerrit)
     want_a17 = _bool_param(include_android17)
@@ -665,16 +652,14 @@ async def get_weekly_report(
     return success_response(data=data, message="周报已生成")
 
 
-# ---------------------------------------------------------------------------
 # Top 主题提取：从工单/提交标题中抽取关键标签 (芯片型号 / Android 版本 /
 # 测试套件 / 业务关键词)，按出现频次排序，作为周报精炼版的主题清单。
-# ---------------------------------------------------------------------------
 
 # 芯片型号：RKxxxx / PXxx / rv1126 等
 _CHIP_RE = re.compile(r"\b(RK\s?\d{4,}|PX\d{2,}|RV\s?\d{4}|rv1126)", re.IGNORECASE)
 # Android 版本：Android16 / 安卓 16 / A14 等
 _ANDROID_RE = re.compile(r"(Android\s*\d{1,2}|安卓\s*\d{1,2}|A(?:ndroid)?\s?\d{1,2})", re.IGNORECASE)
-# 测试套件模块：CtsXxx / GtsXxx / VtsXxx / STS / BTS / Mainline / VBA / EDLA / GMS Express
+# 支持 CTS、GTS、VTS、STS、BTS、Mainline、VBA、EDLA 和 GMS Express。
 _SUITE_RE = re.compile(
     r"\b((?:Cts|Gts|Vts|Sts|Bts)[A-Za-z0-9_]*|Mainline|VBA|EDLA|GMS\s?Express|APEX|VBMeta)",
     re.IGNORECASE,
@@ -852,10 +837,8 @@ async def get_weekly_report_department(
     return success_response(data=data, message="部门成员周报已生成")
 
 
-# ---------------------------------------------------------------------------
 # AI 周报总结：读取代表性 Redmine 工单的完整内容(描述+回复日志)，用本地 AI
 # 生成"本周做了什么 / 解决了什么问题"的总结段落。
-# ---------------------------------------------------------------------------
 
 def _issue_body_for_ai(issue: dict[str, Any]) -> str:
     """把单个工单的标题/状态/描述/回复日志压成 AI 友好的文本块。"""
@@ -929,8 +912,7 @@ def _collect_representative_issues(
         except Exception as exc:
             logger.warning("weekly report: list_resolved_in_range failed: %s", exc, exc_info=True)
 
-        # 2) 开放/跟进类：批量取回候选工单完整行（复用仓库公共 get_issues_by_ids，
-        #    旧版逐个 get_issue 是 N+1），保持 candidate_ids 原始顺序便于 AI 阅读。
+        # 2) 批量读取开放及跟进工单，保持候选 ID 顺序。
         wanted = [iid for iid in candidate_ids if len(issues) < limit * 2]
         if wanted:
             try:

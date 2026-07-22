@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 from scripts.configure_gms_host_tools import END, START, configure_bashrc
 from scripts.extract_zip_preserve_mode import extract_archive
@@ -31,7 +31,6 @@ def test_host_tools_archives_contain_every_required_runtime(tmp_path):
     )
     assert all((tmp_path / name).is_file() for name in required)
     assert all((tmp_path / name).stat().st_mode & 0o111 for name in required[:-1])
-    assert (HOST_TOOLS / "gts-rockchip.json").is_file()
 
 
 def test_bashrc_configuration_replaces_legacy_paths_and_is_idempotent(tmp_path):
@@ -66,7 +65,8 @@ def test_worker_installer_protects_and_exports_gts_credential():
     )
     environment = (HOST_TOOLS / "env.sh").read_text(encoding="utf-8")
 
-    assert 'install -m 600 "${HOST_TOOLS_SOURCE}/gts-rockchip.json"' in installer
+    assert 'install -m 600 "${GTS_CREDENTIAL_FILE}"' in installer
+    assert "GTS credential must be supplied" in installer
     assert "Environment=APE_API_KEY=${SOFTWARE_ROOT}/gts-rockchip.json" in installer
     assert 'export APE_API_KEY="${GMS_SOFTWARE_ROOT}/gts-rockchip.json"' in environment
 
@@ -82,6 +82,9 @@ def test_worker_installer_provisions_a_headless_x_display():
     assert '"${session_type}" == "x11"' in installer
     assert 'display="${display:-:99}"' in installer
     assert 'if [[ "${display}" != ":99" && -n "${auth}"' in installer
+    assert "IPAddressDeny=any" in installer
+    assert "IPAddressAllow=${CONTROLLER_ALLOW_ADDRESSES}" in installer
+    assert "--token-plugin=TokenFile" in installer
 
 
 def test_worker_installer_replaces_read_only_tool_directories_before_extracting():

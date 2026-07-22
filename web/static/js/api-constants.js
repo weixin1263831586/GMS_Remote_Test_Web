@@ -520,10 +520,9 @@ const API_DETAILS_MAP = {
     },
     '/api/adb-forward/start': {
         title: '启动ADB端口转发',
-        description: '启动ADB端口转发',
+        description: '使用服务端 SSH 密钥和 known_hosts 启动ADB端口转发',
         params: [
-            { name: 'device_host', type: 'string', required: true, desc: '设备主机地址' },
-            { name: 'device_password', type: 'string', required: true, desc: '设备SSH密码' }
+            { name: 'device_host', type: 'string', required: false, desc: '已授权设备主机地址；不传则使用服务端配置' }
         ],
         response: '{ "success": true, "forwarding": [] }',
         usage: '启动ADB端口转发'
@@ -549,7 +548,7 @@ const API_DETAILS_MAP = {
         description: '启动 USB/IP 设备共享（支持指定主机）',
         params: [
             { name: 'device_host', type: 'string', required: true, desc: '设备主机地址 (user@ip 或 ip)' },
-            { name: 'device_password', type: 'string', required: false, desc: '设备主机 SSH 密码（可选）' }
+            { name: 'device_password', type: 'string', required: false, desc: '仅用于本次管理员连接并加密保存' },
         ],
         response: '{ "success": true, "message": "USB/IP 已启动" }',
         usage: '启动 USB/IP 连接'

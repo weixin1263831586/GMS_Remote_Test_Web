@@ -20,10 +20,7 @@ from .models import *
 from .parsing import *
 
 
-# Month key → (month index, capitalized label). The index page lists both the
-# 3-letter abbreviation ('may') and the full month name ('february', 'november',
-# ...) as URL directory segments, so we accept both spellings and normalize to
-# the 3-letter key, which the API sort order (CASE month WHEN 'jan' ...) relies on.
+# 月份目录允许缩写和全称，统一规范为三字母键。
 _MAINLINE_MONTHS = {
     'jan': (1, 'January'),
     'january': (1, 'January'),
@@ -50,18 +47,14 @@ _MAINLINE_MONTHS = {
     'december': (12, 'December'),
 }
 
-# Month number (1-12) → canonical 3-letter key, used to emit the recency-checked
-# month as the abbreviation the API sort order keys on.
+# 月份数字到三字母键的映射。
 _MONTH_INDEX_TO_KEY = {idx: key for key, (idx, _label) in _MAINLINE_MONTHS.items() if len(key) == 3}
 
-# Builds like 15605729 in the "Preload partner zip" row of a PRELOAD notes page.
+# 匹配 PRELOAD 页面中的构建 ID。
 _MAINLINE_BUILD_ID_RE = re.compile(r'\b(\d{6,})\b')
-# Matches /release-notes/2026/may/notes-PRELOAD-2026-06-11-v0-1 style links. The
-# month directory segment may be a 3-letter abbreviation or a full month name.
+# 匹配 PRELOAD 发布说明链接。
 _MAINLINE_PRELOAD_LINK_RE = re.compile(r'/release-notes/(\d{4})/([a-z]+)/(notes-PRELOAD-[^/?#]+)', re.IGNORECASE)
-# Pulls the real build date out of a PRELOAD slug, e.g. notes-PRELOAD-2026-06-09.
-# The URL directory month (e.g. 'may') often lags the slug's true date (06-09),
-# so we trust the slug for both month classification and 12-month recency.
+# 从 PRELOAD slug 提取实际构建日期。
 _MAINLINE_SLUG_DATE_RE = re.compile(r'notes-PRELOAD-(\d{4})-(\d{2})-(\d{2})', re.IGNORECASE)
 
 
@@ -82,7 +75,7 @@ def _extract_mainline_links(doc: html.HtmlElement, base_url: str) -> list[tuple[
         if not match:
             continue
         dir_year, dir_month, slug = match.group(1), match.group(2).lower(), match.group(3)
-        # Require a recognizable month so non-month directory segments are skipped.
+        # 跳过无法识别月份的目录。
         if dir_month not in _MAINLINE_MONTHS:
             continue
         if not _MAINLINE_SLUG_DATE_RE.search(slug):
@@ -137,7 +130,7 @@ def _partner_zip_build_id(doc: html.HtmlElement) -> tuple[str, str]:
         if match:
             return match.group(1), row_text.strip()
 
-    # 2. Any table row containing both the phrase and a build id, in order.
+    # 2. 查找同时包含目标文本和构建 ID 的表格行。
     phrase = 'preload partner zip'
     for row in doc.xpath('//tr'):
         row_text = text_content(row)
@@ -146,7 +139,7 @@ def _partner_zip_build_id(doc: html.HtmlElement) -> tuple[str, str]:
             if match:
                 return match.group(1), row_text.strip()
 
-    # 3. Fall back to the first build id anywhere near the phrase in plain text.
+    # 3. 回退到目标文本附近的首个构建 ID。
     page_text = text_content(doc)
     lower = page_text.lower()
     idx = lower.find(phrase)
@@ -179,9 +172,7 @@ def parse_mainline_release_notes(fetched: FetchedDocument, session=None, *, time
     )
 
     for year, month_index, slug, notes_url in entries:
-        # month_index is the real build month (1-12); emit the 3-letter key the
-        # API sort order expects. Reverse-lookup of _MAINLINE_MONTHS is ambiguous
-        # (both 'jan' and 'january' map to index 1), so map by number directly.
+        # 按构建月份数字输出 API 使用的三字母键。
         month_key = _MONTH_INDEX_TO_KEY.get(month_index, '')
         month_label = _MAINLINE_MONTHS.get(month_key, (month_index, ''))[1]
 

@@ -34,11 +34,7 @@ def split_host_port(hostname: str, default_port: int = 22) -> tuple[str, int]:
     return hostname, default_port
 
 
-# Cached set of all local interface IPs. gethostname()/getaddrinfo() only
-# resolve to the *primary* address, which drifts (e.g. hostname resolving to a
-# Tailscale IP instead of the LAN IP) and makes a genuinely-local configured
-# host look remote — turning local ops into doomed SSH-to-self. Enumerate every
-# NIC address instead so host/IP mismatches can't cause false negatives.
+# 缓存所有网卡地址，避免多网卡主机被误判为远端。
 _LOCAL_HOSTS = {'localhost', '127.0.0.1', '::1'}
 _cached_local_ips: set[str] | None = None
 _cached_local_ips_time = 0.0
@@ -54,8 +50,7 @@ def _collect_local_ips() -> set[str]:
 
     local_ips = set(_LOCAL_HOSTS)
 
-    # Primary resolution path (what the old code relied on alone — kept as one
-    # signal among many).
+    # 主机名解析结果是本机地址来源之一。
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None):
             addr = info[4][0]
@@ -68,7 +63,7 @@ def _collect_local_ips() -> set[str]:
     except OSError:
         pass
 
-    # Outbound-socket trick: the IP the kernel would use to reach the internet.
+    # 获取默认出站路由使用的本机地址。
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.connect(('8.8.8.8', 80))
@@ -76,8 +71,7 @@ def _collect_local_ips() -> set[str]:
     except OSError:
         pass
 
-    # `hostname -I` lists every NIC address — the most reliable source on Linux
-    # and the one that catches multi-NIC hosts (LAN + Tailscale + docker, ...).
+    # Linux 下通过 hostname -I 补齐所有网卡地址。
     try:
         result = subprocess.run(
             ['hostname', '-I'],

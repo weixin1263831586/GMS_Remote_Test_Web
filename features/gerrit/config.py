@@ -328,9 +328,7 @@ def sync_gerrit_members_from_redmine_users(config: dict[str, Any], users: Iterab
         department["owners"] = list(dict.fromkeys(owners))
         personal = personal_by_owner.get(email)
         if personal:
-            # redmine user_map 是姓名的权威来源：直接用同步进来的 name 覆盖，
-            # 不能用 `personal.get("name") or name`，否则残留的旧 name（如早期英文前缀）
-            # 永远短路，导致姓名与邮箱不同步。
+            # Redmine 用户映射是姓名的权威来源。
             personal["name"] = name
             personal["department_id"] = department_id
             personal["department"] = department.get("name") or department_name

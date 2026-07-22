@@ -26,6 +26,39 @@ MODULE_LOG_PATTERNS = (
     re.compile(r"\[[0-9]+/[0-9]+\]\s+\S+\s+\S+#\S+"),
 )
 
+ACTIVE_JOB_STATUSES = {
+    "created", "queued", "leasing", "assigned", "dispatching", "running",
+    "stopping", "collecting", "worker_lost",
+}
+
+
+def _active_durable_jobs(owner_id: str) -> list[dict]:
+    """Return browser-safe active jobs for exactly one authenticated owner."""
+    try:
+        from features.cluster import get_cluster_service
+
+        jobs = get_cluster_service().repository.list_jobs(limit=500, owner_id=owner_id)
+    except (AttributeError, RuntimeError):
+        return []
+    return [
+        {
+            "id": job["id"],
+            "status": job.get("status", ""),
+            "worker_id": job.get("assigned_worker_id", ""),
+            "attempt_id": job.get("current_attempt_id", ""),
+            "suite_key": job.get("suite_key", ""),
+            "devices": [
+                lease.get("device_id", "")
+                for lease in (job.get("leases") or [])
+                if lease.get("status") in {"active", "orphaned"}
+            ],
+            "created_at": job.get("created_at", ""),
+            "updated_at": job.get("updated_at", ""),
+        }
+        for job in jobs
+        if job.get("status") in ACTIVE_JOB_STATUSES
+    ]
+
 
 def _infer_log_source(message: str, source: object = None) -> str:
     if isinstance(source, str) and source in {"system", "module"}:
@@ -89,17 +122,22 @@ async def get_status(
 
         client_id = runtime.get_client_id_from_request(request)
         user_state = get_or_create_user_state(client_id)
+        active_jobs = _active_durable_jobs(client_id)
 
         logger.info(f"[Status] Client {client_id} running={user_state.get('running', False)}")
 
         since = request.query_params.get("since")
         include_logs = request.query_params.get("logs", "true").lower() == "true"
 
+        durable_devices = list(dict.fromkeys(
+            device for job in active_jobs for device in job["devices"] if device
+        ))
         response = {
-            "running": user_state.get("running", False),
-            "devices": user_state.get("devices", []),
+            "running": bool(active_jobs),
+            "devices": durable_devices,
             "test_outcome": user_state.get("test_outcome", ""),
             "report_timestamp": user_state.get("report_timestamp", ""),
+            "active_jobs": active_jobs,
         }
 
         try:
@@ -109,20 +147,18 @@ async def get_status(
         except Exception:
             pass
 
+        logs = user_state.get("logs", [])
+        response["log_count"] = len(logs)
         if include_logs:
-            logs = user_state.get("logs", [])
             normalized = [_normalize_log_entry(entry) for entry in logs]
             if since is not None and since.isdigit():
                 since_int = int(since)
                 if 0 <= since_int < len(normalized):
                     response["logs"] = normalized[since_int:]
-                    response["log_count"] = len(normalized)
                 else:
                     response["logs"] = normalized
-                    response["log_count"] = len(normalized)
             else:
                 response["logs"] = normalized
-                response["log_count"] = len(normalized)
 
         return JSONResponse(content=response)
     except Exception as e:

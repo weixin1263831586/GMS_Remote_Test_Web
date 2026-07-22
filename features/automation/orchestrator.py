@@ -12,8 +12,8 @@ from typing import Any
 
 from features.automation.executors import AutomationExecutor
 from features.automation.models import (
-    RUN_STATUS_ANALYZING,
     RUN_STATUS_ANALYSIS_FAILED,
+    RUN_STATUS_ANALYZING,
     RUN_STATUS_ARTIFACT_MISSING,
     RUN_STATUS_ARTIFACT_READY,
     RUN_STATUS_CANCELLED,
@@ -185,7 +185,7 @@ class AutomationOrchestrator:
                 "Devices selected and locked",
                 result,
                 devices_json=json.dumps(devices, ensure_ascii=False, separators=(",", ":")),
-                worker_id=result.get("worker_id", run.get("worker_id", "worker-local")),
+                worker_id=result.get("worker_id", run.get("worker_id", "")),
                 device_reservation_id=result.get("reservation_id", ""),
             )
         if status == RUN_STATUS_DEVICE_LOCKED:
@@ -341,7 +341,18 @@ class AutomationOrchestrator:
         )
         if not applied:
             return updated
-        self.store.append_event(run["id"], status, "success" if status == RUN_STATUS_COMPLETED else "info", message, payload or {})
+        operation_id = f"{run['id']}:transition:{updated.get('state_version', '')}"
+        self.store.append_event(
+            run["id"],
+            status,
+            "success" if status == RUN_STATUS_COMPLETED else "info",
+            message,
+            payload or {},
+            event_type="run.transition",
+            operation_id=operation_id,
+            from_status=run["status"],
+            to_status=status,
+        )
         self._audit(run, run.get("status", ""), status, message)
         return updated
 
@@ -354,7 +365,11 @@ class AutomationOrchestrator:
         )
         if applied:
             self.store.append_event(
-                run["id"], run["status"], "info", message, payload or {}
+                run["id"], run["status"], "info", message, payload or {},
+                event_type="stage.poll",
+                operation_id=f"{run['id']}:{run['status']}:poll",
+                from_status=run["status"],
+                to_status=run["status"],
             )
         return updated
 
@@ -386,7 +401,13 @@ class AutomationOrchestrator:
         )
         if not applied:
             return updated
-        self.store.append_event(run["id"], status, "error", error, failure_payload)
+        self.store.append_event(
+            run["id"], status, "error", error, failure_payload,
+            event_type="run.transition",
+            operation_id=f"{run['id']}:transition:{updated.get('state_version', '')}",
+            from_status=run["status"],
+            to_status=status,
+        )
         self._audit(run, run.get("status", ""), status, error)
         return updated
 

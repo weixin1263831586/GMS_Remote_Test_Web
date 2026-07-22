@@ -25,17 +25,7 @@ router = APIRouter()
 
 @router.post("/api/email/send")
 async def send_email_endpoint(request: Request):
-    """通用发信端点。
-
-    Body 字段：
-    - to (必填): str | list[str]  收件人，支持逗号/分号分隔
-    - subject (必填): str
-    - body (必填): str            正文（纯文本或 HTML）
-    - is_html (可选): bool        默认 false
-    - cc (可选): str | list[str]
-    - attachment_paths (可选): list[str]
-    - sender_name (可选): str
-    """
+    """发送支持抄送、HTML 和附件的邮件。"""
     require_authenticated_user(request)
     body = await request.json()
     to = body.get("to")

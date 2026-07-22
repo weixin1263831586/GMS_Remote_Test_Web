@@ -19,7 +19,7 @@ class KnowledgeVersionMixin:
     """Version snapshots for KnowledgeStore, kept separate from its core CRUD."""
 
     def init_version_db(self) -> None:
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS knowledge_doc_versions (

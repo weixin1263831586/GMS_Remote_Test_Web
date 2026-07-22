@@ -4,6 +4,8 @@ import hashlib
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from worker_agent.app import WorkerAgent, restart_local_vnc
 from worker_agent.client import ControllerClient
 from worker_agent.config import WorkerConfig
@@ -55,6 +57,18 @@ def test_restart_vnc_command_kills_and_restarts(tmp_path):
         agent.handle({"id": "cmd-vnc", "command_type": "restart_vnc", "payload": {}})
 
     mock_fn.assert_called_once()
+    agent.client.ack.assert_called_once()
+    assert agent.client.ack.call_args.args[1] == "completed"
+
+
+def test_uninstall_agent_acks_before_stopping_services(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+
+    with patch("worker_agent.app.stop_local_worker_agent") as stop:
+        agent.handle({"id": "cmd-uninstall", "command_type": "uninstall_agent", "payload": {}})
+        stop.assert_called_once()
+
     agent.client.ack.assert_called_once()
     assert agent.client.ack.call_args.args[1] == "completed"
 
@@ -118,6 +132,136 @@ def test_restart_fails_interrupted_background_command_but_preserves_managed_job(
     assert [item["id"] for item in interrupted] == ["cmd-flash"]
     assert runtime.previous_command("cmd-flash")["status"] == "failed"
     assert runtime.previous_command("cmd-test")["status"] == "running"
+
+
+def test_unsynced_command_result_survives_restart_until_controller_accepts_it(tmp_path):
+    config = worker_config(tmp_path)
+    runtime = WorkerRuntime(config)
+    runtime.save_command("cmd-1", "completed", {"count": 1})
+
+    restarted = WorkerRuntime(config)
+    assert restarted.unsynced_commands() == [{
+        "id": "cmd-1", "status": "completed", "result": {"count": 1}, "error": "",
+    }]
+    restarted.mark_command_synced("cmd-1")
+    assert restarted.unsynced_commands() == []
+
+
+def test_worker_rejects_stale_device_fencing_generation(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+    current = {
+        "payload": {"lease_tokens": [{
+            "device_id": "worker-test:ABC", "lease_id": "lease-2",
+            "attempt_id": "attempt-2", "generation": 2,
+        }]}
+    }
+    runtime.validate_fencing(current)
+    runtime.validate_fencing(current)
+
+    with pytest.raises(ValueError, match="stale fencing token"):
+        runtime.validate_fencing({
+            "payload": {"lease_tokens": [{
+                "device_id": "worker-test:ABC", "lease_id": "lease-1",
+                "attempt_id": "attempt-1", "generation": 1,
+            }]}
+        })
+
+
+def test_worker_rejects_device_command_without_fencing_token(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+
+    with pytest.raises(ValueError, match="requires a valid device fencing token"):
+        runtime.validate_fencing({
+            "command_type": "device_action",
+            "payload": {"devices": ["worker-test:ABC"], "action": "reboot"},
+        })
+
+
+def test_new_fencing_generation_revokes_previous_attempt(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+    runtime.validate_fencing({
+        "command_type": "device_action",
+        "payload": {
+            "devices": ["worker-test:ABC"],
+            "lease_tokens": [{
+                "device_id": "worker-test:ABC", "lease_id": "claim-1",
+                "attempt_id": "attempt-old", "generation": 1,
+            }],
+        },
+    })
+
+    with patch.object(runtime, "revoke_attempt") as revoke:
+        runtime.validate_fencing({
+            "command_type": "device_action",
+            "payload": {
+                "devices": ["worker-test:ABC"],
+                "lease_tokens": [{
+                    "device_id": "worker-test:ABC", "lease_id": "claim-2",
+                    "attempt_id": "operation-new", "generation": 2,
+                }],
+            },
+        })
+
+    revoke.assert_called_once_with(
+        "attempt-old", "superseded by a newer device fencing generation"
+    )
+
+
+def test_heartbeat_replays_unsynced_command_state_after_reconnect(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.runtime.save_command("cmd-1", "completed", {"worker_job_id": "wj-1"})
+    agent.client = MagicMock()
+    agent.client.session_id = "session-1"
+    agent.client.connection_generation = 3
+    agent.client.heartbeat.return_value = {
+        "success": True,
+        "reconciled_command_ids": ["cmd-1"],
+        "revoked_attempt_ids": ["attempt-old"],
+    }
+    agent.suites = [{"suite_key": "CTS:17"}]
+    agent.last_suite_scan = float("inf")
+
+    with patch.object(agent.runtime, "revoke_attempt") as revoke, patch(
+        "worker_agent.app.host_metrics", return_value={}
+    ), patch(
+        "worker_agent.app.probe_devices", return_value=[]
+    ), patch("worker_agent.app.discover_tradefed_processes", return_value=[]):
+        agent.heartbeat()
+
+    payload = agent.client.heartbeat.call_args.args[0]
+    assert payload["session_id"] == "session-1"
+    assert payload["connection_generation"] == 3
+    assert payload["command_states"][0]["id"] == "cmd-1"
+    assert agent.runtime.unsynced_commands() == []
+    revoke.assert_called_once()
+
+
+def test_registration_forces_cached_suite_inventory_into_first_heartbeat(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.suites = [{"suite_key": "CTS:17", "tools_path": "/suite/tools"}]
+    agent.last_suite_scan = float("inf")
+    agent.client = MagicMock()
+    agent.client.session_id = "session-1"
+    agent.client.connection_generation = 1
+    agent.client.heartbeat.side_effect = KeyboardInterrupt
+
+    with patch.object(agent, "registration", return_value={"worker_id": "worker-test"}), patch(
+        "worker_agent.app.scan_suites", return_value=agent.suites
+    ), patch(
+        "worker_agent.app.host_metrics", return_value={}
+    ), patch(
+        "worker_agent.app.probe_devices", return_value=[]
+    ), patch(
+        "worker_agent.app.discover_tradefed_processes", return_value=[]
+    ), patch.object(
+        agent.runtime, "recoverable_jobs", return_value=[]
+    ), patch.object(
+        agent.runtime, "fail_interrupted_commands", return_value=[]
+    ):
+        agent.run()
+
+    payload = agent.client.heartbeat.call_args.args[0]
+    assert payload["suites"] == agent.suites
 
 
 def test_suite_failure_keeps_original_error_when_ack_is_retried(tmp_path):

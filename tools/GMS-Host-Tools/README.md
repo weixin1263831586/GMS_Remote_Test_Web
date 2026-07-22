@@ -10,14 +10,14 @@ Contents:
   automatically by the Worker installer.
 - `platform-tools-gms-linux.zip`: adb, fastboot, aapt, aapt2 and their bundled
   runtime files.
-- `gts-rockchip.json`: GTS API credential, installed with mode `0600`.
+- GTS API credentials are never bundled. Supply a rotated Google service-account
+  file at deployment time with `GMS_GTS_CREDENTIAL_FILE`.
 - `env.sh`: canonical Java and Android tool environment.
 - `verify.sh`: validates exact deployed paths without falling back to another
   copy already present on `PATH`.
 
-Python remains a target-host system dependency. Treat this bundle as sensitive
-because it contains the GTS API credential; do not publish it or commit it to a
-public repository.
+Python remains a target-host system dependency. Keep the external GTS credential
+outside the repository and grant it only to the Worker deployment process.
 
 Manual installation:
 
@@ -38,7 +38,7 @@ PY
 python3 /path/to/extract_zip_preserve_mode.py platform-tools-gms-linux.zip "$HOME/Software"
 mkdir -p "$HOME/Software/GMS-Host-Tools"
 cp env.sh verify.sh "$HOME/Software/GMS-Host-Tools/"
-install -m 600 gts-rockchip.json "$HOME/Software/gts-rockchip.json"
+install -m 600 "$GMS_GTS_CREDENTIAL_FILE" "$HOME/Software/gts-rockchip.json"
 chmod 755 "$HOME/Software/GMS-Host-Tools/"*.sh
 "$HOME/Software/GMS-Host-Tools/verify.sh"
 ```

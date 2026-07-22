@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import time
 from pathlib import Path
@@ -9,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from foundation.config import ConfigManager, settings
+from foundation.secrets import decrypt_secret, encrypt_secret
 
 from .dashboard import (
     denormalize_redmine_dashboard_config,
@@ -79,52 +78,51 @@ class RedmineConfig:
         redmine.setdefault("domain", urlparse(redmine["base_url"]).netloc)
         return redmine
 
+    def save_redmine_base_url(self, base_url: str) -> bool:
+        """Persist the per-owner Redmine URL used by the statistics client."""
+        normalized = str(base_url or "").strip().rstrip("/")
+        if normalized:
+            parsed = urlparse(normalized)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("Redmine 地址必须是完整的 http(s) URL")
+        return self._save_runtime_section(
+            "redmine",
+            {
+                "base_url": normalized,
+                "domain": urlparse(normalized).netloc if normalized else "",
+            },
+        )
+
     def load_redmine_credentials(self) -> dict[str, str]:
         runtime = self.manager.get_runtime_config()
         saved = runtime.get("redmine_auth") or {}
-        if not saved:
-            saved = (self.manager.load_config(force_reload=True).get("redmine_auth") or {})
         encrypted = saved.get("encrypted_password")
         if encrypted:
             try:
-                from cryptography.fernet import Fernet
-
-                key = base64.urlsafe_b64encode(
-                    hashlib.sha256(b"gms_remote_test_redmine_2024").digest()
-                )
-                password = Fernet(key).decrypt(
-                    str(encrypted).encode()
-                ).decode()
+                password = decrypt_secret(str(encrypted))
                 return {
                     "username": str(saved.get("username") or ""),
                     "password": password,
                 }
             except Exception:
                 return {}
-        return {
-            "username": str(saved.get("username") or ""),
-            "password": str(saved.get("password") or ""),
-        }
+        return {}
 
     def save_redmine_credentials(
         self,
         username: str,
         password: str,
     ) -> bool:
-        from cryptography.fernet import Fernet
-
-        key = base64.urlsafe_b64encode(
-            hashlib.sha256(b"gms_remote_test_redmine_2024").digest()
-        )
         runtime = self.manager.get_runtime_config()
         runtime["redmine_auth"] = {
             "username": username,
-            "encrypted_password": Fernet(key).encrypt(
-                password.encode()
-            ).decode(),
+            "encrypted_password": encrypt_secret(password),
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        return self.manager.save_runtime(runtime)
+        saved = self.manager.save_runtime(runtime)
+        if saved:
+            Path(self.manager.runtime_config_path).chmod(0o600)
+        return saved
 
     def get_redmine_stats_config(self) -> dict[str, Any]:
         return normalize_redmine_stats_config(

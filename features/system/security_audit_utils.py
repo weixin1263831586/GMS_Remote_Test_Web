@@ -45,7 +45,12 @@ AUDIT_WEB_READONLY_NOISE_PATHS = {
     '/api/usbip/status',
     '/api/users/current',
     '/api/users/list',
+    '/api/users/workspace-context',
     '/api/vpn/status',
+    # 高频只读集群轮询不记录常规审计。
+    '/api/cluster/status',
+    '/api/cluster/workers',
+    '/api/automation/worker/status',
 }
 AUDIT_WEB_READONLY_NOISE_PREFIXES = (
     '/api/favicon/',

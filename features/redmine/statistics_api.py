@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
@@ -49,8 +50,7 @@ def _request_user_id(request: Request | None) -> str:
     return owner_id_from_request(request)
 
 
-# 看板/统计数据仍按登录用户隔离；配置统一读写 configs/config_runtime.json 和
-# configs/redmine_user_map.json，避免生成额外 per-user 配置目录。
+# 看板数据按登录用户隔离；配置统一读写 configs/config_runtime.json
 def _service_for_request(request: Request | None):
     return get_redmine_service_for_request(request)
 
@@ -59,20 +59,25 @@ def _config_for_request(request: Request | None):
     return get_redmine_config_for_request(request)
 
 
-def _missing_credentials_payload() -> dict[str, Any]:
+def _missing_credentials_payload(message: str | None = None) -> dict[str, Any]:
     return {
         "success": True,
         "data": {
             "configured": False,
             "error": "Redmine credentials not configured",
-            "message": "请先在 Redmine 看板设置中保存 Redmine 账号和密码/API 密码。",
+            "message": message or "请先在 Redmine 看板设置中保存 Redmine 地址、账号和密码/API 密码。",
         },
     }
 
 
 def _has_redmine_credentials(request: Request | None) -> bool:
     try:
-        creds = _config_for_request(request).load_redmine_credentials() or {}
+        manager = _config_for_request(request)
+        base_url = manager.get_redmine_base_url()
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return False
+        creds = manager.load_redmine_credentials() or {}
     except Exception:
         return False
     return bool(str(creds.get("username") or "").strip() and str(creds.get("password") or "").strip())
@@ -95,18 +100,10 @@ def _user_map_mtime_for_request(request: Request | None) -> float:
 
 
 async def _live_stats_for_user(service, user_id: int, freshness_days: int = 180) -> dict[str, Any]:
-    """Fetch full issue counts + resolved trends from Redmine for a user id.
+    """从 Redmine 实时拉取用户工单计数和已解决趋势。
 
-    The local DB only holds issues synced for the configured sync user, so a
-    personal dashboard's resolved-by-day/week/month/year bars would otherwise
-    under-count anyone whose closed issues were never synced. We pull the full
-    closed-issue trend live from Redmine (same channel the department view uses)
-    so the bars match Gerrit's "show everything" behaviour. Trends are cached
-    client-side (``_ASSIGNEE_TREND_CACHE``); on any failure we fall back to the
-    local-DB trends the repository already returned.
-
-    ``freshness_days`` 仅实时拉取近 N 天的关闭趋势，更早的冻结进长期缓存，
-    避免每次翻满全量历史分页。
+    本地 DB 只保存同步用户的工单快照，个人看板的已解决趋势需实时拉取。
+    近 freshness_days 天的趋势实时拉取，更早的走长期缓存。
     """
     try:
         client = service.agent._make_client()
@@ -114,8 +111,7 @@ async def _live_stats_for_user(service, user_id: int, freshness_days: int = 180)
         logger.warning("Redmine live stats client unavailable for user %s: %s", user_id, exc)
         return {}
     try:
-        # 两个 Redmine 实时接口都通过 to_thread 复用同一 python-redmine
-        # Session（非线程安全），故必须串行调用；任一失败不影响另一个。
+        # 两个实时接口共用同一 Session（非线程安全），必须串行调用
         data: dict[str, Any] = {}
         try:
             data.update(await client.count_issues_by_assignee(user_id))
@@ -174,12 +170,14 @@ async def _current_redmine_user_mapping(service) -> dict[str, Any] | None:
 
 @router.get("/statistics/workload")
 async def get_workload_statistics(
-    request: Request = None,
+    request: Request,
     stale_days: int | None = Query(None, ge=1, le=30),
     list_limit: int = Query(30, ge=1, le=100),
     name: str = Query(""),
     refresh: bool = Query(False),
 ):
+    if not _has_redmine_credentials(request):
+        return _missing_credentials_payload()
     service = _service_for_request(request)
     # Check cache
     stats_cfg = _get_redmine_stats_config(request)
@@ -191,10 +189,7 @@ async def get_workload_statistics(
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
-    # Resolve the target user once: a selected name, else the current login user.
-    # When the name maps to a user_map entry we also fetch live Redmine counts +
-    # resolved trends (the local DB only holds partial snapshots), so the
-    # personal dashboard's closed/total/resolved-trend numbers are accurate.
+    # 解析目标用户：指定姓名或当前登录用户。映射到 user_map 时拉取实时数据
     user_map = _user_map_for_request(request)
     live_stats: dict[str, Any] = {}
     candidate_names = [name] if name else []
@@ -221,8 +216,17 @@ async def get_workload_statistics(
             except Exception as exc:
                 logger.warning("Failed to refresh Redmine snapshots for user %s: %s", mapped.get("id"), exc)
     else:
-        current_user = None if name else await _current_redmine_user_mapping(service)
-        if current_user:
+        # /users 会为当前 Redmine 用户插入合成选项，前端回传其显示名。
+        # 将其视为当前 Redmine 账号而非回退到不完整的本地快照。
+        current_user = await _current_redmine_user_mapping(service)
+        selected_is_current = bool(
+            current_user
+            and (
+                not name
+                or find_user_mapping_for_names([current_user], candidate_names)
+            )
+        )
+        if selected_is_current:
             owner_names = display_names_from_mapping(current_user)
             display_names = owner_names
             live_stats = await _live_stats_for_user(service, int(current_user["id"]), freshness_days=freshness_days)
@@ -246,6 +250,7 @@ async def get_workload_statistics(
         list_limit=list_limit,
         display_names=display_names,
         window_days=stats_cfg["window_days"],
+        organization_user_map=user_map,
     )
     if refresh:
         stale_items = list((data.get("lists") or {}).get("no_reply_3_days") or [])
@@ -273,15 +278,14 @@ async def get_workload_statistics(
                     list_limit=list_limit,
                     display_names=display_names,
                     window_days=stats_cfg["window_days"],
+                    organization_user_map=user_map,
                 )
             if refresh_errors:
                 data["refresh_warning"] = "部分工单未能从 Redmine 刷新：" + "；".join(refresh_errors[:3])
     if live_stats:
-        # Live total/open/closed counters always win (the local DB snapshot is
-        # incomplete for non-sync users). Resolved trends only override the
-        # local-DB bars when the live fetch actually returned them, so a
-        # Redmine outage falls back to whatever the DB has instead of blanks.
+        # 实时计数始终优先（本地快照不完整）；趋势仅在有实时数据时覆盖
         data.update(live_stats)
+    data.setdefault("meta", {})["count_source"] = "redmine_live" if live_stats else "local_snapshot"
     data["generated_at"] = datetime.now().isoformat(timespec="seconds")
     _update_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, now_ts, data)
     return {"success": True, "data": data}
@@ -295,6 +299,7 @@ async def _department_user_overdue(
     issue_limit: int,
     window_days: int = 0,
     force_refresh: bool = False,
+    organization_user_map: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     try:
         return await compute_user_overdue_stats(
@@ -305,6 +310,7 @@ async def _department_user_overdue(
             issue_limit,
             window_days,
             force_refresh=force_refresh,
+            organization_user_map=organization_user_map,
         )
     except Exception as exc:
         return _empty_user_stats(user, error=str(exc))
@@ -312,7 +318,7 @@ async def _department_user_overdue(
 
 @router.get("/statistics/resolved-by-date")
 async def get_resolved_issues_by_date(
-    request: Request = None,
+    request: Request,
     start: str = Query("", description="起始日期 YYYY-MM-DD（含）"),
     end: str = Query("", description="结束日期 YYYY-MM-DD（不含，即次日）"),
     names: str = Query("", description="指派人姓名列表，逗号分隔；为空则不过滤"),
@@ -320,7 +326,7 @@ async def get_resolved_issues_by_date(
     limit: int = Query(500, ge=1, le=2000),
 ):
     service = _service_for_request(request)
-    """按日期范围查询已解决的 Redmine issue（供趋势柱状图点击查看明细）。"""
+    """按日期范围查询已解决的 Redmine issue（供趋势柱状图查看明细）。"""
     owner_names = [n.strip() for n in names.split(",") if n.strip()] if names else []
     profile_key = str(profile_id or "").strip()
     profile_users: list[dict[str, Any]] = []
@@ -334,9 +340,7 @@ async def get_resolved_issues_by_date(
     owner_names = list(dict.fromkeys(name for name in owner_names if name))
     try:
         if profile_users:
-            # Live fetch per assignee so the drill-down reflects the whole
-            # department, independent of which issues were synced to the local
-            # DB (the DB only holds issues assigned to the configured sync user).
+            # 按指派人实时拉取，使部门明细不依赖本地 DB 同步范围
             client = service.agent._make_client()
             semaphore = asyncio.Semaphore(4)
 
@@ -389,7 +393,7 @@ async def get_resolved_issues_by_date(
 
 @router.get("/statistics/department-overdue")
 async def get_department_overdue_statistics(
-    request: Request = None,
+    request: Request,
     stale_days: int | None = Query(None, ge=1, le=30),
     list_limit: int | None = Query(None, ge=1, le=500),
     issue_limit: int | None = Query(None, ge=1, le=2000),
@@ -416,6 +420,7 @@ async def get_department_overdue_statistics(
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
     users = filter_users_for_profile(_user_map_for_request(request), profile)
+    organization_user_map = _user_map_for_request(request)
     if not users and str(profile.get("id") or "") == "all":
         current_user = await _current_redmine_user_mapping(service)
         if current_user:
@@ -437,6 +442,7 @@ async def get_department_overdue_statistics(
                 effective_issue_limit,
                 window_days,
                 force_refresh=refresh,
+                organization_user_map=organization_user_map,
             )
 
     try:
@@ -478,7 +484,7 @@ async def get_department_overdue_statistics(
 
 @router.get("/statistics/project")
 async def get_project_statistics(
-    request: Request = None,
+    request: Request,
     profile_id: str = Query(""),
     refresh: bool = Query(False),
 ):

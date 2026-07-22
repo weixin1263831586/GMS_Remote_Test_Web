@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from .provider_routing import call_provider_chain, first_local_provider
+
 
 logger = logging.getLogger(__name__)
 
@@ -66,16 +68,7 @@ class UniversalAIAnalyzer:
 
 
     def _get_api_format(self, provider_name: str, config: dict) -> str:
-        """
-        获取提供商的 API 格式
-
-        Args:
-            provider_name: 提供商名称
-            config: 提供商配置
-
-        Returns:
-            API 格式：'anthropic' 或 'openai'
-        """
+        """返回提供商使用的 Anthropic 或 OpenAI API 格式。"""
         # 优先使用配置中的 api_format 字段
         api_format = config.get('api_format')
         if api_format:
@@ -117,19 +110,11 @@ class UniversalAIAnalyzer:
 
         return None
 
+    def get_local_provider(self) -> str | None: return first_local_provider(self.config, _is_local_provider)
+
     def generate(self, user_prompt: str, system_prompt: str = '', max_tokens: int | None = None,
                  preferred_provider: str | None = None) -> dict:
-        """通用文本生成：用已配置的主 provider 调用大模型，返回纯文本。
-
-        与 analyze_test_failure 不同，不强制 JSON、不绑定测试失败语义，
-        供周报总结等通用场景复用 provider 选择 / HTTP 调用 / 响应解析。
-
-        Args:
-            preferred_provider: 优先使用的 provider 名称；若未启用或不存在，则回退到主 provider。
-
-        Returns:
-            {'success': bool, 'content': str, 'provider': str, 'error': str}
-        """
+        """使用首选或主 AI 提供商生成通用纯文本。"""
         try:
             provider_name = self.get_primary_provider(preferred=preferred_provider)
             if not provider_name:
@@ -179,8 +164,8 @@ class UniversalAIAnalyzer:
         method_name: str | None,
         error_message: str,
         stack_trace: str | None = None,
-        source_code: str | None = None,
-        auto_fetch_source: bool = True
+        source_code: str | None = None, auto_fetch_source: bool = True,
+        preferred_provider: str | None = None,
     ) -> dict:
         """Analyze a test failure with the configured AI provider, auto-fetching source when source_code is empty and auto_fetch_source is True."""
         result = {
@@ -202,28 +187,24 @@ class UniversalAIAnalyzer:
                     result['source_info'] = source_info
                     logger.info(f"成功获取源码: {source_info.get('file_path', 'unknown')}")
 
-            provider_name = self.get_primary_provider()
-
+            provider_name = self.get_primary_provider(preferred=preferred_provider)
             if not provider_name:
                 result['error'] = '未找到启用的AI模型提供商'
                 return result
 
             providers = self.config.get('providers', {})
-            provider_config = providers.get(provider_name, {})
-
-            logger.info(f"使用AI提供商: {provider_name}")
-
-            provider_result = self._call_aimodel(provider_name, provider_config, class_name, method_name, error_message, stack_trace, source_code)
-
-            if provider_result.get('success'):
-                result['success'] = True
-                result['root_cause'] = provider_result.get('root_cause', '')
-                result['analysis'] = provider_result.get('analysis')
-                result['suggestions'] = provider_result.get('suggestions', [])
-                result['solution'] = provider_result.get('solution')
-                result['provider'] = provider_name
-            else:
-                result['error'] = provider_result.get('error', '分析失败')
+            provider_order = [provider_name] + [name for name, config in providers.items()
+                                                   if name != provider_name and config.get('enabled', False)]
+            result['attempted_providers'] = provider_order
+            result['preferred_provider'] = provider_name
+            provider_result = call_provider_chain(
+                provider_order, providers,
+                lambda name, config: self._call_aimodel(
+                    name, config, class_name, method_name, error_message,
+                    stack_trace, source_code
+                ),
+            )
+            result.update(provider_result)
 
         except Exception as e:
             logger.error(f"AI分析失败: {e}")
@@ -382,7 +363,10 @@ class UniversalAIAnalyzer:
                     'root_cause': parsed.get('root_cause', ''),
                     'analysis': parsed.get('analysis'),
                     'suggestions': parsed.get('suggestions', []),
-                    'solution': parsed.get('solution')
+                    'solution': parsed.get('solution'),
+                    'root_cause_status': parsed.get('root_cause_status', 'hypothesis'),
+                    'confidence': parsed.get('confidence', 'low'),
+                    'evidence': parsed.get('evidence', []),
                 }
             else:
                 try:
@@ -448,7 +432,6 @@ class UniversalAIAnalyzer:
 {stack_trace[:2000]}
 ```
 """
-
         if source_code:
             prompt += f"""
 **相关源码**:
@@ -456,7 +439,6 @@ class UniversalAIAnalyzer:
 {source_code[:3000]}
 ```
 """
-
         prompt += """
 请分析上述信息并按以下JSON格式返回。
 
@@ -469,10 +451,12 @@ class UniversalAIAnalyzer:
 6. 绝对不要使用markdown代码块标记（```json 或 ```）
 7. **禁止输出推理过程或思考步骤** - 不要输出 "Thinking Process"、"分析步骤" 等内容
 8. **直接给出最终结果** - 不要解释你的分析过程，直接返回JSON格式的分析结果
-
 返回格式：
 {
-  "root_cause": EMOJI_TARGET + " 根本原因描述（不超过50字）",
+  "root_cause": "基于现有证据的结论或待验证假设（不超过80字）",
+  "root_cause_status": "hypothesis",
+  "confidence": "low",
+  "evidence": ["直接支持该判断的日志或源码证据；没有则返回空数组"],
   "analysis": EMOJI_CHART + " 详细分析：\\n1. 错误类型：xxx\\n2. 触发条件：xxx\\n3. 影响范围：xxx\\n4. 相关代码逻辑：xxx",
   "suggestions": [
     EMOJI_CHECK + "建议一：具体的修改步骤",
@@ -486,15 +470,12 @@ class UniversalAIAnalyzer:
     "code_example": "代码示例（Java格式）"
   }
 }
-
 分析要求（适用于所有类型报错）：
-1. **root_cause必须以🎯开头**，一句话精准定位核心问题：
-   - 配置问题："配置项xxx缺失/错误/不匹配"
-   - 权限问题："缺少xxx权限导致操作失败"
-   - 依赖问题："xxx依赖缺失/版本不兼容"
-   - 超时问题："xxx操作超时（超过N秒）"
-   - 断言失败："期望值xxx与实际值yyy不匹配"
-   - 空指针/异常："调用xxx方法时抛出异常"
+1. **严格区分失败现象与根因**：异常文本、超时、断言失败只属于现象，不能直接称为根因。
+   - 没有直接日志或源码证据时，root_cause必须写成待验证假设
+   - 此时root_cause_status必须为"hypothesis"，confidence为"low"或"medium"
+   - 只有证据形成完整因果链时才能使用"verified"，并在evidence逐条列出直接证据
+   - 不得把测试方法名或测试场景改写成确定的因果结论
 
 2. **analysis必须以📊开头**，4个维度详细分析：
    - 错误类型：明确异常类型（AssertionError/NullPointerException/TimeoutException等）

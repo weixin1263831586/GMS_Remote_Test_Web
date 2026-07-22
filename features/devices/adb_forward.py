@@ -45,15 +45,12 @@ class ADBForwardManager:
     def start_forward(
         self,
         device_host: str,
-        device_password: str | None = None
     ) -> dict[str, Any]:
         """
         启动ADB端口转发
 
         Args:
             device_host: 设备主机地址（格式: user@ip）
-            device_password: 设备主机密码
-
         Returns:
             结果字典
         """
@@ -74,13 +71,10 @@ class ADBForwardManager:
                 self.ssh_manager.execute_command(ssh, _adb_tunnel_kill_command())
                 time.sleep(1)
 
-                # 检测设备主机类型
                 is_windows = 'windows' in device_host.lower()
 
-                # 启动设备主机上的ADB server
                 if is_windows:
-                    # Windows主机：需要通过SSH连接到Windows
-                    # 这里简化处理，实际需要更复杂的SSH转发
+                    # Windows ADB 转发尚未实现。
                     result = {
                         'success': True,
                         'warning': 'Windows设备主机ADB支持待完善',
@@ -96,19 +90,11 @@ class ADBForwardManager:
                     # 设置SSH隧道
                     forward_target = f"localhost:{ADB_FORWARD_PORT}"
 
-                    if device_password:
-                        # 使用sshpass（需要安装）
-                        safe_password = shlex.quote(device_password)
-                        forward_cmd = (
-                            f"SSHPASS={safe_password} sshpass -e ssh -f -N "
-                            f"-o ExitOnForwardFailure=yes -L {ADB_FORWARD_PORT}:{forward_target} {safe_device_host}"
-                        )
-                    else:
-                        # 使用密钥认证
-                        forward_cmd = (
-                            f"ssh -f -N -o ExitOnForwardFailure=yes "
-                            f"-L {ADB_FORWARD_PORT}:{forward_target} {safe_device_host}"
-                        )
+                    forward_cmd = (
+                        f"ssh -f -N -o BatchMode=yes -o StrictHostKeyChecking=yes "
+                        f"-o ExitOnForwardFailure=yes "
+                        f"-L {ADB_FORWARD_PORT}:{forward_target} {safe_device_host}"
+                    )
 
                     self.ssh_manager.execute_command(ssh, forward_cmd, timeout=10)
                     time.sleep(3)

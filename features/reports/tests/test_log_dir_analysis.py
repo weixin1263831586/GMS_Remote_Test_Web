@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -51,13 +52,26 @@ class ResolveSuiteLogDirTests(unittest.TestCase):
         )
         self.assertEqual(err, "无效的测试套件路径")
 
+    def test_expands_home_in_configured_suites_path(self):
+        suite_root = Path.home() / "GMS-Suite" / "android-vts" / "android-vts"
+        abs_path, err = _resolve_suite_log_dir(
+            f"{suite_root}/tools",
+            "logs/2026.06.25_10.57.05",
+            {"suites_path": "~/GMS-Suite"},
+        )
+        self.assertIsNone(err)
+        self.assertEqual(
+            abs_path,
+            str(suite_root / "logs" / "2026.06.25_10.57.05"),
+        )
+
 
 class AnalyzeLogDirEndpointTests(unittest.TestCase):
     """End-to-end: a real logs/<timestamp>/inv_*/host_log_*.txt tree."""
 
     def setUp(self):
         self.tmp = TemporaryDirectory()
-        # Isolate the auth DB so setup doesn't touch the real platform_auth DB.
+        # 使用隔离的认证数据库。
         from features.auth import auth_service
         self._orig_auth_db = auth_service.db_path
         auth_service.db_path = Path(self.tmp.name) / "platform_auth.sqlite3"
@@ -65,8 +79,7 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
         self.suite_root = Path(self.tmp.name) / "android-vts-17_r1" / "android-vts"
         logs_dir = self.suite_root / "logs" / "2026.06.25_10.57.05" / "inv_123"
         logs_dir.mkdir(parents=True)
-        # Minimal host_log shape the parser can consume (it tolerates arbitrary
-        # text; we only assert the endpoint returns a structured result).
+        # 构造解析器可接受的最小 host_log。
         (logs_dir / "host_log_111.txt").write_text(
             "07-01 10:00:00 I/Test: sample host log line\n", encoding="utf-8"
         )
@@ -82,12 +95,40 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
         self.client = TestClient(create_app())
         # The endpoint is auth-gated like all /api routes; create + log in an
         # admin so the requests pass the gate.
-        self.client.post(
+        setup = self.client.post(
             "/api/auth/setup",
             json={"username": "admin", "password": "strongpass1"},
         )
+        owner_id = setup.json()["user"]["id"]
+
+        class OwnedReportStore:
+            @staticmethod
+            def get_report_by_timestamp(
+                timestamp,
+                *,
+                owner_id=None,
+                include_all=False,
+            ):
+                if timestamp != "2026.06.25_10.57.05":
+                    return None
+                if not include_all and owner_id != owner_id_value:
+                    return None
+                return {
+                    "report_id": "report-log-dir-test",
+                    "timestamp": timestamp,
+                    "owner_id": owner_id_value,
+                }
+
+        owner_id_value = owner_id
+
+        self._report_store_patch = patch(
+            "features.reports.analysis_api.test_report_db",
+            OwnedReportStore(),
+        )
+        self._report_store_patch.start()
 
     def tearDown(self):
+        self._report_store_patch.stop()
         self.client.close()
         from foundation.config import config_manager as _cm
         _cm.save_config(self._orig_config)
@@ -122,6 +163,44 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         body = resp.json()
         self.assertFalse(body["success"])
+
+    def test_anonymous_development_mode_can_analyze_local_log_folder(self):
+        self.client.cookies.clear()
+        with patch.dict(
+            "os.environ",
+            {"GMS_ENV": "development", "GMS_AUTH_REQUIRED": "false"},
+        ):
+            resp = self.client.post(
+                "/api/reports/analyze-log-dir",
+                data={
+                    "suite_path": f"{self.suite_root}/tools",
+                    "path": "logs/2026.06.25_10.57.05",
+                },
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertTrue(resp.json()["success"])
+
+    def test_optional_admin_session_does_not_require_deleted_report_index(self):
+        class EmptyReportStore:
+            @staticmethod
+            def get_report_by_timestamp(*_args, **_kwargs):
+                return None
+
+        with patch(
+            "features.reports.analysis_api.test_report_db", EmptyReportStore()
+        ), patch.dict(
+            "os.environ",
+            {"GMS_ENV": "development", "GMS_AUTH_REQUIRED": "false"},
+        ):
+            resp = self.client.post(
+                "/api/reports/analyze-log-dir",
+                data={
+                    "suite_path": f"{self.suite_root}/tools",
+                    "path": "logs/2026.06.25_10.57.05",
+                },
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertTrue(resp.json()["success"])
 
 
 if __name__ == "__main__":

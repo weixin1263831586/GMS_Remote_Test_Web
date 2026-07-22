@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# 项目导入前加载运行环境变量。
+from bootstrap.env_loader import load_runtime_env
+
+load_runtime_env()
+
 import logging
 
 import uvicorn

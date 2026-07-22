@@ -119,10 +119,28 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
         if not executable:
             raise RuntimeError("scrcpy is not installed on this Worker")
         display = str(options.get("display") or os.getenv("DISPLAY") or ":0")
+        # 与 Controller 使用相同的 scrcpy 窗口布局。
+        screen_width = 1920
+        screen_height = 1080
+        max_window_width = 350
+        gap = 20
+        total = len(serials)
+        window_width = (
+            min(max_window_width, (screen_width - gap * (total + 1)) // total)
+            if total
+            else max_window_width
+        )
+        window_height = int(window_width * 16 / 9)
+        max_height = int(screen_height * 0.7)
+        if window_height > max_height:
+            window_height = max_height
+            window_width = int(window_height * 9 / 16)
+        total_width = total * window_width + max(total - 1, 0) * gap
+        start_x = max(gap, (screen_width - total_width) // 2)
+        start_y = max(50, (screen_height - window_height) // 2)
         results = []
         for index, serial in enumerate(serials):
-            # Exact argv inspection avoids duplicate mirrors without a broad
-            # process-name kill that could affect another device or user.
+            # 精确匹配参数，避免影响其他设备的镜像进程。
             already_running = False
             for proc in Path("/proc").iterdir():
                 if not proc.name.isdigit():
@@ -142,10 +160,12 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
                 continue
             env = dict(os.environ)
             env["DISPLAY"] = display
+            x_offset = start_x + index * (window_width + gap)
             process = subprocess.Popen(
                 [executable, "-s", serial, "--window-title", f"GMS {serial}",
-                 "--window-x", str(20 + index * 380), "--window-y", "60",
-                 "--max-size", "1280", "--no-audio"],
+                 "--window-x", str(x_offset), "--window-y", str(start_y),
+                 "--window-width", str(window_width), "--window-height", str(window_height),
+                 "--max-size", "800", "--no-audio"],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True, env=env,
             )
@@ -239,8 +259,7 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
         elif action == "bootloader_status":
             commands = [["adb", "-s", serial, "shell", "getprop", "ro.boot.verifiedbootstate"]]
         elif action in {"bootloader_lock", "bootloader_unlock"}:
-            # Keep the operation scoped to the selected serial throughout the
-            # adb -> fastboot transition; never use a host-wide fastboot call.
+            # ADB 到 Fastboot 的整个过程始终锁定指定序列号。
             subprocess.run(["adb", "-s", serial, "reboot", "bootloader"],
                            capture_output=True, text=True, timeout=30, check=False)
             verb = "lock" if action == "bootloader_lock" else "unlock"
@@ -288,6 +307,11 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("suite URL must use http or https")
+        if (
+            os.getenv("GMS_ENV", "development").strip().lower() == "production"
+            and parsed.scheme != "https"
+        ):
+            raise ValueError("production suite downloads require HTTPS")
         filename = str(payload.get("filename") or Path(urllib.parse.unquote(parsed.path)).name)
         if (not filename or Path(filename).name != filename
                 or any(ord(character) < 32 for character in filename)):
@@ -301,14 +325,24 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         downloaded = 0
         last_reported = 0
         try:
-            request = urllib.request.Request(url, headers={"User-Agent": "GMS-Worker/0.1"})
+            headers = {"User-Agent": "GMS-Worker/0.1"}
             ssl_context = None
+            controller_host = urllib.parse.urlparse(config.controller_url).hostname
+            # 回调 Controller 时附加令牌和固定 CA，兼容代理及域名别名。
+            is_controller_callback = (
+                parsed.hostname == controller_host
+                or parsed.path.startswith("/api/cluster/suite-library-download/")
+            )
             if parsed.scheme == "https":
                 import ssl
-                controller_host = urllib.parse.urlparse(config.controller_url).hostname
-                if parsed.hostname == controller_host:
-                    ssl_context = (ssl.create_default_context(cafile=config.controller_ca)
-                                   if config.controller_ca else ssl._create_unverified_context())
+                if is_controller_callback:
+                    headers["Authorization"] = f"Bearer {config.token}"
+                    ssl_context = ssl.create_default_context(
+                        cafile=config.controller_ca or None
+                    )
+            elif is_controller_callback:
+                headers["Authorization"] = f"Bearer {config.token}"
+            request = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(request, timeout=60, context=ssl_context) as response, temporary.open("wb") as output:
                 while True:
                     block = response.read(1024 * 1024)
@@ -346,9 +380,7 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                 if any(not (destination / item.filename).resolve().is_relative_to(destination) for item in members):
                     raise ValueError("archive contains an unsafe path")
                 bundle.extractall(destination)
-                # ZipFile.extractall does not restore Unix mode bits. Android
-                # suite launchers (cts-tradefed/vts-tradefed, etc.) rely on
-                # the executable bit stored in ZipInfo.external_attr.
+                # 恢复压缩包中的 Unix 权限，确保测试启动脚本可执行。
                 for item in members:
                     mode = (item.external_attr >> 16) & 0o777
                     target = (destination / item.filename).resolve()

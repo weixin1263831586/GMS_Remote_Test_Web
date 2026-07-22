@@ -1,16 +1,4 @@
-"""Automatic device selection for automation runs.
-
-Profiles may carry a ``device_selector`` block (``min_count``, ``exclusive``,
-optional ``serial_prefix``/``board`` filters). The orchestrator's
-``select_devices`` stage delegates here so a run without manually chosen
-devices does not deadlock at ``waiting_device``.
-
-Lock strategy (Phase 1, agreed): the selector only *picks* idle devices — it
-does not pre-lock them. Locking is left to the burn API, which avoids
-client-id contention between this selector and the loopback flash request.
-At worker concurrency 1 this is race-free enough; tracked as a known
-limitation for a later phase.
-"""
+"""按自动化配置筛选空闲设备；设备锁由后续执行接口获取。"""
 
 from __future__ import annotations
 

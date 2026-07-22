@@ -4,26 +4,11 @@
       "ADBForwardStartRequest": {
         "properties": {
           "device_host": {
+            "default": "",
             "title": "Device Host",
             "type": "string"
-          },
-          "device_password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": "",
-            "description": "设备主机SSH密码",
-            "title": "Device Password"
           }
         },
-        "required": [
-          "device_host"
-        ],
         "title": "ADBForwardStartRequest",
         "type": "object"
       },
@@ -231,6 +216,17 @@
               }
             ],
             "title": "Module"
+          },
+          "report_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Id"
           },
           "report_timestamp": {
             "anyOf": [
@@ -1045,10 +1041,20 @@
             "title": "Job Id",
             "type": "string"
           },
+          "operation_id": {
+            "default": "",
+            "title": "Operation Id",
+            "type": "string"
+          },
           "payload": {
             "additionalProperties": true,
             "title": "Payload",
             "type": "object"
+          },
+          "trace_id": {
+            "default": "",
+            "title": "Trace Id",
+            "type": "string"
           },
           "worker_id": {
             "title": "Worker Id",
@@ -1400,6 +1406,11 @@
             "title": "Log Path",
             "type": "string"
           },
+          "operation_id": {
+            "default": "",
+            "title": "Operation Id",
+            "type": "string"
+          },
           "pid": {
             "anyOf": [
               {
@@ -1444,6 +1455,11 @@
           "suite_type": {
             "default": "",
             "title": "Suite Type",
+            "type": "string"
+          },
+          "trace_id": {
+            "default": "",
+            "title": "Trace Id",
             "type": "string"
           },
           "warning": {
@@ -1676,7 +1692,7 @@
             "type": "string"
           },
           "worker_id": {
-            "default": "worker-local",
+            "default": "",
             "title": "Worker Id",
             "type": "string"
           }
@@ -1983,6 +1999,17 @@
               }
             ],
             "title": "Vnc Password"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Id"
           }
         },
         "title": "VNCStartRequest",
@@ -2072,6 +2099,43 @@
         "title": "WifiConnectRequest",
         "type": "object"
       },
+      "WorkerCommandState": {
+        "properties": {
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "WorkerCommandState",
+        "type": "object"
+      },
       "WorkerDevice": {
         "properties": {
           "properties": {
@@ -2108,6 +2172,20 @@
             "default": "",
             "title": "Agent Version",
             "type": "string"
+          },
+          "command_states": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerCommandState"
+            },
+            "maxItems": 200,
+            "title": "Command States",
+            "type": "array"
+          },
+          "connection_generation": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Connection Generation",
+            "type": "integer"
           },
           "cpu_percent": {
             "default": 0,
@@ -2152,6 +2230,12 @@
             },
             "title": "Running Jobs",
             "type": "array"
+          },
+          "session_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Session Id",
+            "type": "string"
           },
           "suites": {
             "anyOf": [
@@ -2208,6 +2292,12 @@
           "name": {
             "default": "",
             "title": "Name",
+            "type": "string"
+          },
+          "session_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Session Id",
             "type": "string"
           },
           "worker_id": {
@@ -2458,6 +2548,19 @@
         "title": "WorkspaceContextPatch",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "ServiceBearer": {
+        "description": "Worker or trusted webhook service credential.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "SessionCookie": {
+        "description": "Authenticated browser session cookie.",
+        "in": "cookie",
+        "name": "gms_session",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -2482,21 +2585,28 @@
             "description": "Successful Response"
           }
         },
+        "security": [],
         "summary": "Root"
       }
     },
     "/api/adb-forward/start": {
       "post": {
-        "description": "Start ADB port forwarding to the configured device host.",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ADBForwardStartRequest"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ADBForwardStartRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Req"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -2523,7 +2633,6 @@
     },
     "/api/adb-forward/stop": {
       "post": {
-        "description": "Stop the active ADB port forwarding.",
         "responses": {
           "200": {
             "content": {
@@ -3117,7 +3226,7 @@
     },
     "/api/auth/elevate": {
       "post": {
-        "description": "Re-authenticate as admin to temporarily unlock sensitive operations.\n\nVerifies the supplied credentials belong to an admin, then stamps a short\nelevation window onto the caller's current session. The session must already\nexist (the user is logged in); elevation just grants admin-level actions\n(remove user / disconnect device) for ``ELEVATION_MINUTES``.",
+        "description": "Re-authenticate as admin to unlock sensitive operations.\n\nVerifies the supplied credentials belong to an admin, then stamps an\nelevation onto the caller's current session that lasts for the rest of\nthat session. In anonymous development mode this is also the point where\nan admin session is created; ordinary page loading remains anonymous while\nsensitive actions still require credentials.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3187,6 +3296,7 @@
             "description": "Validation Error"
           }
         },
+        "security": [],
         "summary": "Auth Login"
       }
     },
@@ -3202,7 +3312,23 @@
             "description": "Successful Response"
           }
         },
+        "security": [],
         "summary": "Auth Logout"
+      }
+    },
+    "/api/auth/roles": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Roles"
       }
     },
     "/api/auth/setup": {
@@ -3239,6 +3365,7 @@
             "description": "Validation Error"
           }
         },
+        "security": [],
         "summary": "Auth Setup"
       }
     },
@@ -3254,7 +3381,190 @@
             "description": "Successful Response"
           }
         },
+        "security": [],
         "summary": "Auth Status"
+      }
+    },
+    "/api/auth/users": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Users"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Create User"
+      }
+    },
+    "/api/auth/users/{user_id}": {
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Update User"
+      }
+    },
+    "/api/auth/users/{user_id}/reset-password": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Reset User Password"
+      }
+    },
+    "/api/auth/users/{user_id}/revoke-sessions": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Revoke User Sessions"
       }
     },
     "/api/automation/dashboard": {
@@ -3358,6 +3668,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Handle Gerrit Webhook"
       }
     },
@@ -3792,6 +4107,55 @@
           }
         },
         "summary": "Retry Automation Run"
+      }
+    },
+    "/api/automation/runs/{run_id}/timeline": {
+      "get": {
+        "description": "Return one correlated timeline across ATS and its Cluster Job.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Automation Run Timeline"
       }
     },
     "/api/automation/runs/{run_id}/trace": {
@@ -5044,6 +5408,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Init Artifact Upload",
         "tags": [
           "cluster"
@@ -5117,6 +5486,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Get Artifact Upload",
         "tags": [
           "cluster"
@@ -5291,6 +5665,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Complete Artifact Upload",
         "tags": [
           "cluster"
@@ -5431,6 +5810,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Upload Artifact",
         "tags": [
           "cluster"
@@ -5602,27 +5986,53 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Add Job Events",
         "tags": [
           "cluster"
         ]
       }
     },
-    "/api/cluster/mode": {
-      "post": {
-        "description": "Toggle between single-host and cluster mode at runtime.",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Body",
-                "type": "object"
-              }
+    "/api/cluster/jobs/{job_id}/timeline": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
             }
           },
-          "required": true
-        },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5643,7 +6053,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Set Cluster Mode",
+        "summary": "List Job Timeline",
         "tags": [
           "cluster"
         ]
@@ -5685,9 +6095,8 @@
         ]
       }
     },
-    "/api/cluster/suite-library-download/{safe_filename}": {
+    "/api/cluster/suite-library-download/{safe_filename}/{filename}": {
       "get": {
-        "description": "Serve an original archive through an old-Worker-compatible URL name.",
         "parameters": [
           {
             "in": "path",
@@ -5695,16 +6104,41 @@
             "required": true,
             "schema": {
               "title": "Safe Filename",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
               "type": "string"
             }
           },
           {
             "in": "query",
-            "name": "filename",
+            "name": "worker_id",
             "required": true,
             "schema": {
-              "title": "Filename",
+              "title": "Worker Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -5728,55 +6162,11 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Download Controller Suite Archive Compat",
-        "tags": [
-          "cluster"
-        ]
-      }
-    },
-    "/api/cluster/suite-library-download/{safe_filename}/{filename}": {
-      "get": {
-        "description": "Keep the original name as the URL's final segment for older Workers.",
-        "parameters": [
+        "security": [
           {
-            "in": "path",
-            "name": "safe_filename",
-            "required": true,
-            "schema": {
-              "title": "Safe Filename",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "filename",
-            "required": true,
-            "schema": {
-              "title": "Filename",
-              "type": "string"
-            }
+            "ServiceBearer": []
           }
         ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
         "summary": "Download Controller Suite Archive Named",
         "tags": [
           "cluster"
@@ -6504,6 +6894,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Complete Transfer",
         "tags": [
           "cluster"
@@ -6737,7 +7132,94 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Register Worker",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/ssh-host-key/scan": {
+      "post": {
+        "description": "Return untrusted fingerprints for explicit administrator verification.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scan Worker Ssh Host Key",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/ssh-host-key/trust": {
+      "post": {
+        "description": "Persist only fingerprints that match a fresh server-side key scan.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trust Worker Ssh Host Key",
         "tags": [
           "cluster"
         ]
@@ -6809,6 +7291,26 @@
               ],
               "title": "Authorization"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-Session",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Gms-Worker-Session",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-Generation",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "X-Gms-Worker-Generation",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -6831,6 +7333,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Poll Commands",
         "tags": [
           "cluster"
@@ -6873,6 +7380,26 @@
               ],
               "title": "Authorization"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-Session",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Gms-Worker-Session",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-Generation",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "X-Gms-Worker-Generation",
+              "type": "integer"
+            }
           }
         ],
         "requestBody": {
@@ -6905,7 +7432,102 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Ack Command",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/config": {
+      "get": {
+        "description": "Return the configurable parameters of a Worker.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Worker Config",
+        "tags": [
+          "cluster"
+        ]
+      },
+      "post": {
+        "description": "Update configurable Worker parameters and restart the agent to apply.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Worker Config",
         "tags": [
           "cluster"
         ]
@@ -6978,6 +7600,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Download Staged Firmware",
         "tags": [
           "cluster"
@@ -7043,6 +7670,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Heartbeat",
         "tags": [
           "cluster"
@@ -8078,6 +8710,58 @@
         "summary": "Upsert Client Ssh Credential"
       }
     },
+    "/api/config/external-services": {
+      "get": {
+        "description": "Return user-editable external service addresses without exposing secrets.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get External Services Config"
+      },
+      "post": {
+        "description": "Save the GMS Assistant upstream address in runtime configuration.\n\nThe assistant app is reached same-origin via the /public, /assets, ...\nproxy routes, which prepend this value as the upstream origin. Storing a\nfull page URL (e.g. .../public/agents/<id>/chat) makes the proxy fetch\n<origin>/<page-path>/assets/... and 404, so any path/query/fragment is\nstripped down to the scheme://netloc origin.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update External Services Config"
+      }
+    },
     "/api/config/opengrok": {
       "get": {
         "description": "获取OpenGrok配置 - 供前端源码链接使用",
@@ -8164,9 +8848,53 @@
         "summary": "Update Config"
       }
     },
+    "/api/desktop/novnc/access": {
+      "post": {
+        "description": "Issue a short-lived grant bound to this admin session and one Worker.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Req"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Novnc Access"
+      }
+    },
     "/api/desktop/validate": {
       "post": {
-        "description": "验证Ubuntu主机桌面连接并检查VNC服务",
+        "description": "Reject browser-supplied targets; hosts must be registered as Workers.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8200,44 +8928,6 @@
           }
         },
         "summary": "Validate Desktop Host"
-      }
-    },
-    "/api/desktop/validate-host": {
-      "post": {
-        "description": "/api/desktop/validate-host。",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Req",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Validate Desktop Host Legacy"
       }
     },
     "/api/desktop/vnc/start": {
@@ -8407,7 +9097,6 @@
     },
     "/api/devices/bootloader-lock": {
       "post": {
-        "description": "Lock device Bootloader.",
         "parameters": [
           {
             "in": "query",
@@ -8454,7 +9143,6 @@
     },
     "/api/devices/bootloader-status": {
       "post": {
-        "description": "Check device Bootloader lock status (GREEN=locked, ORANGE=unlocked).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8490,7 +9178,6 @@
     },
     "/api/devices/bootloader-unlock": {
       "post": {
-        "description": "Unlock device Bootloader.",
         "parameters": [
           {
             "in": "query",
@@ -8573,7 +9260,6 @@
     },
     "/api/devices/info": {
       "post": {
-        "description": "Get device detailed information.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8657,7 +9343,7 @@
     },
     "/api/devices/management": {
       "get": {
-        "description": "Device management page - get detailed management info for all devices.",
+        "description": "Return detailed device management data without leaking cached ownership.",
         "responses": {
           "200": {
             "content": {
@@ -13757,9 +14443,20 @@
         "parameters": [
           {
             "in": "query",
-            "name": "timestamp",
-            "required": true,
+            "name": "report_id",
+            "required": false,
             "schema": {
+              "default": "",
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timestamp",
+            "required": false,
+            "schema": {
+              "default": "",
               "title": "Timestamp",
               "type": "string"
             }
@@ -13830,6 +14527,15 @@
         "parameters": [
           {
             "in": "query",
+            "name": "report_id",
+            "required": false,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "report_timestamp",
             "required": false,
             "schema": {
@@ -13849,10 +14555,10 @@
           },
           {
             "in": "query",
-            "name": "path",
+            "name": "file",
             "required": false,
             "schema": {
-              "title": "Path",
+              "title": "File",
               "type": "string"
             }
           }
@@ -14383,6 +15089,22 @@
         "summary": "Record Security Page View"
       }
     },
+    "/api/security-audit/verify": {
+      "get": {
+        "description": "Verify the HMAC chain and report its current signed head.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Verify Security Audit Chain"
+      }
+    },
     "/api/sidebar-order": {
       "get": {
         "description": "获取侧边栏导航顺序。",
@@ -14531,7 +15253,7 @@
     },
     "/api/system/health": {
       "get": {
-        "description": "健康检查",
+        "description": "Compatibility liveness probe; dependency readiness has its own route.",
         "responses": {
           "200": {
             "content": {
@@ -14542,7 +15264,55 @@
             "description": "Successful Response"
           }
         },
+        "security": [],
         "summary": "Health Check"
+      }
+    },
+    "/api/system/health/details": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Details"
+      }
+    },
+    "/api/system/health/live": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Liveness Check"
+      }
+    },
+    "/api/system/health/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Readiness Check"
       }
     },
     "/api/system/help": {
@@ -14587,38 +15357,6 @@
           }
         },
         "summary": "Get Api Help"
-      }
-    },
-    "/api/system/install-package": {
-      "get": {
-        "description": "下载当前 Web App 安装包，用于 curl | bash 远程部署。",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Download Install Package"
-      }
-    },
-    "/api/system/install-sh": {
-      "get": {
-        "description": "下载 install.sh 部署脚本\n\nReturns:\n    install.sh 脚本文件",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Download Install Sh"
       }
     },
     "/api/system/skills": {
@@ -14985,22 +15723,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "h",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "H"
-            }
-          },
-          {
-            "in": "query",
             "name": "help",
             "required": false,
             "schema": {
@@ -15014,7 +15736,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TestStartRequest"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TestStartRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Req"
               }
             }
           }
@@ -15101,7 +15831,17 @@
         "parameters": [
           {
             "in": "query",
-            "name": "h",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
             "required": false,
             "schema": {
               "anyOf": [
@@ -15112,17 +15852,7 @@
                   "type": "null"
                 }
               ],
-              "title": "H"
-            }
-          },
-          {
-            "in": "query",
-            "name": "help",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Help",
-              "type": "boolean"
+              "title": "Job Id"
             }
           }
         ],
@@ -16032,7 +16762,7 @@
     },
     "/api/usbip/install": {
       "post": {
-        "description": "Install usbipd to Windows host.",
+        "description": "Install usbipd on an authorized Windows host.",
         "parameters": [
           {
             "in": "query",
@@ -16297,49 +17027,6 @@
           }
         },
         "summary": "Patch Workspace Context"
-      }
-    },
-    "/api/vnc/start": {
-      "post": {
-        "description": "/api/vnc/start。",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/VNCStartRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Req"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Start Desktop Vnc Legacy"
       }
     },
     "/api/vpn/connect": {
@@ -16784,5 +17471,10 @@
         "summary": "Get Architecture"
       }
     }
-  }
+  },
+  "security": [
+    {
+      "SessionCookie": []
+    }
+  ]
 }

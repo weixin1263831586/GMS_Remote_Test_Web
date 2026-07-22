@@ -8,11 +8,13 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from features.auth import CurrentUser
 from features.firmware import apk_api, runtime
 
 
 class ApkUploadSecurityTests(unittest.TestCase):
     def setUp(self):
+        self.runtime_directory = TemporaryDirectory()
         runtime.configure_runtime(
             global_state=SimpleNamespace(
                 apk_analysis_tasks={},
@@ -25,13 +27,24 @@ class ApkUploadSecurityTests(unittest.TestCase):
             apk_max_tasks=20,
             apk_max_file_size=500 * 1024 * 1024,
             apk_max_source_file_size=2 * 1024 * 1024,
+            apk_upload_dir=self.runtime_directory.name,
         )
         app = FastAPI()
+
+        @app.middleware('http')
+        async def authenticate_test_request(request, call_next):
+            owner_id = request.headers.get('x-test-owner', 'owner')
+            request.state.current_user = CurrentUser(
+                id=owner_id, username=owner_id, role='user'
+            )
+            return await call_next(request)
+
         app.include_router(apk_api.router)
         self.client = TestClient(app)
 
     def tearDown(self):
         self.client.close()
+        self.runtime_directory.cleanup()
 
     def test_rejects_excessive_chunk_count(self):
         with TemporaryDirectory() as tmp, patch.object(runtime, 'apk_upload_dir', tmp):

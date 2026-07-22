@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
+import inspect
 import logging
 from datetime import datetime
 
@@ -11,17 +13,133 @@ from fastapi.responses import JSONResponse
 from . import runtime
 from .locks import device_lock_manager
 from .manager import device_manager
+from .operation_claims import (
+    acquire_device_operation_claim,
+    audit_device_operation,
+    release_device_operation_claim,
+)
 
 
 logger = logging.getLogger(__name__)
 
-# ==================== Device route/service helpers ====================
-
-
-
 # ==================== 设备锁管理 ====================
 
-async def release_device_locks(client_id: str, device_ids: list[str], broadcast: bool = True):
+def device_mutation_guard(
+    operation: str,
+    *,
+    request_model: str = "req",
+    device_field: str = "devices",
+    device_argument: str = "",
+):
+    """Atomically fence a local device mutation for its full execution.
+
+    Free devices receive a short-lived operation claim; any active test,
+    reservation, transfer, or concurrent operation causes a 409 before the
+    handler reaches ADB/Fastboot. The durable claim record supplies the
+    lease-id, generation, and owner tuple used for audit and fencing.
+    """
+
+    def decorate(function):
+        signature = inspect.signature(function)
+
+        @functools.wraps(function)
+        async def guarded(*args, **kwargs):
+            bound = signature.bind_partial(*args, **kwargs)
+            request = bound.arguments.get("request")
+            model = bound.arguments.get(request_model)
+            raw_devices = (
+                bound.arguments.get(device_argument)
+                if device_argument
+                else getattr(model, device_field, None)
+            )
+            devices = (
+                [raw_devices]
+                if isinstance(raw_devices, str)
+                else list(raw_devices or [])
+            )
+            if not devices and model is not None:
+                single = getattr(model, "device_id", None)
+                if single:
+                    devices = [single]
+            if not devices:
+                return await function(*args, **kwargs)
+            source_id, records, conflict = acquire_device_operation_claim(
+                request,
+                devices,
+                operation,
+            )
+            if conflict:
+                return conflict
+            try:
+                response = await function(*args, **kwargs)
+                audit_device_operation(
+                    request,
+                    operation,
+                    records,
+                    getattr(response, "status_code", 200),
+                )
+                return response
+            except Exception as exc:
+                audit_device_operation(
+                    request,
+                    operation,
+                    records,
+                    500,
+                    error=str(exc),
+                )
+                raise
+            finally:
+                release_device_operation_claim(source_id)
+
+        return guarded
+
+    return decorate
+
+def device_claim_conflict_response(
+    device_ids: list[str],
+    client_id: str,
+    *,
+    allow_owner: bool = False,
+) -> JSONResponse | None:
+    """Return 409 when a direct device action would violate an active claim."""
+    conflicts = []
+    for device_id in dict.fromkeys(str(item).strip() for item in device_ids):
+        if not device_id:
+            continue
+        claim = device_lock_manager.get_lock_status(device_id)
+        if not claim:
+            continue
+        if allow_owner and claim.get("client_id") == client_id:
+            continue
+        conflicts.append(
+            {
+                "device_id": device_id,
+                "owner": claim.get("username") or claim.get("client_id") or "another user",
+                "source_type": claim.get("source_type") or "operation",
+            }
+        )
+    if not conflicts:
+        return None
+    first = conflicts[0]
+    return JSONResponse(
+        content={
+            "success": False,
+            "error": (
+                f"Device {first['device_id']} is reserved by an active "
+                f"{first['source_type']} operation"
+            ),
+            "conflicts": conflicts,
+        },
+        status_code=409,
+    )
+
+async def release_device_locks(
+    client_id: str,
+    device_ids: list[str],
+    broadcast: bool = True,
+    *,
+    source_id: str | None = None,
+):
     """
     批量释放设备锁并广播更新
 
@@ -34,7 +152,11 @@ async def release_device_locks(client_id: str, device_ids: list[str], broadcast:
         return
 
     for device_id in device_ids:
-        device_lock_manager.unlock_device(device_id, client_id)
+        device_lock_manager.unlock_device(
+            device_id,
+            client_id,
+            source_id=source_id,
+        )
 
     if broadcast:
         await broadcast_device_lock_update(device_ids)
@@ -56,13 +178,11 @@ async def broadcast_device_change(devices: list[str], disconnected: list[str] | 
     message = {
         'type': 'devices_changed',
         'devices': devices,
+        'disconnected': disconnected or [],
+        'connected': connected or [],
         'source': source,
         'timestamp': datetime.now().isoformat()
     }
-    if disconnected:
-        message['disconnected'] = disconnected
-    if connected:
-        message['connected'] = connected
 
     logger.info(f"[Broadcast] Notifying {len(runtime.global_state.websocket_connections)} clients about device change (source: {source})")
 
@@ -225,18 +345,7 @@ def update_user_state_field(client_id: str, updates: dict):
 # ==================== 并行设备操作 ====================
 
 async def execute_on_devices_parallel(devices: list[str], operation_func, ssh, **kwargs) -> list[dict]:
-    """
-    并行执行设备操作，替代串行循环
-
-    Args:
-        devices: 设备ID列表
-        operation_func: 单设备操作函数，签名为 async def func(device_id, ssh, **kwargs) -> dict
-        ssh: SSH连接对象
-        **kwargs: 传递给operation_func的额外参数
-
-    Returns:
-        操作结果列表
-    """
+    """并行执行单设备操作并汇总结果。"""
     async def process_device(device_id: str) -> dict:
         try:
             result = await operation_func(device_id, ssh, **kwargs)

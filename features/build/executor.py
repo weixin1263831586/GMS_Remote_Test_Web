@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
+from foundation.ssh_security import configure_strict_host_keys
+
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _SAFE_PARAM_RE = re.compile(r"^[A-Za-z0-9_./:@+=,\- ]*$")
@@ -89,7 +91,6 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
 
 class SshTmuxBuildBackend:
     def _connect_kwargs(self, server: dict[str, Any]) -> dict[str, Any]:
-
         auth = server.get("auth") if isinstance(server.get("auth"), dict) else {}
         kwargs: dict[str, Any] = {
             "hostname": server.get("host"),
@@ -101,18 +102,29 @@ class SshTmuxBuildBackend:
             "look_for_keys": True,
         }
         if auth.get("type") == "env_password":
-            password = os.getenv(str(auth.get("env") or ""))
-            if password:
-                kwargs["password"] = password
-                kwargs["look_for_keys"] = False
+            env_name = str(auth.get("env") or "").strip()
+            if not env_name:
+                raise BuildExecutionError("构建服务器未配置 SSH 密码环境变量")
+            password = os.getenv(env_name)
+            if not password:
+                raise BuildExecutionError(f"构建服务器 SSH 密码未配置：请设置环境变量 {env_name}")
+            kwargs["password"] = password
+            kwargs["look_for_keys"] = False
+            kwargs["allow_agent"] = False
         elif auth.get("type") == "runtime_password":
             password = str(auth.get("password") or "")
-            if password:
-                kwargs["password"] = password
-                kwargs["look_for_keys"] = False
-        elif auth.get("type") == "password":
-            kwargs["password"] = str(auth.get("password") or "")
+            if not password:
+                raise BuildExecutionError("本次构建未提供 SSH 密码")
+            kwargs["password"] = password
             kwargs["look_for_keys"] = False
+            kwargs["allow_agent"] = False
+        elif auth.get("type") == "password":
+            password = str(auth.get("password") or "")
+            if not password:
+                raise BuildExecutionError("构建服务器 SSH 密码为空")
+            kwargs["password"] = password
+            kwargs["look_for_keys"] = False
+            kwargs["allow_agent"] = False
         elif auth.get("type") == "key":
             key_path = os.path.expanduser(str(auth.get("path") or "~/.ssh/id_rsa"))
             if key_path:
@@ -123,7 +135,7 @@ class SshTmuxBuildBackend:
         import paramiko
 
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_strict_host_keys(ssh)
         try:
             ssh.connect(**self._connect_kwargs(server))
             _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=False)
@@ -131,6 +143,14 @@ class SshTmuxBuildBackend:
             err = stderr.read().decode(errors="replace")
             code = stdout.channel.recv_exit_status()
             return code, out, err
+        except BuildExecutionError:
+            raise
+        except paramiko.AuthenticationException as exc:
+            raise BuildExecutionError("连接构建服务器失败：SSH 用户名或密码错误") from exc
+        except paramiko.PasswordRequiredException as exc:
+            raise BuildExecutionError("连接构建服务器失败：SSH 私钥需要密码") from exc
+        except (paramiko.SSHException, OSError, TimeoutError) as exc:
+            raise BuildExecutionError(f"连接构建服务器失败：{exc}") from exc
         finally:
             ssh.close()
 
@@ -205,7 +225,23 @@ class SshTmuxBuildBackend:
             return []
         find_parts = []
         for pattern in patterns[:20]:
-            find_parts.append(f"find {shlex.quote(workspace)} -path {shlex.quote(str(PurePosixPath(workspace) / pattern))} -type f -printf '%p\\t%s\\t%TY-%Tm-%TdT%TH:%TM:%TSZ\\n' 2>/dev/null")
+            relative = PurePosixPath(str(pattern))
+            parts = relative.parts
+            static_parts: list[str] = []
+            for part in parts:
+                if any(char in part for char in "*?["):
+                    break
+                static_parts.append(part)
+            if len(static_parts) == len(parts) and static_parts:
+                static_parts.pop()
+            search_root = PurePosixPath(workspace).joinpath(*static_parts)
+            remaining_depth = max(1, len(parts) - len(static_parts))
+            full_pattern = PurePosixPath(workspace) / relative
+            find_parts.append(
+                f"find {shlex.quote(str(search_root))} -maxdepth {remaining_depth} "
+                f"-path {shlex.quote(str(full_pattern))} -type f "
+                "-printf '%p\\t%s\\t%TY-%Tm-%TdT%TH:%TM:%TSZ\\n' 2>/dev/null || true"
+            )
         command = " ; ".join(find_parts)
         code, out, _err = self._run(server, command, timeout=60)
         if code not in (0, 1):

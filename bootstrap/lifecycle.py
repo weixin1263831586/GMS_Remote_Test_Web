@@ -30,6 +30,7 @@ from features.redmine.scheduler import (
 )
 from features.system.state import global_state
 from foundation.config import CLEANUP_INTERVAL_SECONDS
+from foundation.controller_lock import controller_process_lock
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,19 @@ def initialize_runtime_data(services: AppServices) -> None:
     data_root = services.settings.data_root
     data_root.mkdir(parents=True, exist_ok=True)
 
-    # Redmine repository owns its schema, documents, and attachment workspace.
+    # SQLite 不创建父目录，启动时统一补齐运行目录。
+    for sub in (
+        'apk_uploads', 'automation', 'build', 'cluster', 'cluster/artifacts',
+        'cluster/artifact-uploads', 'cluster/transfers',
+        'config_explorer_cache', 'gerrit', 'gerrit/by_user', 'knowledge',
+        'knowledge/attachments', 'notes', 'notes/uploads', 'notifications',
+        'redmine', 'redmine/attachments', 'redmine/by_user', 'redmine/docs',
+        'reports', 'secrets', 'test_execution', 'uploads', 'uploads/gms_uploads',
+        'user_prefs',
+    ):
+        (data_root / sub).mkdir(parents=True, exist_ok=True)
+
+    # Redmine 仓库管理自身结构、文档和附件目录。
     services.redmine.repository.init_db()
     (data_root / 'redmine/attachments').mkdir(parents=True, exist_ok=True)
 
@@ -50,8 +63,14 @@ def initialize_runtime_data(services: AppServices) -> None:
     from features.system.update_monitor.repository import init_db as init_update_monitor_db
 
     AutomationStore(data_root / 'automation/automation.sqlite3')
-    ClusterRepository(data_root / 'cluster/cluster.sqlite3')
-    TestReportDB(str(data_root / 'test_reports.json'))
+    from features.cluster import ClusterConfig
+
+    cluster_config = ClusterConfig.load()
+    ClusterRepository(
+        data_root / 'cluster/cluster.sqlite3',
+        claim_lease_ttl_seconds=cluster_config.lease_ttl_seconds,
+    )
+    TestReportDB(str(data_root / 'reports/reports.sqlite3'))
 
     update_monitor_db = data_root / 'gms_update_monitor.sqlite3'
     update_monitor_db.parent.mkdir(parents=True, exist_ok=True)
@@ -161,42 +180,63 @@ def _start_usb_monitor(app):
 def create_lifespan(services: AppServices):
     @asynccontextmanager
     async def lifespan(app):
-        app.state.services = services
-        initialize_runtime_data(services)
-        cleanup_task = asyncio.create_task(_periodic_cleanup())
-        redmine_task = start_redmine_agent_scheduler(services.redmine)
-        try:
-            usb_dispatch_task = _start_usb_monitor(app)
-        except Exception:
-            logger.exception('Failed to start USB monitor')
-            usb_dispatch_task = None
-        automation_task = None
-        try:
-            from features.automation.worker import start_automation_worker
+        with controller_process_lock(services.settings.data_root):
+            app.state.services = services
+            initialize_runtime_data(services)
+            cleanup_task = asyncio.create_task(_periodic_cleanup())
+            app.state.cleanup_task = cleanup_task
+            redmine_task = start_redmine_agent_scheduler(services.redmine)
+            app.state.redmine_scheduler_task = redmine_task
+            try:
+                usb_dispatch_task = _start_usb_monitor(app)
+            except Exception:
+                logger.exception('Failed to start USB monitor')
+                usb_dispatch_task = None
+            app.state.usb_dispatch_task = usb_dispatch_task
+            automation_task = None
+            try:
+                from features.automation.worker import start_automation_worker
 
-            automation_task = start_automation_worker()
-        except Exception:
-            logger.exception('Failed to start automation worker')
-        yield
-        cleanup_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await cleanup_task
-        if usb_dispatch_task:
-            usb_dispatch_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await usb_dispatch_task
-        if automation_task:
-            from features.automation.worker import stop_automation_worker
+                automation_task = start_automation_worker()
+            except Exception:
+                logger.exception('Failed to start automation worker')
+            app.state.automation_task = automation_task
+            from features.firmware.apk import recover_apk_analysis_tasks
 
-            with suppress(asyncio.CancelledError):
-                await stop_automation_worker()
-        if redmine_task:
-            await stop_redmine_agent_scheduler()
-        try:
-            stop_local_bridge()
-        except Exception:
-            pass
-        stop_usbip_reconnect_tasks()
-        stop_usb_monitor()
+            app.state.apk_recovery_tasks = recover_apk_analysis_tasks()
+            from features.test_execution.transfers_api import recover_suite_tasks
+
+            app.state.suite_recovery_tasks = recover_suite_tasks()
+            try:
+                yield
+            finally:
+                background_tasks = list(global_state.background_tasks)
+                for task in background_tasks:
+                    task.cancel()
+                if background_tasks:
+                    await asyncio.gather(
+                        *background_tasks,
+                        return_exceptions=True,
+                    )
+                cleanup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await cleanup_task
+                if usb_dispatch_task:
+                    usb_dispatch_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await usb_dispatch_task
+                if automation_task:
+                    from features.automation.worker import stop_automation_worker
+
+                    with suppress(asyncio.CancelledError):
+                        await stop_automation_worker()
+                if redmine_task:
+                    await stop_redmine_agent_scheduler()
+                try:
+                    stop_local_bridge()
+                except Exception:
+                    pass
+                stop_usbip_reconnect_tasks()
+                stop_usb_monitor()
 
     return lifespan

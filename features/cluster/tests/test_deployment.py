@@ -1,15 +1,43 @@
 import asyncio
+import json
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import HTTPException
 import paramiko
+from fastapi import HTTPException
 
 
 class WorkerDeploymentTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.credential = Path(self.temporary_directory.name) / "gts.json"
+        self.credential.write_text(
+            json.dumps({
+                "type": "service_account",
+                "client_email": "worker@example.invalid",
+                "private_key": (
+                    "-----BEGIN PRIVATE KEY-----\nplaceholder\n"
+                    "-----END PRIVATE KEY-----\n"
+                ),
+            }),
+            encoding="utf-8",
+        )
+        self.credential.chmod(0o600)
+        self.environment = patch.dict(
+            "os.environ",
+            {"GMS_GTS_CREDENTIAL_FILE": str(self.credential)},
+        )
+        self.environment.start()
+
+    def tearDown(self):
+        self.environment.stop()
+        self.temporary_directory.cleanup()
+
     @staticmethod
     def _body():
         return {
@@ -75,9 +103,8 @@ class WorkerDeploymentTests(unittest.TestCase):
         ), patch(
             "features.cluster.deployment_api.utc_now",
             return_value="2026-01-01T00:00:01Z",
-        ):
-            with self.assertRaises(HTTPException) as raised:
-                asyncio.run(deploy_worker(self._body()))
+        ), self.assertRaises(HTTPException) as raised:
+            asyncio.run(deploy_worker(self._body()))
 
         self.assertEqual(raised.exception.status_code, 502)
         self.assertIn("未产生新心跳", raised.exception.detail)
@@ -88,9 +115,8 @@ class WorkerDeploymentTests(unittest.TestCase):
         with patch(
             "features.system.ssh_manager.create_connection",
             side_effect=paramiko.AuthenticationException(),
-        ):
-            with self.assertRaises(HTTPException) as raised:
-                asyncio.run(deploy_worker(self._body()))
+        ), self.assertRaises(HTTPException) as raised:
+            asyncio.run(deploy_worker(self._body()))
 
         self.assertEqual(raised.exception.status_code, 502)
         self.assertIn(
@@ -123,6 +149,57 @@ class WorkerDeploymentTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.stdout, "/home/worker/GMS-Suite")
+
+
+class GtsCredentialResolutionTests(unittest.TestCase):
+    """The deployment API must keep working when GMS_GTS_CREDENTIAL_FILE is
+    unset, falling back to the bundled tools/GMS-Host-Tools/gts-rockchip.json
+    instead of failing the deployment with HTTP 503."""
+
+    def _write_service_account(self, path: Path) -> None:
+        path.write_text(
+            json.dumps({
+                "type": "service_account",
+                "client_email": "worker@example.invalid",
+                "private_key": (
+                    "-----BEGIN PRIVATE KEY-----\nplaceholder\n"
+                    "-----END PRIVATE KEY-----\n"
+                ),
+            }),
+            encoding="utf-8",
+        )
+        path.chmod(0o600)
+
+    def test_explicit_env_takes_precedence(self):
+        from features.cluster.deployment_api import _resolve_gts_credential
+
+        with tempfile.TemporaryDirectory() as directory:
+            explicit = Path(directory) / "explicit-gts.json"
+            self._write_service_account(explicit)
+            with patch.dict(
+                "os.environ",
+                {"GMS_GTS_CREDENTIAL_FILE": str(explicit)},
+            ):
+                result = _resolve_gts_credential()
+            self.assertEqual(result, explicit.resolve())
+
+    def test_falls_back_to_bundled_credential_when_env_unset(self):
+        from features.cluster.deployment_api import _resolve_gts_credential
+
+        with tempfile.TemporaryDirectory() as directory:
+            project_root = Path(directory)
+            bundled = (
+                project_root
+                / "tools"
+                / "GMS-Host-Tools"
+                / "gts-rockchip.json"
+            )
+            bundled.parent.mkdir(parents=True)
+            self._write_service_account(bundled)
+            with patch.dict("os.environ", {}, clear=False):
+                os.environ.pop("GMS_GTS_CREDENTIAL_FILE", None)
+                result = _resolve_gts_credential(project_root=project_root)
+            self.assertEqual(result, bundled.resolve())
 
 
 if __name__ == "__main__":

@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
-from features.auth import get_authenticated_user
+from features.auth import (
+    CurrentUser,
+    get_authenticated_user,
+    require_authenticated_user,
+    require_authenticated_user_when_auth_required,
+    require_role,
+    require_role_when_auth_required,
+)
 from features.automation.repository import AutomationStore
 from features.automation.service import (
     AutomationNotFoundError,
@@ -39,17 +47,19 @@ automation_service = AutomationService(
 )
 
 
-def _request_owner(request: Request | None) -> tuple[str, bool]:
+def _request_owner(request: Request) -> tuple[str, bool]:
     """Return the ATS owner filter and whether the caller may see all runs."""
-    if request is None:
-        return "", True
     user = get_authenticated_user(request)
-    if user and user.role == "admin":
+    if user is None:
+        user = require_authenticated_user_when_auth_required(request)
+    if user is None:
+        return owner_id_from_request(request), False
+    if user.role == "admin":
         return "", True
-    return owner_id_from_request(request, default="anonymous"), False
+    return user.id, False
 
 
-def _owned_run(run_id: str, request: Request | None) -> dict[str, Any]:
+def _owned_run(run_id: str, request: Request) -> dict[str, Any]:
     run = automation_service.get_run(run_id)
     owner, see_all = _request_owner(request)
     if not see_all and run.get("created_by") != owner:
@@ -78,7 +88,10 @@ async def automation_page():
 
 
 @router.get('/profiles')
-async def list_automation_profiles(enabled_only: bool = Query(False)):
+async def list_automation_profiles(
+    enabled_only: bool = Query(False),
+    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
+):
     return {
         'success': True,
         'data': {
@@ -90,7 +103,10 @@ async def list_automation_profiles(enabled_only: bool = Query(False)):
 
 
 @router.post('/profiles')
-async def save_automation_profile(req: dict[str, Any]):
+async def save_automation_profile(
+    req: dict[str, Any],
+    _admin: CurrentUser = Depends(require_role("admin")),
+):
     try:
         profile = automation_service.save_profile(req)
     except ValueError as exc:
@@ -108,6 +124,7 @@ async def save_automation_profile(req: dict[str, Any]):
 async def update_automation_profile(
     profile_id: str,
     req: dict[str, Any],
+    _admin: CurrentUser = Depends(require_role("admin")),
 ):
     body = dict(req or {})
     body['id'] = profile_id
@@ -118,6 +135,7 @@ async def update_automation_profile(
 async def dry_run_automation_profile(
     profile_id: str,
     req: dict[str, Any],
+    _user: CurrentUser = Depends(require_authenticated_user),
 ):
     try:
         data = automation_service.dry_run_profile(profile_id, req)
@@ -128,10 +146,10 @@ async def dry_run_automation_profile(
 
 @router.post('/runs')
 async def create_automation_run(
-    req: dict[str, Any], request: Request = None
+    req: dict[str, Any], request: Request
 ):
     try:
-        owner, _ = _request_owner(request)
+        owner = require_authenticated_user(request).id
         run = automation_service.create_run(req, created_by=owner)
     except ValueError as exc:
         return error_response(str(exc), 400)
@@ -139,7 +157,10 @@ async def create_automation_run(
 
 
 @router.post('/runs/preflight')
-async def preflight_automation_run(req: dict[str, Any]):
+async def preflight_automation_run(
+    req: dict[str, Any],
+    _user: CurrentUser = Depends(require_authenticated_user),
+):
     try:
         data = automation_service.preflight(req)
     except ValueError as exc:
@@ -149,7 +170,7 @@ async def preflight_automation_run(req: dict[str, Any]):
 
 @router.get('/runs')
 async def list_automation_runs(
-    request: Request = None,
+    request: Request,
     status: str = Query(''),
     limit: int = Query(50, ge=1, le=500),
 ):
@@ -167,7 +188,7 @@ async def list_automation_runs(
 
 
 @router.get('/runs/{run_id}')
-async def get_automation_run(run_id: str, request: Request = None):
+async def get_automation_run(run_id: str, request: Request):
     try:
         run = _owned_run(run_id, request)
     except AutomationNotFoundError as exc:
@@ -176,7 +197,7 @@ async def get_automation_run(run_id: str, request: Request = None):
 
 
 @router.get('/dashboard')
-async def automation_dashboard(request: Request = None):
+async def automation_dashboard(request: Request):
     """Aggregate run/build counts for the GMS ATS dashboard."""
     from collections import Counter
 
@@ -223,7 +244,7 @@ async def automation_dashboard(request: Request = None):
 
 @router.get('/runs/{run_id}/events')
 async def get_automation_run_events(
-    run_id: str, request: Request = None
+    run_id: str, request: Request
 ):
     try:
         _owned_run(run_id, request)
@@ -233,9 +254,52 @@ async def get_automation_run_events(
     return {'success': True, 'data': {'items': events}}
 
 
+@router.get('/runs/{run_id}/timeline')
+async def get_automation_run_timeline(
+    run_id: str,
+    request: Request,
+    limit: int = Query(default=1000, ge=1, le=2000),
+):
+    """Return one correlated timeline across ATS and its Cluster Job."""
+    try:
+        run = _owned_run(run_id, request)
+    except AutomationNotFoundError as exc:
+        return error_response(str(exc), 404)
+    effective_limit = limit if isinstance(limit, int) else 1000
+    items = []
+    for event in automation_service.list_events(run_id):
+        item = dict(event)
+        try:
+            item['payload'] = json.loads(item.pop('payload_json') or '{}')
+        except (TypeError, ValueError):
+            item['payload'] = {}
+        item['domain'] = 'automation'
+        items.append(item)
+    cluster_job_id = str(run.get('cluster_job_id') or '')
+    if cluster_job_id:
+        try:
+            cluster_events = get_cluster_service().repository.list_timeline(
+                job_id=cluster_job_id, limit=effective_limit
+            )
+        except Exception:
+            cluster_events = []
+        for event in cluster_events:
+            items.append({**event, 'domain': 'cluster'})
+    items.sort(key=lambda item: (str(item.get('created_at') or ''), int(item.get('id') or 0)))
+    return {
+        'success': True,
+        'data': {
+            'trace_id': run.get('trace_id') or run_id,
+            'run_id': run_id,
+            'cluster_job_id': cluster_job_id,
+            'items': items[:effective_limit],
+        },
+    }
+
+
 @router.get('/runs/{run_id}/trace')
 async def get_automation_run_trace(
-    run_id: str, request: Request = None
+    run_id: str, request: Request
 ):
     """Correlate a run with its build job, commit, artifact and report."""
     try:
@@ -270,6 +334,10 @@ async def get_automation_run_trace(
         'success': True,
         'data': {
             'run_id': run['id'],
+            'trace_id': run.get('trace_id') or run['id'],
+            'state_version': run.get('state_version', 1),
+            'recovery_count': run.get('recovery_count', 0),
+            'last_recovered_at': run.get('last_recovered_at', ''),
             'profile_id': run['profile_id'],
             'status': run['status'],
             'build_job_id': build_job_id,
@@ -298,7 +366,7 @@ async def get_automation_run_trace(
 
 @router.post('/runs/{run_id}/cancel')
 async def cancel_automation_run(
-    run_id: str, request: Request = None
+    run_id: str, request: Request
 ):
     try:
         _owned_run(run_id, request)
@@ -312,7 +380,7 @@ async def cancel_automation_run(
 
 @router.post('/runs/{run_id}/retry')
 async def retry_automation_run(
-    run_id: str, request: Request = None
+    run_id: str, request: Request
 ):
     try:
         _owned_run(run_id, request)
@@ -325,11 +393,11 @@ async def retry_automation_run(
 
 
 @router.post('/worker/tick')
-async def automation_worker_tick(executor: str = Query('http', pattern='^(http|stub)$')):
-    # worker_tick drives the whole automation state machine synchronously —
-    # Jenkins trigger/poll, firmware flash (HTTP timeout up to 3600s), test
-    # start, report analysis. Run it off the event loop or a single tick can
-    # freeze the server for the duration of a flash.
+async def automation_worker_tick(
+    executor: str = Query('http', pattern='^(http|stub)$'),
+    _admin: CurrentUser = Depends(require_role("admin")),
+):
+    # 自动化状态机包含长耗时阻塞操作，在线程中执行。
     data = await asyncio.to_thread(automation_service.worker_tick, executor)
     return {
         'success': True,
@@ -338,7 +406,9 @@ async def automation_worker_tick(executor: str = Query('http', pattern='^(http|s
 
 
 @router.get('/worker/status')
-async def automation_worker_status():
+async def automation_worker_status(
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     from features.automation.worker import get_worker_status
 
     return {'success': True, 'data': get_worker_status()}
@@ -347,26 +417,40 @@ async def automation_worker_status():
 @router.post('/gerrit/webhook')
 async def handle_gerrit_webhook(
     payload: dict[str, Any],
-    request: Request = None,
     automation_token: str = Header(default='', alias='X-GMS-Automation-Token'),
 ):
     expected = os.getenv('GMS_AUTOMATION_WEBHOOK_TOKEN', '').strip()
-    if expected and not hmac.compare_digest(automation_token, expected):
-        raise HTTPException(status_code=401, detail='Invalid automation webhook token')
-    if not expected and settings.environment == 'production' and request is not None:
+    if not expected:
         raise HTTPException(
             status_code=503,
-            detail='GMS_AUTOMATION_WEBHOOK_TOKEN is required in production',
+            detail='GMS_AUTOMATION_WEBHOOK_TOKEN is required',
+        )
+    if not hmac.compare_digest(automation_token, expected):
+        raise HTTPException(status_code=401, detail='Invalid automation webhook token')
+    owner_id = os.getenv('GMS_AUTOMATION_OWNER_ID', '').strip()
+    if not owner_id:
+        raise HTTPException(
+            status_code=503,
+            detail='GMS_AUTOMATION_OWNER_ID is required',
         )
     return {
         'success': True,
-        'data': automation_service.handle_gerrit_webhook(payload),
+        'data': automation_service.handle_gerrit_webhook(
+            payload,
+            created_by=owner_id,
+        ),
     }
 
 
 @router.post('/gerrit/poll')
-async def poll_gerrit_changes(limit: int = Query(100, ge=1, le=500)):
+async def poll_gerrit_changes(
+    limit: int = Query(100, ge=1, le=500),
+    admin: CurrentUser = Depends(require_role("admin")),
+):
     return {
         'success': True,
-        'data': await automation_service.poll_gerrit_changes(limit),
+        'data': await automation_service.poll_gerrit_changes(
+            limit,
+            created_by=admin.id,
+        ),
     }

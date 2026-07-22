@@ -37,7 +37,7 @@ class TestLogsManagerTests(unittest.TestCase):
             result = manager.download_logs([str(outside)], str(root / "logs.zip"))
 
         self.assertFalse(result["success"])
-        self.assertIn("不在允许目录", result["error"])
+        self.assertIn("无效的日志标识", result["error"])
 
     def test_save_current_log_sanitizes_client_id(self):
         with TemporaryDirectory() as tmp:
@@ -55,6 +55,33 @@ class TestLogsManagerTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertNotIn("..", result["filename"])
         self.assertNotIn("/", result["filename"])
+
+    def test_regular_user_cannot_list_or_download_another_owners_log(self):
+        with TemporaryDirectory() as tmp:
+            manager = GmsTestLogsManager()
+            manager.saved_logs_dir = Path(tmp) / "saved"
+            manager.downloads_dir = Path(tmp) / "downloads"
+            manager.log_dirs = [Path(tmp)]
+            alice = manager.save_current_log("alice", "alice")
+            bob = manager.save_current_log("bob", "bob")
+            alice_id = manager.log_id_for_path(alice["file_path"])
+            bob_id = manager.log_id_for_path(bob["file_path"])
+
+            listed = manager.list_log_files(owner_id="alice")
+            denied = manager.download_logs(
+                [bob_id],
+                owner_id="alice",
+            )
+            admin = manager.download_logs(
+                [alice_id, bob_id],
+                owner_id="admin",
+                is_admin=True,
+            )
+
+        self.assertEqual([item["name"] for item in listed["files"]], [alice["filename"]])
+        self.assertFalse(denied["success"])
+        self.assertTrue(admin["success"])
+        self.assertEqual(admin["file_count"], 2)
 
     def test_clean_old_logs_reports_failed_deletes(self):
         with TemporaryDirectory() as tmp:

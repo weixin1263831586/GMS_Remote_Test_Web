@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
+from features.auth import require_authenticated_user
 from features.firmware.apk import (
     ANDROID_NS,
     JAVA_IDENTIFIER_RE,
@@ -22,6 +23,7 @@ from features.firmware.apk import (
     _get_apk_upload_lock,
     _normalize_apk_filename,
     _normalize_apk_task_id,
+    _persist_apk_task_locked,
     _read_manifest_xml,
     _run_jadx_analysis,
     _safe_join,
@@ -41,7 +43,7 @@ MAX_APK_UPLOAD_CHUNKS = 1_000
 
 
 def _owner_id(request: Request) -> str:
-    return str(runtime.get_client_id_from_request(request) or 'anonymous')
+    return require_authenticated_user(request).id
 
 
 def _task_id_in_use(task_id: str) -> bool:
@@ -208,6 +210,7 @@ async def analyze_apk(task_id: str, request: Request):
     with runtime.global_state.apk_analysis_tasks_lock:
         t = runtime.global_state.apk_analysis_tasks[task_id]
         t.update({"status": "analyzing", "progress": 5, "output_dir": output_dir, "error": None})
+        _persist_apk_task_locked(task_id)
 
     task = asyncio.create_task(_run_jadx_analysis(task_id, apk_path, output_dir))
     runtime.global_state.background_tasks.add(task)
@@ -496,6 +499,8 @@ async def delete_apk_task(task_id: str, request: Request):
                 status_code=409,
             )
         runtime.global_state.apk_analysis_tasks.pop(safe_task_id)
+        if runtime.apk_task_store is not None:
+            runtime.apk_task_store.delete(safe_task_id)
 
     task_dir = _safe_join(runtime.apk_upload_dir, safe_task_id)
     await asyncio.to_thread(shutil.rmtree, task_dir, ignore_errors=True)

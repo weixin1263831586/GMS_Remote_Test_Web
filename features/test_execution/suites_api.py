@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import shlex
+import shutil
 import time
 import urllib.parse
 import uuid
@@ -25,6 +26,13 @@ from .models import SuiteApkAnalyzeRequest, SuiteDiagnosisTargetRequest
 from .suite_helpers import (
     _get_available_test_suites,
     _resolve_suite_diagnosis_target,
+)
+from .suite_local_files import (
+    list_suite_files_local,
+    local_suite_directory_response,
+    local_suite_file_info,
+    local_suite_file_response,
+    search_suite_files_local,
 )
 from .suite_modules import search_latest_suite_modules
 from .suites import get_default_suites_path, is_config_host_local
@@ -287,51 +295,6 @@ def _run_suite_file_script(ssh, script: str, suite_root: str, remote_path: str, 
         ) from e
 
 
-def _search_suite_files_local(suite_root: str, query: str, limit: int) -> list[dict[str, Any]]:
-    matches: list[dict[str, Any]] = []
-    query_lower = query.lower()
-    if not os.path.isdir(suite_root):
-        return matches
-    for current, dirs, files in os.walk(suite_root):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for name in sorted(dirs, key=str.lower):
-            if query_lower and query_lower not in name.lower():
-                continue
-            full_path = os.path.join(current, name)
-            rel = os.path.relpath(full_path, suite_root)
-            matches.append({
-                "name": name,
-                "path": "" if rel == "." else rel,
-                "type": "directory",
-                "size": 0,
-                "modified": int(os.path.getmtime(full_path)),
-            })
-            if len(matches) >= limit:
-                return matches
-        for name in sorted(files, key=str.lower):
-            if query_lower and query_lower not in name.lower():
-                continue
-            full_path = os.path.join(current, name)
-            try:
-                st = os.stat(full_path)
-            except OSError:
-                continue
-            rel = os.path.relpath(full_path, suite_root)
-            lower = name.lower()
-            matches.append({
-                "name": name,
-                "path": rel,
-                "type": "file",
-                "size": st.st_size,
-                "modified": int(st.st_mtime),
-                "is_apk": lower.endswith(".apk"),
-                "is_jar": lower.endswith(".jar"),
-            })
-            if len(matches) >= limit:
-                return matches
-    return matches
-
-
 @router.get("/api/test/suites/files")
 @handle_api_errors
 async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
@@ -341,6 +304,14 @@ async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
         suite_root, rel_path, remote_path = _build_suite_remote_path(suite_path, path, config)
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
+
+    if is_config_host_local(config):
+        payload = await asyncio.to_thread(
+            list_suite_files_local, suite_root, remote_path
+        )
+        if not payload.get("success"):
+            return ApiResponse.error(payload.get("error", "Directory read failed"), status_code=400)
+        return ApiResponse.success({"suite_path": suite_path, "suite_root": suite_root, "path": payload.get("path", rel_path), "items": payload.get("items", [])})
 
     async with runtime.ssh_manager.async_optional_connection(config) as ssh:
         if not ssh:
@@ -367,7 +338,7 @@ async def search_suite_files(
         return ApiResponse.error(str(e), status_code=400)
 
     if os.path.isdir(suite_root):
-        items = await asyncio.to_thread(_search_suite_files_local, suite_root, query.strip(), limit)
+        items = await asyncio.to_thread(search_suite_files_local, suite_root, query.strip(), limit)
         return ApiResponse.success({"suite_path": suite_path, "suite_root": suite_root, "query": query, "items": items, "count": len(items)})
 
     async with runtime.ssh_manager.async_optional_connection(config) as ssh:
@@ -404,6 +375,15 @@ async def download_suite_file(suite_path: str = Query(...), path: str = Query(..
         suite_root, _, remote_path = _build_suite_remote_path(suite_path, path, config)
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
+
+    if is_config_host_local(config):
+        try:
+            return await asyncio.to_thread(
+                local_suite_file_response, suite_root, remote_path, inline
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            status = 400 if isinstance(exc, ValueError) else 404
+            return ApiResponse.error(str(exc), status_code=status)
 
     ssh = runtime.ssh_manager.get_connection(config)
     if not ssh:
@@ -467,6 +447,15 @@ async def download_suite_directory(suite_path: str = Query(...), path: str = Que
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
 
+    if is_config_host_local(config):
+        try:
+            return await asyncio.to_thread(
+                local_suite_directory_response, suite_root, remote_path
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            status = 400 if isinstance(exc, ValueError) else 404
+            return ApiResponse.error(str(exc), status_code=status)
+
     ssh = runtime.ssh_manager.get_connection(config)
     if not ssh:
         return ssh_connection_failed_response()
@@ -527,6 +516,43 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest, request: R
         suite_root, _, remote_path = _build_suite_remote_path(req.suite_path, req.path, config)
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
+
+    if is_config_host_local(config):
+        try:
+            info = await asyncio.to_thread(
+                local_suite_file_info, suite_root, remote_path
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            status = 400 if isinstance(exc, ValueError) else 404
+            return ApiResponse.error(str(exc), status_code=status)
+        if not (info["is_apk"] or info["is_jar"]):
+            return ApiResponse.error(
+                "Only APK/JAR files supported for decompilation", status_code=400
+            )
+        if int(info["size"]) > runtime.apk_max_file_size:
+            return ApiResponse.error(
+                f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB",
+                status_code=400,
+            )
+
+        task_id = str(uuid.uuid4())
+        filename = runtime.normalize_apk_filename(info["name"])
+        task_dir = runtime.safe_join(runtime.apk_upload_dir, task_id)
+        os.makedirs(task_dir, exist_ok=True)
+        apk_path = runtime.safe_join(task_dir, filename)
+        await asyncio.to_thread(shutil.copyfile, info["real_path"], apk_path)
+        runtime.create_apk_task(
+            task_id,
+            apk_path,
+            filename,
+            runtime.get_client_id_from_request(request),
+        )
+        return ApiResponse.success({
+            "task_id": task_id,
+            "filename": filename,
+            "size": os.path.getsize(apk_path),
+            "source_path": req.path,
+        })
 
     ssh = runtime.ssh_manager.get_connection(config)
     if not ssh:

@@ -98,8 +98,7 @@ def _now_iso() -> str:
 
 def _iso(value: Any) -> str:
     """Normalize a Redmine timestamp to ISO 8601 with a 'T' separator."""
-    # Shared implementation lives in features.redmine.utils; the mixins all
-    # delegate to it so every module formats Redmine timestamps identically.
+    # 所有 mixin 统一使用共享的 Redmine 时间格式化函数。
     return to_iso8601(value)
 
 
@@ -151,9 +150,7 @@ class RedmineAgent(
         self.report_analyzer_factory = report_analyzer_factory
         self.ai_analyzer_factory = ai_analyzer_factory
 
-    # ------------------------------------------------------------------
     # Full sync — build / update complete issue database
-    # ------------------------------------------------------------------
 
     async def sync_all_assigned_issues(
         self,
@@ -166,8 +163,8 @@ class RedmineAgent(
         """Fetch ALL assigned issues and store them. Optionally analyze unanalyzed ones.
 
         ``assignee_id``/``assignee_name`` restricts the sync to issues assigned to
-        that specific Redmine user. When both are omitted the authenticated user
-        (``assigned_to_id="me"``) is used for backwards compatibility.
+        that specific Redmine user. When both are omitted, sync the authenticated
+        Redmine user's issues.
         """
         run_id = run_id or self._generate_run_id("sync-")
         client = self._make_client()
@@ -319,9 +316,7 @@ class RedmineAgent(
                 return int(exact_match["id"]), exact_match.get("name") or self._get_user_name(exact_match)
         return None, self._get_user_name(current_user)
 
-    # ------------------------------------------------------------------
     # Timed scan (daily midnight run)
-    # ------------------------------------------------------------------
 
     async def run(
         self,
@@ -399,9 +394,7 @@ class RedmineAgent(
         finally:
             await client.close()
 
-    # ------------------------------------------------------------------
     # Single issue analysis
-    # ------------------------------------------------------------------
 
     async def analyze_issue(self, client: RedmineClient, issue_id: int, run_id: str = "") -> dict[str, Any]:
         issue = await client.get_issue(str(issue_id), include=["attachments", "journals"])
@@ -506,9 +499,7 @@ class RedmineAgent(
             merged.append(item)
         return merged
 
-    # ------------------------------------------------------------------
     # Client factory
-    # ------------------------------------------------------------------
 
     def _make_client(self) -> RedmineClient:
         redmine_config = self.config_manager.get_redmine_config()
@@ -554,9 +545,7 @@ class RedmineAgent(
             "done_ratio": int(getattr(issue_stub, "done_ratio", 0) or 0),
         }
 
-    # ------------------------------------------------------------------
     # Category detection
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _detect_category(subject: str, description: str) -> str:
@@ -591,9 +580,7 @@ class RedmineAgent(
                 return str(field.value or "")
         return ""
 
-    # ------------------------------------------------------------------
     # Issue window filter
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _issue_created_in_window(issue: Any, start: datetime, end: datetime) -> bool:

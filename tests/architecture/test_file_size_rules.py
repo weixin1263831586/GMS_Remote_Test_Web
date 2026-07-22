@@ -8,15 +8,16 @@ MIGRATION_LINE_LIMITS = {
     'foundation/config.py': 764,
     'features/assistant/api.py': 1466,
     'features/assistant/executor.py': 1398,
-    'features/assistant/intent.py': 636,
     'features/assistant/tools.py': 976,
     'features/assistant/universal_ai.py': 957,
     'features/automation/executors.py': 998,
     'features/automation/service.py': 710,
     'features/cluster/repository.py': 693,
+    # 这些模块使用显式上限，后续拆分时继续收紧。
+    'features/cluster/api.py': 631,
+    'features/cluster/tests/test_cluster.py': 608,
+    'features/auth/service.py': 631,
     'features/devices/config_override.py': 700,
-    'features/devices/integrations_api.py': 606,
-    'features/devices/operations_api.py': 705,
     'features/devices/tests/test_usbip_reconnect.py': 1107,
     'features/devices/usbip.py': 679,
     'features/firmware/firmware_api.py': 881,
@@ -34,7 +35,6 @@ MIGRATION_LINE_LIMITS = {
     'features/system/api.py': 1123,
     'features/system/api_docs_list.py': 963,
     'features/system/icon_fetcher.py': 870,
-    'features/test_execution/execution_api.py': 627,
 }
 
 

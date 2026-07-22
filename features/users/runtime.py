@@ -1,14 +1,42 @@
+"""Typed and validated user-feature runtime bindings."""
+
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 
 
-config_manager: Any = None
-data_root: Any = None
-global_state: Any = None
-ssh_async_manager: Any = None
-get_or_create_user_state: Any = None
+@dataclass
+class UserRuntime:
+    config_manager: object | None = None
+    data_root: Path | None = None
+    global_state: object | None = None
+    ssh_async_manager: object | None = None
+    get_or_create_user_state: Callable[..., object] | None = None
 
 
-def configure_runtime(**values: Any) -> None:
-    globals().update(values)
+_runtime = UserRuntime()
+_RUNTIME_FIELDS = frozenset(UserRuntime.__dataclass_fields__)
+
+
+def get_runtime() -> UserRuntime:
+    return _runtime
+
+
+def __getattr__(name: str) -> object:
+    if name in _RUNTIME_FIELDS:
+        return getattr(_runtime, name)
+    raise AttributeError(name)
+
+
+def configure_runtime(**values: object) -> None:
+    invalid = set(values) - _RUNTIME_FIELDS
+    if invalid:
+        raise TypeError(f"unknown user runtime bindings: {sorted(invalid)}")
+    for name in _RUNTIME_FIELDS:
+        globals().pop(name, None)
+    for name, value in values.items():
+        if name == "data_root" and value is not None:
+            value = Path(value)
+        setattr(_runtime, name, value)

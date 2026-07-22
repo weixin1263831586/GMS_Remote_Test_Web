@@ -416,7 +416,7 @@ function viewMemberInPersonal(owner) {
   currentPersonalProfileId = '';
   switchTab('personal');
 }
-// 把趋势粒度+标签（如 week "2026-W24"、month "2026-06"）转成 Gerrit after:/before: 日期范围（闭区间，before 用次日）
+// 将趋势标签转换为 Gerrit 日期查询范围。
 function utcDateText(date) {
   return date.toISOString().slice(0, 10);
 }
@@ -533,7 +533,7 @@ async function loadPersonal(refresh) {
   document.getElementById('personalContent').innerHTML = placeholderHtml('⏳ 正在统计个人 Gerrit 提交...');
   try {
     const data = await api('/api/gerrit-dashboard/statistics/personal?profile_id=' + encodeURIComponent(profileId) + '&owner=' + encodeURIComponent(owner) + '&refresh=' + (refresh ? 'true' : 'false'));
-    // owner 跳转后，按后端返回的 profile（由 owner 解析）回填下拉选中项，保持 UI 与数据一致。
+    // owner 跳转后按返回的 profile 回填下拉选项。
     const resolvedProfile = (data.profile || {}).id || '';
     if (requestedOwner && resolvedProfile) currentPersonalProfileId = resolvedProfile;
     const reviewQueue = await loadPendingReviewQueue(owner, refresh);
@@ -808,7 +808,7 @@ function renderDepartmentUsers(users) {
   }).join('');
   return '<section class="list-section"><div class="dept-section-head"><h2>成员汇总</h2><span class="muted dept-hint">点击任意成员行可在个人看板查看其详细提交。</span></div><div class="dept-table-wrap"><table class="dept-table"><thead><tr><th>姓名</th><th>邮箱</th><th>历史提交</th><th>已合并</th><th>未合并</th><th>待评审</th><th>待成员评审</th><th>错误</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
 }
-// 中文数字编号排序键（系统一部<系统二部<…<系统十部）；无编号部门编号记 Infinity 排在后。
+// 按部门中文数字编号排序，无编号部门置后。
 // 用码点而非 localeCompare：拼音序会把“系统二部”排到“系统一部”前面（èr<yī）。
 const _DEPT_CN_NUM = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
 function departmentSortKey(name) {
@@ -848,7 +848,7 @@ function populateDepartmentSelect(selectId, selectedId, includeAll) {
   if (!select) return;
   select.innerHTML = departmentOptionsHtml(selectedId || '', includeAll) || '<option value="">暂无部门</option>';
 }
-// 成员排序：部门按 departmentSortKey、同部门按姓名拼音序；显式多级比较（避免数组字典序不可靠）。
+// 成员先按部门排序，再按姓名拼音排序。
 function compareMembers(a, b) {
   const da = a.department && String(a.department).trim();
   const db = b.department && String(b.department).trim();
@@ -1103,9 +1103,11 @@ async function saveChangeToWiki(changeId) {
     space_id: 'issues',
     title: `Gerrit ${id} ${subject || ''}`.trim(),
     source: 'gerrit',
-    related_module: project || '',
     tags: ['Gerrit补丁说明'].concat(project ? [project] : []),
-    links: { gerrit_change_ids: [Number(id)] }
+    links: [
+      {target_type: 'gerrit_change', target_id: String(id), title: String(id)},
+      ...(project ? [{target_type: 'test_case', target_id: project, title: project}] : [])
+    ]
   };
   try {
     await api('/api/knowledge/docs', {

@@ -9,13 +9,15 @@ import mimetypes
 import os
 import re
 import shlex
+import stat
 import urllib.parse
 from datetime import datetime
 
 import aiohttp
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from features.auth import CurrentUser, require_role_when_auth_required
 from features.system.icon_fetcher import IconFetcher
 from features.system.ssh import ssh_manager
 from features.users import get_client_display_id_from_request, get_client_id_from_request
@@ -55,6 +57,31 @@ def _remote_list_command(path: str) -> str:
     return f'ls -la -- {shlex.quote(str(path))} 2>/dev/null'
 
 
+def _expand_user_path(path: str, username: str) -> str:
+    """Expand a configured user's home without relying on the server process user."""
+    if path == "~":
+        return f"/home/{username}"
+    if path.startswith("~/"):
+        return f"/home/{username}/{path[2:]}"
+    return path
+
+
+def _list_local_files(path: str) -> list[dict]:
+    files = []
+    with os.scandir(path) as entries:
+        for entry in entries:
+            entry_stat = entry.stat(follow_symlinks=False)
+            is_dir = entry.is_dir(follow_symlinks=True)
+            files.append({
+                'name': entry.name,
+                'type': 'directory' if is_dir else 'file',
+                'size': 0 if is_dir else entry_stat.st_size,
+                'permissions': stat.filemode(entry_stat.st_mode),
+            })
+    files.sort(key=lambda item: (item['type'] != 'directory', item['name'].lower()))
+    return files
+
+
 @router.get("/api/files/progress")
 async def get_upload_progress(upload_id: str | None = None):
     """Return the current upload progress for an upload_id (always completed)."""
@@ -69,14 +96,35 @@ async def get_upload_progress(upload_id: str | None = None):
 
 
 @router.post("/api/files/list")
-async def list_files(req: dict):
+async def list_files(
+    req: dict,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
     """文件列表 - 通过SSH连接到远程主机"""
     try:
-        path = req.get('path', '')
         config = config_manager.load_config()
+        username = config_manager.get_ubuntu_user(config)
+        path = str(req.get('path') or '').strip()
 
         if not path:
-            path = f"/home/{config_manager.get_ubuntu_user(config)}"
+            path = str(config.get('suites_path') or f"/home/{username}")
+        path = _expand_user_path(path, username)
+
+        if config_manager.is_config_host_local(config):
+            path = os.path.abspath(path)
+            try:
+                files = await asyncio.to_thread(_list_local_files, path)
+            except FileNotFoundError:
+                return error_response('Directory not found', status_code=404)
+            except NotADirectoryError:
+                return error_response('Path is not a directory', status_code=400)
+            except PermissionError:
+                return error_response('Permission denied', status_code=403)
+            return JSONResponse(content={
+                'success': True,
+                'path': path,
+                'files': files,
+            })
 
         def _list_remote_files():
             with ssh_manager.optional_connection(config) as ssh:
@@ -234,26 +282,7 @@ async def fetch_website_favicon(
     url: str = Query(..., description="网站URL"),
     timeout: int = Query(DEFAULT_FAVICON_TIMEOUT, description="超时时间（秒）")
 ):
-    """获取网站的真实Favicon图标
-
-    支持从多种来源获取图标：
-    1. 从HTML页面中提取图标链接（最准确）
-    2. 尝试网站根目录的常见图标文件
-    3. 使用第三方图标服务（Google、DuckDuckGo）
-
-    Args:
-        url: 要获取图标的网站URL
-        timeout: 请求超时时间（秒）
-
-    Returns:
-        {
-            "success": true/false,
-            "icon_url": "图标URL",
-            "icon_type": "svg/ico/png等",
-            "source": "html/root/api",
-            "size": 图标尺寸
-        }
-    """
+    """从网页、站点根目录或图标服务获取 Favicon。"""
     if not url or not url.strip():
         return error_response('URL参数不能为空', status_code=400)
 
@@ -270,8 +299,7 @@ async def fetch_website_favicon(
                 'size': icon_result.size,
                 'original_icon_url': icon_result.original_icon_url
             }
-            # 兼容旧前端直接读取 result.icon_url，同时保留统一 data 响应。
-            return JSONResponse(content={'success': True, **payload, 'data': payload})
+            return success_response(payload)
         else:
             logger.warning(f"[Favicon] Failed to fetch icon for {url}: {icon_result.error}")
             return error_response(
@@ -316,27 +344,7 @@ async def proxy_favicon(
 @router.post("/api/favicon/batch")
 @handle_api_errors
 async def batch_fetch_favicons(request: Request):
-    """批量获取多个网站的Favicon图标
-
-    Body:
-        {
-            "urls": ["https://google.com", "https://github.com"],
-            "timeout": 10
-        }
-
-    Returns:
-        {
-            "success": true,
-            "results": [
-                {
-                    "url": "https://google.com",
-                    "success": true,
-                    "icon_url": "..."
-                },
-                ...
-            ]
-        }
-    """
+    """批量获取网站 Favicon。"""
     data = await request.json()
     urls = data.get('urls', [])
     timeout = data.get('timeout', DEFAULT_FAVICON_TIMEOUT)
@@ -375,6 +383,7 @@ def load_tools_data():
 
 def save_tools_data(tools_data):
     try:
+        os.makedirs(os.path.dirname(TOOLS_DATA_FILE), exist_ok=True)
         with open(TOOLS_DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(tools_data, f, indent=4, ensure_ascii=False)
         return True

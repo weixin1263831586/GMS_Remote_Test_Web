@@ -7,13 +7,18 @@ import os
 import re
 import shutil
 import sqlite3
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from foundation.config import settings
+
+from .schema import KNOWLEDGE_REQUIRED_TABLES, initialize_knowledge_schema
 from .versions import KnowledgeVersionMixin
+
+
 logger = logging.getLogger(__name__)
 DB_PATH: Path = settings.data_root / "knowledge/knowledge.sqlite3"
 ATTACHMENT_DIR: Path = settings.data_root / "knowledge/attachments"
@@ -93,114 +98,57 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 class KnowledgeStore(KnowledgeVersionMixin):
+    _REQUIRED_TABLES = KNOWLEDGE_REQUIRED_TABLES
+
     def __init__(self, db_path: Path = DB_PATH, attachment_dir: Path = ATTACHMENT_DIR) -> None:
         self.db_path = Path(db_path)
         self.attachment_dir = Path(attachment_dir)
+        self._schema_lock = threading.RLock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.attachment_dir.mkdir(parents=True, exist_ok=True)
         # 已确保播种默认空间的用户集合（避免每次读操作都跑 COUNT 探测）。
         self._ensured_users: set[str] = set()
-        self.init_db()
-        self.init_version_db()
+        self._initialize_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _open_connection(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.attachment_dir.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _connect(self) -> sqlite3.Connection:
+        conn = self._open_connection()
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self._initialize_schema()
+            conn = self._open_connection()
+        return conn
+
+    def _initialize_schema(self) -> None:
+        with self._schema_lock:
+            self.init_db()
+            self.init_version_db()
+            self._ensured_users.clear()
+
     def init_db(self) -> None:
-        with self._connect() as conn:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS knowledge_spaces (
-                    space_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    icon TEXT DEFAULT '',
-                    sort_order INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT '',
-                    updated_at TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS knowledge_nodes (
-                    node_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    space_id TEXT NOT NULL,
-                    parent_id TEXT DEFAULT '',
-                    type TEXT NOT NULL CHECK(type IN ('folder','doc')),
-                    title TEXT NOT NULL,
-                    sort_order INTEGER DEFAULT 0,
-                    archived INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT '',
-                    updated_at TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS knowledge_docs (
-                    doc_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    space_id TEXT NOT NULL,
-                    node_id TEXT NOT NULL UNIQUE,
-                    content_md TEXT DEFAULT '',
-                    raw_content TEXT DEFAULT '',
-                    summary TEXT DEFAULT '',
-                    source TEXT DEFAULT 'manual',
-                    source_file TEXT DEFAULT '',
-                    favorite INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT '',
-                    updated_at TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS knowledge_tags (
-                    tag_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    UNIQUE(user_id, name)
-                );
-                CREATE TABLE IF NOT EXISTS knowledge_doc_tags (
-                    doc_id TEXT NOT NULL,
-                    tag_id TEXT NOT NULL,
-                    PRIMARY KEY(doc_id, tag_id)
-                );
-                CREATE TABLE IF NOT EXISTS knowledge_attachments (
-                    attachment_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    doc_id TEXT NOT NULL,
-                    original_name TEXT NOT NULL,
-                    path TEXT NOT NULL,
-                    mime TEXT DEFAULT '',
-                    size INTEGER DEFAULT 0,
-                    extracted_text TEXT DEFAULT '',
-                    created_at TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS knowledge_links (
-                    link_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    doc_id TEXT NOT NULL,
-                    target_type TEXT NOT NULL,
-                    target_id TEXT NOT NULL,
-                    title TEXT DEFAULT '',
-                    url TEXT DEFAULT '',
-                    created_at TEXT DEFAULT ''
-                );
-                CREATE INDEX IF NOT EXISTS idx_knowledge_spaces_user ON knowledge_spaces(user_id, sort_order);
-                CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_tree ON knowledge_nodes(user_id, space_id, parent_id, sort_order);
-                CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user ON knowledge_docs(user_id, updated_at);
-                CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
-                    doc_id UNINDEXED,
-                    user_id UNINDEXED,
-                    space_id UNINDEXED,
-                    title,
-                    content_md,
-                    raw_content,
-                    summary,
-                    tags,
-                    attachments,
-                    links
-                );
-                """
-            )
-            conn.commit()
+        with self._open_connection() as conn:
+            initialize_knowledge_schema(conn)
 
     def ensure_default_spaces(self, user_id: str) -> None:
         if user_id in self._ensured_users:
-            return
+            # Opening the connection detects a runtime data/ deletion and
+            # clears the cache before deciding whether seeding can be skipped.
+            with self._connect():
+                pass
+            if user_id in self._ensured_users:
+                return
         now = _now()
         with self._connect() as conn:
             for idx, (sid, name, icon) in enumerate(DEFAULT_SPACES):
@@ -431,8 +379,6 @@ class KnowledgeStore(KnowledgeVersionMixin):
             self._save_version(conn, user_id, doc_id)
             conn.commit()
         return self.get_doc(user_id, doc_id)
-
-
     def move_node(self, user_id: str, node_id: str, parent_id: str = "", sort_order: int | None = None) -> bool:
         with self._connect() as conn:
             cur = conn.execute(
@@ -773,7 +719,6 @@ class KnowledgeStore(KnowledgeVersionMixin):
                 (doc_id,),
             ).fetchall()
         ]
-
     def _doc_attachments(self, conn: sqlite3.Connection, doc_id: str) -> list[dict[str, Any]]:
         return [
             dict(r)

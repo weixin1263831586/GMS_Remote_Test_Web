@@ -60,6 +60,20 @@ def inline_handler_calls(text: str) -> list[tuple[str, str]]:
 
 
 class FrontendIntegrityTests(unittest.TestCase):
+    def test_server_file_browser_uses_resolved_suite_path(self):
+        navigation_text = read_text("web/static/js/navigation.js")
+
+        self.assertIn("state.config?.effective_ubuntu_user", navigation_text)
+        self.assertIn("state.config?.effective_suites_path", navigation_text)
+        self.assertIn("await loadFileDirectory(getDefaultSuitesPath())", navigation_text)
+        self.assertEqual(
+            len(re.findall(
+                r"/home/\$\{(?:defaultUser|getDefaultUbuntuUser\(\))\}/GMS-Suite",
+                navigation_text,
+            )),
+            1,  # the fallback inside getDefaultSuitesPath itself
+        )
+
     def test_main_app_inline_handlers_resolve_to_global_functions(self):
         main_text = read_text("web/shell/shell.html")
         script_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in Path("web/static/js").glob("*.js"))
@@ -118,7 +132,9 @@ class FrontendIntegrityTests(unittest.TestCase):
         main_text = read_text("web/shell/shell.html")
 
         self.assertNotIn("config.vnc_password", main_text)
-        self.assertIn("const DEFAULT_VNC_PASSWORD = '';", main_text)
+        self.assertNotIn("DEFAULT_VNC_PASSWORD", main_text)
+        self.assertNotIn("new-host-vnc-password", main_text)
+        self.assertIn("/api/desktop/novnc/access", main_text)
 
     def test_desktop_async_mount_cannot_replace_another_worker(self):
         main_text = read_text("web/shell/shell.html")
@@ -149,6 +165,77 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("disposeTerminalWorkspaceInstance(i)", body)
         self.assertIn("mountTerminalWorkspacePane(i,pane", body)
         self.assertNotIn("renderTerminalWorkspace()", body)
+
+    def test_host_workspaces_wait_for_directory_and_recover_expired_elevation(self):
+        main_text = read_text("web/shell/shell.html")
+
+        self.assertIn("await mergeClusterDesktopHosts()", main_text)
+        self.assertIn("await initDesktopHosts()", main_text)
+        self.assertIn("message.elevation_required", main_text)
+        self.assertIn("m.elevation_required", main_text)
+        self.assertIn("message.credential_required", main_text)
+        self.assertIn("m.credential_required", main_text)
+        self.assertIn("showDevicePasswordModal(message.device_host, 'terminal'", main_text)
+        self.assertIn("recoverTerminalElevation(instance", main_text)
+        self.assertIn("refreshHostWorkspacePane(index)", main_text)
+        self.assertIn("refreshTerminalWorkspacePane(index)", main_text)
+        self.assertIn("ensureTerminalElevation(false, '打开主机桌面', '主机桌面')", main_text)
+        self.assertIn("if (state.currentUser && state.currentUser.role !== 'admin')", main_text)
+        self.assertNotIn("if (state.currentUser?.role !== 'admin')", main_text)
+        self.assertIn("frame.allow = 'clipboard-read; clipboard-write'", main_text)
+
+    def test_suite_host_selector_and_assistant_url_start_in_stable_layout(self):
+        main_text = read_text("web/shell/shell.html")
+        navigation_text = read_text("web/static/js/navigation.js")
+
+        self.assertRegex(
+            main_text,
+            r'id="suite-worker-select"[^>]+disabled[^>]*>\s*<option value="">正在加载主机',
+        )
+        self.assertIn("_suiteWorkerSelectorPromise", navigation_text)
+        self.assertIn('id="gms-assistant-url" style="width:100%;box-sizing:border-box;"', main_text)
+
+    def test_single_mode_hides_multi_host_controls_and_sidebar_has_descriptions(self):
+        main_text = read_text("web/shell/shell.html")
+        navigation_text = read_text("web/static/js/navigation.js")
+
+        self.assertIn("SIDEBAR_PAGE_DESCRIPTIONS", main_text)
+        self.assertIn("sidebar-description", main_text)
+        self.assertIn("white-space: nowrap", main_text)
+        self.assertIn("选择 CTS/GTS/VTS/STS 等套件", main_text)
+        self.assertIn('class="sidebar-text">${text}</span>', main_text)
+        self.assertIn("data-multi-host-control", main_text)
+        self.assertIn("workspace-scope-single", main_text)
+        self.assertIn("applyHostWorkspaceScopeMode", main_text)
+        self.assertIn("reportsHostFilter.style.visibility", navigation_text)
+        self.assertIn("classList.toggle('workspace-scope-single', !enabled)", navigation_text)
+
+    def test_terminal_page_switch_avoids_hidden_or_duplicate_resize(self):
+        main_text = read_text("web/shell/shell.html")
+
+        self.assertIn("!page.classList.contains('active')", main_text)
+        self.assertIn("cols === instance.lastResizeCols", main_text)
+        self.assertIn("rows === instance.lastResizeRows", main_text)
+        self.assertIn("applyTerminalHost(select.value, false, false)", main_text)
+
+    def test_device_management_inventory_is_scoped_by_single_cluster_mode(self):
+        main_text = read_text("web/shell/shell.html")
+        navigation_text = read_text("web/static/js/navigation.js")
+
+        self.assertIn("requestedDevicesManagementScope", main_text)
+        self.assertIn("const includeCluster = requestedScope === 'cluster'", main_text)
+        self.assertIn("data-cluster-mode-only", main_text)
+        self.assertIn("managementGroupsForView", main_text)
+        self.assertIn("currentPage === 'devices'", navigation_text)
+        self.assertIn("loadDevicesManagement().catch", navigation_text)
+
+    def test_automation_api_handles_non_json_errors_without_unhandled_promises(self):
+        automation_text = read_text("features/automation/ui/page.js")
+
+        self.assertIn("const text = await resp.text()", automation_text)
+        self.assertIn("data = text ? JSON.parse(text) : {}", automation_text)
+        self.assertIn("loadRuns().catch(err => toast(err.message))", automation_text)
+        self.assertIn("loadBuildJobs().catch(err => toast(err.message))", automation_text)
 
     def test_modal_pages_support_escape_close(self):
         for label, paths in [

@@ -1,23 +1,33 @@
 import asyncio
 import io
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from starlette.datastructures import UploadFile
+from starlette.requests import Request
 
+from features.auth import CurrentUser
 from features.reports import analysis_api
 from features.reports import uploads as report_uploads
 from features.reports.api_helpers import AnalysisMode
 
 
 class ReportUploadLimitTests(unittest.TestCase):
+    @staticmethod
+    def _request() -> Request:
+        request = Request({"type": "http", "headers": []})
+        request.state.current_user = CurrentUser(
+            id="id-alice", username="alice", role="user"
+        )
+        return request
+
     def test_single_upload_over_limit_returns_payload_too_large(self):
         upload = UploadFile(filename='report.zip', file=io.BytesIO(b'1234'))
 
         with patch.object(report_uploads, 'MAX_REPORT_UPLOAD_BYTES', 3):
             response = asyncio.run(
                 analysis_api.analyze_reports(
-                    request=MagicMock(),
+                    request=self._request(),
                     mode=AnalysisMode.UPLOAD,
                     file=upload,
                 )
@@ -34,7 +44,7 @@ class ReportUploadLimitTests(unittest.TestCase):
         with patch.object(report_uploads, 'MAX_REPORT_UPLOAD_BYTES', 3):
             response = asyncio.run(
                 analysis_api.analyze_reports(
-                    request=MagicMock(),
+                    request=self._request(),
                     mode=AnalysisMode.UPLOAD,
                     file=None,
                     files=uploads,

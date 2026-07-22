@@ -29,8 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_iso(value: Any) -> datetime | None:
-    # Delegate to the shared parser so all Redmine timestamp parsing lives in
-    # one place (utils.parse_iso), consistent with to_iso8601 used elsewhere.
+    # 统一使用共享的 Redmine 时间解析函数。
     return parse_iso(value)
 
 
@@ -52,13 +51,11 @@ class RedmineKnowledgeService:
         self.search = RedmineCaseSearch(knowledge_db)
         self.builder = MatureCaseBuilder(knowledge_db)
         self.evaluator = CaseEvaluator(knowledge_db)
-        # Avoid duplicate AI runs on rapid clicks of the same issue (per-issue dedup).
+        # 同一工单的并发 AI 分析只执行一次。
         self._agent_reply_inflight: dict[int, asyncio.Task] = {}
         self._agent_reply_fresh_hours = float(self.config.get("agent_reply_fresh_hours", 24))
 
-    # ------------------------------------------------------------------
     # Config helpers
-    # ------------------------------------------------------------------
 
     def _show_internal_refs(self) -> bool:
         return bool(self.config.get("show_internal_refs_to_customer", False))
@@ -66,9 +63,7 @@ class RedmineKnowledgeService:
     def _allow_internal_create(self) -> bool:
         return bool(self.config.get("allow_internal_issue_create", True))
 
-    # ------------------------------------------------------------------
     # Batch import (no network, no AI)
-    # ------------------------------------------------------------------
 
     async def batch_import_cases(self, issue_ids: list[int], *, reanalyze: bool = True, fetch_missing: bool = True) -> dict[str, Any]:
         """Import issues into the knowledge base.
@@ -134,9 +129,7 @@ class RedmineKnowledgeService:
         item = (result.get("items") or [{}])[0]
         return {"success": item.get("status") in ("done", "exists"), **item}
 
-    # ------------------------------------------------------------------
     # Case facts
-    # ------------------------------------------------------------------
 
     def get_case_fact(self, issue_id: int) -> dict[str, Any] | None:
         return self.knowledge_db.get_case_fact(int(issue_id))
@@ -197,9 +190,7 @@ class RedmineKnowledgeService:
             "gms_like_sections": self._gms_like_sections(issue, fact, mature_case, similar),
         }
 
-    # ------------------------------------------------------------------
     # Mature cases
-    # ------------------------------------------------------------------
 
     def build_mature_case(self, issue_ids: list[int], *, title: str = "") -> dict[str, Any]:
         return self.builder.build_from_issues(issue_ids, title=title)
@@ -220,9 +211,7 @@ class RedmineKnowledgeService:
     def approve_mature_case(self, case_id: int, approved_by: str) -> bool:
         return self.knowledge_db.approve_mature_case(int(case_id), approved_by)
 
-    # ------------------------------------------------------------------
     # Issue workbench evidence helpers
-    # ------------------------------------------------------------------
 
     def _issue_evidence(self, issue: dict[str, Any], fact: dict[str, Any]) -> dict[str, Any]:
         journals = issue.get("journals_json") or []
@@ -358,9 +347,7 @@ class RedmineKnowledgeService:
             "source_issue_ids": (mature_case or {}).get("source_issue_ids_json") or ([int(fact["issue_id"])] if fact.get("issue_id") else []),
         }
 
-    # ------------------------------------------------------------------
     # Reply drafting
-    # ------------------------------------------------------------------
 
     def draft_reply(self, issue_id: int, *, mature_case_id: int | None = None) -> dict[str, Any]:
         issue = self.issue_repository.get_issue(int(issue_id)) or {}
@@ -375,9 +362,7 @@ class RedmineKnowledgeService:
         drafter = ReplyDrafter(self.knowledge_db, show_internal_refs=self._show_internal_refs())
         return drafter.draft_reply(issue, exclude_issue_id=int(issue_id), mature_case=mature_case)
 
-    # ------------------------------------------------------------------
-    # Agent-driven reply (online fetch + AI analysis + knowledge base match)
-    # ------------------------------------------------------------------
+    # Agent 回复：在线获取、AI 分析和知识库匹配。
 
     async def draft_agent_reply(
         self,
@@ -387,17 +372,7 @@ class RedmineKnowledgeService:
         mature_case_id: int | None = None,
         similar_limit: int = 6,
     ) -> dict[str, Any]:
-        """Compose a reply draft + patch direction by orchestrating online
-        fetch/AI analysis with knowledge-base matching.
-
-        Steps:
-        1. Ensure a fresh analyzed issue row exists (online fetch + AI if missing/
-           stale/forced); per-issue dedup avoids duplicate AI runs.
-        2. Read the AI-produced root_cause / solution / patch_direction.
-        3. Match similar case facts / mature case in the knowledge base.
-        4. Assemble the reply body by signal priority:
-           mature_case > ai_analysis > similar_issues.
-        """
+        """结合在线分析、成熟案例和相似工单生成回复与补丁方向。"""
         issue_id = int(issue_id)
 
         # Step 1 — fresh analysis (deduped per issue).
@@ -577,9 +552,7 @@ class RedmineKnowledgeService:
             return f"```xml\n{text}\n```"
         return f"```\n{text}\n```"
 
-    # ------------------------------------------------------------------
     # Reference + evaluation (off the production path)
-    # ------------------------------------------------------------------
 
     def import_reference_output(self, issue_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         ref_id = self.evaluator.import_reference_output(int(issue_id), payload)
@@ -594,9 +567,7 @@ class RedmineKnowledgeService:
     def latest_evaluation(self, issue_id: int) -> dict[str, Any] | None:
         return self.knowledge_db.get_latest_case_evaluation(int(issue_id))
 
-    # ------------------------------------------------------------------
     # Internal issue creation (confirmed, configurable)
-    # ------------------------------------------------------------------
 
     async def create_internal_from_issue(self, source_issue_id: int, payload: dict[str, Any], *, confirmed: bool) -> dict[str, Any]:
         client = None

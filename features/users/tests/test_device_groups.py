@@ -145,6 +145,23 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
 
         self.assertEqual(updated[0]['device_ids'], ['worker-a:ABC'])
 
+    def test_new_worker_gets_group_after_host_auto_grouping_is_enabled(self):
+        groups = [{
+            'id': 'auto_worker_lab-a',
+            'name': 'worker: Lab A',
+            'color': '#000000',
+            'device_ids': ['worker-a:ABC'],
+            'followed': False,
+        }]
+        self.assertTrue(device_groups.save_device_groups('alice', groups))
+
+        updated = device_groups.auto_assign_new_devices(
+            'alice', {'worker-b:XYZ': {'source_host': 'Lab B'}}
+        )
+
+        lab_b = next(group for group in updated if group['name'] == 'worker: Lab B')
+        self.assertEqual(lab_b['device_ids'], ['worker-b:XYZ'])
+
 
 if __name__ == '__main__':
     unittest.main()

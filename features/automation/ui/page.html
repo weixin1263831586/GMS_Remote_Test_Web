@@ -14,29 +14,42 @@
     <div class="ats-toolbar-main">
         <div>
             <h1 class="ats-title">GMS ATS</h1>
-            <div class="ats-subtitle">Gerrit -> Jenkins -> 刷机 -> GMS 测试 -> 报告分析</div>
+            <div class="ats-subtitle">Gerrit → 构建 → 刷机 → GMS 测试 → 报告</div>
         </div>
         <div class="ats-actions">
             <span id="worker-indicator" class="worker-dot down" title="Worker 状态">Worker</span>
             <button type="button" onclick="loadAll()">刷新</button>
-            <button type="button" onclick="pollGerrit()">Gerrit Poll</button>
-            <button type="button" class="primary" onclick="tickWorker('http')">立即推进</button>
+            <button type="button" onclick="pollGerrit()">轮询 Gerrit</button>
+            <button type="button" class="primary" onclick="tickWorker('http')">推进队列</button>
         </div>
     </div>
-    <div class="workflow-tabs" aria-label="GMS ATS workflow">
-        <button type="button" class="workflow-tab active" data-workflow="overview" onclick="switchWorkflowPane('overview')">0 概览</button>
-        <button type="button" class="workflow-tab" data-workflow="create" onclick="switchWorkflowPane('create')">1 创建运行</button>
-        <button type="button" class="workflow-tab" data-workflow="runs" onclick="switchWorkflowPane('runs')">2 运行监控</button>
-        <button type="button" class="workflow-tab" data-workflow="build" onclick="switchWorkflowPane('build')">3 构建日志</button>
-        <button type="button" class="workflow-tab" data-workflow="events" onclick="switchWorkflowPane('events')">4 事件追踪</button>
-        <button type="button" class="workflow-tab" data-workflow="reports" onclick="switchWorkflowPane('reports')">5 报告入口</button>
+    <div class="workflow-tabs" role="tablist" aria-label="GMS ATS workflow">
+        <button type="button" role="tab" aria-selected="true" class="workflow-tab active" data-workflow="overview" onclick="switchWorkflowPane('overview')">概览</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" onclick="switchWorkflowPane('create')">创建运行</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" onclick="switchWorkflowPane('runs')">运行监控</button>
+        <span class="workflow-divider" aria-hidden="true"></span>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="build" onclick="switchWorkflowPane('build')">构建日志</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="events" onclick="switchWorkflowPane('events')">事件诊断</button>
+        <span class="workflow-divider" aria-hidden="true"></span>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="reports" onclick="switchWorkflowPane('reports')">测试报告</button>
         <div id="automation-toast" class="toast"></div>
     </div>
 </section>
 
 <section class="workflow-surface">
-    <section id="workflow-pane-overview" class="workflow-pane active">
+    <section id="workflow-pane-overview" class="workflow-pane active" aria-hidden="false">
         <div class="overview-layout">
+            <div class="overview-actions">
+                <div class="overview-action-copy">
+                    <strong>ATS 工作台</strong>
+                    <span class="muted">从创建运行开始，在监控页跟踪进度，异常时进入构建日志或事件诊断。</span>
+                </div>
+                <div class="overview-action-buttons">
+                    <button type="button" class="primary" onclick="switchWorkflowPane('create')">创建运行</button>
+                    <button type="button" onclick="switchWorkflowPane('runs')">查看监控</button>
+                    <button type="button" onclick="switchWorkflowPane('reports')">查看报告</button>
+                </div>
+            </div>
             <div id="dashboard-stats" class="dashboard-stats">
                 <div class="empty-state">加载中...</div>
             </div>
@@ -57,7 +70,7 @@
         </div>
     </section>
 
-    <section id="workflow-pane-create" class="workflow-pane">
+    <section id="workflow-pane-create" class="workflow-pane" aria-hidden="true">
         <div class="create-layout">
             <section class="panel profile-panel">
                 <div class="panel-header guided-header">
@@ -68,12 +81,12 @@
                     </div>
                 </div>
                 <div class="panel-body compact-stack profile-body">
-                    <label>运行配置
+                    <label class="profile-selector">运行配置
                         <select id="automation-profile"></select>
+                        <span id="automation-profile-summary" class="field-hint">选择 Profile 后会自动回填构建与测试默认值</span>
                     </label>
-                    <div id="automation-profiles" class="profile-strip"></div>
                     <details class="profile-dryrun">
-                        <summary>试运行（Gerrit 事件匹配）</summary>
+                        <summary>Gerrit 匹配调试（可选）</summary>
                         <div class="compact-stack">
                             <input id="dryrun-project" placeholder="project（如 rk3576_android16）">
                             <input id="dryrun-branch" placeholder="branch（如 master）">
@@ -86,19 +99,28 @@
                 </div>
             </section>
             <section class="panel build-panel">
-                <div class="panel-header guided-header">
-                    <span class="step-index">2</span>
-                    <div>
-                        <div>固件与构建</div>
-                        <div class="panel-description">源码目录决定可选的 Lunch Target</div>
+                <div class="panel-header guided-header build-panel-header">
+                    <div class="guided-title">
+                        <span class="step-index">2</span>
+                        <div>
+                            <div>固件与构建</div>
+                            <div class="panel-description">源码目录决定可选的 Lunch Target</div>
+                        </div>
+                    </div>
+                    <div class="build-panel-actions">
+                        <button type="button" class="primary" onclick="createBuildJob()">编译固件</button>
+                        <button type="button" onclick="switchWorkflowPane('build'); loadBuildJobs()">查看日志</button>
                     </div>
                 </div>
                 <div class="panel-body compact-stack">
-                    <label>固件路径或 URL
-                        <input id="automation-artifact" placeholder="/path/to/update.img 或 http://...">
-                        <span class="field-hint">执行编译时可留空；关闭编译后请填写已有固件</span>
+                    <label>已有固件（可选）
+                        <input id="automation-artifact" placeholder="/path/to/update.img 或 http://..." oninput="syncArtifactMode()">
+                        <span id="artifact-mode-hint" class="field-hint">留空时按下方参数从源码编译；填写后直接使用该固件</span>
                     </label>
-                    <label class="checkbox-item build-toggle"><input id="automation-enable-build" type="checkbox" checked onchange="syncBuildSectionState()"> 为本次运行执行编译</label>
+                    <div class="build-config-heading">
+                        <strong>源码编译参数</strong>
+                        <span>仅在未填写已有固件时使用</span>
+                    </div>
                     <div id="automation-build-fields" class="build-config-fields">
                         <div class="form-row">
                             <label>编译服务器
@@ -106,8 +128,18 @@
                             </label>
                             <label>编译模板
                                 <select id="build-template"></select>
+                                <span id="build-template-hint" class="field-hint">模板限定初始化、编译超时和产物规则</span>
                             </label>
                         </div>
+                        <label class="build-command-field">编译命令
+                            <select id="build-command" title="./build.sh -UCKApu -J 8">
+                                <option value="./build.sh -UCKApu -J 8">./build.sh -UCKApu -J 8</option>
+                                <option value="./build.sh -UACKu -J 8">./build.sh -UACKu -J 8</option>
+                                <option value="./build.sh -UCKApu">./build.sh -UCKApu</option>
+                                <option value="./build.sh -UACKu">./build.sh -UACKu</option>
+                            </select>
+                            <span class="field-hint">选项由编译模板给出，展开菜单会优先在当前卡片内显示</span>
+                        </label>
                         <label>源码目录
                             <div class="inline-field">
                                 <select id="build-workspace"></select>
@@ -118,22 +150,10 @@
                         <label>Lunch Target
                             <div class="inline-field">
                                 <select id="build-lunch-target" disabled></select>
-                                <button id="build-lunch-refresh" type="button" onclick="refreshLunchOptions()" disabled>重新扫描</button>
+                                <button id="build-lunch-refresh" type="button" onclick="refreshLunchOptions({forceRefresh: true})" disabled>重新扫描</button>
                             </div>
                             <span id="build-lunch-status" class="field-status">选择源码目录后自动读取该目录的 Lunch Target</span>
                         </label>
-                        <label>编译命令
-                            <select id="build-command">
-                                <option value="./build.sh -UCKApu -J 8">./build.sh -UCKApu -J 8</option>
-                                <option value="./build.sh -UACKu -J 8">./build.sh -UACKu -J 8</option>
-                                <option value="./build.sh -UCKApu">./build.sh -UCKApu</option>
-                                <option value="./build.sh -UACKu">./build.sh -UACKu</option>
-                            </select>
-                        </label>
-                    </div>
-                    <div class="split-actions">
-                        <button id="automation-build-only" type="button" onclick="createBuildJob()">只编译</button>
-                        <button type="button" onclick="loadBuildJobs(); switchWorkflowPane('build')">查看构建日志</button>
                     </div>
                 </div>
             </section>
@@ -151,13 +171,14 @@
                             <option value="worker-local">Controller / Local Worker</option>
                         </select>
                     </label>
-                    <label>设备序列号
-                        <div class="device-picker">
-                            <input id="automation-devices" placeholder="TESTSERIAL001，多个用逗号分隔">
-                            <div id="automation-device-list" class="checkbox-list"></div>
+                    <fieldset class="device-field">
+                        <legend>已有设备（直接勾选）</legend>
+                        <div class="device-field-header">
+                            <span class="field-hint">未勾选时按 Profile 规则自动选择空闲设备</span>
                             <button type="button" onclick="loadDevices(true)">刷新</button>
                         </div>
-                    </label>
+                        <div id="automation-device-list" class="checkbox-list device-checkbox-grid"></div>
+                    </fieldset>
                     <div class="form-row">
                         <label>测试类型
                             <select id="automation-test-type" onchange="renderSuiteOptions(); syncAutomationWorkspaceSelection()">
@@ -176,20 +197,26 @@
                     <label>测试模块
                         <input id="automation-test-module" placeholder="CtsAppSecurityHostTestCases">
                     </label>
-                    <label>附加 test_plan JSON
-                        <textarea id="automation-test-plan" placeholder='{"retry": false}'></textarea>
-                    </label>
+                    <details class="advanced-test-options">
+                        <summary>高级测试参数（可选）</summary>
+                        <label>附加 test_plan JSON
+                            <textarea id="automation-test-plan" placeholder='{"retry": false}'></textarea>
+                        </label>
+                    </details>
                     <button type="button" id="automation-create-run" class="primary create-run-button" onclick="createRun()">创建运行</button>
                 </div>
             </section>
         </div>
     </section>
 
-    <section id="workflow-pane-runs" class="workflow-pane">
+    <section id="workflow-pane-runs" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
             <div class="panel-header stage-header">
                 <div class="stage-nav">
-                    <span class="stage-nav-label">运行队列</span>
+                    <div class="stage-title-block">
+                        <span class="stage-nav-label">运行监控</span>
+                        <span class="panel-description">查看所有运行的当前阶段、设备、结果和可执行操作</span>
+                    </div>
                 </div>
                 <div class="log-actions">
                     <button type="button" onclick="loadRuns()">刷新</button>
@@ -199,9 +226,9 @@
                 <div class="subtabs">
                     <span class="subtabs-label">状态</span>
                     <button type="button" class="tab active" data-status="" onclick="setStatusFilter('')">全部</button>
-                    <button type="button" class="tab" data-status="queued" onclick="setStatusFilter('queued')">Queued</button>
-                    <button type="button" class="tab" data-status="testing" onclick="setStatusFilter('testing')">Testing</button>
-                    <button type="button" class="tab" data-status="completed" onclick="setStatusFilter('completed')">Completed</button>
+                    <button type="button" class="tab" data-status="queued" onclick="setStatusFilter('queued')">排队中</button>
+                    <button type="button" class="tab" data-status="testing" onclick="setStatusFilter('testing')">测试中</button>
+                    <button type="button" class="tab" data-status="completed" onclick="setStatusFilter('completed')">已完成</button>
                 </div>
                 <div id="automation-runs" class="run-list">
                     <div class="empty-state">加载中...</div>
@@ -210,12 +237,15 @@
         </section>
     </section>
 
-    <section id="workflow-pane-build" class="workflow-pane">
+    <section id="workflow-pane-build" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
             <div class="panel-header stage-header">
-                <span class="stage-nav-label">构建日志</span>
+                <div class="stage-title-block">
+                    <span class="stage-nav-label">构建日志</span>
+                    <span class="panel-description">左侧选择构建任务，右侧查看实时输出和最终结果</span>
+                </div>
                 <div class="log-actions">
-                    <button type="button" onclick="createBuildJob()">只编译</button>
+                    <button type="button" onclick="createBuildJob()">按当前参数编译</button>
                     <button type="button" onclick="loadBuildJobs()">刷新任务</button>
                 </div>
             </div>
@@ -238,10 +268,13 @@
         </section>
     </section>
 
-    <section id="workflow-pane-events" class="workflow-pane">
+    <section id="workflow-pane-events" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
             <div class="panel-header stage-header">
-                <span class="stage-nav-label">事件追踪</span>
+                <div class="stage-title-block">
+                    <span class="stage-nav-label">事件诊断</span>
+                    <span class="panel-description">按时间查看选定运行的阶段切换、重试与错误</span>
+                </div>
                 <div class="log-actions">
                     <button type="button" onclick="switchWorkflowPane('runs')">选择运行</button>
                     <button type="button" onclick="refreshSelectedEvents()">刷新事件</button>
@@ -250,24 +283,28 @@
             <div class="stage-pane monitor-events-body">
                 <div class="events-toolbar">
                     <span id="events-title" class="muted">事件</span>
+                    <span class="event-columns-hint">时间 · 阶段 · 级别</span>
                 </div>
-                <div id="automation-events" class="events muted">选择一条运行查看事件。</div>
+                <div id="automation-events" class="events muted">选择一条运行查看 Controller、Worker 与 Cluster Job 时间线。</div>
             </div>
         </section>
     </section>
 
-    <section id="workflow-pane-reports" class="workflow-pane">
+    <section id="workflow-pane-reports" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
             <div class="panel-header stage-header">
-                <span class="stage-nav-label">报告入口</span>
+                <div class="stage-title-block">
+                    <span class="stage-nav-label">测试报告</span>
+                    <span class="panel-description">仅展示已生成报告的 ATS 运行</span>
+                </div>
                 <div class="log-actions">
                     <button type="button" onclick="loadRuns()">刷新运行</button>
                 </div>
             </div>
             <div class="report-layout">
                 <div class="report-copy">
-                    <strong>报告随运行记录生成</strong>
-                    <span class="muted">完成后的运行会在“运行监控”中显示报告链接。这里保留当前运行列表，便于直接打开最新报告。</span>
+                    <strong>已生成报告</strong>
+                    <span class="muted">按运行更新时间排列，可直接进入报告管理查看完整结果。</span>
                 </div>
                 <div id="automation-runs-report" class="run-list report-run-list">
                     <div class="empty-state">加载中...</div>

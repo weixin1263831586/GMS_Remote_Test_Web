@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
+from features.auth import CurrentUser
 from features.firmware import api, firmware_api, runtime, shares_api
 
 
@@ -63,6 +64,7 @@ async def fake_release_firmware_devices(*_args, **_kwargs):
 
 class FirmwareApiTests(unittest.TestCase):
     def setUp(self):
+        self.runtime_directory = TemporaryDirectory()
         runtime.configure_runtime(
             config_manager=FakeConfigManager(),
             ssh_manager=FakeSshManager("__GMS_REMOTE_FILE_MISSING__\n"),
@@ -86,10 +88,23 @@ class FirmwareApiTests(unittest.TestCase):
             apk_max_tasks=20,
             apk_max_file_size=500 * 1024 * 1024,
             apk_max_source_file_size=2 * 1024 * 1024,
+            apk_upload_dir=self.runtime_directory.name,
         )
         app = FastAPI()
+
+        @app.middleware("http")
+        async def authenticate_test_request(request, call_next):
+            request.state.current_user = CurrentUser(
+                id="id-codex", username="codex", role="user"
+            )
+            return await call_next(request)
+
         app.include_router(api.router)
         self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+        self.runtime_directory.cleanup()
 
     def test_firmware_help_does_not_execute_host_command(self):
         response = self.client.post("/api/burn/firmware?help=true")
@@ -549,6 +564,12 @@ class FirmwareApiTests(unittest.TestCase):
                 self._connect_kwargs = None
 
             def set_missing_host_key_policy(self, policy):
+                pass
+
+            def load_system_host_keys(self):
+                pass
+
+            def load_host_keys(self, path):
                 pass
 
             def connect(self, **kwargs):

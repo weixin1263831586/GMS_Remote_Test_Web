@@ -22,9 +22,7 @@ from features.devices.config_override import (
 )
 
 
-# ---------------------------------------------------------------------------
 # validate_override + _split_array_items
-# ---------------------------------------------------------------------------
 
 class TestValidate(unittest.TestCase):
     def test_string_accepts_anything(self):
@@ -92,9 +90,7 @@ class TestSplitArrayItems(unittest.TestCase):
         self.assertEqual(_split_array_items(""), [])
 
 
-# ---------------------------------------------------------------------------
 # render_resource_xml + escaping
-# ---------------------------------------------------------------------------
 
 class TestRenderXml(unittest.TestCase):
     def test_scalar_forms(self):
@@ -125,9 +121,7 @@ class TestRenderXml(unittest.TestCase):
         self.assertIn("<item>a&amp;b</item>", out)
 
 
-# ---------------------------------------------------------------------------
 # build_config_xml + build_manifest
-# ---------------------------------------------------------------------------
 
 class TestBuilders(unittest.TestCase):
     def test_config_xml_structure(self):
@@ -157,9 +151,7 @@ class TestBuilders(unittest.TestCase):
         self.assertNotIn("targetName", m)   # intentionally omitted
 
 
-# ---------------------------------------------------------------------------
 # OverrideStore
-# ---------------------------------------------------------------------------
 
 class TestStore(unittest.TestCase):
     def setUp(self):
@@ -238,9 +230,7 @@ class TestStore(unittest.TestCase):
             self.store.upsert("d", OverrideEntry("config/foo", "bool", "true"))
 
 
-# ---------------------------------------------------------------------------
 # build_overlay_apk (real aapt2 if available, else skipped)
-# ---------------------------------------------------------------------------
 
 def _shutil_which(name):
     import shutil
@@ -274,9 +264,7 @@ class TestBuildApk(unittest.TestCase):
         self.assertIn("com.test.verify", out)
 
 
-# ---------------------------------------------------------------------------
 # probe_status / apply / revert (mocked adb)
-# ---------------------------------------------------------------------------
 
 class TestProbeStatus(unittest.TestCase):
     def test_unreachable_device(self):

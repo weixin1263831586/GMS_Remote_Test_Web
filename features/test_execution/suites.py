@@ -160,6 +160,8 @@ def ensure_tradefed_executable(full_path: str) -> bool:
 
 def list_local_test_suites(base_path: str) -> list[dict[str, str]]:
     """Discover locally available test suites below base_path."""
+    # 展开配置路径中的波浪号后再遍历套件目录。
+    base_path = os.path.expanduser(str(base_path or ""))
     suites = []
     if not os.path.isdir(base_path):
         logger.info(f"[TestSuites] Local base path not found: {base_path}")

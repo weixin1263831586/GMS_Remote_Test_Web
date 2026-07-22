@@ -18,7 +18,6 @@ from starlette.websockets import WebSocketState
 
 from foundation.common_utils import CommonUtils
 from foundation.config import (
-    APK_TASK_MAX_AGE_SECONDS,
     DEVICE_SSH_POOLS_MAX,
     FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT,
     UPLOAD_PROGRESS_MAX_AGE_SECONDS,
@@ -26,6 +25,7 @@ from foundation.config import (
     USER_STATE_MAX_AGE_HOURS,
 )
 from foundation.networking import split_host_port
+from foundation.ssh_security import configure_strict_host_keys
 
 
 logger = logging.getLogger(__name__)
@@ -46,10 +46,6 @@ class GlobalState:
         self.firmware_upload_progress = {}  # {client_id: {'progress': float, 'filename': str, 'uploaded_size': int, 'total_size': int, 'timestamp': float}}
         self.firmware_upload_progress_lock = threading.Lock()  # 上传进度锁
         self.usbip_states = {}  # {client_id: {'connected': bool, 'timestamp': float}}
-        self.suite_download_tasks = {}  # {task_id: {'status': str, 'progress': float, ...}}
-        self.suite_download_tasks_lock = threading.Lock()
-        self.suite_extract_tasks = {}  # {task_id: {'status': str, 'progress': float, ...}}
-        self.suite_extract_tasks_lock = threading.Lock()
         self.usbip_devices_source = {}  # {device_id: {'source': device_host, 'timestamp': float}}
         self.terminal_ssh_sessions = {}  # {session_id: {'ssh': ssh, 'channel': channel, 'websocket': websocket}}
         self.terminal_lock = threading.Lock()  # 终端会话锁
@@ -59,8 +55,6 @@ class GlobalState:
         self.usbip_devices_source_lock = threading.Lock()  # USB/IP设备来源锁
         self.test_logs_lock = threading.Lock()  # 测试日志锁
         self.last_saved_log_file = {}  # {client_id: log_file_path}
-        self.notifications = {}  # {client_id: deque([notification])}
-        self.notifications_lock = threading.Lock()
         self.device_ssh_pools = {}
         self.device_ssh_pools_lock = threading.Lock()
         self.device_ssh_pools_max = DEVICE_SSH_POOLS_MAX
@@ -145,18 +139,15 @@ class GlobalState:
             expired_usbip = self._cleanup_expired(
                 self.usbip_states, self.usbip_states_lock, USBIP_STATE_MAX_AGE_SECONDS)
 
-            expired_apk_tasks = self._cleanup_expired(
-                self.apk_analysis_tasks, self.apk_analysis_tasks_lock, APK_TASK_MAX_AGE_SECONDS)
-
             with self.firmware_upload_progress_lock:
                 for client_id in list(self.firmware_upload_progress.keys()):
                     entries = self.firmware_upload_progress[client_id]
                     if isinstance(entries, list) and len(entries) > FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT:
                         self.firmware_upload_progress[client_id] = entries[-FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT:]
 
-            if to_remove or expired_progress or expired_sessions or expired_usbip or expired_apk_tasks:
+            if to_remove or expired_progress or expired_sessions or expired_usbip:
                 logger.info(f"Cleanup: {len(to_remove)} user states, {len(expired_progress)} upload progress, "
-                           f"{len(expired_sessions)} SSH sessions, {len(expired_usbip)} USB/IP states, {len(expired_apk_tasks)} APK tasks")
+                           f"{len(expired_sessions)} SSH sessions, {len(expired_usbip)} USB/IP states")
         except Exception as e:
             logger.error(f"Error cleaning up user states: {e}")
 
@@ -226,16 +217,7 @@ class GlobalState:
                 self._close_ssh_safely(ssh)
 
     def _create_device_ssh_connection(self, pool_key: str, config: dict):
-        """
-        创建设备SSH连接
-
-        Args:
-            pool_key: 连接池键值（通常是 device_host）
-            config: 配置字典
-
-        Returns:
-            SSHClient 对象，失败返回 None
-        """
+        """创建设备主机 SSH 连接，失败时返回 None。"""
         device_host = config.get('device_host', pool_key)
         if not device_host:
             logger.error("[Device SSH Pool] No device host in config")
@@ -255,7 +237,7 @@ class GlobalState:
 
         try:
             ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_strict_host_keys(ssh)
             ssh.connect(hostname=hostname, port=port, username=username, password=password, timeout=10)
             logger.info(f"[Device SSH Pool] Connected to {pool_key}")
             return ssh

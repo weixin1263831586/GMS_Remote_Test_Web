@@ -193,18 +193,7 @@ def save_test_report_to_db(
     test_params: dict[str, Any],
     user_logs: list[str]
 ) -> str | None:
-    """
-    从测试日志中提取 RESULT DIRECTORY 并记录测试报告到数据库
-
-    Args:
-        client_id: 客户端ID
-        config: 配置字典
-        test_params: 测试参数
-        user_logs: 用户日志列表
-
-    Returns:
-        报告时间戳，如果失败则返回 None
-    """
+    """从日志提取结果目录并保存报告，返回报告时间戳。"""
     from .analyzer import ReportAnalyzer
     from .repository import test_report_db
 
@@ -221,7 +210,10 @@ def save_test_report_to_db(
         timestamp = _build_report_timestamp(result_dir)
 
         # 检查是否已记录
-        existing = test_report_db.get_report_by_timestamp(timestamp)
+        existing = test_report_db.get_report_by_timestamp(
+            timestamp,
+            owner_id=client_id,
+        )
         if existing:
             logger.info(f"[ReportDB] 报告已存在: {timestamp}")
             return timestamp
@@ -234,6 +226,7 @@ def save_test_report_to_db(
             'test_module': test_params.get('test_module', ''),
             'test_case': test_params.get('test_case', ''),
             'client_id': client_id,
+            'owner_id': client_id,
             'display_client_id': test_params.get('display_client_id') or client_id,
             'devices': test_params.get('devices', []),
             'result_dir': result_dir,
@@ -257,7 +250,7 @@ def save_test_report_to_db(
         if '@' in client_id:
             report_info['user'] = _parse_client_id(client_id)[0]
 
-        # 解析 XML 获取测试结果统计（使用缓存）；VTS 可能没有 test_result.xml，回退解析 host log。
+        # 缓存 XML 统计；VTS 缺少 test_result.xml 时解析 host log。
         if os.path.exists(xml_path):
             try:
                 stat = os.stat(xml_path)

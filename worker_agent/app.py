@@ -9,6 +9,7 @@ import socket
 import subprocess
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,7 +32,7 @@ from .runtime import WorkerRuntime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("gms-worker")
-AGENT_VERSION = "0.3.1"
+AGENT_VERSION = "0.4.0"
 
 
 VNC_PORT = 5900
@@ -73,35 +74,32 @@ def restart_local_vnc() -> dict:
             "error": completed.stderr.strip(),
         }
 
-    for pattern in ("x11vnc.*-rfbport", "websockify.*6080"):
-        subprocess.run(["pkill", "-9", "-f", pattern], capture_output=True)
-    time.sleep(1)
-    display = os.environ.get("DISPLAY", ":0")
-    xauth = f"/home/{getpass.getuser()}/.Xauthority"
-    subprocess.run(
-        ["x11vnc", "-display", display, "-forever", "-shared",
-         "-rfbport", str(VNC_PORT), "-nopw", "-bg", "-o", f"/home/{getpass.getuser()}/logs/x11vnc.log"],
-        capture_output=True, env={**os.environ, "DISPLAY": display, "XAUTHORITY": xauth},
-        timeout=10,
-    )
-    time.sleep(1)
-    novnc_dir = next((d for d in ("/opt/noVNC", "/usr/share/novnc")
-                      if os.path.isfile(os.path.join(d, "vnc.html"))), None)
-    if novnc_dir:
-        websockify_bin = shutil.which("websockify")
-        cmd = [websockify_bin or "python3"]
-        if not websockify_bin:
-            cmd += ["-m", "websockify"]
-        cmd += [f"--web={novnc_dir}", str(NOVNC_PORT), f"localhost:{VNC_PORT}"]
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
-        time.sleep(1)
-    rfb_ok = _rfb_handshake_ok()
     return {
-        "x11vnc_running": rfb_ok,
-        "websockify_listening": _port_listening(NOVNC_PORT),
-        "rfb_ok": rfb_ok,
+        "x11vnc_running": False,
+        "websockify_listening": False,
+        "rfb_ok": False,
+        "error": (
+            "managed noVNC systemd units are missing; redeploy this Worker "
+            "to install the private, token-protected services"
+        ),
     }
+
+
+def stop_local_worker_agent() -> None:
+    """Stop this host's managed Worker services after Controller ACK."""
+    units = [
+        "gms-worker-agent.service",
+        "gms-worker-xvfb.service",
+        "gms-worker-x11vnc.service",
+        "gms-worker-novnc.service",
+    ]
+    subprocess.run(
+        ["systemctl", "--user", "disable", "--now", *units],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
 
 
 def _port_listening(port: int) -> bool:
@@ -114,6 +112,7 @@ class WorkerAgent:
         self.config = config
         self.client = ControllerClient(config)
         self.runtime = WorkerRuntime(config)
+        self.session_id = f"worker-session-{uuid.uuid4().hex}"
         self.suites = []
         self.last_suite_scan = 0.0
 
@@ -130,15 +129,14 @@ class WorkerAgent:
                         "device_inspection": True,
                         "aapt2": has_aapt2,
                         "ssh_user": self.config.ssh_user or getpass.getuser()}
-        # noVNC capability requires both ports open AND a valid RFB handshake.
-        # A zombie x11vnc keeps listening on 5900 but never sends the RFB
-        # greeting, so a pure port check reports a false positive.
+        # noVNC 能力要求端口开放且 RFB 握手有效。
         if _port_listening(NOVNC_PORT) and _rfb_handshake_ok():
             capabilities["novnc_port"] = NOVNC_PORT
         return {"worker_id": self.config.worker_id, "name": self.config.name,
                 "hostname": socket.gethostname(),
                 "address": self.config.address or socket.gethostname(),
                 "agent_version": AGENT_VERSION, "max_jobs": self.config.max_jobs,
+                "session_id": self.session_id,
                 "capabilities": capabilities}
 
     def heartbeat(self):
@@ -149,22 +147,44 @@ class WorkerAgent:
             self.last_suite_scan = now
         managed_jobs = self.runtime.running_jobs()
         running_jobs = managed_jobs + discover_tradefed_processes(managed_jobs)
+        command_states = self.runtime.unsynced_commands()
         payload = {"agent_version": AGENT_VERSION, **host_metrics(self.config),
                    "running_jobs": running_jobs, "devices": probe_devices(include_details=True),
+                   "session_id": self.client.session_id or self.session_id,
+                   "connection_generation": self.client.connection_generation,
+                   "command_states": command_states,
                    "timestamp": datetime.now(timezone.utc).isoformat()}
         if include_suites:
             payload["suites"] = self.suites
-        self.client.heartbeat(payload)
+        response = self.client.heartbeat(payload)
+        for attempt_id in response.get("revoked_attempt_ids", []):
+            self.runtime.revoke_attempt(
+                str(attempt_id),
+                "Controller revoked the expired or superseded device claim",
+            )
+        self.runtime.mark_commands_synced(
+            [str(item) for item in response.get("reconciled_command_ids", [])]
+        )
+
+    def _ack_command(
+        self, command_id: str, status: str, result: dict | None = None, error: str = ""
+    ):
+        response = (
+            self.client.ack(command_id, status, error=error)
+            if result is None
+            else self.client.ack(command_id, status, result, error)
+        )
+        self.runtime.mark_command_synced(command_id)
+        return response
 
     def handle(self, command):
         previous = self.runtime.previous_command(command["id"])
         if previous:
-            # Controller delivery is at-least-once.  A running command may be
-            # re-delivered after a network interruption, and executing it a
-            # second time could launch a duplicate test or flash operation.
-            self.client.ack(command["id"], previous["status"], previous["result"], previous["error"])
+            # Controller 可能重复投递，运行中的命令不得再次执行。
+            self._ack_command(command["id"], previous["status"], previous["result"], previous["error"])
             return
         try:
+            self.runtime.validate_fencing(command)
             kind = command["command_type"]
             if kind == "refresh_devices":
                 result = {"devices": probe_devices(include_details=True)}
@@ -178,33 +198,33 @@ class WorkerAgent:
             elif kind == "suite_action":
                 if command.get("payload", {}).get("action") in {"download_url", "extract"}:
                     self.runtime.save_command(command["id"], "running", {})
-                    self.client.ack(command["id"], "running", {})
+                    self._ack_command(command["id"], "running", {})
                     threading.Thread(target=self.run_suite_action,
                                      args=(command,), name=f"SuiteAction-{command['id']}", daemon=True).start()
                     return
                 result = execute_suite_action(self.config, command.get("payload", {}))
             elif kind == "suite_export":
                 self.runtime.save_command(command["id"], "running", {})
-                self.client.ack(command["id"], "running", {})
+                self._ack_command(command["id"], "running", {})
                 threading.Thread(target=self.run_suite_export,
                                  args=(command,), name=f"SuiteExport-{command['id']}", daemon=True).start()
                 return
             elif kind == "device_export":
                 self.runtime.save_command(command["id"], "running", {})
-                self.client.ack(command["id"], "running", {})
+                self._ack_command(command["id"], "running", {})
                 threading.Thread(target=self.run_device_export,
                                  args=(command,), name=f"DeviceExport-{command['id']}", daemon=True).start()
                 return
             elif kind in {"flash_firmware", "flash_gsi"}:
                 self.runtime.save_command(command["id"], "running", {})
-                self.client.ack(command["id"], "running", {})
+                self._ack_command(command["id"], "running", {})
                 threading.Thread(target=self.run_firmware_flash, args=(command,),
                                  name=f"Firmware-{command['id']}", daemon=True).start()
                 return
             elif kind == "start_test":
                 result = self.runtime.start_process(command)
                 self.runtime.save_command(command["id"], "running", result)
-                self.client.ack(command["id"], "running", result)
+                self._ack_command(command["id"], "running", result)
                 threading.Thread(
                     target=self.monitor_job,
                     args=(command["id"], result["worker_job_id"]),
@@ -215,20 +235,78 @@ class WorkerAgent:
                 result = self.runtime.stop_process(command.get("payload", {}).get("worker_job_id", ""))
             elif kind == "restart_vnc":
                 result = restart_local_vnc()
+            elif kind == "uninstall_agent":
+                # 先确认回执，再停止服务，确保 Controller 能移除注册记录。
+                result = {"stopping": True, "removed_data": False}
+                self.runtime.save_command(command["id"], "completed", result)
+                self._ack_command(command["id"], "completed", result)
+                threading.Thread(
+                    target=stop_local_worker_agent,
+                    name="StopWorkerAgent",
+                    daemon=True,
+                ).start()
+                return
+            elif kind == "get_config":
+                result = self.read_worker_config()
+            elif kind == "update_config":
+                result = self.update_worker_config(command.get("payload", {}))
             else:
                 raise ValueError(f"unsupported command type: {kind}")
             self.runtime.save_command(command["id"], "completed", result)
-            self.client.ack(command["id"], "completed", result)
+            self._ack_command(command["id"], "completed", result)
         except Exception as exc:
             logger.exception("command %s failed", command.get("id"))
             self.runtime.save_command(command["id"], "failed", error=str(exc))
-            self.client.ack(command["id"], "failed", error=str(exc))
+            self._ack_command(command["id"], "failed", error=str(exc))
+
+    # ---- 可配置参数读写（通过 Controller 远程下发） ----
+
+    _CONFIG_FIELDS = {"max_jobs": int}
+
+    def _config_path(self) -> Path:
+        return Path(os.getenv("GMS_WORKER_CONFIG",
+                              Path.home() / ".config/gms-worker/config.json"))
+
+    def read_worker_config(self) -> dict:
+        """Return the configurable fields exposed to the cluster UI."""
+        import json
+        path = self._config_path()
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        return {key: raw.get(key) for key in self._CONFIG_FIELDS}
+
+    def update_worker_config(self, updates: dict) -> dict:
+        """Persist whitelisted config fields, then restart the agent service."""
+        import json
+        path = self._config_path()
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        changed = {}
+        for key, caster in self._CONFIG_FIELDS.items():
+            if key in updates:
+                try:
+                    raw[key] = caster(updates[key])
+                    changed[key] = raw[key]
+                except (TypeError, ValueError):
+                    raise ValueError(f"invalid value for {key}")
+        if changed:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+            logger.info("worker config updated: %s — restarting agent", changed)
+            subprocess.Popen(["systemctl", "--user", "restart", "gms-worker-agent"])
+        return {"updated": changed, "restarted": bool(changed)}
 
     def monitor_job(self, command_id: str, worker_job_id: str):
         try:
             # Resolve controller identifiers from the durable jobs table.
             with self.runtime.connect() as conn:
-                row = conn.execute("SELECT job_id,attempt_id,work_dir FROM jobs WHERE worker_job_id=?",
+                row = conn.execute(
+                    """SELECT job_id,attempt_id,work_dir,trace_id,operation_id
+                       FROM jobs WHERE worker_job_id=?""",
                                    (worker_job_id,)).fetchone()
             if row:
                 sequence = 0
@@ -257,12 +335,12 @@ class WorkerAgent:
                             row["job_id"], row["attempt_id"], path, "log"))
                 self._upload_tradefed_results(row, work_dir)
             self.runtime.save_command(command_id, status, result, error)
-            self._retry(lambda: self.client.ack(command_id, status, result, error))
+            self._retry(lambda: self._ack_command(command_id, status, result, error))
         except Exception as exc:
             logger.exception("job monitor failed for %s", worker_job_id)
             self.runtime.save_command(command_id, "failed", error=str(exc))
             try:
-                self.client.ack(command_id, "failed", error=str(exc))
+                self._ack_command(command_id, "failed", error=str(exc))
             except Exception:
                 logger.exception("failed to report job monitor failure")
 
@@ -271,20 +349,20 @@ class WorkerAgent:
             def report_progress(progress: dict):
                 self.runtime.save_command(command["id"], "running", progress)
                 try:
-                    self.client.ack(command["id"], "running", progress)
+                    self._ack_command(command["id"], "running", progress)
                 except Exception:
                     logger.debug("suite progress update failed", exc_info=True)
 
             result = execute_suite_action(self.config, command.get("payload", {}), report_progress)
             self.runtime.save_command(command["id"], "completed", result)
-            self._retry(lambda: self.client.ack(command["id"], "completed", result))
+            self._retry(lambda: self._ack_command(command["id"], "completed", result))
             self.suites = scan_suites(self.config)
             self.last_suite_scan = time.monotonic()
         except Exception as exc:
             logger.exception("suite action %s failed", command.get("id"))
             error = str(exc)
             self.runtime.save_command(command["id"], "failed", error=error)
-            self._retry(lambda: self.client.ack(command["id"], "failed", error=error))
+            self._retry(lambda: self._ack_command(command["id"], "failed", error=error))
 
     def run_suite_export(self, command: dict):
         path = None
@@ -296,12 +374,12 @@ class WorkerAgent:
             summary = {"transfer_id": payload["transfer_id"], "filename": path.name,
                        "size_bytes": path.stat().st_size}
             self.runtime.save_command(command["id"], "completed", summary)
-            self._retry(lambda: self.client.ack(command["id"], "completed", summary))
+            self._retry(lambda: self._ack_command(command["id"], "completed", summary))
         except Exception as exc:
             logger.exception("suite export %s failed", command.get("id"))
             self.runtime.save_command(command["id"], "failed", error=str(exc))
             try:
-                self.client.ack(command["id"], "failed", error=str(exc))
+                self._ack_command(command["id"], "failed", error=str(exc))
             except Exception:
                 logger.exception("failed to acknowledge suite export failure")
         finally:
@@ -323,12 +401,12 @@ class WorkerAgent:
                 "device": payload["devices"][0],
             }
             self.runtime.save_command(command["id"], "completed", summary)
-            self._retry(lambda: self.client.ack(command["id"], "completed", summary))
+            self._retry(lambda: self._ack_command(command["id"], "completed", summary))
         except Exception as exc:
             logger.exception("device export %s failed", command.get("id"))
             self.runtime.save_command(command["id"], "failed", error=str(exc))
             try:
-                self.client.ack(command["id"], "failed", error=str(exc))
+                self._ack_command(command["id"], "failed", error=str(exc))
             except Exception:
                 logger.exception("failed to acknowledge device export failure")
         finally:
@@ -364,12 +442,12 @@ class WorkerAgent:
             status = "completed" if result.get("success") else "failed"
             error = "" if status == "completed" else result.get("output", "firmware flash failed")
             self.runtime.save_command(command["id"], status, result, error)
-            self._retry(lambda: self.client.ack(command["id"], status, result, error))
+            self._retry(lambda: self._ack_command(command["id"], status, result, error))
         except Exception as exc:
             logger.exception("firmware command %s failed", command.get("id"))
             error = str(exc)
             self.runtime.save_command(command["id"], "failed", error=error)
-            self._retry(lambda: self.client.ack(command["id"], "failed", error=error))
+            self._retry(lambda: self._ack_command(command["id"], "failed", error=error))
         finally:
             if directory is not None:
                 shutil.rmtree(directory, ignore_errors=True)
@@ -377,21 +455,30 @@ class WorkerAgent:
     def _flush_log_events(self, row, offsets: dict[str, int], sequence: int) -> int:
         events = []
         new_offsets = dict(offsets)
+        row_keys = set(row.keys())
         for log_name in ("stdout.log", "stderr.log"):
             path = Path(row["work_dir"]) / log_name
             if not path.exists():
                 continue
             with path.open("r", encoding="utf-8", errors="replace") as handle:
                 handle.seek(offsets[log_name])
-                # Keep heartbeat/log-forwarding memory bounded even when a
-                # full CTS run produces output for several days.
+                # 限制长时间测试的日志转发内存占用。
                 text = handle.read(int(os.getenv("GMS_WORKER_LOG_BATCH_CHARS", str(256 * 1024))))
                 new_offsets[log_name] = handle.tell()
             for line in text.splitlines():
                 events.append({"sequence": sequence, "event_type": "log",
                                "source": log_name.removesuffix(".log"),
                                "level": "error" if log_name == "stderr.log" else "info",
-                               "message": line, "payload": {}})
+                               "message": line, "payload": {
+                                   "job_id": row["job_id"],
+                                   "attempt_id": row["attempt_id"],
+                                   "trace_id": row["trace_id"] if "trace_id" in row_keys else "",
+                                   "operation_id": (
+                                       row["operation_id"]
+                                       if "operation_id" in row_keys else ""
+                                   ),
+                                   "worker_id": self.config.worker_id,
+                               }})
                 sequence += 1
         if events:
             self.client.events(row["job_id"], row["attempt_id"], events)
@@ -444,12 +531,14 @@ class WorkerAgent:
             try:
                 if not registered:
                     self.client.register(self.registration())
+                    # 注册后的首次心跳强制重新上报设备清单。
+                    self.last_suite_scan = 0.0
                     registered = True
                     logger.info("registered as %s", self.config.worker_id)
                 if not recovered:
                     recoverable_jobs = self.runtime.recoverable_jobs()
                     for command in self.runtime.fail_interrupted_commands():
-                        self._retry(lambda item=command: self.client.ack(
+                        self._retry(lambda item=command: self._ack_command(
                             item["id"], item["status"], item["result"], item["error"]
                         ))
                     for job in recoverable_jobs:
@@ -470,7 +559,8 @@ class WorkerAgent:
 
     def monitor_recovered_job(self, job: dict):
         row = {"job_id": job["job_id"], "attempt_id": job["attempt_id"],
-               "work_dir": job["work_dir"]}
+               "work_dir": job["work_dir"], "trace_id": job.get("trace_id", ""),
+               "operation_id": job.get("operation_id", "")}
         offsets = {"stdout.log": 0, "stderr.log": 0}
         sequence = 0
         while self.runtime.pid_alive(int(job["pid"])):
@@ -494,7 +584,7 @@ class WorkerAgent:
                     job["job_id"], job["attempt_id"], p, "log"))
         self._upload_tradefed_results(row, work_dir)
         self.runtime.save_command(job["command_id"], status, result, error)
-        self._retry(lambda: self.client.ack(job["command_id"], status, result, error))
+        self._retry(lambda: self._ack_command(job["command_id"], status, result, error))
 
 
 def main():

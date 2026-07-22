@@ -5,10 +5,10 @@ import subprocess
 import zipfile
 from unittest.mock import patch
 
-from worker_agent.config import WorkerConfig
 from worker_agent.android_inspection import _aapt2_path
-from worker_agent.process_inventory import _is_active_invocation
+from worker_agent.config import WorkerConfig
 from worker_agent.inventory import execute_device_action, execute_suite_action, flash_firmware, prepare_suite_export
+from worker_agent.process_inventory import _is_active_invocation
 
 
 def test_aapt2_path_accepts_configured_worker_binary(tmp_path):
@@ -152,6 +152,64 @@ def test_suite_download_preserves_explicit_original_filename(tmp_path):
     expected = root / "android-sts-17_sts-r52-linux-arm64.zip"
     assert expected.read_bytes() == b"sts"
     assert result["archive_path"] == str(expected)
+
+
+def test_controller_suite_download_sends_worker_token(tmp_path):
+    root = tmp_path / "suites"
+    root.mkdir()
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://controller",
+        token="worker-secret",
+        suite_roots=[root],
+        data_root=tmp_path / "data",
+    )
+    with patch(
+        "worker_agent.inventory.urllib.request.urlopen",
+        return_value=io.BytesIO(b"suite"),
+    ) as opened:
+        execute_suite_action(
+            config,
+            {
+                "action": "download_url",
+                "url": "https://controller/api/cluster/suite-library-download/safe/file.zip",
+                "filename": "file.zip",
+            },
+        )
+
+    request = opened.call_args.args[0]
+    assert request.get_header("Authorization") == "Bearer worker-secret"
+
+
+def test_controller_suite_download_attaches_token_when_browser_host_differs(tmp_path):
+    """The browser builds the download URL from window.location, whose host may
+    differ from the controller_url the Worker dials (reverse proxy / DNS alias).
+    The suite-library-download path is unique to the Controller, so the Worker
+    must still attach its token instead of failing the callback with 401."""
+    root = tmp_path / "suites"
+    root.mkdir()
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://controller.internal",
+        token="worker-secret",
+        suite_roots=[root],
+        data_root=tmp_path / "data",
+    )
+    with patch(
+        "worker_agent.inventory.urllib.request.urlopen",
+        return_value=io.BytesIO(b"suite"),
+    ) as opened:
+        execute_suite_action(
+            config,
+            {
+                "action": "download_url",
+                "url": "https://10.10.10.206/api/cluster/suite-library-download/safe/file.zip",
+                "filename": "file.zip",
+            },
+        )
+
+    request = opened.call_args.args[0]
+    assert request.get_header("Authorization") == "Bearer worker-secret"
 
 
 def test_suite_archive_listing_and_safe_extraction(tmp_path):

@@ -1,40 +1,64 @@
-"""Worker token parsing, persistence, and request authentication."""
+"""Worker token parsing, persistence, and request authentication.
+
+Tokens live inside ``configs/cluster.json`` under the ``worker_tokens`` key
+(a JSON object mapping ``worker_id`` to ``token``).  The cluster config path
+can be overridden with the ``GMS_CLUSTER_CONFIG`` environment variable, the
+same variable used by :class:`features.cluster.config.ClusterConfig`.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
-import shlex
 from pathlib import Path
 
 from fastapi import HTTPException
 
 
-def worker_tokens() -> dict[str, str]:
-    result = {}
-    for item in os.getenv("GMS_CLUSTER_WORKER_TOKENS", "").split(","):
-        worker_id, separator, token = item.partition(":")
-        if separator and worker_id.strip() and token.strip():
-            result[worker_id.strip()] = token.strip()
-    return result
+def _cluster_config_path() -> Path:
+    """Return the path to ``configs/cluster.json``."""
+    configured = os.getenv("GMS_CLUSTER_CONFIG", "").strip()
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parents[2] / "configs" / "cluster.json"
 
 
-def write_worker_tokens(tokens: dict[str, str], env_path: Path | None = None) -> None:
-    value = ",".join(f"{key}:{item}" for key, item in sorted(tokens.items()))
-    os.environ["GMS_CLUSTER_WORKER_TOKENS"] = value
-    env_path = env_path or (Path(__file__).resolve().parents[2] / ".env.production")
-    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-    # restart_services.sh sources this file, so the value must be shell-safe.
-    replacement = f"GMS_CLUSTER_WORKER_TOKENS={shlex.quote(value)}"
-    lines = [
-        replacement if line.startswith("GMS_CLUSTER_WORKER_TOKENS=") else line
-        for line in lines
-    ]
-    if not any(line.startswith("GMS_CLUSTER_WORKER_TOKENS=") for line in lines):
-        lines.append(replacement)
-    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    env_path.chmod(0o600)
+def _read_cluster_raw(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def worker_tokens(file_path: Path | None = None) -> dict[str, str]:
+    """Return the worker→token map stored under ``worker_tokens`` in cluster.json."""
+    raw = _read_cluster_raw(file_path or _cluster_config_path())
+    tokens = raw.get("worker_tokens")
+    if isinstance(tokens, dict):
+        return {str(k): str(v) for k, v in tokens.items() if v}
+    return {}
+
+
+def write_worker_tokens(tokens: dict[str, str], file_path: Path | None = None) -> None:
+    """Persist the worker→token map into ``worker_tokens`` within cluster.json.
+
+    Existing cluster configuration keys are preserved; only ``worker_tokens``
+    is replaced.
+    """
+    path = file_path or _cluster_config_path()
+    raw = _read_cluster_raw(path)
+    raw["worker_tokens"] = dict(sorted(tokens.items()))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
 
 
 def persist_worker_token(worker_id: str, token: str) -> None:

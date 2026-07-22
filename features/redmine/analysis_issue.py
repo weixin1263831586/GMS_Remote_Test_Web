@@ -164,6 +164,4 @@ class IssueAnalysisMixin:
             })
         return result
 
-    # ------------------------------------------------------------------
     # Similar reference finding with multi-dimension similarity scoring
-    # ------------------------------------------------------------------

@@ -6,6 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet
+
 from features.redmine.config import RedmineConfig
 from features.redmine.repository import RedmineAgentDB
 from features.redmine.users import load_user_map_payload_for_owner
@@ -24,6 +26,16 @@ def _issue(issue_id: int, subject: str) -> dict:
 
 
 class RedmineUserIsolationTests(unittest.TestCase):
+    def setUp(self):
+        self.secret_env = patch.dict(
+            "os.environ",
+            {"GMS_SECRET_KEY": Fernet.generate_key().decode("ascii")},
+        )
+        self.secret_env.start()
+
+    def tearDown(self):
+        self.secret_env.stop()
+
     def test_redmine_services_are_isolated_by_owner(self):
         import features.redmine.api as redmine_api
 
@@ -45,6 +57,7 @@ class RedmineUserIsolationTests(unittest.TestCase):
                 patch.object(redmine_api, "owner_db_path", lambda owner: root / owner / "redmine.sqlite3"),
                 patch.object(redmine_api, "owner_docs_dir", lambda owner: root / owner / "docs"),
                 patch.object(redmine_api, "owner_attachments_dir", lambda owner: root / owner / "attachments"),
+                patch.object(redmine_api, "owner_knowledge_db_path", lambda owner: root / owner / "knowledge.sqlite3"),
                 # 避免迁移逻辑把全局 user_map 拷到真实 configs/。
                 patch.object(redmine_users, "owner_user_map_path", lambda owner: root / owner / "redmine_user_map.json"),
                 patch.object(redmine_api, "owner_user_map_path", lambda owner: root / owner / "redmine_user_map.json"),
@@ -65,7 +78,7 @@ class RedmineUserIsolationTests(unittest.TestCase):
                 self.assertTrue((root / "alice" / "redmine.sqlite3").exists())
                 self.assertTrue((root / "bob" / "redmine.sqlite3").exists())
 
-    def test_redmine_owner_service_migrates_legacy_data_once(self):
+    def test_redmine_owner_service_does_not_copy_legacy_global_data(self):
         import features.redmine.api as redmine_api
 
         with TemporaryDirectory() as tmp:
@@ -101,14 +114,10 @@ class RedmineUserIsolationTests(unittest.TestCase):
                 patch.object(redmine_api, "settings", fake_settings),
                 patch.object(redmine_users, "settings", fake_settings),
                 patch.object(redmine_api, "config_manager", ConfigFactory()),
-                patch.object(redmine_api, "DB_PATH", legacy_db),
-                patch.object(redmine_api, "DOCS_DIR", legacy_docs),
-                patch.object(redmine_api, "USER_MAP_PATH", legacy_user_map),
-                patch.object(redmine_users, "USER_MAP_PATH", legacy_user_map),
                 patch.object(redmine_api, "owner_db_path", lambda owner: root / owner / "redmine.sqlite3"),
                 patch.object(redmine_api, "owner_docs_dir", lambda owner: root / owner / "docs"),
                 patch.object(redmine_api, "owner_attachments_dir", lambda owner: root / owner / "attachments"),
-                patch.object(redmine_api, "owner_runtime_config_path", lambda owner: root / owner / "config_runtime.json"),
+                patch.object(redmine_api, "owner_knowledge_db_path", lambda owner: root / owner / "knowledge.sqlite3"),
                 patch.object(redmine_api, "owner_user_map_path", lambda owner: root / owner / "redmine_user_map.json"),
                 # users 模块内部用自己导入的 path 函数落盘，必须一并 patch，
                 # 否则测试会向真实 configs/ 写入残留配置。
@@ -117,12 +126,11 @@ class RedmineUserIsolationTests(unittest.TestCase):
             ):
                 service = redmine_api.get_redmine_service_for_owner("alice")
 
-                self.assertEqual(service.repository.get_issue(202)["subject"], "legacy issue")
-                self.assertEqual((root / "alice" / "docs" / "legacy.md").read_text(encoding="utf-8"), "legacy doc")
-                migrated_runtime = json.loads((root / "alice" / "config_runtime.json").read_text(encoding="utf-8"))
-                self.assertEqual(migrated_runtime, {"redmine_auth": {"username": "legacy"}})
+                self.assertIsNone(service.repository.get_issue(202))
+                self.assertFalse((root / "alice" / "docs" / "legacy.md").exists())
+                self.assertFalse((root / "alice" / "config_runtime.json").exists())
 
-    def test_missing_owner_runtime_can_use_static_redmine_credentials(self):
+    def test_missing_owner_runtime_does_not_use_static_redmine_credentials(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "foundation").mkdir(parents=True)
@@ -138,12 +146,9 @@ class RedmineUserIsolationTests(unittest.TestCase):
             manager = RedmineConfig(project_root=root)
             manager.runtime_config_path = root / "data/redmine/by_user/alice/config_runtime.json"
 
-            self.assertEqual(
-                manager.load_redmine_credentials(),
-                {"username": "static-user", "password": "static-secret"},
-            )
+            self.assertEqual(manager.load_redmine_credentials(), {})
 
-    def test_owner_user_map_uses_global_config_path_without_redmine_by_user(self):
+    def test_owner_user_map_does_not_fall_back_to_global_config(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             global_map = root / "configs" / "redmine_user_map.json"
@@ -154,11 +159,14 @@ class RedmineUserIsolationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with (
-                patch("features.redmine.users.USER_MAP_PATH", global_map),
+                patch(
+                    "features.redmine.users.owner_user_map_path",
+                    lambda owner: root / "data/redmine/by_user" / owner / "redmine_user_map.json",
+                ),
             ):
                 payload = load_user_map_payload_for_owner("alice")
 
-            self.assertEqual(payload["departments"][0]["department_id"], "qa")
+            self.assertEqual(payload, {"departments": []})
             self.assertFalse(forbidden_dir.exists())
 
 

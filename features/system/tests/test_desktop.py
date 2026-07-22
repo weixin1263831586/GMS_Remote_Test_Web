@@ -3,6 +3,7 @@ import unittest
 from features.system.desktop import (
     build_novnc_upstream_url,
     default_novnc_upstream_http,
+    novnc_asset_override,
     novnc_locale_override,
 )
 
@@ -24,6 +25,29 @@ class DesktopProxyTests(unittest.TestCase):
         self.assertIn("无法连接到服务器".encode(), locale)
         self.assertNotIn("無法連線到伺服器".encode(), locale)
         self.assertIsNone(novnc_locale_override("app/ui.js"))
+
+    def test_novnc_clipboard_falls_back_when_iframe_is_not_focused(self):
+        entry = novnc_asset_override(
+            "vnc.html",
+            b'import UI from "./app/ui.js";',
+        )
+        ui = novnc_asset_override(
+            "app/ui.js",
+            b'import RFB from "../core/rfb.js";',
+        )
+        rfb = novnc_asset_override(
+            "core/rfb.js",
+            b'import AsyncClipboard from "./clipboard.js";',
+        )
+        clipboard = novnc_asset_override(
+            "core/clipboard.js",
+            b"if (!this._isAvailable) return false;",
+        )
+
+        self.assertIn(b"gms_asset=20260718-clipboard-focus", entry)
+        self.assertIn(b"gms_asset=20260718-clipboard-focus", ui)
+        self.assertIn(b"gms_asset=20260718-clipboard-focus", rfb)
+        self.assertIn(b"!document.hasFocus()", clipboard)
 
 
 if __name__ == "__main__":

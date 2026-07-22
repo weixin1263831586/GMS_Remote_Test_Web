@@ -25,6 +25,8 @@ class DeviceUtilsTests(unittest.TestCase):
         )
 
         self.assertIn("nohup '/opt/scrcpy bin/scrcpy' -s ABC-123", command)
+        self.assertIn("--no-control", command)
+        self.assertNotIn("--stay-awake", command)
         self.assertIn("--window-title ABC-123", command)
         self.assertIn("> /tmp/scrcpy_ABC-123.log 2>&1 &", command)
         self.assertIn("/home/'test user'/.Xauthority", command)

@@ -73,7 +73,7 @@ def to_iso8601(value: Any) -> str:
     parsed = parse_iso(text)
     if parsed is not None:
         return parsed.isoformat(timespec="seconds")
-    # Last resort: collapse a space separator to 'T' if it looks like a timestamp.
+    # 时间格式有效时将空格分隔符规范为 T。
     return text.replace(" ", "T", 1) if len(text) >= 10 and text[4:5] == "-" else text
 
 
@@ -122,8 +122,7 @@ def sanitize_attachment_filename(filename: str | None, default: str = "attachmen
 def attachment_content_disposition(filename: str | None) -> str:
     """Build a safe Content-Disposition header with an RFC 5987 filename field."""
     safe_name = sanitize_attachment_filename(filename)
-    # sanitize_attachment_filename already restricts the name to [A-Za-z0-9._ -],
-    # so the only remaining unsafe-for-header characters here are non-ascii bytes.
+    # Header 文件名仅保留 ASCII 安全字符。
     ascii_name = safe_name.encode("ascii", "ignore").decode("ascii") or "attachment"
     encoded_name = urllib.parse.quote(safe_name, safe="")
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"

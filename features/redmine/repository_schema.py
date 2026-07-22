@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -12,30 +13,46 @@ from .users import (
 
 
 class RepositorySchemaMixin:
+    _REQUIRED_TABLES = frozenset({
+        "redmine_agent_runs",
+        "redmine_agent_issues",
+        "redmine_agent_attachments",
+        "redmine_agent_references",
+        "redmine_agent_issue_status_history",
+    })
+
     def __init__(self, db_path: Path = DB_PATH, docs_dir: Path = DOCS_DIR):
         self.db_path = Path(db_path)
         self.docs_dir = Path(docs_dir)
+        self._schema_lock = threading.RLock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.docs_dir.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
     def connect(self, initialize_if_missing: bool = True) -> sqlite3.Connection:
-        if initialize_if_missing and not self.db_path.exists():
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.docs_dir.mkdir(parents=True, exist_ok=True)
-            self.init_db()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.docs_dir.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        if initialize_if_missing:
+            existing_tables = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            if not self._REQUIRED_TABLES.issubset(existing_tables):
+                conn.close()
+                self.init_db()
+                conn = self.connect(initialize_if_missing=False)
         return conn
 
-    # ------------------------------------------------------------------
     # Schema
-    # ------------------------------------------------------------------
 
     def init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.docs_dir.mkdir(parents=True, exist_ok=True)
-        with self.connect(initialize_if_missing=False) as conn:
+        with self._schema_lock, self.connect(initialize_if_missing=False) as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS redmine_agent_runs (
@@ -208,9 +225,7 @@ class RepositorySchemaMixin:
             except sqlite3.OperationalError:
                 pass
 
-    # ------------------------------------------------------------------
     # Runs
-    # ------------------------------------------------------------------
 
     def create_run(self, run_id: str, mode: str, window_start: str, window_end: str, max_issues: int) -> None:
         with self.connect() as conn:
@@ -273,6 +288,4 @@ class RepositorySchemaMixin:
             ).fetchall()
         return [self._decode_row(row) for row in rows]
 
-    # ------------------------------------------------------------------
     # Issues
-    # ------------------------------------------------------------------

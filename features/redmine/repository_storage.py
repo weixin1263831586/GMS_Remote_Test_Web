@@ -139,9 +139,7 @@ class RepositoryStorageMixin:
                 (issue_id, old_status, new_status, _now()),
             )
 
-    # ------------------------------------------------------------------
     # Attachments
-    # ------------------------------------------------------------------
 
     def insert_attachment(self, item: dict[str, Any]) -> None:
         with self.connect() as conn:
@@ -164,9 +162,7 @@ class RepositoryStorageMixin:
                 ),
             )
 
-    # ------------------------------------------------------------------
     # References
-    # ------------------------------------------------------------------
 
     def replace_references(self, issue_id: int, references: list[dict[str, Any]]) -> None:
         with self.connect() as conn:
@@ -193,9 +189,7 @@ class RepositoryStorageMixin:
                 ],
             )
 
-    # ------------------------------------------------------------------
     # Documents
-    # ------------------------------------------------------------------
 
     def write_issue_doc(self, issue_id: int, content: str) -> str:
         path = self.docs_dir / f"redmine-{issue_id}.md"
@@ -207,9 +201,7 @@ class RepositoryStorageMixin:
         path.write_text(content, encoding="utf-8")
         return str(path)
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
 
     def _replace_fts(self, conn: sqlite3.Connection, payload: dict[str, Any]) -> None:
         try:
@@ -245,9 +237,7 @@ class RepositoryStorageMixin:
         if category:
             clauses.append("category=?")
             params.append(category)
-        # Restrict to issues assigned to one of the given names (substring match,
-        # so "超群 黄" / "黄 超群" / email all match). Used by the personal issue
-        # list to exclude department-members' stubs written by the dashboard.
+        # 按姓名或邮箱片段筛选个人工单。
         names = [str(n).strip() for n in (assignee_names or []) if str(n).strip()]
         if names:
             name_clauses = " OR ".join("assigned_to_name LIKE ?" for _ in names)

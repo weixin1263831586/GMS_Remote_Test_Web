@@ -69,16 +69,7 @@ class DeviceManager:
         force_refresh: bool = False,
         ssh=None
     ) -> list[str]:
-        """
-        获取已连接的Android设备列表
-
-        Args:
-            force_refresh: 是否强制刷新
-            ssh: SSH连接（如果不提供则创建新连接）
-
-        Returns:
-            设备ID列表
-        """
+        """返回已连接 Android 设备 ID 列表。"""
         config = self.config_manager.load_config()
 
         if ssh is None and is_local_host(config.get('ubuntu_host', '')):
@@ -142,16 +133,7 @@ class DeviceManager:
         device_id: str,
         ssh=None
     ) -> dict[str, Any]:
-        """
-        获取设备详细信息
-
-        Args:
-            device_id: 设备ID
-            ssh: SSH连接
-
-        Returns:
-            设备信息字典
-        """
+        """返回指定设备的详细信息。"""
         config = self.config_manager.load_config()
 
         if ssh is None:
@@ -221,16 +203,7 @@ class DeviceManager:
         ssh=None,
         wait_for_online: bool = True,
     ) -> dict[str, Any]:
-        """
-        重启设备
-
-        Args:
-            device_id: 设备ID
-            ssh: SSH连接
-
-        Returns:
-            结果字典
-        """
+        """重启指定设备，并可等待设备重新上线。"""
         config = self.config_manager.load_config()
 
         if ssh is None:
@@ -284,16 +257,7 @@ class DeviceManager:
         device_id: str,
         ssh=None
     ) -> dict[str, Any]:
-        """
-        Remount设备（root权限）
-
-        Args:
-            device_id: 设备ID
-            ssh: SSH连接
-
-        Returns:
-            结果字典
-        """
+        """以 root 权限重新挂载指定设备。"""
         config = self.config_manager.load_config()
 
         if ssh is None:

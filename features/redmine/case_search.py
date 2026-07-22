@@ -1,19 +1,4 @@
-"""Similarity search over the Redmine knowledge base case facts.
-
-Scoring (Redmine.txt §5.5):
-
-    FTS命中            0–30  (scaled by bm25 rank proximity)
-    平台一致           +15
-    Android 版本一致    +10
-    认证类型一致        +10
-    模块一致           +15
-    错误签名一致        +25
-    Closed/Confirmed    +5
-    有 solution         +5
-
-The search decouples from the issue scan store — it operates entirely on the
-``case_facts`` table in the knowledge base.
-"""
+"""基于全文索引和案例属性评分搜索相似 Redmine 工单。"""
 
 from __future__ import annotations
 
@@ -39,7 +24,7 @@ class RedmineCaseSearch:
         if not query_text.strip():
             return []
 
-        # Pull a generous FTS candidate pool, then re-rank with the scoring rules.
+        # 扩大全文检索候选池，再按评分规则重排。
         pool = self.db.search_case_facts(query_text, limit=max(limit * 5, 30))
         results: list[dict[str, Any]] = []
         for fact in pool:
@@ -68,9 +53,7 @@ class RedmineCaseSearch:
         results.sort(key=lambda item: item["score"], reverse=True)
         return results[: max(1, min(limit, 50))]
 
-    # ------------------------------------------------------------------
     # Probe construction
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _probe_from(issue_or_text: dict[str, Any] | str) -> dict[str, Any]:
@@ -110,9 +93,7 @@ class RedmineCaseSearch:
             "error_signature": fact["error_signature"],
         }
 
-    # ------------------------------------------------------------------
     # Scoring
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _score(probe: dict[str, Any], fact: dict[str, Any]) -> tuple[float, dict[str, Any]]:

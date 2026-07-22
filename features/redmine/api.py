@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import shutil
 import threading
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -25,9 +22,6 @@ from features.redmine.dashboard import (
 from features.redmine.knowledge_repository import RedmineKnowledgeDB
 from features.redmine.page import page_router
 from features.redmine.repository import (
-    DB_PATH,
-    DOCS_DIR,
-    USER_MAP_PATH,
     RedmineAgentDB,
     display_names_from_mapping,
     find_user_mapping_for_names,
@@ -37,12 +31,8 @@ from features.redmine.repository import (
     owner_db_path,
     owner_docs_dir,
     owner_knowledge_db_path,
-    owner_runtime_config_path,
     owner_user_map_path,
     save_user_map_payload_for_owner,
-)
-from features.redmine.repository import (
-    load_redmine_user_map as _legacy_load_redmine_user_map,
 )
 from features.redmine.scheduler import get_scheduler_config
 from features.redmine.service import RedmineService
@@ -52,8 +42,6 @@ from foundation.config import settings
 
 
 __all__ = ["page_router", "router"]
-
-load_redmine_user_map = _legacy_load_redmine_user_map
 
 router = APIRouter(prefix="/api/redmine-agent")
 
@@ -79,59 +67,7 @@ def configure_redmine_service(service: RedmineService) -> None:
         pass
 
 
-def _copy_file_if_missing(source, destination) -> None:
-    source_path = Path(source)
-    destination_path = Path(destination)
-    if not source_path.is_file() or destination_path.exists():
-        return
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_path, destination_path)
-
-
-def _copy_tree_contents_if_missing(source, destination) -> None:
-    source_path = Path(source)
-    destination_path = Path(destination)
-    if not source_path.is_dir():
-        return
-    destination_path.mkdir(parents=True, exist_ok=True)
-    for item in source_path.iterdir():
-        target = destination_path / item.name
-        if target.exists():
-            continue
-        if item.is_dir():
-            shutil.copytree(item, target, symlinks=True)
-        elif item.is_file():
-            shutil.copy2(item, target)
-
-
-def _migrate_legacy_redmine_runtime_config(owner_id: str) -> None:
-    source_path = Path(settings.project_root) / "configs/config_runtime.json"
-    target_path = owner_runtime_config_path(owner_id)
-    if not source_path.is_file() or target_path.exists():
-        return
-    try:
-        payload = json.loads(source_path.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    redmine_auth = payload.get("redmine_auth")
-    if not redmine_auth:
-        return
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(
-        json.dumps({"redmine_auth": redmine_auth}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _migrate_legacy_redmine_data(owner_id: str) -> None:
-    _copy_file_if_missing(DB_PATH, owner_db_path(owner_id))
-    _copy_tree_contents_if_missing(DOCS_DIR, owner_docs_dir(owner_id))
-    _copy_file_if_missing(USER_MAP_PATH, owner_user_map_path(owner_id))
-    _migrate_legacy_redmine_runtime_config(owner_id)
-
-
 def _build_user_redmine_service(owner_id: str) -> RedmineService:
-    _migrate_legacy_redmine_data(owner_id)
     user_config = config_manager.for_owner(owner_id)
     repository = RedmineAgentDB(
         db_path=owner_db_path(owner_id),
@@ -212,10 +148,11 @@ def _user_map_path_for_request(request: Request):
     return owner_user_map_path(_owner_id_from_request(request))
 
 
-def get_shared_redmine_dashboard_config() -> dict[str, Any]:
+def get_redmine_dashboard_config_for_request(request: Request) -> dict[str, Any]:
+    manager = get_redmine_config_for_request(request)
     return with_department_profiles_from_users(
-        config_manager.get_redmine_dashboard_config(),
-        load_redmine_user_map(),
+        manager.get_redmine_dashboard_config(),
+        _load_user_map_for_request(request),
     )
 
 
@@ -334,9 +271,7 @@ def _clear_user_redmine_service(owner_id: str) -> None:
             pass
 
 
-# ------------------------------------------------------------------
 # Existing endpoints (enhanced)
-# ------------------------------------------------------------------
 
 @router.post("/runs")
 async def create_run(
@@ -468,9 +403,7 @@ def _attachment_links_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
         })
     if items:
         return items
-    # Known legacy row: local snapshot lacks attachment metadata, but the
-    # source Redmine issue has these attachments. Keep this as link metadata
-    # only; no file is stored in the internal knowledge base.
+    # 为缺少附件元数据的指定工单补充只读链接。
     if issue_id == 598972:
         base = config_manager.get_redmine_base_url()
         return [
@@ -591,9 +524,7 @@ async def download_issue_attachment(issue_id: int, attachment_id: int, request: 
     )
 
 
-# ------------------------------------------------------------------
 # New endpoints
-# ------------------------------------------------------------------
 
 @router.get("/issues")
 async def list_issues(
@@ -608,11 +539,10 @@ async def list_issues(
     order: str = Query("desc"),
 ):
     service = get_redmine_service_for_request(request)
-    # Restrict the personal issue list to the logged-in user's own issues, so
-    # department-members' stubs (written by the dashboard stats path) don't leak in.
+    # 个人工单列表仅返回当前登录用户的数据。
     owner_names = await _resolve_owner_names(request)
     raw_issues = service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order, assignee_names=owner_names)
-    # Batch-fetch knowledge case facts once (N+1 -> 1) for display enrichment.
+    # 批量读取案例事实用于界面补充。
     facts_by_id = service.knowledge.get_case_facts_for_issue_ids(
         [int(i.get("issue_id") or 0) for i in raw_issues]
     ) if raw_issues else {}
@@ -635,7 +565,9 @@ async def get_statistics(request: Request):
 
 
 async def _resolve_owner_names(request: Request | None = None, service: RedmineService | None = None) -> list[str]:
-    selected_service = service or (get_redmine_service_for_request(request) if request is not None else redmine_service)
+    if request is None:
+        raise ValueError("authenticated request is required")
+    selected_service = service or get_redmine_service_for_request(request)
     names: list[str] = []
     try:
         client = selected_service.agent._make_client()
@@ -655,12 +587,10 @@ async def _resolve_owner_names(request: Request | None = None, service: RedmineS
     config: dict[str, Any] = {}
     user_map: list[dict[str, Any]] = []
     try:
-        if request is not None:
-            config = get_redmine_config_for_request(request).load_config()
-            user_map = load_redmine_user_map_for_owner(_owner_id_from_request(request))
-        else:
-            config = config_manager.load_config()
-            user_map = _legacy_load_redmine_user_map()
+        config = get_redmine_config_for_request(request).load_config()
+        user_map = load_redmine_user_map_for_owner(
+            _owner_id_from_request(request)
+        )
     except Exception:
         pass
 
@@ -713,9 +643,7 @@ async def list_stat_users(request: Request):
     current_names = await _resolve_owner_names(request)
     current_name = ""
     if current_names:
-        # Find the current login user inside the user_map so the frontend can
-        # default-select it. Prefer the map's exact name spelling so select.value
-        # matches the option value exactly.
+        # 使用用户映射中的准确姓名作为默认选项。
         mapped = find_user_mapping_for_names(_load_user_map_for_request(request), current_names)
         if mapped:
             current_name = mapped.get("name") or ""
@@ -875,7 +803,10 @@ async def get_latest_report(request: Request):
 
 
 @router.get("/config")
-async def get_config():
+async def get_config(request: Request):
+    from features.auth import require_role
+
+    require_role("admin")(request)
     return {"success": True, "data": get_scheduler_config()}
 
 
@@ -890,8 +821,8 @@ async def get_stats_config(request: Request):
     manager = get_redmine_config_for_request(request)
     config = manager.load_config()
     stats_cfg = manager.get_redmine_stats_config()
-    dashboard_cfg = get_shared_redmine_dashboard_config()
-    gerrit_cfg = config_manager.get_gerrit_dashboard_config()
+    dashboard_cfg = get_redmine_dashboard_config_for_request(request)
+    gerrit_cfg = manager.get_gerrit_dashboard_config()
     if gerrit_cfg.get("rest_password"):
         gerrit_cfg = {**gerrit_cfg, "rest_password": "***"}
     email_cfg = (config.get("redmine_dashboard") or {}).get("email") or {}
@@ -909,6 +840,12 @@ async def update_stats_config(request: Request):
     """Update redmine_stats config from the settings UI."""
     body = await request.json()
     manager = get_redmine_config_for_request(request)
+    if "base_url" in body:
+        try:
+            if not manager.save_redmine_base_url(str(body.get("base_url") or "")):
+                return JSONResponse(status_code=500, content={"success": False, "error": "保存 Redmine 地址失败"})
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     config = manager.load_config()
     stats = config.get("redmine_stats") or {}
     if "stale_days" in body:
@@ -944,7 +881,7 @@ async def update_stats_config(request: Request):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save stats config"})
     _clear_stats_caches()
     if freshness_changed:
-        # Boundary moved: rebuild historical buckets on next request.
+        # 数据新鲜度边界变化后重建缓存分桶。
         _clear_historical_trend_cache()
     return {"success": True, "data": manager.get_redmine_stats_config()}
 
