@@ -14,10 +14,11 @@ from starlette.websockets import WebSocketDisconnect
 
 from features.system.ssh import ssh_manager
 from features.system.state import global_state
-from foundation.networking import is_local_host
 from foundation.config import config_manager
+from foundation.networking import is_local_host
 
 from .terminal_channels import LocalPtyChannel, close_terminal_session_resources
+
 
 logger = logging.getLogger(__name__)
 TERMINAL_CLAIM_TTL_SECONDS = 120

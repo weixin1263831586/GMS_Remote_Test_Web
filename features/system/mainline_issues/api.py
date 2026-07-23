@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from features.auth import CurrentUser, require_role_when_auth_required
+from features.auth import CurrentUser, require_authenticated_user_when_auth_required, require_role_when_auth_required
 from foundation.config import settings
 
 from .repository import escape_like, init_db
@@ -111,7 +111,7 @@ async def start_mainline_known_issues_sync(
 
 @router.get('/api/mainline-known-issues/sync/status')
 async def mainline_known_issues_sync_status(
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
 ):
     with _sync_lock:
         status = dict(_sync_status)

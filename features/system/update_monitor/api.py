@@ -11,7 +11,11 @@ from pathlib import Path
 from fastapi import Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from features.auth import CurrentUser, require_role_when_auth_required
+from features.auth import (
+    CurrentUser,
+    require_authenticated_user_when_auth_required,
+    require_role_when_auth_required,
+)
 
 from .api_support import *
 
@@ -88,7 +92,9 @@ async def start_gms_update_monitor_sync(
 
 @router.get('/sync/status')
 async def gms_update_monitor_sync_status(
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
 ):
     with _sync_lock:
         status = dict(_sync_status)

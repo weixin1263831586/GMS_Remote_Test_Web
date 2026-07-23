@@ -5,7 +5,6 @@ from __future__ import annotations
 import getpass
 import logging
 import os
-import re
 import shutil
 import socket
 import threading
@@ -16,6 +15,7 @@ from typing import Any
 
 from worker_agent.inventory import probe_devices
 from worker_agent.process_inventory import discover_tradefed_processes
+from worker_agent.suite_detection import suite_details
 
 from .config import ClusterConfig
 from .repository import ClusterRepository
@@ -28,18 +28,6 @@ AGENT_VERSION = "controller-0.1.0"
 def _probe_devices() -> list[dict[str, Any]]:
     """Return locally attached ADB / Fastboot devices in Worker format."""
     return probe_devices(include_details=True)
-
-
-def _suite_details(path: Path) -> tuple[str, str]:
-    lowered = str(path).lower()
-    suite_type = next(
-        (name for name in ("CTS", "GTS", "VTS", "STS")
-         if f"{name.lower()}-tradefed" in path.name.lower()
-         or f"android-{name.lower()}" in lowered),
-        "XTS",
-    )
-    match = re.search(r"(?:android-)?(?:cts|gts|vts|sts)[-_]([0-9]+(?:_r[0-9]+)?)", lowered)
-    return suite_type, match.group(1) if match else ""
 
 
 def _scan_suites(roots: list[Path]) -> list[dict[str, Any]]:
@@ -60,7 +48,7 @@ def _scan_suites(roots: list[Path]) -> list[dict[str, Any]]:
                 if tools_path in seen:
                     continue
                 seen.add(tools_path)
-                suite_type, version = _suite_details(executable)
+                suite_type, version = suite_details(executable)
                 suites.append({
                     "suite_type": suite_type,
                     "suite_version": version,

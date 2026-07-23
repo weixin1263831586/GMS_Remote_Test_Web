@@ -14,6 +14,7 @@ from features.build.repository import BuildStore
 from features.build.service import BuildExecutionError, BuildNotFoundError, BuildService
 from features.users import owner_id_from_request
 from foundation.config import settings
+from foundation.config_paths import build_servers_path
 from foundation.responses import error_response
 
 
@@ -21,10 +22,7 @@ router = APIRouter(prefix="/api/build")
 
 
 def _default_config_path() -> Path:
-    configured = settings.project_root / "configs/build_servers.json"
-    if configured.exists():
-        return configured
-    return settings.project_root / "configs/build_servers.example.json"
+    return build_servers_path(settings.project_root)
 
 
 build_service = BuildService(

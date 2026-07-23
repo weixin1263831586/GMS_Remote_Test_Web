@@ -73,6 +73,25 @@ def test_uninstall_agent_acks_before_stopping_services(tmp_path):
     assert agent.client.ack.call_args.args[1] == "completed"
 
 
+def test_worker_config_update_is_applied_without_agent_restart(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"max_jobs": 1}', encoding="utf-8")
+    agent = WorkerAgent(worker_config(tmp_path))
+
+    with patch.dict("os.environ", {"GMS_WORKER_CONFIG": str(config_path)}), patch(
+        "worker_agent.app.subprocess.Popen"
+    ) as restart:
+        result = agent.update_worker_config({"max_jobs": 4})
+
+    assert result == {
+        "updated": {"max_jobs": 4},
+        "applied": True,
+        "restarted": False,
+    }
+    assert agent.config.max_jobs == 4
+    restart.assert_not_called()
+
+
 def test_restart_vnc_uses_managed_headless_units_when_installed(tmp_path):
     unit_root = tmp_path / ".config/systemd/user"
     unit_root.mkdir(parents=True)

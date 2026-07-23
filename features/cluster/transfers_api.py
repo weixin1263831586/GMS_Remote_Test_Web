@@ -21,8 +21,8 @@ from features.auth import (
 from .api import _authenticate, _require_cluster_enabled, service
 from .config import configured_max_bytes
 from .models import TransferComplete
-from .operation_claims import operation_claim_payload
 from .repository import utc_now
+from .transfer_support import operation_claim_for_request, worker_device
 
 
 router = APIRouter()
@@ -47,60 +47,6 @@ def _require_transfer_access(request: Request, transfer: dict) -> None:
         transfer.get("owner_id"),
         not_found_detail="transfer not found",
     )
-def _worker_device(
-    worker_id: str, devices: str, operation: str,
-    reservation_id: str = "", automation_run_id: str = "",
-) -> str:
-    requested = [item.strip() for item in devices.split(",") if item.strip()]
-    if len(requested) != 1:
-        raise HTTPException(400, f"cluster {operation} requires exactly one device")
-    device_id = (
-        requested[0]
-        if requested[0].startswith(f"{worker_id}:")
-        else f"{worker_id}:{requested[0]}"
-    )
-    device = next(
-        (item for item in service().repository.list_devices(worker_id)
-         if item["id"] == device_id), None
-    )
-    if not device:
-        raise HTTPException(409, "device is not available on worker")
-    reservation = (
-        service().repository.get_reservation(reservation_id)
-        if reservation_id else None
-    )
-    reserved_for_request = bool(
-        reservation
-        and reservation.get("status") == "active"
-        and reservation.get("worker_id") == worker_id
-        and (not automation_run_id or reservation.get("source_id") == automation_run_id)
-        and device_id in {item["id"] for item in reservation.get("devices") or []}
-    )
-    if device.get("state") != "available" and not reserved_for_request:
-        raise HTTPException(409, "device is not available on worker")
-    return device_id
-
-
-def _operation_claim_payload(
-    request: Request,
-    worker_id: str,
-    device_id: str,
-    operation_id: str,
-    *,
-    reservation_id: str = "",
-) -> dict:
-    owner_id = principal_owner_id(request)
-    payload = operation_claim_payload(
-        service().repository, worker_id, device_id, operation_id, owner_id,
-        reservation_id=reservation_id,
-    )
-    request.state.device_lease_tokens = [
-        {**token, "owner_id": owner_id}
-        for token in payload.get("lease_tokens") or []
-    ]
-    return payload
-
-
 @router.post("/firmware/stage")
 async def stage_worker_firmware(
     request: Request,
@@ -112,7 +58,7 @@ async def stage_worker_firmware(
 ):
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     _online_worker(worker_id)
-    device_id = _worker_device(
+    device_id = worker_device(
         worker_id, devices, "firmware flashing", reservation_id, automation_run_id
     )
     if automation_run_id:
@@ -133,7 +79,7 @@ async def stage_worker_firmware(
         Path(firmware_file.filename or "firmware.img").name,
     )
     stage_id = "fw-" + os.urandom(16).hex()
-    claim_payload = _operation_claim_payload(
+    claim_payload = operation_claim_for_request(
         request,
         worker_id,
         device_id,
@@ -214,9 +160,9 @@ async def stage_worker_gsi(
 ):
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     _online_worker(worker_id)
-    device_id = _worker_device(worker_id, devices, "GSI flashing")
+    device_id = worker_device(worker_id, devices, "GSI flashing")
     stage_id = "fw-" + os.urandom(16).hex()
-    claim_payload = _operation_claim_payload(
+    claim_payload = operation_claim_for_request(
         request, worker_id, device_id, stage_id
     )
     directory = _firmware_root() / stage_id
@@ -319,7 +265,7 @@ def create_device_export(
 
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     _online_worker(worker_id)
-    device = _worker_device(worker_id, device_id, "device file export")
+    device = worker_device(worker_id, device_id, "device file export")
     try:
         safe_path = validate_export_path(path)
     except ValueError as exc:

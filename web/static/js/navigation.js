@@ -1207,9 +1207,6 @@ async function toggleClusterMode() {
             await loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
             showToast('已切换到集群模式', 'success');
         } else {
-            const clusterPageActive = document.querySelector('.sidebar-item[data-page="cluster"].active')
-                || document.getElementById('page-cluster')?.style.display === 'flex';
-            if (clusterPageActive) switchPage('test');
             showToast('已切换到单机模式', 'success');
         }
         // 重新加载设备列表以反映模式变化
@@ -3726,9 +3723,10 @@ async function connectWifi() {
     const pwdInput = document.getElementById('wifi-password');
     if (ssidInput) ssidInput.value = wifi.ssid || '';
     if (pwdInput) {
-        // 默认回显 config.wifi.password（明文存储），便于直接连接。
         pwdInput.value = wifi.password || '';
         pwdInput.placeholder = '请输入 Wi-Fi 密码';
+        pwdInput.onfocus = null;
+        delete pwdInput.dataset.savedPassword;
     }
     ModalManager.open('wifi-modal');
 }
@@ -3741,8 +3739,12 @@ async function submitWifiConfig() {
     const ssid = document.getElementById('wifi-ssid').value.trim();
     const password = document.getElementById('wifi-password').value.trim();
 
-    if (!ssid || !password) {
-        showToast('SSID 和密码不能为空', 'error');
+    if (!ssid) {
+        showToast('SSID 不能为空', 'error');
+        return;
+    }
+    if (!password) {
+        showToast('密码不能为空', 'error');
         return;
     }
 
@@ -13595,16 +13597,19 @@ async function loadSecurityAudit(reset = false) {
         }
         updateSecurityAuditStats(payload.stats || {});
     } catch (error) {
+        const needElevation = error.status === 403 && !state.elevated;
         if (reset) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" style="padding: 40px; text-align: center; color: var(--danger-color);">
-                        加载失败: ${escapeHtml(error.message)}
+                    <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        ${needElevation
+                            ? '🔒 此页面需要管理员权限，请点击右上角提权后查看。'
+                            : `加载失败: ${escapeHtml(error.message)}`}
                     </td>
                 </tr>
             `;
         } else {
-            showToast('加载更多审计记录失败: ' + error.message, 'error');
+            if (!needElevation) showToast('加载更多审计记录失败: ' + error.message, 'error');
         }
     } finally {
         securityAuditState.loading = false;

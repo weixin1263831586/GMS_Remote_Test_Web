@@ -50,7 +50,7 @@ def _request_user_id(request: Request | None) -> str:
     return owner_id_from_request(request)
 
 
-# 看板数据按登录用户隔离；配置统一读写 configs/config_runtime.json
+# 看板数据按登录用户隔离；全局配置统一读写 configs/config_runtime.json
 def _service_for_request(request: Request | None):
     return get_redmine_service_for_request(request)
 

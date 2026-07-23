@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-_RUNTIME_FILES = ("runtime.json",)
+from foundation.config_paths import runtime_environment_path
 
 
 def _project_root() -> Path:
@@ -16,14 +16,15 @@ def _project_root() -> Path:
 def _candidate_paths() -> list[Path]:
     root = _project_root()
     env_root = os.getenv("GMS_DATA_ROOT")
-    paths = [root / "configs" / name for name in _RUNTIME_FILES]
+    paths = [runtime_environment_path(root)]
     if env_root:
-        paths.append(Path(env_root).resolve() / "configs" / "runtime.json")
+        data_root = Path(env_root).resolve()
+        paths.append(runtime_environment_path(data_root))
     return paths
 
 
 def load_runtime_env() -> dict[str, str]:
-    """Merge configs/runtime.json into ``os.environ``; return what was applied.
+    """Merge configs/runtime.json into ``os.environ``.
 
     Existing environment variables always win (the explicit ``systemd``
     ``Environment=`` directive or a real shell variable takes precedence over
@@ -34,7 +35,7 @@ def load_runtime_env() -> dict[str, str]:
     """
 
     applied: dict[str, str] = {}
-    # Test harnesses set this to prevent the deployment runtime.json from
+    # Test harnesses set this to prevent the deployment environment JSON from
     # leaking production settings into the test environment.
     if os.getenv("GMS_SKIP_RUNTIME_ENV"):
         return applied

@@ -18,7 +18,7 @@ cd "$PROJECT_DIR"
 
 ENV_FILE="${PROJECT_DIR}/configs/runtime.json"
 # 加载生产环境变量（含 worker token 等配置），保证手动启动与 systemd 行为一致。
-# runtime.json 是 JSON 格式，由 app.py 启动时通过 bootstrap.env_loader 加载到
+# runtime.json 是 JSON 格式，由 app.py 启动时通过 bootstrap.env_loader 加载；
 # 将 JSON 环境配置导出为 Shell 变量供后台进程继承。
 if [[ -f "${ENV_FILE}" ]]; then
     while IFS='=' read -r key value; do

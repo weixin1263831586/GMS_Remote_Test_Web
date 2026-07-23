@@ -9,9 +9,8 @@ from fastapi.responses import JSONResponse
 from features.auth import (
     CurrentUser,
     get_authenticated_user,
-    require_elevated_admin,
     require_authenticated_user_when_auth_required,
-    require_role_when_auth_required,
+    require_elevated_admin,
 )
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response

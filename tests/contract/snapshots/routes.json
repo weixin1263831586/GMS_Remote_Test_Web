@@ -141,6 +141,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/auth/elevation/reset"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/auth/login"
   },
   {
@@ -670,6 +676,18 @@
       "POST"
     ],
     "path": "/api/cluster/workers/deploy"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/workers/local/software/reconfigure"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/workers/local/software/reconfigure/{task_id}"
   },
   {
     "methods": [

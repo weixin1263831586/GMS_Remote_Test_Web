@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from datetime import datetime
 from typing import Any
 
-from features.redmine.config import config_manager
 from features.redmine.utils import to_iso8601
 
 
@@ -49,16 +47,6 @@ SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
 SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
 MAX_REFERENCES = 5              # max similar references to return
 TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
-
-
-def _load_agent_config() -> dict[str, Any]:
-    """Load redmine_agent section from config.json, with env overrides."""
-    cfg = config_manager.load_config().get("redmine_agent", {})
-    return {
-        "max_issues_per_run": int(os.getenv("REDMINE_AGENT_MAX_ISSUES", cfg.get("max_issues_per_run", 50))),
-        "sync_max_issues": int(os.getenv("REDMINE_AGENT_SYNC_MAX_ISSUES", cfg.get("sync_max_issues", 5000))),
-        "detail_sync_limit": int(os.getenv("REDMINE_AGENT_DETAIL_SYNC_LIMIT", cfg.get("detail_sync_limit", 5000))),
-    }
 
 
 SYNC_PRESERVE_FIELDS = {

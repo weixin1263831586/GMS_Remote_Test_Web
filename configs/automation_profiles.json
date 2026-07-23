@@ -1,0 +1,89 @@
+{
+  "profiles": [
+    {
+      "id": "manual-cts-smoke",
+      "name": "Manual CTS Smoke",
+      "enabled": true,
+      "gerrit": {},
+      "build": {
+        "provider": "ssh",
+        "server_id": "rk-build-206",
+        "template_id": "rk-android-build",
+        "parameters": {
+          "workspace": "/home/hcq/rk/android",
+          "lunch_target": "rk3566_rgo-userdebug",
+          "build_command": "./build.sh -UCKApu -J 8"
+        }
+      },
+      "jenkins": {},
+      "device_selector": {
+        "min_count": 1,
+        "exclusive": true
+      },
+      "flash": {
+        "mode": "firmware",
+        "wipe_data": true
+      },
+      "test_plan": {
+        "worker_id": "auto",
+        "test_type": "CTS",
+        "mode": "module",
+        "modules": [
+          "CtsAppSecurityHostTestCases"
+        ],
+        "retry_count": 0,
+        "analyze_on_failure": true
+      },
+      "reporting": {
+        "gerrit_comment": false,
+        "gerrit_verified_label": false
+      }
+    },
+    {
+      "id": "auto-gts-rk3566",
+      "name": "Auto GTS RK3566",
+      "enabled": false,
+      "gerrit": {},
+      "build": {
+        "provider": "ssh",
+        "server_id": "rk-build-206",
+        "template_id": "rk-android-build-clean",
+        "parameters": {
+          "workspace": "/home/hcq/rk/android",
+          "lunch_target": "rk3566_rgo-userdebug",
+          "build_command": "./build.sh -UACKApu -J 8"
+        }
+      },
+      "jenkins": {},
+      "device_selector": {
+        "min_count": 1,
+        "exclusive": true,
+        "serial_prefix": "RK3566"
+      },
+      "flash": {
+        "mode": "firmware",
+        "wipe_data": true,
+        "verify": {
+          "product": "rk3566",
+          "fingerprint_contains": "release-keys",
+          "retries": 30,
+          "retry_delay": 10
+        }
+      },
+      "test_plan": {
+        "worker_id": "auto",
+        "test_type": "GTS",
+        "mode": "module",
+        "modules": [
+          "GtsCompatibilityTestCases"
+        ],
+        "retry_count": 1,
+        "analyze_on_failure": true
+      },
+      "reporting": {
+        "gerrit_comment": false,
+        "gerrit_verified_label": false
+      }
+    }
+  ]
+}

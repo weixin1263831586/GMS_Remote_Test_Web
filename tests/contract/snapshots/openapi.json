@@ -3262,6 +3262,22 @@
         "summary": "Auth Elevate"
       }
     },
+    "/api/auth/elevation/reset": {
+      "post": {
+        "description": "Drop admin verification when a new browser tab session is opened.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Elevation Reset"
+      }
+    },
     "/api/auth/login": {
       "post": {
         "requestBody": {
@@ -7082,6 +7098,64 @@
         ]
       }
     },
+    "/api/cluster/workers/local/software/reconfigure": {
+      "post": {
+        "description": "Reinstall bundled tools used by the Controller Local Worker.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reconfigure Local Worker Software",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/local/software/reconfigure/{task_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Local Worker Software Reconfiguration Status",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/workers/register": {
       "post": {
         "parameters": [
@@ -9663,7 +9737,7 @@
     },
     "/api/email/send": {
       "post": {
-        "description": "通用发信端点。\n\nBody 字段：\n- to (必填): str | list[str]  收件人，支持逗号/分号分隔\n- subject (必填): str\n- body (必填): str            正文（纯文本或 HTML）\n- is_html (可选): bool        默认 false\n- cc (可选): str | list[str]\n- attachment_paths (可选): list[str]\n- sender_name (可选): str",
+        "description": "发送支持抄送、HTML 和附件的邮件。",
         "responses": {
           "200": {
             "content": {
@@ -9679,7 +9753,7 @@
     },
     "/api/favicon/batch": {
       "post": {
-        "description": "批量获取多个网站的Favicon图标\n\nBody:\n    {\n        \"urls\": [\"https://google.com\", \"https://github.com\"],\n        \"timeout\": 10\n    }\n\nReturns:\n    {\n        \"success\": true,\n        \"results\": [\n            {\n                \"url\": \"https://google.com\",\n                \"success\": true,\n                \"icon_url\": \"...\"\n            },\n            ...\n        ]\n    }",
+        "description": "批量获取网站 Favicon。",
         "responses": {
           "200": {
             "content": {
@@ -9695,7 +9769,7 @@
     },
     "/api/favicon/fetch": {
       "get": {
-        "description": "获取网站的真实Favicon图标\n\n支持从多种来源获取图标：\n1. 从HTML页面中提取图标链接（最准确）\n2. 尝试网站根目录的常见图标文件\n3. 使用第三方图标服务（Google、DuckDuckGo）\n\nArgs:\n    url: 要获取图标的网站URL\n    timeout: 请求超时时间（秒）\n\nReturns:\n    {\n        \"success\": true/false,\n        \"icon_url\": \"图标URL\",\n        \"icon_type\": \"svg/ico/png等\",\n        \"source\": \"html/root/api\",\n        \"size\": 图标尺寸\n    }",
+        "description": "从网页、站点根目录或图标服务获取 Favicon。",
         "parameters": [
           {
             "description": "网站URL",
@@ -14336,7 +14410,7 @@
     },
     "/api/redmine/reply": {
       "post": {
-        "description": "向 Redmine Issue 发送回复（支持附件）\n\n参数：\n    issue_id: Redmine Issue ID\n    reply_text: 回复内容\n    files: 可选附件列表\n\n返回：\n    success: 是否成功\n    message: 成功消息\n    error: 错误信息（如果失败）",
+        "description": "向 Redmine 工单发送文本回复和可选附件。",
         "responses": {
           "200": {
             "content": {
@@ -14387,7 +14461,7 @@
     },
     "/api/reports/analyze-log-dir": {
       "post": {
-        "description": "Analyze a test-run log folder browsed from the suite browser.\n\nTriggered by the per-folder \"报告分析\" button inside a ``.../logs`` dir.\nResolves ``suite_path``+``path`` to an absolute directory (same semantics\nas the suite file browser) and runs the host-log analyzer over it. The\nanalyzer walks the tree recursively, so pointing it at a\n``logs/<timestamp>`` folder finds the nested ``inv_*/host_log_*.txt``.\n\nThe suite directory must be readable from the web host itself. When the\nconfigured test host is remote and the path is not mounted locally, the\ncaller gets a clear error instead of a silent failure.",
+        "description": "递归分析套件浏览器选中的本地测试日志目录。",
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {
@@ -15317,7 +15391,7 @@
     },
     "/api/system/help": {
       "get": {
-        "description": "获取API帮助信息（统一接口）\n\nArgs:\n    api_path: 可选的API路径（如 'api/test/start'）\n              - 不提供：返回所有API列表\n              - 提供：返回指定API的详细帮助\n\nExamples:\n    # 获取所有API列表\n    curl -s \"http://localhost:5001/api/system/help\"\n\n    # 获取单个API详细帮助\n    curl -s \"http://localhost:5001/api/system/help?api_path=api/test/start\"",
+        "description": "返回全部 API 列表或指定路径的详细帮助。",
         "parameters": [
           {
             "in": "query",
@@ -16861,6 +16935,7 @@
             "description": "Successful Response"
           }
         },
+        "security": [],
         "summary": "Get Client Info"
       }
     },

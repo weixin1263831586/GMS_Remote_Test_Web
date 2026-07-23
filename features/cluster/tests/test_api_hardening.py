@@ -236,6 +236,27 @@ class ClusterApiHardeningTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIsNotNone(self.repo.get_worker("worker-246"))
 
+    def test_busy_worker_configuration_cannot_change(self):
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [{
+                "worker_job_id": "external-123",
+                "source": "external",
+                "status": "running",
+                "devices": ["ABC"],
+            }],
+            "devices": [{"serial": "ABC", "state": "available"}],
+            "suites": [],
+        })
+
+        response = self.client.post(
+            "/api/cluster/workers/worker-246/config",
+            json={"max_jobs": 4},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("tests are running", response.json()["detail"])
+
     def test_regular_user_cannot_delete_worker(self):
         with patch("features.auth.access.authentication_required", return_value=True):
             response = self.client.delete(

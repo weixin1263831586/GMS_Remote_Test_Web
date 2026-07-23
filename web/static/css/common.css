@@ -390,10 +390,11 @@ body {
     display: flex;
     flex-direction: column;
     height: 100%;
-    max-height: calc(100vh - 30px);
     padding: 15px;
     overflow: hidden;
     flex: 1;
+    min-width: 0;
+    min-height: 0;
 }
 
 .page-content {
@@ -442,7 +443,7 @@ body {
 .host-workspace-layouts > .btn-xs + .btn-xs { margin-left:-1px; }
 .host-workspace-broadcast { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text-secondary); cursor:pointer; user-select:none; }
 .host-workspace-layouts .btn-xs.active { background:var(--primary-color); color:#fff; border-color:var(--primary-color); }
-.host-workspace-grid { flex:1; min-height:0; display:grid; gap:8px; height:calc(100vh - 76px); }
+.host-workspace-grid { flex:1; min-height:0; display:grid; gap:8px; height:auto; }
 .host-workspace-grid.layout-single { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
 .host-workspace-grid.layout-horizontal { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:minmax(0,1fr); }
 .host-workspace-grid.layout-vertical { grid-template-columns:minmax(0,1fr); grid-template-rows:repeat(2,minmax(0,1fr)); }
@@ -1109,6 +1110,8 @@ body {
 
 .log-text {
     flex: 1;
+    min-height: 0;
+    height: 100%;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -1118,8 +1121,6 @@ body {
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 12px;
     line-height: 1.7;
-    min-height: 480px;
-    max-height: 480px;
     color: #e8e8f0;
     word-wrap: break-word;
     white-space: pre-wrap;
@@ -3419,8 +3420,9 @@ select option {
     display: grid;
     grid-template-columns: minmax(20px, 320px) minmax(0, 1fr);
     gap: 12px;
-    height: calc(100vh - 150px);
-    min-height: 420px;
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
     overflow: hidden;
 }
 .suite-browser-sidebar,
@@ -4343,17 +4345,18 @@ select option {
 @media (max-width: 900px) {
     .suite-browser-layout {
         grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 2fr) minmax(0, 3fr);
         height: auto;
-        min-height: calc(100vh - 130px);
-        overflow: visible;
+        min-height: 0;
+        overflow: hidden;
     }
     .suite-browser-sidebar {
-        height: 40vh;
-        min-height: 260px;
+        height: auto;
+        min-height: 0;
     }
     .suite-browser-main {
-        height: calc(60vh - 24px);
-        min-height: 360px;
+        height: auto;
+        min-height: 0;
     }
 }
 

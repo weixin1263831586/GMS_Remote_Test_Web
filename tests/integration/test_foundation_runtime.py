@@ -71,7 +71,8 @@ class FoundationConfigTests(unittest.TestCase):
             configs = root / 'configs'
             configs.mkdir()
             (root / 'foundation').mkdir()
-            (configs / 'config_runtime.json').write_text(
+            runtime_path = configs / 'config_runtime.json'
+            runtime_path.write_text(
                 '{"redmine_auth": {"encrypted_password": "secret"}}',
                 encoding='utf-8',
             )
@@ -82,7 +83,7 @@ class FoundationConfigTests(unittest.TestCase):
 
             self.assertEqual(payload, {'sidebar_order': ['test']})
             stored = json.loads(
-                (configs / 'config_runtime.json').read_text(encoding='utf-8')
+                runtime_path.read_text(encoding='utf-8')
             )
             self.assertIn('redmine_auth', stored)
 

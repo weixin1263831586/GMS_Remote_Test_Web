@@ -9,8 +9,8 @@ import select
 import shlex
 import subprocess
 import time
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 from . import runtime
 

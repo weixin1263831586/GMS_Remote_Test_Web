@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from foundation.config_paths import runtime_config_path, user_tools_path
 from foundation.config_persistence import ConfigPersistenceMixin
 from foundation.networking import is_local_host
 from foundation.runtime_settings import RuntimeSettings
@@ -67,7 +68,7 @@ APK_MAX_SOURCE_FILE_SIZE = 2 * 1024 * 1024
 APK_MAX_TASKS = 50
 JADX_TIMEOUT = 600
 REDMINE_ISSUE_ID_CACHE_MAX_SIZE = 100
-TOOLS_DATA_FILE = os.path.join(PROJECT_ROOT, 'configs', 'user_tools_data.json')
+TOOLS_DATA_FILE = str(user_tools_path(PROJECT_ROOT))
 
 # 测试 Wi-Fi 默认值统一从 config.json 的 wifi 节点读取。
 DEFAULT_WIFI_SSID = ""
@@ -97,7 +98,7 @@ class ConfigManager(ConfigPersistenceMixin):
         self.project_root = Path(base_dir).resolve().parent
         # 配置文件位于 configs 目录。
         self.config_path = os.path.join(base_dir, '..', 'configs', 'config.json')
-        self.runtime_config_path = os.path.join(base_dir, '..', 'configs', 'config_runtime.json')
+        self.runtime_config_path = str(runtime_config_path(self.project_root))
 
         # 缓存相关
         self._cache: dict[str, Any] | None = None
@@ -348,7 +349,7 @@ class ConfigManager(ConfigPersistenceMixin):
     def _load_runtime_config(self) -> dict[str, Any] | None:
         """加载运行时配置。
 
-        config_runtime.json 保存安装脚本写入的部署身份和用户操作产生的数据，
+        configs/config_runtime.json 保存安装脚本写入的部署身份和用户操作产生的数据，
         覆盖随源码携带的静态默认值（config.json）。
         """
         try:
@@ -660,7 +661,7 @@ class ConfigManager(ConfigPersistenceMixin):
             return False
 
     def load_redmine_credentials(self) -> dict[str, str] | None:
-        """从 config_runtime.json 加载并解密 Redmine 凭证"""
+        """从 configs/config_runtime.json 加载并解密 Redmine 凭证。"""
         try:
             runtime = self._load_runtime_config()
             if not runtime:

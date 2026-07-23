@@ -10,7 +10,7 @@ import subprocess
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import require_role_when_auth_required
+from features.auth import require_authenticated_user_when_auth_required
 from features.devices import DeviceSSHConnection
 from features.system.models import VPNConnectRequest
 from features.system.network import (
@@ -42,7 +42,10 @@ from foundation.responses import error_response
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(dependencies=[Depends(require_role_when_auth_required("admin"))])
+router = APIRouter()
+
+# VPN 连接/断开、SSH ping 是登录用户的日常操作，只需认证无需管理员权限。
+_AUTH_REQUIRED = [Depends(require_authenticated_user_when_auth_required)]
 
 configure_network_dependencies(
     ssh_manager=ssh_manager,
@@ -262,7 +265,7 @@ async def check_ssh_route(request: Request):
         })
 
 
-@router.post("/api/ssh/ping")
+@router.post("/api/ssh/ping", dependencies=_AUTH_REQUIRED)
 async def ping_route_test(request: Request):
     """测试测试主机和客户端的网络连通性"""
     try:
@@ -443,7 +446,7 @@ async def get_vpn_status():
         })
 
 
-@router.post("/api/vpn/connect")
+@router.post("/api/vpn/connect", dependencies=_AUTH_REQUIRED)
 async def connect_vpn(
     req: VPNConnectRequest | None = Body(default=None)
 ):
@@ -537,7 +540,7 @@ async def connect_vpn(
         )
 
 
-@router.post("/api/vpn/disconnect")
+@router.post("/api/vpn/disconnect", dependencies=_AUTH_REQUIRED)
 async def disconnect_vpn():
     """断开VPN（使用nmcli）"""
     try:

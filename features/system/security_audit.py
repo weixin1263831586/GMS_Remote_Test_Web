@@ -1,19 +1,19 @@
 """
 Security audit logging for web and CLI operations.
 """
+import fcntl
 import hashlib
 import hmac
 import json
 import os
-import fcntl
 import re
 import stat
 import threading
 import urllib.parse
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from contextlib import contextmanager
 from uuid import uuid4
 
 

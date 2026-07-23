@@ -278,7 +278,7 @@ class WorkerAgent:
         return {key: raw.get(key) for key in self._CONFIG_FIELDS}
 
     def update_worker_config(self, updates: dict) -> dict:
-        """Persist whitelisted config fields, then restart the agent service."""
+        """Persist and apply whitelisted fields without restarting the Agent."""
         import json
         path = self._config_path()
         try:
@@ -292,13 +292,14 @@ class WorkerAgent:
                     raw[key] = caster(updates[key])
                     changed[key] = raw[key]
                 except (TypeError, ValueError):
-                    raise ValueError(f"invalid value for {key}")
+                    raise ValueError(f"invalid value for {key}") from None
         if changed:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-            logger.info("worker config updated: %s — restarting agent", changed)
-            subprocess.Popen(["systemctl", "--user", "restart", "gms-worker-agent"])
-        return {"updated": changed, "restarted": bool(changed)}
+            if "max_jobs" in changed:
+                self.config.max_jobs = changed["max_jobs"]
+            logger.info("worker config updated and applied: %s", changed)
+        return {"updated": changed, "applied": bool(changed), "restarted": False}
 
     def monitor_job(self, command_id: str, worker_job_id: str):
         try:
