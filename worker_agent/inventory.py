@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import WorkerConfig
+from .suite_detection import suite_details
 
 
 def _run(argv: list[str], timeout: int = 10) -> str:
@@ -569,15 +570,6 @@ def flash_gsi(config: WorkerConfig, system_img: Path, vendor_img: Path | None,
             "exit_code": completed.returncode, "output": output[-20000:]}
 
 
-def _suite_details(path: Path) -> tuple[str, str]:
-    lowered = str(path).lower()
-    suite_type = next((name for name in ("CTS", "GTS", "VTS", "STS")
-                       if f"{name.lower()}-tradefed" in path.name.lower()
-                       or f"android-{name.lower()}" in lowered), "XTS")
-    match = re.search(r"(?:android-)?(?:cts|gts|vts|sts)[-_]([0-9]+(?:_r[0-9]+)?)", lowered)
-    return suite_type, match.group(1) if match else ""
-
-
 def scan_suites(config: WorkerConfig) -> list[dict[str, Any]]:
     suites = []
     seen = set()
@@ -596,7 +588,7 @@ def scan_suites(config: WorkerConfig) -> list[dict[str, Any]]:
                 if tools_path in seen:
                     continue
                 seen.add(tools_path)
-                suite_type, version = _suite_details(executable)
+                suite_type, version = suite_details(executable)
                 suites.append({
                     "suite_type": suite_type, "suite_version": version,
                     "suite_key": f"{suite_type}:{version or executable.parent.parent.name}",

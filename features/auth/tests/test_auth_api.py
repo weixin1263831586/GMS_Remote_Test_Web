@@ -114,7 +114,7 @@ class AuthApiTests(unittest.TestCase):
             "find_device_host_password",
             return_value=None,
         ), patch(
-            "features.users.sessions.client_manager.detect_username",
+            "features.auth.api._client_ssh_authenticator",
             return_value=(True, "cp2-share", None),
         ) as detect:
             login = self.client.post(

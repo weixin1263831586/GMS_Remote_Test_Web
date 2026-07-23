@@ -68,7 +68,8 @@ def sanitize_product_config(config: dict[str, Any]) -> dict[str, Any]:
 
 def sanitize_file(path: Path) -> None:
     raw = json.loads(path.read_text(encoding="utf-8") or "{}")
-    sanitized = sanitize_product_config(raw) if path.name == "config.json" and path.parent.name == "configs" else sanitize_value(raw)
+    is_product_config = path.name == "config.json" and path.parent.name == "configs"
+    sanitized = sanitize_product_config(raw) if is_product_config else sanitize_value(raw)
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
         json.dumps(sanitized, ensure_ascii=False, indent=4) + "\n",

@@ -6,6 +6,7 @@ from features import knowledge
 from features.assistant import api as assistant
 from features.assistant.universal_ai import get_universal_analyzer
 from features.auth import router as auth_router
+from features.auth.api import configure_client_ssh_authenticator
 from features.automation import api as automation
 from features.automation.api import configure_automation_service
 from features.automation.repository import AutomationStore
@@ -185,6 +186,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             ssh_async_manager=ssh_async_manager,
             get_or_create_user_state=get_or_create_user_state,
         )
+        configure_client_ssh_authenticator(client_manager.detect_username)
         configure_firmware_dependencies(
             config_manager=config_manager,
             ssh_manager=ssh_manager,
@@ -258,15 +260,9 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             ),
         )
         configure_redmine_service(services.redmine)
-        profiles_path = (
-            services.settings.project_root
-            / 'configs/automation_profiles.json'
-        )
-        if not profiles_path.exists():
-            profiles_path = (
-                services.settings.project_root
-                / 'configs/automation_profiles.example.json'
-            )
+        from foundation.config_paths import automation_profiles_path, build_servers_path
+
+        profiles_path = automation_profiles_path(services.settings.project_root)
 
         async def query_gerrit(owner_id: str, query: str, limit: int):
             config = gerrit_config_manager.for_owner(
@@ -296,9 +292,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
                 cluster_provider=get_cluster_service,
             )
         )
-        build_config_path = services.settings.project_root / 'configs/build_servers.json'
-        if not build_config_path.exists():
-            build_config_path = services.settings.project_root / 'configs/build_servers.example.json'
+        build_config_path = build_servers_path(services.settings.project_root)
         configure_build_service(
             BuildService(
                 store=BuildStore(

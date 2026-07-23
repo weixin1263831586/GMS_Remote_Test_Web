@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260716-diagnosis-quality">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260723-responsive-viewport">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
@@ -272,7 +272,7 @@
         #usage-examples-modal .modal-close:hover { color: #ccc; }
         #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: var(--card-bg); }
         #usage-examples-modal.modal.show { display: flex !important; }
-        #page-architecture .architecture-container { background: rgba(15,23,42,0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1rem; height: 92vh; overflow: hidden; }
+        #page-architecture .architecture-container { background: rgba(15,23,42,0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1rem; flex: 1; min-height: 0; overflow: hidden; }
         #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 0.5rem; }
     </style>
     <style>
@@ -438,7 +438,7 @@
                     <span class="sidebar-icon">📡</span>
                     <span class="sidebar-text">系统接口</span>
                 </a>
-                <a href="#" class="sidebar-item" data-admin-only data-page="architecture" data-page-order="10" onclick="switchPage('architecture', event)">
+                <a href="#" class="sidebar-item" data-page="architecture" data-page-order="10" onclick="switchPage('architecture', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🏗️</span>
                     <span class="sidebar-text">系统架构</span>
@@ -453,7 +453,7 @@
                     <span class="sidebar-icon">🧰</span>
                     <span class="sidebar-text">常用工具</span>
                 </a>
-                <a href="#" class="sidebar-item" data-admin-only data-page="security-audit" data-page-order="13" onclick="switchPage('security-audit', event)">
+                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="13" onclick="switchPage('security-audit', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🛡️</span>
                     <span class="sidebar-text">安全审计</span>
@@ -468,7 +468,7 @@
                     <span class="sidebar-icon">⚙️</span>
                     <span class="sidebar-text">GMS ATS</span>
                 </a>
-                <a href="#" class="sidebar-item" data-admin-only data-page="cluster" data-page-order="16" onclick="switchPage('cluster', event)">
+                <a href="#" class="sidebar-item" data-page="cluster" data-page-order="16" onclick="switchPage('cluster', event)">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🖧</span>
                     <span class="sidebar-text">主机集群</span>
@@ -834,7 +834,7 @@
                 <div class="control-frame">
                     <div class="section-title">操作控制</div>
                     <!-- VPN 控制按钮 -->
-                    <div class="vpn-btn-frame" data-admin-only data-operation-log-tab="system">
+                    <div class="vpn-btn-frame" data-operation-log-tab="system">
                         <button class="btn-xxs" onclick="copyDeployCommand()">📦 签名发布包部署</button>
                         <button class="btn-xxs" onclick="showTailscaleInfoModal()">🌐 Tailscale组网</button>
                         <button class="btn-xxs" id="check-sshd-btn" onclick="checkSshd()">📡 检查SSHD</button>
@@ -1023,7 +1023,7 @@
                 <button class="btn-xs" onclick="exportSecurityAudit()">📥 导出</button>
             </div>
 
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 220px); overflow-y: auto;">
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -1149,7 +1149,7 @@
             </div>
 
             <!-- 报告列表 -->
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 95px); overflow-y: auto;">
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -1245,7 +1245,7 @@
             </div>
 
             <!-- 下载和解压区域 -->
-            <div class="suite-download-section" data-admin-only style="margin-bottom: 10px; padding: 8px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color);">
+            <div class="suite-download-section" style="margin-bottom: 10px; padding: 8px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color);">
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin-bottom: 8px;">
                     <div style="flex: 1; min-width: 200px;">
                         <input type="text" id="suite-download-url" class="combo-box" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" style="width: 100%; height: 36px;" />
@@ -1517,7 +1517,7 @@
             </div>
 
             <!-- API列表 -->
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 265px); overflow-y: auto;">
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -1543,7 +1543,7 @@
             <div class="section-title">🌐 常用网址</div>
 
             <!-- 工具页面外框容器 - 固定高度支持滚动 -->
-            <div class="tools-container" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; overflow: hidden; max-height: calc(100vh - 80px);">
+            <div class="tools-container" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden;">
 
                 <!-- 工具列表容器 - 可滚动区域 -->
                 <div id="tools-scroll-container" style="flex: 1; overflow-y: auto; padding: 0; min-height: 0;">
@@ -1568,7 +1568,7 @@
         <div class="container page-content" id="page-tools">
             <div class="section-title">🧰 常用工具</div>
 
-            <div class="tools-container" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; overflow: hidden; max-height: calc(100vh - 80px);">
+            <div class="tools-container" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden;">
 
                 <div id="ut-scroll-container" style="flex: 1; overflow-y: auto; padding: 0; min-height: 0;">
                     <div id="ut-grid" style="padding: 4px 8px 8px 8px;">
@@ -1639,7 +1639,7 @@
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; height: calc(100vh - 80px);">
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; flex: 1; min-height: 0;">
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
                     <div id="agent-chat-messages" style="flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: rgba(0, 0, 0, 0.08);">
                         <div class="agent-chat-empty">输入测试需求，例如：跑 CtsWifiTestCases，找一台空闲设备，失败 retry 2 次，还失败就报告分析</div>
@@ -1667,7 +1667,7 @@
         <!-- 个人知识库 页面 -->
         <div class="container page-content" id="page-notes">
             <div class="section-title">📚 个人知识库</div>
-            <div style="display:grid;grid-template-columns:220px 300px minmax(0,1fr);gap:10px;height:calc(100vh - 90px);">
+            <div style="display:grid;grid-template-columns:220px 300px minmax(0,1fr);gap:10px;flex:1;min-height:0;">
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
                     <div style="padding: 8px 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-size:13px;font-weight:600;">知识库</span>
@@ -2842,11 +2842,11 @@
                 state.elevated = false;
                 state.elevatedUntil = null;
             }
-            if (state.elevated) {
-                // The backend may have restarted or the server-side grant may
-                // have expired before the local timer. Verify before opening a
-                // protected WebSocket/API so the browser does not need a 403
-                // challenge to discover that fact.
+            if (state.elevated) return true;
+            // Recover a server grant created before this tab updated its local
+            // state. Expired local grants are rejected by the protected API
+            // and handled by recoverTerminalElevation.
+            if (!force) {
                 try {
                     const status = await fetchAuthStatus();
                     if (status.elevated) {
@@ -2857,7 +2857,6 @@
                     state.elevatedUntil = null;
                 } catch (error) {
                     debugLog('[Elevation] status verification failed; protected request will verify it', error);
-                    return true;
                 }
             }
             if (!terminalElevationPromise) {
@@ -5862,6 +5861,7 @@
                 }, 100);
             }
             if (pageName === 'desktop') {
+                if (!await ensureTerminalElevation(false, '打开主机桌面', '主机桌面')) return;
                 await ensureDesktopInitialized();
             }
             if (pageName === 'websites') {

@@ -151,6 +151,116 @@ class WorkerDeploymentTests(unittest.TestCase):
         self.assertEqual(completed.stdout, "/home/worker/GMS-Suite")
 
 
+class LocalSoftwareReconfigurationTests(unittest.TestCase):
+    def setUp(self):
+        import features.cluster.deployment_api as deployment
+
+        with deployment._LOCAL_SOFTWARE_LOCK:
+            deployment._LOCAL_SOFTWARE_TASKS.clear()
+            deployment._LOCAL_SOFTWARE_ACTIVE_TASK = ""
+
+    def test_starts_the_restricted_local_software_unit(self):
+        from features.cluster.deployment_api import _reconfigure_local_software
+
+        loaded = SimpleNamespace(returncode=0, stdout="loaded\n", stderr="")
+        completed = SimpleNamespace(returncode=0, stdout="configured", stderr="")
+        with patch(
+            "features.cluster.deployment_api.subprocess.run",
+            side_effect=[loaded, completed],
+        ) as run:
+            output = _reconfigure_local_software()
+
+        self.assertEqual(output, "configured")
+        command = run.call_args_list[1].args[0]
+        self.assertEqual(command[0], "sudo")
+        self.assertEqual(command[-2:], ["start", "gms-web-app-local-software.service"])
+
+    def test_runs_local_script_when_unit_is_not_installed(self):
+        from features.cluster.deployment_api import _reconfigure_local_software
+
+        missing = SimpleNamespace(returncode=1, stdout="not-found\n", stderr="")
+        completed = SimpleNamespace(returncode=0, stdout="configured", stderr="")
+        with patch(
+            "features.cluster.deployment_api.subprocess.run",
+            side_effect=[missing, completed],
+        ) as run:
+            output = _reconfigure_local_software()
+
+        self.assertEqual(output, "configured")
+        command = run.call_args_list[1].args[0]
+        self.assertEqual(command[0], "/bin/bash")
+        self.assertTrue(command[1].endswith("configure_local_worker_software.sh"))
+
+    def test_reconfigures_software_when_local_worker_is_idle(self):
+        from features.cluster.deployment_api import (
+            reconfigure_local_worker_software,
+        )
+
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="worker-local"),
+            repository=SimpleNamespace(
+                get_worker=MagicMock(return_value={"running_jobs": 0})
+            ),
+        )
+        thread = MagicMock()
+        with patch(
+            "features.cluster.deployment_api.service", return_value=cluster
+        ), patch(
+            "features.cluster.deployment_api._local_worker_has_active_tests",
+            return_value=False,
+        ), patch(
+            "features.cluster.deployment_api.threading.Thread",
+            return_value=thread,
+        ):
+            result = asyncio.run(reconfigure_local_worker_software())
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["task"]["worker_id"], "worker-local")
+        thread.start.assert_called_once_with()
+
+    def test_rejects_reconfiguration_while_local_test_is_running(self):
+        from features.cluster.deployment_api import (
+            reconfigure_local_worker_software,
+        )
+
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="worker-local"),
+            repository=SimpleNamespace(
+                get_worker=MagicMock(return_value={"running_jobs": 1})
+            ),
+        )
+        with patch(
+            "features.cluster.deployment_api.service", return_value=cluster
+        ), patch(
+            "features.cluster.deployment_api._local_worker_has_active_tests",
+            return_value=True,
+        ), self.assertRaises(HTTPException) as raised:
+            asyncio.run(reconfigure_local_worker_software())
+
+        self.assertEqual(raised.exception.status_code, 409)
+
+    def test_reuses_the_active_software_task(self):
+        import features.cluster.deployment_api as deployment
+
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="worker-local"),
+            repository=SimpleNamespace(
+                get_worker=MagicMock(return_value={"running_jobs": 0})
+            ),
+        )
+        thread = MagicMock()
+        with patch.object(deployment, "service", return_value=cluster), patch.object(
+            deployment, "_local_worker_has_active_tests", return_value=False
+        ), patch.object(deployment.threading, "Thread", return_value=thread):
+            first = asyncio.run(deployment.reconfigure_local_worker_software())
+            second = asyncio.run(deployment.reconfigure_local_worker_software())
+
+        self.assertEqual(second["task"]["id"], first["task"]["id"])
+        self.assertTrue(second["already_running"])
+        thread.start.assert_called_once_with()
+
+
 class GtsCredentialResolutionTests(unittest.TestCase):
     """The deployment API must keep working when GMS_GTS_CREDENTIAL_FILE is
     unset, falling back to the bundled tools/GMS-Host-Tools/gts-rockchip.json

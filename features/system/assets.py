@@ -17,7 +17,7 @@ import aiohttp
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from features.auth import CurrentUser, require_role_when_auth_required
+from features.auth import CurrentUser, require_elevated_admin_when_auth_required
 from features.system.icon_fetcher import IconFetcher
 from features.system.ssh import ssh_manager
 from features.users import get_client_display_id_from_request, get_client_id_from_request
@@ -98,7 +98,7 @@ async def get_upload_progress(upload_id: str | None = None):
 @router.post("/api/files/list")
 async def list_files(
     req: dict,
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
 ):
     """文件列表 - 通过SSH连接到远程主机"""
     try:

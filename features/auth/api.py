@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
+from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from foundation.responses import error_response
 from foundation.config import config_manager
+from foundation.responses import error_response
 
 from .access import (
     get_authenticated_user,
@@ -24,6 +25,15 @@ from .service import (
 
 
 router = APIRouter(prefix="/api/auth")
+_client_ssh_authenticator: Callable[[str, str, str], tuple[bool, str, str | None]] | None = None
+
+
+def configure_client_ssh_authenticator(
+    authenticator: Callable[[str, str, str], tuple[bool, str, str | None]],
+) -> None:
+    """Inject host SSH verification without coupling auth to the users feature."""
+    global _client_ssh_authenticator
+    _client_ssh_authenticator = authenticator
 
 
 def _set_session_cookie(response: JSONResponse, token: str) -> None:
@@ -83,9 +93,9 @@ def _authenticate_client_ssh_user(
     if not expected:
         # The first login may be the moment the host password is supplied. Use
         # it for a real SSH whoami check; never accept an unverified password.
-        from features.users.sessions import client_manager
-
-        success, detected_user, _error = client_manager.detect_username(
+        if _client_ssh_authenticator is None:
+            return None
+        success, detected_user, _error = _client_ssh_authenticator(
             client_host,
             client_user,
             str(password or ""),

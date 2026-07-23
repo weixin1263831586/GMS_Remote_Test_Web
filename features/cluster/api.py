@@ -15,7 +15,7 @@ from features.auth import (
     authentication_required,
     get_authenticated_user,
     require_authenticated_user,
-    require_elevated_admin,
+    require_authenticated_user_when_auth_required,
     require_role,
     require_role_when_auth_required,
 )
@@ -389,7 +389,7 @@ def _update_local_worker_config(updates: dict) -> dict:
                 raw[key] = caster(updates[key])
                 changed[key] = raw[key]
             except (TypeError, ValueError):
-                raise HTTPException(400, f"invalid value for {key}")
+                raise HTTPException(400, f"invalid value for {key}") from None
     if changed:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -449,7 +449,7 @@ async def cluster_suite_search(worker_id: str = Query(...), suite_path: str = Qu
 async def cluster_suite_results(
     worker_id: str = Query(...),
     suite_path: str = Query(...),
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
 ):
     from features.test_execution import parse_tradefed_list_results
 
@@ -540,73 +540,6 @@ def create_command(
     return {"success": True, "command": service().repository.create_command(body.model_dump())}
 
 
-@router.get("/workers/{worker_id}/config")
-async def get_worker_config(
-    worker_id: str,
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
-):
-    """Return the configurable parameters of a Worker."""
-    worker = service().repository.get_worker(worker_id)
-    if worker is None:
-        raise HTTPException(404, "worker not found")
-    if worker_id == service().config.local_worker_id:
-        return {"success": True, "config": _read_local_worker_config()}
-    result = await _run_worker_command(worker_id, "get_config", {}, timeout=15)
-    return {"success": True, "config": result}
-
-
-@router.post("/workers/{worker_id}/config")
-async def update_worker_config(
-    worker_id: str,
-    body: dict,
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
-):
-    """Update configurable Worker parameters and restart the agent to apply."""
-    worker = service().repository.get_worker(worker_id)
-    if worker is None:
-        raise HTTPException(404, "worker not found")
-    if worker.get("status") not in {"online", "busy"}:
-        raise HTTPException(409, "worker is not online")
-    max_jobs = body.get("max_jobs")
-    if max_jobs is not None:
-        try:
-            max_jobs = int(max_jobs)
-        except (TypeError, ValueError):
-            raise HTTPException(400, "max_jobs must be an integer")
-        if not (1 <= max_jobs <= 32):
-            raise HTTPException(400, "max_jobs must be between 1 and 32")
-        body["max_jobs"] = max_jobs
-    if worker_id == service().config.local_worker_id:
-        result = _update_local_worker_config(body)
-    else:
-        result = await _run_worker_command(worker_id, "update_config", body, timeout=15)
-    return {"success": True, **result}
-
-
-@router.post("/workers/{worker_id}/restart-vnc")
-async def restart_worker_vnc(
-    worker_id: str,
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
-):
-    """Restart x11vnc/websockify on a worker to recover from zombie VNC processes."""
-    worker = service().repository.get_worker(worker_id)
-    if worker is None:
-        raise HTTPException(404, "worker not found")
-    if worker.get("status") not in {"online", "busy"}:
-        raise HTTPException(409, "worker is not online")
-    if worker_id == service().config.local_worker_id:
-        from worker_agent.app import restart_local_vnc
-        result = await asyncio.to_thread(restart_local_vnc)
-        return {"success": result.get("rfb_ok", False), "result": result}
-    try:
-        result = await _run_worker_command(worker_id, "restart_vnc", {}, timeout=20)
-        return {"success": result.get("rfb_ok", False), "result": result}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(502, f"restart_vnc failed: {exc}") from exc
-
-
 def _mount_subrouters() -> None:
     """Mount split routers after this module's shared dependencies exist."""
     global device_action
@@ -619,6 +552,7 @@ def _mount_subrouters() -> None:
     from .suite_library_api import router as suite_library_router
     from .timeline_api import router as timeline_router
     from .transfers_api import router as transfers_router
+    from .worker_settings_api import router as worker_settings_router
 
     router.include_router(deployment_router)
     router.include_router(device_actions_router)
@@ -628,6 +562,7 @@ def _mount_subrouters() -> None:
     router.include_router(job_control_router)
     router.include_router(timeline_router)
     router.include_router(suite_library_router)
+    router.include_router(worker_settings_router)
 
 
 _mount_subrouters()

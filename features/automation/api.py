@@ -26,6 +26,7 @@ from features.automation.service import (
 from features.cluster import get_cluster_service
 from features.users import owner_id_from_request
 from foundation.config import settings
+from foundation.config_paths import automation_profiles_path
 from foundation.responses import error_response
 
 
@@ -34,10 +35,7 @@ page_router = APIRouter()
 
 
 def _default_profiles_path() -> Path:
-    configured = settings.project_root / 'configs/automation_profiles.json'
-    if configured.exists():
-        return configured
-    return settings.project_root / 'configs/automation_profiles.example.json'
+    return automation_profiles_path(settings.project_root)
 
 
 automation_service = AutomationService(
@@ -407,7 +405,7 @@ async def automation_worker_tick(
 
 @router.get('/worker/status')
 async def automation_worker_status(
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
 ):
     from features.automation.worker import get_worker_status
 

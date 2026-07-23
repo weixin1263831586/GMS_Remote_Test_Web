@@ -25,7 +25,7 @@ class ReleasePackagingTests(unittest.TestCase):
         ):
             self.assertIn(expected, source)
 
-        # EnvironmentFile was removed: runtime.json is now loaded in-process
+        # EnvironmentFile was removed: the runtime environment JSON is loaded in-process
         # by bootstrap.env_loader, so systemd no longer needs it.
         self.assertNotIn("EnvironmentFile", source)
 

@@ -638,7 +638,7 @@ configure_sudoers() {
 # USB/IP commands are executed only over the authenticated host SSH boundary.
 # Network routes, VPN and Tailscale lifecycle are deliberately excluded: they
 # are deployment-time host administration, never web-process capabilities.
-Cmnd_Alias GMS_WEB_APP_CMDS = /usr/sbin/usbip *, /usr/bin/usbip *, /sbin/modprobe *, /usr/sbin/modprobe *, /usr/bin/udevadm *, /sbin/udevadm *
+Cmnd_Alias GMS_WEB_APP_CMDS = /usr/sbin/usbip *, /usr/bin/usbip *, /sbin/modprobe *, /usr/sbin/modprobe *, /usr/bin/udevadm *, /sbin/udevadm *, /usr/bin/systemctl start ${SERVICE_NAME}-local-software.service, /bin/systemctl start ${SERVICE_NAME}-local-software.service
 ${RUN_USER} ALL=(root) NOPASSWD: GMS_WEB_APP_CMDS
 EOF
     sudo visudo -cf "${tmp}" >/dev/null
@@ -668,6 +668,7 @@ Group=${RUN_GROUP}
 WorkingDirectory=${INSTALL_DIR}
 Environment=PYTHONUNBUFFERED=1
 Environment=GMS_ENV=production
+Environment=GMS_SERVICE_NAME=${SERVICE_NAME}
 Environment=GMS_DATA_ROOT=${INSTALL_DIR}/data
 Environment=PYTHONPYCACHEPREFIX=${INSTALL_DIR}/data/pycache
 Environment=GMS_SOFTWARE_ROOT=${RUN_HOME}/Software
@@ -746,6 +747,36 @@ EOF
     sudo systemctl daemon-reload
     sudo systemctl enable "${worker_service}" >/dev/null
     sudo systemctl restart "${worker_service}"
+}
+
+install_local_software_service() {
+    command -v systemctl >/dev/null 2>&1 || return
+    local software_service="${SERVICE_NAME}-local-software.service"
+    local service_file="/etc/systemd/system/${software_service}"
+    local tmp
+    tmp="$(mktemp)"
+    cat > "${tmp}" <<EOF
+[Unit]
+Description=Reconfigure GMS Local Worker Software
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${RUN_USER}
+Group=${RUN_GROUP}
+WorkingDirectory=${INSTALL_DIR}
+Environment=HOME=${RUN_HOME}
+ExecStart=${INSTALL_DIR}/scripts/configure_local_worker_software.sh ${INSTALL_DIR} ${RUN_HOME}
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+EOF
+    sudo install -o root -g root -m 0644 "${tmp}" "${service_file}"
+    rm -f "${tmp}"
+    sudo chmod 0755 "${INSTALL_DIR}/scripts/configure_local_worker_software.sh"
+    sudo systemctl daemon-reload
 }
 
 install_backup_service() {
@@ -860,6 +891,7 @@ install_web_app() {
     configure_sudoers
     install_systemd_service
     install_local_worker_service
+    install_local_software_service
     install_backup_service
 
     ok "安装完成"

@@ -12,7 +12,10 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import require_role_when_auth_required
+from features.auth import (
+    require_authenticated_user_when_auth_required,
+    require_elevated_admin_when_auth_required,
+)
 from features.devices import ssh_connection_failed_response
 from foundation.archives import (
     derive_suite_dir_name_from_archive,
@@ -34,7 +37,6 @@ from .suite_archives import extract_archive_local_with_progress
 from .suite_download_security import (
     curl_resolve_arguments as _curl_resolve_arguments,
 )
-from .tradefed_results import collect_tradefed_results
 from .suite_download_security import (
     resolve_suite_download_target as _resolve_suite_download_target,
 )
@@ -45,10 +47,15 @@ from .suites import (
     get_default_suites_path,
     is_config_host_local,
 )
+from .tradefed_results import collect_tradefed_results
 
 
 logger = logging.getLogger(__name__)
-router = APIRouter(dependencies=[Depends(require_role_when_auth_required("admin"))])
+router = APIRouter()
+
+# 下载/解压是日常操作，只需登录；添加本地路径修改主机配置，需要管理员提权。
+_WRITE_AUTH = [Depends(require_authenticated_user_when_auth_required)]
+_ADD_LOCAL_ELEVATION = [Depends(require_elevated_admin_when_auth_required)]
 
 
 def _path_within_suite_root(path: str, suite_root: str, label: str) -> str:
@@ -201,7 +208,7 @@ async def _run_suite_extract_task(task_id: str, archive_path: str, extract_dir: 
         _update_suite_extract_task(task_id, status="error", error=f"Extraction failed: {e!s}")
 
 
-@router.post("/api/test/suites/add-local")
+@router.post("/api/test/suites/add-local", dependencies=_ADD_LOCAL_ELEVATION)
 @handle_api_errors
 async def add_local_test_suite(req: TestSuiteAddLocalRequest):
     """Add a local test suite path to config."""
@@ -262,7 +269,7 @@ async def list_tradefed_results(
         return error_response(str(e), 500)
 
 
-@router.post("/api/test/suites/download-url")
+@router.post("/api/test/suites/download-url", dependencies=_WRITE_AUTH)
 @handle_api_errors
 async def download_test_suite_from_url(
     request: Request,
@@ -395,7 +402,7 @@ async def list_test_suite_archives():
         return JSONResponse(content={"success": True, "archives": archives, "base_path": base_path})
 
 
-@router.post("/api/test/suites/extract-start")
+@router.post("/api/test/suites/extract-start", dependencies=_WRITE_AUTH)
 @handle_api_errors
 async def start_test_suite_extract(
     request: Request,
@@ -521,7 +528,7 @@ def recover_suite_tasks() -> list[asyncio.Task]:
     return recovered
 
 
-@router.post("/api/test/suites/extract")
+@router.post("/api/test/suites/extract", dependencies=_WRITE_AUTH)
 @handle_api_errors
 async def extract_test_suite_archive(req: TestSuiteExtractRequest):
     """Extract test suite archive."""

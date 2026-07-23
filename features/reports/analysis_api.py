@@ -386,7 +386,7 @@ async def analyze_suite_log_dir(
     path: str = Form(default=""),
 ):
     """递归分析套件浏览器选中的本地测试日志目录。"""
-    principal = require_authenticated_user_when_auth_required(request)
+    require_authenticated_user_when_auth_required(request)
     config = config_manager.load_config()
     abs_path, err = _resolve_suite_log_dir(suite_path, path, config)
     if err:

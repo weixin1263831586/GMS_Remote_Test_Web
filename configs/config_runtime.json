@@ -1,8 +1,39 @@
 {
     "client_hosts": {
-        "172.16.14.66": "hcq"
+        "172.16.14.66": "hcq",
+        "127.0.0.1": "hcq",
+        "172.16.14.65": "cp2-share"
     },
-    "client_ssh_credentials": [],
+    "client_ssh_credentials": [
+        {
+            "device_host": "hcq@172.16.14.66",
+            "username": "hcq",
+            "host": "172.16.14.66"
+        },
+        {
+            "device_host": "admin@172.16.14.76",
+            "username": "admin",
+            "host": "172.16.14.76"
+        },
+        {
+            "device_host": "wlq@172.16.14.244",
+            "username": "wlq",
+            "host": "172.16.14.244",
+            "encrypted_password": "gAAAAABqXxU2Z_5WyafbtXULJxBndEtCSsaG_lZTIqN7V0_-SDxMwxIBkw3o_xYLh5GBnaNqruTR8plLRAAJj5HoWlJFxUcboQ=="
+        },
+        {
+            "device_host": "wlq@172.16.14.246",
+            "username": "wlq",
+            "host": "172.16.14.246",
+            "encrypted_password": "gAAAAABqXyH2sd8tA3dPj1uYlexhVSyhLQM2Bq7fJmu_KwfYqtpLKPx3KSSLbxh3nZCU9_d0Jv-hzlvg5LMxOrabdgJAWJ1ucg=="
+        },
+        {
+            "device_host": "hcq@172.16.14.118",
+            "username": "hcq",
+            "host": "172.16.14.118",
+            "encrypted_password": "gAAAAABqXzNtoo8ehTtQCQAKbdSwIPdtq97BPYC-NTQABk5Exgpy5wLszPV3CXRDl9Il05CwrXH3bSlRM-uvuWecGPhs-wLeFA=="
+        }
+    ],
     "sidebar_order": [
         "test",
         "desktop",
@@ -15,8 +46,218 @@
         "test-suites",
         "api-docs",
         "architecture",
+        "websites",
         "tools",
         "security-audit",
-        "ai-assistant"
-    ]
+        "gms-assistant",
+        "automation",
+        "redmine-agent",
+        "gerrit-dashboard",
+        "agent"
+    ],
+    "device_groups": [
+        {
+            "id": "auto_worker_hcq_172_16_14_233",
+            "name": "worker: hcq@172.16.14.233",
+            "color": "#3b82f6",
+            "device_ids": [
+                "RK3576GMS5",
+                "RK3576GMS4",
+                "RK3572GMS6",
+                "RK3576GMS6",
+                "c3d9b8674f4b94f6",
+                "RK3576GMS2"
+            ],
+            "followed": false
+        },
+        {
+            "id": "auto_worker_ats-worker-246",
+            "name": "worker: ats-worker-246",
+            "color": "#764ba2",
+            "device_ids": [
+                "ats-worker-246:ATS357629",
+                "ats-worker-246:ATS357630",
+                "ats-worker-246:ATS357631",
+                "ats-worker-246:RK3572GMS1"
+            ],
+            "followed": false
+        },
+        {
+            "id": "auto_worker_ats-worker-118",
+            "name": "worker: ats-worker-118",
+            "color": "#10b981",
+            "device_ids": [
+                "ats-worker-118:c3d9b8674f4b94f6"
+            ],
+            "followed": false
+        },
+        {
+            "id": "auto_worker_test_user_192_168_0_2",
+            "name": "worker: test user@192.168.0.2",
+            "color": "#f59e0b",
+            "device_ids": [
+                "USBIP001",
+                "LOCAL001",
+                "ABC-123"
+            ],
+            "followed": false
+        },
+        {
+            "id": "auto_worker_hcq_172_16_14_66",
+            "name": "worker: hcq@172.16.14.66",
+            "color": "#ef4444",
+            "device_ids": [
+                "USBIP001"
+            ],
+            "followed": false
+        }
+    ],
+    "redmine_dashboard": {
+        "department_defaults": {
+            "list_limit": 50,
+            "issue_limit": 500
+        },
+        "dashboard_profiles": [
+            {
+                "id": "all",
+                "name": "全部部门",
+                "user_ids": [],
+                "aliases": [],
+                "stale_days": 3,
+                "window_days": 60,
+                "list_limit": 50,
+                "issue_limit": 500,
+                "email_to": ""
+            }
+        ],
+        "project_profiles": [],
+        "email": {
+            "smtp_host": "",
+            "smtp_port": 465,
+            "from_addr": "",
+            "username": "",
+            "password": "",
+            "use_tls": true
+        }
+    },
+    "redmine_stats": {
+        "stale_days": 3,
+        "window_days": 60,
+        "cache_ttl": 600,
+        "freshness_days": 90,
+        "chart_date_ranges": {}
+    },
+    "redmine_auth": {
+        "username": "chaoqun.huang@rock-chips.com",
+        "encrypted_password": "",
+        "updated_at": "2026-07-07T16:15:48"
+    },
+    "gerrit_dashboard": {
+        "base_url": "https://10.10.10.29",
+        "rest_username": "",
+        "rest_password": "",
+        "rest_verify_ssl": false,
+        "ssh_host": "10.10.10.29",
+        "ssh_user": "chaoqun.huang",
+        "ssh_port": 29418,
+        "ssh_identity_file": "/home/hcq/.ssh/id_ed25519_gerrit_dashboard",
+        "query_limit": 100,
+        "cache_ttl": 600,
+        "default_owner": "chaoqun.huang@rock-chips.com",
+        "chart_date_ranges": {},
+        "department_defaults": {
+            "list_limit": 50,
+            "query_limit": 500,
+            "query_page_size": 500,
+            "max_history_changes": 0
+        },
+        "dashboard_profiles": [
+            {
+                "id": "open",
+                "name": "打开的变更",
+                "query": "status:open limit:100"
+            },
+            {
+                "id": "merged",
+                "name": "最近合入",
+                "query": "status:merged limit:100"
+            }
+        ],
+        "personal_profiles": [
+            {
+                "id": "chaoqun-huang",
+                "name": "chaoqun.huang",
+                "owner": "chaoqun.huang@rock-chips.com",
+                "department_id": "",
+                "department": "",
+                "list_limit": 50,
+                "query_limit": 500,
+                "query_page_size": 500,
+                "max_history_changes": 0
+            },
+            {
+                "id": "jake-wu-rock-chips-com",
+                "name": "吴崇杰",
+                "owner": "jake.wu@rock-chips.com",
+                "department_id": "system-2",
+                "department": "系统二部",
+                "list_limit": 50,
+                "query_limit": 500,
+                "query_page_size": 500,
+                "max_history_changes": 0
+            }
+        ],
+        "department_profiles": [
+            {
+                "id": "all",
+                "name": "全部部门",
+                "owners": [
+                    "chaoqun.huang@rock-chips.com"
+                ],
+                "list_limit": 50,
+                "query_limit": 500,
+                "query_page_size": 500,
+                "max_history_changes": 0
+            },
+            {
+                "id": "system-2",
+                "name": "系统二部",
+                "owners": [
+                    "jake.wu@rock-chips.com"
+                ],
+                "list_limit": 50,
+                "query_limit": 500,
+                "query_page_size": 500,
+                "max_history_changes": 0
+            }
+        ]
+    },
+    "usbip_devices_source": {},
+    "sidebar_visible_pages": [
+        "test",
+        "desktop",
+        "terminal",
+        "users",
+        "devices",
+        "reports",
+        "report-analysis",
+        "apk-analysis",
+        "test-suites",
+        "api-docs",
+        "architecture",
+        "websites",
+        "tools",
+        "security-audit",
+        "gms-assistant",
+        "automation",
+        "redmine-agent",
+        "gerrit-dashboard",
+        "agent"
+    ],
+    "external_services": {
+        "gms_assistant_url": "http://172.16.14.248:5173",
+        "grafana_url": "",
+        "crm_icon_url": "",
+        "router_icon_url": ""
+    }
 }

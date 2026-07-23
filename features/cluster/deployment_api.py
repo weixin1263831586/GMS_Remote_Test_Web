@@ -8,8 +8,11 @@ import os
 import re
 import shlex
 import stat
+import subprocess
 import tarfile
 import tempfile
+import threading
+import uuid
 from pathlib import Path
 
 import paramiko
@@ -25,10 +28,128 @@ from foundation.ssh_security import (
 
 from .api import service
 from .repository import utc_now
-from .worker_auth import persist_worker_token
+from .worker_auth import persist_worker_token, worker_tokens, write_worker_tokens
 
 
 router = APIRouter()
+_LOCAL_SOFTWARE_LOCK = threading.Lock()
+_LOCAL_SOFTWARE_TASKS: dict[str, dict] = {}
+_LOCAL_SOFTWARE_ACTIVE_TASK = ""
+
+
+def _local_software_service_name() -> str:
+    base = os.getenv("GMS_SERVICE_NAME", "gms-web-app").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.@-]+", base):
+        raise RuntimeError("invalid GMS service name")
+    return f"{base}-local-software.service"
+
+
+def _reconfigure_local_software() -> str:
+    unit = _local_software_service_name()
+    systemctl = "/usr/bin/systemctl"
+    if not Path(systemctl).is_file():
+        systemctl = "/bin/systemctl"
+    unit_state = subprocess.run(
+        [systemctl, "show", unit, "--property=LoadState", "--value"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if unit_state.returncode == 0 and unit_state.stdout.strip() == "loaded":
+        command = ["sudo", systemctl, "start", unit]
+    else:
+        project_root = Path(__file__).resolve().parents[2]
+        script = project_root / "scripts/configure_local_worker_software.sh"
+        if not script.is_file():
+            raise RuntimeError(f"local Software script is missing: {script}")
+        command = ["/bin/bash", str(script), str(project_root), str(Path.home())]
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=900,
+        check=False,
+    )
+    output = (completed.stdout + completed.stderr).strip()
+    if completed.returncode:
+        raise RuntimeError(output or f"Software setup exited with {completed.returncode}")
+    return output
+
+
+def _local_worker_has_active_tests(worker: dict) -> bool:
+    if int(worker.get("running_jobs") or 0) > 0:
+        return True
+    from worker_agent.process_inventory import discover_tradefed_processes
+
+    return bool(discover_tradefed_processes())
+
+
+def _run_local_software_task(task_id: str) -> None:
+    global _LOCAL_SOFTWARE_ACTIVE_TASK
+    with _LOCAL_SOFTWARE_LOCK:
+        task = _LOCAL_SOFTWARE_TASKS[task_id]
+        task.update(status="running", started_at=utc_now())
+    try:
+        output = _reconfigure_local_software()
+    except Exception as exc:
+        with _LOCAL_SOFTWARE_LOCK:
+            task.update(status="failed", error=str(exc), finished_at=utc_now())
+    else:
+        with _LOCAL_SOFTWARE_LOCK:
+            task.update(status="completed", output=output, finished_at=utc_now())
+    finally:
+        with _LOCAL_SOFTWARE_LOCK:
+            if task_id == _LOCAL_SOFTWARE_ACTIVE_TASK:
+                _LOCAL_SOFTWARE_ACTIVE_TASK = ""
+
+
+@router.post("/workers/local/software/reconfigure")
+async def reconfigure_local_worker_software(
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """Reinstall bundled tools used by the Controller Local Worker."""
+    svc = service()
+    worker = svc.repository.get_worker(svc.config.local_worker_id) or {}
+    if _local_worker_has_active_tests(worker):
+        raise HTTPException(409, "Local Worker has running jobs")
+    global _LOCAL_SOFTWARE_ACTIVE_TASK
+    with _LOCAL_SOFTWARE_LOCK:
+        if _LOCAL_SOFTWARE_ACTIVE_TASK:
+            task = dict(_LOCAL_SOFTWARE_TASKS[_LOCAL_SOFTWARE_ACTIVE_TASK])
+            return {"success": True, "already_running": True, "task": task}
+        task_id = f"local-software-{uuid.uuid4().hex}"
+        task = {
+            "id": task_id,
+            "worker_id": svc.config.local_worker_id,
+            "status": "queued",
+            "created_at": utc_now(),
+            "started_at": "",
+            "finished_at": "",
+            "output": "",
+            "error": "",
+        }
+        _LOCAL_SOFTWARE_TASKS[task_id] = task
+        _LOCAL_SOFTWARE_ACTIVE_TASK = task_id
+    threading.Thread(
+        target=_run_local_software_task,
+        args=(task_id,),
+        name="LocalSoftwareReconfigure",
+        daemon=True,
+    ).start()
+    return {"success": True, "accepted": True, "task": dict(task)}
+
+
+@router.get("/workers/local/software/reconfigure/{task_id}")
+def local_worker_software_reconfiguration_status(
+    task_id: str,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    with _LOCAL_SOFTWARE_LOCK:
+        task = _LOCAL_SOFTWARE_TASKS.get(task_id)
+        if task is None:
+            raise HTTPException(404, "local Software task not found")
+        return {"success": True, "task": dict(task)}
 
 
 def _validate_gts_credential(path: Path) -> Path:
@@ -142,6 +263,7 @@ async def deploy_worker(
     token = str(body.get("token") or "").strip()
     controller_url = str(body.get("controller_url") or "").strip().rstrip("/")
     suite_root = str(body.get("suite_root") or "~/GMS-Suite").strip()
+    save_password = body.get("save_password") is True
     if not re.fullmatch(r"[A-Za-z0-9._-]+", worker_id):
         raise HTTPException(400, "invalid worker ID")
     if (
@@ -188,15 +310,10 @@ async def deploy_worker(
             raise RuntimeError("SSH connection failed")
         archive_path = None
         try:
-            # The same credential is required by the host-terminal workspace.
-            # Persist it only after SSH authentication has actually succeeded.
-            if password and not config_manager.upsert_device_host_password(
+            if save_password and password and not config_manager.upsert_device_host_password(
                 connection, password
             ):
-                raise RuntimeError(
-                    "SSH connected, but saving the host credential failed"
-                )
-            persist_worker_token(worker_id, token)
+                raise RuntimeError("saving the host credential failed")
             project_root = Path(__file__).resolve().parents[2]
             with tempfile.NamedTemporaryFile(
                 suffix=".tar.gz", delete=False
@@ -304,18 +421,24 @@ async def deploy_worker(
             )
             if password:
                 install = "sudo -S -p '' -v && " + install
-            stdin, stdout, stderr = ssh.exec_command(
-                install, timeout=900, get_pty=True
-            )
-            if password:
-                stdin.write(password + "\n")
-                stdin.flush()
-            exit_code = stdout.channel.recv_exit_status()
-            output = (stdout.read() + stderr.read()).decode(
-                "utf-8", errors="replace"
-            )[-12000:]
-            if exit_code != 0:
-                raise RuntimeError(output or f"installer exited with {exit_code}")
+            previous_tokens = worker_tokens()
+            persist_worker_token(worker_id, token)
+            try:
+                stdin, stdout, stderr = ssh.exec_command(
+                    install, timeout=900, get_pty=True
+                )
+                if password:
+                    stdin.write(password + "\n")
+                    stdin.flush()
+                exit_code = stdout.channel.recv_exit_status()
+                output = (stdout.read() + stderr.read()).decode(
+                    "utf-8", errors="replace"
+                )[-12000:]
+                if exit_code != 0:
+                    raise RuntimeError(output or f"installer exited with {exit_code}")
+            except Exception:
+                write_worker_tokens(previous_tokens)
+                raise
             return {"success": True, "worker_id": worker_id, "output": output}
         finally:
             ssh.close()

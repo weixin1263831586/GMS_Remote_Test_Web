@@ -31,7 +31,7 @@ class BackupToolTests(unittest.TestCase):
             '{"runtime": true}\n', encoding="utf-8"
         )
         (self.project / "configs/runtime.json").write_text(
-            "TOKEN=private\n", encoding="utf-8"
+            '{"TOKEN": "private"}\n', encoding="utf-8"
         )
         (self.home / ".ssh/gms_web_app_rsa").write_text(
             "private-key", encoding="utf-8"

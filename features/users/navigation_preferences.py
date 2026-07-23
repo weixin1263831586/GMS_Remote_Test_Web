@@ -2,31 +2,22 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import re
 import tempfile
 import threading
 from pathlib import Path
 from typing import Any
 
 from . import runtime
+from .storage_paths import owner_storage_key
 
 
 _storage_lock = threading.RLock()
 
 
-def _owner_key(owner_id: str) -> str:
-    raw = str(owner_id or "anonymous").strip() or "anonymous"
-    readable = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._") or "anonymous"
-    if readable != raw:
-        readable = f"{readable}_{hashlib.sha256(raw.encode()).hexdigest()[:12]}"
-    return readable[:160]
-
-
 def _preferences_path(owner_id: str) -> Path:
-    directory = Path(runtime.data_root) / "user_prefs" / _owner_key(owner_id)
+    directory = Path(runtime.data_root) / "user_prefs" / owner_storage_key(owner_id)
     directory.mkdir(parents=True, exist_ok=True)
     return directory / "navigation.json"
 

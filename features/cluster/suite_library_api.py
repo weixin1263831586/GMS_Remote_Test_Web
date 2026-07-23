@@ -8,7 +8,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from features.auth import CurrentUser, require_role_when_auth_required
+from features.auth import (
+    CurrentUser,
+    require_authenticated_user_when_auth_required,
+)
 
 from .api import _authenticate
 from .local_bridge import _suite_roots
@@ -55,7 +58,9 @@ def _download(path: Path) -> FileResponse:
 
 @router.get("/suite-library")
 def controller_suite_library(
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
 ):
     archives = []
     for path in controller_suite_archives():
@@ -74,7 +79,9 @@ def controller_suite_library(
 @router.get("/suite-library/{filename}")
 def download_controller_suite_archive(
     filename: str,
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
 ):
     return _download(_archive(filename))
 

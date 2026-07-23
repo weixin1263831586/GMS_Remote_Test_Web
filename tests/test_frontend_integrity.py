@@ -118,6 +118,38 @@ class FrontendIntegrityTests(unittest.TestCase):
 
                 self.assertEqual(missing, [])
 
+    def test_cluster_dashboard_has_stable_refresh_and_safe_dynamic_actions(self):
+        html = read_text("features/cluster/ui/page.html")
+        script = read_text("features/cluster/ui/page.js")
+
+        self.assertIn('class="primary stable-action"', html)
+        self.assertIn('id="reload-library" class="stable-action"', html)
+        self.assertIn('class="section-head-copy"', html)
+        self.assertIn('id="cluster-search"', html)
+        self.assertIn('id="job-status-filter"', html)
+        self.assertIn("if(refreshPromise)return refreshPromise", script)
+        self.assertIn("Promise.allSettled", script)
+        self.assertIn('data-action="redeploy-worker"', script)
+        self.assertNotIn('onclick="redeployWorker(', script)
+        self.assertIn("button.disabled=true;button.textContent='刷新中…'", script)
+        self.assertIn("state.status.enabled&&clusterWorkspace.scope_mode==='cluster'", script)
+        self.assertIn("renderModeStatus();renderJobForm()", script)
+        self.assertNotIn('集群模式已启用 · 本机', script)
+        self.assertNotIn('集群能力已启用', script)
+
+    def test_cluster_mode_switch_stays_on_page_and_desktop_elevates_first(self):
+        navigation = read_text("web/static/js/navigation.js")
+        shell = read_text("web/shell/shell.html")
+
+        toggle_start = navigation.index("async function toggleClusterMode()")
+        toggle_end = navigation.index("window.toggleClusterMode", toggle_start)
+        self.assertNotIn("switchPage('test')", navigation[toggle_start:toggle_end])
+
+        desktop_initializer = """if (pageName === 'desktop') {
+                if (!await ensureTerminalElevation(false, '打开主机桌面', '主机桌面')) return;
+                await ensureDesktopInitialized();"""
+        self.assertIn(desktop_initializer, shell)
+
     def test_test_host_uses_one_cluster_worker_selector(self):
         main_text = read_text("web/shell/shell.html")
 
@@ -180,8 +212,6 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("refreshHostWorkspacePane(index)", main_text)
         self.assertIn("refreshTerminalWorkspacePane(index)", main_text)
         self.assertIn("ensureTerminalElevation(false, '打开主机桌面', '主机桌面')", main_text)
-        self.assertIn("if (state.currentUser && state.currentUser.role !== 'admin')", main_text)
-        self.assertNotIn("if (state.currentUser?.role !== 'admin')", main_text)
         self.assertIn("frame.allow = 'clipboard-read; clipboard-write'", main_text)
 
     def test_suite_host_selector_and_assistant_url_start_in_stable_layout(self):

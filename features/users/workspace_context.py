@@ -9,7 +9,6 @@ single source of truth.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -26,6 +25,7 @@ from foundation.responses import success_response
 
 from . import runtime
 from .clients import owner_id_from_request
+from .storage_paths import owner_storage_key
 
 
 router = APIRouter(prefix="/api/users/workspace-context")
@@ -105,16 +105,8 @@ def _default_context() -> dict:
     }
 
 
-def _owner_key(owner_id: str) -> str:
-    raw = str(owner_id or "anonymous").strip() or "anonymous"
-    readable = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._") or "anonymous"
-    if readable != raw:
-        readable = f"{readable}_{hashlib.sha256(raw.encode()).hexdigest()[:12]}"
-    return readable[:160]
-
-
 def _context_path(owner_id: str) -> Path:
-    root = Path(runtime.data_root) / "user_prefs" / _owner_key(owner_id)
+    root = Path(runtime.data_root) / "user_prefs" / owner_storage_key(owner_id)
     root.mkdir(parents=True, exist_ok=True)
     return root / "workspace_context.json"
 

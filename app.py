@@ -3,14 +3,15 @@
 # 项目导入前加载运行环境变量。
 from bootstrap.env_loader import load_runtime_env
 
+
 load_runtime_env()
 
-import logging
+import logging  # noqa: E402
 
-import uvicorn
+import uvicorn  # noqa: E402
 
-from bootstrap.application import create_app
-from foundation.config import settings
+from bootstrap.application import create_app  # noqa: E402
+from foundation.config import settings  # noqa: E402
 
 
 app = create_app()
