@@ -137,6 +137,17 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertNotIn('集群模式已启用 · 本机', script)
         self.assertNotIn('集群能力已启用', script)
 
+    def test_login_explains_client_ssh_account_and_finishes_identity_prefill(self):
+        shell = read_text("web/shell/shell.html")
+        api_script = read_text("web/static/js/api.js")
+
+        self.assertIn("SSH用户名@客户端IP，例如 ", shell)
+        self.assertIn("通常与系统登录/锁屏密码相同", shell)
+        self.assertIn("identity.includes('@')", api_script)
+        self.assertIn("但尚不知道 SSH 用户名", api_script)
+        self.assertIn("usernameInput.placeholder === '正在读取客户端身份…'", api_script)
+        self.assertIn("此处不使用客户端 SSH 账号", api_script)
+
     def test_cluster_mode_switch_stays_on_page_and_desktop_elevates_first(self):
         navigation = read_text("web/static/js/navigation.js")
         shell = read_text("web/shell/shell.html")
@@ -192,8 +203,31 @@ class FrontendIntegrityTests(unittest.TestCase):
         share_end = navigation.index("async function initTestSuiteBrowserPage", share_start)
         share_source = navigation[share_start:share_end]
 
-        self.assertIn("params.toString().replace(/%2F/gi, '/')", share_source)
+        self.assertIn("buildReadablePathQuery(params)", share_source)
         self.assertIn("#test-suites?${readableQuery}", share_source)
+        self.assertIn("params.set('worker_id', workerId)", share_source)
+        self.assertNotIn("workerId && !isLocalWorkspaceWorker(workerId)", share_source)
+        self.assertIn("params.get('host') || workspaceLocalWorkerId()", navigation)
+
+    def test_suite_download_and_inline_urls_keep_path_slashes_readable(self):
+        navigation = read_text("web/static/js/navigation.js")
+
+        self.assertIn(
+            "return params.toString().replace(/%2F/gi, '/')",
+            navigation,
+        )
+        self.assertIn(
+            "window.open(`${endpoint}?${buildReadablePathQuery(params)}`, '_blank')",
+            navigation,
+        )
+        self.assertIn(
+            "link.href = `${endpoint}?${buildReadablePathQuery(params)}`",
+            navigation,
+        )
+        self.assertIn(
+            "/api/test/suites/download-dir?${buildReadablePathQuery(params)}",
+            navigation,
+        )
 
     def test_public_shell_never_embeds_configured_vnc_password(self):
         main_text = read_text("web/shell/shell.html")

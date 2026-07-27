@@ -185,9 +185,29 @@ function showAuthGate(setupRequired = false) {
     const title = document.getElementById('auth-title');
     const submit = document.getElementById('auth-submit');
     const displayNameRow = document.getElementById('auth-display-name-row');
+    const usernameInput = document.getElementById('auth-username');
+    const passwordInput = document.getElementById('auth-password');
+    const usernameHelp = document.getElementById('auth-username-help');
+    const passwordHelp = document.getElementById('auth-password-help');
     if (title) title.textContent = setupRequired ? '初始化管理员账户' : '登录';
     if (submit) submit.textContent = setupRequired ? '创建管理员并进入' : '登录';
     if (displayNameRow) displayNameRow.style.display = setupRequired ? 'flex' : 'none';
+    if (usernameInput) {
+        usernameInput.placeholder = setupRequired ? '管理员账号' : '正在读取客户端身份…';
+    }
+    if (passwordInput) {
+        passwordInput.placeholder = setupRequired ? '管理员密码' : '客户端主机 SSH 登录密码';
+    }
+    if (usernameHelp) {
+        usernameHelp.textContent = setupRequired
+            ? '创建平台管理员账号；此处不使用客户端 SSH 账号。'
+            : '格式：SSH用户名@客户端IP，例如 hcq@172.16.14.66。';
+    }
+    if (passwordHelp) {
+        passwordHelp.textContent = setupRequired
+            ? '请设置平台管理员密码。'
+            : '请输入该账号的 SSH 密码，通常与系统登录/锁屏密码相同。';
+    }
     const message = document.getElementById('auth-message');
     if (message) message.textContent = setupRequired ? '首次访问需要创建管理员账户。' : '';
     // 仅初始化模式允许关闭登录层并匿名进入。
@@ -206,22 +226,38 @@ function showAuthGate(setupRequired = false) {
 
 async function prefillAuthUsernameFromClient() {
     const usernameInput = document.getElementById('auth-username');
-    if (!usernameInput || usernameInput.value.trim()) return;
+    const usernameHelp = document.getElementById('auth-username-help');
+    const defaultPlaceholder = '用户名@客户端IP，例如 hcq@172.16.14.66';
+    if (!usernameInput) return;
+    if (usernameInput.value.trim()) {
+        usernameInput.placeholder = defaultPlaceholder;
+        return;
+    }
     try {
         const response = await fetch('/api/users/current', { credentials: 'same-origin' });
         if (!response.ok) return;
         const client = await response.json();
+        const clientIp = String(client.ip || '').trim();
         const identity = String(
             client.display_client_id
             || (client.username && client.ip ? `${client.username}@${client.ip}` : '')
             || ''
         ).trim();
-        if (identity && identity !== 'unknown' && identity !== 'unknown@unknown') {
+        if (identity.includes('@') && identity !== 'unknown@unknown') {
             usernameInput.value = identity;
             usernameInput.dataset.autoFilled = 'true';
+        } else if (clientIp && clientIp !== 'unknown') {
+            usernameInput.placeholder = `用户名@${clientIp}，例如 hcq@${clientIp}`;
+            if (usernameHelp) {
+                usernameHelp.textContent = `检测到客户端 IP ${clientIp}，但尚不知道 SSH 用户名；请填写完整账号，例如 hcq@${clientIp}。`;
+            }
         }
     } catch (error) {
         debugLog('[Auth] client identity prefill failed:', error);
+    } finally {
+        if (usernameInput.placeholder === '正在读取客户端身份…') {
+            usernameInput.placeholder = defaultPlaceholder;
+        }
     }
 }
 

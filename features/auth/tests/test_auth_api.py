@@ -104,7 +104,7 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(login.json()["user"]["username"], "hcq@172.16.14.66")
         self.assertEqual(login.json()["user"]["role"], "user")
 
-    def test_ip_only_client_login_resolves_username_with_ssh_whoami(self):
+    def test_ip_only_client_login_is_rejected_even_with_known_host_mapping(self):
         with patch.object(
             config_manager,
             "load_config",
@@ -125,13 +125,12 @@ class AuthApiTests(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(login.status_code, 200)
-        self.assertEqual(login.json()["user"]["username"], "cp2-share@172.16.14.65")
-        detect.assert_called_once_with(
-            "172.16.14.65",
-            "cp2-share",
-            "windows-lock-password",
+        self.assertEqual(login.status_code, 401)
+        self.assertIn(
+            "SSH用户名@客户端IP",
+            login.json()["error"],
         )
+        detect.assert_not_called()
 
     def test_admin_user_list_reports_real_accounts_and_active_sessions(self):
         setup = self.client.post(

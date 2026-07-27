@@ -1171,6 +1171,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "&file=testcases/CtsKeystore%26Tests/arm64/Cts%23Keystore.apk",
                 link,
             )
+            self.assertIn("&worker_id=worker-local", link)
             self.assertEqual(
                 result["parsed"]["suitePath"],
                 "/home/hcq/GMS Suite/android-cts-17_r1/android-cts/tools",
@@ -1178,6 +1179,83 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(
                 result["parsed"]["filePath"],
                 "testcases/CtsKeystore&Tests/arm64/Cts#Keystore.apk",
+            )
+            self.assertEqual(result["parsed"]["workerId"], "worker-local")
+        finally:
+            page.close()
+
+    def test_local_suite_share_link_switches_from_saved_remote_worker_before_load(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """async () => {
+                    const localWorker = 'worker-local';
+                    const remoteWorker = 'ats-worker-246';
+                    const suitePath =
+                        '/home/hcq/GMS-Suite/android-cts-17_r1/android-cts/tools';
+                    const select = document.getElementById('suite-worker-select');
+                    const loadedWorkers = [];
+                    let selected = null;
+
+                    window.loadSuiteWorkerSelector = async () => {
+                        select.innerHTML = `
+                            <option value="${localWorker}">ATS Controller Local Worker</option>
+                            <option value="${remoteWorker}">ats-worker-246</option>`;
+                        select.value = remoteWorker;
+                        select.dataset.loaded = '1';
+                        select.disabled = false;
+                    };
+                    window.loadSuitesForBrowserWorker = async () => {
+                        loadedWorkers.push(select.value);
+                        testSuitesWorkerId = select.value;
+                        testSuitesCache = select.value === localWorker
+                            ? [{
+                                tools_path: suitePath,
+                                test_type: 'cts',
+                                version: '17_r1',
+                                suite_key: suitePath,
+                                worker_id: localWorker,
+                            }]
+                            : [{
+                                tools_path: '/remote/other-suite/tools',
+                                test_type: 'cts',
+                                version: 'remote',
+                                suite_key: 'remote',
+                                worker_id: remoteWorker,
+                            }];
+                        return testSuitesCache;
+                    };
+                    window.renderTestSuiteBrowserList = () => {};
+                    window.selectTestSuiteForBrowser = async (path, directory) => {
+                        selected = {
+                            path,
+                            directory,
+                            exists: testSuitesCache.some(suite => suite.tools_path === path),
+                        };
+                    };
+
+                    window.history.replaceState(
+                        null,
+                        '',
+                        `#test-suites?suite_path=${suitePath}` +
+                            `&path=results/2026.07.02_21.27.07.425_5532`
+                    );
+                    await initTestSuiteBrowserPage();
+                    return {
+                        selectedWorker: select.value,
+                        loadedWorkers,
+                        selected,
+                    };
+                }"""
+            )
+
+            self.assertEqual(result["selectedWorker"], "worker-local")
+            self.assertEqual(result["loadedWorkers"], ["worker-local"])
+            self.assertTrue(result["selected"]["exists"])
+            self.assertEqual(
+                result["selected"]["directory"],
+                "results/2026.07.02_21.27.07.425_5532",
             )
         finally:
             page.close()

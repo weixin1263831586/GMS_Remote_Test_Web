@@ -641,14 +641,23 @@ configure_sudoers() {
     tmp="$(mktemp)"
     cat > "${tmp}" <<EOF
 # USB/IP commands are executed only over the authenticated host SSH boundary.
-# Network routes, VPN and Tailscale lifecycle are deliberately excluded: they
-# are deployment-time host administration, never web-process capabilities.
+# Network routes and Tailscale lifecycle remain deployment-time administration.
+# VPN activation uses the separate NetworkManager Polkit rule below, not sudo.
 Cmnd_Alias GMS_WEB_APP_CMDS = /usr/sbin/usbip *, /usr/bin/usbip *, /sbin/modprobe *, /usr/sbin/modprobe *, /usr/bin/udevadm *, /sbin/udevadm *, /usr/bin/systemctl start ${SERVICE_NAME}-local-software.service, /bin/systemctl start ${SERVICE_NAME}-local-software.service
 ${RUN_USER} ALL=(root) NOPASSWD: GMS_WEB_APP_CMDS
 EOF
     sudo visudo -cf "${tmp}" >/dev/null
     sudo install -o root -g root -m 0440 "${tmp}" "${SUDOERS_FILE}"
     rm -f "${tmp}"
+}
+
+configure_networkmanager_policy() {
+    if ! command -v nmcli >/dev/null 2>&1; then
+        warn "未检测到 NetworkManager，跳过 VPN 后台控制授权"
+        return
+    fi
+    sudo bash "${INSTALL_DIR}/scripts/install_networkmanager_policy.sh" \
+        "${RUN_USER}" "${SERVICE_NAME}"
 }
 
 install_systemd_service() {
@@ -894,6 +903,7 @@ install_web_app() {
     verify_runtime_config
     setup_suite_dir
     configure_sudoers
+    configure_networkmanager_policy
     install_systemd_service
     install_local_worker_service
     install_local_software_service
