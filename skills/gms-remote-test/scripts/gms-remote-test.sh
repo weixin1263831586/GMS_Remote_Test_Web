@@ -2091,6 +2091,8 @@ ${YELLOW}System:${NC}
   gms-rt-system-docs             - Get API documentation
   gms-rt-system-health           - Check server health
   gms-rt-system-skills           - Download skills directory as ZIP
+  gms-rt-system-help             - Show this command list
+  gms-rt-update                  - Update the Skill and all CLI command links
 
 ${YELLOW}Terminal:${NC}
   gms-rt-terminal-open           - Open SSH terminal on test host

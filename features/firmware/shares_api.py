@@ -95,11 +95,21 @@ def _allowed_prefixes(config: dict[str, Any]) -> tuple[str, ...]:
     return prefixes or _DEFAULT_ALLOWED_PREFIXES
 
 
-def _validate_remote_path(path: str, config: dict[str, Any]) -> None:
+def _validate_remote_path(
+    path: str,
+    config: dict[str, Any],
+    additional_roots: tuple[str, ...] = (),
+) -> None:
     parts = PurePosixPath(path).parts
     if ".." in parts:
         raise ValueError("远端路径不能包含 ..")
-    if not any(path.startswith(prefix) for prefix in _allowed_prefixes(config)):
+    roots = (*_allowed_prefixes(config), *additional_roots)
+    if not any(
+        path == str(root).rstrip("/")
+        or path.startswith(str(root).rstrip("/") + "/")
+        for root in roots
+        if str(root).strip()
+    ):
         raise ValueError(f"远端路径不在允许范围内: {path}")
 
 
@@ -120,12 +130,22 @@ def _host_credentials(host: str, user: str | None, config: dict[str, Any]) -> di
     default_user = default_user or config.get("ubuntu_user") or getpass.getuser()
 
     key_filename = host_config.get("key_filename") or share_config.get("key_filename") or config.get("firmware_share_key")
+    password_env = str(host_config.get("password_env") or "").strip()
+    environment_password = (
+        os.getenv(password_env)
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", password_env)
+        else None
+    )
     password = (
         host_config.get("password")
         or share_config.get("password")
         or config.get("firmware_share_password")
         or config.get("firmware_share_pswd")
+        or environment_password
     )
+    credential_lookup = getattr(runtime.config_manager, "find_device_host_password", None)
+    if not password and default_user and callable(credential_lookup):
+        password = credential_lookup(f"{default_user}@{host}", config)
     # ubuntu_pswd 仅限配置中的固定主机使用。
     if not password and host == str(config.get("ubuntu_host") or ""):
         password = config.get("ubuntu_pswd")
@@ -182,9 +202,10 @@ def _sftp_client(host: str, user: str | None, config: dict[str, Any], password: 
 
 
 def _stat_remote(host: str, user: str | None, path: str, config: dict[str, Any], password: str | None = None) -> dict[str, Any]:
-    _validate_remote_path(path, config)
     try:
         with _sftp_client(host, user, config, password) as (sftp, creds):
+            remote_home = str(PurePosixPath(sftp.normalize(".")))
+            _validate_remote_path(path, config, (remote_home,))
             stat = sftp.stat(path)
             if stat.st_size is None or stat.st_size <= 0:
                 raise ValueError("远端固件文件为空")
@@ -207,10 +228,19 @@ def _stat_remote(host: str, user: str | None, path: str, config: dict[str, Any],
 
 
 def _list_remote_dir(host: str, user: str | None, path: str, config: dict[str, Any], password: str | None = None) -> dict[str, Any]:
-    normalized_path = str(PurePosixPath(path or "/"))
-    _validate_remote_path(normalized_path, config)
+    requested_path = str(path or "").strip()
+    normalized_path = (
+        str(PurePosixPath(requested_path))
+        if requested_path
+        else ""
+    )
     try:
         with _sftp_client(host, user, config, password) as (sftp, creds):
+            remote_home = str(PurePosixPath(sftp.normalize(".")))
+            if not remote_home.startswith("/"):
+                raise ValueError("无法解析远端用户HOME目录")
+            normalized_path = normalized_path or remote_home
+            _validate_remote_path(normalized_path, config, (remote_home,))
             entries = []
             for attr in sftp.listdir_attr(normalized_path):
                 name = attr.filename
@@ -231,7 +261,9 @@ def _list_remote_dir(host: str, user: str | None, path: str, config: dict[str, A
                 "files": entries,
             }
     except FileNotFoundError as exc:
-        raise ValueError(f"远端目录不存在: {normalized_path}") from exc
+        raise ValueError(
+            f"远端目录不存在: {normalized_path or 'HOME'}"
+        ) from exc
     except paramiko.AuthenticationException as exc:
         raise _AuthError(f"远端认证失败（用户名/密码/密钥不匹配）: {exc}") from exc
     except (TimeoutError, ConnectionRefusedError, OSError) as exc:
@@ -414,12 +446,17 @@ async def browse_firmware_share_remote(request: Request):
                 or config.get("ubuntu_user")
                 or getpass.getuser()
             ).strip() or None
-            path = str(PurePosixPath(str(
+            requested_path = str(
                 payload.get("path")
                 or share_config.get("default_path")
                 or remote_path
-                or (f"/home/{user}" if user else "/home")
-            )))
+                or ""
+            ).strip()
+            path = (
+                str(PurePosixPath(requested_path))
+                if requested_path
+                else ""
+            )
             if not host:
                 raise ValueError("未配置共享固件主机")
         password = payload.get("password") or None

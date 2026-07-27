@@ -10,7 +10,7 @@
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
-    <script src="/static/js/api-constants.js?v=20260411" defer></script>
+    <script src="/static/js/api-constants.js?v=20260727-skill-install-action" defer></script>
     <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
     <script src="/static/js/utils.js?v=20260601-01" defer></script>
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
@@ -24,7 +24,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260722-client-admin-stepup" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260727-suite-share-readable" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -771,8 +771,8 @@
                             <div class="right-frame">
                                 <div class="form-row">
                                     <label>测试主机:</label>
-                                    <select id="cluster-worker" class="combo-box" onchange="switchTestWorker()">
-                                        <option value="worker-local">本机 worker-local</option>
+                                    <select id="cluster-worker" class="combo-box" onchange="switchTestWorker()" disabled aria-busy="true">
+                                        <option value="">加载中...</option>
                                     </select>
                                 </div>
                                 <div class="form-row">
@@ -798,7 +798,7 @@
                         <button class="btn-xxs" id="btn-follow-filter" onclick="toggleFollowFilter()" title="只显示我在设备管理页&quot;关注&quot;的分组设备">⭐ 只看关注</button>
                     </div>
                     <div class="device-list-container">
-                        <div class="device-canvas" id="device-canvas">
+                        <div class="device-canvas device-canvas-empty" id="device-canvas">
                             <div class="device-column" id="device-list-left">
                                 <div class="empty-message">点击刷新按钮获取设备列表...</div>
                             </div>
@@ -1510,8 +1510,11 @@
                     <button class="filter-btn" onclick="showUsageExamples()" style="background: var(--primary-color); color: white;">
                         📖 使用实例
                     </button>
-                    <button class="filter-btn" onclick="downloadSkillsZip()" style="background: var(--success-color); color: white;">
-                        📁 skill下载
+                    <button class="filter-btn" onclick="copySkillInstallCommand()" style="background: var(--success-color); color: white;" title="复制可在任意 Linux 主机执行的一键安装或更新命令">
+                        📋 安装/更新命令
+                    </button>
+                    <button class="filter-btn" onclick="downloadSkillsZip()" title="仅下载 ZIP，用于离线部署或备份">
+                        📦 离线包
                     </button>
                 </div>
             </div>
@@ -2190,7 +2193,7 @@
                         <label>远端固件:</label>
                         <div class="input-with-btn">
                             <input type="text" id="firmware-share-remote" placeholder="user@host:/absolute/path/to/firmware.img" />
-                            <button class="btn-small" onclick="browseRemoteFileForFirmwareShare()">本机</button>
+                            <button class="btn-small" onclick="browseRemoteFileForFirmwareShare()">编译服务器</button>
                         </div>
                     </div>
                     <div class="modal-form-row" style="margin-bottom: 0;">
@@ -10206,21 +10209,21 @@
                 <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.6; color: var(--text-primary);">
                     <h3 style="color: var(--primary-color); margin-bottom: 10px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🚀 完整测试流程指南</h3>
 
-                    <!-- Step 1: 下载Skills包 -->
+                    <!-- Step 1: 一键安装Skill和CLI -->
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
-                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 下载Skills包 (可在编译服务器205/206执行)</div>
+                        <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 一键安装Skill和CLI（可在任意Linux主机执行）</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl {% if request.url.scheme == 'https' %}-k {% endif %}-s -OJ "{{ request.url.scheme }}://{{ request.url.netloc }}/api/system/skills"</code>
+                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl {% if request.url.scheme == 'https' %}-k {% endif %}-fsSL "{{ request.url.scheme }}://{{ request.url.netloc }}/api/system/skills/install.sh" | bash</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-1-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">source ./gms-remote-test/scripts/gms-remote-test.sh</code>
+                            <code id="cmd-1-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-auth-login USERNAME &amp;&amp; gms-rt-devices-list</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-1-5')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 加载 gms-rt-* 命令，每次新开终端都需要执行</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 无需解压或source；重复执行安装命令即可更新，也可运行 gms-rt-update</div>
                     </div>
 
                     <!-- Step 2: 系统健康检查 -->
@@ -10262,7 +10265,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📶 步骤4: WiFi连接配置 (可选)</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-devices-wifi-connect RK3572GMS4 SSID password</code>
+                            <code id="cmd-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-devices-wifi RK3572GMS4 SSID password</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-5')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 如果设备需要WiFi连接执行测试时使用</div>

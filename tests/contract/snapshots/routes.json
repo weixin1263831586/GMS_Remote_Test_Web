@@ -1986,6 +1986,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/system/skills/install.sh"
+  },
+  {
+    "methods": [
       "WEBSOCKET"
     ],
     "path": "/api/system/websocket/{client_id}"
@@ -2205,6 +2211,12 @@
       "POST"
     ],
     "path": "/api/usbip/install"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/usbip/source-devices"
   },
   {
     "methods": [

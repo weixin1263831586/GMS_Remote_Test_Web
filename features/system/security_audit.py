@@ -166,6 +166,26 @@ class SecurityAuditLogger:
                 return value
         return 'GENESIS'
 
+    def _assert_active_key_matches_head_locked(self) -> None:
+        """Reject appends when the current key cannot authenticate the log head."""
+        if not os.path.exists(self.log_path):
+            return
+        lines = self._tail_lines(1)
+        if not lines:
+            return
+        try:
+            record = json.loads(lines[-1])
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RuntimeError("cannot append to an invalid audit log head") from exc
+        expected_hash = str(record.get("record_hash") or "")
+        if not expected_hash or not hmac.compare_digest(
+            expected_hash,
+            self._record_hash(record),
+        ):
+            raise RuntimeError(
+                "active audit key does not match the current audit log head"
+            )
+
     def _tail_lines(self, limit: int) -> list[bytes]:
         """Read at most ``limit`` lines without scanning an ever-growing log."""
 
@@ -285,6 +305,7 @@ class SecurityAuditLogger:
             **self.sanitize_mapping(event),
         }
         with self._lock, self._cross_process_lock():
+            self._assert_active_key_matches_head_locked()
             self._rotate_if_needed_locked()
             # Another process may have appended since this logger instance last
             # wrote. Never trust the process-local head across the file lock.

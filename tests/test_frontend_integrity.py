@@ -152,6 +152,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_test_host_uses_one_cluster_worker_selector(self):
         main_text = read_text("web/shell/shell.html")
+        navigation = read_text("web/static/js/navigation.js")
 
         self.assertEqual(len(re.findall(r'id=["\']cluster-worker["\']', main_text)), 1)
         self.assertNotRegex(main_text, r'id=["\']ubuntu-host["\']')
@@ -159,6 +160,40 @@ class FrontendIntegrityTests(unittest.TestCase):
             main_text,
             r'<label>测试主机:</label>\s*<select id="cluster-worker"',
         )
+        load_start = navigation.index("async function loadClusterWorkers()")
+        load_end = navigation.index("async function resolveClusterHost", load_start)
+        load_source = navigation[load_start:load_end]
+        self.assertNotIn("select.style.visibility", load_source)
+        self.assertIn("await initializeClusterMode()", load_source)
+        self.assertIn("if (!optionsUnchanged)", load_source)
+        self.assertIn("select.value !== selectedWorkerId", load_source)
+        self.assertIn("select.dataset.workersLoaded = 'true'", load_source)
+        self.assertIn("testHostSelect.disabled = !enabled || !workersLoaded", navigation)
+
+    def test_skill_toolbar_prefers_installer_and_labels_zip_as_offline_only(self):
+        shell = read_text("web/shell/shell.html")
+        navigation = read_text("web/static/js/navigation.js")
+        api_constants = read_text("web/static/js/api-constants.js")
+
+        self.assertIn('onclick="copySkillInstallCommand()"', shell)
+        self.assertIn("📋 安装/更新命令", shell)
+        self.assertIn('onclick="downloadSkillsZip()"', shell)
+        self.assertIn("📦 离线包", shell)
+        self.assertIn("function buildSkillInstallCommand()", navigation)
+        self.assertIn("function copySkillInstallCommand()", navigation)
+        self.assertIn("window.location.protocol === 'https:' ? '-k ' : ''", navigation)
+        self.assertIn("apiPath === '/api/system/skills/install.sh'", navigation)
+        self.assertIn("apiPath === '/api/system/skills'", navigation)
+        self.assertIn("全部独立gms-rt-*命令", api_constants)
+
+    def test_suite_share_links_keep_slashes_readable(self):
+        navigation = read_text("web/static/js/navigation.js")
+        share_start = navigation.index("function buildSuiteBrowserLink(")
+        share_end = navigation.index("async function initTestSuiteBrowserPage", share_start)
+        share_source = navigation[share_start:share_end]
+
+        self.assertIn("params.toString().replace(/%2F/gi, '/')", share_source)
+        self.assertIn("#test-suites?${readableQuery}", share_source)
 
     def test_public_shell_never_embeds_configured_vnc_password(self):
         main_text = read_text("web/shell/shell.html")

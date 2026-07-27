@@ -9,19 +9,27 @@ Use the implementation in the current checkout as the source of truth. Do not re
 
 ## Operate the platform
 
-Run the bundled helper:
+On another Linux host, install or update the Skill and CLI from the Controller:
 
 ```bash
-skills/gms-remote-test/scripts/gms-remote-test.sh gms-rt-system-help
+curl -kfsSL https://CONTROLLER:5001/api/system/skills/install.sh | bash
+gms-rt-system-help
 ```
 
 Before calling protected APIs, inspect and establish the CLI session:
 
 ```bash
-skills/gms-remote-test/scripts/gms-remote-test.sh gms-rt-auth-status
-skills/gms-remote-test/scripts/gms-remote-test.sh gms-rt-auth-login USERNAME
-skills/gms-remote-test/scripts/gms-remote-test.sh gms-rt-devices-list
+gms-rt-auth-status
+gms-rt-auth-login USERNAME
+gms-rt-devices-list
 ```
+
+Run `gms-rt-update` to reinstall the latest Skill and command links from the
+same Controller. Commands are installed as standalone `gms-rt-*` executables so
+shell PATH completion can list them. Only those standalone commands are exposed;
+the shared dispatcher stays in the private runtime directory.
+Inside a source checkout, the bundled helper remains available directly as
+`skills/gms-remote-test/scripts/gms-remote-test.sh gms-rt-system-help`.
 
 Prompt for the password by default. Use `GMS_REMOTE_TEST_USERNAME` and
 `GMS_REMOTE_TEST_PASSWORD` only for controlled non-interactive execution. Never

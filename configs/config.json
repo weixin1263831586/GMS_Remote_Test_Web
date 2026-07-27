@@ -3,6 +3,16 @@
     "ubuntu_host": "172.16.14.233",
     "ubuntu_pswd": "rockchip",
     "local_server": "hcq@10.10.10.206",
+    "firmware_shares": {
+        "default_host": "10.10.10.206",
+        "default_user": "hcq",
+        "default_path": "/home/hcq",
+        "hosts": {
+            "10.10.10.206": {
+                "password_env": "RK_BUILD_206_PASSWORD"
+            }
+        }
+    },
     "use_key_auth": false,
     "private_key_path": "~/.ssh/id_rsa",
     "usbip_vid_pid": "2207:0006",

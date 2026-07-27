@@ -1,0 +1,16 @@
+{
+  "_comment": "Runtime environment loaded by bootstrap.env_loader at process start. Contains secrets — excluded from git via .gitignore.",
+  "GMS_ENV": "production",
+  "PYTHONPYCACHEPREFIX": "/home/hcq/.cache/gms-web-app/pycache",
+  "GMS_LOCAL_AI_API_KEY": "sk-n59SFal6iyndmvp3EjnFjiyTXs6jYPlQ5U88QY8tBYYNIi9v",
+  "RK_BUILD_206_PASSWORD": "hcq951",
+  "GMS_AUTH_REQUIRED": "true",
+  "GMS_SECURE_COOKIES": "true",
+  "GMS_SECRET_KEY_FILE": "/home/hcq/GMS_Remote_Test/data/secrets/master.key",
+  "GMS_AUDIT_HMAC_KEY_FILE": "/home/hcq/GMS_Remote_Test/data/secrets/audit_hmac.key",
+  "GMS_METRICS_TOKEN": "ozK0KI3c5MHQIzaouhInZCr_ebLefmZRh_zxB_l-6yZOJB9QXUGdsQuB7aLLJwdc",
+  "GMS_AUTOMATION_WEBHOOK_TOKEN": "IQEq4PIUWfOrgCYv-BeJjKK-_bBmsU6URXRknXgrGjC6GjTj_cFOU_OdLrMmNs7b",
+  "GMS_AUTOMATION_OWNER_ID": "service-automation",
+  "GMS_ALLOWED_ORIGINS": "https://172.16.14.233:5001,https://localhost:5001",
+  "TRUSTED_HOSTS": "172.16.14.233,localhost,127.0.0.1"
+}
