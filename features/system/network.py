@@ -34,7 +34,10 @@ def get_primary_vpn_target(config: dict[str, Any]) -> str:
     return str(vpn_target or 'www.google.com')
 
 
-VPN_CONNECTION_TYPES = {"vpn", "tun", "tap", "wireguard"}
+# This UI manages NetworkManager VPN profiles. Generic tunnel interfaces such
+# as Tailscale's ``tun`` connection have their own lifecycle and must not make
+# the managed VPN status look connected.
+VPN_CONNECTION_TYPES = {"vpn"}
 
 
 def has_active_vpn_connection(nmcli_output: str) -> bool:
@@ -43,11 +46,7 @@ def has_active_vpn_connection(nmcli_output: str) -> bool:
     nmcli -t 每行 "NAME:TYPE:STATE"——只认 TYPE 列明确属于 VPN 类型，
     避免连接名或其它字段误含子串导致假阳性（误报已连接）。
     """
-    for line in (nmcli_output or '').splitlines():
-        fields = line.split(":")
-        if len(fields) >= 2 and fields[1].strip().lower() in VPN_CONNECTION_TYPES:
-            return True
-    return False
+    return bool(parse_vpn_connection_names(nmcli_output or ""))
 
 
 def check_local_vpn_connected() -> bool:
@@ -77,8 +76,8 @@ def parse_vpn_connection_names(nmcli_output: str) -> list:
     """解析 nmcli 输出，返回所有 VPN 连接名称列表"""
     names = []
     for line in nmcli_output.splitlines():
-        parts = line.split(':')
-        if len(parts) >= 2 and 'vpn' in parts[1].lower():
+        parts = re.split(r"(?<!\\):", line)
+        if len(parts) >= 2 and parts[1].strip().lower() in VPN_CONNECTION_TYPES:
             names.append(parts[0].replace(r'\:', ':').strip())
     return names
 

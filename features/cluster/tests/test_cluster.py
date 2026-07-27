@@ -71,6 +71,38 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(device["properties"]["product"], "rk")
         self.assertEqual(self.repo.list_suites("worker-246")[0]["suite_key"], "CTS:17_r1")
 
+    def test_suite_api_includes_cluster_inventory_display_fields(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [],
+            "devices": [],
+            "suites": [{
+                "suite_type": "CTS",
+                "suite_version": "17_r1",
+                "suite_key": "CTS:17_r1",
+                "tools_path": "/suite/tools",
+                "available": True,
+            }],
+        })
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            app = FastAPI()
+            app.include_router(cluster_api.router)
+            with TestClient(app) as client:
+                response = client.get("/api/cluster/suites?worker_id=worker-246")
+        finally:
+            cluster_api.cluster_service = previous
+
+        self.assertEqual(response.status_code, 200, response.text)
+        suite = response.json()["suites"][0]
+        self.assertEqual(suite["worker_id"], "worker-246")
+        self.assertEqual(suite["suite_type"], "CTS")
+        self.assertEqual(suite["suite_version"], "17_r1")
+        self.assertEqual(suite["test_type"], "cts")
+        self.assertEqual(suite["version"], "android-cts-17_r1")
+
     def test_refresh_command_result_restores_suite_inventory(self):
         self.register()
         command = self.repo.create_command({

@@ -492,13 +492,23 @@ async def connect_vpn(
 
             await asyncio.sleep(2)
 
-            if code == 0:
-                is_connected = True
-                message = 'VPN 连接成功'
-            elif 'already active' in (error or ''):
-                is_connected = True
-                message = 'VPN 已连接'
-            elif 'unknown connection' in (error or ''):
+            # A successful activation command only means NetworkManager
+            # accepted the request. Confirm that the selected VPN profile is
+            # actually active before reporting a connected state.
+            active_cmd = "nmcli -t -f NAME,TYPE,STATE connection show --active 2>/dev/null"
+            active_output, active_error, _ = await execute_config_host_command(
+                config,
+                ssh,
+                active_cmd,
+                5,
+            )
+            active_vpn_names = parse_vpn_connection_names(active_output)
+            is_connected = vpn_name in active_vpn_names
+
+            detail = error or output
+            if is_connected:
+                message = 'VPN 已连接' if 'already active' in detail.lower() else 'VPN 连接成功'
+            elif 'unknown connection' in detail.lower():
                 if ssh:
                     ssh_manager.return_connection(ssh)
                 return JSONResponse(
@@ -509,14 +519,17 @@ async def connect_vpn(
                     status_code=404
                 )
             else:
-                is_connected = False
-                detail = error or output
                 if 'not authorized' in detail.lower() or 'permission' in detail.lower():
+                    service_user = config_manager.get_ubuntu_user(config)
                     detail = (
-                        '该 VPN 连接未授权给平台运行账号；'
-                        '请由主机管理员在 NetworkManager 中配置连接权限'
+                        f'NetworkManager 未授权后台服务用户 {service_user} 控制连接；'
+                        '请在测试主机执行：sudo bash '
+                        'scripts/install_networkmanager_policy.sh '
+                        f'{service_user} gms-web-app'
                     )
-                message = f'VPN 连接失败: {detail}'
+                elif code == 0:
+                    detail = active_error or f'{vpn_name} 未出现在活动 VPN 列表中'
+                message = f'VPN 连接失败: {detail or "未检测到活动连接"}'
 
             if ssh:
                 ssh_manager.return_connection(ssh)

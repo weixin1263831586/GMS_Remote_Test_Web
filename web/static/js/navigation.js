@@ -1696,7 +1696,9 @@ function getSuiteBrowserRouteParams() {
     const suitePath = params.get('suite_path') || params.get('suite') || '';
     const filePath = params.get('file') || '';
     const directoryPath = params.get('path') || (filePath ? getParentSuitePath(filePath) : '');
-    const workerId = params.get('worker_id') || params.get('host') || '';
+    // 旧实现只有 Controller 本机分享链接会省略 Worker ID，因此缺省值
+    // 可以明确归属本机；远端 Worker 分享链接始终包含 worker_id。
+    const workerId = params.get('worker_id') || params.get('host') || workspaceLocalWorkerId();
 
     if (!suitePath) {
         return null;
@@ -1706,7 +1708,7 @@ function getSuiteBrowserRouteParams() {
         suitePath,
         directoryPath,
         filePath,
-        workerId: workerId && !isLocalWorkspaceWorker(workerId) ? workerId : ''
+        workerId
     };
 }
 
@@ -1718,17 +1720,25 @@ function buildSuiteBrowserLink(path = '', type = 'file') {
     } else {
         params.set('file', path || '');
     }
-    // 集群报告链接携带所在 Worker ID。
+    // 分享链接始终携带明确 Worker ID；本机链接也必须能把其他浏览器
+    // 从上次保存的远端 Worker 切回 Controller。
     const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
-    const workerId = suite?.worker_id || testSuitesWorkerId;
-    if (workerId && !isLocalWorkspaceWorker(workerId)) {
-        params.set('worker_id', workerId);
-    }
+    const workerId = suite?.worker_id
+        || testSuitesWorkerId
+        || $('suite-worker-select')?.value
+        || workspaceLocalWorkerId();
+    params.set('worker_id', workerId);
 
     // Hash 内的分享参数不发送给服务器。仅恢复路径分隔符以提升可读性，
     // 其余可能改变查询参数边界的字符继续保持 URL 编码。
-    const readableQuery = params.toString().replace(/%2F/gi, '/');
+    const readableQuery = buildReadablePathQuery(params);
     return `${window.location.origin}${window.location.pathname}${window.location.search}#test-suites?${readableQuery}`;
+}
+
+function buildReadablePathQuery(params) {
+    // Query values still encode characters that could alter parameter
+    // boundaries, but path separators remain readable in copied/opened URLs.
+    return params.toString().replace(/%2F/gi, '/');
 }
 
 async function initTestSuiteBrowserPage() {
@@ -1738,29 +1748,24 @@ async function initTestSuiteBrowserPage() {
     }
 
     await loadSuiteWorkerSelector();
+    const routeParams = getSuiteBrowserRouteParams();
+    // 在首次加载套件前先应用链接指定的 Worker，避免先按浏览器保存的
+    // ats-worker-* 加载并短暂显示“测试套件不存在”。
+    if (routeParams?.workerId) {
+        const workerSelect = $('suite-worker-select');
+        const supported = workerSelect
+            && Array.from(workerSelect.options).some(opt => opt.value === routeParams.workerId);
+        if (workerSelect && supported) {
+            workerSelect.value = routeParams.workerId;
+        } else {
+            debugLog('[Suites] Shared link targets unknown worker:', routeParams.workerId);
+        }
+    }
+
     await loadSuitesForBrowserWorker(false);
     renderTestSuiteBrowserList();
 
-    const routeParams = getSuiteBrowserRouteParams();
     if (routeParams) {
-        // A shared link may target a remote worker host. Switch the dropdown
-        // to that worker and reload its suites before restoring the report,
-        // otherwise the file lookup falls back to the local host and the
-        // report can't be found.
-        if (routeParams.workerId) {
-            const workerSelect = $('suite-worker-select');
-            const supported = workerSelect
-                && Array.from(workerSelect.options).some(opt => opt.value === routeParams.workerId);
-            if (workerSelect && supported) {
-                if (workerSelect.value !== routeParams.workerId) {
-                    workerSelect.value = routeParams.workerId;
-                    await loadSuitesForBrowserWorker(true);
-                    renderTestSuiteBrowserList();
-                }
-            } else {
-                debugLog('[Suites] Shared link targets unknown worker:', routeParams.workerId);
-            }
-        }
         state.suiteBrowser.highlightPath = routeParams.filePath || '';
         await selectTestSuiteForBrowser(
             routeParams.suitePath,
@@ -3247,7 +3252,7 @@ function openSuiteFileInline(path) {
     if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
     const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
         ? '/api/cluster/suites/download' : '/api/test/suites/download';
-    window.open(`${endpoint}?${params.toString()}`, '_blank');
+    window.open(`${endpoint}?${buildReadablePathQuery(params)}`, '_blank');
 }
 
 async function startRemoteSuiteExport(path, directory = false) {
@@ -3314,7 +3319,7 @@ async function downloadSuiteFile(path, filename = '') {
     if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
     const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
         ? '/api/cluster/suites/download' : '/api/test/suites/download';
-    link.href = `${endpoint}?${params.toString()}`;
+    link.href = `${endpoint}?${buildReadablePathQuery(params)}`;
     link.download = filename || path.split('/').pop() || 'download';
     link.target = frame.name;
     link.style.display = 'none';
@@ -3346,7 +3351,7 @@ async function downloadSuiteDir(path, name = '') {
         document.body.appendChild(frame);
     }
     const link = document.createElement('a');
-    link.href = `/api/test/suites/download-dir?${params.toString()}`;
+    link.href = `/api/test/suites/download-dir?${buildReadablePathQuery(params)}`;
     link.download = `${name || path.split('/').pop() || 'download'}.zip`;
     link.target = frame.name;
     link.style.display = 'none';

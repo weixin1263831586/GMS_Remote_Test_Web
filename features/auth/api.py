@@ -66,26 +66,19 @@ def _authenticate_client_ssh_user(
 ) -> CurrentUser | None:
     """Authenticate a client with a host-scoped SSH password.
 
-    Client accounts are separate from platform administrators. The configured
-    host-scoped SSH credential is preferred. For an IP-only login, the known
-    client-host username is used and the supplied password is verified by an
-    actual SSH ``whoami`` call when no encrypted credential is stored yet.
+    Client accounts are separate from platform administrators and must use the
+    explicit ``SSH_USER@CLIENT_IP`` form. The supplied password is verified by
+    an actual SSH ``whoami`` call when no encrypted credential is stored yet.
     """
     login_name = str(username or "").strip()
-    if "@" in login_name:
-        client_user, client_host = login_name.rsplit("@", 1)
-    else:
-        client_user = ""
-        client_host = login_name
+    if "@" not in login_name:
+        return None
+    client_user, client_host = login_name.rsplit("@", 1)
+    if not client_user or not client_host:
+        return None
     try:
         ipaddress.ip_address(client_host)
     except ValueError:
-        return None
-
-    if not client_user:
-        configured_hosts = config_manager.load_config().get("client_hosts") or {}
-        client_user = str(configured_hosts.get(client_host) or "").strip()
-    if not client_user:
         return None
 
     canonical_username = f"{client_user}@{client_host}"
@@ -249,6 +242,22 @@ async def auth_login(request: Request, req: dict):
         str(req.get("password", "")),
     )
     if not user:
+        try:
+            ipaddress.ip_address(username)
+        except ValueError:
+            pass
+        else:
+            retry_after = auth_service.record_auth_failure(
+                "login",
+                username,
+                source_ip,
+            )
+            if retry_after:
+                return _rate_limit_response(retry_after)
+            return error_response(
+                "客户端账号格式错误，请使用 SSH用户名@客户端IP，例如 hcq@172.16.14.66",
+                status_code=401,
+            )
         from fastapi.concurrency import run_in_threadpool
 
         user = await run_in_threadpool(

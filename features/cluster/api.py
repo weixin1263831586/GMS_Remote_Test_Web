@@ -328,6 +328,9 @@ def list_suites(worker_id: str = Query(default="")):
         version = str(item.get("suite_version") or "")
         full_version = f"android-{test_type}-{version}" if version and not version.startswith("android-") else version
         suites.append({
+            "worker_id": item.get("worker_id", ""),
+            "suite_type": item.get("suite_type", ""),
+            "suite_version": version,
             "test_type": test_type,
             "version": full_version,
             "tools_path": item.get("tools_path", ""),

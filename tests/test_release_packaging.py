@@ -29,6 +29,38 @@ class ReleasePackagingTests(unittest.TestCase):
         # by bootstrap.env_loader, so systemd no longer needs it.
         self.assertNotIn("EnvironmentFile", source)
 
+    def test_installer_adds_limited_networkmanager_policy_for_service_user(self):
+        installer = Path("install.sh").read_text(encoding="utf-8")
+        policy = Path("scripts/install_networkmanager_policy.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("configure_networkmanager_policy", installer)
+        self.assertIn(
+            "org.freedesktop.NetworkManager.network-control",
+            policy,
+        )
+        self.assertIn('subject.user == "${RUN_USER}"', policy)
+        self.assertIn(
+            "install -d -o root -g root -m 0755 /etc/polkit-1/rules.d",
+            policy,
+        )
+        self.assertIn(
+            "install -d -o root -g root -m 0755 "
+            "/etc/polkit-1/localauthority/50-local.d",
+            policy,
+        )
+        self.assertIn("Identity=unix-user:${RUN_USER}", policy)
+        self.assertIn("ResultAny=yes", policy)
+        self.assertIn("systemctl restart polkit.service", policy)
+        self.assertIn(
+            "--action-id org.freedesktop.NetworkManager.network-control",
+            policy,
+        )
+        self.assertNotIn("systemctl reload polkit.service", policy)
+        self.assertNotIn("settings.modify.system", policy)
+        self.assertNotIn("sudoers", policy.lower())
+
     def test_product_config_scrubs_nested_secrets_and_source_identity(self):
         source = {
             "ubuntu_user": "builder",

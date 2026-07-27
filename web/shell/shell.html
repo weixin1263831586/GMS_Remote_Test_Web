@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260723-modal-layout">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260727-auth-account-hint">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
@@ -20,11 +20,11 @@
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/api.js?v=20260722-client-login-prefill" defer></script>
+    <script src="/static/js/api.js?v=20260727-auth-account-hint" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260727-suite-share-readable" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260727-suite-path-readable" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -367,11 +367,13 @@
             <div class="auth-title" id="auth-title">登录</div>
             <div class="auth-row">
                 <label for="auth-username">账号</label>
-                <input id="auth-username" name="username" type="text" autocomplete="username" placeholder="正在读取客户端身份…" required>
+                <input id="auth-username" name="username" type="text" autocomplete="username" placeholder="正在读取客户端身份…" aria-describedby="auth-username-help" required>
+                <div class="auth-help" id="auth-username-help">格式：SSH用户名@客户端IP，例如 hcq@172.16.14.66。</div>
             </div>
             <div class="auth-row">
                 <label for="auth-password">密码</label>
-                <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="客户端主机 SSH 密码" required>
+                <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="客户端主机 SSH 登录密码" aria-describedby="auth-password-help" required>
+                <div class="auth-help" id="auth-password-help">请输入该账号的 SSH 密码，通常与系统登录/锁屏密码相同。</div>
             </div>
             <div class="auth-row" id="auth-display-name-row" style="display: none;">
                 <label for="auth-display-name">显示名</label>
