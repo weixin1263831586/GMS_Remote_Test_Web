@@ -1045,27 +1045,77 @@ function initDragDrop() {
 }
 
 // ==================== Device Management ====================
+let _loadClusterWorkersInFlight = null;
 async function loadClusterWorkers() {
     const select = document.getElementById('cluster-worker');
     if (!select) return;
-    const response = await fetch('/api/cluster/workers');
-    if (!response.ok) return;
-    const data = await response.json();
-    const localWorkerId = workspaceLocalWorkerId();
-    const workers = (data.workers || []).filter(worker =>
-        worker.status !== 'offline'
-        && (state.clusterStatus?.enabled || worker.id === localWorkerId)
-    );
-    await (window.GmsWorkspace?.ready || Promise.resolve());
-    const context = window.GmsWorkspace?.get?.() || {};
-    const current = context.worker_id || localWorkerId;
-    select.innerHTML = workers.map(worker =>
-        `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)} (${escapeHtml(worker.hostname || worker.id)})</option>`
-    ).join('');
-    if (!workers.some(worker => worker.id === localWorkerId)) {
-        select.insertAdjacentHTML('afterbegin', `<option value="${escapeHtml(localWorkerId)}">本机 ${escapeHtml(localWorkerId)}</option>`);
-    }
-    if (Array.from(select.options).some(option => option.value === current)) select.value = current;
+    // 页面恢复和主初始化可能同时触发，统一等待同一次集群状态初始化，
+    // 避免先按单机状态渲染、随后又切换成集群状态。
+    await initializeClusterMode();
+    if (_loadClusterWorkersInFlight) return _loadClusterWorkersInFlight;
+    _loadClusterWorkersInFlight = (async () => {
+        try {
+            const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
+            if (!response.ok) return;
+            const data = await response.json();
+            await (window.GmsWorkspace?.ready || Promise.resolve());
+            const localWorkerId = workspaceLocalWorkerId();
+            const workers = (data.workers || []).filter(worker =>
+                worker.status !== 'offline'
+                && (state.clusterStatus?.enabled || worker.id === localWorkerId)
+            );
+            const context = window.GmsWorkspace?.get?.() || {};
+            const optionData = [];
+            if (!workers.some(worker => worker.id === localWorkerId)) {
+                optionData.push({value: localWorkerId, label: `本机 ${localWorkerId}`});
+            }
+            for (const worker of workers) {
+                optionData.push({
+                    value: worker.id,
+                    label: `${worker.name || worker.id} (${worker.hostname || worker.id})`,
+                });
+            }
+
+            const availableValues = new Set(optionData.map(option => option.value));
+            const contextWorkerId = context.worker_id || localWorkerId;
+            const selectedWorkerId = availableValues.has(contextWorkerId)
+                ? contextWorkerId
+                : (availableValues.has(select.value)
+                    ? select.value
+                    : (availableValues.has(localWorkerId) ? localWorkerId : optionData[0]?.value || ''));
+            const optionsUnchanged = select.options.length === optionData.length
+                && optionData.every((option, index) => {
+                    const currentOption = select.options[index];
+                    return currentOption.value === option.value
+                        && currentOption.textContent === option.label;
+                });
+
+            // 列表没有变化时保留现有 DOM，避免自动刷新导致原生 select 重新绘制。
+            if (!optionsUnchanged) {
+                const fragment = document.createDocumentFragment();
+                for (const item of optionData) {
+                    const option = document.createElement('option');
+                    option.value = item.value;
+                    option.textContent = item.label;
+                    option.selected = item.value === selectedWorkerId;
+                    fragment.appendChild(option);
+                }
+                select.replaceChildren(fragment);
+            } else if (select.value !== selectedWorkerId) {
+                select.value = selectedWorkerId;
+            }
+
+            select.dataset.workersLoaded = 'true';
+            select.setAttribute('aria-busy', 'false');
+            const clusterModeEnabled = Boolean(
+                state.clusterStatus?.enabled && context.scope_mode === 'cluster'
+            );
+            select.disabled = !clusterModeEnabled;
+        } finally {
+            _loadClusterWorkersInFlight = null;
+        }
+    })();
+    return _loadClusterWorkersInFlight;
 }
 
 async function resolveClusterHost(workerId) {
@@ -1170,9 +1220,12 @@ function applyClusterMode(enabled) {
     });
     const testHostSelect = document.getElementById('cluster-worker');
     if (testHostSelect) {
-        testHostSelect.disabled = !enabled;
+        const workersLoaded = testHostSelect.dataset.workersLoaded === 'true';
+        testHostSelect.disabled = !enabled || !workersLoaded;
         testHostSelect.title = enabled
-            ? '选择执行测试的 Cluster Worker'
+            ? (workersLoaded
+                ? '选择执行测试的 Cluster Worker'
+                : '正在加载测试主机列表')
             : '当前为单机模式；切换到集群模式后可选择远端测试主机';
     }
     const suiteWorkerSelect = document.getElementById('suite-worker-select');
@@ -1235,25 +1288,38 @@ async function toggleClusterMode() {
 
 window.toggleClusterMode = toggleClusterMode;
 
+let _initializeClusterModeInFlight = null;
+let _clusterModeInitialized = false;
 async function initializeClusterMode() {
-    try {
-        const [response, context] = await Promise.all([
-            fetch('/api/cluster/status', {cache: 'no-store'}),
-            window.GmsWorkspace?.ready || Promise.resolve({scope_mode: 'single', worker_id: workspaceLocalWorkerId()})
-        ]);
-        const status = await response.json();
-        state.clusterStatus = status;
-        const enabled = Boolean(response.ok && status.enabled && context.scope_mode === 'cluster');
-        applyClusterMode(enabled);
-        if (!enabled && context.scope_mode === 'cluster') {
-            window.GmsWorkspace?.update({scope_mode: 'single', worker_id: workspaceLocalWorkerId(), device_ids: []},
-                {source: 'cluster-unavailable'});
-        }
-        return enabled;
-    } catch (error) {
-        debugLog('[Cluster] Status unavailable, preserving single-host UI:', error);
-        return false;
+    if (_clusterModeInitialized) {
+        const context = window.GmsWorkspace?.get?.() || {};
+        return Boolean(state.clusterStatus?.enabled && context.scope_mode === 'cluster');
     }
+    if (_initializeClusterModeInFlight) return _initializeClusterModeInFlight;
+    _initializeClusterModeInFlight = (async () => {
+        try {
+            const [response, context] = await Promise.all([
+                fetch('/api/cluster/status', {cache: 'no-store'}),
+                window.GmsWorkspace?.ready || Promise.resolve({scope_mode: 'single', worker_id: workspaceLocalWorkerId()})
+            ]);
+            const status = await response.json();
+            state.clusterStatus = status;
+            const enabled = Boolean(response.ok && status.enabled && context.scope_mode === 'cluster');
+            applyClusterMode(enabled);
+            if (!enabled && context.scope_mode === 'cluster') {
+                window.GmsWorkspace?.update({scope_mode: 'single', worker_id: workspaceLocalWorkerId(), device_ids: []},
+                    {source: 'cluster-unavailable'});
+            }
+            return enabled;
+        } catch (error) {
+            debugLog('[Cluster] Status unavailable, preserving single-host UI:', error);
+            return false;
+        } finally {
+            _clusterModeInitialized = true;
+            _initializeClusterModeInFlight = null;
+        }
+    })();
+    return _initializeClusterModeInFlight;
 }
 
 window.addEventListener('gms:workspace-context', event => {
@@ -1283,12 +1349,9 @@ window.addEventListener('gms:workspace-context', event => {
         ? (previous.worker_id || workspaceLocalWorkerId())
         : workspaceLocalWorkerId();
     if (previousWorker !== workerId) {
-        // 先清空主机数据，再由刷新请求重新填充。
         state.selectedDevices.clear();
-        state.devices = [];
         testSuitesCache = [];
         testSuitesWorkerId = '';
-        renderDevices();
         renderTestSuitesDropdown();
     }
 });
@@ -1662,7 +1725,10 @@ function buildSuiteBrowserLink(path = '', type = 'file') {
         params.set('worker_id', workerId);
     }
 
-    return `${window.location.origin}${window.location.pathname}${window.location.search}#test-suites?${params.toString()}`;
+    // Hash 内的分享参数不发送给服务器。仅恢复路径分隔符以提升可读性，
+    // 其余可能改变查询参数边界的字符继续保持 URL 编码。
+    const readableQuery = params.toString().replace(/%2F/gi, '/');
+    return `${window.location.origin}${window.location.pathname}${window.location.search}#test-suites?${readableQuery}`;
 }
 
 async function initTestSuiteBrowserPage() {
@@ -3447,25 +3513,15 @@ function renderDevices() {
     }
 
     if (state.devices.length === 0) {
-        // 清空两个列的内容，并在左侧显示空消息
-        leftContainer.innerHTML = '<div class="empty-message">点击刷新按钮获取设备列表...</div>';
+        // 先加居中 class 再渲染消息，避免分两步布局导致空态提示先出现在
+        // 左栏顶部、再被 class 拉到正中间的视觉跳变。
         rightContainer.innerHTML = '';
-        // 显示空状态样式
-        leftContainer.style.display = '';
-        rightContainer.style.display = 'none';
-        deviceCanvas.style.display = 'flex';
-        deviceCanvas.style.justifyContent = 'center';
-        deviceCanvas.style.alignItems = 'center';
-        deviceCanvas.style.minHeight = '150px';
+        deviceCanvas.classList.add('device-canvas-empty');
+        leftContainer.innerHTML = '<div class="empty-message">点击刷新按钮获取设备列表...</div>';
         return;
     }
 
-    // 恢复正常显示
-    leftContainer.style.display = '';
-    rightContainer.style.display = '';
-    deviceCanvas.style.display = '';
-    deviceCanvas.style.justifyContent = '';
-    deviceCanvas.style.alignItems = '';
+    deviceCanvas.classList.remove('device-canvas-empty');
 
     // 将设备交替分配到左右两栏
     // ADB 区按"关注"筛选：开启且有关注分组时，只显示属于任一关注分组的设备
@@ -3999,7 +4055,7 @@ function firmwareShareDefaults() {
     const host = String(
         at > 0 ? connection.slice(at + 1) : (connection || config.ubuntu_host || '')
     ).trim();
-    const path = String(share.default_path || (user ? `/home/${user}` : '/home')).trim();
+    const path = String(share.default_path || '').trim();
     return {user, host, path, remote: ''};
 }
 
@@ -11961,8 +12017,13 @@ window.copyTailscaleAccessUrl = copyTailscaleAccessUrl;
  * 复制部署脚本命令
  */
 function copyDeployCommand() {
-    // 发布包由 CI 生成并签名。
-    const deployCommand = 'sha256sum -c gms-web-app-<VERSION>.tar.gz.sha256 && gpg --verify gms-web-app-<VERSION>.tar.gz.sig gms-web-app-<VERSION>.tar.gz && tar -xzf gms-web-app-<VERSION>.tar.gz && cd gms-web-app && sudo ./install.sh';
+    // 发布包由 install.sh package 生成并签名。用通配符匹配最新的包，避免用户
+    // 手填 <VERSION>（bash 会把尖括号当成重定向报错，且版本号默认是时间戳）。
+    const deployCommand =
+        'PKG=$(ls -t gms-web-app-*.tar.gz | head -1) && ' +
+        'sha256sum -c "${PKG}.sha256" && ' +
+        'gpg --verify "${PKG}.sig" "${PKG}" && ' +
+        'tar -xzf "${PKG}" && cd gms-web-app && sudo ./install.sh';
 
     const clipboardWrite = navigator.clipboard && navigator.clipboard.writeText
         ? navigator.clipboard.writeText(deployCommand)
@@ -12615,10 +12676,14 @@ function getApiDetails(apiPath) {
 function generateCurlCommand(api, details) {
     const apiPath = api.path || '';
     if (api.method === 'GET') {
+        if (apiPath === '/api/system/skills/install.sh') {
+            const command = buildSkillInstallCommand();
+            return {display: command, full: command};
+        }
         // 特殊处理stream端点：使用 -N 而不是 -s
         const isStreamEndpoint = apiPath.includes('/api/test/logs/stream');
-        // 特殊处理文件下载端点：使用 -OJ
-        const isDownloadEndpoint = apiPath.includes('/api/system/skills');
+        // ZIP 离线包使用 -OJ；安装脚本在上方生成可直接执行的管道命令。
+        const isDownloadEndpoint = apiPath === '/api/system/skills';
 
         let curlOptions = 'curl -s';
         if (isStreamEndpoint) {
@@ -12967,7 +13032,24 @@ function closeUsageExamplesModal() {
 }
 
 /**
- * 下载 skills zip 文件（直接下载，不跳转）
+ * 生成与当前 Controller 地址绑定的一键安装命令。
+ */
+function buildSkillInstallCommand() {
+    const insecureOption = window.location.protocol === 'https:' ? '-k ' : '';
+    return `curl ${insecureOption}-fsSL "${window.location.origin}/api/system/skills/install.sh" | bash`;
+}
+
+/**
+ * 复制一键安装/更新命令。浏览器不能代替目标 Linux 主机执行该命令。
+ */
+function copySkillInstallCommand() {
+    copyText(buildSkillInstallCommand(), {
+        successMsg: '✓ Skill 一键安装/更新命令已复制',
+    });
+}
+
+/**
+ * 下载 Skill ZIP 离线包（不执行安装和命令链接迁移）。
  */
 async function downloadSkillsZip() {
     try {
@@ -12979,6 +13061,7 @@ async function downloadSkillsZip() {
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         triggerDownload(url, 'gms-remote-test-skills.zip', true);
+        showToast('离线包已下载；在线安装请使用“安装/更新命令”', 'success');
     } catch (e) {
         console.error('[downloadSkillsZip] Error:', e);
         showToast('下载失败：' + e.message, 'error');

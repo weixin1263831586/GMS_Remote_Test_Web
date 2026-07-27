@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import aiohttp
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -414,6 +414,16 @@ async def prometheus_metrics(
 
 # ==================== Skills Download ====================
 
+def _skill_directory(skill_name: str) -> str | None:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", skill_name or ""):
+        return None
+    skills_base_dir = os.path.realpath(os.path.join(PROJECT_ROOT, "skills"))
+    skills_dir = os.path.realpath(os.path.join(skills_base_dir, skill_name))
+    if not skills_dir.startswith(skills_base_dir + os.sep):
+        return None
+    return skills_dir
+
+
 @router.get("/api/system/skills")
 async def download_skills_zip(request: Request, skill_name: str = Query("gms-remote-test", description="技能名称")):
     """下载指定技能目录的 zip 文件
@@ -427,10 +437,9 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
     try:
         logger.info(f"[SKILLS_DOWNLOAD] 请求下载技能包: {skill_name}")
 
-        skills_base_dir = os.path.join(PROJECT_ROOT, 'skills')
-        skills_dir = os.path.join(skills_base_dir, skill_name)
+        skills_dir = _skill_directory(skill_name)
 
-        if not os.path.exists(skills_dir):
+        if not skills_dir or not os.path.isdir(skills_dir):
             logger.error(f"[SKILLS_DOWNLOAD] 技能目录不存在：{skills_dir}")
             return JSONResponse(
                 content={'success': False, 'error': f'技能目录不存在：{skill_name}'},
@@ -458,10 +467,53 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
 
     except Exception as e:
         logger.error(f"[SKILLS_DOWNLOAD] Error: {e}", exc_info=True)
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
+        return error_response("技能包下载失败", status_code=500)
+
+
+@router.get("/api/system/skills/install.sh")
+async def download_skill_installer(request: Request):
+    """Return a Controller-bound one-command installer for gms-remote-test."""
+    installer_path = os.path.join(
+        PROJECT_ROOT,
+        "skills",
+        "gms-remote-test",
+        "scripts",
+        "install.sh",
+    )
+    try:
+        def read_installer() -> str:
+            with open(installer_path, encoding="utf-8") as installer_file:
+                return installer_file.read()
+
+        template = await asyncio.to_thread(read_installer)
+    except OSError:
+        logger.exception("[SKILLS_INSTALLER] installer script is unavailable")
+        return error_response("技能安装脚本不可用", status_code=500)
+
+    server_url = str(request.base_url).rstrip("/")
+    download_url = (
+        f"{server_url}/api/system/skills?"
+        f"skill_name={quote('gms-remote-test')}"
+    )
+
+    def shell_literal(value: str) -> str:
+        return value.replace("'", "'\"'\"'")
+
+    content = template.replace(
+        "__GMS_REMOTE_TEST_SERVER__",
+        shell_literal(server_url),
+    ).replace(
+        "__GMS_SKILL_DOWNLOAD_URL__",
+        shell_literal(download_url),
+    )
+    return Response(
+        content=content,
+        media_type="text/x-shellscript",
+        headers={
+            "Content-Disposition": 'inline; filename="install-gms-remote-test.sh"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # ==================== Architecture Page ====================

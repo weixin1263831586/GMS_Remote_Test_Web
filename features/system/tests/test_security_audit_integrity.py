@@ -37,6 +37,34 @@ class SecurityAuditIntegrityTests(unittest.TestCase):
             self.assertFalse(invalid["valid"])
             self.assertEqual(invalid["line"], 1)
 
+    def test_append_rejects_a_different_active_key_without_changing_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "audit.jsonl"
+            audit = SecurityAuditLogger(str(path))
+            with patch.dict(
+                "os.environ",
+                {"GMS_AUDIT_HMAC_KEY": "a" * 64, "GMS_ENV": "production"},
+            ):
+                audit.log_event({"operation": "production-event"})
+                original = path.read_bytes()
+
+            with patch.dict(
+                "os.environ",
+                {"GMS_AUDIT_HMAC_KEY": "b" * 64, "GMS_ENV": "production"},
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "active audit key does not match",
+                ):
+                    audit.log_event({"operation": "foreign-key-event"})
+
+            self.assertEqual(path.read_bytes(), original)
+            with patch.dict(
+                "os.environ",
+                {"GMS_AUDIT_HMAC_KEY": "a" * 64, "GMS_ENV": "production"},
+            ):
+                self.assertTrue(audit.verify_chain()["valid"])
+
     def test_unsigned_legacy_prefix_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             "os.environ",

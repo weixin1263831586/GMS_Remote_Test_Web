@@ -24,7 +24,14 @@ class SecurityBoundaryTests(unittest.TestCase):
         auth_service.db_path = Path(self.tmp.name) / "platform_auth.sqlite3"
         auth_service._initialized = False
         self.original_audit_path = security_audit_logger.log_path
-        security_audit_logger.log_path = str(Path(self.tmp.name) / "security_audit.json")
+        self.original_audit_lock_path = security_audit_logger.lock_path
+        security_audit_logger.log_path = str(
+            Path(self.tmp.name) / "security_audit.json"
+        )
+        security_audit_logger.lock_path = (
+            f"{security_audit_logger.log_path}.lock"
+        )
+        security_audit_logger._head_hash = None
         self.cluster_config_path = Path(self.tmp.name) / "cluster.json"
         self.cluster_config_path.write_text("{}", encoding="utf-8")
         self.tokens_path = Path(self.tmp.name) / "worker_tokens.json"
@@ -61,6 +68,8 @@ class SecurityBoundaryTests(unittest.TestCase):
         auth_service.db_path = self.original_db_path
         auth_service._initialized = self.original_initialized
         security_audit_logger.log_path = self.original_audit_path
+        security_audit_logger.lock_path = self.original_audit_lock_path
+        security_audit_logger._head_hash = None
         self.tmp.cleanup()
 
     def _setup_admin(self):
@@ -74,6 +83,8 @@ class SecurityBoundaryTests(unittest.TestCase):
         client_identity = self.client.get("/api/users/current")
         status = self.client.get("/api/auth/status")
         health = self.client.get("/api/system/health")
+        installer = self.client.get("/api/system/skills/install.sh")
+        skill_archive = self.client.get("/api/system/skills")
 
         self.assertEqual(client_identity.status_code, 200)
         self.assertIsNone(client_identity.json()["user"])
@@ -81,6 +92,14 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(status.status_code, 200)
         self.assertTrue(status.json()["auth_required"])
         self.assertEqual(health.status_code, 200)
+        self.assertEqual(installer.status_code, 200)
+        self.assertIn(
+            "https://testserver/api/system/skills?skill_name=gms-remote-test",
+            installer.text,
+        )
+        self.assertNotIn("__GMS_REMOTE_TEST_SERVER__", installer.text)
+        self.assertEqual(skill_archive.status_code, 200)
+        self.assertEqual(skill_archive.headers["content-type"], "application/zip")
 
     def test_setup_and_authenticated_requests_obey_same_origin_policy(self):
         blocked_setup = self.client.post(

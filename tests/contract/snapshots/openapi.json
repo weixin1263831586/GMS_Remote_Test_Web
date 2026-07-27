@@ -1836,6 +1836,14 @@
       },
       "USBIPDisconnectRequest": {
         "properties": {
+          "busids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Busids",
+            "type": "array"
+          },
           "device_host": {
             "anyOf": [
               {
@@ -1846,6 +1854,16 @@
               }
             ],
             "title": "Device Host"
+          },
+          "source_host": {
+            "default": "",
+            "title": "Source Host",
+            "type": "string"
+          },
+          "worker_id": {
+            "default": "",
+            "title": "Worker Id",
+            "type": "string"
           }
         },
         "title": "USBIPDisconnectRequest",
@@ -1853,6 +1871,14 @@
       },
       "USBIPStartRequest": {
         "properties": {
+          "busids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Busids",
+            "type": "array"
+          },
           "device_host": {
             "anyOf": [
               {
@@ -1882,6 +1908,11 @@
             "description": "用户显式点击连接",
             "title": "Manual Connect",
             "type": "boolean"
+          },
+          "worker_id": {
+            "default": "",
+            "title": "Worker Id",
+            "type": "string"
           }
         },
         "title": "USBIPStartRequest",
@@ -15470,7 +15501,25 @@
             "description": "Validation Error"
           }
         },
+        "security": [],
         "summary": "Download Skills Zip"
+      }
+    },
+    "/api/system/skills/install.sh": {
+      "get": {
+        "description": "Return a Controller-bound one-command installer for gms-remote-test.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Download Skill Installer"
       }
     },
     "/api/tailscale/ensure": {
@@ -16876,6 +16925,50 @@
           }
         },
         "summary": "Install Usbipd"
+      }
+    },
+    "/api/usbip/source-devices": {
+      "get": {
+        "description": "List selectable Android USB busids on an authorized source host.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "device_host",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Device Host"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Usbip Source Devices"
       }
     },
     "/api/usbip/status": {

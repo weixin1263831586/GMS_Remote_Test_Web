@@ -745,6 +745,20 @@ body {
     overflow: hidden;
 }
 
+.device-canvas.device-canvas-empty {
+    justify-content: center;
+    align-items: center;
+}
+.device-canvas.device-canvas-empty #device-list-right {
+    display: none;
+}
+/* 空态时左栏也垂直居中其内容，避免空态提示先贴顶部再被拉到中间的跳变。 */
+.device-canvas.device-canvas-empty #device-list-left {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .device-column {
     flex: 1;
     overflow-y: auto;

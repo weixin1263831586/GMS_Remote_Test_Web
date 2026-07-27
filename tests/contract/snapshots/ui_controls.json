@@ -459,6 +459,7 @@
       "copyFirmwareShareLink(",
       "copyReportDiagnosis()",
       "copySkillCommand(this)",
+      "copySkillInstallCommand()",
       "copyTailscaleAccessUrl()",
       "copyText(",
       "copyWeeklyReportMarkdown()",

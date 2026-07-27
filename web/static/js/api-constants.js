@@ -231,13 +231,22 @@ const API_DETAILS_MAP = {
         usage: '实时通信'
     },
     '/api/system/skills': {
-        title: '下载技能包',
-        description: '下载技能ZIP压缩包（默认下载gms-remote-test技能包）',
+        title: '下载 Skill 离线包',
+        description: '仅下载gms-remote-test技能ZIP，用于离线部署或备份，不创建CLI命令',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: 'ZIP文件下载',
         usage: '下载技能包用于离线部署或备份',
         curl_example: 'curl -s -OJ "http://server:5001/api/system/skills"'
+    },
+    '/api/system/skills/install.sh': {
+        title: '一键安装GMS Remote Test CLI',
+        description: '自动安装或更新Skill和全部独立gms-rt-*命令',
+        method: 'GET',
+        params: [],
+        response: 'Shell安装脚本',
+        usage: '在其他主机或编译服务器一键安装',
+        curl_example: 'curl -fsSL "http://server:5001/api/system/skills/install.sh" | bash'
     },
     '/api/system/docs': {
         title: '获取API文档',

@@ -38,6 +38,8 @@ class RuntimeUiHarness(unittest.TestCase):
         env = os.environ.copy()
         env["GMS_PORT"] = str(cls.port)
         env["GMS_DATA_ROOT"] = cls.runtime_dir.name
+        env["GMS_ENV"] = "development"
+        env["GMS_SKIP_RUNTIME_ENV"] = "1"
         env["ATS_WORKER_ENABLED"] = "0"
         env["GMS_AUTH_REQUIRED"] = "true"
         env["GMS_SECURE_COOKIES"] = "false"
@@ -1136,6 +1138,266 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "GmsWorkspace.update({scope_mode: 'single', worker_id: 'worker-local'})"
             )
             page.wait_for_timeout(200)
+            page.close()
+
+    def test_suite_share_link_keeps_path_slashes_readable(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """() => {
+                    state.suiteBrowser.selectedSuitePath =
+                        '/home/hcq/GMS Suite/android-cts-17_r1/android-cts/tools';
+                    const link = buildSuiteBrowserLink(
+                        'testcases/CtsKeystore&Tests/arm64/Cts#Keystore.apk',
+                        'file'
+                    );
+                    const previousUrl = window.location.href;
+                    window.history.replaceState(null, '', link);
+                    const parsed = getSuiteBrowserRouteParams();
+                    window.history.replaceState(null, '', previousUrl);
+                    return {link, parsed};
+                }"""
+            )
+            link = result["link"]
+
+            self.assertNotRegex(link, re.compile(r"%2f", re.IGNORECASE))
+            self.assertIn(
+                "#test-suites?suite_path=/home/hcq/GMS+Suite/"
+                "android-cts-17_r1/android-cts/tools",
+                link,
+            )
+            self.assertIn(
+                "&file=testcases/CtsKeystore%26Tests/arm64/Cts%23Keystore.apk",
+                link,
+            )
+            self.assertEqual(
+                result["parsed"]["suitePath"],
+                "/home/hcq/GMS Suite/android-cts-17_r1/android-cts/tools",
+            )
+            self.assertEqual(
+                result["parsed"]["filePath"],
+                "testcases/CtsKeystore&Tests/arm64/Cts#Keystore.apk",
+            )
+        finally:
+            page.close()
+
+    def test_skill_install_action_uses_current_controller_and_keeps_zip_offline(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """() => {
+                    const install = buildSkillInstallCommand();
+                    const installApi = generateCurlCommand({
+                        method: 'GET',
+                        path: '/api/system/skills/install.sh',
+                    }, {});
+                    const archiveApi = generateCurlCommand({
+                        method: 'GET',
+                        path: '/api/system/skills',
+                    }, {params: []});
+                    return {
+                        install,
+                        installApi,
+                        archiveApi,
+                        primaryLabel: Array.from(document.querySelectorAll('button'))
+                            .find(button => button.textContent.includes('安装/更新命令'))
+                            ?.textContent.trim(),
+                        offlineLabel: Array.from(document.querySelectorAll('button'))
+                            .find(button => button.textContent.includes('离线包'))
+                            ?.textContent.trim(),
+                    };
+                }"""
+            )
+
+            expected = (
+                f'curl -fsSL "{self.base_url}/api/system/skills/install.sh" | bash'
+            )
+            self.assertEqual(result["install"], expected)
+            self.assertEqual(result["installApi"]["full"], expected)
+            self.assertIn("-OJ", result["archiveApi"]["full"])
+            self.assertNotIn("| bash", result["archiveApi"]["full"])
+            self.assertEqual(result["primaryLabel"], "📋 安装/更新命令")
+            self.assertEqual(result["offlineLabel"], "📦 离线包")
+        finally:
+            page.close()
+
+    def test_test_host_stays_disabled_until_initial_worker_list_is_ready(self):
+        page = self.new_page()
+
+        def json_response(route, payload):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+        page.route(
+            "**/api/cluster/status",
+            lambda route: json_response(route, {
+                "success": True,
+                "enabled": True,
+                "local_worker_id": "worker-local",
+            }),
+        )
+        page.route(
+            "**/api/cluster/workers",
+            lambda route: json_response(route, {
+                "success": True,
+                "workers": [{
+                    "id": "worker-local",
+                    "name": "ATS Controller Local Worker",
+                    "hostname": "ats-041055-64g",
+                    "status": "online",
+                }],
+            }),
+        )
+        page.add_init_script(
+            """
+            const nativeFetch = window.fetch.bind(window);
+            window.fetch = (input, options = {}) => {
+                if (String(input).includes('/api/cluster/workers')) {
+                    return new Promise((resolve, reject) => setTimeout(
+                        () => nativeFetch(input, options).then(resolve, reject),
+                        1500
+                    ));
+                }
+                return nativeFetch(input, options);
+            };
+            """
+        )
+
+        try:
+            page.goto(self.base_url, wait_until="domcontentloaded")
+            page.wait_for_selector("#cluster-worker")
+            page.wait_for_function(
+                "window.GmsWorkspace && window.state?.clusterStatus?.enabled === true"
+            )
+            loading = page.evaluate(
+                """() => {
+                    GmsWorkspace.update(
+                        {scope_mode: 'cluster', worker_id: 'worker-local'},
+                        {source: 'timing-test', persist: false}
+                    );
+                    const select = document.getElementById('cluster-worker');
+                    return {
+                        disabled: select.disabled,
+                        busy: select.getAttribute('aria-busy'),
+                        label: select.selectedOptions[0]?.textContent,
+                        title: select.title,
+                    };
+                }"""
+            )
+            self.assertTrue(loading["disabled"])
+            self.assertEqual(loading["busy"], "true")
+            self.assertEqual(loading["label"], "加载中...")
+            self.assertEqual(loading["title"], "正在加载测试主机列表")
+
+            page.wait_for_function(
+                """() => {
+                    const select = document.getElementById('cluster-worker');
+                    return select.dataset.workersLoaded === 'true' && !select.disabled;
+                }"""
+            )
+            ready = page.locator("#cluster-worker").evaluate(
+                """select => ({
+                    disabled: select.disabled,
+                    busy: select.getAttribute('aria-busy'),
+                    label: select.selectedOptions[0]?.textContent,
+                })"""
+            )
+            self.assertFalse(ready["disabled"])
+            self.assertEqual(ready["busy"], "false")
+            self.assertEqual(
+                ready["label"],
+                "ATS Controller Local Worker (ats-041055-64g)",
+            )
+        finally:
+            page.close()
+
+    def test_test_host_refresh_stays_visible_and_preserves_unchanged_selection(self):
+        page = self.new_page()
+
+        def json_response(route, payload):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+        workers = {
+            "success": True,
+            "workers": [{
+                "id": "worker-local",
+                "name": "ATS Controller Local Worker",
+                "hostname": "ats-041055-64g",
+                "status": "online",
+            }],
+        }
+        page.route(
+            "**/api/cluster/status",
+            lambda route: json_response(route, {
+                "success": True,
+                "enabled": True,
+                "local_worker_id": "worker-local",
+            }),
+        )
+        page.route(
+            "**/api/cluster/workers",
+            lambda route: json_response(route, workers),
+        )
+
+        try:
+            self.goto_shell(page)
+            page.wait_for_function(
+                """() => document.querySelector(
+                    '#cluster-worker option[value="worker-local"]'
+                )?.textContent === 'ATS Controller Local Worker (ats-041055-64g)'"""
+            )
+            result = page.evaluate(
+                """async workers => {
+                    const select = document.getElementById('cluster-worker');
+                    const selectedOption = select.selectedOptions[0];
+                    const originalFetch = window.fetch.bind(window);
+                    window.fetch = (input, options = {}) => {
+                        if (String(input).includes('/api/cluster/workers')) {
+                            return new Promise(resolve => setTimeout(() => resolve(
+                                new Response(JSON.stringify(workers), {
+                                    status: 200,
+                                    headers: {'Content-Type': 'application/json'}
+                                })
+                            ), 120));
+                        }
+                        return originalFetch(input, options);
+                    };
+
+                    const refresh = loadClusterWorkers();
+                    await new Promise(resolve => setTimeout(resolve, 30));
+                    const during = {
+                        value: select.value,
+                        label: select.selectedOptions[0]?.textContent,
+                        visibility: getComputedStyle(select).visibility,
+                    };
+                    await refresh;
+                    return {
+                        during,
+                        afterValue: select.value,
+                        afterLabel: select.selectedOptions[0]?.textContent,
+                        sameOptionNode: select.selectedOptions[0] === selectedOption,
+                    };
+                }""",
+                workers,
+            )
+
+            expected_label = "ATS Controller Local Worker (ats-041055-64g)"
+            self.assertEqual(result["during"]["visibility"], "visible")
+            self.assertEqual(result["during"]["value"], "worker-local")
+            self.assertEqual(result["during"]["label"], expected_label)
+            self.assertEqual(result["afterValue"], "worker-local")
+            self.assertEqual(result["afterLabel"], expected_label)
+            self.assertTrue(result["sameOptionNode"])
+        finally:
             page.close()
 
     def test_rapid_test_host_switch_keeps_latest_context_and_devices(self):

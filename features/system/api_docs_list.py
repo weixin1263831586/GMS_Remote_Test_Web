@@ -624,11 +624,12 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/system/skills",
-        "description": "下载技能ZIP压缩包（默认下载gms-remote-test技能包）",
+        "description": "下载Skill ZIP离线包（不安装CLI命令）",
         "params": [],
         "category": "system",
         "skill": "gms-rt-system-skills"
     },
+    dict(method="GET", path="/api/system/skills/install.sh", description="获取Skill和独立gms-rt-*命令一键安装脚本", params=[], category="system"),
 
     # ==================== API文档 ====================
     {

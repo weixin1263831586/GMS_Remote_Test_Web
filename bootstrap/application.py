@@ -159,6 +159,11 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             '/api/system/health/ready',
         }:
             return True
+        if method in {'GET', 'HEAD'} and path in {
+            '/api/system/skills',
+            '/api/system/skills/install.sh',
+        }:
+            return True
         return False
 
     @app.middleware('http')
