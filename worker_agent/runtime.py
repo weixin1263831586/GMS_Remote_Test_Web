@@ -115,7 +115,7 @@ class WorkerRuntime:
         command_type = str(command.get("command_type") or "")
         protected_types = {
             "start_test", "device_action", "flash_firmware", "flash_gsi",
-            "device_export",
+            "device_export", "usbip_detach",
         }
         require_fencing = os.getenv(
             "GMS_WORKER_REQUIRE_DEVICE_FENCING", "true"

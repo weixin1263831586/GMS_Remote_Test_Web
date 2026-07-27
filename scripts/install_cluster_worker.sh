@@ -144,6 +144,17 @@ if ! command -v x11vnc >/dev/null 2>&1 || \
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
         x11vnc xvfb novnc websockify
 fi
+if ! command -v usbip >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y linux-tools-generic
+fi
+sudo install -d -m 755 /usr/local/libexec
+sudo install -m 755 "${PROJECT_ROOT}/scripts/gms_worker_usbip.sh" \
+    /usr/local/libexec/gms-worker-usbip
+printf '%s ALL=(root) NOPASSWD: /usr/local/libexec/gms-worker-usbip *\n' "$(id -un)" \
+    | sudo tee /etc/sudoers.d/gms-worker-usbip >/dev/null
+sudo chmod 440 /etc/sudoers.d/gms-worker-usbip
+sudo visudo -cf /etc/sudoers.d/gms-worker-usbip >/dev/null
 rsync -a --delete "${PROJECT_ROOT}/worker_agent/" "${INSTALL_ROOT}/worker_agent/"
 mkdir -p "${INSTALL_ROOT}/scripts" "${INSTALL_ROOT}/tools"
 install -m 755 "${PROJECT_ROOT}/scripts/run_GSI_Burn.sh" \

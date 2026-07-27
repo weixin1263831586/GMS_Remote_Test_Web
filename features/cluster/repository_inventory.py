@@ -249,6 +249,22 @@ class ClusterInventoryRepositoryMixin:
             worker["revoked_attempt_ids"] = sorted(revoked_attempt_ids)
         return worker
 
+    def refresh_worker_devices(
+        self,
+        worker_id: str,
+        devices: list[dict[str, Any]],
+    ) -> None:
+        """Apply a device snapshot for a Worker without waiting for the next heartbeat.
+
+        Remote USB/IP attach/detach commands already return the Worker's current
+        device list. Reusing that snapshot here keeps ``cluster_worker_devices``
+        (and therefore the UI) consistent immediately, instead of lagging up to
+        one heartbeat interval (~15s) after an operation completed.
+        """
+        now = _utc_now()
+        with self._lock, self.connect() as conn:
+            self._replace_devices(conn, worker_id, devices or [], now)
+
     def mark_worker_offline(self, worker_id: str) -> None:
         now = _utc_now()
         with self._lock, self.connect() as conn:

@@ -1528,12 +1528,15 @@ select option {
 .modal {
     display: none;
     position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
+    inset: 0;
+    z-index: var(--modal-z-index, 10000);
+    width: auto;
+    height: auto;
+    padding: clamp(8px, 2.5vw, 20px);
+    box-sizing: border-box;
     background: rgba(0, 0, 0, 0.7);
+    overflow: hidden;
+    overscroll-behavior: contain;
 }
 
 .modal.show {
@@ -1546,12 +1549,43 @@ select option {
     background: var(--light-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    width: 90%;
+    width: min(500px, 100%);
     max-width: 500px;
-    max-height: 80vh;
+    max-height: min(80vh, calc(100dvh - 16px));
+    min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden; /* 防止整个modal-content滚动 */
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+}
+
+/* USB/IP 内容会异步刷新；固定弹框尺寸，避免加载前后产生视觉跳动。 */
+.usbip-modal-content {
+    width: min(560px, 100%);
+    max-width: 560px;
+    resize: none;
+}
+
+.usbip-attach-modal-content {
+    height: min(410px, calc(100dvh - 16px));
+}
+
+.usbip-detach-modal-content {
+    height: min(390px, calc(100dvh - 16px));
+}
+
+.usbip-device-select {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 13px;
+    resize: none;
 }
 
 /* 设备配置弹框加宽大尺寸 */
@@ -1567,6 +1601,8 @@ select option {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
+    min-width: 0;
     padding: 15px 20px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0; /* 防止header被压缩 */
@@ -1576,14 +1612,25 @@ select option {
 }
 
 .modal-title {
+    min-width: 0;
     font-size: 16px;
     font-weight: 600;
+    line-height: 1.35;
     color: var(--text-primary);
+    overflow-wrap: anywhere;
 }
 
 .modal-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 32px;
+    min-width: 32px;
+    min-height: 32px;
     font-size: 28px;
     font-weight: bold;
+    line-height: 1;
     color: var(--text-secondary);
     cursor: pointer;
     transition: color 0.2s;
@@ -1597,8 +1644,22 @@ select option {
     padding: 20px;
     overflow-y: auto;
     overflow-x: hidden;
+    overscroll-behavior: contain;
     flex: 1; /* 占据剩余空间 */
     min-height: 0; /* 允许flex子元素正确收缩 */
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modal-body > *,
+.modal-header > *,
+.modal-buttons > * {
+    min-width: 0;
+    max-width: 100%;
+}
+
+body.modal-open {
+    overflow: hidden;
 }
 
 /* 设备配置资源查看弹框：复用 .modal-header/.modal-body，补充专用样式 */
@@ -1957,6 +2018,7 @@ select option {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
     margin-bottom: 8px;
 }
 
@@ -1968,8 +2030,14 @@ select option {
 
 
 .modal-form-row input[type="text"],
-.modal-form-row input[type="password"] {
+.modal-form-row input[type="password"],
+.modal-form-row input[type="number"],
+.modal-form-row input[type="search"],
+.modal-form-row select,
+.modal-form-row textarea {
     flex: 1;
+    min-width: 0;
+    max-width: 100%;
     padding: 8px 10px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
@@ -1991,6 +2059,7 @@ select option {
 
 .modal-buttons {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     justify-content: flex-end;
     margin-top: 20px;
@@ -2008,6 +2077,7 @@ select option {
     color: var(--warning-color);
     font-size: 12px;
     margin-top: 10px;
+    overflow-wrap: anywhere;
 }
 
 .modal-ssh-info {
@@ -2018,6 +2088,25 @@ select option {
     color: var(--primary-color);
     font-size: 16px;
     margin-top: 10px;
+    overflow-wrap: anywhere;
+}
+
+@media (max-height: 560px) {
+    .modal {
+        align-items: stretch;
+    }
+
+    .modal-content {
+        max-height: calc(100dvh - 16px);
+    }
+
+    .modal-header {
+        padding-block: 9px;
+    }
+
+    .modal-body {
+        padding-block: 12px;
+    }
 }
 
 /* ==================== File Browser ==================== */
@@ -5083,5 +5172,174 @@ body.apk-resizing {
 
     .agent-message {
         max-width: 94%;
+    }
+}
+
+/* Compact shell layout: keep every interactive control reachable on narrow clients. */
+@media (max-width: 600px) {
+    .sidebar {
+        width: 54px;
+    }
+
+    .sidebar-header {
+        padding: 10px 4px;
+        text-align: center;
+    }
+
+    .sidebar-brand {
+        font-size: 0;
+        letter-spacing: 0;
+    }
+
+    .sidebar-brand::after {
+        content: "GMS";
+        font-size: 12px;
+        letter-spacing: 0.4px;
+    }
+
+    .sidebar-item {
+        justify-content: center;
+        padding-inline: 4px;
+    }
+
+    .sidebar-text,
+    .drag-handle,
+    .client-identity-line {
+        display: none;
+    }
+
+    .client-info-panel {
+        padding: 7px 3px;
+    }
+
+    .client-info-header > span:first-child {
+        display: none;
+    }
+
+    .container {
+        padding: 8px;
+    }
+
+    #page-test,
+    #page-users,
+    #page-security-audit,
+    #page-apk-analysis,
+    #page-test-suites,
+    #page-notes {
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    .input-table,
+    .input-table tbody,
+    .input-table tr,
+    .input-table td {
+        display: block;
+        width: 100% !important;
+    }
+
+    .input-table td {
+        padding: 0 0 8px;
+    }
+
+    .middle-row {
+        grid-template-columns: 1fr;
+    }
+
+    .device-canvas {
+        flex-direction: column;
+        max-height: 240px;
+    }
+
+    .device-column {
+        min-height: 80px;
+    }
+
+    .test-btn-frame,
+    .log-frame-header,
+    .apk-upload-content,
+    .suite-browser-header,
+    .suite-search-bar {
+        flex-wrap: wrap;
+    }
+
+    .test-btn-frame > *,
+    .apk-upload-content > button {
+        max-width: 100%;
+    }
+
+    .apk-upload-content > div:nth-child(2) {
+        min-width: 0;
+        flex: 1 1 180px;
+    }
+
+    .suite-download-section > div:first-child {
+        flex-wrap: wrap !important;
+    }
+
+    .suite-download-section > div:first-child > div,
+    .suite-download-section > div:first-child > button {
+        flex: 1 1 100%;
+        min-width: 0 !important;
+        max-width: 100%;
+    }
+
+    .suite-browser-filter {
+        width: calc(100% - 20px);
+        min-width: 0;
+    }
+
+    .suite-browser-header > div {
+        min-width: 0;
+        max-width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .users-stats,
+    .audit-stats {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px !important;
+    }
+
+    .users-table-wrap,
+    .audit-table-wrap {
+        overflow: auto !important;
+    }
+
+    .users-table-wrap table,
+    .audit-table-wrap table {
+        min-width: 760px;
+    }
+
+    .audit-filter-bar {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .audit-filter-bar > * {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .kb-layout {
+        grid-template-columns: 1fr !important;
+        grid-template-rows: minmax(220px, auto) minmax(260px, auto) minmax(420px, 1fr);
+        overflow: visible;
+    }
+
+    .kb-layout > * {
+        min-height: 220px;
+    }
+
+    .kb-editor-toolbar,
+    .kb-editor-tags {
+        flex-wrap: wrap;
+    }
+
+    .kb-editor-toolbar input,
+    .kb-editor-tags input {
+        flex-basis: 100% !important;
+        min-width: 0;
     }
 }

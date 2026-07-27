@@ -25,7 +25,9 @@ class SecurityBoundaryTests(unittest.TestCase):
         auth_service._initialized = False
         self.original_audit_path = security_audit_logger.log_path
         security_audit_logger.log_path = str(Path(self.tmp.name) / "security_audit.json")
-        self.tokens_path = Path(self.tmp.name) / "cluster.json"
+        self.cluster_config_path = Path(self.tmp.name) / "cluster.json"
+        self.cluster_config_path.write_text("{}", encoding="utf-8")
+        self.tokens_path = Path(self.tmp.name) / "worker_tokens.json"
         self.tokens_path.write_text(
             json.dumps(
                 {"worker_tokens": {"worker-local": "worker-token-for-security-tests-000001"}}
@@ -44,7 +46,8 @@ class SecurityBoundaryTests(unittest.TestCase):
                 "GMS_METRICS_TOKEN": "metrics-token-for-security-tests-000001",
                 "GMS_AUTOMATION_WEBHOOK_TOKEN": "webhook-token-for-security-tests-00001",
                 "GMS_AUTOMATION_OWNER_ID": "service-automation",
-                "GMS_CLUSTER_CONFIG": str(self.tokens_path),
+                "GMS_CLUSTER_CONFIG": str(self.cluster_config_path),
+                "GMS_WORKER_TOKENS_FILE": str(self.tokens_path),
                 "GMS_ALLOWED_ORIGINS": "https://testserver",
                 "TRUSTED_HOSTS": "testserver",
             },
@@ -183,7 +186,10 @@ class SecurityBoundaryTests(unittest.TestCase):
         ):
             create_app()
         with (
-            patch.dict("os.environ", {"GMS_CLUSTER_CONFIG": "/nonexistent/cluster.json"}),
+            patch.dict(
+                "os.environ",
+                {"GMS_WORKER_TOKENS_FILE": "/nonexistent/worker_tokens.json"},
+            ),
             self.assertRaisesRegex(RuntimeError, "worker tokens are required"),
         ):
             create_app()
@@ -277,7 +283,7 @@ class SecurityBoundaryTests(unittest.TestCase):
             )
             with patch.dict(
                 "os.environ",
-                {"GMS_CLUSTER_CONFIG": str(tokens_path)},
+                {"GMS_WORKER_TOKENS_FILE": str(tokens_path)},
             ):
                 invalid = self.client.post(
                     "/api/cluster/workers/register",
@@ -321,7 +327,7 @@ class SecurityBoundaryTests(unittest.TestCase):
             )
             with patch.dict(
                 "os.environ",
-                {"GMS_CLUSTER_CONFIG": str(tokens_path)},
+                {"GMS_WORKER_TOKENS_FILE": str(tokens_path)},
             ):
                 self.client.post(
                     "/api/cluster/workers/register",
@@ -367,7 +373,7 @@ class SecurityBoundaryTests(unittest.TestCase):
             )
             with patch.dict(
                 "os.environ",
-                {"GMS_CLUSTER_CONFIG": str(tokens_path)},
+                {"GMS_WORKER_TOKENS_FILE": str(tokens_path)},
             ):
                 invalid = self.client.get(
                     "/api/cluster/suite-library-download/safe/archive.zip",

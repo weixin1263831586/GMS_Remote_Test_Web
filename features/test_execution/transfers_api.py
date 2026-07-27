@@ -236,7 +236,10 @@ async def add_local_test_suite(req: TestSuiteAddLocalRequest):
     return JSONResponse(content={"success": True, "message": f"Added local path: {os.path.basename(req.path.rstrip('/'))}", "path": req.path})
 
 
-@router.post("/api/test/suites/result")
+@router.post(
+    "/api/test/suites/result",
+    dependencies=_ADD_LOCAL_ELEVATION,
+)
 async def list_tradefed_results(
     h: str | None = Query(None),
     help: bool = Query(False),

@@ -108,6 +108,47 @@ class ElevatedRouteAccessTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         self.assertTrue(allowed.json()["success"])
 
+    def test_worker_host_key_scan_uses_temporary_admin_elevation(self):
+        payload = {"ssh_host": "worker@192.0.2.10"}
+        self._assert_elevation_required(
+            "/api/cluster/workers/ssh-host-key/scan", payload
+        )
+        self._elevate()
+
+        with patch(
+            "features.cluster.deployment_api.scan_ssh_host_keys",
+            return_value=[{
+                "key_type": "ssh-ed25519",
+                "key_base64": "AAAA",
+                "fingerprint": "SHA256:test",
+            }],
+        ):
+            allowed = self.client.post(
+                "/api/cluster/workers/ssh-host-key/scan",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.json()["keys"][0]["fingerprint"], "SHA256:test")
+
+    def test_worker_delete_uses_temporary_admin_elevation(self):
+        path = "/api/cluster/workers/missing-worker"
+        denied = self.client.delete(
+            path,
+            headers={"Origin": "http://testserver"},
+        )
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(denied.json()["detail"]["elevation_required"])
+
+        self._elevate()
+        allowed = self.client.delete(
+            path,
+            headers={"Origin": "http://testserver"},
+        )
+        self.assertEqual(allowed.status_code, 404)
+        self.assertEqual(allowed.json()["detail"], "worker not found")
+
 
 if __name__ == "__main__":
     unittest.main()

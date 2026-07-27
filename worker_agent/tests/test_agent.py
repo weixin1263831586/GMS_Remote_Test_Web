@@ -61,6 +61,53 @@ def test_restart_vnc_command_kills_and_restarts(tmp_path):
     assert agent.client.ack.call_args.args[1] == "completed"
 
 
+def test_usbip_command_runs_in_background_so_heartbeats_are_not_blocked(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    thread = MagicMock()
+    command = {
+        "id": "cmd-usbip",
+        "command_type": "usbip_attach",
+        "payload": {"source_host": "192.0.2.10", "busids": ["1-1"]},
+    }
+
+    with patch("worker_agent.app.threading.Thread", return_value=thread) as thread_cls, \
+            patch("worker_agent.app.execute_usbip_action") as execute:
+        agent.handle(command)
+
+    execute.assert_not_called()
+    thread_cls.assert_called_once_with(
+        target=agent.run_usbip_action,
+        args=(command,),
+        name="USBIP-cmd-usbip",
+        daemon=True,
+    )
+    thread.start.assert_called_once_with()
+    assert agent.runtime.previous_command("cmd-usbip")["status"] == "running"
+    agent.client.ack.assert_called_once_with("cmd-usbip", "running", {}, "")
+
+
+def test_background_usbip_command_reports_completion(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    command = {
+        "id": "cmd-usbip",
+        "command_type": "usbip_attach",
+        "payload": {"source_host": "192.0.2.10", "busids": ["1-1"]},
+    }
+    result = {"attached_busids": ["1-1"]}
+
+    with patch("worker_agent.app.execute_usbip_action", return_value=result):
+        agent.run_usbip_action(command)
+
+    saved = agent.runtime.previous_command("cmd-usbip")
+    assert saved["status"] == "completed"
+    assert saved["result"] == result
+    agent.client.ack.assert_called_once_with(
+        "cmd-usbip", "completed", result, ""
+    )
+
+
 def test_uninstall_agent_acks_before_stopping_services(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()
@@ -193,6 +240,20 @@ def test_worker_rejects_device_command_without_fencing_token(tmp_path):
         runtime.validate_fencing({
             "command_type": "device_action",
             "payload": {"devices": ["worker-test:ABC"], "action": "reboot"},
+        })
+
+
+def test_worker_rejects_usbip_detach_without_fencing_token(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+
+    with pytest.raises(ValueError, match="requires a valid device fencing token"):
+        runtime.validate_fencing({
+            "command_type": "usbip_detach",
+            "payload": {
+                "devices": ["worker-test:USBIP001"],
+                "source_host": "192.0.2.10",
+                "busids": ["1-1"],
+            },
         })
 
 

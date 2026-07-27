@@ -1,8 +1,23 @@
 from __future__ import annotations
 
 from enum import Enum
+import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+USBIP_BUSID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def _validated_usbip_busids(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for raw in values or []:
+        busid = str(raw or "").strip()
+        if not USBIP_BUSID_PATTERN.fullmatch(busid):
+            raise ValueError(f"invalid USB/IP busid: {busid}")
+        if busid not in normalized:
+            normalized.append(busid)
+    return normalized
 
 
 class ADBForwardStartRequest(BaseModel):
@@ -11,6 +26,8 @@ class ADBForwardStartRequest(BaseModel):
 
 class USBIPStartRequest(BaseModel):
     device_host: str | None = None
+    worker_id: str = ""
+    busids: list[str] = Field(default_factory=list, max_length=32)
     device_password: str | None = Field(
         default="",
         description="设备主机SSH密码",
@@ -20,9 +37,16 @@ class USBIPStartRequest(BaseModel):
         description="用户显式点击连接",
     )
 
+    _validate_busids = field_validator("busids")(_validated_usbip_busids)
+
 
 class USBIPDisconnectRequest(BaseModel):
     device_host: str | None = None
+    source_host: str = ""
+    worker_id: str = ""
+    busids: list[str] = Field(default_factory=list, max_length=32)
+
+    _validate_busids = field_validator("busids")(_validated_usbip_busids)
 
 
 class DeviceLockRequest(BaseModel):

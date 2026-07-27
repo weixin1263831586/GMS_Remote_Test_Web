@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260723-responsive-viewport">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260723-modal-layout">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
@@ -18,7 +18,7 @@
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
     <script src="/static/js/workspace-context.js?v=20260716-host-sync" defer></script>
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
-    <script src="/static/js/modal.js?v=20260601-01" defer></script>
+    <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/api.js?v=20260722-client-login-prefill" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
@@ -264,7 +264,7 @@
         .filter-btn:hover { background: var(--darker-bg); border-color: var(--primary-color); }
         .filter-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
         /* 弹框居中样式 - 通用 */
-        .modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 9999; padding: 20px; box-sizing: border-box; }
+        .modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: var(--modal-z-index, 10000); padding: clamp(8px, 2.5vw, 20px); box-sizing: border-box; overflow: hidden; overscroll-behavior: contain; }
         #usage-examples-modal .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); max-width: 90%; max-height: 90%; overflow: hidden; display: flex; flex-direction: column; }
         #usage-examples-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; }
         #usage-examples-modal .modal-title { color: #fff; font-size: 16px; font-weight: 600; }
@@ -942,7 +942,7 @@
             <div class="section-title">👥 用户管理</div>
 
             <!-- 用户统计卡片 -->
-            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
+            <div class="users-stats" style="display: flex; gap: 15px; margin-bottom: 10px;">
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-users-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">在线用户数</div>
@@ -958,7 +958,7 @@
             </div>
 
             <!-- 用户列表 -->
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+            <div class="users-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -987,7 +987,7 @@
         <div class="container page-content" id="page-security-audit">
             <div class="section-title">🛡️ 安全审计</div>
 
-            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
+            <div class="audit-stats" style="display: flex; gap: 15px; margin-bottom: 10px;">
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="audit-total-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">审计记录</div>
@@ -1006,7 +1006,7 @@
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 120px 140px minmax(180px, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 10px;">
+            <div class="audit-filter-bar" style="display: grid; grid-template-columns: 120px 140px minmax(180px, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 10px;">
                 <select id="audit-source-filter" class="combo-box" onchange="loadSecurityAudit(true)">
                     <option value="">全部来源</option>
                     <option value="web">Web</option>
@@ -1023,7 +1023,7 @@
                 <button class="btn-xs" onclick="exportSecurityAudit()">📥 导出</button>
             </div>
 
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
+            <div class="audit-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -1096,7 +1096,7 @@
                                 设备序列号 <span id="sort-serial_no">↕</span>
                             </th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" onclick="sortDevices('source_host')">
-                                来源主机 <span id="sort-source_host">↕</span>
+                                设备来源 <span id="sort-source_host">↕</span>
                             </th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 110px;" onclick="sortDevices('source_type')">
                                 来源类型 <span id="sort-source_type">↕</span>
@@ -1667,7 +1667,7 @@
         <!-- 个人知识库 页面 -->
         <div class="container page-content" id="page-notes">
             <div class="section-title">📚 个人知识库</div>
-            <div style="display:grid;grid-template-columns:220px 300px minmax(0,1fr);gap:10px;flex:1;min-height:0;">
+            <div class="kb-layout" style="display:grid;grid-template-columns:220px 300px minmax(0,1fr);gap:10px;flex:1;min-height:0;">
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
                     <div style="padding: 8px 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-size:13px;font-weight:600;">知识库</span>
@@ -1693,14 +1693,14 @@
                 </div>
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
                     <div id="kb-editor" style="display:flex;flex-direction:column;flex:1;min-height:0;">
-                        <div style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;align-items:center;">
+                        <div class="kb-editor-toolbar" style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;align-items:center;">
                             <input id="kb-doc-title" class="combo-box" placeholder="文档标题" style="flex:1;height:30px;font-size:15px;font-weight:600;" />
                             <button class="btn-xs" onclick="kbToggleFavorite()">收藏</button>
                             <button class="btn-xs" onclick="kbShowHistory()">历史</button>
                             <button class="btn-xs btn-primary" onclick="kbSaveDoc()">保存</button>
                             <button class="btn-xs" onclick="kbDeleteCurrent()">删除</button>
                         </div>
-                        <div style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;">
+                        <div class="kb-editor-tags" style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;">
                             <input id="kb-doc-tags" class="combo-box" placeholder="标签，逗号分隔" style="flex:1;height:26px;font-size:12px;" />
                             <button class="btn-xs" onclick="kbAsk()">问答</button>
                         </div>
@@ -1946,6 +1946,71 @@
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeWifiModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitWifiConfig()">连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- USB/IP 本地设备接入弹框 -->
+    <div id="usbip-attach-modal" class="modal">
+        <div class="modal-content usbip-modal-content usbip-attach-modal-content">
+            <div class="modal-header">
+                <span class="modal-title">📱 本地设备接入</span>
+                <span class="modal-close" onclick="closeUsbipAttachModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="usbip-attach-form" onsubmit="event.preventDefault(); submitUsbipAttach();" autocomplete="off">
+                    <div class="modal-form-row">
+                        <label for="usbip-source-host" style="white-space:nowrap;min-width:84px;">设备来源:</label>
+                        <select id="usbip-source-host" onchange="loadUsbipSourceDevices()" style="flex:1;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:var(--card-bg);color:var(--text-primary);font-size:13px;"></select>
+                    </div>
+                    <div class="modal-form-row">
+                        <label for="usbip-target-worker" style="white-space:nowrap;min-width:84px;">接入主机:</label>
+                        <select id="usbip-target-worker" style="flex:1;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:var(--card-bg);color:var(--text-primary);font-size:13px;"></select>
+                    </div>
+                    <div class="modal-form-row">
+                        <label for="usbip-source-device" style="white-space:nowrap;min-width:84px;">USB设备:</label>
+                        <select id="usbip-source-device" class="usbip-device-select" multiple size="4">
+                            <option value="">请选择设备来源以加载USB设备</option>
+                        </select>
+                    </div>
+                </form>
+                <div id="usbip-attach-message" class="modal-info-text">
+                    可多选USB设备；同一设备同一时间只能接入一台主机。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" type="button" onclick="closeUsbipAttachModal()">取消</button>
+                    <button class="btn-xxs btn-primary" id="usbip-attach-submit" type="button" onclick="submitUsbipAttach()">连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- USB/IP 断开设备弹框 -->
+    <div id="usbip-detach-modal" class="modal">
+        <div class="modal-content usbip-modal-content usbip-detach-modal-content">
+            <div class="modal-header">
+                <span class="modal-title">📱 断开USB/IP设备</span>
+                <span class="modal-close" onclick="closeUsbipDetachModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row" style="align-items:flex-start;">
+                    <label for="usbip-detach-devices">已接入设备:</label>
+                    <select id="usbip-detach-devices" class="usbip-device-select" multiple size="6"></select>
+                </div>
+                <div class="modal-form-row">
+                    <label for="usbip-detach-all">断开范围:</label>
+                    <label style="flex:1;text-align:left;width:auto;">
+                        <input type="checkbox" id="usbip-detach-all" onchange="toggleUsbipDetachAll()" />
+                        全部断开（仅限弹框中列出的设备）
+                    </label>
+                </div>
+                <div id="usbip-detach-message" class="modal-info-text">
+                    可多选设备；不会影响其他设备来源或未列出的Worker。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" type="button" onclick="closeUsbipDetachModal()">取消</button>
+                    <button class="btn-xxs btn-primary" type="button" onclick="submitUsbipDetach()">断开</button>
                 </div>
             </div>
         </div>
@@ -10401,8 +10466,6 @@
         <div id="report-diagnosis-minimized-title" style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
         <button type="button" class="btn-xxs" onclick="closeReportDiagnosisWorkbench()">关闭</button>
     </div>
-</div> <!-- End of main-container -->
-
 <script>
     // 初始化Emoji选择器
     document.addEventListener('DOMContentLoaded', function() {

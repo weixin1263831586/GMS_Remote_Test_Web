@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
+import threading
 import time
+import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -44,6 +47,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 router.include_router(adb_forward_router)
 router.include_router(usbip_install_router)
+_usbip_assignment_lock = threading.RLock()
+_USBIP_ATTACHING_STALE_SECONDS = 30 * 60
 
 __all__ = ["install_usbipd", "router"]
 
@@ -77,6 +82,58 @@ def _usbip_remote_host(device_host: str, usbip_attach_host: str | None = None) -
     return hostname or "127.0.0.1"
 
 
+def _usbip_assignments() -> dict[str, dict]:
+    getter = getattr(runtime.config_manager, "get_runtime_config", None)
+    runtime_config = getter() if callable(getter) else {}
+    runtime_config = runtime_config or {}
+    assignments = runtime_config.get("usbip_cluster_assignments") or {}
+    return dict(assignments) if isinstance(assignments, dict) else {}
+
+
+def _save_usbip_assignments(assignments: dict[str, dict]) -> None:
+    updater = getattr(runtime.config_manager, "update_runtime_config", None)
+    if callable(updater):
+        saved = updater({"usbip_cluster_assignments": assignments})
+    else:
+        runtime_config = runtime.config_manager.get_runtime_config() or {}
+        runtime_config["usbip_cluster_assignments"] = assignments
+        saved = runtime.config_manager.save_runtime_config(runtime_config)
+    if not saved:
+        raise RuntimeError("无法保存USB/IP集群分配状态")
+
+
+def _usbip_assignment_key(device_host: str, busid: str) -> str:
+    return f"{device_host}|{busid}"
+
+
+def _is_usbip_recoverable_attach_error(exc: Exception) -> bool:
+    detail = str(getattr(exc, "detail", "") or exc).lower()
+    return (
+        "busy (exported)" in detail
+        or "残留usb/ip会话占用" in detail
+        or "device in error state" in detail
+    )
+
+
+def _is_usbip_export_busy(exc: Exception) -> bool:
+    detail = str(getattr(exc, "detail", "") or exc).lower()
+    return "busy (exported)" in detail or "残留usb/ip会话占用" in detail
+
+
+def _usbip_worker_command_timeout(busids: list[str]) -> int:
+    """Cover the Worker's bounded attach+rollback budget for a multi-select."""
+    return 120 + 25 * max(1, len(busids))
+
+
+def _preserve_usbip_assignment_after_error(exc: Exception) -> str:
+    detail = str(getattr(exc, "detail", "") or exc)
+    if isinstance(exc, HTTPException) and exc.status_code == 504:
+        return "unknown"
+    if "回滚未完成" in detail:
+        return "cleanup_required"
+    return ""
+
+
 def _adb_devices_on_ssh(ssh) -> set[str]:
     output, error, _code = runtime.ssh_manager.execute_command(
         ssh,
@@ -92,17 +149,22 @@ def _detach_ubuntu_usbip_for_devices(
     device_host: str,
     usbip_attach_host: str | None,
     devices_to_remove: list[str],
+    busids: list[str] | None = None,
     detach_all: bool = False,
+    settle: bool = True,
 ) -> dict[str, object]:
     """Detach Ubuntu USB/IP ports and verify target ADB serials disappear."""
     expected_removed = {str(device_id) for device_id in devices_to_remove or [] if str(device_id)}
+    detach_kwargs = {"detach_all": detach_all}
+    if busids:
+        detach_kwargs["busids"] = busids
     detached_ports = detach_ubuntu_usbip_ports(
         ssh,
         _usbip_remote_host(device_host, usbip_attach_host),
-        detach_all=detach_all,
+        **detach_kwargs,
     )
     remaining = expected_removed & _adb_devices_on_ssh(ssh) if expected_removed else set()
-    if remaining and not detach_all:
+    if remaining and not detach_all and not busids:
         logger.warning(
             "[USB/IP Stop] Target devices still present after host-filtered detach: %s; "
             "falling back to detach all Ubuntu USB/IP ports",
@@ -111,12 +173,52 @@ def _detach_ubuntu_usbip_for_devices(
         fallback_ports = detach_ubuntu_usbip_ports(ssh, None, detach_all=True)
         detached_ports = list(dict.fromkeys([*detached_ports, *fallback_ports]))
         remaining = expected_removed & _adb_devices_on_ssh(ssh)
+    if remaining and settle:
+        # ADB keeps detached USB/IP serials briefly as "offline"; wait for the
+        # USB hotplug event to reap them before declaring a device still online.
+        remaining = _wait_for_adb_devices_removed(ssh, expected_removed)
     return {
         "detached_ports": detached_ports,
         "remaining_devices": sorted(remaining),
     }
 
+
+def _wait_for_adb_devices_removed(
+    ssh,
+    expected_removed: set[str],
+    attempts: int = 6,
+) -> set[str]:
+    """Wait until target serials are no longer ADB-online after physical detach."""
+    remaining = set(expected_removed) & _adb_devices_on_ssh(ssh)
+    for _ in range(max(0, attempts - 1)):
+        if not remaining:
+            break
+        time.sleep(1)
+        remaining = set(expected_removed) & _adb_devices_on_ssh(ssh)
+    return remaining
+
 # ==================== USB/IP Status ====================
+
+@router.get("/api/usbip/source-devices")
+async def list_usbip_source_devices(
+    request: Request,
+    device_host: str | None = None,
+    _elevated=Depends(require_elevated_admin),
+):
+    """List selectable Android USB busids on an authorized source host."""
+    config = runtime.config_manager.load_config()
+    resolved = _resolve_usbip_device_host(request, config, device_host)
+    enforce_usbip_host_access(request, device_host, resolved)
+    result = await asyncio.to_thread(usbip_manager.list_source_devices, resolved)
+    if not result.get("success"):
+        if "凭据" in str(result.get("error") or ""):
+            return error_response(
+                result.get("error"), status_code=401,
+                need_password=True, device_host=resolved,
+            )
+        return error_response(result.get("error", "USB设备枚举失败"), status_code=500)
+    return JSONResponse(content=result)
+
 
 @router.get("/api/usbip/status")
 async def get_usbip_status(
@@ -152,6 +254,30 @@ async def get_usbip_status(
             if has_devices_from_host:
                 connected = True
 
+    assignments = [
+        item for item in _usbip_assignments().values()
+        if str(item.get("device_host") or "") == client_id
+    ]
+    cluster_selections = []
+    if assignments:
+        connected = True
+        grouped: dict[tuple[str, str], list[str]] = {}
+        for item in assignments:
+            group = (
+                str(item.get("worker_id") or ""),
+                str(item.get("source_host") or ""),
+            )
+            grouped.setdefault(group, []).append(str(item.get("busid") or ""))
+        cluster_selections = [
+            {
+                "device_host": client_id,
+                "source_host": source_host,
+                "worker_id": worker_id,
+                "busids": sorted(filter(None, busids)),
+            }
+            for (worker_id, source_host), busids in grouped.items()
+        ]
+
     logger.info(f"[USB/IP Status] device_host={client_id}, connected={connected}, device_count={len(runtime.global_state.usbip_devices_source)}")
     return JSONResponse(content={
         "connected": connected,
@@ -161,6 +287,8 @@ async def get_usbip_status(
         "adb_ready": bool(state_info.get("adb_ready", False)),
         "reconnecting": bool(state_info.get("reconnecting", False)),
         "protocol_status": state_info.get("protocol_status") or {},
+        "cluster_selection": cluster_selections[0] if cluster_selections else None,
+        "cluster_selections": cluster_selections,
     })
 
 
@@ -242,15 +370,309 @@ async def start_usbip(
                 device_host=device_host,
             )
 
+        worker_id = str(request_data.get("worker_id") or "")
+        busids = [str(item) for item in request_data.get("busids") or []]
+        if worker_id:
+            from features.cluster import get_cluster_service
+            from features.cluster.api import _require_cluster_enabled, _run_worker_command
+
+            cluster = get_cluster_service()
+            if worker_id != cluster.config.local_worker_id:
+                _require_cluster_enabled(remote=True)
+                worker = cluster.repository.get_worker(worker_id) or {}
+                if not (worker.get("capabilities") or {}).get("usbip_client"):
+                    return error_response(
+                        f"{worker_id} 尚未安装Worker USB/IP能力，请重新部署Worker",
+                        status_code=409,
+                    )
+                if not busids:
+                    return error_response("远端Worker接入必须选择USB设备", status_code=400)
+                with _usbip_assignment_lock:
+                    assignments = _usbip_assignments()
+                    now = time.time()
+                    assignments = {
+                        key: value for key, value in assignments.items()
+                        if not (
+                            value.get("status") == "attaching"
+                            and now - float(value.get("timestamp") or 0)
+                            > _USBIP_ATTACHING_STALE_SECONDS
+                        )
+                    }
+                    conflicts = [
+                        busid for busid in busids
+                        if (
+                            (
+                                assignments.get(
+                                    _usbip_assignment_key(device_host, busid), {}
+                                ).get("worker_id") not in {None, "", worker_id}
+                            )
+                            or assignments.get(
+                                _usbip_assignment_key(device_host, busid), {}
+                            ).get("status") in {
+                                "attaching", "unknown", "cleanup_required",
+                            }
+                        )
+                    ]
+                    if conflicts:
+                        return error_response(
+                            f"USB设备已接入其他Worker: {', '.join(conflicts)}",
+                            status_code=409,
+                        )
+                    for busid in busids:
+                        assignments[_usbip_assignment_key(device_host, busid)] = {
+                            "device_host": device_host,
+                            "source_host": "",
+                            "worker_id": worker_id,
+                            "busid": busid,
+                            "status": "attaching",
+                            "timestamp": time.time(),
+                        }
+                    _save_usbip_assignments(assignments)
+                prepared: dict = {}
+                try:
+                    prepared = await asyncio.to_thread(
+                        usbip_manager.bind_source_devices,
+                        device_host,
+                        busids,
+                        device_password,
+                    )
+                    if not prepared.get("success"):
+                        raise RuntimeError(
+                            prepared.get("error", "USB/IP设备绑定失败")
+                        )
+                    prepared_busids = list(dict.fromkeys(
+                        str(item or "").strip()
+                        for item in prepared.get("busids") or []
+                        if str(item or "").strip()
+                    ))
+                    if set(prepared_busids) != set(busids):
+                        missing = [item for item in busids if item not in prepared_busids]
+                        raise RuntimeError(
+                            "USB/IP设备未全部完成绑定: " + ", ".join(missing)
+                        )
+                    prepared["busids"] = prepared_busids
+                    attach_payload = {
+                        "source_host": prepared["source_host"],
+                        "busids": prepared["busids"],
+                    }
+                    command_timeout = _usbip_worker_command_timeout(
+                        prepared["busids"]
+                    )
+                    recovered_stale_session = False
+                    try:
+                        result = await _run_worker_command(
+                            worker_id,
+                            "usbip_attach",
+                            attach_payload,
+                            timeout=command_timeout,
+                        )
+                    except HTTPException as attach_exc:
+                        if (
+                            not request_data.get("manual_connect")
+                            or not _is_usbip_recoverable_attach_error(attach_exc)
+                        ):
+                            raise
+                        logger.warning(
+                            "[USB/IP] Recovering source export after attach error: "
+                            "device_host=%s worker_id=%s busids=%s",
+                            device_host,
+                            worker_id,
+                            prepared["busids"],
+                        )
+                        recovery = await asyncio.to_thread(
+                            usbip_manager.detach_source_sessions,
+                            device_host,
+                            prepared["busids"],
+                            device_password,
+                        )
+                        if not recovery.get("success"):
+                            raise HTTPException(
+                                status_code=409,
+                                detail=(
+                                    "USB/IP残留会话自动清理失败: "
+                                    f"{recovery.get('error') or attach_exc.detail}"
+                                ),
+                            ) from attach_exc
+                        rebound = await asyncio.to_thread(
+                            usbip_manager.bind_source_devices,
+                            device_host,
+                            prepared["busids"],
+                            device_password,
+                        )
+                        rebound_busids = list(dict.fromkeys(
+                            str(item or "").strip()
+                            for item in rebound.get("busids") or []
+                            if str(item or "").strip()
+                        ))
+                        if (
+                            not rebound.get("success")
+                            or set(rebound_busids) != set(prepared["busids"])
+                        ):
+                            raise HTTPException(
+                                status_code=409,
+                                detail=(
+                                    "USB/IP源设备恢复绑定失败: "
+                                    f"{rebound.get('error') or attach_exc.detail}"
+                                ),
+                            ) from attach_exc
+                        prepared.update({
+                            "source_host": rebound.get("source_host")
+                            or prepared["source_host"],
+                            "busids": rebound_busids,
+                        })
+                        attach_payload.update({
+                            "source_host": prepared["source_host"],
+                            "busids": prepared["busids"],
+                        })
+                        await asyncio.sleep(1)
+                        result = await _run_worker_command(
+                            worker_id,
+                            "usbip_attach",
+                            attach_payload,
+                            timeout=command_timeout,
+                        )
+                        recovered_stale_session = True
+                    if recovered_stale_session:
+                        result["recovered_stale_session"] = True
+                except Exception as exc:
+                    with _usbip_assignment_lock:
+                        assignments = _usbip_assignments()
+                        preserved_status = _preserve_usbip_assignment_after_error(
+                            exc
+                        )
+                        for busid in busids:
+                            key = _usbip_assignment_key(device_host, busid)
+                            current = assignments.get(key) or {}
+                            if (
+                                current.get("worker_id") == worker_id
+                                and current.get("status") == "attaching"
+                            ):
+                                if preserved_status:
+                                    current.update({
+                                        "source_host": str(
+                                            prepared.get("source_host") or ""
+                                        ),
+                                        "status": preserved_status,
+                                        "timestamp": time.time(),
+                                    })
+                                    assignments[key] = current
+                                else:
+                                    assignments.pop(key, None)
+                        _save_usbip_assignments(assignments)
+                    detail = str(getattr(exc, "detail", "") or exc)
+                    if (
+                        isinstance(exc, HTTPException)
+                        and exc.status_code in {409, 502}
+                        and _is_usbip_export_busy(exc)
+                    ):
+                        raise HTTPException(status_code=409, detail=detail) from exc
+                    raise
+                with _usbip_assignment_lock:
+                    assignments = _usbip_assignments()
+                    attached_serials = list(dict.fromkeys(
+                        str(item or "").strip()
+                        for item in (
+                            result.get("new_devices")
+                            or [
+                                device.get("serial")
+                                for device in result.get("devices") or []
+                            ]
+                        )
+                        if str(item or "").strip()
+                    ))
+                    prepared_set = set(prepared["busids"])
+                    for requested_busid in busids:
+                        if requested_busid not in prepared_set:
+                            assignments.pop(
+                                _usbip_assignment_key(
+                                    device_host, requested_busid
+                                ),
+                                None,
+                            )
+                    for busid in prepared["busids"]:
+                        assignments[_usbip_assignment_key(device_host, busid)] = {
+                            "device_host": device_host,
+                            "source_host": prepared["source_host"],
+                            "worker_id": worker_id,
+                            "busid": busid,
+                            "device_serials": attached_serials,
+                            "status": "attached",
+                            "timestamp": time.time(),
+                        }
+                    _save_usbip_assignments(assignments)
+                # The attach command already returned the Worker's current device
+                # list. Apply it immediately so the UI shows the newly attached
+                # device without waiting for the next heartbeat (~15s lag).
+                if "devices" in result:
+                    try:
+                        cluster.repository.refresh_worker_devices(
+                            worker_id, result.get("devices") or []
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[USB/IP] failed to refresh worker devices for %s: %s",
+                            worker_id,
+                            exc,
+                        )
+                return JSONResponse(content={
+                    "success": True,
+                    "device_host": device_host,
+                    "worker_id": worker_id,
+                    "source_host": prepared["source_host"],
+                    "busids": prepared["busids"],
+                    "transport_connected": bool(result.get("attached_busids")),
+                    "adb_ready": bool(result.get("devices")),
+                    "device_list": [
+                        item.get("serial")
+                        for item in result.get("devices") or []
+                        if item.get("serial")
+                    ],
+                    "message": f"USB/IP设备已接入 {worker_id}",
+                    **result,
+                })
+
+        if worker_id and busids:
+            with _usbip_assignment_lock:
+                assignments = _usbip_assignments()
+                conflicts = [
+                    busid for busid in busids
+                    if assignments.get(
+                        _usbip_assignment_key(device_host, busid), {}
+                    ).get("worker_id") not in {None, "", worker_id}
+                ]
+            if conflicts:
+                return error_response(
+                    f"USB设备已接入其他Worker: {', '.join(conflicts)}",
+                    status_code=409,
+                )
+
+        start_kwargs = {"usbip_attach_host": usbip_attach_host}
+        if busids:
+            start_kwargs["selected_busids"] = busids
         result = await asyncio.to_thread(
             usbip_manager.start_usbip,
             device_host,
             device_password,
-            usbip_attach_host=usbip_attach_host,
+            **start_kwargs,
         )
         result["device_host"] = device_host
 
         if result.get("success"):
+            if worker_id and busids:
+                with _usbip_assignment_lock:
+                    assignments = _usbip_assignments()
+                    for busid in busids:
+                        assignments[_usbip_assignment_key(device_host, busid)] = {
+                            "device_host": device_host,
+                            "source_host": _usbip_remote_host(
+                                device_host, usbip_attach_host
+                            ),
+                            "worker_id": worker_id,
+                            "busid": busid,
+                            "status": "attached",
+                            "timestamp": time.time(),
+                        }
+                    _save_usbip_assignments(assignments)
             device_list = result.get("device_list", [])
             result["transport_connected"] = bool(result.get("transport_connected") or result.get("devices"))
             result["adb_ready"] = bool(device_list)
@@ -427,6 +849,154 @@ async def stop_usbip(
     client_id = runtime.get_client_id_from_request(request)
     tailscale_mode = False
 
+    if req and req.worker_id:
+        from features.cluster import get_cluster_service
+        from features.cluster.api import _require_cluster_enabled, _run_worker_command
+
+        cluster = get_cluster_service()
+        if req.worker_id != cluster.config.local_worker_id:
+            _require_cluster_enabled(remote=True)
+            if not req.device_host or not req.busids:
+                return error_response(
+                    "远端 Worker 断开需要 device_host 和 busids", status_code=400
+                )
+            worker = cluster.repository.get_worker(req.worker_id) or {}
+            if worker.get("status") not in {"online", "busy"}:
+                return error_response("worker is not online", status_code=409)
+            with _usbip_assignment_lock:
+                assignments = _usbip_assignments()
+                selected_assignments = []
+                invalid_assignments = []
+                for busid in req.busids:
+                    current = assignments.get(
+                        _usbip_assignment_key(req.device_host, busid)
+                    ) or {}
+                    if (
+                        current.get("worker_id") != req.worker_id
+                        or current.get("status") == "attaching"
+                    ):
+                        invalid_assignments.append(busid)
+                    else:
+                        selected_assignments.append(current)
+            if invalid_assignments:
+                return error_response(
+                    "USB/IP分配状态已变化，请刷新后重试: "
+                    + ", ".join(invalid_assignments),
+                    status_code=409,
+                )
+            claimed_serials = list(dict.fromkeys(
+                str(serial or "").strip()
+                for assignment in selected_assignments
+                for serial in assignment.get("device_serials") or []
+                if str(serial or "").strip()
+            ))
+            if not claimed_serials:
+                # Older assignments do not carry a BUSID→serial mapping. Claim
+                # the Worker's visible inventory conservatively so a concurrent
+                # test cannot start while the physical detach is in flight.
+                claimed_serials = list(dict.fromkeys(
+                    [
+                        str(device.get("serial") or "").strip()
+                        for device in cluster.repository.list_devices(
+                            req.worker_id
+                        )
+                        if str(device.get("serial") or "").strip()
+                    ]
+                    + [
+                        str(claim.get("serial") or "").strip()
+                        for claim in cluster.repository.claims.list_active(
+                            worker_id=req.worker_id
+                        )
+                        if str(claim.get("serial") or "").strip()
+                    ]
+                ))
+            claim_source = ""
+            if claimed_serials:
+                operation_id = f"usbip-detach-{uuid.uuid4().hex}"
+                claim_source = f"operation:{operation_id}"
+                try:
+                    claim_records = (
+                        cluster.repository.acquire_device_operation_claim(
+                            req.worker_id,
+                            claimed_serials,
+                            owner_id=_elevated.id,
+                            source_type="cluster-usbip",
+                            source_id=claim_source,
+                            ttl_seconds=10 * 60,
+                        )
+                    )
+                except ValueError as exc:
+                    return error_response(str(exc), status_code=409)
+                lease_tokens = cluster.repository.claim_fencing_tokens(
+                    claim_records, operation_id
+                )
+            else:
+                lease_tokens = []
+            source_host = req.source_host or _usbip_remote_host(req.device_host)
+            command_payload = {
+                "source_host": source_host,
+                "busids": req.busids,
+                "devices": claimed_serials,
+                "lease_tokens": lease_tokens,
+                "claim_source_id": claim_source,
+                "release_claim_on_terminal": bool(claim_source),
+            }
+            try:
+                result = await _run_worker_command(
+                    req.worker_id,
+                    "usbip_detach",
+                    command_payload,
+                    timeout=90,
+                )
+            except HTTPException as exc:
+                if claim_source and exc.status_code != 504:
+                    cluster.repository.claims.release(
+                        claim_source, status="failed"
+                    )
+                raise
+            except Exception:
+                if claim_source:
+                    cluster.repository.claims.release(
+                        claim_source, status="failed"
+                    )
+                raise
+            already_detached = bool(result.get("already_detached"))
+            if not result.get("detached_ports") and not already_detached:
+                return error_response(
+                    f"{req.worker_id} 未确认USB/IP设备已断开，保留分配记录",
+                    status_code=502,
+                )
+            with _usbip_assignment_lock:
+                assignments = _usbip_assignments()
+                for busid in req.busids:
+                    key = _usbip_assignment_key(req.device_host, busid)
+                    current = assignments.get(key) or {}
+                    if current.get("worker_id") == req.worker_id:
+                        assignments.pop(key, None)
+                _save_usbip_assignments(assignments)
+            # The detach command already returned the Worker's settled device
+            # list. Apply it immediately so the UI reflects the removal without
+            # waiting for the next heartbeat (~15s lag).
+            if "devices" in result:
+                try:
+                    cluster.repository.refresh_worker_devices(
+                        req.worker_id, result.get("devices") or []
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[USB/IP Stop] failed to refresh worker devices for %s: %s",
+                        req.worker_id,
+                        exc,
+                    )
+            return JSONResponse(content={
+                "success": True,
+                "device_host": req.device_host,
+                "worker_id": req.worker_id,
+                "busids": req.busids,
+                "message": f"已从 {req.worker_id} 断开USB/IP设备",
+                **result,
+            })
+
     if req and req.device_host:
         config["device_host"] = req.device_host
     else:
@@ -487,7 +1057,9 @@ async def stop_usbip(
                     device_host=config["device_host"],
                     usbip_attach_host=usbip_attach_host,
                     devices_to_remove=devices_to_remove,
+                    busids=(req.busids if req else None),
                     detach_all=tailscale_mode,
+                    settle=tailscale_mode,
                 )
                 ubuntu_detached_ports = list(detach_result["detached_ports"])
                 remaining_devices_after_detach = list(detach_result["remaining_devices"])
@@ -502,10 +1074,33 @@ async def stop_usbip(
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)
         else:
             with DeviceSSHConnection(config) as win_ssh:
-                runtime.ssh_manager.execute_command(win_ssh, "usbipd unbind --all", timeout=10)
+                selected_busids = list(req.busids) if req and req.busids else []
+                if selected_busids:
+                    for busid in selected_busids:
+                        runtime.ssh_manager.execute_command(
+                            win_ssh,
+                            f"usbipd unbind --busid {shlex.quote(busid)}",
+                            timeout=10,
+                        )
+                else:
+                    runtime.ssh_manager.execute_command(
+                        win_ssh, "usbipd unbind --all", timeout=10
+                    )
                 await asyncio.sleep(2)
 
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)
+            if remaining_devices_after_detach:
+                verification_ssh = runtime.ssh_manager.get_connection(config)
+                if verification_ssh:
+                    try:
+                        remaining_devices_after_detach = sorted(
+                            _wait_for_adb_devices_removed(
+                                verification_ssh,
+                                set(remaining_devices_after_detach),
+                            )
+                        )
+                    finally:
+                        runtime.ssh_manager.return_connection(verification_ssh)
 
         with runtime.global_state.usbip_states_lock:
             runtime.global_state.usbip_states[config["device_host"]] = {
@@ -527,6 +1122,16 @@ async def stop_usbip(
                 "[USB/IP Stop] Devices still visible after detach cleanup: %s",
                 remaining_devices_after_detach,
             )
+
+        if req and req.worker_id and req.busids:
+            with _usbip_assignment_lock:
+                assignments = _usbip_assignments()
+                for busid in req.busids:
+                    key = _usbip_assignment_key(config["device_host"], busid)
+                    current = assignments.get(key) or {}
+                    if current.get("worker_id") == req.worker_id:
+                        assignments.pop(key, None)
+                _save_usbip_assignments(assignments)
 
         await notify_device_change(devices_to_remove, "USB/IP Stop")
 

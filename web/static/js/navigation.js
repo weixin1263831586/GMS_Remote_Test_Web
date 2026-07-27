@@ -82,12 +82,16 @@ const HTTP_METHODS = {
 const CURL_SPECIAL_PARAMS = ['force_refresh', 'log_type', 'report_timestamp'];
 const VIEWPORT_HEIGHT_OFFSET = 150;
 let pendingUsbipDeviceHost = '';
+let activeUsbipSelection = null;
+let usbipSourceLoadPromise = null;
+const usbipSourceDeviceCache = new Map();
 let pendingDevicePasswordAction = 'usbip';
 let pendingDevicePasswordRetry = null;
 let usbipReconnectTimer = null;
 let usbipReconnectAttempts = 0;
 let usbipManualDisconnectUntil = 0;
 let usbipReconnectWaiting = false;
+let usbipOperationGeneration = 0;
 const USBIP_RECONNECT_MAX_ATTEMPTS = 30;
 const USBIP_RECONNECT_INTERVAL_MS = 5000;
 const USBIP_RECONNECT_INITIAL_DELAY_MS = 1500;
@@ -1083,7 +1087,6 @@ async function resolveClusterHost(workerId) {
 function updateTestHostScopedControls(workerId = workspaceWorkerId()) {
     const remoteSelected = Boolean(workerId && !isLocalWorkspaceWorker(workerId));
     const controllerOnly = {
-        'usbip-btn': 'USB/IP 设备接入只作用于 Controller 本机',
         'check-sshd-btn': 'SSHD 检查面向 Controller 连接的设备主机',
         'check-routing-btn': '路由检查面向 Controller 与浏览器客户端',
         'vpn-connect-btn': 'VPN 连接由 Controller 测试主机管理',
@@ -1094,6 +1097,13 @@ function updateTestHostScopedControls(workerId = workspaceWorkerId()) {
         control.disabled = remoteSelected;
         control.title = remoteSelected ? `${message}；当前已选择远端 Worker` : '';
     });
+    const usbip = document.getElementById('usbip-btn');
+    if (usbip) {
+        usbip.disabled = false;
+        usbip.title = remoteSelected
+            ? '选择设备来源和接入主机；远端 Worker 接入将在后端分发启用后开放'
+            : '选择设备来源、接入主机和 USB 设备';
+    }
     const adbForward = document.getElementById('adb-forward-btn');
     if (adbForward) {
         // ADB forward is intentionally unavailable until its Controller-side
@@ -4924,7 +4934,6 @@ async function setupAdbPortForward() {
 }
 
 async function setupUsbipForward() {
-    if (!requireControllerHostAction('USB/IP 设备接入')) return;
     const btn = $('usbip-btn');
     if (!btn) return;
 
@@ -4934,87 +4943,451 @@ async function setupUsbipForward() {
     debugLog('[setupUsbipForward] Called, state.usbipConnected =', state.usbipConnected);
 
     if (state.usbipConnected) {
-        // 断开连接（敏感操作：需管理员提权）
-        debugLog('[setupUsbipForward] Disconnecting...');
         const granted = await requestElevatedAccess('断开/移除设备');
         if (!granted) {
             addLogEntry('已取消断开设备（需要管理员权限）', 'warning');
             return;
         }
-        try {
-            btn.textContent = '📱 断开中...';
-            btn.disabled = true;
-            usbipManualDisconnectUntil = Date.now() + USBIP_MANUAL_DISCONNECT_SUPPRESS_MS;
-            if (usbipReconnectTimer) {
-                clearTimeout(usbipReconnectTimer);
-                usbipReconnectTimer = null;
-            }
-
-            const result = await apiCall('/api/usbip/disconnect', 'POST', {});
-            state.usbipConnected = false;
-            btn.textContent = '📱 本地设备';
-            btn.disabled = false;
-            addLogEntry(result.message || '本地设备已断开', 'success');
-            if (Array.isArray(result.remaining_devices) && result.remaining_devices.length > 0) {
-                addLogEntry('USB/IP 断开后仍检测到设备残留: ' + result.remaining_devices.join(' '), 'warning');
-            }
-            // 断开后强制刷新（force_refresh），确保不返回带 is_usbip 标记的缓存设备。
-            setTimeout(() => loadDevices(true), 2500);
-        } catch (error) {
-            btn.textContent = '📱 断开设备';
-            btn.disabled = false;
-            addLogEntry('停止 USB/IP 失败: ' + error.message, 'error');
-        }
+        await openUsbipDetachModal();
     } else {
-        // 连接
-        debugLog('[setupUsbipForward] Connecting...');
-        try {
-            btn.textContent = '📱 连接中...';
-            btn.disabled = true;
-            usbipManualDisconnectUntil = 0;
+        const granted = await requestElevatedAccess('枚举和接入USB/IP设备');
+        if (!granted) return;
+        await openUsbipAttachModal();
+    }
+}
 
-            const result = await apiCall('/api/usbip/connect', 'POST', { manual_connect: true });
+async function openUsbipDetachModal() {
+    const select = document.getElementById('usbip-detach-devices');
+    const all = document.getElementById('usbip-detach-all');
+    const message = document.getElementById('usbip-detach-message');
+    if (!select || !all) return;
+    select.innerHTML = '<option value="">正在读取已接入设备...</option>';
+    select.disabled = true;
+    all.checked = false;
+    ModalManager.open('usbip-detach-modal');
+    try {
+        const statusPath = pendingUsbipDeviceHost
+            ? '/api/usbip/status?device_host=' + encodeURIComponent(pendingUsbipDeviceHost)
+            : '/api/usbip/status';
+        const status = await apiCall(statusPath, 'GET');
+        const selections = status.cluster_selections || [];
+        select.innerHTML = '';
+        selections.forEach(group => {
+            (group.busids || []).forEach(busid => {
+                const selection = {...group, busids: [busid]};
+                const label = `${group.device_host} → ${group.worker_id} · ${busid}`;
+                select.append(new Option(label, JSON.stringify(selection)));
+            });
+        });
+        if (!select.options.length && activeUsbipSelection?.busids?.length) {
+            activeUsbipSelection.busids.forEach(busid => {
+                const selection = {...activeUsbipSelection, busids: [busid]};
+                select.append(new Option(
+                    `${selection.device_host} → ${selection.worker_id || 'Controller'} · ${busid}`,
+                    JSON.stringify(selection)
+                ));
+            });
+        }
+        if (!select.options.length && status.connected) {
+            const legacy = {device_host: status.device_host || pendingUsbipDeviceHost};
+            select.append(new Option(
+                `${legacy.device_host} · 全部历史USB/IP设备（无busid记录）`,
+                JSON.stringify(legacy)
+            ));
+        }
+        select.disabled = !select.options.length;
+        if (select.options.length) select.options[0].selected = true;
+        if (message) message.textContent = select.options.length
+            ? `共 ${select.options.length} 个可断开项。`
+            : '未找到可断开的USB/IP设备。';
+    } catch (error) {
+        select.innerHTML = '<option value="">读取失败</option>';
+        if (message) message.textContent = `读取USB/IP分配失败：${error.message}`;
+    }
+}
 
-            // 检查是否成功（支持多种响应格式）
-            if (isUsbipAdbReady(result)) {
-                state.usbipConnected = true;
-                pendingUsbipDeviceHost = result.device_host || pendingUsbipDeviceHost || '';
-                btn.textContent = '📱 断开设备';
-                btn.disabled = false;
-                addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
-                setTimeout(() => debouncedRefreshDevices(), 3500);
-            } else {
-                btn.textContent = '📱 本地设备';
-                btn.disabled = false;
+function closeUsbipDetachModal() {
+    ModalManager.close('usbip-detach-modal');
+}
 
-                // 检查是否需要SSH密码
-                if (result.need_password && result.device_host) {
-                    showDevicePasswordModal(result.device_host);
-                    addLogEntry('需要输入SSH密码以连接到 ' + result.device_host, 'warning');
-                } else if (result.error && result.error.includes('SSH连接失败')) {
-                    addLogEntry('⚠️ SSH 连接失败，请点击 "📡 检查SSHD" 按钮检查SSH服务状态', 'warning');
-                } else if (result.install_guide) {
-                    // 显示友好的安装指南弹窗
-                    showInstallGuide('usbipd 安装指南', result.install_guide);
-                    addLogEntry('启动 USB/IP 失败: ' + (result.error || '未知错误'), 'error');
-                } else {
-                    addLogEntry('启动 USB/IP 失败: ' + (result.error || result.message || '未知错误'), 'error');
+function toggleUsbipDetachAll() {
+    const select = document.getElementById('usbip-detach-devices');
+    const checked = document.getElementById('usbip-detach-all')?.checked;
+    if (!select) return;
+    Array.from(select.options).forEach(option => { option.selected = Boolean(checked); });
+    select.disabled = Boolean(checked);
+}
+
+async function submitUsbipDetach() {
+    const select = document.getElementById('usbip-detach-devices');
+    const useAll = document.getElementById('usbip-detach-all')?.checked;
+    const options = useAll
+        ? Array.from(select?.options || [])
+        : Array.from(select?.selectedOptions || []);
+    const selections = options.map(option => {
+        try { return JSON.parse(option.value); } catch (_error) { return null; }
+    }).filter(Boolean);
+    if (!selections.length) {
+        showToast('请选择需要断开的USB设备', 'warning');
+        return;
+    }
+    const grouped = new Map();
+    selections.forEach(selection => {
+        const key = [
+            selection.device_host || '',
+            selection.source_host || '',
+            selection.worker_id || ''
+        ].join('|');
+        const current = grouped.get(key) || {...selection, busids: []};
+        current.busids.push(...(selection.busids || []));
+        grouped.set(key, current);
+    });
+    closeUsbipDetachModal();
+    await performUsbipDisconnect(Array.from(grouped.values()));
+}
+
+async function performUsbipDisconnect(selections) {
+    const btn = $('usbip-btn');
+    const operationGeneration = ++usbipOperationGeneration;
+    try {
+        btn.textContent = '📱 断开中...';
+        btn.disabled = true;
+        usbipManualDisconnectUntil = Date.now() + USBIP_MANUAL_DISCONNECT_SUPPRESS_MS;
+        if (usbipReconnectTimer) {
+            clearTimeout(usbipReconnectTimer);
+            usbipReconnectTimer = null;
+        }
+        const workerBaselines = new Map();
+        selections.forEach(selection => {
+            if (!selection.worker_id || workerBaselines.has(selection.worker_id)) return;
+            const serials = new Set(
+                (state.devices || [])
+                    .filter(device => (
+                        device.worker_id === selection.worker_id
+                        || String(device.device_id || '').startsWith(`${selection.worker_id}:`)
+                    ))
+                    .map(device => String(device.serial || device.device_id || '').split(':').pop())
+            );
+            workerBaselines.set(selection.worker_id, serials);
+        });
+        for (const selection of selections) {
+            const result = await apiCall('/api/usbip/disconnect', 'POST', selection);
+            addLogEntry(result.message || 'USB/IP设备已断开', 'success');
+            if (Array.isArray(result.remaining_devices) && result.remaining_devices.length) {
+                addLogEntry('断开后仍在线: ' + result.remaining_devices.join(' '), 'warning');
+            }
+        }
+        activeUsbipSelection = null;
+        state.usbipConnected = false;
+        btn.textContent = '📱 本地设备';
+        btn.disabled = false;
+        // Refresh the global device list immediately after the backend confirms
+        // the disconnect. Remote Worker detachments do not emit a local USB
+        // hotplug event, so without this the UI keeps showing the detached
+        // device until the slower background poll notices it is gone.
+        await loadDevices(true);
+        void refreshUsbipDetachedWorkers(workerBaselines, operationGeneration);
+        setTimeout(() => {
+            if (operationGeneration === usbipOperationGeneration) {
+                checkUsbipStatus();
+            }
+        }, 500);
+    } catch (error) {
+        btn.textContent = '📱 断开设备';
+        btn.disabled = false;
+        addLogEntry('停止 USB/IP 失败: ' + error.message, 'error');
+    }
+}
+
+async function refreshUsbipDetachedWorkers(workerBaselines, operationGeneration) {
+    for (const delay of [2000, 3000, 5000, 8000, 12000, 15000]) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        if (operationGeneration !== usbipOperationGeneration) return;
+        let changed = false;
+        for (const [workerId, baseline] of workerBaselines.entries()) {
+            try {
+                const devices = await fetchDevicesForWorker(workerId, true);
+                const visible = new Set(
+                    (devices || []).map(device => String(device.serial || device.device_id || '').split(':').pop())
+                );
+                if (baseline.size && [...baseline].some(serial => !visible.has(serial))) {
+                    changed = true;
+                    break;
                 }
+            } catch (error) {
+                debugLog('[USB/IP] Detached Worker refresh failed:', error.message);
             }
-        } catch (error) {
-            btn.textContent = '📱 本地设备';
-            btn.disabled = false;
-
-            // 检查是否需要SSH密码
-            if (error.needPassword && error.deviceHost) {
-                showDevicePasswordModal(error.deviceHost);
-                addLogEntry('需要输入SSH密码以连接到 ' + error.deviceHost, 'warning');
-            } else if (error.installGuide) {
-                showInstallGuide('usbipd 安装指南', error.installGuide);
-            }
-            addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
+        }
+        if (operationGeneration !== usbipOperationGeneration) return;
+        if (changed) {
+            await loadDevices(true);
+            if (operationGeneration !== usbipOperationGeneration) return;
+            addLogEntry('已自动刷新设备列表，USB/IP设备已从ADB移除', 'success');
+            return;
         }
     }
+    if (operationGeneration !== usbipOperationGeneration) return;
+    await loadDevices(true);
+    if (operationGeneration !== usbipOperationGeneration) return;
+    addLogEntry('USB/IP已断开，但ADB设备状态更新较慢，已完成最终刷新', 'warning');
+}
+
+async function openUsbipAttachModal() {
+    const sourceSelect = document.getElementById('usbip-source-host');
+    const targetSelect = document.getElementById('usbip-target-worker');
+    const message = document.getElementById('usbip-attach-message');
+    const submit = document.getElementById('usbip-attach-submit');
+    if (!sourceSelect || !targetSelect) return;
+
+    const config = state.config || {};
+    const sources = new Set();
+    const isLoopbackSource = value => {
+        const rawHost = String(value || '').split('@').pop().replace(/^\[|\]$/g, '');
+        if (rawHost.toLowerCase() === '::1') return true;
+        const host = rawHost.split(':')[0];
+        return ['127.0.0.1', 'localhost', '::1'].includes(host.toLowerCase());
+    };
+    [config.usbip_device_host, config.device_host, pendingUsbipDeviceHost]
+        .filter(value => value && String(value).includes('@') && !isLoopbackSource(value))
+        .forEach(value => sources.add(String(value)));
+    Object.entries(config.client_hosts || {}).forEach(([host, username]) => {
+        if (host && username && !isLoopbackSource(`${username}@${host}`)) {
+            sources.add(`${username}@${host}`);
+        }
+    });
+    sourceSelect.innerHTML = '';
+    if (!sources.size) {
+        sourceSelect.append(new Option('未配置设备来源', ''));
+    } else {
+        sources.forEach(value => sourceSelect.append(new Option(value, value)));
+    }
+
+    const localWorkerId = workspaceLocalWorkerId();
+    targetSelect.innerHTML = '';
+    targetSelect.append(new Option(`${localWorkerId}（Controller）`, localWorkerId));
+    try {
+        const response = await fetch('/api/cluster/hosts', {
+            credentials: 'same-origin',
+            cache: 'no-store'
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+        (payload.hosts || []).forEach(host => {
+            if (!host.worker_id || host.worker_id === localWorkerId) return;
+            const label = `${host.worker_id} · ${host.hostname || host.address || ''}`;
+            const option = new Option(label, host.worker_id);
+            const online = ['online', 'busy'].includes(host.status);
+            const usbipCapable = host.capabilities?.usbip_client === true;
+            option.disabled = !online || !usbipCapable;
+            if (!online) option.textContent += '（离线）';
+            else if (!usbipCapable) option.textContent += '（需重新部署以启用USB/IP）';
+            targetSelect.append(option);
+        });
+    } catch (error) {
+        debugLog('[USB/IP] Failed to load cluster hosts:', error.message);
+        if (message) message.textContent = `加载集群主机失败：${error.message}；仍可接入 Controller。`;
+    }
+    const preferredWorker = workspaceWorkerId();
+    targetSelect.value = Array.from(targetSelect.options)
+        .some(option => option.value === preferredWorker && !option.disabled)
+        ? preferredWorker : localWorkerId;
+    if (submit) submit.disabled = !sourceSelect.value;
+    ModalManager.open('usbip-attach-modal');
+    await loadUsbipSourceDevices();
+}
+
+function closeUsbipAttachModal() {
+    ModalManager.close('usbip-attach-modal');
+}
+
+async function submitUsbipAttach() {
+    const deviceHost = document.getElementById('usbip-source-host')?.value || '';
+    const workerId = document.getElementById('usbip-target-worker')?.value || '';
+    const busids = Array.from(
+        document.getElementById('usbip-source-device')?.selectedOptions || []
+    ).map(option => option.value).filter(Boolean);
+    if (!deviceHost) {
+        showToast('请先配置设备来源', 'warning');
+        return;
+    }
+    if (!workerId) {
+        showToast('请选择接入主机', 'warning');
+        return;
+    }
+    if (!busids.length) {
+        showToast('请至少选择一个USB设备', 'warning');
+        return;
+    }
+    closeUsbipAttachModal();
+    await connectUsbipDeviceHost(deviceHost, workerId, busids);
+}
+
+async function loadUsbipSourceDevices(force = false) {
+    const source = document.getElementById('usbip-source-host')?.value || '';
+    const select = document.getElementById('usbip-source-device');
+    const message = document.getElementById('usbip-attach-message');
+    if (!select) return;
+    select.disabled = true;
+    select.innerHTML = '<option value="">正在读取USB设备...</option>';
+    if (!source) return;
+    const cached = usbipSourceDeviceCache.get(source);
+    if (!force && cached && Date.now() - cached.timestamp < 5000) {
+        renderUsbipSourceDevices(source, cached.devices);
+        return;
+    }
+    if (usbipSourceLoadPromise?.source === source) {
+        await usbipSourceLoadPromise.promise;
+        return;
+    }
+    const request = apiCall(
+        '/api/usbip/source-devices?device_host=' + encodeURIComponent(source),
+        'GET'
+    );
+    usbipSourceLoadPromise = {source, promise: request};
+    try {
+        const result = await request;
+        const devices = result.devices || [];
+        usbipSourceDeviceCache.set(source, {timestamp: Date.now(), devices});
+        renderUsbipSourceDevices(source, devices);
+    } catch (error) {
+        select.innerHTML = '<option value="">USB设备加载失败</option>';
+        if (message) message.textContent = `USB设备加载失败：${error.message}`;
+        if (error.needPassword || error.need_password) {
+            showDevicePasswordModal(source, 'usbip-list', loadUsbipSourceDevices);
+        }
+    } finally {
+        if (usbipSourceLoadPromise?.promise === request) {
+            usbipSourceLoadPromise = null;
+        }
+    }
+}
+
+function renderUsbipSourceDevices(source, devices) {
+    if (document.getElementById('usbip-source-host')?.value !== source) return;
+    const select = document.getElementById('usbip-source-device');
+    const message = document.getElementById('usbip-attach-message');
+    if (!select) return;
+    select.innerHTML = '';
+    devices.forEach(device => {
+        const option = new Option(device.label || device.busid, device.busid);
+        option.selected = true;
+        select.append(option);
+    });
+    if (!devices.length) select.append(new Option('未发现Android USB设备', ''));
+    select.disabled = !devices.length;
+    if (message) message.textContent = devices.length
+        ? `发现 ${devices.length} 个 USB 设备。多选时，Windows/Linux 按住 Ctrl，macOS 按住 Command。`
+        : '设备源未发现可接入的Android USB设备。';
+}
+
+async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
+    const btn = $('usbip-btn');
+    const operationGeneration = ++usbipOperationGeneration;
+    activeUsbipSelection = {device_host: deviceHost, worker_id: workerId, busids};
+    debugLog('[USB/IP] Connecting source:', deviceHost);
+    try {
+        btn.textContent = '📱 连接中...';
+        btn.disabled = true;
+        usbipManualDisconnectUntil = 0;
+        let targetSerialsBefore = new Set();
+        try {
+            const devicesBefore = await fetchDevicesForWorker(workerId, true);
+            targetSerialsBefore = new Set(
+                (devicesBefore || []).map(device => String(device.serial || device.device_id || ''))
+            );
+        } catch (error) {
+            debugLog('[USB/IP] Failed to capture target device baseline:', error.message);
+        }
+        const result = await apiCall('/api/usbip/connect', 'POST', {
+            device_host: deviceHost,
+            worker_id: workerId,
+            busids,
+            manual_connect: true
+        });
+        if (isUsbipAdbReady(result)) {
+            state.usbipConnected = true;
+            pendingUsbipDeviceHost = result.device_host || deviceHost;
+            activeUsbipSelection.source_host = result.source_host || '';
+            btn.textContent = '📱 断开设备';
+            btn.disabled = false;
+            addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
+            refreshUsbipTargetWorker(
+                workerId,
+                result.new_devices || [],
+                targetSerialsBefore,
+                operationGeneration
+            );
+            return;
+        }
+        btn.textContent = '📱 本地设备';
+        btn.disabled = false;
+        if (result.need_password && result.device_host) {
+            showDevicePasswordModal(result.device_host);
+            addLogEntry('需要输入SSH密码以连接到 ' + result.device_host, 'warning');
+        } else if (result.error && result.error.includes('SSH连接失败')) {
+            addLogEntry('⚠️ SSH 连接失败，请点击 "📡 检查SSHD" 按钮检查SSH服务状态', 'warning');
+        } else if (result.install_guide) {
+            showInstallGuide('usbipd 安装指南', result.install_guide);
+            addLogEntry('启动 USB/IP 失败: ' + (result.error || '未知错误'), 'error');
+        } else {
+            activeUsbipSelection = null;
+            addLogEntry('启动 USB/IP 失败: ' + (result.error || result.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        btn.textContent = '📱 本地设备';
+        btn.disabled = false;
+        if (error.needPassword && error.deviceHost) {
+            showDevicePasswordModal(error.deviceHost);
+            addLogEntry('需要输入SSH密码以连接到 ' + error.deviceHost, 'warning');
+        } else if (error.installGuide) {
+            showInstallGuide('usbipd 安装指南', error.installGuide);
+            activeUsbipSelection = null;
+        } else {
+            activeUsbipSelection = null;
+        }
+        addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
+    }
+}
+
+async function refreshUsbipTargetWorker(
+    workerId,
+    expectedSerials = [],
+    serialsBefore = new Set(),
+    operationGeneration = usbipOperationGeneration
+) {
+    if (workerId && workerId !== workspaceWorkerId()) {
+        window.GmsWorkspace?.update({
+            scope_mode: isLocalWorkspaceWorker(workerId) ? 'single' : 'cluster',
+            worker_id: workerId,
+            device_ids: []
+        }, {source: 'usbip-attach'});
+        syncWorkspaceWorkerSelectors(workerId);
+        updateTestHostScopedControls(workerId);
+    }
+    const baseline = serialsBefore instanceof Set ? serialsBefore : new Set(serialsBefore || []);
+    for (const delay of [1000, 3000, 6000, 10000, 15000]) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        if (operationGeneration !== usbipOperationGeneration) return;
+        try {
+            await loadDevices(true);
+            if (operationGeneration !== usbipOperationGeneration) return;
+            const visible = new Set(
+                state.devices.map(device => String(device.serial || device.device_id || ''))
+            );
+            if (
+                expectedSerials.length
+                ? expectedSerials.every(serial => visible.has(serial))
+                : [...visible].some(serial => !baseline.has(serial))
+            ) {
+                addLogEntry(`已刷新 ${workerId} 设备列表，找到 ${state.devices.length} 台设备`, 'success');
+                return;
+            }
+        } catch (error) {
+            debugLog('[USB/IP] Target Worker refresh failed:', error.message);
+        }
+    }
+    if (operationGeneration !== usbipOperationGeneration) return;
+    addLogEntry(`USB/IP传输已连接，但 ${workerId} 尚未枚举到新设备，请稍后刷新`, 'warning');
 }
 
 function scheduleUsbipReconnect(reason) {
@@ -5459,7 +5832,11 @@ async function submitDevicePassword() {
         return;
     }
 
-    if (pendingDevicePasswordAction === 'sshd' || pendingDevicePasswordAction === 'terminal') {
+    if (
+        pendingDevicePasswordAction === 'sshd'
+        || pendingDevicePasswordAction === 'terminal'
+        || pendingDevicePasswordAction === 'usbip-list'
+    ) {
         const action = pendingDevicePasswordAction;
         const retry = pendingDevicePasswordRetry;
         try {
@@ -5471,7 +5848,7 @@ async function submitDevicePassword() {
             showToast('SSH 凭据已保存', 'success');
             addLogEntry(`已保存 ${deviceHost} 的 SSH 凭据`, 'success');
             pendingDevicePasswordAction = 'usbip';
-            if (action === 'terminal') {
+            if (action === 'terminal' || action === 'usbip-list') {
                 if (retry) await retry();
             } else {
                 addLogEntry('正在重新检查 SSHD...', 'info');
@@ -5494,6 +5871,8 @@ async function submitDevicePassword() {
 
         const result = await apiCall('/api/usbip/connect', 'POST', {
             device_host: deviceHost,
+            worker_id: activeUsbipSelection?.worker_id || '',
+            busids: activeUsbipSelection?.busids || [],
             device_password: password,
             manual_connect: true
         });
@@ -5944,6 +6323,9 @@ async function checkUsbipStatus() {
         const result = await apiCall('/api/usbip/status', 'GET');
         if (result.device_host) {
             pendingUsbipDeviceHost = result.device_host;
+        }
+        if (result.cluster_selection) {
+            activeUsbipSelection = result.cluster_selection;
         }
         updateUsbipButtonStatus(result.connected);
     } catch (error) {
@@ -11517,6 +11899,12 @@ window.rebootDevices = rebootDevices;
 window.remountDevices = remountDevices;
 window.connectWifi = connectWifi;
 window.setupUsbipForward = setupUsbipForward;
+window.closeUsbipAttachModal = closeUsbipAttachModal;
+window.submitUsbipAttach = submitUsbipAttach;
+window.loadUsbipSourceDevices = loadUsbipSourceDevices;
+window.closeUsbipDetachModal = closeUsbipDetachModal;
+window.toggleUsbipDetachAll = toggleUsbipDetachAll;
+window.submitUsbipDetach = submitUsbipDetach;
 window.checkSshd = checkSshd;
 window.checkRouting = checkRouting;
 window.connectVpn = connectVpn;

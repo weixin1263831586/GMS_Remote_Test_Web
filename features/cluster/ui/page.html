@@ -12,6 +12,14 @@ button:disabled{cursor:not-allowed;opacity:.5}.mode-status{margin-top:5px;color:
 .progress-track{display:block;width:180px;height:7px}
 .progress-bar{display:block}
 .deploy-progress{display:block;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.modal-backdrop{z-index:10000;padding:clamp(8px,2.5vw,20px);overflow:hidden;overscroll-behavior:contain}
+.onboarding-modal{width:min(920px,100%);max-width:100%;max-height:min(92vh,calc(100dvh - 16px));min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;overflow-wrap:anywhere}
+.onboarding-modal>*{min-width:0;max-width:100%}
+.onboarding-grid>*{min-width:0}
+.onboarding-grid input,.onboarding-grid select,.input-action{min-width:0;max-width:100%}
+body.modal-open{overflow:hidden}
+@media(max-width:560px){.onboarding-grid{grid-template-columns:1fr}.modal-backdrop{align-items:stretch}.actions{flex-wrap:wrap}.compact-filter{width:100%;min-width:0}}
+@media(max-height:560px){.modal-backdrop{align-items:stretch}.onboarding-modal{max-height:calc(100dvh - 16px)}}
 </style>
 <main>
   <div id="onboarding" class="modal-backdrop" hidden><section class="onboarding-modal"><div class="section-head"><div><h2>添加测试主机</h2><p>填写连接信息后由 Controller 自动部署，或复制命令手动执行。</p></div><button id="close-onboarding">×</button></div>

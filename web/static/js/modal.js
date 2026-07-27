@@ -11,10 +11,8 @@ function createAnalysisModal(type, title, loadingMessage) {
     const modal = document.createElement('div');
     modal.id = modalId;
     modal.className = 'modal';
-    modal.style.cssText = 'z-index: 10000;';
-
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-content" style="max-width: 900px; max-height: min(90vh, calc(100dvh - 16px));">
             <div class="modal-header">
                 <span class="modal-title">${title}</span>
                 <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
@@ -39,17 +37,34 @@ const ModalManager = {
     _activeModals: [],
     _dynamicModals: new Set(),
     _closeHandlers: new Map(),
+    _originalZIndexes: new Map(),
+    _focusOrigins: new Map(),
+    _baseZIndex: 12000,
+    _stackStep: 20,
 
     open(modalId) {
         const modal = document.getElementById(modalId);
-        if (modal) {
-            if (modal.classList.contains('modal')) {
-                modal.style.display = 'flex';
-            }
-            modal.classList.add('show');
-            this._addActiveModal(modalId);
-            this._ensureEscListener();
+        if (!modal) {
+            return;
         }
+
+        if (!this._originalZIndexes.has(modalId)) {
+            this._originalZIndexes.set(modalId, modal.style.zIndex || '');
+        }
+        if (!this._focusOrigins.has(modalId)) {
+            this._focusOrigins.set(modalId, document.activeElement);
+        }
+
+        if (modal.classList.contains('modal')) {
+            modal.style.display = 'flex';
+        }
+        modal.classList.add('show');
+        modal.setAttribute('role', modal.getAttribute('role') || 'dialog');
+        modal.setAttribute('aria-hidden', 'false');
+        this._addActiveModal(modalId);
+        this._syncModalStack();
+        this._ensureEscListener();
+        window.requestAnimationFrame(() => this._focusModal(modalId));
     },
 
     close(modalId) {
@@ -63,20 +78,29 @@ const ModalManager = {
             if (modal.classList.contains('modal')) {
                 modal.style.display = 'none';
             }
+            modal.setAttribute('aria-hidden', 'true');
+            modal.removeAttribute('aria-modal');
+            modal.inert = false;
             this._removeActiveModal(modalId);
+            this._restoreZIndex(modalId, modal);
             this._emitClose(modalId);
+            this._syncModalStack();
+            this._restoreFocus(modalId);
             this._cleanupEscListener();
         }
     },
 
     closeAll() {
-        const modals = document.querySelectorAll('.modal.show');
-        this._activeModals = [];
-        modals.forEach(m => {
-            m.classList.remove('show');
-            m.style.display = 'none';
-            this._emitClose(m.id);
+        [...this._activeModals].reverse().forEach(modalId => this.close(modalId));
+        document.querySelectorAll('.modal.show').forEach(modal => {
+            modal.classList.remove('show');
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+            modal.removeAttribute('aria-modal');
+            modal.inert = false;
         });
+        this._activeModals = [];
+        this._syncModalStack();
         this._cleanupEscListener();
     },
 
@@ -90,25 +114,27 @@ const ModalManager = {
     },
 
     registerDynamic(modalElement) {
-        document.body.appendChild(modalElement);
-        if (modalElement.classList.contains('modal')) {
-            modalElement.style.display = 'flex';
+        if (!modalElement.id) {
+            throw new Error('Dynamic modal must have an id');
         }
-        modalElement.classList.add('show');
-        this._addActiveModal(modalElement.id);
+        document.body.appendChild(modalElement);
         this._dynamicModals.add(modalElement.id);
-        this._ensureEscListener();
+        this.open(modalElement.id);
         return modalElement;
     },
 
     unregisterDynamic(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
+            this._restoreZIndex(modalId, modal);
             modal.remove();
         }
         this._dynamicModals.delete(modalId);
         this._removeActiveModal(modalId);
         this._emitClose(modalId);
+        this._syncModalStack();
+        this._restoreFocus(modalId);
+        this._cleanupEscListener();
     },
 
     onClose(modalId, handler) {
@@ -118,9 +144,11 @@ const ModalManager = {
     },
 
     _addActiveModal(modalId) {
-        if (!this._activeModals.includes(modalId)) {
-            this._activeModals.push(modalId);
+        const existingIndex = this._activeModals.indexOf(modalId);
+        if (existingIndex !== -1) {
+            this._activeModals.splice(existingIndex, 1);
         }
+        this._activeModals.push(modalId);
     },
 
     _removeActiveModal(modalId) {
@@ -138,6 +166,8 @@ const ModalManager = {
             this._escListener = (event) => {
                 if (event.key === 'Escape' && this._activeModals.length > 0) {
                     const topModalId = this._activeModals[this._activeModals.length - 1];
+                    event.preventDefault();
+                    event.stopPropagation();
                     this.close(topModalId);
                 }
             };
@@ -157,6 +187,70 @@ const ModalManager = {
         if (handler) {
             this._closeHandlers.delete(modalId);
             handler();
+        }
+    },
+
+    _syncModalStack() {
+        this._activeModals = this._activeModals.filter(modalId => {
+            const modal = document.getElementById(modalId);
+            return Boolean(modal && modal.classList.contains('show'));
+        });
+
+        const topIndex = this._activeModals.length - 1;
+        this._activeModals.forEach((modalId, index) => {
+            const modal = document.getElementById(modalId);
+            if (!modal) {
+                return;
+            }
+            modal.style.zIndex = String(this._baseZIndex + index * this._stackStep);
+            modal.inert = index !== topIndex;
+            modal.setAttribute('aria-hidden', index === topIndex ? 'false' : 'true');
+            if (index === topIndex) {
+                modal.setAttribute('aria-modal', 'true');
+            } else {
+                modal.removeAttribute('aria-modal');
+            }
+        });
+        document.body.classList.toggle('modal-open', this._activeModals.length > 0);
+    },
+
+    _restoreZIndex(modalId, modal) {
+        if (!this._originalZIndexes.has(modalId)) {
+            return;
+        }
+        const original = this._originalZIndexes.get(modalId);
+        if (original) {
+            modal.style.zIndex = original;
+        } else {
+            modal.style.removeProperty('z-index');
+        }
+        this._originalZIndexes.delete(modalId);
+    },
+
+    _focusModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (!modal || this._activeModals[this._activeModals.length - 1] !== modalId) {
+            return;
+        }
+        const content = modal.querySelector('.modal-content');
+        const focusTarget = modal.querySelector(
+            '[autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+        ) || content;
+        if (focusTarget) {
+            if (focusTarget === content && !content.hasAttribute('tabindex')) {
+                content.setAttribute('tabindex', '-1');
+            }
+            focusTarget.focus({ preventScroll: true });
+        }
+    },
+
+    _restoreFocus(modalId) {
+        const origin = this._focusOrigins.get(modalId);
+        this._focusOrigins.delete(modalId);
+        if (this._activeModals.length > 0) {
+            this._focusModal(this._activeModals[this._activeModals.length - 1]);
+        } else if (origin && origin.isConnected && typeof origin.focus === 'function') {
+            origin.focus({ preventScroll: true });
         }
     }
 };

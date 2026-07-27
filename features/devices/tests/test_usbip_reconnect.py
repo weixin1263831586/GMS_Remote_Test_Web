@@ -5,12 +5,18 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import HTTPException
+from pydantic import ValidationError
 from starlette.requests import Request
 
 from features.auth import CurrentUser
-from features.devices.models import DeviceActionRequest, USBIPStartRequest
+from features.devices.models import (
+    DeviceActionRequest,
+    USBIPDisconnectRequest,
+    USBIPStartRequest,
+)
 from features.devices.runtime import configure_runtime
 from features.devices.usbip import (
     USBIPManager,
@@ -77,6 +83,12 @@ class UsbipCredentialTests(unittest.TestCase):
     def tearDown(self):
         import features.devices.reconnect as reconnect
         reconnect.stop_usbip_reconnect_tasks(timeout=1)
+
+    def test_usbip_request_models_reject_shell_metacharacters_in_busids(self):
+        for model in (USBIPStartRequest, USBIPDisconnectRequest):
+            with self.subTest(model=model.__name__):
+                with self.assertRaises(ValidationError):
+                    model(busids=["1-1 & whoami"])
     def test_usbipd_persisted_guid_is_not_treated_as_busid(self):
         output = """
 Connected:
@@ -140,6 +152,419 @@ UNAUTH001	unauthorized
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
         self.assertEqual(manager._find_android_devices(object(), {}), ["1-1"])
+
+    def test_detach_source_sessions_clears_selected_export_without_unbind(self):
+        commands = []
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {"device_pswd": "secret"}
+
+            def find_device_host_password(self, device_host, config):
+                return "secret"
+
+        class FakeSsh:
+            def close(self):
+                pass
+
+        class FakeSshManager:
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                commands.append(cmd)
+                if cmd.startswith("tasklist "):
+                    return ("INFO: No tasks are running", "", 0)
+                return ("", "", 0)
+
+        manager = USBIPManager(FakeSshManager(), FakeConfigManager())
+        manager._create_windows_ssh = lambda *args: FakeSsh()
+        manager._is_windows_host = lambda ssh: True
+        manager.check_usbipd_installed = lambda ssh: (True, "5.3.0")
+
+        result = manager.detach_source_sessions(
+            "hcq@172.16.14.66",
+            ["1-1"],
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["detached_busids"], ["1-1"])
+        self.assertEqual(commands, [
+            "taskkill /F /IM adb.exe /T",
+            'tasklist /FI "IMAGENAME eq adb.exe" /NH',
+            "usbipd detach --busid 1-1",
+        ])
+        self.assertFalse(any("unbind" in command for command in commands))
+
+    def test_bind_source_devices_rejects_partial_bind_results(self):
+        class FakeConfigManager:
+            def load_config(self):
+                return {"device_pswd": "secret"}
+
+            def find_device_host_password(self, device_host, config):
+                return "secret"
+
+        class FakeSsh:
+            def close(self):
+                pass
+
+        manager = USBIPManager(config_manager=FakeConfigManager())
+        manager._create_windows_ssh = lambda *args: FakeSsh()
+        manager._is_windows_host = lambda ssh: True
+        manager.check_usbipd_installed = lambda ssh: (True, "5.3.0")
+        manager._find_android_devices = lambda ssh, config: ["1-1", "1-2"]
+        manager._stop_windows_adb = lambda ssh: {"success": True}
+        manager._bind_devices = lambda ssh, busids: ["1-1"]
+
+        result = manager.bind_source_devices(
+            "hcq@172.16.14.66",
+            ["1-1", "1-2"],
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("1-2", result["error"])
+
+    def test_stop_windows_adb_fails_if_server_restarts_immediately(self):
+        class FakeSshManager:
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                if cmd.startswith("tasklist "):
+                    return ("adb.exe 123 Console", "", 0)
+                return ("SUCCESS", "", 0)
+
+        manager = USBIPManager()
+        manager.ssh_manager = FakeSshManager()
+        with patch("features.devices.usbip.time.sleep", return_value=None):
+            result = manager._stop_windows_adb(object())
+
+        self.assertFalse(result["success"])
+        self.assertIn("仍在运行", result["error"])
+
+    def test_detach_source_sessions_rejects_invalid_busid(self):
+        manager = USBIPManager()
+        result = manager.detach_source_sessions(
+            "hcq@172.16.14.66",
+            ["1-1 & whoami"],
+        )
+        self.assertFalse(result["success"])
+        self.assertIn("BUSID", result["error"])
+
+    def test_detach_source_sessions_accepts_already_detached_device(self):
+        class FakeSshManager:
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                if cmd == "ver 2>&1":
+                    return ("Microsoft Windows", "", 0)
+                if cmd == "usbipd --version":
+                    return ("5.2.0", "", 0)
+                if cmd.startswith("taskkill "):
+                    return ("", "", 0)
+                if cmd.startswith("tasklist "):
+                    return ("INFO: No tasks are running", "", 0)
+                if cmd == "usbipd detach --busid 1-1":
+                    return (
+                        "",
+                        "usbipd: info: Device with busid '1-1' is not attached.",
+                        1,
+                    )
+                return ("", "", 0)
+
+        class FakeSSH:
+            def close(self):
+                pass
+
+        manager = USBIPManager()
+        manager.ssh_manager = FakeSshManager()
+        manager._create_windows_ssh = lambda *args, **kwargs: FakeSSH()
+        manager.config_manager = SimpleNamespace(
+            load_config=lambda: {
+                "device_pswd": "secret",
+                "client_ssh_credentials": [],
+            },
+            find_device_host_password=lambda *args: "secret",
+        )
+
+        result = manager.detach_source_sessions(
+            "hcq@172.16.14.66",
+            ["1-1"],
+            "secret",
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["detached_busids"], ["1-1"])
+
+    def test_manual_remote_connect_reclaims_busy_export_once(self):
+        import features.cluster as cluster_module
+        import features.cluster.api as cluster_api
+        import features.devices.integrations_api as integrations
+
+        runtime_config = {}
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {"device_pswd": "secret", "client_ssh_credentials": []}
+
+            def get_runtime_config(self):
+                return dict(runtime_config)
+
+            def save_runtime_config(self, data):
+                runtime_config.clear()
+                runtime_config.update(data)
+                return True
+
+        class FakeUsbipManager:
+            def __init__(self):
+                self.detach_calls = []
+                self.bind_calls = []
+
+            def bind_source_devices(self, device_host, busids, device_password):
+                self.bind_calls.append(
+                    (device_host, list(busids), device_password)
+                )
+                return {
+                    "success": True,
+                    "source_host": "172.16.14.66",
+                    "busids": list(busids),
+                }
+
+            def detach_source_sessions(self, device_host, busids, device_password):
+                self.detach_calls.append((device_host, list(busids), device_password))
+                return {"success": True, "detached_busids": list(busids)}
+
+        fake_manager = FakeUsbipManager()
+        fake_cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="worker-local"),
+            repository=SimpleNamespace(
+                get_worker=lambda worker_id: {
+                    "capabilities": {"usbip_client": True},
+                }
+            ),
+        )
+        run_worker = AsyncMock(side_effect=[
+            HTTPException(
+                status_code=502,
+                detail=(
+                    "USB设备仍被其他Worker或残留USB/IP会话占用；"
+                    "1-1: Device busy (exported)"
+                ),
+            ),
+            {
+                "attached_busids": ["1-1"],
+                "devices": [{"serial": "USBIP001"}],
+                "new_devices": ["USBIP001"],
+            },
+        ])
+        request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+
+        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+                patch.object(integrations, "usbip_manager", fake_manager), \
+                patch.object(
+                    integrations.runtime,
+                    "get_client_id_from_request",
+                    return_value="hcq@172.16.14.66",
+                ), \
+                patch.object(cluster_module, "get_cluster_service", return_value=fake_cluster), \
+                patch.object(cluster_api, "_require_cluster_enabled"), \
+                patch.object(cluster_api, "_run_worker_command", run_worker), \
+                patch.object(integrations.asyncio, "sleep", AsyncMock()):
+            response = asyncio.run(integrations.start_usbip(
+                req=USBIPStartRequest(
+                    device_host="hcq@172.16.14.66",
+                    worker_id="ats-worker-246",
+                    busids=["1-1"],
+                    manual_connect=True,
+                ),
+                request=request,
+                help=False,
+            ))
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(body["success"])
+        self.assertTrue(body["recovered_stale_session"])
+        self.assertEqual(run_worker.await_count, 2)
+        self.assertEqual(
+            fake_manager.detach_calls,
+            [("hcq@172.16.14.66", ["1-1"], "secret")],
+        )
+        self.assertEqual(
+            fake_manager.bind_calls,
+            [
+                ("hcq@172.16.14.66", ["1-1"], "secret"),
+                ("hcq@172.16.14.66", ["1-1"], "secret"),
+            ],
+        )
+        assignment = runtime_config["usbip_cluster_assignments"][
+            "hcq@172.16.14.66|1-1"
+        ]
+        self.assertEqual(assignment["worker_id"], "ats-worker-246")
+        self.assertEqual(assignment["status"], "attached")
+
+    def test_device_error_state_is_recoverable_for_manual_remote_attach(self):
+        import features.devices.integrations_api as integrations
+
+        error = HTTPException(
+            status_code=502,
+            detail=(
+                "1-1: usbip: error: Attach Request for 1-1 failed "
+                "- Device in error state"
+            ),
+        )
+        self.assertTrue(
+            integrations._is_usbip_recoverable_attach_error(error)
+        )
+        self.assertFalse(integrations._is_usbip_export_busy(error))
+
+    def test_remote_detach_claims_devices_and_applies_empty_snapshot(self):
+        import features.cluster as cluster_module
+        import features.cluster.api as cluster_api
+        import features.devices.integrations_api as integrations
+
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "hcq@172.16.14.66|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "ats-worker-246",
+                    "busid": "1-1",
+                    "device_serials": ["USBIP001"],
+                    "status": "attached",
+                    "timestamp": 1,
+                },
+            },
+        }
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {}
+
+            def get_runtime_config(self):
+                return dict(runtime_config)
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
+
+        repository = MagicMock()
+        repository.get_worker.return_value = {"status": "online"}
+        repository.acquire_device_operation_claim.return_value = [{
+            "id": "claim-1",
+            "device_key": "ats-worker-246:USBIP001",
+            "generation": 2,
+        }]
+        repository.claim_fencing_tokens.return_value = [{
+            "lease_id": "claim-1",
+            "device_id": "ats-worker-246:USBIP001",
+            "generation": 2,
+            "attempt_id": "operation-1",
+        }]
+        fake_cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="worker-local"),
+            repository=repository,
+        )
+        run_worker = AsyncMock(return_value={
+            "detached_ports": ["00"],
+            "devices": [],
+        })
+        request = SimpleNamespace(
+            headers={},
+            client=SimpleNamespace(host="127.0.0.1"),
+        )
+        user = CurrentUser(id="admin-id", username="admin", role="admin")
+
+        with patch.object(
+            integrations.runtime, "config_manager", FakeConfigManager()
+        ), patch.object(
+            integrations.runtime,
+            "get_client_id_from_request",
+            return_value="hcq@172.16.14.66",
+        ), patch.object(
+            cluster_module, "get_cluster_service", return_value=fake_cluster
+        ), patch.object(
+            cluster_api, "_require_cluster_enabled"
+        ), patch.object(
+            cluster_api, "_run_worker_command", run_worker
+        ):
+            response = asyncio.run(integrations.stop_usbip(
+                request=request,
+                req=USBIPDisconnectRequest(
+                    device_host="hcq@172.16.14.66",
+                    source_host="172.16.14.66",
+                    worker_id="ats-worker-246",
+                    busids=["1-1"],
+                ),
+                _elevated=user,
+            ))
+
+        self.assertEqual(response.status_code, 200)
+        repository.acquire_device_operation_claim.assert_called_once()
+        command_payload = run_worker.await_args.args[2]
+        self.assertEqual(command_payload["devices"], ["USBIP001"])
+        self.assertTrue(command_payload["lease_tokens"])
+        repository.refresh_worker_devices.assert_called_once_with(
+            "ats-worker-246", []
+        )
+        self.assertNotIn(
+            "hcq@172.16.14.66|1-1",
+            runtime_config["usbip_cluster_assignments"],
+        )
+
+    def test_remote_detach_refuses_an_active_device_claim(self):
+        import features.cluster as cluster_module
+        import features.cluster.api as cluster_api
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {}
+
+            def get_runtime_config(self):
+                return {
+                    "usbip_cluster_assignments": {
+                        "hcq@172.16.14.66|1-1": {
+                            "device_host": "hcq@172.16.14.66",
+                            "source_host": "172.16.14.66",
+                            "worker_id": "ats-worker-246",
+                            "busid": "1-1",
+                            "device_serials": ["USBIP001"],
+                            "status": "attached",
+                        },
+                    },
+                }
+
+        repository = MagicMock()
+        repository.get_worker.return_value = {"status": "busy"}
+        repository.acquire_device_operation_claim.side_effect = ValueError(
+            "device is already claimed by active-test"
+        )
+        fake_cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="worker-local"),
+            repository=repository,
+        )
+        run_worker = AsyncMock()
+        user = CurrentUser(id="admin-id", username="admin", role="admin")
+
+        with patch.object(
+            integrations.runtime, "config_manager", FakeConfigManager()
+        ), patch.object(
+            integrations.runtime,
+            "get_client_id_from_request",
+            return_value="hcq@172.16.14.66",
+        ), patch.object(
+            cluster_module, "get_cluster_service", return_value=fake_cluster
+        ), patch.object(
+            cluster_api, "_require_cluster_enabled"
+        ), patch.object(
+            cluster_api, "_run_worker_command", run_worker
+        ):
+            response = asyncio.run(integrations.stop_usbip(
+                request=SimpleNamespace(headers={}, client=None),
+                req=USBIPDisconnectRequest(
+                    device_host="hcq@172.16.14.66",
+                    source_host="172.16.14.66",
+                    worker_id="ats-worker-246",
+                    busids=["1-1"],
+                ),
+                _elevated=user,
+            ))
+
+        self.assertEqual(response.status_code, 409)
+        run_worker.assert_not_awaited()
 
     def test_attach_devices_reports_only_successful_attach_commands(self):
         class FakeSshManager:
@@ -607,6 +1032,41 @@ UNAUTH001	unauthorized
         self.assertEqual(hosts, [])
         self.assertEqual(scheduled, [])
 
+    def test_remote_worker_assignment_blocks_local_reconnect(self):
+        import features.devices.reconnect as reconnect
+
+        fake_runtime = {
+            "usbip_cluster_assignments": {
+                "hcq@172.16.14.66|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "ats-worker-246",
+                    "busid": "1-1",
+                    "status": "attached",
+                    "timestamp": 1,
+                },
+                "hcq@172.16.14.66|1-2": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "worker-local",
+                    "busid": "1-2",
+                    "status": "attached",
+                    "timestamp": 1,
+                },
+            },
+        }
+        with patch.object(reconnect, "_local_worker_id", return_value="worker-local"), patch.object(
+            reconnect.runtime.config_manager, "get_runtime_config", return_value=fake_runtime
+        ):
+            # A busid on this host belongs to a remote Worker.
+            self.assertTrue(reconnect._device_host_has_remote_assignment("hcq@172.16.14.66"))
+            # Hostname-only form (no user@) still matches via source_host.
+            self.assertTrue(reconnect._device_host_has_remote_assignment("172.16.14.66"))
+            # An unrelated host is unaffected.
+            self.assertFalse(reconnect._device_host_has_remote_assignment("10.0.0.9"))
+            # Local reconnect scheduling must be refused for the contended host.
+            self.assertFalse(reconnect.schedule_usbip_reconnect("hcq@172.16.14.66"))
+
     def test_usbip_disconnect_finds_devices_from_runtime_sources(self):
         import features.devices.integrations_api as integrations
 
@@ -800,6 +1260,39 @@ UNAUTH001	unauthorized
         self.assertEqual(detach_calls, [("172.16.14.66", False), (None, True)])
         self.assertEqual(result["detached_ports"], ["00", "01"])
         self.assertEqual(result["remaining_devices"], [])
+
+    def test_verified_detach_can_defer_settle_until_source_unbind(self):
+        import features.devices.integrations_api as integrations
+
+        class FakeSshManager:
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                if cmd == "adb devices":
+                    return (
+                        "List of devices attached\nUSBIP001\tdevice\n",
+                        "",
+                        0,
+                    )
+                return ("", "", 0)
+
+        with patch.object(
+            integrations.runtime, "ssh_manager", FakeSshManager()
+        ), patch.object(
+            integrations,
+            "detach_ubuntu_usbip_ports",
+            return_value=["00"],
+        ), patch.object(integrations.time, "sleep") as sleep:
+            result = integrations._detach_ubuntu_usbip_for_devices(
+                "ubuntu-ssh",
+                device_host="hcq@172.16.14.66",
+                usbip_attach_host=None,
+                devices_to_remove=["USBIP001"],
+                busids=["1-1"],
+                settle=False,
+            )
+
+        self.assertEqual(result["detached_ports"], ["00"])
+        self.assertEqual(result["remaining_devices"], ["USBIP001"])
+        sleep.assert_not_called()
 
     def test_device_list_refresh_keeps_usbip_source_for_reconnect(self):
         import features.devices.api as devices_router

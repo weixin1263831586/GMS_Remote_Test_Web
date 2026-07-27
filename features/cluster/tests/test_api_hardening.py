@@ -56,7 +56,7 @@ class ClusterApiHardeningTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.env = patch.dict(
-            "os.environ", {"GMS_CLUSTER_CONFIG": str(self.tokens_path)}
+            "os.environ", {"GMS_WORKER_TOKENS_FILE": str(self.tokens_path)}
         )
         self.env.start()
 

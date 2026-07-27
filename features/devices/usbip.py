@@ -43,7 +43,12 @@ USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行Power
 验证安装：usbipd --version'''
 
 
-def detach_ubuntu_usbip_ports(ssh, remote_host: str | None = '127.0.0.1', detach_all: bool = False) -> list[str]:
+def detach_ubuntu_usbip_ports(
+    ssh,
+    remote_host: str | None = '127.0.0.1',
+    detach_all: bool = False,
+    busids: list[str] | None = None,
+) -> list[str]:
     """Detach Ubuntu usbip ports that point to a remote USB/IP host."""
     detached: list[str] = []
     stdout, stderr, code = usbip_manager.ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
@@ -57,7 +62,9 @@ def detach_ubuntu_usbip_ports(ssh, remote_host: str | None = '127.0.0.1', detach
         port_match = re.match(r'\s*Port\s+(\d+):', line)
         if port_match:
             block_text = '\n'.join(current_block)
-            if current_port and (detach_all or (remote_host and remote_host in block_text)):
+            host_matches = bool(remote_host and remote_host in block_text)
+            busid_matches = not busids or any(busid in block_text for busid in busids)
+            if current_port and (detach_all or (host_matches and busid_matches)):
                 detach_out, detach_err, detach_code = usbip_manager.ssh_manager.execute_command(
                     ssh, f'sudo usbip detach -p {current_port}', timeout=15
                 )
@@ -147,7 +154,8 @@ class USBIPManager:
         self,
         device_host: str,
         device_password: str | None = None,
-        usbip_attach_host: str | None = None
+        usbip_attach_host: str | None = None,
+        selected_busids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Start USB/IP forwarding to the Ubuntu host over the given Windows device_host.
 
@@ -209,7 +217,11 @@ class USBIPManager:
 
                 self.ssh_manager.execute_command(win_ssh, 'taskkill /F /IM adb.exe /T')
 
-                busids = self._find_android_devices(win_ssh, config)
+                discovered_busids = self._find_android_devices(win_ssh, config)
+                requested = [str(item) for item in selected_busids or []]
+                busids = requested or discovered_busids
+                if requested and not set(requested).issubset(discovered_busids):
+                    return {'success': False, 'error': '选择的USB设备已不可用，请刷新后重试'}
                 if not busids:
                     win_ssh.close()
                     return {'success': False, 'error': '未找到Android设备'}
@@ -284,6 +296,187 @@ class USBIPManager:
             logger.error(f"Error in start_usbip: {e}")
             return {'success': False, 'error': str(e)}
 
+    def list_source_devices(
+        self, device_host: str, device_password: str | None = None
+    ) -> dict[str, Any]:
+        """List Android USB/IP busids on a Windows source without binding."""
+        config = self.config_manager.load_config()
+        password = (
+            device_password
+            or self.config_manager.find_device_host_password(device_host, config)
+            or config.get("device_pswd", "")
+        )
+        if not password:
+            return {"success": False, "error": f"未找到 {device_host} 的SSH凭据"}
+        username, hostname = parse_host_address(device_host)
+        ssh_hostname, ssh_port = split_host_port(hostname)
+        ssh = self._create_windows_ssh(ssh_hostname, username, password, ssh_port)
+        if not ssh:
+            return {"success": False, "error": f"SSH连接失败到 {device_host}"}
+        try:
+            if not self._is_windows_host(ssh):
+                return {"success": False, "error": "USB/IP仅支持Windows主机"}
+            output = self._usbipd_list_output(ssh)
+            busids = parse_usbipd_android_busids(
+                output, config.get("usbip_vid_pid")
+            )
+            labels = {}
+            for line in output.splitlines():
+                stripped = line.strip()
+                parts = stripped.split()
+                if parts and parts[0] in busids:
+                    labels[parts[0]] = re.sub(r"\s+", " ", stripped)
+            return {
+                "success": True,
+                "device_host": device_host,
+                "devices": [
+                    {"busid": item, "label": labels.get(item, item)}
+                    for item in busids
+                ],
+            }
+        finally:
+            ssh.close()
+
+    def bind_source_devices(
+        self,
+        device_host: str,
+        busids: list[str],
+        device_password: str | None = None,
+    ) -> dict[str, Any]:
+        """Bind selected Windows USB devices for a remote Worker attach."""
+        config = self.config_manager.load_config()
+        password = (
+            device_password
+            or self.config_manager.find_device_host_password(device_host, config)
+            or config.get("device_pswd", "")
+        )
+        if not password:
+            return {"success": False, "error": f"未找到 {device_host} 的SSH凭据"}
+        username, hostname = parse_host_address(device_host)
+        ssh_hostname, ssh_port = split_host_port(hostname)
+        ssh = self._create_windows_ssh(ssh_hostname, username, password, ssh_port)
+        if not ssh:
+            return {"success": False, "error": f"SSH连接失败到 {device_host}"}
+        try:
+            if not self._is_windows_host(ssh):
+                return {"success": False, "error": "USB/IP仅支持Windows主机"}
+            if not self.check_usbipd_installed(ssh)[0]:
+                return {"success": False, "error": "usbipd未安装"}
+            selected = list(dict.fromkeys(
+                str(item or "").strip() for item in busids or []
+            ))
+            if not selected or any(
+                not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", item)
+                for item in selected
+            ):
+                return {"success": False, "error": "无效的USB/IP BUSID"}
+            available = set(self._find_android_devices(ssh, config))
+            unavailable = [item for item in selected if item not in available]
+            if unavailable:
+                return {
+                    "success": False,
+                    "error": (
+                        "选择的USB设备已不可用，请刷新后重试: "
+                        + ", ".join(unavailable)
+                    ),
+                }
+            adb_release = self._stop_windows_adb(ssh)
+            if not adb_release.get("success"):
+                return {
+                    "success": False,
+                    "error": f"释放Windows ADB占用失败: {adb_release.get('error')}",
+                }
+            bound = self._bind_devices(ssh, selected)
+            if set(bound) != set(selected):
+                missing = [item for item in selected if item not in bound]
+                return {
+                    "success": False,
+                    "error": "部分USB设备绑定失败: " + ", ".join(missing),
+                }
+            return {
+                "success": True,
+                "device_host": device_host,
+                "source_host": config.get("usbip_attach_host") or ssh_hostname,
+                "busids": bound,
+            }
+        finally:
+            ssh.close()
+
+    def detach_source_sessions(
+        self,
+        device_host: str,
+        busids: list[str],
+        device_password: str | None = None,
+    ) -> dict[str, Any]:
+        """Drop stale usbipd exports without removing persistent bindings."""
+        selected = [str(item).strip() for item in busids or []]
+        if not selected or any(
+            not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", item)
+            for item in selected
+        ):
+            return {"success": False, "error": "无效的USB/IP BUSID"}
+
+        config = self.config_manager.load_config()
+        password = (
+            device_password
+            or self.config_manager.find_device_host_password(device_host, config)
+            or config.get("device_pswd", "")
+        )
+        if not password:
+            return {"success": False, "error": f"未找到 {device_host} 的SSH凭据"}
+
+        username, hostname = parse_host_address(device_host)
+        ssh_hostname, ssh_port = split_host_port(hostname)
+        ssh = self._create_windows_ssh(ssh_hostname, username, password, ssh_port)
+        if not ssh:
+            return {"success": False, "error": f"SSH连接失败到 {device_host}"}
+
+        try:
+            if not self._is_windows_host(ssh):
+                return {"success": False, "error": "USB/IP仅支持Windows主机"}
+            if not self.check_usbipd_installed(ssh)[0]:
+                return {"success": False, "error": "usbipd未安装"}
+
+            adb_release = self._stop_windows_adb(ssh)
+            if not adb_release.get("success"):
+                return {
+                    "success": False,
+                    "error": f"释放Windows ADB占用失败: {adb_release.get('error')}",
+                }
+
+            detached = []
+            errors = {}
+            for busid in selected:
+                stdout, stderr, code = self.ssh_manager.execute_command(
+                    ssh,
+                    f"usbipd detach --busid {busid}",
+                    timeout=15,
+                )
+                detail = (stderr or stdout or "").strip()
+                normalized_detail = detail.lower()
+                if code == 0 or any(
+                    marker in normalized_detail
+                    for marker in (
+                        "already not attached",
+                        "is not attached",
+                        "not currently attached",
+                        "no devices are currently attached",
+                    )
+                ):
+                    detached.append(busid)
+                else:
+                    errors[busid] = detail or f"usbipd detach exited with code {code}"
+            return {
+                "success": not errors,
+                "detached_busids": detached,
+                "errors": errors,
+                "error": "; ".join(
+                    f"{busid}: {detail}" for busid, detail in errors.items()
+                ),
+            }
+        finally:
+            ssh.close()
+
     def stop_usbip(self, client_id: str | None = None) -> dict[str, Any]:
         """Stop USB/IP forwarding for client_id, keeping device-source records for re-attach."""
         try:
@@ -342,17 +535,7 @@ class USBIPManager:
 
     def _find_android_devices(self, ssh, config: dict[str, Any]) -> list[str]:
         try:
-            # usbipd list 需要 PTY 才会返回完整设备表。
-            stdout, stderr, code = self.ssh_manager.execute_command(
-                ssh,
-                'usbipd list',
-                timeout=15,
-                get_pty=True
-            )
-            output = "\n".join(part for part in (stdout, stderr) if part)
-
-            logger.info(f"USB/IP devices (code={code}):\n{output}")
-
+            output = self._usbipd_list_output(ssh)
             devices = parse_usbipd_android_busids(output, config.get('usbip_vid_pid'))
             logger.info(f"Found USB/IP devices: {devices}")
             return devices
@@ -361,11 +544,32 @@ class USBIPManager:
             logger.error(f"Error finding Android devices: {e}")
             return []
 
+    def _usbipd_list_output(self, ssh) -> str:
+        # usbipd list 需要 PTY 才会返回完整设备表。
+        stdout, stderr, code = self.ssh_manager.execute_command(
+            ssh, "usbipd list", timeout=15, get_pty=True
+        )
+        output = "\n".join(part for part in (stdout, stderr) if part)
+        logger.info("USB/IP devices (code=%s):\n%s", code, output)
+        return output
+
     def _bind_devices(self, ssh, busids: list[str]) -> list[str]:
         bound = []
         for busid in busids:
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", str(busid or "")):
+                logger.error("Rejected invalid USB/IP busid: %r", busid)
+                continue
             try:
-                stdout, _, _ = self.ssh_manager.execute_command(ssh, f'usbipd list | findstr {busid}')
+                stdout, stderr, list_code = self.ssh_manager.execute_command(
+                    ssh, f"usbipd list | findstr {busid}"
+                )
+                if list_code not in {0, 1}:
+                    logger.error(
+                        "Failed to inspect USB/IP device %s: %s",
+                        busid,
+                        (stderr or stdout).strip(),
+                    )
+                    continue
 
                 if 'Shared' in stdout:
                     logger.info(f"Device {busid} already shared")
@@ -373,11 +577,35 @@ class USBIPManager:
                     continue
                 elif 'Attached' in stdout:
                     # Detach first
-                    self.ssh_manager.execute_command(ssh, f'usbipd detach --busid {busid}', timeout=15)
+                    detach_out, detach_err, detach_code = (
+                        self.ssh_manager.execute_command(
+                            ssh,
+                            f"usbipd detach --busid {busid}",
+                            timeout=15,
+                        )
+                    )
+                    if detach_code != 0:
+                        logger.error(
+                            "Failed to detach USB/IP device %s before bind: %s",
+                            busid,
+                            (detach_err or detach_out).strip(),
+                        )
+                        continue
                     time.sleep(1)
 
                 # Bind
-                self.ssh_manager.execute_command(ssh, f'usbipd bind --busid {busid}', timeout=15)
+                bind_out, bind_err, bind_code = self.ssh_manager.execute_command(
+                    ssh,
+                    f"usbipd bind --busid {busid}",
+                    timeout=15,
+                )
+                if bind_code != 0:
+                    logger.error(
+                        "Failed to bind USB/IP device %s: %s",
+                        busid,
+                        (bind_err or bind_out).strip(),
+                    )
+                    continue
                 time.sleep(2)
                 logger.info(f"Device {busid} bound")
                 bound.append(busid)
@@ -386,6 +614,36 @@ class USBIPManager:
                 logger.error(f"Error binding device {busid}: {e}")
 
         return bound
+
+    def _stop_windows_adb(self, ssh) -> dict[str, Any]:
+        """Release Android USB handles held by the Windows ADB server."""
+        stop_out, stop_err, stop_code = self.ssh_manager.execute_command(
+            ssh,
+            "taskkill /F /IM adb.exe /T",
+            timeout=15,
+        )
+        time.sleep(1)
+        list_out, list_err, list_code = self.ssh_manager.execute_command(
+            ssh,
+            'tasklist /FI "IMAGENAME eq adb.exe" /NH',
+            timeout=10,
+        )
+        if list_code != 0:
+            return {
+                "success": False,
+                "error": (list_err or list_out).strip() or "无法确认Windows ADB状态",
+            }
+        if "adb.exe" in (list_out or "").lower():
+            return {
+                "success": False,
+                "error": "Windows adb.exe 仍在运行，USB设备句柄未释放",
+            }
+        logger.info(
+            "Windows ADB stopped before USB/IP export: code=%s detail=%s",
+            stop_code,
+            (stop_err or stop_out).strip(),
+        )
+        return {"success": True}
 
     def _ensure_vhci_driver(self, ssh):
         try:

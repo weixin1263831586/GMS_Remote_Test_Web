@@ -25,18 +25,19 @@
     header .filter-bar input#syncAssigneeInput { width:200px; min-width:200px; }
 
     /* Modal */
-    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:9999; padding:20px; }
+    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:10000; padding:clamp(8px,2.5vw,20px); overflow:hidden; overscroll-behavior:contain; }
     .modal.show { display:flex; }
-    .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4); max-width:400px; width:100%; max-height:85vh; display:flex; flex-direction:column; overflow:hidden; }
-    .modal-header { background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; }
+    .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4); max-width:400px; width:100%; max-height:min(85vh,calc(100dvh - 16px)); min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+    .modal-header { background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; gap:10px; min-width:0; }
     .modal-title { color:#fff; font-size:15px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .modal-close { color:#fff; font-size:22px; cursor:pointer; line-height:1; background:none; border:none; padding:0; height:auto; }
     .modal-close:hover { color:#ccc; }
-    .modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; min-height:0; flex:1; }
+    .modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; overscroll-behavior:contain; min-width:0; min-height:0; flex:1; overflow-wrap:anywhere; }
+    .modal-body > *, .modal-header > *, .modal-buttons > *, .modal-footer > * { min-width:0; max-width:100%; }
     .modal-body label { font-size:13px; font-weight:600; color:var(--muted); margin-bottom:2px; display:block; }
-    .modal-body input { width:100%; padding:8px 10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; }
-    .modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:6px; }
-    .modal-footer { display:flex; gap:8px; justify-content:flex-end; padding:12px 16px; border-top:1px solid var(--border); flex-shrink:0; }
+    .modal-body input, .modal-body select, .modal-body textarea { width:100%; min-width:0; max-width:100%; padding:8px 10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; }
+    .modal-buttons { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:6px; }
+    .modal-footer { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; padding:12px 16px; border-top:1px solid var(--border); flex-shrink:0; }
     .redmine-reply-modal { max-width:760px; }
     .redmine-reply-modal textarea { width:100%; min-height:280px; resize:vertical; padding:10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; line-height:1.5; font-family:"Courier New", monospace; }
     .redmine-reply-drop { width:100%; padding:18px 12px; text-align:center; cursor:pointer; border:2px dashed var(--border); border-radius:6px; background:var(--panel2); color:var(--muted); font-size:12px; transition:border-color .15s, background .15s; }
@@ -44,6 +45,15 @@
     .redmine-reply-file-list { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
     .redmine-reply-file { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border:1px solid var(--border); border-radius:5px; background:var(--panel2); font-size:12px; }
     .redmine-reply-file button { padding:2px 8px; font-size:11px; }
+    html.modal-open, body.modal-open { overflow:hidden; }
+    @media (max-width:560px) {
+        .modal-buttons, .modal-footer { flex-direction:column; }
+        .modal-buttons button, .modal-footer button { width:100%; }
+    }
+    @media (max-height:560px) {
+        .modal { align-items:stretch; }
+        .modal-content { max-height:calc(100dvh - 16px); }
+    }
 
     /* Tabs — inline in header, left side */
     .tabs { display:flex; gap:0; }
@@ -228,6 +238,16 @@
     pre { white-space:pre-wrap; word-break:break-word; background:#090c11; border:1px solid var(--border); border-radius:6px; padding:10px; color:#d7e1f5; font-size:12px; }
 
     @media (max-width:900px) { header { grid-template-columns:1fr; row-gap:8px; } .tabs { margin-left:0; width:100%; } header .filter-bar { width:100%; min-width:0; } header .filter-bar input { width:140px; min-width:140px; } header .btn-group { width:100%; min-width:0; justify-content:flex-start; } .two-col { grid-template-columns:1fr; } .issue-mini { grid-template-columns:1fr; gap:6px; align-items:start; } .issue-mini-right { justify-content:flex-start; flex-wrap:wrap; } .issue-mini-right-meta { text-align:left; } }
+    @media (max-width:900px) {
+        .tabs { overflow-x:auto; flex-wrap:nowrap; }
+        .tab { flex:0 0 auto; }
+        header .filter-bar, header .btn-group { flex-wrap:wrap; }
+        header .filter-bar input, header .filter-bar select {
+            flex:1 1 140px;
+            width:auto !important;
+            min-width:0;
+        }
+    }
 
     /* ---- Knowledge base: case cards + actions ---- */
     .knowledge-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); }
