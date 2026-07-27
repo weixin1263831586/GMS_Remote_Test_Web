@@ -18,7 +18,11 @@ from pathlib import Path
 import paramiko
 from fastapi import APIRouter, Depends, HTTPException
 
-from features.auth import CurrentUser, require_role, require_role_when_auth_required
+from features.auth import (
+    CurrentUser,
+    require_elevated_admin_when_auth_required,
+    require_role_when_auth_required,
+)
 from foundation.config import config_manager
 from foundation.networking import split_host_port
 from foundation.ssh_security import (
@@ -213,7 +217,9 @@ def _deployment_host(connection: str) -> tuple[str, str, int]:
 @router.post("/workers/ssh-host-key/scan")
 async def scan_worker_ssh_host_key(
     body: dict,
-    _admin: CurrentUser = Depends(require_role("admin")),
+    _admin: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
 ):
     """Return untrusted fingerprints for explicit administrator verification."""
     connection = str(body.get("ssh_host") or "").strip()
@@ -228,7 +234,9 @@ async def scan_worker_ssh_host_key(
 @router.post("/workers/ssh-host-key/trust")
 async def trust_worker_ssh_host_key(
     body: dict,
-    _admin: CurrentUser = Depends(require_role("admin")),
+    _admin: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
 ):
     """Persist only fingerprints that match a fresh server-side key scan."""
     connection = str(body.get("ssh_host") or "").strip()
@@ -254,7 +262,9 @@ async def trust_worker_ssh_host_key(
 @router.post("/workers/deploy")
 async def deploy_worker(
     body: dict,
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _admin: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
 ):
     """Upload and install a Worker using explicitly supplied SSH credentials."""
     worker_id = str(body.get("worker_id") or "").strip()
@@ -324,6 +334,10 @@ async def deploy_worker(
                 bundle.add(
                     project_root / "scripts/install_cluster_worker.sh",
                     arcname="scripts/install_cluster_worker.sh",
+                )
+                bundle.add(
+                    project_root / "scripts/gms_worker_usbip.sh",
+                    arcname="scripts/gms_worker_usbip.sh",
                 )
                 bundle.add(
                     project_root / "scripts/configure_gms_host_tools.py",

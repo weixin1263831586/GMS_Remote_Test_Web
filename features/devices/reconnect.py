@@ -81,6 +81,66 @@ def is_usbip_reconnect_suppressed(device_host: str = "", device_id: str = "") ->
     return False
 
 
+def _normalize_host(host: str) -> str:
+    """Strip user@ prefix and whitespace so host identities compare reliably."""
+    host = str(host or "").strip()
+    if "@" in host:
+        host = host.split("@", 1)[-1]
+    return host
+
+
+def _local_worker_id() -> str:
+    try:
+        from features.cluster import get_cluster_service
+
+        return str(get_cluster_service().config.local_worker_id or "")
+    except Exception:
+        return ""
+
+
+def _device_host_has_remote_assignment(device_host: str) -> bool:
+    """Return True if any busid on this source host is assigned to a remote Worker.
+
+    The local reconnect worker re-attaches a whole source host's USB/IP exports.
+    If those exports were explicitly assigned to a remote Worker, a blind local
+    re-attach steals them back and the two hosts flap the device between each
+    other. ``usbip_cluster_assignments`` is written by the connect/disconnect
+    endpoints and is the source of truth for cluster-wide ownership.
+    """
+    target = _normalize_host(device_host)
+    if not target:
+        return False
+    local = _local_worker_id()
+    now = time.time()
+    getter = getattr(runtime.config_manager, "get_runtime_config", None)
+    runtime_config = getter() if callable(getter) else {}
+    runtime_config = runtime_config or {}
+    assignments = runtime_config.get("usbip_cluster_assignments") or {}
+    if not isinstance(assignments, dict):
+        return False
+    for info in assignments.values():
+        if not isinstance(info, dict):
+            continue
+        status = info.get("status")
+        worker_id = str(info.get("worker_id") or "")
+        if not worker_id or worker_id == local:
+            continue
+        # "attaching" is transient; ignore stale entries left by a crashed attach.
+        if status == "attaching" and now - float(info.get("timestamp") or 0) > 120:
+            continue
+        if status not in {
+            "attaching", "attached", "unknown", "cleanup_required",
+        }:
+            continue
+        candidates = {
+            _normalize_host(info.get("device_host")),
+            _normalize_host(info.get("source_host")),
+        }
+        if target in candidates:
+            return True
+    return False
+
+
 def filter_suppressed_usbip_devices(devices: Iterable[str]) -> list[str]:
     """Hide manually disconnected USB/IP serials from generic device views."""
     filtered: list[str] = []
@@ -166,6 +226,13 @@ def schedule_usbip_reconnect(
         return False
     if is_usbip_reconnect_suppressed(device_host):
         logger.info("[USB/IP Reconnect] suppressed for %s (%s)", device_host, reason)
+        return False
+    if _device_host_has_remote_assignment(device_host):
+        logger.info(
+            "[USB/IP Reconnect] %s is assigned to a remote Worker, skipping local reconnect (%s)",
+            device_host,
+            reason,
+        )
         return False
 
     with _tasks_lock:
@@ -309,6 +376,12 @@ def _reconnect_worker(
                 logger.info("[USB/IP Reconnect] stopped by manual disconnect suppression for %s", device_host)
                 return
             if stop_event.is_set():
+                return
+            if _device_host_has_remote_assignment(device_host):
+                logger.info(
+                    "[USB/IP Reconnect] stopping for %s, its devices were reassigned to a remote Worker",
+                    device_host,
+                )
                 return
             result = usbip_manager.start_usbip(device_host, device_password)
             if is_usbip_reconnect_suppressed(device_host) or stop_event.is_set():

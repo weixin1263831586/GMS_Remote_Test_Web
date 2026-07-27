@@ -1,9 +1,6 @@
-"""Worker token parsing, persistence, and request authentication.
+"""Worker token parsing, private persistence, and request authentication.
 
-Tokens live inside ``configs/cluster.json`` under the ``worker_tokens`` key
-(a JSON object mapping ``worker_id`` to ``token``).  The cluster config path
-can be overridden with the ``GMS_CLUSTER_CONFIG`` environment variable, the
-same variable used by :class:`features.cluster.config.ClusterConfig`.
+Tokens are stored exclusively in a separate ``0600`` JSON file.
 """
 
 from __future__ import annotations
@@ -13,19 +10,22 @@ import hmac
 import json
 import os
 from pathlib import Path
+import threading
 
 from fastapi import HTTPException
 
 
-def _cluster_config_path() -> Path:
-    """Return the path to ``configs/cluster.json``."""
-    configured = os.getenv("GMS_CLUSTER_CONFIG", "").strip()
+_token_lock = threading.RLock()
+
+
+def _worker_tokens_path() -> Path:
+    configured = os.getenv("GMS_WORKER_TOKENS_FILE", "").strip()
     if configured:
         return Path(configured)
-    return Path(__file__).resolve().parents[2] / "configs" / "cluster.json"
+    return Path(__file__).resolve().parents[2] / "configs" / "worker_tokens.json"
 
 
-def _read_cluster_raw(path: Path) -> dict:
+def _read_token_raw(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
@@ -35,30 +35,53 @@ def _read_cluster_raw(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def worker_tokens(file_path: Path | None = None) -> dict[str, str]:
-    """Return the worker→token map stored under ``worker_tokens`` in cluster.json."""
-    raw = _read_cluster_raw(file_path or _cluster_config_path())
-    tokens = raw.get("worker_tokens")
-    if isinstance(tokens, dict):
-        return {str(k): str(v) for k, v in tokens.items() if v}
-    return {}
+def _token_map(raw: dict) -> dict[str, str]:
+    tokens = raw.get("worker_tokens") if isinstance(raw, dict) else None
+    if not isinstance(tokens, dict):
+        return {}
+    return {str(k): str(v) for k, v in tokens.items() if v}
 
 
-def write_worker_tokens(tokens: dict[str, str], file_path: Path | None = None) -> None:
-    """Persist the worker→token map into ``worker_tokens`` within cluster.json.
-
-    Existing cluster configuration keys are preserved; only ``worker_tokens``
-    is replaced.
-    """
-    path = file_path or _cluster_config_path()
-    raw = _read_cluster_raw(path)
-    raw["worker_tokens"] = dict(sorted(tokens.items()))
+def _write_private_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
     )
-    path.chmod(0o600)
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        path.chmod(0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def worker_tokens() -> dict[str, str]:
+    """Return the worker→token map from the dedicated private file."""
+    with _token_lock:
+        return _token_map(_read_token_raw(_worker_tokens_path()))
+
+
+def write_worker_tokens(tokens: dict[str, str]) -> None:
+    """Persist the worker→token map in the dedicated private file."""
+    normalized = {
+        str(key): str(value)
+        for key, value in tokens.items()
+        if str(value)
+    }
+    with _token_lock:
+        _write_private_json(
+            _worker_tokens_path(),
+            {"worker_tokens": dict(sorted(normalized.items()))},
+        )
 
 
 def persist_worker_token(worker_id: str, token: str) -> None:

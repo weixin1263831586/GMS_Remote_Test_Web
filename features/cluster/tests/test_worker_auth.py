@@ -3,47 +3,90 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from features.cluster.worker_auth import worker_tokens, write_worker_tokens
 
 
 class WorkerAuthPersistenceTests(unittest.TestCase):
-    def test_worker_tokens_persisted_into_cluster_json(self):
+    def test_tokens_are_persisted_in_dedicated_private_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "cluster.json"
-            write_worker_tokens({"worker-2": "token two", "worker-1": "token-one"}, path)
-            parsed = worker_tokens(path)
+            token_path = Path(directory) / "worker_tokens.json"
+            with patch.dict(
+                "os.environ",
+                {"GMS_WORKER_TOKENS_FILE": str(token_path)},
+            ):
+                write_worker_tokens({
+                    "worker-2": "token two",
+                    "worker-1": "token-one",
+                })
+                parsed = worker_tokens()
 
-            mode = stat.S_IMODE(path.stat().st_mode)
-            data = json.loads(path.read_text(encoding="utf-8"))
+            mode = stat.S_IMODE(token_path.stat().st_mode)
+            data = json.loads(token_path.read_text(encoding="utf-8"))
 
         self.assertEqual(mode, 0o600)
-        # Tokens land under the worker_tokens key, sorted on write.
         self.assertEqual(
             data["worker_tokens"],
             {"worker-1": "token-one", "worker-2": "token two"},
         )
-        self.assertEqual(parsed, {"worker-1": "token-one", "worker-2": "token two"})
+        self.assertEqual(parsed, data["worker_tokens"])
 
-    def test_existing_cluster_config_keys_are_preserved(self):
+    def test_missing_dedicated_file_returns_empty_map(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "cluster.json"
-            path.write_text(
-                json.dumps({"enabled": True, "local_worker_id": "worker-local"}),
+            token_path = Path(directory) / "missing.json"
+            with patch.dict(
+                "os.environ",
+                {"GMS_WORKER_TOKENS_FILE": str(token_path)},
+            ):
+                parsed = worker_tokens()
+        self.assertEqual(parsed, {})
+
+    def test_cluster_config_tokens_are_not_read_or_modified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cluster_path = Path(directory) / "cluster.json"
+            token_path = Path(directory) / "worker_tokens.json"
+            cluster_data = {
+                "enabled": True,
+                "worker_tokens": {"worker-legacy": "legacy-token"},
+            }
+            cluster_path.write_text(
+                json.dumps(cluster_data),
                 encoding="utf-8",
             )
-            write_worker_tokens({"worker-1": "token-one"}, path)
-            data = json.loads(path.read_text(encoding="utf-8"))
-            parsed = worker_tokens(path)
+            with patch.dict(
+                "os.environ",
+                {
+                    "GMS_CLUSTER_CONFIG": str(cluster_path),
+                    "GMS_WORKER_TOKENS_FILE": str(token_path),
+                },
+            ):
+                self.assertEqual(worker_tokens(), {})
+                write_worker_tokens({"worker-current": "current-token"})
 
-        self.assertEqual(data["enabled"], True)
-        self.assertEqual(data["local_worker_id"], "worker-local")
-        self.assertEqual(data["worker_tokens"], {"worker-1": "token-one"})
-        self.assertEqual(parsed, {"worker-1": "token-one"})
+            unchanged_cluster = json.loads(
+                cluster_path.read_text(encoding="utf-8")
+            )
+            token_data = json.loads(token_path.read_text(encoding="utf-8"))
 
-    def test_missing_file_returns_empty_map(self):
+        self.assertEqual(unchanged_cluster, cluster_data)
+        self.assertEqual(
+            token_data["worker_tokens"],
+            {"worker-current": "current-token"},
+        )
+
+    def test_direct_map_without_latest_schema_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            parsed = worker_tokens(Path(directory) / "missing.json")
+            token_path = Path(directory) / "worker_tokens.json"
+            token_path.write_text(
+                json.dumps({"worker-1": "token-one"}),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                "os.environ",
+                {"GMS_WORKER_TOKENS_FILE": str(token_path)},
+            ):
+                parsed = worker_tokens()
         self.assertEqual(parsed, {})
 
 

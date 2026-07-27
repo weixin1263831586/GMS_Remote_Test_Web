@@ -183,6 +183,13 @@ const FAILURE_STAGE_INDEX = {
 };
 
 function qs(id) { return document.getElementById(id); }
+function syncAutomationOverlayState() {
+    const hasOverlay = Boolean(
+        document.querySelector('.password-backdrop')
+        || qs('ats-trace-drawer')?.classList.contains('open')
+    );
+    document.body.classList.toggle('overlay-open', hasOverlay);
+}
 function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
@@ -427,8 +434,11 @@ function collectBuildPlan({forceBuild = false} = {}) {
 
 function promptBuildPassword() {
     return new Promise(resolve => {
+        const focusOrigin = document.activeElement;
         const backdrop = document.createElement('div');
         backdrop.className = 'password-backdrop';
+        backdrop.setAttribute('role', 'dialog');
+        backdrop.setAttribute('aria-modal', 'true');
         backdrop.innerHTML = `
             <div class="password-dialog">
                 <div class="password-title">编译服务器 SSH 密码</div>
@@ -440,11 +450,19 @@ function promptBuildPassword() {
             </div>
         `;
         document.body.appendChild(backdrop);
+        syncAutomationOverlayState();
         const input = backdrop.querySelector('#build-password-input');
         const finish = value => {
             backdrop.remove();
+            syncAutomationOverlayState();
+            if (focusOrigin && focusOrigin.isConnected && typeof focusOrigin.focus === 'function') {
+                focusOrigin.focus({preventScroll: true});
+            }
             resolve(value || '');
         };
+        backdrop.addEventListener('click', event => {
+            if (event.target === backdrop) finish('');
+        });
         backdrop.querySelector('#build-password-cancel').onclick = () => finish('');
         backdrop.querySelector('#build-password-ok').onclick = () => finish(input.value);
         input.addEventListener('keydown', event => {
@@ -1192,15 +1210,30 @@ function jumpToBuildLog(jobId) {
 }
 
 function openTrace() {
+    window.atsTraceFocusOrigin = document.activeElement;
     qs('ats-trace-drawer').classList.add('open');
     qs('ats-trace-backdrop').classList.add('open');
     qs('ats-trace-drawer').setAttribute('aria-hidden', 'false');
+    syncAutomationOverlayState();
+    qs('ats-trace-drawer').querySelector('button')?.focus({preventScroll: true});
 }
 function closeTrace() {
     qs('ats-trace-drawer').classList.remove('open');
     qs('ats-trace-backdrop').classList.remove('open');
     qs('ats-trace-drawer').setAttribute('aria-hidden', 'true');
+    syncAutomationOverlayState();
+    if (window.atsTraceFocusOrigin && window.atsTraceFocusOrigin.isConnected) {
+        window.atsTraceFocusOrigin.focus({preventScroll: true});
+    }
+    window.atsTraceFocusOrigin = null;
 }
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && qs('ats-trace-drawer')?.classList.contains('open')) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeTrace();
+    }
+});
 
 async function dryRunProfile() {
     try {

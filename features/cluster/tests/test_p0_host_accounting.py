@@ -99,7 +99,9 @@ def test_artifact_chunks_resume_and_complete_atomically(tmp_path):
         tokens_path.write_text(
             json.dumps({"worker_tokens": {"worker-1": "token"}}), encoding="utf-8"
         )
-        with patch.dict("os.environ", {"GMS_CLUSTER_CONFIG": str(tokens_path)}):
+        with patch.dict(
+            "os.environ", {"GMS_WORKER_TOKENS_FILE": str(tokens_path)}
+        ):
             initialized = client.post(
                 f"/api/cluster/jobs/{job['id']}/artifacts/uploads",
                 headers=headers,

@@ -19,6 +19,7 @@ from .config import WorkerConfig
 from .inventory import (
     execute_device_action,
     execute_suite_action,
+    execute_usbip_action,
     flash_firmware,
     flash_gsi,
     host_metrics,
@@ -32,7 +33,7 @@ from .runtime import WorkerRuntime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("gms-worker")
-AGENT_VERSION = "0.4.0"
+AGENT_VERSION = "0.5.0"
 
 
 VNC_PORT = 5900
@@ -127,6 +128,10 @@ class WorkerAgent:
                         "tradefed": True,
                         "cts": True, "gts": True, "vts": True, "sts": True,
                         "device_inspection": True,
+                        "usbip_client": (
+                            shutil.which("usbip") is not None
+                            and os.access("/usr/local/libexec/gms-worker-usbip", os.X_OK)
+                        ),
                         "aapt2": has_aapt2,
                         "ssh_user": self.config.ssh_user or getpass.getuser()}
         # noVNC 能力要求端口开放且 RFB 握手有效。
@@ -195,6 +200,16 @@ class WorkerAgent:
             elif kind == "device_action":
                 payload = command.get("payload", {})
                 result = execute_device_action(payload.get("action", ""), payload.get("devices", []), payload)
+            elif kind in {"usbip_attach", "usbip_detach"}:
+                self.runtime.save_command(command["id"], "running", {})
+                self._ack_command(command["id"], "running", {})
+                threading.Thread(
+                    target=self.run_usbip_action,
+                    args=(command,),
+                    name=f"USBIP-{command['id']}",
+                    daemon=True,
+                ).start()
+                return
             elif kind == "suite_action":
                 if command.get("payload", {}).get("action") in {"download_url", "extract"}:
                     self.runtime.save_command(command["id"], "running", {})
@@ -364,6 +379,31 @@ class WorkerAgent:
             error = str(exc)
             self.runtime.save_command(command["id"], "failed", error=error)
             self._retry(lambda: self._ack_command(command["id"], "failed", error=error))
+
+    def run_usbip_action(self, command: dict):
+        try:
+            payload = command.get("payload", {})
+            kind = command.get("command_type", "")
+            result = execute_usbip_action(
+                "attach" if kind == "usbip_attach" else "detach",
+                str(payload.get("source_host") or ""),
+                list(payload.get("busids") or []),
+            )
+            self.runtime.save_command(command["id"], "completed", result)
+            self._retry(
+                lambda: self._ack_command(
+                    command["id"], "completed", result
+                )
+            )
+        except Exception as exc:
+            logger.exception("USB/IP command %s failed", command.get("id"))
+            error = str(exc)
+            self.runtime.save_command(command["id"], "failed", error=error)
+            self._retry(
+                lambda: self._ack_command(
+                    command["id"], "failed", error=error
+                )
+            )
 
     def run_suite_export(self, command: dict):
         path = None

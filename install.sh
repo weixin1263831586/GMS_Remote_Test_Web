@@ -177,6 +177,7 @@ package_web_app() {
             --exclude 'configs/env.production' \
             --exclude 'configs/certs/' \
             --exclude 'configs/runtime.json' \
+            --exclude 'configs/worker_tokens.json' \
             --exclude '.venv/' \
             --exclude '.pytest_cache/' \
             --exclude '.ruff_cache/' \
@@ -272,6 +273,7 @@ copy_project() {
             --exclude 'configs/env.production' \
             --exclude 'configs/certs/' \
             --exclude 'configs/runtime.json' \
+            --exclude 'configs/worker_tokens.json' \
             --exclude '.venv/' \
             --exclude '__pycache__/' \
             --exclude '*.pyc' \
@@ -312,18 +314,20 @@ PY"
 }
 
 setup_runtime_secrets() {
-    local secret_root secret_key worker_token env_file worker_config
+    local secret_root secret_key worker_token env_file worker_config worker_tokens_file
     secret_root="${INSTALL_DIR}/data/secrets"
     secret_key="${secret_root}/master.key"
     worker_token="${secret_root}/local-worker.token"
     env_file="${INSTALL_DIR}/configs/runtime.json"
     worker_config="${INSTALL_DIR}/data/local-worker/config.json"
+    worker_tokens_file="${INSTALL_DIR}/configs/worker_tokens.json"
 
     sudo -H -u "${RUN_USER}" mkdir -p "${secret_root}" "$(dirname "${worker_config}")"
     sudo -H -u "${RUN_USER}" chmod 700 "${secret_root}"
     sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - \
         "${secret_key}" "${worker_token}" "${env_file}" "${worker_config}" \
-        "${INSTALL_DIR}/configs/cluster.json" "${CERT_CRT}" "${RUN_HOME}" \
+        "${INSTALL_DIR}/configs/cluster.json" "${worker_tokens_file}" \
+        "${CERT_CRT}" "${RUN_HOME}" \
         "${RUN_USER}" "${HOST_IP}" "${PORT}" <<'PY'
 import json
 import os
@@ -340,6 +344,7 @@ from cryptography.fernet import Fernet
     env_path_raw,
     worker_config_raw,
     cluster_config_raw,
+    worker_tokens_raw,
     certificate_raw,
     run_home,
     run_user,
@@ -351,6 +356,7 @@ token_path = Path(token_path_raw)
 env_path = Path(env_path_raw)
 worker_config = Path(worker_config_raw)
 cluster_config_path = Path(cluster_config_raw)
+worker_tokens_path = Path(worker_tokens_raw)
 
 def create_private(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -387,33 +393,32 @@ if env_path.exists():
     except (OSError, json.JSONDecodeError):
         pass
 
-# Legacy deployments stored worker tokens in this env var; the value now
-# lives under worker_tokens in configs/cluster.json, so drop any stale entry.
-values.pop("GMS_CLUSTER_WORKER_TOKENS", None)
-
-cluster_raw = {}
-if cluster_config_path.exists():
+token_raw = {}
+if worker_tokens_path.exists():
     try:
-        cluster_raw = json.loads(cluster_config_path.read_text(encoding="utf-8"))
-        if not isinstance(cluster_raw, dict):
-            cluster_raw = {}
+        token_raw = json.loads(worker_tokens_path.read_text(encoding="utf-8"))
+        if not isinstance(token_raw, dict):
+            token_raw = {}
     except (OSError, json.JSONDecodeError):
-        cluster_raw = {}
-existing_tokens = cluster_raw.get("worker_tokens")
-tokens = (
-    {str(k): str(v) for k, v in existing_tokens.items() if v}
-    if isinstance(existing_tokens, dict) else {}
-)
+        token_raw = {}
+existing_tokens = token_raw.get("worker_tokens")
+tokens = {}
+if isinstance(existing_tokens, dict):
+    tokens.update({str(k): str(v) for k, v in existing_tokens.items() if v})
 tokens[worker_id] = token
-cluster_raw["worker_tokens"] = dict(sorted(tokens.items()))
-cluster_config_path.write_text(
-    json.dumps(cluster_raw, indent=2, ensure_ascii=False) + "\n",
+worker_tokens_path.write_text(
+    json.dumps(
+        {"worker_tokens": dict(sorted(tokens.items()))},
+        indent=2,
+        ensure_ascii=False,
+    ) + "\n",
     encoding="utf-8",
 )
-os.chmod(cluster_config_path, 0o600)
+os.chmod(worker_tokens_path, 0o600)
 values.update({
     "GMS_SECRET_KEY_FILE": str(key_path),
     "GMS_AUDIT_HMAC_KEY_FILE": str(audit_key_path),
+    "GMS_WORKER_TOKENS_FILE": str(worker_tokens_path),
     "GMS_AUTOMATION_WEBHOOK_TOKEN": webhook_token_path.read_text(encoding="utf-8").strip(),
     "GMS_AUTOMATION_OWNER_ID": "service-automation",
     "GMS_METRICS_TOKEN": metrics_token_path.read_text(encoding="utf-8").strip(),

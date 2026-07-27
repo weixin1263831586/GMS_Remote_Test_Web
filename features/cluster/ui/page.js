@@ -5,11 +5,36 @@ let selectedClusterJob=null;
 let applyingClusterWorkspace=false;
 let refreshPromise=null;
 let toastTimer=null;
+const clusterModalStack=[];
+function syncClusterModalState(){
+ const visible=Array.from(document.querySelectorAll('.modal-backdrop:not([hidden])'));
+ const visibleIds=new Set(visible.map(modal=>modal.id));
+ const active=clusterModalStack.filter(id=>visibleIds.has(id));
+ visible.forEach(modal=>{if(!active.includes(modal.id))active.push(modal.id)});
+ clusterModalStack.length=0;active.forEach(id=>clusterModalStack.push(id));
+ const topIndex=clusterModalStack.length-1;
+ clusterModalStack.forEach((id,index)=>{
+  const modal=document.getElementById(id);if(!modal)return;
+  modal.style.zIndex=String(10000+index*20);modal.inert=index!==topIndex;
+  modal.setAttribute('role','dialog');modal.setAttribute('aria-hidden',index===topIndex?'false':'true');
+  if(index===topIndex)modal.setAttribute('aria-modal','true');else modal.removeAttribute('aria-modal');
+ });
+ document.querySelectorAll('.modal-backdrop[hidden]').forEach(modal=>{modal.inert=false;modal.setAttribute('aria-hidden','true');modal.removeAttribute('aria-modal');modal.style.removeProperty('z-index')});
+ document.body.classList.toggle('modal-open',clusterModalStack.length>0);
+}
+function closeTopClusterModal(){
+ const id=clusterModalStack[clusterModalStack.length-1],modal=id&&document.getElementById(id);
+ if(!modal)return;modal.hidden=true;syncClusterModalState();
+}
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&clusterModalStack.length){event.preventDefault();event.stopPropagation();closeTopClusterModal()}});
+document.addEventListener('click',event=>{const modal=event.target?.classList?.contains('modal-backdrop')?event.target:null;if(modal&&clusterModalStack[clusterModalStack.length-1]===modal.id){modal.hidden=true;syncClusterModalState()}});
+new MutationObserver(syncClusterModalState).observe(document.body,{subtree:true,attributes:true,attributeFilter:['hidden']});
+syncClusterModalState();
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const oneDecimal=value=>(Number(value)||0).toFixed(1);
 const relativeTime=value=>{const timestamp=Date.parse(value||'');if(!Number.isFinite(timestamp))return '-';const seconds=Math.max(0,Math.floor((Date.now()-timestamp)/1000));if(seconds<60)return `${seconds}秒前`;if(seconds<3600)return `${Math.floor(seconds/60)}分钟前`;if(seconds<86400)return `${Math.floor(seconds/3600)}小时前`;return `${Math.floor(seconds/86400)}天前`};
 async function api(path,options,retried=false){const r=await fetch(path,options),text=await r.text();let d={};try{d=text?JSON.parse(text):{}}catch(_){d={detail:text||r.statusText}}const detail=d.detail;if(r.status===403&&!retried&&detail&&typeof detail==='object'&&detail.elevation_required&&typeof window.parent?.requestElevatedAccess==='function'){const granted=await window.parent.requestElevatedAccess('执行集群敏感操作');if(granted)return api(path,options,true)}if(!r.ok||d.success===false){const message=typeof detail==='object'?(detail.message||JSON.stringify(detail)):(detail||d.error||`HTTP ${r.status}`);throw new Error(message)}return d}
-function toast(message){const el=document.querySelector('#toast');el.textContent=message;el.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.style.display='none',3000);if(message==='Worker 已安装并成功注册')notifyCompletion('测试主机部署完成',message);else if(message.includes(' 已部署到 '))notifyCompletion('测试套件部署完成',message)}
+function toast(message){const el=document.querySelector('#toast');el.textContent=message;el.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.style.display='none',3000);if(message.startsWith('Worker 已安装并成功注册：'))notifyCompletion('测试主机部署完成',message);else if(message.includes(' 已部署到 '))notifyCompletion('测试套件部署完成',message)}
 function notifyCompletion(title,message){window.parent.postMessage({type:'cluster-notification',title,message,level:'success'},location.origin)}
 function badge(s){return `<span class="status ${esc(s)}">${esc(s)}</span>`}
 function localWorkerId(){return state.status.local_worker_id||'worker-local'}
@@ -163,7 +188,7 @@ async function saveWorkerConfig(){
  finally{btn.disabled=false;btn.textContent='保存配置'}
 }
 function normalizedWorkerId(value){return String(value||'').trim().toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')}
-function updateDeployCommand(){const id=normalizedWorkerId(document.querySelector('#new-worker-id').value)||'WORKER_ID',host=document.querySelector('#new-worker-host').value.trim()||'USER@HOST',address=host.includes('@')?host.split('@').slice(1).join('@'):'HOST',controller=document.querySelector('#controller-url').value.trim()||location.origin,root=document.querySelector('#suite-root').value.trim()||'~/GMS-Suite';document.querySelector('#deploy-command').textContent=`rsync -azR worker_agent scripts/install_cluster_worker.sh scripts/run_GSI_Burn.sh scripts/run_GMS_Test_Auto.sh tools/upgrade_tool tools/scrcpy-linux-x86_64-v3.3.4 tools/GMS-Host-Tools ${host}:~/gms-worker-setup/ && scp "$GMS_GTS_CREDENTIAL_FILE" ${host}:~/gms-worker-gts.json && ssh ${host} 'cd ~/gms-worker-setup && bash scripts/install_cluster_worker.sh ${id} ${controller} WORKER_TOKEN - ${root} ${address} ~/gms-worker-gts.json'`}
+function updateDeployCommand(){const id=normalizedWorkerId(document.querySelector('#new-worker-id').value)||'WORKER_ID',host=document.querySelector('#new-worker-host').value.trim()||'USER@HOST',address=host.includes('@')?host.split('@').slice(1).join('@'):'HOST',controller=document.querySelector('#controller-url').value.trim()||location.origin,root=document.querySelector('#suite-root').value.trim()||'~/GMS-Suite';document.querySelector('#deploy-command').textContent=`rsync -azR worker_agent scripts/install_cluster_worker.sh scripts/gms_worker_usbip.sh scripts/run_GSI_Burn.sh scripts/run_GMS_Test_Auto.sh tools/upgrade_tool tools/scrcpy-linux-x86_64-v3.3.4 tools/GMS-Host-Tools ${host}:~/gms-worker-setup/ && scp "$GMS_GTS_CREDENTIAL_FILE" ${host}:~/gms-worker-gts.json && ssh ${host} 'cd ~/gms-worker-setup && bash scripts/install_cluster_worker.sh ${id} ${controller} WORKER_TOKEN - ${root} ${address} ~/gms-worker-gts.json'`}
 async function autoDeployWorker(){
  const button=document.querySelector('#auto-deploy'),errorBox=document.querySelector('#deploy-error');
  const body={worker_id:normalizedWorkerId(document.querySelector('#new-worker-id').value),ssh_host:document.querySelector('#new-worker-host').value.trim(),controller_url:document.querySelector('#controller-url').value.trim(),suite_root:document.querySelector('#suite-root').value.trim(),token:document.querySelector('#worker-token').value,password:document.querySelector('#worker-password').value,save_password:Boolean(document.querySelector('#save-worker-password')?.checked)};
@@ -176,7 +201,7 @@ async function autoDeployWorker(){
   await api('/api/cluster/workers/ssh-host-key/trust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssh_host:body.ssh_host,keys:scan.keys})});
   button.textContent='安装并等待注册…';
   await api('/api/cluster/workers/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  toast('Worker 已安装并成功注册');document.querySelector('#worker-password').value='';document.querySelector('#onboarding').hidden=true;await refresh()
+  toast(`Worker 已安装并成功注册：${body.worker_id}（${body.ssh_host}）`);document.querySelector('#worker-password').value='';document.querySelector('#onboarding').hidden=true;await refresh()
  }catch(e){if(errorBox){errorBox.hidden=false;errorBox.textContent=`自动部署失败\n${e.message}\n\n可复制上方命令到终端手动执行。`}toast('自动部署失败，请查看详细信息')}finally{button.disabled=false;button.textContent='自动部署'}
 }
 document.addEventListener('click',event=>{

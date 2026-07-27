@@ -1,7 +1,8 @@
 #!/bin/bash
+set -o pipefail
 # ==============================================================================
 # GMS Remote Test API Helper Script (FastAPI Port 5001)
-# Version: 2026.04.05-100000
+# Version: 2026.07.23-1
 # ==============================================================================
 
 # GMS Web App Configuration Directory
@@ -62,6 +63,13 @@ CURL_EXIT_CANNOT_CONNECT=7
 CURL_EXIT_OPERATION_TIMEOUT=28
 CURL_EXIT_SSL_CERT=60
 
+# Authentication
+# The current backend authenticates API clients with the gms_session cookie.
+# Keep the cookie outside the repository and allow callers to override its path.
+GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/session.cookies}"
+CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
+CURL_AUTH_EVAL_ARGS="-b \"$GMS_AUTH_COOKIE_JAR\" -c \"$GMS_AUTH_COOKIE_JAR\""
+
 # Local deployments commonly use a self-signed HTTPS certificate. Keep curl
 # usable by default, while allowing callers to provide a real CA bundle.
 CURL_TLS_ARGS=()
@@ -93,6 +101,21 @@ info() {
     echo -e "${BLUE}ℹ $1${NC}"
 }
 
+_ensure_auth_cookie_jar() {
+    local cookie_dir
+    cookie_dir=$(dirname "$GMS_AUTH_COOKIE_JAR")
+    if [ ! -d "$cookie_dir" ]; then
+        mkdir -p "$cookie_dir" || {
+            error "无法创建认证会话目录: $cookie_dir"
+            return 1
+        }
+    fi
+    chmod 700 "$cookie_dir" 2>/dev/null || true
+    if [ -f "$GMS_AUTH_COOKIE_JAR" ]; then
+        chmod 600 "$GMS_AUTH_COOKIE_JAR" 2>/dev/null || true
+    fi
+}
+
 _server_host_from_url() {
     # Extract host from URL: strip scheme, then path, then port — single pass
     local url="${1#*://}"  # strip scheme
@@ -120,20 +143,29 @@ api_call() {
     local curl_extra="${4:-}"
     local response
 
+    _ensure_auth_cookie_jar || return 1
     if [ -n "$curl_extra" ]; then
         # File upload or custom curl args mode
-        response=$(eval "curl $CURL_TLS_EVAL_ARGS -w \"\\nHTTP_STATUS:%{http_code}\" --max-time $CURL_TIMEOUT -X \"\${method}\" \"\${API_BASE}\${endpoint}\" $curl_extra" 2>/dev/null)
+        response=$(eval "curl $CURL_TLS_EVAL_ARGS $CURL_AUTH_EVAL_ARGS -w \"\\nHTTP_STATUS:%{http_code}\" --max-time $CURL_TIMEOUT -X \"\${method}\" \"\${API_BASE}\${endpoint}\" $curl_extra" 2>/dev/null)
     elif [ -n "$data" ] || [ "$method" = "POST" ]; then
-        response=$(curl "${CURL_TLS_ARGS[@]}" -s -X "${method}" "${API_BASE}${endpoint}" \
+        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s -X "${method}" "${API_BASE}${endpoint}" \
             -H "Content-Type: application/json" \
             -d "${data}" \
             --max-time $CURL_TIMEOUT 2>/dev/null)
     else
-        response=$(curl "${CURL_TLS_ARGS[@]}" -s "${API_BASE}${endpoint}" --max-time $CURL_TIMEOUT 2>/dev/null)
+        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s "${API_BASE}${endpoint}" --max-time $CURL_TIMEOUT 2>/dev/null)
     fi
 
     local curl_exit_code=$?
     if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
+        if echo "$response" | jq -e '
+            (.detail == "Authentication required")
+            or (.error == "Authentication required")
+        ' >/dev/null 2>&1; then
+            warning "需要登录。请先运行: gms-rt-auth-login [username]" >&2
+            echo "$response"
+            return 22
+        fi
         echo "$response"
         return 0
     else
@@ -147,6 +179,57 @@ api_call() {
         fi
         return 1
     fi
+}
+
+# ==============================================================================
+# Authentication Commands
+# ==============================================================================
+
+gms-rt-auth-status() {
+    check_jq || return 1
+    api_call "/auth/status" | jq '.'
+}
+
+gms-rt-auth-login() {
+    local username="${1:-${GMS_REMOTE_TEST_USERNAME:-}}"
+    local password="${GMS_REMOTE_TEST_PASSWORD:-}"
+    [ -z "$username" ] && {
+        read -r -p "Username: " username
+    }
+    [ -z "$password" ] && {
+        read -r -s -p "Password: " password
+        echo
+    }
+    [ -z "$username" ] && { error "Username is required"; return 1; }
+    [ -z "$password" ] && { error "Password is required"; return 1; }
+    check_jq || return 1
+    _ensure_auth_cookie_jar || return 1
+
+    local data response
+    data=$(jq -cn --arg username "$username" --arg password "$password" \
+        '{username: $username, password: $password}')
+    response=$(api_call "/auth/login" "POST" "$data") || return 1
+    unset password
+    if echo "$response" | jq -e '.success == true and .authenticated == true' >/dev/null 2>&1; then
+        chmod 600 "$GMS_AUTH_COOKIE_JAR" 2>/dev/null || true
+        success "Authenticated as $(echo "$response" | jq -r '.user.username // .user.display_name // "unknown"')"
+        return 0
+    fi
+    error "Login failed: $(extract_api_error "$response")"
+    return 1
+}
+
+gms-rt-auth-logout() {
+    check_jq || return 1
+    local response
+    response=$(api_call "/auth/logout" "POST" "{}") || return 1
+    if echo "$response" | jq -e '.success == true' >/dev/null 2>&1; then
+        rm -f -- "$GMS_AUTH_COOKIE_JAR"
+        success "Logged out"
+        return 0
+    fi
+    error "Logout failed: $(extract_api_error "$response")"
+    return 1
 }
 
 # Extract error message from API response
@@ -236,7 +319,8 @@ _post_firmware_burn_path() {
     local device_list
     device_list=$(echo "$devices" | tr ' ' ',')
 
-    curl "${CURL_TLS_ARGS[@]}" -sS -w "\nHTTP_STATUS:%{http_code}" \
+    _ensure_auth_cookie_jar || return 1
+    curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
         -X POST "${API_BASE}/burn/firmware" \
         -F "firmware_path=${remote_path}" \
@@ -253,7 +337,8 @@ _post_firmware_burn_upload() {
     device_list=$(echo "$devices" | tr ' ' ',')
     device_query=$(_urlencode "$device_list")
 
-    curl "${CURL_TLS_ARGS[@]}" -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
+    _ensure_auth_cookie_jar || return 1
+    curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
         -X POST "${API_BASE}/burn/firmware?devices=${device_query}" \
         -F "firmware_file=@${firmware_path}" \
@@ -1060,14 +1145,16 @@ gms-rt-reports-analyze() {
     local response
     if [ -f "$report_query" ]; then
         echo "🔍 Analyzing uploaded report file: $report_query..."
-        response=$(curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_BASE}/reports/analyze" \
+        _ensure_auth_cookie_jar || return 1
+        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s -X POST "${API_BASE}/reports/analyze" \
             -F "mode=upload" \
             -F "file=@${report_query}")
     else
         local report_timestamp
         report_timestamp=$(_resolve_report_timestamp "$report_query") || return 1
         echo "🔍 Analyzing saved report: $report_timestamp..."
-        response=$(curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_BASE}/reports/analyze" \
+        _ensure_auth_cookie_jar || return 1
+        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s -X POST "${API_BASE}/reports/analyze" \
             -F "mode=saved" \
             -F "report_timestamp=${report_timestamp}")
     fi
@@ -1158,7 +1245,8 @@ gms-rt-reports-delete() {
     check_jq
     echo "🗑️  Deleting report: $report_timestamp..."
     # Use curl directly for DELETE with query parameter
-    local response=$(curl "${CURL_TLS_ARGS[@]}" -s -w "\nHTTP_STATUS:%{http_code}" -X DELETE "${API_BASE}/reports/delete?timestamp=${report_timestamp}")
+    _ensure_auth_cookie_jar || return 1
+    local response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s -w "\nHTTP_STATUS:%{http_code}" -X DELETE "${API_BASE}/reports/delete?timestamp=${report_timestamp}")
     local body=$(echo "$response" | grep -v "HTTP_STATUS:")
     echo "$body" | jq '.'
 }
@@ -1350,7 +1438,8 @@ gms-rt-system-skills() {
     echo "📁 Downloading skills directory as ZIP..."
     echo "URL: ${API_BASE}/system/skills?skill_name=${skill_name}"
     echo "Saving to: ${skill_name}-skills.zip"
-    curl "${CURL_TLS_ARGS[@]}" -o "${skill_name}-skills.zip" "${API_BASE}/system/skills?skill_name=${skill_name}"
+    _ensure_auth_cookie_jar || return 1
+    curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -o "${skill_name}-skills.zip" "${API_BASE}/system/skills?skill_name=${skill_name}"
     if [ $? -eq 0 ]; then
         success "Skills ZIP downloaded successfully"
         ls -lh "${skill_name}-skills.zip"
@@ -1535,7 +1624,8 @@ gms-rt-test-clean() {
 # Stream test logs
 gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
-    curl "${CURL_TLS_ARGS[@]}" -N "${API_BASE}/test/logs/stream"
+    _ensure_auth_cookie_jar || return 1
+    curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -N "${API_BASE}/test/logs/stream"
 }
 
 # Start a test - delegates to /api/test/parse-args for intelligent parameter parsing
@@ -1949,6 +2039,11 @@ ${BLUE}GMS Remote Test API Helper (FastAPI Port 5001)${NC}
 ${YELLOW}ADB Port forward:${NC}
   gms-rt-adb-forward-start       - Start ADB port forwarding
   gms-rt-adb-forward-stop        - Stop ADB port forwarding
+
+${YELLOW}Authentication:${NC}
+  gms-rt-auth-login [username]   - Log in and save an API session
+  gms-rt-auth-status             - Show the current authentication status
+  gms-rt-auth-logout             - Revoke and remove the saved session
 
 ${YELLOW}Firmware Burning:${NC}
   gms-rt-burn-firmware           - Burn firmware image

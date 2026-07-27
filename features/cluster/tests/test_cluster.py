@@ -111,7 +111,7 @@ class ClusterRepositoryTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with patch.dict(
-                "os.environ", {"GMS_CLUSTER_CONFIG": str(tokens_path)}
+                "os.environ", {"GMS_WORKER_TOKENS_FILE": str(tokens_path)}
             ), TestClient(app) as client:
                 response = client.post(
                     "/api/cluster/workers/register",
@@ -333,7 +333,7 @@ class ClusterRepositoryTests(unittest.TestCase):
                 json.dumps({"worker_tokens": {"worker-246": "token"}}),
                 encoding="utf-8",
             )
-            with patch.dict("os.environ", {"GMS_CLUSTER_CONFIG": str(tokens_path)}), TestClient(
+            with patch.dict("os.environ", {"GMS_WORKER_TOKENS_FILE": str(tokens_path)}), TestClient(
                 app,
                 client=("172.16.14.246", 50000),
             ) as client:

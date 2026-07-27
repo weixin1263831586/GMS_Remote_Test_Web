@@ -733,6 +733,13 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
         def handle_device_request(route):
             request = route.request
+            if "/api/usbip/source-devices" in request.url:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body='{"success":true,"devices":[{"busid":"1-2","label":"Android 1-2"}]}',
+                )
+                return
             requests.append(
                 {
                     "method": request.method,
@@ -757,6 +764,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 state.selectedDevices = new Set(['D1']);
                 state.adbForwardRunning = false;
                 state.usbipConnected = false;
+                state.elevated = true;
+                state.config = {...(state.config || {}), device_host: 'tester@192.0.2.10'};
                 showConfirmDialog = async () => true;
                 initAndStartVnc = async () => true;
                 document.getElementById('wifi-ssid').value = 'LabWifi';
@@ -770,6 +779,27 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.evaluate("lockSelectedDevices('lock')")
             page.evaluate("showDeviceScreen()")
             page.evaluate("setupUsbipForward()")
+            self.assertTrue(page.locator("#usbip-attach-modal").is_visible())
+            attach_message = page.locator("#usbip-attach-message").inner_text()
+            self.assertIn("Windows/Linux 按住 Ctrl", attach_message)
+            self.assertIn("macOS 按住 Command", attach_message)
+            self.assertNotIn("⌘", attach_message)
+            attach_style = page.locator(
+                "#usbip-attach-modal .modal-content"
+            ).evaluate(
+                """element => {
+                    const style = getComputedStyle(element);
+                    return {
+                        resize: style.resize,
+                        width: Math.round(element.getBoundingClientRect().width),
+                        height: Math.round(element.getBoundingClientRect().height)
+                    };
+                }"""
+            )
+            self.assertEqual(attach_style["resize"], "none")
+            self.assertEqual(attach_style["width"], 560)
+            self.assertEqual(attach_style["height"], 410)
+            page.evaluate("submitUsbipAttach()")
             page.evaluate("setupAdbPortForward()")
 
             self.assertEqual(
@@ -780,6 +810,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     ("POST", "/api/devices/wifi"),
                     ("POST", "/api/devices/bootloader-lock"),
                     ("POST", "/api/devices/scrcpy"),
+                    ("GET", "/api/devices/list?force_refresh=1"),
                     ("POST", "/api/usbip/connect"),
                     ("POST", "/api/adb-forward/start"),
                 ],
@@ -792,8 +823,77 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             self.assertEqual(requests[3]["body"], {"devices": ["D1"]})
             self.assertEqual(requests[4]["body"], {"devices": ["D1"]})
-            self.assertEqual(requests[5]["body"], {"manual_connect": True})
-            self.assertIsNone(requests[6]["body"])
+            self.assertEqual(
+                requests[6]["body"],
+                {
+                    "device_host": "tester@192.0.2.10",
+                    "worker_id": "worker-local",
+                    "busids": ["1-2"],
+                    "manual_connect": True,
+                },
+            )
+            self.assertIsNone(requests[7]["body"])
+
+            requests.clear()
+            page.evaluate("setupUsbipForward()")
+            self.assertTrue(page.locator("#usbip-detach-modal").is_visible())
+            detach_style = page.locator(
+                "#usbip-detach-modal .modal-content"
+            ).evaluate(
+                """element => {
+                    const style = getComputedStyle(element);
+                    return {
+                        resize: style.resize,
+                        width: Math.round(element.getBoundingClientRect().width),
+                        height: Math.round(element.getBoundingClientRect().height)
+                    };
+                }"""
+            )
+            self.assertEqual(detach_style["resize"], "none")
+            self.assertEqual(detach_style["width"], 560)
+            self.assertEqual(detach_style["height"], 390)
+            page.evaluate("submitUsbipDetach()")
+            self.assertEqual(
+                [(item["method"], item["path"]) for item in requests],
+                [
+                    ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
+                    ("POST", "/api/usbip/disconnect"),
+                    # Remote/Worker detachments do not emit a local USB hotplug
+                    # event, so the UI must refresh the device list itself right
+                    # after the backend confirms the disconnect.
+                    ("GET", "/api/devices/list?force_refresh=1"),
+                ],
+            )
+            self.assertEqual(
+                requests[1]["body"],
+                {
+                    "device_host": "tester@192.0.2.10",
+                    "worker_id": "worker-local",
+                    "busids": ["1-2"],
+                    "source_host": "",
+                },
+            )
+            stale_refresh_logs = page.evaluate(
+                """async () => {
+                    const originalSetTimeout = window.setTimeout;
+                    const originalAddLogEntry = window.addLogEntry;
+                    const messages = [];
+                    window.setTimeout = callback => {
+                        callback();
+                        return 0;
+                    };
+                    window.addLogEntry = message => messages.push(message);
+                    try {
+                        usbipOperationGeneration = 10;
+                        await refreshUsbipDetachedWorkers(new Map(), 9);
+                    } finally {
+                        window.setTimeout = originalSetTimeout;
+                        window.addLogEntry = originalAddLogEntry;
+                    }
+                    return messages;
+                }"""
+            )
+            self.assertEqual(stale_refresh_logs, [])
         finally:
             page.close()
 
@@ -1560,6 +1660,336 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.keyboard.press("Escape")
             expect(page.locator(f"#{modal_id}")).not_to_have_class(re.compile(r"show"))
 
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_main_shell_modals_fit_supported_viewports_and_stack_in_order(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof ModalManager === 'object'")
+            modal_ids = page.locator(".modal[id]").evaluate_all(
+                "(items) => items.map(item => item.id).filter(Boolean)"
+            )
+            viewports = [
+                {"width": 1440, "height": 960},
+                {"width": 768, "height": 720},
+                {"width": 390, "height": 844},
+                {"width": 844, "height": 390},
+            ]
+
+            for viewport in viewports:
+                page.set_viewport_size(viewport)
+                for modal_id in modal_ids:
+                    with self.subTest(viewport=viewport, modal=modal_id):
+                        page.evaluate("id => ModalManager.open(id)", modal_id)
+                        report = page.locator(f"#{modal_id}").evaluate(
+                            """modal => {
+                              const content = modal.querySelector('.modal-content');
+                              if (!content) return {missingContent: true};
+                              const rect = content.getBoundingClientRect();
+                              const controls = Array.from(content.querySelectorAll(
+                                'button, [role="button"]'
+                              )).filter(node => {
+                                const style = getComputedStyle(node);
+                                return style.display !== 'none' && style.visibility !== 'hidden';
+                              });
+                              return {
+                                missingContent: false,
+                                rect: {
+                                  left: rect.left,
+                                  top: rect.top,
+                                  right: rect.right,
+                                  bottom: rect.bottom,
+                                  width: rect.width,
+                                  height: rect.height
+                                },
+                                viewport: {width: innerWidth, height: innerHeight},
+                                overflowControls: controls.filter(node =>
+                                  node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 2
+                                ).map(node => node.id || node.className || node.tagName).slice(0, 8)
+                              };
+                            }"""
+                        )
+                        self.assertFalse(report["missingContent"], report)
+                        rect = report["rect"]
+                        self.assertGreater(rect["width"], 0, report)
+                        self.assertGreater(rect["height"], 0, report)
+                        self.assertGreaterEqual(rect["left"], -1, report)
+                        self.assertGreaterEqual(rect["top"], -1, report)
+                        self.assertLessEqual(rect["right"], report["viewport"]["width"] + 1, report)
+                        self.assertLessEqual(rect["bottom"], report["viewport"]["height"] + 1, report)
+                        self.assertEqual(report["overflowControls"], [], report)
+                        page.evaluate("id => ModalManager.close(id)", modal_id)
+
+            first_id, second_id = modal_ids[:2]
+            page.evaluate(
+                "ids => { ModalManager.open(ids[0]); ModalManager.open(ids[1]); }",
+                [first_id, second_id],
+            )
+            stack = page.evaluate(
+                """ids => ({
+                  active: ModalManager._activeModals.slice(),
+                  firstZ: Number(getComputedStyle(document.getElementById(ids[0])).zIndex),
+                  secondZ: Number(getComputedStyle(document.getElementById(ids[1])).zIndex),
+                  firstInert: document.getElementById(ids[0]).inert,
+                  secondInert: document.getElementById(ids[1]).inert
+                })""",
+                [first_id, second_id],
+            )
+            self.assertEqual(stack["active"][-2:], [first_id, second_id])
+            self.assertGreater(stack["secondZ"], stack["firstZ"])
+            self.assertTrue(stack["firstInert"])
+            self.assertFalse(stack["secondInert"])
+            page.keyboard.press("Escape")
+            expect(page.locator(f"#{second_id}")).not_to_have_class(re.compile(r"show"))
+            expect(page.locator(f"#{first_id}")).to_have_class(re.compile(r"show"))
+            self.assertFalse(page.locator(f"#{first_id}").evaluate("modal => modal.inert"))
+            page.keyboard.press("Escape")
+            expect(page.locator(".modal.show")).to_have_count(0)
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_standalone_pages_keep_overlays_inside_mobile_viewport(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+
+        def assert_overlay_fits(selector):
+            report = page.locator(selector).evaluate(
+                """overlay => {
+                  const rect = overlay.getBoundingClientRect();
+                  return {
+                    left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+                    width: rect.width, height: rect.height,
+                    viewportWidth: innerWidth, viewportHeight: innerHeight,
+                    className: overlay.className,
+                    transform: getComputedStyle(overlay).transform
+                  };
+                }"""
+            )
+            self.assertGreater(report["width"], 0, report)
+            self.assertGreater(report["height"], 0, report)
+            self.assertGreaterEqual(report["left"], -1, report)
+            self.assertGreaterEqual(report["top"], -1, report)
+            self.assertLessEqual(report["right"], report["viewportWidth"] + 1, report)
+            self.assertLessEqual(report["bottom"], report["viewportHeight"] + 1, report)
+
+        try:
+            page.set_viewport_size({"width": 390, "height": 720})
+
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.wait_for_function("typeof showModal === 'function'")
+            redmine_ids = page.locator(".modal[id]").evaluate_all(
+                "(items) => items.map(item => item.id)"
+            )
+            for modal_id in redmine_ids:
+                page.evaluate("id => showModal(id)", modal_id)
+                assert_overlay_fits(f"#{modal_id} .modal-content")
+                page.evaluate("id => hideModal(id)", modal_id)
+
+            page.goto(f"{self.base_url}/gerrit-dashboard", wait_until="domcontentloaded")
+            page.wait_for_function("typeof showModal === 'function'")
+            gerrit_ids = page.locator(".modal[id]").evaluate_all(
+                "(items) => items.map(item => item.id)"
+            )
+            for modal_id in gerrit_ids:
+                page.evaluate("id => showModal(id)", modal_id)
+                assert_overlay_fits(f"#{modal_id} .modal-content")
+                page.evaluate("id => hideModal(id)", modal_id)
+
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function("typeof syncClusterModalState === 'function'")
+            page.evaluate(
+                """() => {
+                  document.getElementById('onboarding').hidden = false;
+                  document.getElementById('worker-config-modal').hidden = false;
+                  syncClusterModalState();
+                }"""
+            )
+            assert_overlay_fits("#onboarding .onboarding-modal")
+            assert_overlay_fits("#worker-config-modal .onboarding-modal")
+            self.assertTrue(page.locator("#onboarding").evaluate("modal => modal.inert"))
+            page.keyboard.press("Escape")
+            expect(page.locator("#worker-config-modal")).to_be_hidden()
+            expect(page.locator("#onboarding")).to_be_visible()
+            page.keyboard.press("Escape")
+            expect(page.locator("#onboarding")).to_be_hidden()
+
+            page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.wait_for_function("typeof openTrace === 'function'")
+            page.evaluate("openTrace()")
+            page.wait_for_function(
+                "document.getElementById('ats-trace-drawer').getBoundingClientRect().right <= innerWidth + 1"
+            )
+            assert_overlay_fits("#ats-trace-drawer")
+            page.keyboard.press("Escape")
+            expect(page.locator("#ats-trace-drawer")).not_to_have_class(re.compile(r"open"))
+            page.evaluate("void promptBuildPassword()")
+            expect(page.locator(".password-backdrop")).to_be_visible()
+            assert_overlay_fits(".password-dialog")
+            page.keyboard.press("Escape")
+            expect(page.locator(".password-backdrop")).to_have_count(0)
+
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_standalone_pages_have_no_uncontained_mobile_overflow(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        paths = [
+            "/automation",
+            "/cluster",
+            "/redmine-agent",
+            "/gerrit-dashboard",
+            "/mainline-known-issues",
+            "/gms-update-monitor",
+            "/templates/architecture.html",
+        ]
+        viewports = [
+            {"width": 390, "height": 720},
+            {"width": 844, "height": 390},
+        ]
+        try:
+            for viewport in viewports:
+                page.set_viewport_size(viewport)
+                for path in paths:
+                    with self.subTest(viewport=viewport, path=path):
+                        page.goto(f"{self.base_url}{path}", wait_until="domcontentloaded")
+                        page.wait_for_timeout(100)
+                        report = page.evaluate(
+                            """() => {
+                              const viewportWidth = innerWidth;
+                              const isVisible = node => {
+                                const style = getComputedStyle(node);
+                                return style.display !== 'none'
+                                  && style.visibility !== 'hidden'
+                                  && !node.closest('[aria-hidden="true"]')
+                                  && node.getClientRects().length > 0;
+                              };
+                              const hasHorizontalContainer = node => {
+                                for (let parent = node.parentElement;
+                                     parent && parent !== document.body;
+                                     parent = parent.parentElement) {
+                                  const overflow = getComputedStyle(parent).overflowX;
+                                  if (overflow === 'auto' || overflow === 'scroll') return true;
+                                }
+                                return false;
+                              };
+                              const leaks = Array.from(document.querySelectorAll(
+                                'button, input, select, textarea, a[href]'
+                              )).filter(isVisible).filter(node => {
+                                const rect = node.getBoundingClientRect();
+                                return (rect.left < -1 || rect.right > viewportWidth + 1)
+                                  && !hasHorizontalContainer(node);
+                              }).map(node => ({
+                                tag: node.tagName,
+                                id: node.id,
+                                className: String(node.className || ''),
+                                text: String(node.textContent || node.value || '').trim().slice(0, 80),
+                                rect: {
+                                  left: node.getBoundingClientRect().left,
+                                  right: node.getBoundingClientRect().right
+                                }
+                              })).slice(0, 12);
+                              const clippedButtons = Array.from(document.querySelectorAll(
+                                'button, [role="button"]'
+                              )).filter(isVisible).filter(node =>
+                                node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 2
+                              ).map(node => node.id || String(node.className || '') || node.textContent)
+                                .slice(0, 12);
+                              return {
+                                viewportWidth,
+                                documentWidth: document.documentElement.scrollWidth,
+                                leaks,
+                                clippedButtons
+                              };
+                            }"""
+                        )
+                        self.assertLessEqual(
+                            report["documentWidth"], report["viewportWidth"] + 1, report
+                        )
+                        self.assertEqual(report["leaks"], [], report)
+                        self.assertEqual(report["clippedButtons"], [], report)
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_shell_pages_keep_visible_controls_inside_narrow_viewport(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 390, "height": 720})
+            for page_name in self.visible_sidebar_pages(page):
+                with self.subTest(page=page_name):
+                    self.show_all_sidebar_pages(page)
+                    page.evaluate("name => switchPage(name, null)", page_name)
+                    report = page.locator(f"#page-{page_name}").evaluate(
+                        """container => {
+                          const bounds = container.getBoundingClientRect();
+                          const isVisible = node => {
+                            const style = getComputedStyle(node);
+                            return style.display !== 'none'
+                              && style.visibility !== 'hidden'
+                              && !node.closest('[aria-hidden="true"]')
+                              && node.getClientRects().length > 0;
+                          };
+                          const hasHorizontalContainer = node => {
+                            for (let parent = node.parentElement;
+                                 parent && parent !== container;
+                                 parent = parent.parentElement) {
+                              const overflow = getComputedStyle(parent).overflowX;
+                              if (overflow === 'auto' || overflow === 'scroll') return true;
+                            }
+                            return false;
+                          };
+                          const controls = Array.from(container.querySelectorAll(
+                            'button, input, select, textarea, a[href]'
+                          )).filter(isVisible);
+                          return {
+                            container: {
+                              left: bounds.left, right: bounds.right,
+                              width: bounds.width, viewportWidth: innerWidth
+                            },
+                            leaks: controls.filter(node => {
+                              const rect = node.getBoundingClientRect();
+                              return (rect.left < bounds.left - 1
+                                || rect.right > Math.min(bounds.right, innerWidth) + 1)
+                                && !hasHorizontalContainer(node);
+                            }).map(node => ({
+                              tag: node.tagName,
+                              id: node.id,
+                              text: String(node.textContent || node.value || '').trim().slice(0, 80),
+                              rect: {
+                                left: node.getBoundingClientRect().left,
+                                right: node.getBoundingClientRect().right
+                              }
+                            })).slice(0, 12),
+                            clippedButtons: controls.filter(node =>
+                              (node.tagName === 'BUTTON' || node.getAttribute('role') === 'button')
+                              && node.clientWidth > 0
+                              && node.scrollWidth > node.clientWidth + 2
+                            ).map(node => node.id || node.textContent).slice(0, 12)
+                          };
+                        }"""
+                    )
+                    self.assertGreater(report["container"]["width"], 0, report)
+                    self.assertGreaterEqual(report["container"]["left"], -1, report)
+                    self.assertLessEqual(
+                        report["container"]["right"],
+                        report["container"]["viewportWidth"] + 1,
+                        report,
+                    )
+                    self.assertEqual(report["leaks"], [], report)
+                    self.assertEqual(report["clippedButtons"], [], report)
             self.assert_no_page_errors(page_errors)
         finally:
             page.close()

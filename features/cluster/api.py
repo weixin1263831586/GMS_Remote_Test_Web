@@ -14,6 +14,7 @@ from features.auth import (
     CurrentUser,
     authentication_required,
     get_authenticated_user,
+    require_elevated_admin_when_auth_required,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
     require_role,
@@ -191,7 +192,7 @@ def list_worker_tests(
 @router.delete("/workers/{worker_id}")
 async def delete_worker(
     worker_id: str,
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
 ):
     svc = service()
     if worker_id == svc.config.local_worker_id:

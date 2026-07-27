@@ -566,17 +566,67 @@ async function onStatsUserChange() {
 }
 
 // ---- Shared modal helpers ----
+const redmineModalStack = [];
+function syncRedmineModalState() {
+  const active = redmineModalStack.filter(function(id) {
+    const modal = document.getElementById(id);
+    return modal && modal.classList.contains('show');
+  });
+  redmineModalStack.length = 0;
+  active.forEach(function(id) { redmineModalStack.push(id); });
+  const topIndex = redmineModalStack.length - 1;
+  redmineModalStack.forEach(function(id, index) {
+    const modal = document.getElementById(id);
+    modal.style.zIndex = String(10000 + index * 20);
+    modal.inert = index !== topIndex;
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-hidden', index === topIndex ? 'false' : 'true');
+    if (index === topIndex) modal.setAttribute('aria-modal', 'true');
+    else modal.removeAttribute('aria-modal');
+  });
+  document.documentElement.classList.toggle('modal-open', redmineModalStack.length > 0);
+  document.body.classList.toggle('modal-open', redmineModalStack.length > 0);
+}
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') document.querySelectorAll('.modal.show').forEach(function(m) { m.classList.remove('show'); });
+  if (e.key === 'Escape' && redmineModalStack.length) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideModal(redmineModalStack[redmineModalStack.length - 1]);
+  }
 });
 document.addEventListener('click', function(e) {
-  if (e.target && e.target.classList && e.target.classList.contains('modal')) e.target.classList.remove('show');
+  if (e.target && e.target.classList && e.target.classList.contains('modal')
+      && redmineModalStack[redmineModalStack.length - 1] === e.target.id) {
+    hideModal(e.target.id);
+  }
 });
-function showModal(id) { document.getElementById(id).classList.add('show'); }
-function hideModal(id) { document.getElementById(id).classList.remove('show'); }
+function showModal(id) {
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  const index = redmineModalStack.indexOf(id);
+  if (index >= 0) redmineModalStack.splice(index, 1);
+  redmineModalStack.push(id);
+  modal.classList.add('show');
+  syncRedmineModalState();
+}
+function hideModal(id) {
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  modal.classList.remove('show');
+  modal.inert = false;
+  modal.setAttribute('aria-hidden', 'true');
+  modal.removeAttribute('aria-modal');
+  modal.style.removeProperty('z-index');
+  const index = redmineModalStack.indexOf(id);
+  if (index >= 0) redmineModalStack.splice(index, 1);
+  syncRedmineModalState();
+}
 function removeDynamicModal(id) {
   const modal = document.getElementById(id);
   if (modal) modal.remove();
+  const index = redmineModalStack.indexOf(id);
+  if (index >= 0) redmineModalStack.splice(index, 1);
+  syncRedmineModalState();
 }
 function notifyUser(title, message, level) {
   level = level || 'info';
@@ -590,7 +640,7 @@ function notifyUser(title, message, level) {
   var toast = document.createElement('div');
   toast.id = 'redmine-local-toast';
   toast.textContent = title + (message ? ': ' + message : '');
-  toast.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10000;max-width:min(460px,calc(100vw - 32px));padding:10px 12px;border-radius:6px;background:#111827;color:#f8fafc;border:1px solid #334155;box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:12px;';
+  toast.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:20000;max-width:min(460px,calc(100vw - 32px));padding:10px 12px;border-radius:6px;background:#111827;color:#f8fafc;border:1px solid #334155;box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:12px;overflow-wrap:anywhere;pointer-events:none;';
   document.body.appendChild(toast);
   setTimeout(function(){ if (toast.parentNode) toast.remove(); }, 3600);
 }
@@ -605,7 +655,7 @@ function openRedmineReplyModal(issueId, replyText, meta) {
   const fileListId = modalId + '-file-list';
   const modal = document.createElement('div');
   modal.id = modalId;
-  modal.className = 'modal show';
+  modal.className = 'modal';
   modal.innerHTML = `
     <div class="modal-content redmine-reply-modal">
       <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
@@ -635,6 +685,7 @@ function openRedmineReplyModal(issueId, replyText, meta) {
       </div>
     </div>`;
   document.body.appendChild(modal);
+  showModal(modalId);
   const drop = document.getElementById(fileInputId + '-drop');
   if (drop) {
     drop.addEventListener('dragover', function(e) { e.preventDefault(); drop.classList.add('drag-over'); });
