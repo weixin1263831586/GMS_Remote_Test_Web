@@ -19,9 +19,10 @@ gms-rt-system-help
 Before calling protected APIs, inspect and establish the CLI session:
 
 ```bash
-gms-rt-auth-status
-gms-rt-auth-login USERNAME
-gms-rt-devices-list
+gms-rt-capabilities --json
+gms-rt-auth-status --json
+printf '%s\n' "$PASSWORD" | gms-rt-auth-login USERNAME --password-stdin --non-interactive --json
+gms-rt-devices-list --json
 ```
 
 Run `gms-rt-update` to reinstall the latest Skill and command links from the
@@ -31,26 +32,38 @@ the shared dispatcher stays in the private runtime directory.
 Inside a source checkout, the bundled helper remains available directly as
 `skills/gms-remote-test/scripts/gms-remote-test.sh gms-rt-system-help`.
 
-Prompt for the password by default. Use `GMS_REMOTE_TEST_USERNAME` and
-`GMS_REMOTE_TEST_PASSWORD` only for controlled non-interactive execution. Never
-print, log, commit, or persist passwords. The helper stores only the server-issued
-session cookie in `GMS_AUTH_COOKIE_JAR`, defaulting beneath
+Prompt for the password by default. Agents should prefer `--password-stdin`
+together with `--non-interactive`; use `GMS_REMOTE_TEST_USERNAME` and
+`GMS_REMOTE_TEST_PASSWORD` only in a controlled environment. Never print, log,
+commit, or persist passwords. The helper stores only the server-issued session
+cookie in `GMS_AUTH_COOKIE_JAR`, defaulting beneath
 `${XDG_STATE_HOME:-$HOME/.local/state}`.
+
+Use `--json` for automation. It emits exactly one JSON envelope with `ok`,
+`command`, `exit_code`, structured `data` when recoverable, and optional
+`diagnostics`. Honor the documented exit codes; do not infer success from text.
+Use `--non-interactive` for unattended execution and add `--yes` only when the
+requested operation explicitly authorizes supported confirmations.
 
 Set `GMS_REMOTE_TEST_SERVER` when the automatic server address is wrong. Set
 `GMS_CURL_CA_CERT` for a trusted CA, or set `GMS_CURL_INSECURE=1` only for a
 local self-signed deployment.
 
 Read [references/api-catalog.md](references/api-catalog.md) for supported CLI
-commands and examples. For exact request or response fields, inspect the current
-route and its service call path.
+commands and examples. Read
+[references/agent-integration.md](references/agent-integration.md) when wiring
+the CLI into Codex, Claude Code, Kimi, or another terminal agent. For exact
+request or response fields, inspect the current route and its service call path.
 
 ## Handle failures
 
 - On `Authentication required`, run `gms-rt-auth-status`, then
   `gms-rt-auth-login`. Do not disable server authentication.
 - On `Permission denied` or `Elevation required`, verify the account role and
-  use the web UI's administrator elevation flow for sensitive operations.
+  run `gms-rt-auth-elevate ADMIN --password-stdin --non-interactive --json`.
+- Exit codes are stable: `2` usage, `3` authentication, `4` permission or
+  elevation, `5` conflict or busy, `6` network or timeout, and `7` operation
+  failure.
 - On connection failure, verify the resolved server URL, health endpoint,
   certificate settings, service status, and firewall.
 - On device failures, inspect device state and ownership before retrying. Do not

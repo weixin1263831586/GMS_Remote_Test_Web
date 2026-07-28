@@ -44,3 +44,21 @@ def test_lightweight_probe_skips_detail_shell_call():
 
     assert devices[0]["properties"]["model"] == "Box"
     assert runner.call_count == 2
+
+
+def test_probe_keeps_fastbootd_device_visible():
+    with patch(
+        "worker_agent.inventory._run",
+        side_effect=[
+            "List of devices attached\n",
+            "FB001\tfastbootd\n",
+        ],
+    ):
+        devices = probe_devices()
+
+    assert devices == [{
+        "serial": "FB001",
+        "transport": "local_usb",
+        "state": "fastboot",
+        "properties": {},
+    }]

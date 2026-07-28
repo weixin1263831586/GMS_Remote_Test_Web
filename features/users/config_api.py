@@ -11,7 +11,12 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import CurrentUser, require_elevated_admin, require_role_when_auth_required
+from features.auth import (
+    CurrentUser,
+    require_authenticated_user_when_auth_required,
+    require_elevated_admin,
+    require_elevated_admin_when_auth_required,
+)
 from foundation.responses import error_response, success_response
 
 from . import runtime
@@ -172,7 +177,9 @@ _tailscale_start_lock = asyncio.Lock()
 
 @router.get("/api/config/external-services")
 async def get_external_services_config(
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
 ):
     """Return user-editable external service addresses without exposing secrets."""
     config = config_manager.load_config()
@@ -185,7 +192,9 @@ async def get_external_services_config(
 @router.post("/api/config/external-services")
 async def update_external_services_config(
     req: dict[str, Any],
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _admin: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
 ):
     """Save the GMS Assistant upstream address in runtime configuration.
 

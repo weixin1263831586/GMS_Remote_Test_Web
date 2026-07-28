@@ -360,6 +360,10 @@ async def deploy_worker(
                     arcname="tools/upgrade_tool",
                 )
                 bundle.add(
+                    project_root / "tools/misc.img",
+                    arcname="tools/misc.img",
+                )
+                bundle.add(
                     project_root / "tools/scrcpy-linux-x86_64-v3.3.4",
                     arcname="tools/scrcpy-linux-x86_64-v3.3.4",
                 )

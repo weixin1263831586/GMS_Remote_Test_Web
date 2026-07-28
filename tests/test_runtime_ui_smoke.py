@@ -899,6 +899,148 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_fastboot_device_is_visible_but_not_adb_selectable(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """
+                state.devices = [
+                    {device_id: 'ADB-1', status: 'online', protocol: 'adb', locked: false},
+                    {device_id: 'FB-1', status: 'fastboot', protocol: 'fastboot', locked: false}
+                ];
+                state.selectedDevices = new Set();
+                renderDevices();
+                """
+            )
+
+            fastboot = page.locator('.device-item[data-device-id="FB-1"]')
+            expect(fastboot).to_contain_text("Fastboot")
+            expect(fastboot.locator('input[type="checkbox"]')).to_be_enabled()
+
+            page.evaluate("toggleDevice('FB-1')")
+            self.assertEqual(
+                page.evaluate("Array.from(state.selectedDevices)"),
+                ["FB-1"],
+            )
+            self.assertFalse(page.evaluate("validateDeviceSelection()"))
+            self.assertTrue(page.evaluate("validateBootloaderDeviceSelection()"))
+
+            bootloader_requests = []
+
+            def handle_bootloader_request(route, request):
+                bootloader_requests.append(request.post_data_json)
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=(
+                        '{"success":false,"error":"mock unlock failed",'
+                        '"data":{"results":[{"device":"FB-1","success":false,'
+                        '"error":"still locked"}],"summary":{"failed":1}}}'
+                    ),
+                )
+
+            page.route(
+                "**/api/devices/bootloader-unlock",
+                handle_bootloader_request,
+            )
+            operation_logs = page.evaluate(
+                """async () => {
+                    const originalAddLogEntry = window.addLogEntry;
+                    const messages = [];
+                    window.addLogEntry = message => messages.push(message);
+                    try {
+                        await lockSelectedDevices('unlock');
+                    } finally {
+                        window.addLogEntry = originalAddLogEntry;
+                    }
+                    return messages;
+                }"""
+            )
+            self.assertEqual(
+                bootloader_requests,
+                [{"devices": ["FB-1"]}],
+            )
+            self.assertIn("设备解锁失败: mock unlock failed", operation_logs)
+            self.assertNotIn("设备解锁完成", operation_logs)
+
+            page.evaluate("state.selectedDevices.clear()")
+            page.evaluate("selectAllDevices()")
+            self.assertEqual(
+                page.evaluate("Array.from(state.selectedDevices)"),
+                ["ADB-1"],
+            )
+        finally:
+            page.close()
+
+    def test_gsi_burn_refresh_waits_for_delayed_fastboot_inventory(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """
+                state.clusterStatus = {
+                    ...(state.clusterStatus || {}),
+                    enabled: false,
+                    local_worker_id: 'worker-local'
+                };
+                window.GmsWorkspace?.update({
+                    scope_mode: 'single',
+                    worker_id: 'worker-local',
+                    device_ids: []
+                }, {source: 'test'});
+                state.devices = [
+                    {device_id: 'LATE-FB', status: 'online', protocol: 'adb', locked: true}
+                ];
+                renderDevices();
+                window.__burnRefreshCalls = 0;
+                window.__stopBurnRefresh = startBurnDeviceProtocolRefresh(
+                    ['LATE-FB'],
+                    {
+                        intervalMs: 100,
+                        timeoutMs: 10000,
+                        refreshDevices: async () => {
+                            window.__burnRefreshCalls += 1;
+                            const fastbootVisible =
+                                window.__burnRefreshCalls >= 2;
+                            state.devices = [{
+                                device_id: 'LATE-FB',
+                                status: fastbootVisible
+                                    ? 'fastboot' : 'online',
+                                protocol: fastbootVisible
+                                    ? 'fastboot' : 'adb',
+                                locked: true
+                            }];
+                            renderDevices();
+                            return state.devices;
+                        }
+                    }
+                );
+                void 0;
+                """
+            )
+
+            page.wait_for_timeout(500)
+            self.assertGreaterEqual(
+                page.evaluate("window.__burnRefreshCalls"),
+                2,
+                page.evaluate(
+                    """
+                    ({
+                        workerId: workspaceWorkerId(),
+                        localWorkerId: workspaceLocalWorkerId(),
+                        isLocal: isLocalWorkspaceWorker(workspaceWorkerId())
+                    })
+                    """
+                ),
+            )
+            expect(
+                page.locator('.device-item[data-device-id="LATE-FB"]')
+            ).to_contain_text("Fastboot")
+        finally:
+            page.evaluate("window.__stopBurnRefresh?.()")
+            page.close()
+
     def test_remote_device_controls_follow_worker_capabilities(self):
         page = self.new_page()
         worker_ready = {"value": False}
@@ -1050,6 +1192,14 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "source_type": "local",
                     "source_host": "ui-admin@127.0.0.1",
                     "status": "online",
+                    "protocol": "adb",
+                }, {
+                    "device_id": "LOCAL-FB",
+                    "serial_no": "LOCAL-FB",
+                    "source_type": "local",
+                    "source_host": "ui-admin@127.0.0.1",
+                    "status": "fastboot",
+                    "protocol": "fastboot",
                 }],
             }),
         )
@@ -1119,10 +1269,15 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             page.evaluate("switchPage('devices')")
             expect(page.locator("#devices-table-body")).to_contain_text("LOCAL-1")
+            expect(page.locator("#devices-table-body")).to_contain_text("LOCAL-FB")
+            expect(page.locator("#devices-table-body")).to_contain_text("Fastboot")
             expect(page.locator("#devices-table-body")).not_to_contain_text("REMOTE-1")
             expect(page.locator("#devices-table-body")).to_contain_text("Local Group")
             expect(page.locator("#devices-table-body")).not_to_contain_text("Remote Group")
             expect(page.locator("#cluster-devices-count").locator("..")).to_be_hidden()
+            expect(page.locator("#fastboot-devices-count")).to_have_text("1")
+            fastboot_row = page.locator("#devices-table-body tr", has_text="LOCAL-FB")
+            expect(fastboot_row.get_by_role("button", name="🐧 adb shell")).to_be_disabled()
             self.assertEqual(cluster_device_requests, [])
 
             page.evaluate(

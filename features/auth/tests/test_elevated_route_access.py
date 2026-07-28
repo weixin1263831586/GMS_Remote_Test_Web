@@ -108,6 +108,51 @@ class ElevatedRouteAccessTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         self.assertTrue(allowed.json()["success"])
 
+    def test_external_service_config_reads_as_user_and_writes_after_elevation(self):
+        config = {
+            "external_services": {
+                "gms_assistant_url": "https://assistant.example.test/",
+            },
+        }
+        with (
+            patch.object(config_manager, "load_config", return_value=config),
+            patch.object(
+                config_manager,
+                "update_runtime_config",
+                return_value=True,
+            ) as update_runtime_config,
+        ):
+            readable = self.client.get("/api/config/external-services")
+            self.assertEqual(readable.status_code, 200)
+            self.assertEqual(
+                readable.json()["data"]["gms_assistant_url"],
+                "https://assistant.example.test",
+            )
+
+            self._assert_elevation_required(
+                "/api/config/external-services",
+                {"gms_assistant_url": "https://new-assistant.example.test/chat"},
+            )
+            self._elevate()
+            allowed = self.client.post(
+                "/api/config/external-services",
+                headers={"Origin": "http://testserver"},
+                json={
+                    "gms_assistant_url": "https://new-assistant.example.test/chat"
+                },
+            )
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(
+            allowed.json()["data"]["gms_assistant_url"],
+            "https://new-assistant.example.test",
+        )
+        update_runtime_config.assert_called_once_with({
+            "external_services": {
+                "gms_assistant_url": "https://new-assistant.example.test",
+            },
+        })
+
     def test_worker_host_key_scan_uses_temporary_admin_elevation(self):
         payload = {"ssh_host": "worker@192.0.2.10"}
         self._assert_elevation_required(

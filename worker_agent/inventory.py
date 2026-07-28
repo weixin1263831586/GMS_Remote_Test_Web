@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import WorkerConfig
+from .fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_partition
 from .suite_detection import suite_details
 
 
@@ -793,9 +794,19 @@ def flash_gsi(config: WorkerConfig, system_img: Path, vendor_img: Path | None,
     script = Path(__file__).resolve().parent.parent / "scripts" / "run_GSI_Burn.sh"
     if not script.is_file():
         raise RuntimeError("GSI burn script is not installed on Worker")
-    argv = [str(script), serial, "--system", str(system_img)]
+    misc_img = Path(__file__).resolve().parent.parent / "tools" / "misc.img"
+    if not misc_img.is_file():
+        raise RuntimeError("misc.img is not installed on Worker")
+    prepared = FastbootPreparer(subprocess_runner).prepare_bootloader(serial)
+    argv = [
+        str(script),
+        serial,
+        prepared.oem_argument("unlock"),
+        str(system_img),
+        str(misc_img),
+    ]
     if vendor_img:
-        argv.extend(["--vendor", str(vendor_img)])
+        argv.extend([vendor_partition(str(vendor_img)), str(vendor_img)])
     completed = subprocess.run(argv, capture_output=True, text=True, timeout=1800, check=False)
     output = "\n".join(filter(None, [completed.stdout, completed.stderr])).strip()
     return {"device": serial, "success": completed.returncode == 0,

@@ -369,7 +369,7 @@ async def create_firmware_share(request: Request):
         info = _stat_remote(host, user, path, config, password=password)
         username = get_client_username_from_request(request)
         record = {
-            "id": uuid.uuid4().hex[:12],
+            "id": uuid.uuid4().hex,
             "name": name or info["filename"],
             **info,
             "password": password,

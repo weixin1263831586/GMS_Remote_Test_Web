@@ -12,6 +12,10 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 from features.test_execution import get_default_suites_path
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
+from worker_agent.fastboot_workflow import (
+    CommandResult,
+    FastbootPreparer,
+)
 
 from . import runtime
 from .manager import device_manager
@@ -40,6 +44,34 @@ def _help_or_continue(help_requested: bool, method: str, path: str):
     if runtime.generate_help_or_continue is None:
         return None
     return runtime.generate_help_or_continue(help_requested, method, path)
+
+
+def _adb_state_is_ready(output: str, code: int) -> bool:
+    return code == 0 and output.strip() == "device"
+
+
+def _bootloader_operation_response(results: list[dict], action_text: str):
+    success_count = sum(item.get("success", False) for item in results)
+    payload = {
+        "results": results,
+        "summary": {
+            "total": len(results),
+            "success": success_count,
+            "failed": len(results) - success_count,
+        },
+    }
+    if success_count != len(results):
+        details = "; ".join(
+            f"{item.get('device')}: {item.get('error') or item.get('output') or 'unknown error'}"
+            for item in results
+            if not item.get("success")
+        )
+        return error_response(
+            f"Device {action_text} failed: {details}",
+            status_code=200,
+            data=payload,
+        )
+    return _api_success(payload, f"Device {action_text} operation completed")
 
 
 async def _manage_bootloader_lock(
@@ -87,37 +119,58 @@ async def _manage_bootloader_lock(
             results = []
             for device_id in devices:
                 try:
-                    cmd = f"bash '{remote_script}' '{device_id}' '{action}'"
+                    def remote_runner(argv: list[str], timeout: int) -> CommandResult:
+                        output, error, code = runtime.ssh_manager.execute_command(
+                            ssh,
+                            shlex.join(argv),
+                            timeout=timeout,
+                        )
+                        return CommandResult(output, error, code)
+
+                    prepared = await asyncio.to_thread(
+                        FastbootPreparer(remote_runner).prepare_bootloader,
+                        device_id,
+                    )
+                    cmd = shlex.join([
+                        "bash",
+                        remote_script,
+                        device_id,
+                        prepared.oem_argument(action),
+                    ])
                     output, error, code = runtime.ssh_manager.execute_command(ssh, cmd)
                     if code == 0:
                         start_time = time.time()
+                        adb_ready = False
                         while time.time() - start_time < 60:
-                            check_output, _, _ = runtime.ssh_manager.execute_command(
+                            check_output, _, check_code = runtime.ssh_manager.execute_command(
                                 ssh, f"adb -s {device_id} get-state"
                             )
-                            if "device" in check_output.lower():
+                            if _adb_state_is_ready(check_output, check_code):
+                                adb_ready = True
                                 break
+                            await asyncio.sleep(1)
+                        if not adb_ready:
+                            code = 1
+                            error = (
+                                f"{error}\n" if error else ""
+                            ) + "设备操作后未在 60 秒内返回 ADB device 状态"
                     await asyncio.sleep(2)
+                    result_output = "\n".join(
+                        part.strip() for part in (output, error) if part and part.strip()
+                    )
                     results.append({
                         "device": device_id,
                         "success": code == 0,
-                        "output": output[-200:] if output else error,
+                        "output": result_output[-500:],
+                        **({"error": result_output[-500:]} if code != 0 else {}),
                     })
                 except Exception as exc:
                     results.append({
                         "device": device_id, "success": False, "error": str(exc),
                     })
 
-            success_count = sum(item.get("success", False) for item in results)
             action_text = "unlock" if action == "unlock" else "lock"
-            return _api_success({
-                "results": results,
-                "summary": {
-                    "total": len(results),
-                    "success": success_count,
-                    "failed": len(results) - success_count,
-                },
-            }, f"Device {action_text} operation completed")
+            return _bootloader_operation_response(results, action_text)
     except HTTPException:
         raise
     except Exception as exc:

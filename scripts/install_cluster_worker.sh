@@ -163,6 +163,8 @@ install -m 755 "${PROJECT_ROOT}/scripts/run_GMS_Test_Auto.sh" \
     "${INSTALL_ROOT}/scripts/run_GMS_Test_Auto.sh"
 install -m 755 "${PROJECT_ROOT}/tools/upgrade_tool" \
     "${INSTALL_ROOT}/tools/upgrade_tool"
+install -m 644 "${PROJECT_ROOT}/tools/misc.img" \
+    "${INSTALL_ROOT}/tools/misc.img"
 rsync -a --delete "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4/" \
     "${INSTALL_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4/"
 for platform_tool in adb fastboot aapt aapt2; do
