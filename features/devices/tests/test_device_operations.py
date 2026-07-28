@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 import unittest
 from contextlib import asynccontextmanager, contextmanager
@@ -10,6 +11,7 @@ from starlette.requests import Request
 from features.auth import CurrentUser
 from features.devices import device_lock_manager, management_api, operations_api
 from features.devices.models import DeviceActionRequest, WifiConnectRequest
+from features.devices.utils import DeviceUtils
 
 
 class _ConfigManager:
@@ -101,6 +103,82 @@ class DeviceOperationsTests(unittest.TestCase):
             )
 
         self.assertTrue(payload["devices"][0]["locked_by_self"])
+
+    def test_fastboot_parser_and_protocol_merge_deduplicate_serials(self):
+        self.assertEqual(
+            DeviceUtils.parse_fastboot_devices(
+                "FB001\tfastboot\nFB002 fastboot\nFB003 fastbootd\n"
+                "malformed extra-value\n"
+            ),
+            ["FB001", "FB002", "FB003"],
+        )
+        devices, protocols = management_api._merge_device_protocols(
+            ["ADB001", "SWITCHING"],
+            ["SWITCHING", "FB001"],
+        )
+        self.assertEqual(devices, ["ADB001", "SWITCHING", "FB001"])
+        self.assertEqual(protocols["ADB001"], "adb")
+        self.assertEqual(protocols["SWITCHING"], "fastboot")
+        self.assertEqual(protocols["FB001"], "fastboot")
+
+    def test_management_endpoint_merges_adb_and_fastboot_inventory(self):
+        def run_local(command, _timeout):
+            if command == "adb devices":
+                return "List of devices attached\nADB001\tdevice\n", "", 0
+            self.assertIn("adb -s ADB001 shell", command)
+            return (
+                "===DEVICE:ADB001===\nADB001\nModel\n14\n90\nSoC\n",
+                "",
+                0,
+            )
+
+        with (
+            patch.object(management_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(
+                management_api.runtime,
+                "global_state",
+                SimpleNamespace(
+                    device_cache={"devices": [], "timestamp": 0},
+                    device_cache_lock=threading.RLock(),
+                    usbip_devices_source={},
+                    usbip_devices_source_lock=threading.RLock(),
+                ),
+            ),
+            patch.object(
+                management_api.runtime,
+                "get_client_id_from_request",
+                return_value="alice",
+            ),
+            patch.object(
+                management_api.runtime,
+                "run_local_shell_command",
+                side_effect=run_local,
+            ),
+            patch.object(management_api, "is_local_host", return_value=True),
+            patch.object(management_api, "has_blocked_adb_process", return_value=False),
+            patch.object(
+                management_api.device_manager,
+                "get_fastboot_devices",
+                return_value=["FB001"],
+            ),
+            patch.object(management_api.device_lock_manager, "get_all_locks", return_value={}),
+            patch.object(management_api, "_known_usbip_sources", return_value={}),
+            patch("features.users.auto_assign_new_devices", return_value=[]),
+            patch("features.users.build_device_group_map", return_value={}),
+        ):
+            response = asyncio.run(
+                management_api.devices_management(self.request_for())
+            )
+
+        devices = {
+            item["device_id"]: item
+            for item in json.loads(response.body)["devices"]
+        }
+        self.assertEqual(devices["ADB001"]["protocol"], "adb")
+        self.assertEqual(devices["ADB001"]["status"], "online")
+        self.assertEqual(devices["FB001"]["protocol"], "fastboot")
+        self.assertEqual(devices["FB001"]["status"], "fastboot")
+        self.assertEqual(devices["FB001"]["model"], "")
 
     def test_management_payload_hides_another_users_identity_and_lease(self):
         payload = {

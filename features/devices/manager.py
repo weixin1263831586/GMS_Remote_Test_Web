@@ -128,6 +128,58 @@ class DeviceManager:
             if created_ssh and ssh:
                 self.ssh_manager.return_connection(ssh)
 
+    def get_fastboot_devices(self, ssh=None) -> list[str]:
+        """返回当前主机上由 ``fastboot devices`` 枚举到的设备 ID。"""
+        config = self.config_manager.load_config()
+
+        if ssh is None and is_local_host(config.get("ubuntu_host", "")):
+            try:
+                result = subprocess.run(
+                    ["fastboot", "devices"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        "[Device] Local fastboot devices failed: %s",
+                        result.stderr.strip(),
+                    )
+                    return []
+                return DeviceUtils.parse_fastboot_devices(result.stdout)
+            except FileNotFoundError:
+                logger.warning("[Device] fastboot command not found on local host")
+                return []
+            except Exception as exc:
+                logger.error("[Device] Error getting local fastboot devices: %s", exc)
+                return []
+
+        if ssh is None:
+            ssh = self.ssh_manager.get_connection(config)
+            if not ssh:
+                logger.error("[Device] Failed to get SSH connection for fastboot scan")
+                return []
+            created_ssh = True
+        else:
+            created_ssh = False
+
+        try:
+            output, error, code = self.ssh_manager.execute_command(
+                ssh,
+                "fastboot devices",
+                timeout=10,
+            )
+            if code != 0 and not output:
+                logger.warning("[Device] Remote fastboot devices failed: %s", error.strip())
+                return []
+            return DeviceUtils.parse_fastboot_devices(output or error)
+        except Exception as exc:
+            logger.error("[Device] Error getting remote fastboot devices: %s", exc)
+            return []
+        finally:
+            if created_ssh and ssh:
+                self.ssh_manager.return_connection(ssh)
+
     def get_device_info(
         self,
         device_id: str,

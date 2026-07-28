@@ -244,3 +244,48 @@ def test_firmware_multi_device_claim_is_atomic_and_not_reentrant(tmp_path):
     )
     assert not atomic
     assert locks.get_lock_status("D") is None
+
+
+def test_firmware_claim_survives_worker_adb_fastboot_transition(tmp_path):
+    repository = _repository(tmp_path)
+    locks = DeviceLockManager(
+        tmp_path / "device_claims.sqlite3",
+        local_worker_id="worker-local",
+    )
+    acquired, _records = locks.lock_devices(
+        ["ABC"],
+        "alice",
+        "Alice",
+        source_id="firmware:alice",
+        source_type="firmware",
+        allow_existing_source=False,
+    )
+    assert acquired
+    lease_id = locks.get_lock_status("ABC")["lease_id"]
+
+    repository.heartbeat(
+        "worker-local",
+        {
+            "running_jobs": [],
+            "devices": [{"serial": "ABC", "state": "fastboot"}],
+            "suites": [],
+        },
+    )
+    fastboot = repository.list_devices("worker-local")[0]
+    assert fastboot["state"] == "fastboot"
+    assert fastboot["claimed"] is True
+    assert fastboot["claim_source_type"] == "firmware"
+    assert locks.get_lock_status("ABC")["lease_id"] == lease_id
+
+    repository.heartbeat(
+        "worker-local",
+        {
+            "running_jobs": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+            "suites": [],
+        },
+    )
+    adb = repository.list_devices("worker-local")[0]
+    assert adb["state"] == "available"
+    assert adb["claimed"] is True
+    assert locks.get_lock_status("ABC")["lease_id"] == lease_id

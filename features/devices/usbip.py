@@ -136,7 +136,7 @@ def parse_fastboot_devices(output: str) -> list[str]:
     devices: list[str] = []
     for raw_line in (output or "").splitlines():
         parts = raw_line.strip().split()
-        if len(parts) >= 2 and parts[1].lower() == "fastboot":
+        if len(parts) >= 2 and parts[1].lower() in {"fastboot", "fastbootd"}:
             devices.append(parts[0])
     return devices
 

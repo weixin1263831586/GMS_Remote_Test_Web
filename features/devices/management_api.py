@@ -14,7 +14,7 @@ from foundation.networking import is_local_host
 
 from . import runtime
 from .locks import device_lock_manager
-from .manager import has_blocked_adb_process
+from .manager import device_manager, has_blocked_adb_process
 from .support import SSHConnection
 from .utils import DeviceUtils
 
@@ -189,12 +189,23 @@ def _parse_management_device_props(props_output: str) -> dict[str, dict[str, str
     return device_data
 
 
+def _merge_device_protocols(
+    adb_devices: list[str],
+    fastboot_devices: list[str],
+) -> tuple[list[str], dict[str, str]]:
+    """Merge protocol probes, preferring Fastboot during an ADB transition."""
+    protocols = {device_id: "adb" for device_id in adb_devices}
+    protocols.update({device_id: "fastboot" for device_id in fastboot_devices})
+    return list(protocols), protocols
+
+
 def _build_devices_management_payload(
     device_ids: list[str],
     device_data: dict[str, dict[str, str]],
     config: dict[str, Any],
     client_id: str | None = None,
     username: str | None = None,
+    device_protocols: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     client_id = client_id or runtime.client_manager.get_client_id("127.0.0.1")
     locks = device_lock_manager.get_all_locks()
@@ -216,10 +227,12 @@ def _build_devices_management_payload(
     group_map = build_device_group_map(auto_assign_new_devices(username, device_data))
 
     devices_info = []
+    device_protocols = device_protocols or {}
     for device_id in device_ids:
         props = device_data.get(device_id, {})
         lock_info = locks.get(device_id, {})
         source = all_sources.get(device_id)
+        protocol = device_protocols.get(device_id, "adb")
         devices_info.append(
             {
                 "device_id": device_id,
@@ -230,7 +243,8 @@ def _build_devices_management_payload(
                 "soc_model": props.get("soc_model", ""),
                 "source_type": "usbip" if source else "local",
                 "source_host": source.get("source", "Unknown") if source else f"{ubuntu_user}@{ubuntu_host}",
-                "status": "online",
+                "status": "fastboot" if protocol == "fastboot" else "online",
+                "protocol": protocol,
                 "locked_by": lock_info.get("username", ""),
                 "locked_username": lock_info.get("username", ""),
                 "locked_client_id": lock_info.get("client_id", ""),
@@ -265,6 +279,9 @@ def _cached_management_payload(client_id: str) -> dict[str, Any] | None:
                 "source_type": "usbip" if device.get("is_usbip") else "local",
                 "source_host": device.get("source") or device.get("source_host") or "-",
                 "status": device.get("status") or "online",
+                "protocol": device.get("protocol") or (
+                    "fastboot" if device.get("status") == "fastboot" else "adb"
+                ),
                 "locked_by": lock.get("locked_by") or "",
                 "locked_username": lock.get("username") or "",
                 "locked_client_id": lock.get("client_id") or "",
@@ -336,34 +353,46 @@ async def devices_management(request: Request):
         config = runtime.config_manager.load_config()
         client_id = runtime.get_client_id_from_request(request)
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
-            if has_blocked_adb_process():
+            adb_blocked = has_blocked_adb_process()
+            output = error = ""
+            code = 0
+            if not adb_blocked:
+                output, error, code = await asyncio.to_thread(
+                    runtime.run_local_shell_command, "adb devices", 5
+                )
+            adb_devices = DeviceUtils.parse_adb_devices(output)
+            fastboot_devices = await asyncio.to_thread(
+                device_manager.get_fastboot_devices,
+            )
+            device_ids, device_protocols = _merge_device_protocols(
+                adb_devices,
+                fastboot_devices,
+            )
+            if not device_ids:
                 cached = _cached_management_payload(client_id)
+                warning = (
+                    "Local adb server is blocked; skipped adb scan"
+                    if adb_blocked
+                    else error if code != 0 else ""
+                )
                 return response(cached or {
                     "devices": [], "success": True, "source": "local",
-                    "warning": "Local adb server is blocked; skipped adb scan",
+                    "warning": warning,
                 })
-            output, error, code = await asyncio.to_thread(
-                runtime.run_local_shell_command, "adb devices", 5
-            )
-            if code != 0 and not output:
-                return response({
-                    "devices": [], "success": True, "warning": error,
-                })
-            device_ids = DeviceUtils.parse_adb_devices(output)
-            if not device_ids:
-                return response(_cached_management_payload(client_id) or {
-                    "devices": [], "success": True, "source": "local",
-                })
-            props_output, props_error, props_code = await asyncio.to_thread(
-                runtime.run_local_shell_command,
-                _build_management_props_command(device_ids),
-                15,
-            )
+            props_output = props_error = ""
+            props_code = 0
+            if adb_devices:
+                props_output, props_error, props_code = await asyncio.to_thread(
+                    runtime.run_local_shell_command,
+                    _build_management_props_command(adb_devices),
+                    15,
+                )
             if props_code != 0:
                 logger.warning("[Device Management] property query failed: %s", props_error)
             payload = _build_devices_management_payload(
                 device_ids, _parse_management_device_props(props_output), config,
                 client_id, _mgmt_username(request),
+                device_protocols,
             )
             payload.update({"success": True, "source": "local"})
             return response(payload)
@@ -381,15 +410,26 @@ async def devices_management(request: Request):
             })
         try:
             output, _, _ = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=5)
-            device_ids = DeviceUtils.parse_adb_devices(output)
+            adb_devices = DeviceUtils.parse_adb_devices(output)
+            fastboot_devices = await asyncio.to_thread(
+                device_manager.get_fastboot_devices,
+                ssh,
+            )
+            device_ids, device_protocols = _merge_device_protocols(
+                adb_devices,
+                fastboot_devices,
+            )
             if not device_ids:
                 return response(_cached_management_payload(client_id) or {"devices": []})
-            props_output, _, _ = runtime.ssh_manager.execute_command(
-                ssh, _build_management_props_command(device_ids), timeout=15
-            )
+            props_output = ""
+            if adb_devices:
+                props_output, _, _ = runtime.ssh_manager.execute_command(
+                    ssh, _build_management_props_command(adb_devices), timeout=15
+                )
             return response(_build_devices_management_payload(
                 device_ids, _parse_management_device_props(props_output), config,
                 client_id, _mgmt_username(request),
+                device_protocols,
             ))
         finally:
             runtime.ssh_manager.return_connection(ssh)

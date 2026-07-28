@@ -224,6 +224,7 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/terminal/open": "features.system.terminal_api:get_ssh_terminal_info",
     "/api/terminal/push": "features.system.terminal_api:upload_file",
     "/api/system/skills": "features.system.api:download_skills_zip",
+    "/api/system/skills/install.sh": "features.system.api:download_skill_installer",
     "/api/system/docs": "features.system.api:get_api_docs",
     "/api/system/help": "features.system.api:get_api_help",
     # --- 补充：报告 ---

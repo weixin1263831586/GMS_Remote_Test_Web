@@ -15,12 +15,15 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.devices import parse_adb_device_states
+from features.devices.utils import DeviceUtils
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
 from foundation.uploads import merge_files_to_path, safe_upload_target_path, save_upload_to_path
 
 from . import runtime
+from .gsi_diagnostics import diagnose_gsi_burn_failure
+from .gsi_transport import prepare_gsi_command, upload_gsi_assets
 from .models import SNBurnRequest
 from .upload_transport import upload_firmware_to_test_host as _upload_firmware_to_test_host
 
@@ -325,17 +328,32 @@ async def _lock_devices(request: Request, client_id: str, devices: list, error_p
     )
 
 
-def _partition_devices_by_adb_state(ssh, devices: list[str]) -> tuple[list[str], list[str]]:
-    """按 ADB 在线状态拆分可烧写和不可烧写设备。"""
-    output, _error, _code = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
-    states = parse_adb_device_states(output)
-    online, offline = [], []
+def _partition_devices_by_flash_state(
+    ssh,
+    devices: list[str],
+) -> tuple[list[str], list[str]]:
+    """允许 GSI 从 ADB、bootloader Fastboot 或 Fastbootd 状态开始。"""
+    adb_output, _error, _code = runtime.ssh_manager.execute_command(
+        ssh,
+        "adb devices",
+        timeout=8,
+    )
+    fastboot_output, fastboot_error, _code = runtime.ssh_manager.execute_command(
+        ssh,
+        "fastboot devices",
+        timeout=8,
+    )
+    adb_states = parse_adb_device_states(adb_output)
+    fastboot_devices = set(
+        DeviceUtils.parse_fastboot_devices(fastboot_output or fastboot_error)
+    )
+    ready, unavailable = [], []
     for serial in devices:
-        if states.get(serial) == "device":
-            online.append(serial)
+        if adb_states.get(serial) == "device" or serial in fastboot_devices:
+            ready.append(serial)
         else:
-            offline.append(serial)
-    return online, offline
+            unavailable.append(serial)
+    return ready, unavailable
 
 
 async def _notify_skip(client_id: str, offline: list[str]) -> None:
@@ -348,7 +366,7 @@ async def _notify_skip(client_id: str, offline: list[str]) -> None:
                 client_id,
                 {
                     "type": "log_update",
-                    "log": f"跳过离线设备（未在 adb 中或状态异常）: {', '.join(offline)}",
+                    "log": f"跳过不可烧写设备（未在 ADB/Fastboot 中或状态异常）: {', '.join(offline)}",
                     "log_type": "warning",
                 },
             )
@@ -615,8 +633,6 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
         logger.error(f"Traceback: {traceback.format_exc()}")
         return error_response(str(e), 500)
 
-
-
 @router.post("/api/burn/gsi")
 async def burn_gsi(request: Request):
     """GSI burning using run_GSI_Burn.sh script."""
@@ -640,14 +656,14 @@ async def burn_gsi(request: Request):
             if not ssh:
                 return error_response("SSH connection failed")
 
-            # 烧写前预检：adb 一次查询，剔除离线/未授权设备，避免选中集合里
-            # 混入离线设备导致"部分设备失败"且要等 fastboot 超时才暴露。
+            # 烧写前预检：允许设备从 ADB、bootloader Fastboot 或 Fastbootd
+            # 开始；其他离线/未授权状态仍提前剔除。
             online_devices, offline_devices = await asyncio.to_thread(
-                _partition_devices_by_adb_state, ssh, devices
+                _partition_devices_by_flash_state, ssh, devices
             )
             if not online_devices:
                 return error_response(
-                    f"没有可烧写的在线设备，离线/状态异常: {', '.join(offline_devices)}"
+                    f"没有可烧写的 ADB/Fastboot 设备，离线/状态异常: {', '.join(offline_devices)}"
                 )
             await _notify_skip(client_id, offline_devices)
 
@@ -656,31 +672,17 @@ async def burn_gsi(request: Request):
                 return lock_err
 
             try:
-                import scp
-
                 gms_suite_dir = get_default_suites_path(config)
-
-                # Upload script
-                local_script = os.path.join(runtime.project_root, "scripts", "run_GSI_Burn.sh")
-                remote_script = os.path.join(gms_suite_dir, "run_GSI_Burn.sh")
-
-                if os.path.exists(local_script):
-                    def _upload_gsi_script():
-                        scp_client = scp.SCPClient(ssh.get_transport())
-                        scp_client.put(local_script, remote_script)
-                        scp_client.close()
-                        runtime.ssh_manager.execute_command(ssh, f"chmod +x {shlex.quote(remote_script)}")
-                    await asyncio.to_thread(_upload_gsi_script)
-                else:
-                    return error_response(f"GSI burn script not found: {local_script}")
-
-            # Upload misc.img
-                local_misc = os.path.join(runtime.project_root, "tools", "misc.img")
-                remote_misc = os.path.join(gms_suite_dir, "misc.img")
-                if os.path.exists(local_misc):
-                    scp_client = scp.SCPClient(ssh.get_transport())
-                    scp_client.put(local_misc, remote_misc)
-                    scp_client.close()
+                remote_script, resolved_misc, asset_error = await asyncio.to_thread(
+                    upload_gsi_assets,
+                    ssh=ssh,
+                    ssh_manager=runtime.ssh_manager,
+                    project_root=str(runtime.project_root),
+                    suite_dir=gms_suite_dir,
+                )
+                if asset_error:
+                    await runtime.release_firmware_devices(client_id, locked_devices)
+                    return error_response(asset_error)
 
                 resolved_system, system_error = await asyncio.to_thread(
                     _resolve_gsi_remote_image,
@@ -714,15 +716,33 @@ async def burn_gsi(request: Request):
                         await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Starting GSI burn for {len(online_devices)} devices...", "log_type": "info"})
 
                 for device in online_devices:
-                    img_args = f"--system {shlex.quote(resolved_system)}"
-                    if remote_vendor:
-                        img_args += f" --vendor {shlex.quote(remote_vendor)}"
-
-                    burn_cmd = f"{shlex.quote(remote_script)} {shlex.quote(device)} {img_args}"
-
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
                             await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Burning device: {device}", "log_type": "info"})
+
+                    try:
+                        burn_cmd = await asyncio.to_thread(
+                            prepare_gsi_command,
+                            ssh=ssh,
+                            ssh_manager=runtime.ssh_manager,
+                            remote_script=remote_script,
+                            device=device,
+                            system_img=resolved_system,
+                            misc_img=resolved_misc,
+                            vendor_img=remote_vendor,
+                        )
+                    except Exception as prep_error:
+                        error_msg = f"Fastboot preparation failed: {prep_error}"
+                        results.append({
+                            "device": device,
+                            "success": False,
+                            "error": error_msg,
+                            "output": error_msg,
+                        })
+                        if client_id in runtime.global_state.websocket_connections:
+                            with contextlib.suppress(Exception):
+                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
+                        continue
 
                     _stdin, stdout, stderr = await asyncio.to_thread(
                         ssh.exec_command,
@@ -758,11 +778,12 @@ async def burn_gsi(request: Request):
                         else:
                             await asyncio.sleep(0.5)
 
+                    while stdout.channel.recv_ready():
+                        chunk = await asyncio.to_thread(stdout.channel.recv, 1024)
+                        output_buffer.append(chunk.decode("utf-8", errors="ignore"))
                     final_output = "".join(output_buffer)
                     exit_status = stdout.channel.recv_exit_status()
-                    error_output = ""
-                    if stderr.channel.recv_ready():
-                        error_output = stderr.read().decode("utf-8", errors="ignore")
+                    error_output = (await asyncio.to_thread(stderr.read)).decode("utf-8", errors="ignore")
 
                     if exit_status == 0:
                         results.append({"device": device, "success": True, "output": final_output})
@@ -770,17 +791,13 @@ async def burn_gsi(request: Request):
                             with contextlib.suppress(Exception):
                                 await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn complete", "log_type": "success"})
                     else:
-                        results.append({"device": device, "success": False, "error": error_output, "output": final_output})
+                        combined_output = "\n".join(
+                            part for part in (final_output, error_output) if part
+                        )
+                        error_msg = diagnose_gsi_burn_failure(combined_output)
+                        results.append({"device": device, "success": False, "error": error_msg, "output": combined_output})
                         if client_id in runtime.global_state.websocket_connections:
                             try:
-                                error_msg = error_output or "Unknown error"
-                                if final_output:
-                                    lines = final_output.strip().split("\n")
-                                    if lines:
-                                        last_lines = lines[-3:]
-                                        error_detail = " ".join(last_lines)
-                                        if error_detail and len(error_detail) < 200:
-                                            error_msg = error_detail
                                 await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
                             except Exception:
                                 pass
@@ -802,12 +819,16 @@ async def burn_gsi(request: Request):
                             await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": online_devices, "success": True})
                     return JSONResponse(content={"success": True, "message": "GSI burn completed successfully", "results": results})
                 else:
-                    failed = [r.get("device") for r in results if not r.get("success")]
+                    failed_results = [r for r in results if not r.get("success")]
+                    failure_summary = "; ".join(
+                        f"{result.get('device')}: {result.get('error')}"
+                        for result in failed_results
+                    )
                     try:
-                        runtime.store_notification(client_id, "GSI burn failed", f"Failed: {', '.join(failed)}", "error", "firmware", {"devices": online_devices, "results": results})
+                        runtime.store_notification(client_id, "GSI burn failed", failure_summary[:300], "error", "firmware", {"devices": online_devices, "results": results})
                     except Exception as notify_error:
                         logger.warning("[GSI Burn] Failed to store failure notification: %s", notify_error)
-                    return error_response(f"部分设备烧写失败: {', '.join(failed)}", results=results)
+                    return error_response(f"部分设备烧写失败: {failure_summary}", results=results)
 
             except Exception as e:
                 try:

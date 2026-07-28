@@ -30,6 +30,18 @@ class DeviceUtils:
         return [line.split('\t')[0] for line in output.split('\n')[1:] if line.strip() and '\tdevice' in line]
 
     @staticmethod
+    def parse_fastboot_devices(output: str) -> list[str]:
+        """解析 `fastboot devices` 输出，兼容 bootloader Fastboot 和 Fastbootd。"""
+        devices = []
+        for line in (output or "").splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            if len(parts) >= 2 and parts[1].lower() in {"fastboot", "fastbootd"}:
+                devices.append(parts[0])
+        return devices
+
+    @staticmethod
     def calculate_window_positions(
         devices: list[str],
         screen_width: int = 1920,

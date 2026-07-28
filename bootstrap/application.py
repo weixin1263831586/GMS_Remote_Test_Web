@@ -84,6 +84,10 @@ _SERVICE_AUTHENTICATED_ROUTES = (
     ('GET', re.compile(r'^/metrics$')),
 )
 
+_PUBLIC_FIRMWARE_SHARE_DOWNLOAD = re.compile(
+    r'^/api/firmware-shares/(?:[0-9a-f]{12}|[0-9a-f]{32})/download$'
+)
+
 
 def _is_service_authenticated_path(path: str, method: str) -> bool:
     normalized_method = method.upper()
@@ -163,6 +167,8 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             '/api/system/skills',
             '/api/system/skills/install.sh',
         }:
+            return True
+        if method == 'GET' and _PUBLIC_FIRMWARE_SHARE_DOWNLOAD.fullmatch(path):
             return True
         return False
 

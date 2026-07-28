@@ -1,71 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
-DEVICE=""
-SYSTEM_IMG=""
-VENDOR_IMG=""
-GMS_SUITE_DIR="${GMS_SUITE_DIR:-${HOME}/GMS-Suite}"
-
-# 解析命令行参数
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --system)
-            shift
-            SYSTEM_IMG="$1"
-            ;;
-        --vendor)
-            shift
-            VENDOR_IMG="$1"
-            ;;
-        *)
-            if [[ -z "$DEVICE" ]]; then
-                DEVICE="$1"
-            else
-                echo "未知参数: $1" >&2
-                exit 1
-            fi
-            ;;
-    esac
-    shift
-done
-
-if [[ -z "$DEVICE" ]] || [[ -z "$SYSTEM_IMG" ]]; then
-    echo "Usage: $0 <device> --system <system.img> [--vendor <vendor_boot.img>]" >&2
+if [[ $# -ne 4 && $# -ne 6 ]]; then
+    echo "Usage: $0 <serial> <unlock-command> <system.img> <misc.img> [partition image]" >&2
     exit 1
 fi
 
-if [[ ! -f "$SYSTEM_IMG" ]]; then
-    echo "❌ System 镜像不存在: $SYSTEM_IMG" >&2
-    exit 1
-fi
+SERIAL="$1"
+UNLOCK_COMMAND="$2"
+SYSTEM_IMG="$3"
+MISC_IMG="$4"
+VENDOR_PARTITION="${5:-}"
+VENDOR_IMG="${6:-}"
 
-echo "🔄 重启设备 $DEVICE 进入 bootloader..."
-adb -s "$DEVICE" reboot bootloader
-sleep 5
+fastboot -s "$SERIAL" oem "$UNLOCK_COMMAND"
+fastboot -s "$SERIAL" reboot fastboot || true
 
-fastboot -s "$DEVICE" reboot fastboot
-sleep 3
+fastboot -s "$SERIAL" delete-logical-partition product || true
+fastboot -s "$SERIAL" delete-logical-partition product_a || true
+fastboot -s "$SERIAL" delete-logical-partition product_b || true
 
-echo "🗑️ 删除 product 分区..."
-fastboot -s "$DEVICE" delete-logical-partition product
-fastboot -s "$DEVICE" delete-logical-partition product_a
-fastboot -s "$DEVICE" delete-logical-partition product_b
-
-echo "💾 烧写 system 镜像..."
-fastboot -s "$DEVICE" flash system "$SYSTEM_IMG"
-
-fastboot -s "$DEVICE" flash misc "${GMS_SUITE_DIR}/misc.img"
+fastboot -s "$SERIAL" flash system "$SYSTEM_IMG"
+fastboot -s "$SERIAL" flash misc "$MISC_IMG"
 
 if [[ -n "$VENDOR_IMG" ]]; then
-    if [[ -f "$VENDOR_IMG" ]]; then
-        echo "💾 烧写 vendor_boot 镜像..."
-        fastboot -s "$DEVICE" flash vendor_boot "$VENDOR_IMG"
-    else
-        echo "⚠️ Vendor boot 镜像不存在，跳过: $VENDOR_IMG"
-    fi
+    fastboot -s "$SERIAL" flash "$VENDOR_PARTITION" "$VENDOR_IMG"
 fi
 
-echo "🔄 重启设备..."
-fastboot -s "$DEVICE" reboot
-
-echo "✅ GSI 烧写完成!"
+fastboot -s "$SERIAL" reboot

@@ -150,6 +150,36 @@ function validateDeviceSelection() {
         showToast('请先选择设备', 'warning');
         return false;
     }
+    const unavailable = Array.from(state.selectedDevices).filter(deviceId => {
+        const device = state.devices.find(item => {
+            const id = typeof item === 'string' ? item : item.device_id;
+            return id === deviceId;
+        });
+        return device && !isSelectableTestDevice(device);
+    });
+    if (unavailable.length > 0) {
+        showToast(`所选设备当前不可执行 ADB/测试操作: ${unavailable.join(', ')}`, 'warning');
+        return false;
+    }
+    return true;
+}
+
+function validateBootloaderDeviceSelection() {
+    if (state.selectedDevices.size === 0) {
+        showToast('请先选择设备', 'warning');
+        return false;
+    }
+    const unavailable = Array.from(state.selectedDevices).filter(deviceId => {
+        const device = state.devices.find(item => {
+            const id = typeof item === 'string' ? item : item.device_id;
+            return id === deviceId;
+        });
+        return device && !isSelectableBootloaderDevice(device);
+    });
+    if (unavailable.length > 0) {
+        showToast(`所选设备当前不可执行 Bootloader 锁定/解锁: ${unavailable.join(', ')}`, 'warning');
+        return false;
+    }
     return true;
 }
 
@@ -1390,6 +1420,42 @@ window.switchTestWorker = switchTestWorker;
 let deviceRefreshGeneration = 0;
 const deviceRefreshFlights = new Map();
 
+function isSelectableTestDevice(device) {
+    if (typeof device === 'string') return true;
+    const status = device.status || device.state || 'online';
+    return !device.locked && ['online', 'available'].includes(status);
+}
+
+function isSelectableBootloaderDevice(device) {
+    if (typeof device === 'string') return true;
+    const status = device.status || device.state || 'online';
+    if (status === 'fastboot') {
+        return !device.locked && !device.cluster_worker_id;
+    }
+    return !device.locked && ['online', 'available'].includes(status);
+}
+
+function isSelectableWorkspaceDevice(device) {
+    if (typeof device === 'string') return true;
+    const status = device.status || device.state || 'online';
+    if (status === 'fastboot') {
+        // 当前 GSI 直刷 Fastbootd 仅由本机 /api/burn/gsi 支持；
+        // 远端 Worker 仍需从 available 状态发起。
+        return !device.locked && !device.cluster_worker_id;
+    }
+    return !device.locked && ['online', 'available'].includes(status);
+}
+
+function selectedFastbootDeviceIds() {
+    return Array.from(state.selectedDevices).filter(deviceId => {
+        const device = state.devices.find(item => {
+            const id = typeof item === 'string' ? item : item.device_id;
+            return id === deviceId;
+        });
+        return device && (device.status === 'fastboot' || device.state === 'fastboot');
+    });
+}
+
 function fetchDevicesForWorker(workerId, forceRefresh) {
     const requestKey = `${workerId}\n${forceRefresh ? 'force' : 'cached'}`;
     const existing = deviceRefreshFlights.get(requestKey);
@@ -1407,7 +1473,7 @@ function fetchDevicesForWorker(workerId, forceRefresh) {
             .filter(device => !['offline', 'unknown'].includes(device.state))
             .map(device => {
                 const lockedStates = ['allocated', 'leased', 'busy', 'external_busy', 'reserved'];
-                const isLocked = lockedStates.includes(device.state);
+                const isLocked = Boolean(device.claimed || lockedStates.includes(device.state));
                 return {
                     ...(device.properties || {}),
                     device_id: device.id,
@@ -1415,7 +1481,9 @@ function fetchDevicesForWorker(workerId, forceRefresh) {
                     worker_id: workerId,
                     cluster_worker_id: workerId,
                     locked: isLocked,
-                    locked_by: isLocked ? device.state : '',
+                    locked_by: isLocked
+                        ? (device.claim_source_type || device.state || 'occupied')
+                        : '',
                     locked_by_self: false,
                     state: device.state,
                     status: device.state === 'available' ? 'online' : device.state
@@ -1432,9 +1500,10 @@ function fetchDevicesForWorker(workerId, forceRefresh) {
     return request;
 }
 
-async function loadDevices(forceRefresh = false) {
+async function loadDevices(forceRefresh = false, options = {}) {
     const workerId = workspaceWorkerId();
     const generation = ++deviceRefreshGeneration;
+    const silent = Boolean(options && options.silent);
     state.isRefreshingDevices = true;
     state.deviceRefreshPromise = fetchDevicesForWorker(workerId, forceRefresh);
 
@@ -1467,16 +1536,18 @@ async function loadDevices(forceRefresh = false) {
                 .catch((err) => debugLog('[Devices] loadDeviceGroups failed:', err));
         }
 
-        // 显示设备信息，包含序列号
-        let deviceInfo = `已刷新设备列表，找到 ${devices.length} 台设备`;
-        if (devices.length > 0) {
-            // 支持 device_id 和 serial 两种字段名
-            const serials = devices.map(d => d.device_id || d.serial || '未知').filter(s => s).join(' ');
-            if (serials) {
-                deviceInfo += ` (${serials})`;
+        if (!silent) {
+            // 显示设备信息，包含序列号
+            let deviceInfo = `已刷新设备列表，找到 ${devices.length} 台设备`;
+            if (devices.length > 0) {
+                // 支持 device_id 和 serial 两种字段名
+                const serials = devices.map(d => d.device_id || d.serial || '未知').filter(s => s).join(' ');
+                if (serials) {
+                    deviceInfo += ` (${serials})`;
+                }
             }
+            addLogEntry(deviceInfo, 'info');
         }
-        addLogEntry(deviceInfo, 'info');
 
         // 不再自动检查 USB/IP 状态，避免覆盖连接状态
         // USB/IP 状态只在连接/断开操作时更新
@@ -1485,7 +1556,11 @@ async function loadDevices(forceRefresh = false) {
         if (generation !== deviceRefreshGeneration || workspaceWorkerId() !== workerId) {
             return state.devices;
         }
-        addLogEntry('加载设备列表失败: ' + error.message, 'error');
+        if (silent) {
+            debugLog('[Devices] Silent refresh failed:', error.message);
+        } else {
+            addLogEntry('加载设备列表失败: ' + error.message, 'error');
+        }
         throw error;
     } finally {
         if (generation === deviceRefreshGeneration) {
@@ -1493,6 +1568,74 @@ async function loadDevices(forceRefresh = false) {
             state.deviceRefreshPromise = null;
         }
     }
+}
+
+function startBurnDeviceProtocolRefresh(deviceIds, options = {}) {
+    const targets = new Set(
+        (deviceIds || []).map(deviceId => String(deviceId || '').trim()).filter(Boolean)
+    );
+    const workerId = workspaceWorkerId();
+    if (!targets.size || !isLocalWorkspaceWorker(workerId)) {
+        return () => {};
+    }
+
+    const requestedInterval = Number(options.intervalMs);
+    const requestedTimeout = Number(options.timeoutMs);
+    const refreshDevices = typeof options.refreshDevices === 'function'
+        ? options.refreshDevices
+        : () => loadDevices(true, {silent: true});
+    const intervalMs = Number.isFinite(requestedInterval) && requestedInterval > 0
+        ? Math.max(10, requestedInterval)
+        : 1500;
+    const timeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+        ? Math.max(intervalMs, requestedTimeout)
+        : 45000;
+    const deadline = Date.now() + timeoutMs;
+    let stopped = false;
+    let timer = null;
+    let inFlight = false;
+
+    const stop = () => {
+        stopped = true;
+        if (timer) {
+            clearInterval(timer);
+            timer = null;
+        }
+    };
+    const hasTargetFastbootDevice = devices => (devices || []).some(device => {
+        const deviceId = typeof device === 'string'
+            ? device
+            : device.device_id || device.serial;
+        const protocol = typeof device === 'string'
+            ? ''
+            : device.protocol || device.status || device.state;
+        return targets.has(String(deviceId || ''))
+            && String(protocol || '').toLowerCase() === 'fastboot';
+    });
+    const poll = async () => {
+        if (stopped || inFlight) return;
+        if (Date.now() >= deadline || workspaceWorkerId() !== workerId) {
+            stop();
+            return;
+        }
+        inFlight = true;
+        try {
+            const devices = await refreshDevices();
+            if (hasTargetFastbootDevice(devices)) {
+                debugLog('[Burn] Fastboot device became visible; stopping transition refresh');
+                stop();
+                return;
+            }
+        } catch (error) {
+            debugLog('[Burn] Device transition refresh failed:', error.message);
+        } finally {
+            inFlight = false;
+        }
+    };
+
+    timer = setInterval(() => void poll(), intervalMs);
+    void poll();
+    return stop;
 }
 
 // 测试套件管理
@@ -3547,11 +3690,15 @@ function renderDevices() {
         const deviceId = typeof device === 'string' ? device : device.device_id;
         const isLocked = typeof device === 'object' && device.locked;
         const lockedBy = typeof device === 'object' ? device.locked_by : '';
+        const status = typeof device === 'object'
+            ? (device.status || device.state || 'online')
+            : 'online';
+        const selectable = isSelectableWorkspaceDevice(device);
 
         if (index % 2 === 0) {
-            leftDevices.push({ deviceId, isLocked, lockedBy });
+            leftDevices.push({ deviceId, isLocked, lockedBy, status, selectable });
         } else {
-            rightDevices.push({ deviceId, isLocked, lockedBy });
+            rightDevices.push({ deviceId, isLocked, lockedBy, status, selectable });
         }
     });
 
@@ -3594,19 +3741,23 @@ function renderDevices() {
 }
 
 // 构建单个设备项 DOM（renderDevices 奇偶分栏与分组视图共用）
-function buildDeviceItemEl({ deviceId, isLocked, lockedBy }) {
+function buildDeviceItemEl({ deviceId, isLocked, lockedBy, status = 'online', selectable = true }) {
     const div = document.createElement('div');
     const isSelected = state.selectedDevices.has(deviceId);
     div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
     div.dataset.deviceId = deviceId;
-    if (isLocked) div.dataset.locked = 'true';
-    div.title = isLocked ? `已被 ${lockedBy} 占用` : '点击选择设备';
+    if (!selectable) div.dataset.locked = 'true';
+    div.title = isLocked
+        ? `已被 ${lockedBy} 占用`
+        : status === 'fastboot'
+        ? 'Fastboot/Fastbootd 设备仅可用于 GSI 烧写'
+        : selectable ? '点击选择设备' : `设备当前处于 ${status} 状态`;
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'device-checkbox';
     checkbox.checked = isSelected;
-    if (isLocked) checkbox.disabled = true;
+    if (!selectable) checkbox.disabled = true;
 
     const info = document.createElement('div');
     info.className = 'device-info';
@@ -3621,13 +3772,20 @@ function buildDeviceItemEl({ deviceId, isLocked, lockedBy }) {
         info.appendChild(lockStatus);
     }
 
-    const status = document.createElement('span');
-    status.className = 'device-status';
-    status.textContent = isLocked ? 'Allocated' : 'Available';
+    const statusEl = document.createElement('span');
+    statusEl.className = 'device-status';
+    const displayStatus = String(status || '').toLowerCase() === 'fastboot'
+        ? 'Fastboot'
+        : String(status || '').toLowerCase() === 'unauthorized'
+        ? 'Unauthorized'
+        : isLocked ? 'Allocated' : selectable ? 'Available' : status;
+    statusEl.textContent = isLocked && displayStatus !== 'Allocated'
+        ? `${displayStatus} · Locked`
+        : displayStatus;
 
     div.appendChild(checkbox);
     div.appendChild(info);
-    div.appendChild(status);
+    div.appendChild(statusEl);
     return div;
 }
 
@@ -3667,6 +3825,14 @@ window.toggleFollowFilter = toggleFollowFilter;
 // 以下函数仅供设备管理页的 allDevices 表格使用。
 
 function toggleDevice(deviceId) {
+    const device = state.devices.find(item => {
+        const id = typeof item === 'string' ? item : item.device_id;
+        return id === deviceId;
+    });
+    if (device && !isSelectableWorkspaceDevice(device)) {
+        showToast(`设备 ${deviceId} 当前不可选择`, 'warning');
+        return;
+    }
     if (state.selectedDevices.has(deviceId)) {
         state.selectedDevices.delete(deviceId);
     } else {
@@ -3683,13 +3849,20 @@ async function refreshDevices() {
 }
 
 function selectAllDevices() {
-    if (state.selectedDevices.size === state.devices.length) {
+    const selectableDevices = state.devices.filter(isSelectableTestDevice);
+    const selectableIds = selectableDevices.map(
+        device => typeof device === 'string' ? device : device.device_id
+    );
+    if (
+        selectableIds.length > 0
+        && selectableIds.every(deviceId => state.selectedDevices.has(deviceId))
+    ) {
         // Deselect all
         state.selectedDevices.clear();
     } else {
-        // Select all - skip devices locked by other users
+        // Select all - skip locked devices and non-ADB protocol states.
         let selectedCount = 0;
-        let skippedLocked = 0;
+        let skippedUnavailable = 0;
 
         state.devices.forEach(device => {
             // Extract device_id from object or use string directly
@@ -3697,21 +3870,19 @@ function selectAllDevices() {
             const deviceObj = typeof device === 'string' ?
                 state.devices.find(d => d.device_id === deviceId) : device;
 
-            // 检查设备是否被锁定
-            if (deviceObj && deviceObj.locked && !deviceObj.locked_by_self) {
-                // 设备被其他用户锁定，跳过
-                skippedLocked++;
-                debugLog(`[SelectAll] Skipping locked device: ${deviceId} (locked by: ${deviceObj.locked_by})`);
+            // 锁定设备以及 Fastboot 等非 ADB 可用状态均不可选。
+            if (deviceObj && !isSelectableTestDevice(deviceObj)) {
+                skippedUnavailable++;
+                debugLog(`[SelectAll] Skipping unavailable device: ${deviceId} (${deviceObj.status || deviceObj.state || deviceObj.locked_by})`);
             } else {
-                // 设备未被锁定或被自己锁定，可以选择
                 state.selectedDevices.add(deviceId);
                 selectedCount++;
             }
         });
 
-        if (skippedLocked > 0) {
-            showToast(`跳过 ${skippedLocked} 台被其他用户锁定的设备`, 'warning');
-            addLogEntry(`全选设备：已选择 ${selectedCount} 台，跳过 ${skippedLocked} 台被锁定的设备`, 'warning');
+        if (skippedUnavailable > 0) {
+            showToast(`跳过 ${skippedUnavailable} 台锁定或非 ADB 可用设备`, 'warning');
+            addLogEntry(`全选设备：已选择 ${selectedCount} 台，跳过 ${skippedUnavailable} 台不可用设备`, 'warning');
         }
     }
     window.GmsWorkspace?.update({device_ids: Array.from(state.selectedDevices)}, {source: 'test'});
@@ -3839,7 +4010,7 @@ async function submitWifiConfig() {
 }
 
 async function lockSelectedDevices(action) {
-    if (!validateDeviceSelection()) return;
+    if (!validateBootloaderDeviceSelection()) return;
 
     const buttonId = action === 'lock' ? 'btn-lock-device' : 'btn-unlock-device';
     const button = document.getElementById(buttonId);
@@ -3855,13 +4026,24 @@ async function lockSelectedDevices(action) {
     try {
         addLogEntry(`正在${actionText}设备...`, 'info');
         const workerId = selectedClusterWorker();
+        let result;
         if (workerId) {
-            await apiCall('/api/cluster/devices/actions', 'POST', {
+            result = await apiCall('/api/cluster/devices/actions', 'POST', {
                 worker_id: workerId, devices: Array.from(state.selectedDevices),
                 action: action === 'lock' ? 'bootloader_lock' : 'bootloader_unlock'
             });
         } else {
-            await callDeviceApi(`/api/devices/bootloader-${action}`, {});
+            result = await apiCall(`/api/devices/bootloader-${action}`, 'POST', {
+                devices: Array.from(state.selectedDevices)
+            });
+        }
+        const operationResults = result?.data?.results || result?.results || [];
+        const failedResults = operationResults.filter(item => !item.success);
+        if (result?.success === false || failedResults.length > 0) {
+            const detail = failedResults.map(
+                item => `${item.device}: ${item.error || item.output || '未知错误'}`
+            ).join('; ');
+            throw new Error(result?.error || detail || `设备${actionText}失败`);
         }
         addLogEntry(`设备${actionText}完成`, 'info');
     } catch (error) {
@@ -3940,6 +4122,14 @@ async function collectDeviceInfo() {
 async function burnFirmware() {
     if (state.selectedDevices.size === 0) {
         showToast('请先选择要烧写固件的设备', 'warning');
+        return;
+    }
+    const fastbootDevices = selectedFastbootDeviceIds();
+    if (fastbootDevices.length > 0) {
+        showToast(
+            `普通固件烧写需要 ADB 设备；Fastboot/Fastbootd 请使用“烧写GSI”: ${fastbootDevices.join(', ')}`,
+            'warning'
+        );
         return;
     }
 
@@ -4343,10 +4533,10 @@ async function copyFirmwareShareLink(id) {
         } else {
             fallbackCopyText(url);
         }
-        showToast('分享链接已复制，已登录客户端可直接打开下载', 'success');
+        showToast('分享链接已复制，无需登录即可打开下载', 'success');
     } catch (error) {
         fallbackCopyText(url);
-        showToast('分享链接已复制，已登录客户端可直接打开下载', 'success');
+        showToast('分享链接已复制，无需登录即可打开下载', 'success');
     }
 }
 
@@ -4781,6 +4971,7 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
     }
 
     const devices = Array.from(state.selectedDevices);
+    let stopDeviceProtocolRefresh = () => {};
     try {
         if (closeModalFunc) {
             closeModalFunc();
@@ -4791,6 +4982,10 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
 
         // 立即在UI上标记设备为锁定状态
         lockDevicesInUI(devices);
+
+        if (endpoint === '/api/burn/gsi') {
+            stopDeviceProtocolRefresh = startBurnDeviceProtocolRefresh(devices);
+        }
 
         // 调用API
         const result = await apiCall(endpoint, 'POST', {
@@ -4824,6 +5019,7 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
             endpoint
         });
     } finally {
+        stopDeviceProtocolRefresh();
         try {
             await loadDevices(true);
             if (typeof currentPage !== 'undefined' && currentPage === 'devices' && typeof loadDevicesManagement === 'function') {
@@ -7034,10 +7230,7 @@ async function startTest() {
         return;
     }
 
-    if (state.selectedDevices.size === 0) {
-        showToast('请先选择要测试的设备', 'warning');
-        return;
-    }
+    if (!validateDeviceSelection()) return;
 
     const testType = document.getElementById('test-type').value;
     const testModule = document.getElementById('test-module').value.trim();

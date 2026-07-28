@@ -24,7 +24,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260727-suite-path-readable" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260728-gms-config-fastboot-refresh" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -796,7 +796,7 @@
                 <!-- ADB设备区 -->
                 <div class="adb-frame">
                     <div class="adb-title-row" style="display: flex; align-items: center; justify-content: space-between;">
-                        <div class="section-title" style="margin: 0;">ADB设备</div>
+                        <div class="section-title" style="margin: 0;">设备</div>
                         <button class="btn-xxs" id="btn-follow-filter" onclick="toggleFollowFilter()" title="只显示我在设备管理页&quot;关注&quot;的分组设备">⭐ 只看关注</button>
                     </div>
                     <div class="device-list-container">
@@ -1081,6 +1081,10 @@
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="usbip-devices-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">USB/IP设备</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="fastboot-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Fastboot设备</div>
                 </div>
                 <div data-cluster-mode-only style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="cluster-devices-count">-</div>
@@ -1593,9 +1597,9 @@
 
         <!-- GMS助手页面 -->
         <div class="container page-content" id="page-gms-assistant">
-            <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-                <span>🎓 GMS助手</span>
-                <button class="btn-xs" type="button" onclick="showGmsAssistantConfig()">配置助手</button>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">🎓 GMS助手</div>
+                <button class="btn-xxs" type="button" onclick="showGmsAssistantConfig()">配置助手</button>
             </div>
             <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
                     style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
@@ -2382,7 +2386,7 @@
                     </div>
                 </div>
                 <div class="modal-info-text">
-                    ℹ️ GSI烧写将使用 run_GSI_Burn.sh 脚本，该脚本会自动处理分区删除、镜像烧写和设备重启。
+                    ⚠️ GSI烧写会在需要时自动解锁 Bootloader（通常会清除设备数据），并自动处理分区删除、镜像烧写和设备重启。
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeGsiModal()">取消</button>
@@ -3835,7 +3839,15 @@
                                 android_version: device.properties && device.properties.android_version,
                                 battery_level: device.properties && device.properties.battery_level,
                                 soc_model: device.properties && device.properties.soc_model,
-                                locked_by: ({
+                                claimed: Boolean(device.claimed),
+                                claim_source_type: device.claim_source_type || '',
+                                locked_by: device.claimed
+                                    ? ({
+                                        'cluster-firmware': '固件烧写',
+                                        'cluster-job': '测试任务',
+                                        'cluster-device-action': '设备操作'
+                                    })[device.claim_source_type] || '平台操作'
+                                    : ({
                                     allocated: 'Cluster 租约',
                                     reserved: 'ATS 预留',
                                     external_busy: '外部 Tradefed'
@@ -3924,10 +3936,16 @@
             const localCount = allDevices.filter(d => d.source_type === 'local').length;
             const usbipCount = allDevices.filter(d => d.source_type === 'usbip').length;
             const clusterCount = allDevices.filter(d => d.source_type === 'cluster').length;
+            const fastbootCount = allDevices.filter(d =>
+                d.protocol === 'fastboot'
+                || d.status === 'fastboot'
+                || d.cluster_state === 'fastboot'
+            ).length;
 
             document.getElementById('total-devices-count').textContent = totalCount;
             document.getElementById('local-devices-count').textContent = localCount;
             document.getElementById('usbip-devices-count').textContent = usbipCount;
+            document.getElementById('fastboot-devices-count').textContent = fastbootCount;
             document.getElementById('cluster-devices-count').textContent = clusterCount;
 
             if (devices.length === 0) {
@@ -3968,8 +3986,15 @@
                     offline: ['var(--text-secondary)', '○ 离线'],
                     unknown: ['var(--text-secondary)', '○ 未知']
                 }[device.cluster_state];
+                const localStatus = {
+                    fastboot: ['#42a5f5', '● Fastboot'],
+                    unauthorized: ['var(--danger-color)', '● 未授权'],
+                    offline: ['var(--text-secondary)', '○ 离线']
+                }[device.status];
                 const statusBadge = clusterStatus
                     ? `<span style="color: ${clusterStatus[0]}; font-weight: 600; font-size: 12px;">${clusterStatus[1]}</span>`
+                    : localStatus
+                    ? `<span style="color: ${localStatus[0]}; font-weight: 600; font-size: 12px;">${localStatus[1]}</span>`
                     : device.status === 'online'
                     ? '<span style="color: var(--success-color); font-weight: 600; font-size: 12px;">● 在线</span>'
                     : '<span style="color: var(--text-secondary); font-weight: 600; font-size: 12px;">○ 离线</span>';
@@ -3997,6 +4022,9 @@
                     : '-';
 
                 const isClusterRemote = Boolean(device.cluster_readonly);
+                const isFastboot = device.protocol === 'fastboot'
+                    || device.status === 'fastboot'
+                    || device.cluster_state === 'fastboot';
                 const clusterWorkerAttr = escapeIconAttr(device.worker_id || '');
                 const clusterFullIdAttr = escapeIconAttr(`${device.worker_id || ''}:${serialNo}`);
                 const clusterInspectable = !['offline', 'unknown', 'unauthorized', 'fastboot'].includes(device.cluster_state);
@@ -4007,9 +4035,12 @@
                     && !(clusterInspectable && device.cluster_device_inspection) ? ' disabled' : '';
                 const remoteControlDisabled = isClusterRemote
                     && !(clusterMutable && device.cluster_device_inspection) ? ' disabled' : '';
-                const shellStyle = shellDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
-                const remoteInspectionStyle = remoteInspectionDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
-                const remoteControlStyle = remoteControlDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
+                const adbShellDisabled = Boolean(shellDisabled || (!isClusterRemote && isFastboot));
+                const adbInspectionDisabled = Boolean(remoteInspectionDisabled || (!isClusterRemote && isFastboot));
+                const adbControlDisabled = Boolean(remoteControlDisabled || (!isClusterRemote && isFastboot));
+                const shellStyle = adbShellDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
+                const remoteInspectionStyle = adbInspectionDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
+                const remoteControlStyle = adbControlDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
                 const inspectionTitle = device.cluster_device_inspection
                     ? '查看远程设备信息：packages / features / props'
                     : 'Worker Agent 版本过旧或未上报 device_inspection 能力';
@@ -4018,13 +4049,13 @@
                     : 'Worker Agent 版本过旧或未上报 device_inspection 能力';
                 const shellButton = isClusterRemote
                     ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceShell(this.dataset.serial,this.dataset.worker)" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${shellDisabled}>🐧 adb shell</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceShell(this.dataset.serial)" style="background: var(--primary-color); ${actionButtonStyle}">🐧 adb shell</button>`;
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceShell(this.dataset.serial)" title="${isFastboot ? 'Fastboot 状态下不可使用 adb shell' : '打开 adb shell'}" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>🐧 adb shell</button>`;
                 const deviceInfoButton = isClusterRemote
                     ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceInfo(this.dataset.serial,this.dataset.worker)" title="${inspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>ℹ️ device info</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" onclick="openDeviceConfigExplorer(this.dataset.serial)" title="查看设备信息：configs 配置资源 / packages 已装包 / features 特性" style="background: var(--success-color); color: white; ${actionButtonStyle}">ℹ️ device info</button>`;
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" onclick="openDeviceConfigExplorer(this.dataset.serial)" title="${isFastboot ? 'Fastboot 状态下不可读取 ADB 设备信息' : '查看设备信息：configs 配置资源 / packages 已装包 / features 特性'}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>ℹ️ device info</button>`;
                 const uiControlButton = isClusterRemote
                     ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceUiControl(this.dataset.serial,this.dataset.worker)" title="${controlTitle}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>🎯 UI 操控</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openUiControl(this.dataset.serial)" title="智能 UI 操控：截图 + 布局元素 + 点按" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}">🎯 UI 操控</button>`;
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openUiControl(this.dataset.serial)" title="${isFastboot ? 'Fastboot 状态下不可使用 UI 操控' : '智能 UI 操控：截图 + 布局元素 + 点按'}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>🎯 UI 操控</button>`;
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">

@@ -113,11 +113,20 @@ async def get_connected_devices(
     with runtime.global_state.device_cache_lock:
         cached_devices = runtime.global_state.device_cache.get("devices") or []
         cache_timestamp = runtime.global_state.device_cache.get("timestamp", 0)
-    cached_ids = [
-        item.get("device_id")
-        for item in cached_devices
-        if isinstance(item, dict) and item.get("device_id")
-    ]
+    cached_inventory = []
+    for item in cached_devices:
+        if not isinstance(item, dict) or not item.get("device_id"):
+            continue
+        cached_inventory.append(
+            {
+                "device_id": item["device_id"],
+                "status": item.get("status") or "online",
+                "protocol": item.get("protocol") or (
+                    "fastboot" if item.get("status") == "fastboot" else "adb"
+                ),
+            }
+        )
+    cached_ids = [item["device_id"] for item in cached_inventory]
     cache_fresh = bool(
         cached_ids
         and not force_refresh
@@ -125,18 +134,48 @@ async def get_connected_devices(
     )
 
     # 共享缓存仅保存主机和设备事实，用户状态按请求合并。
-    raw_devices = (
-        cached_ids
-        if cache_fresh
-        else await asyncio.to_thread(device_manager.get_connected_devices, force_refresh)
-    )
-    if not raw_devices:
-        if cached_ids:
+    if cache_fresh:
+        inventory = cached_inventory
+    else:
+        adb_devices = await asyncio.to_thread(
+            device_manager.get_connected_devices,
+            force_refresh,
+        )
+        fastboot_devices = await asyncio.to_thread(
+            device_manager.get_fastboot_devices,
+        )
+        if adb_devices:
+            inventory = [
+                {"device_id": device_id, "status": "online", "protocol": "adb"}
+                for device_id in adb_devices
+            ]
+        elif cached_inventory:
             logger.warning("[Device] ADB scan returned no devices; keeping cached device list")
-            raw_devices = cached_ids
+            inventory = list(cached_inventory)
+        else:
+            inventory = []
 
-    reconnect.reconcile_observed_usbip_devices(raw_devices)
-    devices = reconnect.filter_suppressed_usbip_devices(raw_devices)
+        # 同一序列号从 ADB 切到 Fastboot 时以本次 Fastboot 状态为准。
+        inventory_by_id = {item["device_id"]: item for item in inventory}
+        for device_id in fastboot_devices:
+            inventory_by_id[device_id] = {
+                "device_id": device_id,
+                "status": "fastboot",
+                "protocol": "fastboot",
+            }
+        inventory = list(inventory_by_id.values())
+
+    adb_devices = [
+        item["device_id"]
+        for item in inventory
+        if item.get("protocol") == "adb" and item.get("status") == "online"
+    ]
+    reconnect.reconcile_observed_usbip_devices(adb_devices)
+    visible_ids = reconnect.filter_suppressed_usbip_devices(
+        item["device_id"] for item in inventory
+    )
+    inventory_by_id = {item["device_id"]: item for item in inventory}
+    devices = [device_id for device_id in visible_ids if device_id in inventory_by_id]
 
     # 保留断线设备来源，供 USB/IP 自动重连使用。
     devices_with_status = []
@@ -161,7 +200,13 @@ async def get_connected_devices(
     )
 
     for device_id in devices:
-        device_info = {"device_id": device_id, "status": "online", "locked": False}
+        observed = inventory_by_id[device_id]
+        device_info = {
+            "device_id": device_id,
+            "status": observed.get("status") or "online",
+            "protocol": observed.get("protocol") or "adb",
+            "locked": False,
+        }
 
         # 所属分组（仅内存查表，不增加网络往返）
         device_info["groups"] = group_map.get(device_id, [])
@@ -192,7 +237,7 @@ async def get_connected_devices(
         cache_records.append(
             {
                 key: device_info[key]
-                for key in ("device_id", "status", "source", "is_usbip")
+                for key in ("device_id", "status", "protocol", "source", "is_usbip")
                 if key in device_info
             }
         )

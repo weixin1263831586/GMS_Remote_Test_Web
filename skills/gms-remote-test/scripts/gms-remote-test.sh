@@ -2,8 +2,22 @@
 set -o pipefail
 # ==============================================================================
 # GMS Remote Test API Helper Script (FastAPI Port 5001)
-# Version: 2026.07.23-1
+# Version: 2026.07.28-2
 # ==============================================================================
+
+GMS_RT_VERSION="2026.07.28-2"
+GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
+GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
+GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
+GMS_RT_ASSUME_YES="${GMS_RT_ASSUME_YES:-0}"
+GMS_RT_ERROR_SEEN=0
+
+GMS_RT_EXIT_USAGE=2
+GMS_RT_EXIT_AUTH=3
+GMS_RT_EXIT_PERMISSION=4
+GMS_RT_EXIT_CONFLICT=5
+GMS_RT_EXIT_NETWORK=6
+GMS_RT_EXIT_OPERATION=7
 
 # GMS Web App Configuration Directory
 # Can be overridden by environment variable
@@ -57,7 +71,7 @@ NC=$(printf '\033[0m')
 
 # Network timeout constants
 PING_TIMEOUT=2
-CURL_TIMEOUT=30  # 30 seconds for slow API endpoints (e.g., test results)
+CURL_TIMEOUT="${GMS_CURL_TIMEOUT:-30}"  # 30 seconds for slow API endpoints (e.g., test results)
 CURL_BURN_TIMEOUT="${GMS_CURL_BURN_TIMEOUT:-1800}"  # firmware transfer + burn can take much longer
 CURL_EXIT_CANNOT_CONNECT=7
 CURL_EXIT_OPERATION_TIMEOUT=28
@@ -68,37 +82,84 @@ CURL_EXIT_SSL_CERT=60
 # Keep the cookie outside the repository and allow callers to override its path.
 GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/session.cookies}"
 CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
-CURL_AUTH_EVAL_ARGS="-b \"$GMS_AUTH_COOKIE_JAR\" -c \"$GMS_AUTH_COOKIE_JAR\""
 
 # Local deployments commonly use a self-signed HTTPS certificate. Keep curl
 # usable by default, while allowing callers to provide a real CA bundle.
 CURL_TLS_ARGS=()
-CURL_TLS_EVAL_ARGS=""
 if [[ "$SERVER_URL" == https://* ]]; then
     if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
         CURL_TLS_ARGS=(--cacert "$GMS_CURL_CA_CERT")
-        CURL_TLS_EVAL_ARGS="--cacert \"${GMS_CURL_CA_CERT//\"/\\\"}\""
     elif [ "${GMS_CURL_INSECURE:-1}" != "0" ]; then
         CURL_TLS_ARGS=(-k)
-        CURL_TLS_EVAL_ARGS="-k"
     fi
+fi
+
+if [ "$GMS_RT_OUTPUT" = "json" ] || [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    NC=""
 fi
 
 # Print functions
 error() {
-    echo -e "${RED}Error:${NC} $1" >&2
+    GMS_RT_ERROR_SEEN=1
+    printf '%sError:%s %s\n' "$RED" "$NC" "$1" >&2
+    return "$GMS_RT_EXIT_OPERATION"
 }
 
 success() {
-    echo -e "${GREEN}✓ $1${NC}"
+    [ "$GMS_RT_QUIET" = "1" ] || printf '%s✓ %s%s\n' "$GREEN" "$1" "$NC"
 }
 
 warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
+    [ "$GMS_RT_QUIET" = "1" ] || printf '%s⚠ %s%s\n' "$YELLOW" "$1" "$NC"
 }
 
 info() {
-    echo -e "${BLUE}ℹ $1${NC}"
+    [ "$GMS_RT_QUIET" = "1" ] || printf '%sℹ %s%s\n' "$BLUE" "$1" "$NC"
+}
+
+diagnostic() {
+    printf '%s\n' "$1" >&2
+}
+
+_record_api_exit_code() {
+    local exit_code="$1"
+    if [ -n "${GMS_RT_STATUS_FILE:-}" ]; then
+        printf '%s\n' "$exit_code" > "$GMS_RT_STATUS_FILE"
+    fi
+}
+
+_http_exit_code() {
+    local status="$1"
+    case "$status" in
+        401) printf '%s\n' "$GMS_RT_EXIT_AUTH" ;;
+        403) printf '%s\n' "$GMS_RT_EXIT_PERMISSION" ;;
+        409|423|429) printf '%s\n' "$GMS_RT_EXIT_CONFLICT" ;;
+        000|5??) printf '%s\n' "$GMS_RT_EXIT_NETWORK" ;;
+        2??) printf '0\n' ;;
+        *) printf '%s\n' "$GMS_RT_EXIT_OPERATION" ;;
+    esac
+}
+
+_body_from_http_response() {
+    local response="$1"
+    if [[ "$response" == *$'\nHTTP_STATUS:'* ]]; then
+        printf '%s\n' "${response%$'\n'HTTP_STATUS:*}"
+    else
+        printf '%s\n' "$response"
+    fi
+}
+
+_status_from_http_response() {
+    local response="$1"
+    if [[ "$response" == *$'\nHTTP_STATUS:'* ]]; then
+        printf '%s\n' "${response##*$'\n'HTTP_STATUS:}"
+    else
+        printf '000\n'
+    fi
 }
 
 _ensure_auth_cookie_jar() {
@@ -134,51 +195,70 @@ show_connection_error() {
     error "  4. 服务器日志 (tail -f $GMS_WEB_APP_DIR/fastapi.log)"
 }
 
-# Make API call and return JSON with optimized error handling
-# Usage: api_call <endpoint> [method] [data] [curl_extra_args]
+# Make an authenticated API call.
+# Usage: api_call <endpoint> [method] [data] [curl_arg ...]
+# The response body is always written to stdout. HTTP and transport failures
+# use stable CLI exit codes and never rely on response text matching alone.
 api_call() {
     local endpoint="$1"
     local method="${2:-GET}"
     local data="${3:-}"
-    local curl_extra="${4:-}"
-    local response
+    shift "$(( $# >= 3 ? 3 : $# ))"
+    local extra_args=("$@")
+    local response body http_status exit_code curl_exit_code
 
-    _ensure_auth_cookie_jar || return 1
-    if [ -n "$curl_extra" ]; then
-        # File upload or custom curl args mode
-        response=$(eval "curl $CURL_TLS_EVAL_ARGS $CURL_AUTH_EVAL_ARGS -w \"\\nHTTP_STATUS:%{http_code}\" --max-time $CURL_TIMEOUT -X \"\${method}\" \"\${API_BASE}\${endpoint}\" $curl_extra" 2>/dev/null)
+    _ensure_auth_cookie_jar || {
+        _record_api_exit_code "$GMS_RT_EXIT_OPERATION"
+        return "$GMS_RT_EXIT_OPERATION"
+    }
+    if [ "${#extra_args[@]}" -gt 0 ]; then
+        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
+            -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT" \
+            -X "$method" "${API_BASE}${endpoint}" "${extra_args[@]}")
     elif [ -n "$data" ] || [ "$method" = "POST" ]; then
-        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s -X "${method}" "${API_BASE}${endpoint}" \
+        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -X "${method}" "${API_BASE}${endpoint}" \
             -H "Content-Type: application/json" \
             -d "${data}" \
-            --max-time $CURL_TIMEOUT 2>/dev/null)
+            -w $'\nHTTP_STATUS:%{http_code}' \
+            --max-time "$CURL_TIMEOUT")
     else
-        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s "${API_BASE}${endpoint}" --max-time $CURL_TIMEOUT 2>/dev/null)
+        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
+            -w $'\nHTTP_STATUS:%{http_code}' \
+            -X "$method" "${API_BASE}${endpoint}" --max-time "$CURL_TIMEOUT")
     fi
 
-    local curl_exit_code=$?
-    if [ $curl_exit_code -eq 0 ] && [ -n "$response" ]; then
-        if echo "$response" | jq -e '
-            (.detail == "Authentication required")
-            or (.error == "Authentication required")
-        ' >/dev/null 2>&1; then
-            warning "需要登录。请先运行: gms-rt-auth-login [username]" >&2
-            echo "$response"
-            return 22
-        fi
-        echo "$response"
-        return 0
-    else
-        if [ $curl_exit_code -eq $CURL_EXIT_CANNOT_CONNECT ] || [ $curl_exit_code -eq $CURL_EXIT_OPERATION_TIMEOUT ]; then
+    curl_exit_code=$?
+    body=$(_body_from_http_response "$response")
+    http_status=$(_status_from_http_response "$response")
+    if [ "$curl_exit_code" -ne 0 ]; then
+        if [ "$curl_exit_code" -eq "$CURL_EXIT_CANNOT_CONNECT" ] || [ "$curl_exit_code" -eq "$CURL_EXIT_OPERATION_TIMEOUT" ]; then
             show_connection_error
-        elif [ $curl_exit_code -eq $CURL_EXIT_SSL_CERT ]; then
+        elif [ "$curl_exit_code" -eq "$CURL_EXIT_SSL_CERT" ]; then
             error "HTTPS证书校验失败: $SERVER_URL" >&2
             error "本地自签名证书可执行: export GMS_CURL_INSECURE=1；或配置: export GMS_CURL_CA_CERT=/path/to/ca.crt" >&2
         else
             error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
         fi
-        return 1
+        [ -z "$body" ] || printf '%s\n' "$body"
+        _record_api_exit_code "$GMS_RT_EXIT_NETWORK"
+        return "$GMS_RT_EXIT_NETWORK"
     fi
+
+    exit_code=$(_http_exit_code "$http_status")
+    _record_api_exit_code "$exit_code"
+    printf '%s\n' "$body"
+    if [ "$exit_code" -ne 0 ]; then
+        case "$exit_code" in
+            "$GMS_RT_EXIT_AUTH")
+                diagnostic "需要登录。请先运行: gms-rt-auth-login [username]"
+                ;;
+            "$GMS_RT_EXIT_PERMISSION")
+                diagnostic "权限不足或需要管理员提权。请运行: gms-rt-auth-elevate [username]"
+                ;;
+        esac
+        return "$exit_code"
+    fi
+    return 0
 }
 
 # ==============================================================================
@@ -191,32 +271,59 @@ gms-rt-auth-status() {
 }
 
 gms-rt-auth-login() {
-    local username="${1:-${GMS_REMOTE_TEST_USERNAME:-}}"
+    local username=""
     local password="${GMS_REMOTE_TEST_PASSWORD:-}"
-    [ -z "$username" ] && {
+    local password_stdin=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --password-stdin) password_stdin=1 ;;
+            -h|--help)
+                printf 'Usage: gms-rt-auth-login [username] [--password-stdin]\n'
+                return 0
+                ;;
+            *)
+                [ -z "$username" ] || {
+                    error "Unexpected argument: $1"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                username="$1"
+                ;;
+        esac
+        shift
+    done
+    username="${username:-${GMS_REMOTE_TEST_USERNAME:-}}"
+    if [ "$password_stdin" = "1" ]; then
+        IFS= read -r password || true
+    fi
+    [ -z "$username" ] && [ "$GMS_RT_NON_INTERACTIVE" != "1" ] && {
         read -r -p "Username: " username
     }
-    [ -z "$password" ] && {
+    [ -z "$password" ] && [ "$GMS_RT_NON_INTERACTIVE" != "1" ] && {
         read -r -s -p "Password: " password
         echo
     }
-    [ -z "$username" ] && { error "Username is required"; return 1; }
-    [ -z "$password" ] && { error "Password is required"; return 1; }
+    [ -z "$username" ] && { error "Username is required"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$password" ] && {
+        error "Password is required in non-interactive mode; use --password-stdin"
+        return "$GMS_RT_EXIT_USAGE"
+    }
     check_jq || return 1
     _ensure_auth_cookie_jar || return 1
 
-    local data response
+    local data response call_status
     data=$(jq -cn --arg username "$username" --arg password "$password" \
         '{username: $username, password: $password}')
-    response=$(api_call "/auth/login" "POST" "$data") || return 1
-    unset password
+    response=$(api_call "/auth/login" "POST" "$data")
+    call_status=$?
+    unset password data
+    [ "$call_status" -eq 0 ] || return "$call_status"
     if echo "$response" | jq -e '.success == true and .authenticated == true' >/dev/null 2>&1; then
         chmod 600 "$GMS_AUTH_COOKIE_JAR" 2>/dev/null || true
         success "Authenticated as $(echo "$response" | jq -r '.user.username // .user.display_name // "unknown"')"
         return 0
     fi
     error "Login failed: $(extract_api_error "$response")"
-    return 1
+    return "$GMS_RT_EXIT_AUTH"
 }
 
 gms-rt-auth-logout() {
@@ -232,6 +339,74 @@ gms-rt-auth-logout() {
     return 1
 }
 
+gms-rt-auth-elevate() {
+    local username=""
+    local password="${GMS_REMOTE_TEST_ADMIN_PASSWORD:-}"
+    local password_stdin=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --password-stdin) password_stdin=1 ;;
+            -h|--help)
+                printf 'Usage: gms-rt-auth-elevate [admin_username] [--password-stdin]\n'
+                return 0
+                ;;
+            *)
+                [ -z "$username" ] || {
+                    error "Unexpected argument: $1"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                username="$1"
+                ;;
+        esac
+        shift
+    done
+    username="${username:-${GMS_REMOTE_TEST_ADMIN_USERNAME:-${GMS_REMOTE_TEST_USERNAME:-}}}"
+    if [ "$password_stdin" = "1" ]; then
+        IFS= read -r password || true
+    fi
+    [ -z "$username" ] && [ "$GMS_RT_NON_INTERACTIVE" != "1" ] && {
+        read -r -p "Admin username: " username
+    }
+    [ -z "$password" ] && [ "$GMS_RT_NON_INTERACTIVE" != "1" ] && {
+        read -r -s -p "Admin password: " password
+        echo
+    }
+    [ -z "$username" ] && { error "Admin username is required"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$password" ] && {
+        error "Admin password is required in non-interactive mode; use --password-stdin"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    check_jq || return 1
+
+    local data response call_status
+    data=$(jq -cn --arg username "$username" --arg password "$password" \
+        '{username: $username, password: $password}')
+    response=$(api_call "/auth/elevate" "POST" "$data")
+    call_status=$?
+    unset password data
+    [ "$call_status" -eq 0 ] || return "$call_status"
+    if echo "$response" | jq -e '.success == true and .elevated == true' >/dev/null 2>&1; then
+        success "Administrator elevation active"
+        echo "$response" | jq '.'
+        return 0
+    fi
+    error "Elevation failed: $(extract_api_error "$response")"
+    return "$GMS_RT_EXIT_PERMISSION"
+}
+
+gms-rt-auth-elevation-reset() {
+    check_jq || return 1
+    local response
+    response=$(api_call "/auth/elevation/reset" "POST" "{}") || return $?
+    if echo "$response" | jq -e '.success == true and .elevated == false' >/dev/null 2>&1; then
+        success "Administrator elevation cleared"
+        echo "$response" | jq '.'
+        return 0
+    fi
+    error "Failed to clear elevation: $(extract_api_error "$response")"
+    return "$GMS_RT_EXIT_OPERATION"
+}
+
 # Extract error message from API response
 extract_api_error() {
     local response="$1"
@@ -243,12 +418,18 @@ extract_api_error() {
 # Usage: body=$(check_http_response "$response") && echo "Success: $body"
 check_http_response() {
     local response="$1"
-    HTTP_STATUS_CODE=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
-    local body=$(echo "$response" | grep -v "HTTP_STATUS:")
+    HTTP_STATUS_CODE=$(_status_from_http_response "$response")
+    local body
+    body=$(_body_from_http_response "$response")
     if [[ ! "$HTTP_STATUS_CODE" =~ ^2[0-9]{2}$ ]]; then
-        return 1
+        local exit_code
+        exit_code=$(_http_exit_code "$HTTP_STATUS_CODE")
+        _record_api_exit_code "$exit_code"
+        printf '%s\n' "$body"
+        return "$exit_code"
     fi
-    echo "$body"
+    _record_api_exit_code 0
+    printf '%s\n' "$body"
     return 0
 }
 
@@ -310,6 +491,14 @@ _shell_quote() {
 
 _urlencode() {
     jq -rn --arg value "$1" '$value | @uri'
+}
+
+_secret_value() {
+    local value="${1:-}"
+    if [ "$value" = "-" ]; then
+        IFS= read -r value || true
+    fi
+    printf '%s' "$value"
 }
 
 _post_firmware_burn_path() {
@@ -382,12 +571,9 @@ _copy_firmware_to_test_host() {
 build_devices_json_data() {
     local devices="$1"
     if [[ "$devices" == \[* ]]; then
-        # Already JSON array - wrap directly
-        echo "{\"devices\":$devices}"
+        jq -cn --argjson devices "$devices" '{devices: $devices}'
     else
-        # Convert space-separated list to JSON array and wrap
-        local device_array=$(echo "$devices" | jq -R -c 'split(" ") | map(select(length>0))')
-        echo "{\"devices\":$device_array}"
+        jq -R -c '{devices: (split(" ") | map(select(length > 0)))}' <<< "$devices"
     fi
 }
 
@@ -397,8 +583,7 @@ build_devices_json_data() {
 convert_devices_to_json() {
     local devices="$1"
     if [[ "$devices" == \[* ]]; then
-        # Already JSON array
-        echo "$devices"
+        jq -cn --argjson devices "$devices" '$devices'
     else
         # Convert space-separated list to JSON array
         echo "$devices" | jq -R -c 'split(" ") | map(select(length>0))'
@@ -412,12 +597,15 @@ convert_devices_to_json() {
 # Start ADB Port forwarding
 gms-rt-adb-forward-start() {
     local device_host="$1"
-    local device_password="$2"
+    local device_password
+    device_password=$(_secret_value "${2:-${GMS_REMOTE_DEVICE_PASSWORD:-}}")
     [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-adb-forward-start <device_host> <device_password>"; return 1; }
     [ -z "$device_password" ] && { error "Device password required. Usage: gms-rt-adb-forward-start <device_host> <device_password>"; return 1; }
     check_jq
     echo "🔌 Starting ADB Port forward..."
-    local data="{\"device_host\":\"$device_host\",\"device_password\":\"$device_password\"}"
+    local data
+    data=$(jq -cn --arg device_host "$device_host" --arg device_password "$device_password" \
+        '{device_host: $device_host, device_password: $device_password}')
     local response=$(api_call "/adb-forward/start" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -428,7 +616,8 @@ gms-rt-adb-forward-stop() {
     [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-adb-forward-stop <device_host>"; return 1; }
     check_jq
     echo "🛑 Stopping ADB Port forward..."
-    local data="{\"device_host\":\"$device_host\"}"
+    local data
+    data=$(jq -cn --arg device_host "$device_host" '{device_host: $device_host}')
     local response=$(api_call "/adb-forward/stop" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -482,11 +671,14 @@ gms-rt-burn-firmware() {
         unset COLUMNS
     fi
 
-    local body
-    if ! body=$(check_http_response "$response"); then
-        error "Firmware burn failed - HTTP status: $HTTP_STATUS_CODE"
-        echo "$response" | grep -v "HTTP_STATUS:" | jq '.' 2>/dev/null || echo "$response" | grep -v "HTTP_STATUS:"
-        return 1
+    local body http_status check_status
+    http_status=$(_status_from_http_response "$response")
+    body=$(check_http_response "$response")
+    check_status=$?
+    if [ "$check_status" -ne 0 ]; then
+        error "Firmware burn failed - HTTP status: $http_status"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
+        return "$check_status"
     fi
 
     # Check if response contains success field
@@ -532,15 +724,13 @@ gms-rt-burn-gsi() {
         --argjson devices "$(convert_devices_to_json "$devices")" \
         '{system_img: $system_img, script_path: $script_path, devices: $devices}')
 
-    # Use api_call with custom curl args for JSON POST with status code
-    local response=$(api_call "/burn/gsi" "POST" "" "-H \"Content-Type: application/json\" -d \"$json_payload\"")
-
     local body
-    if ! body=$(check_http_response "$response"); then
-        error "GSI burn failed - HTTP status: $HTTP_STATUS_CODE"
-        echo "$response" | grep -v "HTTP_STATUS:" | jq '.' 2>/dev/null || echo "$response" | grep -v "HTTP_STATUS:"
-        return 1
-    fi
+    body=$(api_call "/burn/gsi" "POST" "$json_payload") || {
+        local call_status=$?
+        error "GSI burn request failed"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
+        return "$call_status"
+    }
 
     if echo "$body" | jq -e '.success' > /dev/null; then
         success "GSI burn completed successfully"
@@ -566,7 +756,9 @@ gms-rt-burn-serial() {
     [ -z "$serial" ] && { error "Serial required. Usage: gms-rt-burn-serial <device_id> <serial>"; return 1; }
     check_jq
     echo "🔥 Burning serial $serial to $device_id..."
-    local data="{\"device_id\":\"$device_id\",\"serial\":\"$serial\"}"
+    local data
+    data=$(jq -cn --arg device_id "$device_id" --arg serial "$serial" \
+        '{device_id: $device_id, serial: $serial}')
     local response=$(api_call "/burn/serial" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Serial burned successfully"
@@ -594,7 +786,8 @@ gms-rt-config-update() {
     [ -z "$key" ] && { error "Key required. Usage: gms-rt-config-update <key> <value>"; return 1; }
     check_jq
     echo "⚙️  Updating configuration: $key = $value"
-    local data="{\"$key\":\"$value\"}"
+    local data
+    data=$(jq -cn --arg key "$key" --arg value "$value" '{($key): $value}')
     local response=$(api_call "/config/update" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Configuration updated"
@@ -616,7 +809,8 @@ gms-rt-desktop-validate() {
     [ -z "$host" ] && { error "Host required. Usage: gms-rt-desktop-validate <user@ip>"; return 1; }
     check_jq
     echo "🔍 Validating desktop host $host..."
-    local data="{\"host\":\"$host\"}"
+    local data
+    data=$(jq -cn --arg host "$host" '{host: $host}')
     local response=$(api_call "/desktop/validate" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Desktop host is valid"
@@ -631,15 +825,22 @@ gms-rt-desktop-validate() {
 # Start VNC server on remote desktop
 gms-rt-desktop-vnc-start() {
     local host="${1:-}"
-    local password="${2:-}"
-    local vnc_password="${3:-}"
+    local password
+    local vnc_password
+    password=$(_secret_value "${2:-${GMS_REMOTE_DEVICE_PASSWORD:-}}")
+    vnc_password=$(_secret_value "${3:-${GMS_REMOTE_VNC_PASSWORD:-}}")
     check_jq
     echo "🚀 Starting desktop VNC..."
-    local data="{"
-    [ -n "$host" ] && data="$data\"host\":\"$host\","
-    [ -n "$password" ] && data="$data\"password\":\"$password\","
-    [ -n "$vnc_password" ] && data="$data\"vnc_password\":\"$vnc_password\","
-    data="${data%,}}"
+    local data
+    data=$(jq -cn \
+        --arg host "$host" \
+        --arg password "$password" \
+        --arg vnc_password "$vnc_password" \
+        '{
+            host: $host,
+            password: $password,
+            vnc_password: $vnc_password
+        } | with_entries(select(.value != ""))')
     local response=$(api_call "/desktop/vnc/start" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -882,9 +1083,16 @@ gms-rt-devices-remount() {
             done
             echo ""
 
-            # 询问是否自动重启
-            echo "💡 提示: 是否自动重启这些设备? (y/n)"
-            read -r -t 10 auto_reboot || auto_reboot="n"
+            # 询问是否自动重启；Agent 模式绝不阻塞等待输入。
+            local auto_reboot="n"
+            if [ "$GMS_RT_ASSUME_YES" = "1" ]; then
+                auto_reboot="y"
+            elif [ "$GMS_RT_NON_INTERACTIVE" = "1" ]; then
+                warning "非交互模式下未自动重启；如需自动重启请增加 --yes"
+            else
+                echo "💡 提示: 是否自动重启这些设备? (y/n)"
+                read -r -t 10 auto_reboot || auto_reboot="n"
+            fi
 
             if [ "$auto_reboot" = "y" ] || [ "$auto_reboot" = "Y" ]; then
                 echo "🔄 自动重启设备..."
@@ -930,6 +1138,10 @@ gms-rt-devices-shell() {
 
     shift
     local shell_command="$*"
+    if [ -z "$shell_command" ] && [ "$GMS_RT_NON_INTERACTIVE" = "1" ]; then
+        error "Interactive device shell is disabled by --non-interactive; provide a command"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
 
     if _is_test_host && command -v adb &> /dev/null && adb devices 2>/dev/null | grep -q "$device_id"; then
         if [ -n "$shell_command" ]; then
@@ -948,7 +1160,10 @@ gms-rt-devices-shell() {
     ! command -v ssh &> /dev/null && { error "ssh 命令未找到. 请安装 OpenSSH 客户端"; return 1; }
 
     if [ -n "$shell_command" ]; then
-        ssh -p "$port" "$user@$host" "adb -s $device_id shell $shell_command"
+        local quoted_device quoted_command
+        quoted_device=$(_shell_quote "$device_id")
+        quoted_command=$(_shell_quote "$shell_command")
+        ssh -p "$port" "$user@$host" "adb -s ${quoted_device} shell ${quoted_command}"
     else
         echo ""; echo "💻 打开设备Shell: $device_id... (via $user@$host)"
         echo "🔌 使用 Ctrl+D 退出 shell"; echo ""
@@ -1003,7 +1218,8 @@ gms-rt-devices-user-locked() {
 gms-rt-devices-wifi() {
     local devices="$1"
     local ssid="$2"
-    local password="$3"
+    local password
+    password=$(_secret_value "${3:-${GMS_REMOTE_WIFI_PASSWORD:-}}")
 
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
     [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
@@ -1012,8 +1228,10 @@ gms-rt-devices-wifi() {
     check_jq
     echo "📶 连接WiFi: $ssid..."
 
-    local devices_json=$(build_devices_json_data "$devices")
-    local data=$(echo "$devices_json" | jq -c ". + {ssid: \"$ssid\", password: \"$password\"}")
+    local devices_json data
+    devices_json=$(build_devices_json_data "$devices") || return "$GMS_RT_EXIT_USAGE"
+    data=$(echo "$devices_json" | jq -c --arg ssid "$ssid" --arg password "$password" \
+        '. + {ssid: $ssid, password: $password}')
     local response=$(api_call "/devices/wifi" "POST" "$data")
 
     if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then
@@ -1034,9 +1252,9 @@ gms-rt-files-progress() {
     local upload_id="${1:-}"
     check_jq
     echo "📊 Getting upload progress..."
-    local url="${SERVER_URL}/files/progress"
-    [ -n "$upload_id" ] && url="$url?upload_id=$upload_id"
-    api_call "/files/progress" | jq '.'
+    local endpoint="/files/progress"
+    [ -n "$upload_id" ] && endpoint="${endpoint}?upload_id=$(_urlencode "$upload_id")"
+    api_call "$endpoint" | jq '.'
 }
 
 # OpenGrok search
@@ -1046,7 +1264,13 @@ gms-rt-opengrok-search() {
     [ -z "$query" ] && { error "Query required. Usage: gms-rt-opengrok-search <query> [full]"; return 1; }
     check_jq
     echo "🔍 Searching OpenGrok for: $query..."
-    local data="{\"query\":\"$query\",\"full\":$full}"
+    case "$full" in
+        true|false) ;;
+        *) error "full must be true or false"; return "$GMS_RT_EXIT_USAGE" ;;
+    esac
+    local data
+    data=$(jq -cn --arg query "$query" --argjson full "$full" \
+        '{query: $query, full: $full}')
     local response=$(api_call "/opengrok/search" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -1146,17 +1370,17 @@ gms-rt-reports-analyze() {
     if [ -f "$report_query" ]; then
         echo "🔍 Analyzing uploaded report file: $report_query..."
         _ensure_auth_cookie_jar || return 1
-        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s -X POST "${API_BASE}/reports/analyze" \
+        response=$(api_call "/reports/analyze" "POST" "" \
             -F "mode=upload" \
-            -F "file=@${report_query}")
+            -F "file=@${report_query}") || return $?
     else
         local report_timestamp
         report_timestamp=$(_resolve_report_timestamp "$report_query") || return 1
         echo "🔍 Analyzing saved report: $report_timestamp..."
         _ensure_auth_cookie_jar || return 1
-        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s -X POST "${API_BASE}/reports/analyze" \
+        response=$(api_call "/reports/analyze" "POST" "" \
             -F "mode=saved" \
-            -F "report_timestamp=${report_timestamp}")
+            -F "report_timestamp=${report_timestamp}") || return $?
     fi
 
     # Check if request was successful
@@ -1244,11 +1468,10 @@ gms-rt-reports-delete() {
     [ -z "$report_timestamp" ] && { error "Report timestamp required. Usage: gms-rt-reports-delete <report_timestamp>"; return 1; }
     check_jq
     echo "🗑️  Deleting report: $report_timestamp..."
-    # Use curl directly for DELETE with query parameter
-    _ensure_auth_cookie_jar || return 1
-    local response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -s -w "\nHTTP_STATUS:%{http_code}" -X DELETE "${API_BASE}/reports/delete?timestamp=${report_timestamp}")
-    local body=$(echo "$response" | grep -v "HTTP_STATUS:")
-    echo "$body" | jq '.'
+    local encoded_timestamp response
+    encoded_timestamp=$(_urlencode "$report_timestamp")
+    response=$(api_call "/reports/delete?timestamp=${encoded_timestamp}" "DELETE") || return $?
+    echo "$response" | jq '.'
 }
 
 # Get/download report
@@ -1264,7 +1487,9 @@ gms-rt-reports-download() {
     mkdir -p "$output_dir"
 
     # 获取文件列表
-    local response=$(api_call "/reports/download?report_timestamp=$report_timestamp")
+    local encoded_timestamp response
+    encoded_timestamp=$(_urlencode "$report_timestamp")
+    response=$(api_call "/reports/download?report_timestamp=$encoded_timestamp")
 
     if ! echo "$response" | jq -e '.success' > /dev/null; then
         local error_msg=$(echo "$response" | jq -r '.error // "Unknown error"')
@@ -1279,9 +1504,19 @@ gms-rt-reports-download() {
     local success_count=0
     local fail_count=0
 
-    echo "$response" | jq -r '.files[] | @json "{\"path\": \"" + .path + "\", \"relative_path\": \"" + .relative_path + "\"}"' | while IFS= read -r file_info; do
+    while IFS= read -r file_info; do
         local file_path=$(echo "$file_info" | jq -r '.path')
         local relative_path=$(echo "$file_info" | jq -r '.relative_path')
+        if [ -z "$relative_path" ] \
+                || [[ "$relative_path" = /* ]] \
+                || [[ "$relative_path" = ".." ]] \
+                || [[ "$relative_path" = ../* ]] \
+                || [[ "$relative_path" = */../* ]] \
+                || [[ "$relative_path" = */.. ]]; then
+            error "Rejected unsafe report path: $relative_path"
+            ((fail_count++))
+            continue
+        fi
         local output_path="${output_dir}/${relative_path}"
 
         # 创建目标目录
@@ -1289,7 +1524,9 @@ gms-rt-reports-download() {
         mkdir -p "$target_dir"
 
         # 下载文件内容
-        local file_response=$(api_call "/reports/download?path=${file_path}")
+        local encoded_path file_response
+        encoded_path=$(_urlencode "$file_path")
+        file_response=$(api_call "/reports/download?path=${encoded_path}")
         if echo "$file_response" | jq -e '.success' > /dev/null; then
             echo "$file_response" | jq -r '.content' > "$output_path"
             echo "✓ Downloaded: $relative_path"
@@ -1298,9 +1535,13 @@ gms-rt-reports-download() {
             echo "✗ Failed: $relative_path"
             ((fail_count++))
         fi
-    done
+    done < <(echo "$response" | jq -c '.files[] | {path, relative_path}')
 
     echo ""
+    if [ "$fail_count" -gt 0 ]; then
+        error "Report download incomplete: ${success_count} succeeded, ${fail_count} failed"
+        return "$GMS_RT_EXIT_OPERATION"
+    fi
     success "Report folder downloaded to: $output_dir"
 }
 
@@ -1340,7 +1581,9 @@ gms-rt-ssh-ping() {
     [ -z "$client_ip" ] && { error "Client IP required. Usage: gms-rt-ssh-ping <test_host_ip> <client_ip>"; return 1; }
     check_jq
     echo "🌐 Testing SSH connectivity..."
-    local data="{\"test_host_ip\":\"$test_host_ip\", \"client_ip\":\"$client_ip\"}"
+    local data
+    data=$(jq -cn --arg test_host_ip "$test_host_ip" --arg client_ip "$client_ip" \
+        '{test_host_ip: $test_host_ip, client_ip: $client_ip}')
     local response=$(api_call "/ssh/ping" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         local reachable=$(echo "$response" | jq -r '.reachable')
@@ -1389,7 +1632,7 @@ gms-rt-ssh-sshd() {
         fi
         echo "🔍 Checking SSHD status for $device_host..."
         # Use GET with query parameter (like USB/IP status)
-        local response=$(api_call "/ssh/sshd?device_host=$device_host")
+        local response=$(api_call "/ssh/sshd?device_host=$(_urlencode "$device_host")")
     else
         echo "🔍 Checking SSHD status for current client..."
         local response=$(api_call "/ssh/sshd")
@@ -1435,16 +1678,30 @@ gms-rt-system-health() {
 # Download skills ZIP
 gms-rt-system-skills() {
     local skill_name="${1:-gms-remote-test}"
+    local encoded_skill target temporary http_status curl_status exit_code
+    encoded_skill=$(_urlencode "$skill_name")
+    target="${skill_name}-skills.zip"
+    temporary="${target}.tmp.$$"
     echo "📁 Downloading skills directory as ZIP..."
-    echo "URL: ${API_BASE}/system/skills?skill_name=${skill_name}"
-    echo "Saving to: ${skill_name}-skills.zip"
+    echo "URL: ${API_BASE}/system/skills?skill_name=${encoded_skill}"
+    echo "Saving to: ${target}"
     _ensure_auth_cookie_jar || return 1
-    curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -o "${skill_name}-skills.zip" "${API_BASE}/system/skills?skill_name=${skill_name}"
-    if [ $? -eq 0 ]; then
+    http_status=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
+        -o "$temporary" -w '%{http_code}' --max-time "$CURL_TIMEOUT" \
+        "${API_BASE}/system/skills?skill_name=${encoded_skill}")
+    curl_status=$?
+    exit_code=$(_http_exit_code "$http_status")
+    if [ "$curl_status" -eq 0 ] && [ "$exit_code" -eq 0 ]; then
+        mv -f -- "$temporary" "$target"
+        _record_api_exit_code 0
         success "Skills ZIP downloaded successfully"
-        ls -lh "${skill_name}-skills.zip"
+        ls -lh "$target"
     else
+        rm -f -- "$temporary"
+        [ "$curl_status" -eq 0 ] || exit_code="$GMS_RT_EXIT_NETWORK"
+        _record_api_exit_code "$exit_code"
         error "Failed to download skills ZIP"
+        return "$exit_code"
     fi
 }
 
@@ -1472,6 +1729,10 @@ gms-rt-terminal-open() {
         echo "  gms-rt-terminal-open 192.168.1.100 $DEFAULT_SSH_USER  # Full parameters"
         echo ""
         return 0
+    fi
+    if [ "$GMS_RT_NON_INTERACTIVE" = "1" ]; then
+        error "Interactive SSH terminal is disabled by --non-interactive"
+        return "$GMS_RT_EXIT_USAGE"
     fi
 
     # 如果没有提供参数，优先使用本地配置，回退到API获取SSH连接信息
@@ -1510,7 +1771,7 @@ gms-rt-terminal-open() {
                 echo "💡 Troubleshooting:"
                 echo "   1. Check if the API server is running: systemctl status gms-web-app"
                 echo "   2. Verify server URL: echo \$GMS_REMOTE_TEST_SERVER"
-                echo "   3. Test connection: curl ${CURL_TLS_EVAL_ARGS} -s ${API_BASE}/terminal/open"
+                echo "   3. Test connection with the configured CA/TLS settings: gms-rt-terminal-open"
                 return 1
             fi
 
@@ -1587,16 +1848,16 @@ gms-rt-terminal-push() {
     echo "📤 Pushing file to terminal: $filename"
     echo "📁 Target path: $target_path"
 
-    # 使用 api_call with custom curl args for file upload
-    local curl_args="-F \"file=@$file_path\" -F \"path=$target_path\" -F \"auto_rename=true\""
-    local response=$(api_call "/terminal/push" "POST" "" "$curl_args")
-
     local body
-    if ! body=$(check_http_response "$response"); then
-        error "Failed to push file - HTTP status: $HTTP_STATUS_CODE"
+    body=$(api_call "/terminal/push" "POST" "" \
+        -F "file=@${file_path}" \
+        -F "path=${target_path}" \
+        -F "auto_rename=true") || {
+        local call_status=$?
+        error "Failed to push file"
         echo "$body" | jq '.' 2>/dev/null || echo "$body"
-        return 1
-    fi
+        return "$call_status"
+    }
 
     if echo "$body" | jq -e '.success' > /dev/null; then
         success "File pushed successfully"
@@ -1769,6 +2030,7 @@ gms-rt-test-stop() {
         success "Test stopped successfully"
     else
         warning "Failed to stop test or no test was running"
+        return "$GMS_RT_EXIT_OPERATION"
     fi
 }
 
@@ -1782,7 +2044,7 @@ gms-rt-test-suites() {
         echo "📋 Listing test suites..."
     fi
     local url="/test/suites"
-    [ -n "$base_path" ] && url="/test/suites?base_path=$base_path"
+    [ -n "$base_path" ] && url="/test/suites?base_path=$(_urlencode "$base_path")"
     local response=$(api_call "$url" "GET")
     if echo "$response" | jq -e '.success' > /dev/null; then
         local count=$(echo "$response" | jq '.count')
@@ -1817,7 +2079,8 @@ gms-rt-test-suites-result() {
     local tradefed_bin=$(find "$suite_path" -maxdepth 1 -type f -executable -name '*-tradefed' 2>/dev/null | head -1)
 
     # Build request data
-    local data="{\"suite_path\":\"$suite_path\"}"
+    local data
+    data=$(jq -cn --arg suite_path "$suite_path" '{suite_path: $suite_path}')
     if [ -n "$tradefed_bin" ]; then
         data=$(echo "$data" | jq --arg bin "$tradefed_bin" '. + {tradefed_bin: $bin}')
     fi
@@ -1879,7 +2142,8 @@ gms-rt-usbip-install() {
     [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-usbip-install <user@ip>"; return 1; }
     check_jq
     echo "🔧 Installing USB/IP on host: $device_host..."
-    local data="{\"device_host\":\"$device_host\"}"
+    local data
+    data=$(jq -cn --arg device_host "$device_host" '{device_host: $device_host}')
     local response=$(api_call "/usbip/install" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -1887,12 +2151,15 @@ gms-rt-usbip-install() {
 # Start USB/IP connection
 gms-rt-usbip-connect() {
     local device_host="$1"
-    local device_password="$2"
+    local device_password
+    device_password=$(_secret_value "${2:-${GMS_REMOTE_DEVICE_PASSWORD:-}}")
     [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-usbip-connect <user@ip> [password]"; return 1; }
     check_jq
     echo "🔌 Starting USB/IP connection to $device_host..."
-    local data="{\"device_host\":\"$device_host\"}"
-    [ -n "$device_password" ] && data=$(echo "$data" | jq ". + {\"device_password\":\"$device_password\"}")
+    local data
+    data=$(jq -cn --arg device_host "$device_host" --arg device_password "$device_password" \
+        '{device_host: $device_host, device_password: $device_password}
+         | with_entries(select(.value != ""))')
     local response=$(api_call "/usbip/connect" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "USB/IP connection started"
@@ -1909,7 +2176,8 @@ gms-rt-usbip-disconnect() {
     [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-usbip-disconnect <user@ip>"; return 1; }
     check_jq
     echo "🔌 Stopping USB/IP connection for $device_host..."
-    local data="{\"device_host\":\"$device_host\"}"
+    local data
+    data=$(jq -cn --arg device_host "$device_host" '{device_host: $device_host}')
     local response=$(api_call "/usbip/disconnect" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "USB/IP stopped"
@@ -1917,6 +2185,7 @@ gms-rt-usbip-disconnect() {
     else
         warning "Failed to stop USB/IP or not connected"
         echo "$response" | jq '.'
+        return "$GMS_RT_EXIT_OPERATION"
     fi
 }
 
@@ -1927,7 +2196,7 @@ gms-rt-usbip-status() {
     check_jq
     echo "🔌 Checking USB/IP status for $device_host..."
     # Use GET with query parameter
-    api_call "/usbip/status?device_host=$device_host" | jq '.'
+    api_call "/usbip/status?device_host=$(_urlencode "$device_host")" | jq '.'
 }
 
 # ==============================================================================
@@ -1945,13 +2214,14 @@ gms-rt-users-current() {
 gms-rt-users-detect() {
     local ip="$1"
     local username="${2:-}"
-    local password="${3:-}"
+    local password
+    password=$(_secret_value "${3:-${GMS_REMOTE_DEVICE_PASSWORD:-}}")
     check_jq
     echo "🔍 Detecting user for $ip..."
-    local data="{\"ip\":\"$ip\""
-    [ -n "$username" ] && data="$data,\"username\":\"$username\""
-    [ -n "$password" ] && data="$data,\"password\":\"$password\""
-    data="$data}"
+    local data
+    data=$(jq -cn --arg ip "$ip" --arg username "$username" --arg password "$password" \
+        '{ip: $ip, username: $username, password: $password}
+         | with_entries(select(.value != ""))')
     local response=$(api_call "/users/detect" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -1969,7 +2239,8 @@ gms-rt-users-set-username() {
     [ -z "$username" ] && { error "Username required. Usage: gms-rt-users-set-username [username]"; return 1; }
     check_jq
     echo "👤 Setting username to $username..."
-    local data="{\"username\":\"$username\"}"
+    local data
+    data=$(jq -cn --arg username "$username" '{username: $username}')
     local response=$(api_call "/users/set-username" "POST" "$data")
     echo "$response" | jq '.'
 }
@@ -2031,6 +2302,89 @@ gms-rt-vpn-status() {
 # Help Function
 # ==============================================================================
 
+_gms_rt_command_names() {
+    declare -F | awk '$3 ~ /^gms-rt-/ {print $3}' | sort -u
+}
+
+gms-rt-commands() {
+    check_jq || return 1
+    _gms_rt_command_names | jq -Rn --arg version "$GMS_RT_VERSION" '
+        def category:
+            split("-")[2] // "other";
+        def mode:
+            if test("terminal-open|devices-shell|devices-scrcpy|test-logs-stream")
+            then "interactive"
+            elif test(
+                "burn-|config-update|bootloader-(lock|unlock)|devices-(reboot|remount|push|wifi)"
+                + "|reports-delete|terminal-push|test-(start|stop|clean)|usbip-(install|connect|disconnect)"
+                + "|vpn-(connect|disconnect)|adb-forward-|desktop-vnc-(start|stop)|users-set-username"
+            )
+            then "mutating"
+            else "read_only"
+            end;
+        [inputs | {
+            name: .,
+            category: category,
+            mode: mode,
+            agent_safe_unattended: (mode == "read_only")
+        }] |
+        {
+            schema_version: 1,
+            cli_version: $version,
+            commands: .
+        }'
+}
+
+gms-rt-version() {
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        jq -cn --arg version "$GMS_RT_VERSION" '{name: "gms-remote-test", version: $version}'
+    else
+        printf 'gms-remote-test %s\n' "$GMS_RT_VERSION"
+    fi
+}
+
+gms-rt-capabilities() {
+    check_jq || return 1
+    local commands
+    commands=$(gms-rt-commands) || return 1
+    jq -cn \
+        --arg version "$GMS_RT_VERSION" \
+        --arg server "$SERVER_URL" \
+        --argjson commands "$commands" \
+        '{
+            schema_version: 1,
+            name: "gms-remote-test",
+            version: $version,
+            server: $server,
+            transport: "authenticated HTTPS API",
+            output_modes: ["human", "json"],
+            global_options: [
+                "--json",
+                "--quiet",
+                "--no-color",
+                "--non-interactive",
+                "--yes",
+                "--timeout SECONDS"
+            ],
+            authentication: {
+                cookie_session: true,
+                password_stdin: true,
+                elevation_command: "gms-rt-auth-elevate"
+            },
+            exit_codes: {
+                success: 0,
+                usage: 2,
+                authentication_required: 3,
+                permission_or_elevation_required: 4,
+                conflict_or_busy: 5,
+                network_or_timeout: 6,
+                operation_failed: 7
+            },
+            command_count: ($commands.commands | length),
+            commands: $commands.commands
+        }'
+}
+
 gms-rt-system-help() {
     cat << EOF
 ${BLUE}GMS Remote Test API Helper (FastAPI Port 5001)${NC}
@@ -2044,6 +2398,8 @@ ${YELLOW}Authentication:${NC}
   gms-rt-auth-login [username]   - Log in and save an API session
   gms-rt-auth-status             - Show the current authentication status
   gms-rt-auth-logout             - Revoke and remove the saved session
+  gms-rt-auth-elevate [username] - Verify an admin for sensitive operations
+  gms-rt-auth-elevation-reset    - Clear administrator elevation
 
 ${YELLOW}Firmware Burning:${NC}
   gms-rt-burn-firmware           - Burn firmware image
@@ -2062,6 +2418,7 @@ ${YELLOW}Desktop VNC:${NC}
 
 ${YELLOW}Device Management:${NC}
   gms-rt-devices-list               - List all connected devices
+  gms-rt-devices-info               - Get detailed device information
   gms-rt-devices-bootloader-lock    - Lock bootloader
   gms-rt-devices-bootloader-unlock  - Unlock bootloader
   gms-rt-devices-bootloader-status  - Check bootloader status
@@ -2088,11 +2445,17 @@ ${YELLOW}SSH Management:${NC}
   gms-rt-ssh-sshd          - Check SSHD status & install guide (optional: user@ip, e.g. ${DEFAULT_SSH_USER}@192.168.1.100)
 
 ${YELLOW}System:${NC}
+  gms-rt-capabilities            - Print machine-readable CLI capabilities
+  gms-rt-commands                - Print machine-readable command inventory
+  gms-rt-version                 - Print CLI version
   gms-rt-system-docs             - Get API documentation
   gms-rt-system-health           - Check server health
   gms-rt-system-skills           - Download skills directory as ZIP
   gms-rt-system-help             - Show this command list
   gms-rt-update                  - Update the Skill and all CLI command links
+
+${YELLOW}Code search:${NC}
+  gms-rt-opengrok-search         - Search the configured OpenGrok service
 
 ${YELLOW}Terminal:${NC}
   gms-rt-terminal-open           - Open SSH terminal on test host
@@ -2126,6 +2489,9 @@ ${YELLOW}VPN Management:${NC}
 
 ${YELLOW}Examples:${NC}
   gms-rt-devices-list
+  gms-rt-devices-list --json
+  printf '%s\n' "\$PASSWORD" | gms-rt-auth-login admin --password-stdin --non-interactive
+  gms-rt-capabilities --json
   gms-rt-devices-bootloader-lock '["DEVICE-1", "DEVICE-2"]'
   gms-rt-desktop-vnc-start
   gms-rt-test-start DEVICE CTS TestModule
@@ -2144,6 +2510,17 @@ ${YELLOW}Terminal:${NC}
 Server: ${GREEN}$SERVER_URL${NC}
 Docs:   ${GREEN}${SERVER_URL}/docs${NC}
 Help:   ${GREEN}${SERVER_URL}/api/system/help${NC}
+
+Global options:
+  --json                 Emit exactly one JSON envelope on stdout
+  --quiet                Suppress helper progress messages where supported
+  --no-color             Disable ANSI colors
+  --non-interactive      Never prompt for input
+  --yes                  Accept supported confirmations
+  --timeout SECONDS      Override the API timeout for this invocation
+
+Exit codes: 0 success, 2 usage, 3 authentication, 4 permission/elevation,
+            5 conflict/busy, 6 network/timeout, 7 operation failure
 EOF
 }
 
@@ -2161,10 +2538,139 @@ _is_sourced() {
     fi
 }
 
-if ! _is_sourced; then
-    if [ $# -eq 0 ]; then
-        gms-rt-system-help
+_gms_rt_dispatch_usage_error() {
+    local command="$1"
+    local message="$2"
+    if [ "$GMS_RT_OUTPUT" = "json" ] && command -v jq >/dev/null 2>&1; then
+        jq -cn --arg command "$command" --arg message "$message" \
+            --argjson exit_code "$GMS_RT_EXIT_USAGE" \
+            '{ok: false, command: $command, exit_code: $exit_code, error: $message}'
     else
-        "$@"
+        error "$message"
     fi
+    return "$GMS_RT_EXIT_USAGE"
+}
+
+_gms_rt_dispatch() {
+    local command="${1:-gms-rt-system-help}"
+    [ "$#" -eq 0 ] || shift
+    local args=()
+    local argument
+
+    # Detect JSON mode before validating other global options so usage errors
+    # still honor the one-document stdout contract regardless of option order.
+    for argument in "$@"; do
+        if [ "$argument" = "--json" ]; then
+            GMS_RT_OUTPUT=json
+            GMS_RT_QUIET=1
+            NO_COLOR=1
+            break
+        fi
+    done
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --json)
+                GMS_RT_OUTPUT=json
+                GMS_RT_QUIET=1
+                NO_COLOR=1
+                ;;
+            --quiet) GMS_RT_QUIET=1 ;;
+            --no-color) NO_COLOR=1 ;;
+            --non-interactive) GMS_RT_NON_INTERACTIVE=1 ;;
+            --yes) GMS_RT_ASSUME_YES=1 ;;
+            --timeout)
+                shift
+                if [ "$#" -eq 0 ] || ! [[ "$1" =~ ^[1-9][0-9]*$ ]]; then
+                    _gms_rt_dispatch_usage_error "$command" "--timeout requires a positive integer"
+                    return $?
+                fi
+                CURL_TIMEOUT="$1"
+                ;;
+            --timeout=*)
+                CURL_TIMEOUT="${1#*=}"
+                if ! [[ "$CURL_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+                    _gms_rt_dispatch_usage_error "$command" "--timeout requires a positive integer"
+                    return $?
+                fi
+                ;;
+            *) args+=("$1") ;;
+        esac
+        shift
+    done
+
+    if [[ "$command" != gms-rt-* ]] || ! declare -F "$command" >/dev/null; then
+        _gms_rt_dispatch_usage_error "$command" "Unknown command: $command"
+        return $?
+    fi
+
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        RED=""; GREEN=""; YELLOW=""; BLUE=""; NC=""
+    elif [ -n "${NO_COLOR:-}" ]; then
+        RED=""; GREEN=""; YELLOW=""; BLUE=""; NC=""
+    fi
+
+    local status_file stdout_file stderr_file command_status api_status
+    status_file=$(mktemp "${TMPDIR:-/tmp}/gms-rt-status.XXXXXX") || return "$GMS_RT_EXIT_OPERATION"
+    stdout_file=$(mktemp "${TMPDIR:-/tmp}/gms-rt-stdout.XXXXXX") || {
+        rm -f -- "$status_file"
+        return "$GMS_RT_EXIT_OPERATION"
+    }
+    stderr_file=$(mktemp "${TMPDIR:-/tmp}/gms-rt-stderr.XXXXXX") || {
+        rm -f -- "$status_file" "$stdout_file"
+        return "$GMS_RT_EXIT_OPERATION"
+    }
+    GMS_RT_STATUS_FILE="$status_file"
+    export GMS_RT_STATUS_FILE GMS_RT_OUTPUT GMS_RT_QUIET GMS_RT_NON_INTERACTIVE GMS_RT_ASSUME_YES
+
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        "$command" "${args[@]}" >"$stdout_file" 2>"$stderr_file"
+        command_status=$?
+    else
+        "$command" "${args[@]}"
+        command_status=$?
+    fi
+
+    api_status=$(tail -n 1 "$status_file" 2>/dev/null || true)
+    if [[ "$api_status" =~ ^[1-9][0-9]*$ ]]; then
+        command_status="$api_status"
+    fi
+    if [ "$command_status" -eq 0 ] && [ "$GMS_RT_ERROR_SEEN" = "1" ]; then
+        command_status="$GMS_RT_EXIT_OPERATION"
+    fi
+    case "$command_status" in
+        0|2|3|4|5|6|7) ;;
+        *) command_status="$GMS_RT_EXIT_OPERATION" ;;
+    esac
+
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        local stdout_text stderr_text
+        stdout_text=$(<"$stdout_file")
+        stderr_text=$(<"$stderr_file")
+        jq -cn \
+            --arg command "$command" \
+            --arg stdout "$stdout_text" \
+            --arg stderr "$stderr_text" \
+            --argjson exit_code "$command_status" '
+            def json_suffix:
+                ([try (
+                    capture("(?s)(?<json>[\\[{].*)$").json | fromjson
+                ) catch empty][0] // null);
+            ($stdout | json_suffix) as $parsed |
+            {
+                ok: ($exit_code == 0),
+                command: $command,
+                exit_code: $exit_code
+            }
+            + (if $parsed == null then {output: $stdout} else {data: $parsed} end)
+            + (if $stderr == "" then {} else {diagnostics: $stderr} end)'
+    fi
+
+    rm -f -- "$status_file" "$stdout_file" "$stderr_file"
+    unset GMS_RT_STATUS_FILE
+    return "$command_status"
+}
+
+if ! _is_sourced; then
+    _gms_rt_dispatch "$@"
 fi

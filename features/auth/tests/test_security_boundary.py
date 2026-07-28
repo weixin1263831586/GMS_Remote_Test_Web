@@ -101,6 +101,34 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(skill_archive.status_code, 200)
         self.assertEqual(skill_archive.headers["content-type"], "application/zip")
 
+    def test_anonymous_firmware_share_download_uses_bearer_link_boundary(self):
+        with patch(
+            "features.firmware.shares_api._find_record",
+            return_value=([], None),
+        ):
+            public_download = self.client.get(
+                "/api/firmware-shares/ffffffffffffffffffffffffffffffff/download"
+            )
+            existing_format_download = self.client.get(
+                "/api/firmware-shares/09b054043429/download"
+            )
+        protected_check = self.client.get(
+            "/api/firmware-shares/ffffffffffffffffffffffffffffffff/check"
+        )
+        malformed_download = self.client.get(
+            "/api/firmware-shares/not-a-share-token/download"
+        )
+
+        self.assertEqual(public_download.status_code, 404)
+        self.assertEqual(public_download.json()["error"], "固件分享不存在")
+        self.assertEqual(existing_format_download.status_code, 404)
+        self.assertEqual(
+            existing_format_download.json()["error"],
+            "固件分享不存在",
+        )
+        self.assertEqual(protected_check.status_code, 401)
+        self.assertEqual(malformed_download.status_code, 401)
+
     def test_setup_and_authenticated_requests_obey_same_origin_policy(self):
         blocked_setup = self.client.post(
             "/api/auth/setup",

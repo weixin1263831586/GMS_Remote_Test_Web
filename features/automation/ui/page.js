@@ -708,8 +708,8 @@ async function loadDevices(forceRefresh = false) {
                     ? (d.locked ? 'allocated' : (d.status || 'available'))
                     : (d.state || 'unknown');
                 const unavailable = isLocalAutomationWorker(workerId)
-                    ? Boolean(d.locked || ['offline', 'unauthorized', 'unknown'].includes(deviceState))
-                    : deviceState !== 'available';
+                    ? Boolean(d.locked || ['offline', 'unauthorized', 'unknown', 'fastboot'].includes(deviceState))
+                    : Boolean(d.claimed || deviceState !== 'available');
                 const label = `${id}${unavailable ? ` (${deviceState})` : ''}`;
                 return `<label class="checkbox-item${unavailable ? ' muted' : ''}"><input type="checkbox" value="${esc(id)}"${unavailable ? ' disabled' : ''} onchange="syncAutomationWorkspaceSelection()"> <span>${esc(label)}</span></label>`;
             }).join('')

@@ -1,24 +1,14 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-if [[ $# -lt 2 ]]; then
-    echo "Usage: $0 <SerialNo> <lock|unlock>"
+if [[ $# -ne 2 ]]; then
+    echo "Usage: $0 <serial> <oem-command>" >&2
     exit 1
 fi
 
 SERIAL="$1"
-ACTION="$2"
+OEM_COMMAND="$2"
 
-echo "🔄 重启设备 $SERIAL 进入 bootloader..."
-adb -s "$SERIAL" reboot bootloader
-sleep 5
-
-echo "🔐 执行 $ACTION 操作..."
-fastboot -s "$SERIAL" oem at-"$ACTION"-vboot
-fastboot -s "$SERIAL" reboot fastboot
-sleep 3
-
-echo "🔄 重启设备..."
+fastboot -s "$SERIAL" oem "$OEM_COMMAND"
+fastboot -s "$SERIAL" reboot fastboot || true
 fastboot -s "$SERIAL" reboot
-
-echo "✅ 设备 $SERIAL $ACTION 完成!"

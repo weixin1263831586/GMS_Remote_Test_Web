@@ -128,14 +128,14 @@ REC001	recovery
 OFF001	offline
 UNAUTH001	unauthorized
 """
-        fastboot_output = "FB001\tfastboot\n"
+        fastboot_output = "FB001\tfastboot\nFB002\tfastbootd\n"
         self.assertEqual(parse_adb_device_states(adb_output), {
             "ADB001": "device",
             "REC001": "recovery",
             "OFF001": "offline",
             "UNAUTH001": "unauthorized",
         })
-        self.assertEqual(parse_fastboot_devices(fastboot_output), ["FB001"])
+        self.assertEqual(parse_fastboot_devices(fastboot_output), ["FB001", "FB002"])
 
     def test_find_android_devices_parses_stderr_output(self):
         class FakeSshManager:
@@ -1311,6 +1311,7 @@ UNAUTH001	unauthorized
 
             request = _authenticated_request()
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001"]), \
+                    patch.object(devices_router.device_manager, "get_fastboot_devices", return_value=[]), \
                     patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
                     patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
                     patch.object(devices_router.runtime, "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
@@ -1335,6 +1336,7 @@ UNAUTH001	unauthorized
             reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
             request = _authenticated_request()
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001", "USBIP001"]), \
+                    patch.object(devices_router.device_manager, "get_fastboot_devices", return_value=[]), \
                     patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
                     patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
                     patch.object(devices_router.runtime, "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
@@ -1360,6 +1362,7 @@ UNAUTH001	unauthorized
 
             request = _authenticated_request()
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001", "USBIP001"]), \
+                    patch.object(devices_router.device_manager, "get_fastboot_devices", return_value=[]), \
                     patch.object(devices_router.runtime.config_manager, "get_runtime_config", return_value={
                         "usbip_devices_source": {
                             "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1}

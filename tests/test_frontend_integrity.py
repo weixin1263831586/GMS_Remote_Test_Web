@@ -148,6 +148,22 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("usernameInput.placeholder === '正在读取客户端身份…'", api_script)
         self.assertIn("此处不使用客户端 SSH 账号", api_script)
 
+    def test_firmware_share_copy_explains_public_download(self):
+        navigation = read_text("web/static/js/navigation.js")
+
+        self.assertIn("分享链接已复制，无需登录即可打开下载", navigation)
+        self.assertNotIn("分享链接已复制，已登录客户端可直接打开下载", navigation)
+
+    def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
+        navigation = read_text("web/static/js/navigation.js")
+
+        self.assertIn(
+            "stopDeviceProtocolRefresh = startBurnDeviceProtocolRefresh(devices)",
+            navigation,
+        )
+        self.assertIn("stopDeviceProtocolRefresh();", navigation)
+        self.assertIn("loadDevices(true, {silent: true})", navigation)
+
     def test_cluster_mode_switch_stays_on_page_and_desktop_elevates_first(self):
         navigation = read_text("web/static/js/navigation.js")
         shell = read_text("web/shell/shell.html")

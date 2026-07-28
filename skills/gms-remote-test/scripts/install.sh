@@ -6,7 +6,9 @@ DEFAULT_SERVER_URL='__GMS_REMOTE_TEST_SERVER__'
 DEFAULT_DOWNLOAD_URL='__GMS_SKILL_DOWNLOAD_URL__'
 SERVER_URL="${GMS_REMOTE_TEST_SERVER:-$DEFAULT_SERVER_URL}"
 DOWNLOAD_URL="${GMS_SKILL_DOWNLOAD_URL:-$DEFAULT_DOWNLOAD_URL}"
-SKILLS_DIR="${GMS_CODEX_SKILLS_DIR:-${CODEX_HOME:-${HOME}/.codex}/skills}"
+# GMS_SKILLS_DIR is the agent-neutral override. Keep the Codex-specific name
+# for backward compatibility with existing installations.
+SKILLS_DIR="${GMS_SKILLS_DIR:-${GMS_CODEX_SKILLS_DIR:-${CODEX_HOME:-${HOME}/.codex}/skills}}"
 TARGET_DIR="${SKILLS_DIR}/${SKILL_NAME}"
 BIN_DIR="${GMS_BIN_DIR:-${HOME}/.local/bin}"
 RUNTIME_BIN_DIR="${GMS_RUNTIME_BIN_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/gms-remote-test/bin}"
@@ -176,6 +178,7 @@ fi
     printf 'export GMS_REMOTE_TEST_SERVER=%q\n' "$SERVER_URL"
     printf 'export GMS_SKILL_DOWNLOAD_URL=%q\n' "$DOWNLOAD_URL"
     printf 'export GMS_CODEX_SKILLS_DIR=%q\n' "$SKILLS_DIR"
+    printf 'export GMS_SKILLS_DIR=%q\n' "$SKILLS_DIR"
     printf 'export GMS_BIN_DIR=%q\n' "$BIN_DIR"
     printf 'export GMS_RUNTIME_BIN_DIR=%q\n' "$RUNTIME_BIN_DIR"
     printf 'export PATH=%q:"$PATH"\n' "$RUNTIME_BIN_DIR"

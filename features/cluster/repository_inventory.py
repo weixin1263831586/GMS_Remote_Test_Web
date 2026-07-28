@@ -505,10 +505,23 @@ class ClusterInventoryRepositoryMixin:
             params = (worker_id,)
         sql += " ORDER BY worker_id,serial"
         with self.connect() as conn:
-            return [
+            devices = [
                 self._decode(row) or {}
                 for row in conn.execute(sql, params).fetchall()
             ]
+        # Protocol state and ownership are independent. A firmware claim must
+        # remain visible while the same serial transitions ADB -> Fastboot ->
+        # ADB, without replacing the reported protocol state.
+        claims = {
+            claim["device_key"]: claim
+            for claim in self.claims.list_active(worker_id=worker_id or None)
+        }
+        for device in devices:
+            claim = claims.get(str(device.get("id") or ""))
+            device["claimed"] = claim is not None
+            if claim is not None:
+                device["claim_source_type"] = claim.get("source_type") or ""
+        return devices
 
     def list_suites(self, worker_id: str = "") -> list[dict[str, Any]]:
         sql = "SELECT * FROM cluster_worker_suites"
