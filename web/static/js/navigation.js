@@ -92,6 +92,8 @@ let usbipReconnectAttempts = 0;
 let usbipManualDisconnectUntil = 0;
 let usbipReconnectWaiting = false;
 let usbipOperationGeneration = 0;
+let adbProxyStatus = null;
+let adbProxyOperationRunning = false;
 const USBIP_RECONNECT_MAX_ATTEMPTS = 30;
 const USBIP_RECONNECT_INTERVAL_MS = 5000;
 const USBIP_RECONNECT_INITIAL_DELAY_MS = 1500;
@@ -177,10 +179,58 @@ function validateBootloaderDeviceSelection() {
         return device && !isSelectableBootloaderDevice(device);
     });
     if (unavailable.length > 0) {
-        showToast(`所选设备当前不可执行 Bootloader 锁定/解锁: ${unavailable.join(', ')}`, 'warning');
+        const proxyDevices = selectedAdbProxyDeviceIds();
+        showToast(proxyDevices.length
+            ? `ADB Proxy远程设备没有本地USB/Fastboot通道，不能锁定或解锁: ${proxyDevices.join(', ')}`
+            : `所选设备当前不可执行 Bootloader 锁定/解锁: ${unavailable.join(', ')}`, 'warning');
         return false;
     }
     return true;
+}
+
+function selectedAdbProxyDeviceIds() {
+    return Array.from(state.selectedDevices).filter(deviceId => {
+        const device = state.devices.find(item => (
+            (typeof item === 'string' ? item : item.device_id) === deviceId
+        ));
+        return typeof device === 'object' && device?.transport === 'adb_proxy';
+    });
+}
+
+function validateLocalUsbDeviceSelection(operationName) {
+    const proxyDevices = selectedAdbProxyDeviceIds();
+    if (!proxyDevices.length) return true;
+    showToast(
+        `ADB Proxy远程设备不支持${operationName}，请在设备来源主机操作: ${proxyDevices.join(', ')}`,
+        'warning'
+    );
+    return false;
+}
+
+function syncLocalUsbActionButtons() {
+    const blocked = selectedAdbProxyDeviceIds().length > 0;
+    [
+        ['btn-lock-device', '锁定设备'],
+        ['btn-unlock-device', '解锁设备'],
+        ['btn-burn-firmware', '烧写固件'],
+        ['btn-burn-gsi', '烧写GSI']
+    ].forEach(([buttonId, operationName]) => {
+        const button = document.getElementById(buttonId);
+        if (!button) return;
+        if (blocked && button.dataset.adbProxyBlocked !== 'true') {
+            button.dataset.adbProxyBlocked = 'true';
+            button.dataset.adbProxyPreviousDisabled = String(button.disabled);
+            button.dataset.adbProxyPreviousTitle = button.title || '';
+            button.disabled = true;
+            button.title = `ADB Proxy远程设备不支持${operationName}，请在设备来源主机操作`;
+        } else if (!blocked && button.dataset.adbProxyBlocked === 'true') {
+            button.disabled = button.dataset.adbProxyPreviousDisabled === 'true';
+            button.title = button.dataset.adbProxyPreviousTitle || '';
+            delete button.dataset.adbProxyBlocked;
+            delete button.dataset.adbProxyPreviousDisabled;
+            delete button.dataset.adbProxyPreviousTitle;
+        }
+    });
 }
 
 // 获取Redmine配置（带缓存）
@@ -1186,12 +1236,8 @@ function updateTestHostScopedControls(workerId = workspaceWorkerId()) {
     }
     const adbForward = document.getElementById('adb-forward-btn');
     if (adbForward) {
-        // ADB forward is intentionally unavailable until its Controller-side
-        // transport is enabled; selecting a Worker must never re-enable it.
-        adbForward.disabled = true;
-        adbForward.title = remoteSelected
-            ? 'ADB forward 只作用于 Controller 本机，不能投递到远端 Worker'
-            : adbForward.title;
+        adbForward.disabled = adbProxyOperationRunning;
+        adbForward.title = '选择ADB设备来源和接入主机（不依赖USB/IP内核模块）';
     }
 }
 
@@ -1428,6 +1474,7 @@ function isSelectableTestDevice(device) {
 
 function isSelectableBootloaderDevice(device) {
     if (typeof device === 'string') return true;
+    if (device.transport === 'adb_proxy') return false;
     const status = device.status || device.state || 'online';
     if (status === 'fastboot') {
         return !device.locked && !device.cluster_worker_id;
@@ -1474,15 +1521,24 @@ function fetchDevicesForWorker(workerId, forceRefresh) {
             .map(device => {
                 const lockedStates = ['allocated', 'leased', 'busy', 'external_busy', 'reserved'];
                 const isLocked = Boolean(device.claimed || lockedStates.includes(device.state));
+                const lockLabels = {
+                    'cluster-job': '测试任务',
+                    'cluster-device-action': '设备操作',
+                    'cluster-firmware': '固件烧写'
+                };
                 return {
                     ...(device.properties || {}),
                     device_id: device.id,
                     serial: device.serial,
                     worker_id: workerId,
                     cluster_worker_id: workerId,
+                    transport: device.transport || 'local_usb',
                     locked: isLocked,
                     locked_by: isLocked
-                        ? (device.claim_source_type || device.state || 'occupied')
+                        ? (lockLabels[device.claim_source_type]
+                            || device.claim_source_type
+                            || device.state
+                            || '平台操作')
                         : '',
                     locked_by_self: false,
                     state: device.state,
@@ -3666,6 +3722,7 @@ function renderDevices() {
         rightContainer.innerHTML = '';
         deviceCanvas.classList.add('device-canvas-empty');
         leftContainer.innerHTML = '<div class="empty-message">点击刷新按钮获取设备列表...</div>';
+        syncLocalUsbActionButtons();
         return;
     }
 
@@ -3694,11 +3751,31 @@ function renderDevices() {
             ? (device.status || device.state || 'online')
             : 'online';
         const selectable = isSelectableWorkspaceDevice(device);
+        const transport = typeof device === 'object'
+            ? (device.transport || 'local_usb')
+            : 'local_usb';
+        const adbProxySourceWorkerId = typeof device === 'object'
+            ? (device.adb_proxy_source_worker_id || '')
+            : '';
+        const adbProxyTargetWorkerId = typeof device === 'object'
+            ? (device.cluster_worker_id || device.worker_id || '')
+            : '';
+        const displaySerial = typeof device === 'object'
+            ? (device.adb_proxy_source_serial || device.serial || deviceId)
+            : deviceId;
 
         if (index % 2 === 0) {
-            leftDevices.push({ deviceId, isLocked, lockedBy, status, selectable });
+            leftDevices.push({
+                deviceId, isLocked, lockedBy, status, selectable,
+                transport, adbProxySourceWorkerId, adbProxyTargetWorkerId,
+                displaySerial
+            });
         } else {
-            rightDevices.push({ deviceId, isLocked, lockedBy, status, selectable });
+            rightDevices.push({
+                deviceId, isLocked, lockedBy, status, selectable,
+                transport, adbProxySourceWorkerId, adbProxyTargetWorkerId,
+                displaySerial
+            });
         }
     });
 
@@ -3738,16 +3815,29 @@ function renderDevices() {
     };
     setupDeviceDelegation(leftContainer);
     setupDeviceDelegation(rightContainer);
+    syncLocalUsbActionButtons();
 }
 
 // 构建单个设备项 DOM（renderDevices 奇偶分栏与分组视图共用）
-function buildDeviceItemEl({ deviceId, isLocked, lockedBy, status = 'online', selectable = true }) {
+function buildDeviceItemEl({
+    deviceId,
+    isLocked,
+    lockedBy,
+    status = 'online',
+    selectable = true,
+    transport = 'local_usb',
+    adbProxySourceWorkerId = '',
+    adbProxyTargetWorkerId = '',
+    displaySerial = ''
+}) {
     const div = document.createElement('div');
     const isSelected = state.selectedDevices.has(deviceId);
     div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
     div.dataset.deviceId = deviceId;
     if (!selectable) div.dataset.locked = 'true';
-    div.title = isLocked
+    div.title = transport === 'adb_proxy'
+        ? `ADB Proxy远程设备，来源：${adbProxySourceWorkerId || '未知'}；可执行ADB/测试，不能执行Fastboot、锁定或烧写`
+        : isLocked
         ? `已被 ${lockedBy} 占用`
         : status === 'fastboot'
         ? 'Fastboot/Fastbootd 设备仅可用于 GSI 烧写'
@@ -3763,9 +3853,18 @@ function buildDeviceItemEl({ deviceId, isLocked, lockedBy, status = 'online', se
     info.className = 'device-info';
     const idDiv = document.createElement('div');
     idDiv.className = 'device-id';
-    idDiv.textContent = deviceId;
+    idDiv.textContent = displaySerial || deviceId;
     info.appendChild(idDiv);
-    if (isLocked) {
+    if (transport === 'adb_proxy') {
+        const sourceStatus = document.createElement('div');
+        sourceStatus.className = 'lock-status';
+        const source = adbProxySourceWorkerId || '来源未知';
+        sourceStatus.textContent = adbProxyTargetWorkerId
+            ? `ADB Proxy · ${source} → ${adbProxyTargetWorkerId}`
+            : `ADB Proxy · ${source}`;
+        info.appendChild(sourceStatus);
+    }
+    if (isLocked && transport !== 'adb_proxy') {
         const lockStatus = document.createElement('div');
         lockStatus.className = 'lock-status';
         lockStatus.textContent = `🔒 ${lockedBy}`;
@@ -3778,9 +3877,9 @@ function buildDeviceItemEl({ deviceId, isLocked, lockedBy, status = 'online', se
         ? 'Fastboot'
         : String(status || '').toLowerCase() === 'unauthorized'
         ? 'Unauthorized'
-        : isLocked ? 'Allocated' : selectable ? 'Available' : status;
-    statusEl.textContent = isLocked && displayStatus !== 'Allocated'
-        ? `${displayStatus} · Locked`
+        : isLocked ? '已分配' : selectable ? '可用' : status;
+    statusEl.textContent = isLocked && displayStatus !== '已分配'
+        ? `${displayStatus} · 已占用`
         : displayStatus;
 
     div.appendChild(checkbox);
@@ -4124,6 +4223,7 @@ async function burnFirmware() {
         showToast('请先选择要烧写固件的设备', 'warning');
         return;
     }
+    if (!validateLocalUsbDeviceSelection('烧写固件')) return;
     const fastbootDevices = selectedFastbootDeviceIds();
     if (fastbootDevices.length > 0) {
         showToast(
@@ -4734,6 +4834,7 @@ async function burnGsiImage() {
         showToast('请先选择要烧写GSI的设备', 'warning');
         return;
     }
+    if (!validateLocalUsbDeviceSelection('烧写GSI')) return;
 
     // Set default script path
     const scriptInput = document.getElementById('gsi-script');
@@ -5167,27 +5268,397 @@ async function showDeviceScreen() {
 }
 
 async function setupAdbPortForward() {
-    if (!requireControllerHostAction('ADB 端口转发')) return;
-    const btn = document.getElementById('adb-forward-btn');
-    if (state.adbForwardRunning) {
-        try {
-            await apiCall('/api/adb-forward/stop', 'POST');
-            state.adbForwardRunning = false;
-            btn.textContent = '🔌 端口转发';
-            addLogEntry('ADB 端口转发已停止', 'info');
-        } catch (error) {
-            addLogEntry('停止端口转发失败: ' + error.message, 'error');
+    const granted = await requestElevatedAccess('管理ADB');
+    if (!granted) return;
+    await openAdbProxyModal();
+}
+
+async function openAdbProxyModal() {
+    const assignments = document.getElementById('adb-proxy-assignments');
+    const message = document.getElementById('adb-proxy-message');
+    const submit = document.getElementById('adb-proxy-connect-submit');
+    if (!assignments || !message || !submit) return;
+    assignments.textContent = '正在读取接入状态...';
+    message.textContent = '正在读取设备来源和接入主机...';
+    submit.disabled = true;
+    ModalManager.open('adb-proxy-modal');
+    try {
+        adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
+        state.adbForwardRunning = Boolean(adbProxyStatus.connected);
+        renderAdbProxyAssignments();
+        renderAdbProxyHosts();
+        updateAdbProxyButton();
+    } catch (error) {
+        assignments.textContent = '接入状态读取失败';
+        message.textContent = `加载ADB接入信息失败：${error.message}`;
+        addLogEntry('加载ADB接入信息失败: ' + error.message, 'error');
+    }
+}
+
+function closeAdbProxyModal() {
+    ModalManager.close('adb-proxy-modal');
+}
+
+function adbProxyHostLabel(host) {
+    const name = host.name || host.worker_id;
+    const address = host.address || host.hostname || '地址未知';
+    const role = host.adb_proxy_source_only ? 'Ubuntu来源' : host.worker_id;
+    return `${name} · ${address}（${role}）`;
+}
+
+function toggleAdbProxyUbuntuSource(forceOpen) {
+    const panel = document.getElementById('adb-proxy-ubuntu-source-panel');
+    const toggle = document.getElementById('adb-proxy-add-ubuntu-toggle');
+    if (!panel || !toggle) return;
+    panel.hidden = typeof forceOpen === 'boolean' ? !forceOpen : !panel.hidden;
+    toggle.textContent = panel.hidden ? '＋ 添加Ubuntu设备来源' : '收起Ubuntu设备来源';
+    if (!panel.hidden) {
+        document.getElementById('adb-proxy-ubuntu-host')?.focus();
+    }
+}
+
+async function deployAdbProxyUbuntuSource() {
+    const hostInput = document.getElementById('adb-proxy-ubuntu-host');
+    const passwordInput = document.getElementById('adb-proxy-ubuntu-password');
+    const button = document.getElementById('adb-proxy-ubuntu-deploy');
+    const message = document.getElementById('adb-proxy-message');
+    const sshHost = hostInput?.value.trim() || '';
+    const password = passwordInput?.value || '';
+    if (!/^[A-Za-z0-9._-]+@.+/.test(sshHost)) {
+        showToast('SSH主机必须使用 用户名@IP 格式', 'warning');
+        return;
+    }
+    if (!password) {
+        showToast('请输入SSH密码', 'warning');
+        return;
+    }
+    if (!button || !message) return;
+
+    let finalMessage = '';
+    adbProxyOperationRunning = true;
+    button.disabled = true;
+    button.textContent = '校验SSH指纹…';
+    message.textContent = `正在读取 ${sshHost} 的SSH主机指纹…`;
+    try {
+        const scan = await apiCall(
+            '/api/cluster/workers/ssh-host-key/scan',
+            'POST',
+            {ssh_host: sshHost}
+        );
+        const fingerprints = (scan.keys || []).map(
+            key => `${key.key_type}  ${key.fingerprint}`
+        ).join('\n');
+        if (!fingerprints) throw new Error('目标主机没有返回可校验的SSH指纹');
+        if (!window.confirm(
+            `请核对 ${scan.host}:${scan.port} 的SSH指纹：\n\n`
+            + `${fingerprints}\n\n确认无误后继续安装。`
+        )) {
+            throw new Error('已取消Ubuntu来源主机安装');
         }
+        await apiCall(
+            '/api/cluster/workers/ssh-host-key/trust',
+            'POST',
+            {ssh_host: sshHost, keys: scan.keys}
+        );
+        button.textContent = '安装adbproxy-rs…';
+        message.textContent = `正在 ${sshHost} 安装adbproxy-rs和来源Agent…`;
+        const deployed = await apiCall(
+            '/api/cluster/workers/deploy-adb-proxy-source',
+            'POST',
+            {
+                ssh_host: sshHost,
+                password,
+                controller_url: window.location.origin
+            }
+        );
+        if (passwordInput) passwordInput.value = '';
+        adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
+        renderAdbProxyAssignments();
+        renderAdbProxyHosts();
+        const sourceSelect = document.getElementById('adb-proxy-source-host');
+        if (
+            sourceSelect
+            && Array.from(sourceSelect.options).some(
+                option => option.value === deployed.worker_id
+            )
+        ) {
+            sourceSelect.value = deployed.worker_id;
+            renderAdbProxySourceDevices();
+        }
+        toggleAdbProxyUbuntuSource(false);
+        finalMessage = (
+            `${sshHost} 已安装并添加为ADB设备来源`
+            + (deployed.registered ? '，设备清单已同步。' : '。')
+        );
+        showToast('Ubuntu ADB设备来源添加成功', 'success');
+    } catch (error) {
+        finalMessage = `添加Ubuntu来源失败：${error.message}`;
+        showToast('添加Ubuntu来源失败: ' + error.message, 'error');
+        addLogEntry('添加Ubuntu ADB来源失败: ' + error.message, 'error');
+    } finally {
+        if (passwordInput) passwordInput.value = '';
+        adbProxyOperationRunning = false;
+        button.disabled = false;
+        button.textContent = '安装并添加';
+        updateAdbProxyButton();
+        renderAdbProxyAssignments();
+        renderAdbProxySourceDevices();
+        if (finalMessage) message.textContent = finalMessage;
+    }
+}
+
+function renderAdbProxyHosts() {
+    const sourceSelect = document.getElementById('adb-proxy-source-host');
+    const targetSelect = document.getElementById('adb-proxy-target-host');
+    const message = document.getElementById('adb-proxy-message');
+    if (!sourceSelect || !targetSelect || !adbProxyStatus) return;
+    const hosts = adbProxyStatus.hosts || [];
+    const activeAssignments = adbProxyStatus.assignments || [];
+    const activeTargets = new Set(
+        activeAssignments.map(item => item.target_worker_id)
+    );
+    const assignedBySource = new Map(
+        activeAssignments.map(item => [
+            item.source_worker_id,
+            new Set(item.devices || [])
+        ])
+    );
+    const capable = hosts.filter(host => (
+        host.adb_proxy && host.status === 'online'
+    ));
+    const sourceHosts = capable.filter(host => (
+        !activeTargets.has(host.worker_id)
+        && (
+            host.adb_proxy_source_only
+            || (host.devices || []).some(device => (
+                device.state === 'available'
+                && device.transport !== 'adb_proxy'
+                && !assignedBySource.get(host.worker_id)?.has(device.serial)
+            ))
+        )
+    ));
+    sourceSelect.replaceChildren();
+    sourceHosts.forEach(host => sourceSelect.append(
+        new Option(adbProxyHostLabel(host), host.worker_id)
+    ));
+    if (!sourceHosts.length) {
+        sourceSelect.append(new Option('没有可用的ADB设备来源', ''));
+    }
+
+    renderAdbProxySourceDevices();
+    if (!adbProxyStatus.cluster_enabled && capable.length < 2) {
+        message.textContent = (
+            '单机模式下本机ADB设备已直接可用，无需再次接入。若设备连接在另一台Ubuntu主机，'
+            + '请部署Worker并启用集群模式。'
+        );
+    }
+}
+
+function renderAdbProxySourceDevices() {
+    const sourceId = document.getElementById('adb-proxy-source-host')?.value || '';
+    const targetSelect = document.getElementById('adb-proxy-target-host');
+    const deviceSelect = document.getElementById('adb-proxy-source-devices');
+    const submit = document.getElementById('adb-proxy-connect-submit');
+    const message = document.getElementById('adb-proxy-message');
+    if (!targetSelect || !deviceSelect || !submit || !message) return;
+    const assignments = adbProxyStatus?.assignments || [];
+    const existingAssignment = assignments.find(
+        item => item.source_worker_id === sourceId
+    );
+    const activeSources = new Set(
+        assignments.map(item => item.source_worker_id)
+    );
+    const host = (adbProxyStatus?.hosts || []).find(item => item.worker_id === sourceId);
+    const capable = (adbProxyStatus?.hosts || []).filter(item => (
+        item.adb_proxy && item.status === 'online'
+    ));
+    const previousTarget = targetSelect.value;
+    const targetHosts = existingAssignment
+        ? capable.filter(item => (
+            item.worker_id === existingAssignment.target_worker_id
+            && !item.adb_proxy_source_only
+        ))
+        : capable.filter(item => (
+            item.worker_id !== sourceId
+            && !activeSources.has(item.worker_id)
+            && !item.adb_proxy_source_only
+        ));
+    targetSelect.replaceChildren();
+    targetHosts.forEach(item => targetSelect.append(
+        new Option(adbProxyHostLabel(item), item.worker_id)
+    ));
+    if (!targetHosts.length) {
+        targetSelect.append(new Option('没有可用的ADB接入主机', ''));
     } else {
-        try {
-            await apiCall('/api/adb-forward/start', 'POST');
-            state.adbForwardRunning = true;
-            btn.textContent = '🔌 停止转发';
-            addLogEntry('ADB 端口转发已启动', 'success');
-        } catch (error) {
-            addLogEntry('启动端口转发失败: ' + error.message, 'error');
+        const preferred = existingAssignment?.target_worker_id
+            || (targetHosts.some(item => item.worker_id === previousTarget)
+                ? previousTarget
+                : workspaceWorkerId());
+        if (targetHosts.some(item => item.worker_id === preferred)) {
+            targetSelect.value = preferred;
         }
     }
+    deviceSelect.replaceChildren();
+    const assigned = new Set(existingAssignment?.devices || []);
+    const devices = (host?.devices || []).filter(device => (
+        device.state === 'available'
+        && device.transport !== 'adb_proxy'
+        && !assigned.has(device.serial)
+    ));
+    devices.forEach(device => {
+        const detail = [device.model, device.transport].filter(Boolean).join(' · ');
+        const option = new Option(
+            `${device.serial}${detail ? ` · ${detail}` : ''}`,
+            device.serial
+        );
+        option.selected = true;
+        deviceSelect.append(option);
+    });
+    if (!devices.length) {
+        deviceSelect.append(new Option('该来源没有可接入的ADB设备', ''));
+    }
+    deviceSelect.disabled = !devices.length;
+    submit.disabled = (
+        adbProxyOperationRunning || !sourceId || !targetSelect.value || !devices.length
+    );
+    if (adbProxyOperationRunning) {
+        message.textContent = '正在更新ADB接入，请稍候...';
+    } else if (sourceId && existingAssignment && devices.length) {
+        message.textContent = (
+            `该来源还有 ${devices.length} 台ADB设备可追加接入 `
+            + `${existingAssignment.target_name || existingAssignment.target_worker_id}。`
+        );
+    } else if (sourceId && devices.length && targetHosts.length) {
+        message.textContent = `请选择要接入的ADB设备，共 ${devices.length} 台可用。`;
+    } else if (assignments.length) {
+        message.textContent = '当前没有剩余可接入的ADB设备；已有接入可在上方查看或断开。';
+    } else if (!capable.length) {
+        message.textContent = '没有在线且已安装adbproxy-rs的主机。';
+    } else if (!sourceId) {
+        message.textContent = '没有可用的ADB设备来源。';
+    } else if (!targetHosts.length) {
+        message.textContent = '没有可用于接入该来源设备的目标主机。';
+    } else {
+        message.textContent = '该来源当前没有可接入的ADB设备。';
+    }
+}
+
+function renderAdbProxyAssignments() {
+    const container = document.getElementById('adb-proxy-assignments');
+    if (!container) return;
+    container.replaceChildren();
+    const assignments = adbProxyStatus?.assignments || [];
+    if (!assignments.length) {
+        container.textContent = '当前没有通过adbproxy-rs接入的设备。';
+        return;
+    }
+    assignments.forEach(assignment => {
+        const row = document.createElement('div');
+        row.className = 'adb-proxy-assignment';
+        const info = document.createElement('div');
+        info.className = 'adb-proxy-assignment-info';
+        const source = assignment.source_name || assignment.source_worker_id;
+        const target = assignment.target_name || assignment.target_worker_id;
+        info.textContent = (
+            `${source} · ${assignment.source_address || '地址未知'} → `
+            + `${target} · ${assignment.target_address || '地址未知'}`
+            + `｜设备：${(assignment.devices || []).join(', ') || '无'}`
+            + `｜状态：${assignment.status || 'unknown'}`
+        );
+        const disconnect = document.createElement('button');
+        disconnect.type = 'button';
+        disconnect.className = 'btn-xxs btn-danger';
+        disconnect.textContent = '断开';
+        disconnect.disabled = adbProxyOperationRunning;
+        disconnect.addEventListener('click', () => disconnectAdbProxyAssignment(
+            assignment.source_worker_id,
+            assignment.target_worker_id
+        ));
+        row.append(info, disconnect);
+        container.append(row);
+    });
+}
+
+async function submitAdbProxyConnect() {
+    const sourceWorkerId = document.getElementById('adb-proxy-source-host')?.value || '';
+    const targetWorkerId = document.getElementById('adb-proxy-target-host')?.value || '';
+    const devices = Array.from(
+        document.getElementById('adb-proxy-source-devices')?.selectedOptions || []
+    ).map(option => option.value).filter(Boolean);
+    if (!sourceWorkerId || !targetWorkerId || !devices.length) {
+        showToast('请选择设备来源、接入主机和至少一台ADB设备', 'warning');
+        return;
+    }
+    await runAdbProxyOperation(async () => {
+        const result = await apiCall('/api/adb-forward/start', 'POST', {
+            source_worker_id: sourceWorkerId,
+            target_worker_id: targetWorkerId,
+            devices
+        });
+        addLogEntry(result.message || 'ADB设备接入完成', 'success');
+        return result;
+    });
+}
+
+async function disconnectAdbProxyAssignment(sourceWorkerId, targetWorkerId) {
+    await runAdbProxyOperation(async () => {
+        const result = await apiCall('/api/adb-forward/stop', 'POST', {
+            source_worker_id: sourceWorkerId,
+            target_worker_id: targetWorkerId
+        });
+        addLogEntry(result.message || 'ADB设备接入已断开', 'success');
+        return result;
+    });
+}
+
+async function refreshAdbProxyTargetDevices(result) {
+    const targetWorkerId = result?.assignment?.target_worker_id
+        || result?.target_worker_id
+        || '';
+    if (!targetWorkerId || targetWorkerId !== workspaceWorkerId()) return;
+    try {
+        await loadDevices(true, {silent: true});
+        addLogEntry(`已自动刷新 ${targetWorkerId} 的ADB设备列表`, 'info');
+    } catch (error) {
+        addLogEntry(`ADB接入已更新，但设备列表自动刷新失败: ${error.message}`, 'warning');
+    }
+}
+
+async function runAdbProxyOperation(operation) {
+    const message = document.getElementById('adb-proxy-message');
+    let operationError = '';
+    adbProxyOperationRunning = true;
+    updateAdbProxyButton();
+    renderAdbProxyAssignments();
+    renderAdbProxySourceDevices();
+    if (message) message.textContent = '正在更新ADB接入，请稍候...';
+    try {
+        const result = await operation();
+        adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
+        state.adbForwardRunning = Boolean(adbProxyStatus.connected);
+        renderAdbProxyAssignments();
+        renderAdbProxyHosts();
+        await refreshAdbProxyTargetDevices(result);
+    } catch (error) {
+        operationError = `ADB接入操作失败：${error.message}`;
+        addLogEntry('ADB接入操作失败: ' + error.message, 'error');
+        showToast('ADB接入操作失败: ' + error.message, 'error');
+    } finally {
+        adbProxyOperationRunning = false;
+        updateAdbProxyButton();
+        renderAdbProxyAssignments();
+        renderAdbProxyHosts();
+        if (operationError && message) message.textContent = operationError;
+    }
+}
+
+function updateAdbProxyButton() {
+    const button = document.getElementById('adb-forward-btn');
+    if (!button) return;
+    button.disabled = adbProxyOperationRunning;
+    button.textContent = state.adbForwardRunning
+        ? '🔌 管理ADB'
+        : '🔌 ADB接入';
 }
 
 async function setupUsbipForward() {
@@ -5818,6 +6289,9 @@ function _markElevated(elevatedUntilIso) {
  */
 let _elevationRequestPromise = null;
 async function requestElevatedAccess(actionLabel = '需要管理员权限') {
+    if (!state.authRequired) {
+        return true;
+    }
     if (state.elevated) {
         debugLog('[Elevation] already elevated, skipping prompt');
         return true;

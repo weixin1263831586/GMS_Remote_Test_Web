@@ -827,7 +827,7 @@
                         <button class="btn-xxs" onclick="burnSerialNumber()" disabled>🔥 烧写SN</button>
                         <button class="btn-xxs" id="start-vnc-btn" onclick="initAndStartVnc()">🚀 启动VNC</button>
                         <button class="btn-xxs" onclick="showDeviceScreen()">📺 设备投屏</button>
-                        <button class="btn-xxs" id="adb-forward-btn" onclick="setupAdbPortForward()" disabled>🔌 端口转发</button>
+                        <button class="btn-xxs" id="adb-forward-btn" onclick="setupAdbPortForward()">🔌 ADB接入</button>
                         <button class="btn-xxs" id="usbip-btn" onclick="setupUsbipForward()">📱 本地设备</button>
                     </div>
                 </div>
@@ -1078,6 +1078,10 @@
                     <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="local-devices-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">测试主机设备</div>
                 </div>
+                <div data-cluster-mode-only style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="cluster-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">集群 Worker 设备</div>
+                </div>
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="usbip-devices-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">USB/IP设备</div>
@@ -1085,10 +1089,6 @@
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="fastboot-devices-count">-</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Fastboot设备</div>
-                </div>
-                <div data-cluster-mode-only style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="cluster-devices-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">集群 Worker 设备</div>
                 </div>
             </div>
 
@@ -1955,6 +1955,67 @@
                 <div class="modal-buttons">
                     <button class="btn-xxs" onclick="closeWifiModal()">取消</button>
                     <button class="btn-xxs btn-primary" onclick="submitWifiConfig()">连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- adbproxy-rs ADB设备接入弹框 -->
+    <div id="adb-proxy-modal" class="modal">
+        <div class="modal-content usbip-modal-content adb-proxy-modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🔌 ADB设备接入</span>
+                <span class="modal-close" onclick="closeAdbProxyModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="adb-proxy-section-head">
+                    <div class="adb-proxy-section-title">当前接入</div>
+                    <button class="btn-xxs" id="adb-proxy-add-ubuntu-toggle" type="button" onclick="toggleAdbProxyUbuntuSource()">＋ 添加Ubuntu设备来源</button>
+                </div>
+                <div id="adb-proxy-assignments" class="adb-proxy-assignments">
+                    正在读取接入状态...
+                </div>
+                <div id="adb-proxy-ubuntu-source-panel" class="adb-proxy-ubuntu-source-panel" hidden>
+                    <div class="adb-proxy-host-grid">
+                        <div class="modal-form-row">
+                            <label for="adb-proxy-ubuntu-host">SSH主机</label>
+                            <input id="adb-proxy-ubuntu-host" type="text" placeholder="用户名@IP 或 用户名@[IPv6]:端口" autocomplete="off">
+                        </div>
+                        <div class="modal-form-row">
+                            <label for="adb-proxy-ubuntu-password">SSH密码</label>
+                            <input id="adb-proxy-ubuntu-password" type="password" placeholder="仅用于本次安装" autocomplete="new-password">
+                        </div>
+                    </div>
+                    <div class="adb-proxy-inline-actions">
+                        <span>将校验SSH指纹并离线安装adbproxy-rs，不保存密码。</span>
+                        <button class="btn-xxs btn-primary" id="adb-proxy-ubuntu-deploy" type="button" onclick="deployAdbProxyUbuntuSource()">安装并添加</button>
+                    </div>
+                </div>
+                <form id="adb-proxy-form" onsubmit="event.preventDefault(); submitAdbProxyConnect();" autocomplete="off">
+                    <div class="adb-proxy-section-title">新建接入</div>
+                    <div class="adb-proxy-routing-fields">
+                        <div class="modal-form-row">
+                            <label for="adb-proxy-source-host">设备来源</label>
+                            <select id="adb-proxy-source-host" onchange="renderAdbProxySourceDevices()"></select>
+                        </div>
+                        <div class="modal-form-row">
+                            <label for="adb-proxy-target-host">接入主机</label>
+                            <select id="adb-proxy-target-host"></select>
+                        </div>
+                    </div>
+                    <div class="modal-form-row adb-proxy-device-row">
+                        <label for="adb-proxy-source-devices">ADB设备</label>
+                        <select id="adb-proxy-source-devices" class="usbip-device-select" multiple size="3">
+                            <option value="">请选择设备来源</option>
+                        </select>
+                    </div>
+                </form>
+                <div id="adb-proxy-message" class="modal-info-text">
+                    ADB通过adbproxy-rs接入后会显示在目标主机；可执行ADB和测试操作，Fastboot、锁定及烧写操作将被禁用。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" type="button" onclick="closeAdbProxyModal()">关闭</button>
+                    <button class="btn-xxs btn-primary" id="adb-proxy-connect-submit" type="button" onclick="submitAdbProxyConnect()">接入</button>
                 </div>
             </div>
         </div>
@@ -3816,6 +3877,11 @@
                     host.worker_id,
                     host.name || host.ssh_connection || host.worker_id
                 ]));
+                allDevices.forEach(device => {
+                    device.host_display_name = hostNames.get(device.worker_id)
+                        || device.source_host
+                        || device.worker_id;
+                });
                 if (clusterMode && clusterResp && clusterResp.ok) {
                     const clusterData = await clusterResp.json();
                     const remoteDevices = (clusterData.devices || [])
@@ -3823,22 +3889,39 @@
                         .map(device => {
                             const host = hostDirectory.get(device.worker_id) || {};
                             const capabilities = host.capabilities || {};
+                            const properties = device.properties || {};
+                            const isAdbProxy = device.transport === 'adb_proxy';
+                            const sourceWorkerId = String(
+                                properties.adb_proxy_source_worker_id || ''
+                            );
+                            const targetHostName = hostNames.get(device.worker_id)
+                                || device.worker_id;
+                            const sourceHostName = sourceWorkerId
+                                ? (hostNames.get(sourceWorkerId) || sourceWorkerId)
+                                : '来源未知';
                             return {
                                 device_id: device.id,
                                 serial_no: device.serial,
                                 worker_id: device.worker_id,
-                                source_host: hostNames.get(device.worker_id) || device.worker_id,
-                                source_type: 'cluster',
+                                host_display_name: targetHostName,
+                                source_host: isAdbProxy
+                                    ? `${sourceHostName} → ${targetHostName}`
+                                    : targetHostName,
+                                source_type: isAdbProxy ? 'adb_proxy' : 'cluster',
+                                transport: device.transport || 'local_usb',
+                                adb_proxy_source_worker_id: sourceWorkerId,
+                                adb_proxy_source_serial:
+                                    properties.adb_proxy_source_serial || '',
                                 status: ['offline', 'unknown'].includes(device.state) ? 'offline' : 'online',
                                 cluster_state: device.state || 'unknown',
                                 cluster_shell_available: Boolean(
                                     host.status !== 'offline' && host.address && host.ssh_user
                                 ),
                                 cluster_device_inspection: Boolean(capabilities.device_inspection),
-                                model: device.properties && (device.properties.model || device.properties.product),
-                                android_version: device.properties && device.properties.android_version,
-                                battery_level: device.properties && device.properties.battery_level,
-                                soc_model: device.properties && device.properties.soc_model,
+                                model: properties.model || properties.product,
+                                android_version: properties.android_version,
+                                battery_level: properties.battery_level,
+                                soc_model: properties.soc_model,
                                 claimed: Boolean(device.claimed),
                                 claim_source_type: device.claim_source_type || '',
                                 locked_by: device.claimed
@@ -3869,7 +3952,9 @@
                 await mgmtLoadGroups();
                 state.deviceGroupsLoaded = true;
                 displayDevicesManagement(filteredDevicesForView());
-                if (state.deviceGroups.length > 0) setupMgmtGroupDelegation();
+                if (clusterMode || state.deviceGroups.length > 0) {
+                    setupMgmtGroupDelegation();
+                }
 
                 // 启动自动刷新（每10秒）
                 if (!devicesRefreshInterval) {
@@ -3935,7 +4020,7 @@
             const totalCount = allDevices.length;
             const localCount = allDevices.filter(d => d.source_type === 'local').length;
             const usbipCount = allDevices.filter(d => d.source_type === 'usbip').length;
-            const clusterCount = allDevices.filter(d => d.source_type === 'cluster').length;
+            const clusterCount = allDevices.filter(d => d.cluster_readonly).length;
             const fastbootCount = allDevices.filter(d =>
                 d.protocol === 'fastboot'
                 || d.status === 'fastboot'
@@ -3970,7 +4055,9 @@
                     : device.locked_by
                     ? `<button class="btn-xxs" data-serial="${serialAttr}" onclick="forceReleaseDeviceLock(this.dataset.serial)" title="强制释放该设备的平台占用锁" style="background: var(--danger-color); color: white; ${actionButtonStyle}">释放设备</button>`
                     : `<span style="visibility: hidden; width: 92px; min-width: 92px;"></span>`;
-                const sourceTypeBadge = device.source_type === 'cluster'
+                const sourceTypeBadge = device.source_type === 'adb_proxy'
+                    ? '<span style="background:rgba(156,39,176,.16);color:#ce93d8;padding:2px 6px;border-radius:3px;font-size:12px;font-weight:600;">ADB Proxy</span>'
+                    : device.source_type === 'cluster'
                     ? `<span style="background:rgba(33,150,243,.15);color:#42a5f5;padding:2px 6px;border-radius:3px;font-size:12px;font-weight:600;">${escapeHtml(device.worker_id)}</span>`
                     : device.source_type === 'local'
                     ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">测试主机</span>'
@@ -4098,8 +4185,14 @@
                 `;
             };
 
-            // 有分组则按组分段（每组独立表格 + 组标题行）；无分组则平铺
-            if (state.deviceGroups.length > 0) {
+            // 集群模式默认按实际接入 Worker 分段。选择自定义分组筛选后，
+            // 仍按用户分组渲染，避免覆盖既有分组配置。
+            if (
+                devicesManagementClusterMode
+                && !state.groupFilter
+            ) {
+                tbody.innerHTML = renderDevicesManagementByHost(devices, renderDeviceRow);
+            } else if (state.deviceGroups.length > 0) {
                 tbody.innerHTML = renderDevicesManagementGrouped(devices, renderDeviceRow);
             } else {
                 tbody.innerHTML = devices.map(renderDeviceRow).join('');
@@ -4226,6 +4319,37 @@
                 }
             }
             return sections.join('');
+        }
+
+        function renderDevicesManagementByHost(devices, renderRow) {
+            const byWorker = new Map();
+            devices.forEach(device => {
+                const workerId = String(device.worker_id || workspaceLocalWorkerId());
+                if (!byWorker.has(workerId)) byWorker.set(workerId, []);
+                byWorker.get(workerId).push(device);
+            });
+            const localWorkerId = workspaceLocalWorkerId();
+            return [...byWorker.entries()]
+                .sort(([left], [right]) => {
+                    if (left === localWorkerId) return -1;
+                    if (right === localWorkerId) return 1;
+                    return left.localeCompare(right, undefined, {numeric: true});
+                })
+                .map(([workerId, members]) => {
+                    const hostName = members[0]?.host_display_name || workerId;
+                    const label = hostName === workerId
+                        ? workerId
+                        : `${hostName} · ${workerId}`;
+                    const group = {
+                        id: `__host__${workerId}`,
+                        name: label,
+                        color: '#42a5f5'
+                    };
+                    const collapsed = state.collapsedGroups.has(group.id);
+                    return mgmtGroupTitleRow(group, members.length, true)
+                        + (collapsed ? '' : members.map(renderRow).join(''));
+                })
+                .join('');
         }
 
         // 分组标题行（跨全部列）：组名/色块/计数/关注/编辑/删除/折叠

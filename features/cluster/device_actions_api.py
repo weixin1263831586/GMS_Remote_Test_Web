@@ -51,6 +51,16 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             raise HTTPException(409, f"device is offline: {value}")
         if state == "external_busy" and not is_read_only:
             raise HTTPException(409, f"device is busy with a manual Tradefed test: {value}")
+        if (
+            device.get("transport") == "adb_proxy"
+            and body.action in {
+                "reboot_bootloader", "bootloader_lock", "bootloader_unlock",
+            }
+        ):
+            raise HTTPException(
+                409,
+                f"ADB Proxy remote device has no local USB/Fastboot channel: {value}",
+            )
         requested.append(device_id)
 
     user = require_authenticated_user(request)

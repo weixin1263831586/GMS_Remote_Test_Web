@@ -432,12 +432,33 @@ API_DOCS_LIST = [
 
     # ==================== USB/IP管理 ====================
     {
+        "method": "GET",
+        "path": "/api/adb-forward/status",
+        "description": "查询adbproxy-rs设备来源、接入主机、能力和当前接入关系",
+        "params": [],
+        "category": "usbip",
+        "skill": "gms-rt-adb-forward-status"
+    },
+    {
+        "method": "POST",
+        "path": "/api/cluster/workers/deploy-adb-proxy-source",
+        "description": "通过SSH在指定Ubuntu主机离线安装adbproxy-rs和轻量ADB来源Agent",
+        "params": [
+            {"name": "ssh_host", "type": "string", "required": True, "desc": "用户名@IP，可附带SSH端口"},
+            {"name": "password", "type": "string", "required": True, "desc": "仅用于本次SSH安装，不持久化"},
+            {"name": "controller_url", "type": "string", "required": True, "desc": "HTTPS Controller地址"}
+        ],
+        "category": "usbip",
+        "skill": ""
+    },
+    {
         "method": "POST",
         "path": "/api/adb-forward/start",
-        "description": "启动ADB端口转发",
+        "description": "通过adbproxy-rs把来源Worker或Ubuntu来源主机的选定ADB设备接入目标Worker",
         "params": [
-            {"name": "device_host", "type": "string", "required": True, "desc": "设备主机地址"},
-            {"name": "device_password", "type": "string", "required": True, "desc": "设备SSH密码"}
+            {"name": "source_worker_id", "type": "string", "required": True, "desc": "ADB设备来源Worker"},
+            {"name": "target_worker_id", "type": "string", "required": True, "desc": "ADB接入目标Worker"},
+            {"name": "devices", "type": "array", "required": True, "desc": "接入的ADB设备序列号"}
         ],
         "category": "usbip",
         "skill": "gms-rt-adb-forward-start"
@@ -445,9 +466,10 @@ API_DOCS_LIST = [
     {
         "method": "POST",
         "path": "/api/adb-forward/stop",
-        "description": "停止ADB端口转发",
+        "description": "断开指定来源Worker到目标Worker的adbproxy-rs接入",
         "params": [
-            {"name": "device_id", "type": "string", "required": True, "desc": "设备序列号"}
+            {"name": "source_worker_id", "type": "string", "required": True, "desc": "ADB设备来源Worker"},
+            {"name": "target_worker_id", "type": "string", "required": True, "desc": "ADB接入目标Worker"}
         ],
         "category": "usbip",
         "skill": "gms-rt-adb-forward-stop"

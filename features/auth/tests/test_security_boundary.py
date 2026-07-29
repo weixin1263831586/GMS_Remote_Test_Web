@@ -13,6 +13,7 @@ from bootstrap.application import create_app
 from features.auth import auth_service
 from features.cluster import ClusterRepository, ClusterService
 from features.cluster import api as cluster_api
+from features.devices.adb_proxy_security import create_pair_grant
 from features.system import security_audit_logger
 
 
@@ -196,6 +197,12 @@ class SecurityBoundaryTests(unittest.TestCase):
             schema["paths"]["/api/cluster/workers/register"]["post"]["security"],
             [{"ServiceBearer": []}],
         )
+        self.assertEqual(
+            schema["paths"][
+                "/api/cluster/workers/{worker_id}/adb-proxy/pair-code"
+            ]["post"]["security"],
+            [{"ServiceBearer": []}],
+        )
 
     def test_production_cookie_is_secure_by_default(self):
         self.client.close()
@@ -349,6 +356,60 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(invalid.json()["detail"], "invalid worker token")
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.json()["worker"]["id"], "worker-246")
+
+    def test_worker_adb_proxy_pair_code_uses_service_authentication(self):
+        previous_service = cluster_api.cluster_service
+        repository = ClusterRepository(Path(self.tmp.name) / "cluster.sqlite3")
+        cluster_api.cluster_service = ClusterService(repository)
+        repository.register_worker({
+            "worker_id": "worker-target",
+            "hostname": "target-host",
+            "address": "192.0.2.20",
+        })
+        tokens_path = Path(self.tmp.name) / "worker_tokens_adb_proxy.json"
+        tokens_path.write_text(
+            json.dumps({
+                "worker_tokens": {
+                    "worker-source": "source-worker-secret",
+                    "worker-target": "target-worker-secret",
+                },
+            }),
+            encoding="utf-8",
+        )
+        try:
+            with patch.dict(
+                "os.environ",
+                {"GMS_WORKER_TOKENS_FILE": str(tokens_path)},
+            ):
+                grant = create_pair_grant(
+                    "worker-source",
+                    "worker-target",
+                    cluster_api.cluster_service.config.local_worker_id,
+                )
+                invalid = self.client.post(
+                    "/api/cluster/workers/worker-target/adb-proxy/pair-code",
+                    headers={"Authorization": "Bearer wrong"},
+                    json={
+                        "source_worker_id": "worker-source",
+                        "access_token": grant,
+                    },
+                )
+                accepted = self.client.post(
+                    "/api/cluster/workers/worker-target/adb-proxy/pair-code",
+                    headers={"Authorization": "Bearer target-worker-secret"},
+                    json={
+                        "source_worker_id": "worker-source",
+                        "access_token": grant,
+                    },
+                )
+        finally:
+            cluster_api.cluster_service = previous_service
+
+        self.assertEqual(invalid.status_code, 401)
+        self.assertEqual(invalid.json()["detail"], "invalid worker token")
+        self.assertEqual(accepted.status_code, 200)
+        self.assertRegex(accepted.json()["access_token"], r"^[A-Z2-7]{8}$")
+        self.assertIn("no-store", accepted.headers["cache-control"])
 
     def test_service_authenticated_successes_are_not_audited_but_failures_are(self):
         # Worker heartbeat/poll/register are trusted internal traffic on a

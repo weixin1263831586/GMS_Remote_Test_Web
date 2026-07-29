@@ -3,7 +3,8 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -177,6 +178,51 @@ class ElevatedRouteAccessTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(allowed.json()["keys"][0]["fingerprint"], "SHA256:test")
 
+    def test_adb_proxy_source_deployment_requires_temporary_admin_elevation(self):
+        self._assert_elevation_required(
+            "/api/cluster/workers/deploy-adb-proxy-source",
+            {
+                "ssh_host": "worker@192.0.2.10",
+                "password": "secret",
+                "controller_url": "https://controller.example",
+            },
+        )
+
+    def test_local_software_reconfigure_uses_temporary_admin_elevation(self):
+        import features.cluster.deployment_api as deployment
+
+        path = "/api/cluster/workers/local/software/reconfigure"
+        self._assert_elevation_required(path, {})
+        self._elevate()
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="worker-local"),
+            repository=SimpleNamespace(
+                get_worker=MagicMock(return_value={"running_jobs": 0})
+            ),
+        )
+        thread = MagicMock()
+        with deployment._LOCAL_SOFTWARE_LOCK:
+            deployment._LOCAL_SOFTWARE_TASKS.clear()
+            deployment._LOCAL_SOFTWARE_ACTIVE_TASK = ""
+        with (
+            patch.object(deployment, "service", return_value=cluster),
+            patch.object(
+                deployment,
+                "_local_worker_has_active_tests",
+                return_value=False,
+            ),
+            patch.object(deployment.threading, "Thread", return_value=thread),
+        ):
+            allowed = self.client.post(
+                path,
+                headers={"Origin": "http://testserver"},
+                json={},
+            )
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertTrue(allowed.json()["accepted"])
+        thread.start.assert_called_once_with()
+
     def test_worker_delete_uses_temporary_admin_elevation(self):
         path = "/api/cluster/workers/missing-worker"
         denied = self.client.delete(
@@ -191,6 +237,33 @@ class ElevatedRouteAccessTests(unittest.TestCase):
             path,
             headers={"Origin": "http://testserver"},
         )
+        self.assertEqual(allowed.status_code, 404)
+        self.assertEqual(allowed.json()["detail"], "worker not found")
+
+    def test_legacy_admin_role_routes_use_temporary_elevation(self):
+        denied = self.client.get("/api/auth/roles")
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(denied.json()["detail"]["elevation_required"])
+
+        self._elevate()
+        allowed = self.client.get("/api/auth/roles")
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertIn("admin", allowed.json()["roles"])
+        self.assertEqual(
+            self.client.get("/api/auth/status").json()["user"]["role"],
+            "user",
+        )
+
+    def test_worker_config_uses_temporary_admin_elevation(self):
+        path = "/api/cluster/workers/missing-worker/config"
+        denied = self.client.get(path)
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(denied.json()["detail"]["elevation_required"])
+
+        self._elevate()
+        allowed = self.client.get(path)
+
         self.assertEqual(allowed.status_code, 404)
         self.assertEqual(allowed.json()["detail"], "worker not found")
 

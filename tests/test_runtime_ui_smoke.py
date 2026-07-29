@@ -509,6 +509,55 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_start_test_capacity_conflict_is_explained_without_elevation(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.route(
+                "**/api/test/start",
+                lambda route: route.fulfill(
+                    status=409,
+                    content_type="application/json",
+                    body=json.dumps({
+                        "success": False,
+                        "error": "worker capacity is exhausted",
+                    }),
+                ),
+            )
+            page.evaluate(
+                """async () => {
+                    state.elevated = false;
+                    state.devices = [{
+                        device_id: 'ats-worker-246:RK3576GMS1',
+                        status: 'online',
+                        locked: false
+                    }];
+                    state.selectedDevices = new Set([
+                        'ats-worker-246:RK3576GMS1'
+                    ]);
+                    document.querySelector('#test-module').value = 'MockModule';
+                    const suite = document.querySelector('#test-suite');
+                    suite.replaceChildren(
+                        new Option('/tmp/mock-suite', '/tmp/mock-suite')
+                    );
+                    await startTest();
+                    flushLogQueue();
+                }"""
+            )
+
+            expect(page.locator("#toast")).to_contain_text(
+                "Worker 已达到最大并发任务数"
+            )
+            expect(page.locator("#system-log-output")).to_contain_text(
+                "Worker 已达到最大并发任务数"
+            )
+            expect(page.locator("#elevate-modal")).not_to_have_class(
+                re.compile(r"show")
+            )
+            self.assertFalse(page.evaluate("state.testing"))
+        finally:
+            page.close()
+
     def test_cluster_stop_keeps_polling_until_job_is_terminal(self):
         page = self.new_page()
         terminal = {"value": False}
@@ -735,6 +784,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
         def handle_device_request(route):
             request = route.request
+            path = request.url.split(self.base_url, 1)[-1]
             if "/api/usbip/source-devices" in request.url:
                 route.fulfill(
                     status=200,
@@ -742,10 +792,32 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     body='{"success":true,"devices":[{"busid":"1-2","label":"Android 1-2"}]}',
                 )
                 return
+            if path == "/api/adb-forward/status":
+                requests.append({
+                    "method": request.method,
+                    "path": path,
+                    "body": None,
+                })
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=(
+                        '{"success":true,"connected":false,"cluster_enabled":true,'
+                        '"local_worker_id":"worker-local","assignments":[],"hosts":['
+                        '{"worker_id":"worker-source","name":"Device Host",'
+                        '"address":"10.10.10.206","status":"online","adb_proxy":true,'
+                        '"devices":[{"serial":"D1","state":"available",'
+                        '"transport":"local_usb","model":"RK3572"}]},'
+                        '{"worker_id":"worker-local","name":"Controller",'
+                        '"address":"10.10.10.10","status":"online","adb_proxy":true,'
+                        '"devices":[]}]}'
+                    ),
+                )
+                return
             requests.append(
                 {
                     "method": request.method,
-                    "path": request.url.split(self.base_url, 1)[-1],
+                    "path": path,
                     "body": request.post_data_json if request.post_data else None,
                 }
             )
@@ -803,6 +875,12 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(attach_style["height"], 410)
             page.evaluate("submitUsbipAttach()")
             page.evaluate("setupAdbPortForward()")
+            self.assertTrue(page.locator("#adb-proxy-modal").is_visible())
+            self.assertIn(
+                "10.10.10.206",
+                page.locator("#adb-proxy-source-host").inner_text(),
+            )
+            page.evaluate("submitAdbProxyConnect()")
 
             self.assertEqual(
                 [(item["method"], item["path"]) for item in requests],
@@ -814,7 +892,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     ("POST", "/api/devices/scrcpy"),
                     ("GET", "/api/devices/list?force_refresh=1"),
                     ("POST", "/api/usbip/connect"),
+                    ("GET", "/api/adb-forward/status"),
                     ("POST", "/api/adb-forward/start"),
+                    ("GET", "/api/adb-forward/status"),
                 ],
             )
             self.assertEqual(requests[0]["body"], {"devices": ["D1"]})
@@ -834,7 +914,14 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "manual_connect": True,
                 },
             )
-            self.assertIsNone(requests[7]["body"])
+            self.assertEqual(
+                requests[8]["body"],
+                {
+                    "source_worker_id": "worker-source",
+                    "target_worker_id": "worker-local",
+                    "devices": ["D1"],
+                },
+            )
 
             requests.clear()
             page.evaluate("setupUsbipForward()")
@@ -970,6 +1057,249 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 page.evaluate("Array.from(state.selectedDevices)"),
                 ["ADB-1"],
             )
+        finally:
+            page.close()
+
+    def test_adb_proxy_device_is_visible_for_tests_but_blocks_usb_actions(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """
+                state.devices = [{
+                    device_id: 'ats-worker-246:RK3576GMS1',
+                    serial: 'RK3576GMS1',
+                    worker_id: 'ats-worker-246',
+                    status: 'online',
+                    protocol: 'adb',
+                    transport: 'adb_proxy',
+                    adb_proxy_source_worker_id: 'worker-local',
+                    locked: false
+                }];
+                state.selectedDevices = new Set(['ats-worker-246:RK3576GMS1']);
+                renderDevices();
+                """
+            )
+
+            device = page.locator(
+                '.device-item[data-device-id="ats-worker-246:RK3576GMS1"]'
+            )
+            expect(device.locator(".device-id")).to_have_text("RK3576GMS1")
+            expect(device).to_contain_text(
+                "ADB Proxy · worker-local → ats-worker-246"
+            )
+            expect(device.locator('input[type="checkbox"]')).to_be_enabled()
+            self.assertTrue(page.evaluate("validateDeviceSelection()"))
+            self.assertFalse(page.evaluate("validateBootloaderDeviceSelection()"))
+            for button_id in (
+                "btn-lock-device",
+                "btn-unlock-device",
+                "btn-burn-firmware",
+                "btn-burn-gsi",
+            ):
+                expect(page.locator(f"#{button_id}")).to_be_disabled()
+        finally:
+            page.close()
+
+    def test_cluster_device_management_groups_hosts_and_labels_adb_proxy(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """
+                devicesManagementClusterMode = true;
+                state.deviceGroups = [];
+                state.groupFilter = '';
+                allDevices = [{
+                    device_id: 'ats-worker-246:RK3576GMS1',
+                    serial_no: 'RK3576GMS1',
+                    worker_id: 'ats-worker-246',
+                    host_display_name: 'ats-worker-246',
+                    source_host: 'worker-local → ats-worker-246',
+                    source_type: 'adb_proxy',
+                    transport: 'adb_proxy',
+                    status: 'online',
+                    cluster_state: 'allocated',
+                    cluster_readonly: true,
+                    cluster_shell_available: true,
+                    cluster_device_inspection: true,
+                    locked_by: '测试任务'
+                }];
+                displayDevicesManagement(allDevices);
+                """
+            )
+
+            table = page.locator("#devices-table-body")
+            expect(table).to_contain_text("ats-worker-246")
+            expect(table).to_contain_text("ADB Proxy")
+            expect(table).to_contain_text("worker-local → ats-worker-246")
+            expect(table).to_contain_text("已分配")
+            expect(table.locator("tr.device-group-row")).to_have_count(1)
+        finally:
+            page.close()
+
+    def test_adb_proxy_modal_offers_only_remaining_source_devices(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """
+                () => {
+                    adbProxyStatus = {
+                        cluster_enabled: true,
+                        hosts: [
+                            {
+                                worker_id: 'worker-source',
+                                name: 'Device Host',
+                                address: '172.16.14.233',
+                                status: 'online',
+                                adb_proxy: true,
+                                devices: [
+                                    {serial: 'RK-A', state: 'available', transport: 'local_usb'},
+                                    {serial: 'RK-B', state: 'available', transport: 'local_usb'}
+                                ]
+                            },
+                            {
+                                worker_id: 'worker-target',
+                                name: 'Test Host',
+                                address: '172.16.14.246',
+                                status: 'online',
+                                adb_proxy: true,
+                                devices: [
+                                    {serial: 'RK-A', state: 'available', transport: 'adb_proxy'}
+                                ]
+                            }
+                        ],
+                        assignments: [{
+                            source_worker_id: 'worker-source',
+                            source_name: 'Device Host',
+                            target_worker_id: 'worker-target',
+                            target_name: 'Test Host',
+                            devices: ['RK-A'],
+                            status: 'connected'
+                        }]
+                    };
+                    adbProxyOperationRunning = false;
+                    renderAdbProxyHosts();
+                    return {
+                        source: document.getElementById('adb-proxy-source-host').value,
+                        target: document.getElementById('adb-proxy-target-host').value,
+                        devices: Array.from(
+                            document.getElementById('adb-proxy-source-devices').options
+                        ).map(option => option.value).filter(Boolean),
+                        message: document.getElementById('adb-proxy-message').textContent,
+                        submitDisabled: document.getElementById(
+                            'adb-proxy-connect-submit'
+                        ).disabled
+                    };
+                }
+                """
+            )
+
+            self.assertEqual(result["source"], "worker-source")
+            self.assertEqual(result["target"], "worker-target")
+            self.assertEqual(result["devices"], ["RK-B"])
+            self.assertIn("还有 1 台", result["message"])
+            self.assertFalse(result["submitDisabled"])
+        finally:
+            page.close()
+
+    def test_adb_proxy_modal_supports_compact_source_only_ubuntu_host(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """
+                () => {
+                    adbProxyStatus = {
+                        cluster_enabled: false,
+                        hosts: [
+                            {
+                                worker_id: 'worker-local',
+                                name: 'Controller Local Worker',
+                                address: '172.16.14.233',
+                                status: 'online',
+                                adb_proxy: true,
+                                adb_proxy_source_only: false,
+                                devices: []
+                            },
+                            {
+                                worker_id: 'adb-source-246',
+                                name: 'Ubuntu ADB来源',
+                                address: '172.16.14.246',
+                                status: 'online',
+                                adb_proxy: true,
+                                adb_proxy_source_only: true,
+                                devices: [{
+                                    serial: 'RK3576GMS1',
+                                    state: 'available',
+                                    transport: 'local_usb'
+                                }]
+                            }
+                        ],
+                        assignments: []
+                    };
+                    adbProxyOperationRunning = false;
+                    renderAdbProxyHosts();
+                    ModalManager.open('adb-proxy-modal');
+                    return {
+                        sources: Array.from(
+                            document.getElementById('adb-proxy-source-host').options
+                        ).map(option => option.value).filter(Boolean),
+                        targets: Array.from(
+                            document.getElementById('adb-proxy-target-host').options
+                        ).map(option => option.value).filter(Boolean),
+                        hasUbuntuForm: Boolean(
+                            document.getElementById('adb-proxy-ubuntu-host')
+                            && document.getElementById('adb-proxy-ubuntu-password')
+                        )
+                    };
+                }
+                """
+            )
+
+            self.assertEqual(result["sources"], ["adb-source-246"])
+            self.assertEqual(result["targets"], ["worker-local"])
+            self.assertTrue(result["hasUbuntuForm"])
+            source_box = page.locator("#adb-proxy-source-host").bounding_box()
+            target_box = page.locator("#adb-proxy-target-host").bounding_box()
+            self.assertGreater(target_box["y"], source_box["y"] + source_box["height"])
+            modal_height = page.locator(
+                "#adb-proxy-modal .adb-proxy-modal-content"
+            ).bounding_box()["height"]
+            self.assertLess(modal_height, 550)
+        finally:
+            page.close()
+
+    def test_adb_proxy_operation_refreshes_current_target_devices(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            calls = page.evaluate(
+                """
+                async () => {
+                    const originalWorkspaceWorkerId = window.workspaceWorkerId;
+                    const originalLoadDevices = window.loadDevices;
+                    const captured = [];
+                    window.workspaceWorkerId = () => 'worker-target';
+                    window.loadDevices = async (...args) => {
+                        captured.push(args);
+                        return [];
+                    };
+                    try {
+                        await refreshAdbProxyTargetDevices({
+                            assignment: {target_worker_id: 'worker-target'}
+                        });
+                    } finally {
+                        window.workspaceWorkerId = originalWorkspaceWorkerId;
+                        window.loadDevices = originalLoadDevices;
+                    }
+                    return captured;
+                }
+                """
+            )
+
+            self.assertEqual(calls, [[True, {"silent": True}]])
         finally:
             page.close()
 
@@ -1284,7 +1614,13 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "GmsWorkspace.update({scope_mode: 'cluster', worker_id: 'worker-1'})"
             )
             expect(page.locator("#devices-table-body")).to_contain_text("REMOTE-1")
-            expect(page.locator("#devices-table-body")).to_contain_text("Remote Group")
+            expect(page.locator("#devices-table-body")).not_to_contain_text("Remote Group")
+            expect(
+                page.locator(
+                    "#devices-table-body tr.device-group-row",
+                    has_text="Worker 1 · worker-1",
+                )
+            ).to_contain_text("Worker 1 · worker-1")
             expect(page.locator("#cluster-devices-count").locator("..")).to_be_visible()
             expect(page.locator("#cluster-devices-count")).to_have_text("1")
             self.assertGreaterEqual(len(cluster_device_requests), 1)
@@ -2331,6 +2667,58 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(page.locator(".password-backdrop")).to_have_count(0)
 
             self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_worker_config_retries_after_admin_elevation(self):
+        page = self.new_page()
+        requests = []
+
+        def worker_config(route):
+            requests.append(route.request.url)
+            if len(requests) == 1:
+                route.fulfill(
+                    status=403,
+                    content_type="application/json",
+                    body=json.dumps({
+                        "detail": {
+                            "message": "Elevation required",
+                            "elevation_required": True,
+                        },
+                    }),
+                )
+                return
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"config":{"max_jobs":4}}',
+            )
+
+        try:
+            page.route(
+                "**/api/cluster/workers/ats-worker-246/config",
+                worker_config,
+            )
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function("typeof openWorkerConfig === 'function'")
+            page.evaluate(
+                """async () => {
+                    window.__workerConfigElevationLabels = [];
+                    window.requestElevatedAccess = async label => {
+                        window.__workerConfigElevationLabels.push(label);
+                        return true;
+                    };
+                    await openWorkerConfig('ats-worker-246');
+                }"""
+            )
+
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(
+                page.evaluate("window.__workerConfigElevationLabels"),
+                ["执行集群敏感操作"],
+            )
+            expect(page.locator("#config-max-jobs")).to_have_value("4")
+            expect(page.locator("#config-error")).to_be_hidden()
         finally:
             page.close()
 

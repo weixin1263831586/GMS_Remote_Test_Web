@@ -687,6 +687,35 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             async def resolved_trends_by_assignee(self, user_id, freshness_days=180, limit=5000):
                 return {"resolved_yearly": [{"year": "2026", "count": 103}]}
 
+            async def fetch_open_issue_snapshots_by_assignee(
+                self,
+                assignee_id,
+                limit,
+                window_days,
+            ):
+                return [
+                    _issue(
+                        700004,
+                        "黄 超群",
+                        journals=[
+                            {
+                                "user": "客户",
+                                "created_on": "2026-07-01T00:00:00",
+                                "notes": "请协助确认",
+                            }
+                        ],
+                    )
+                ]
+
+            async def fetch_resolved_issues_by_assignee(
+                self,
+                assignee_id,
+                start,
+                end,
+                limit,
+            ):
+                return []
+
             async def close(self):
                 pass
 
@@ -721,6 +750,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
             self.assertEqual(result["data"]["total_owned"], 2413)
             self.assertEqual(result["data"]["closed_count"], 2385)
+            self.assertEqual(result["data"]["waiting_my_reply"], 1)
+            self.assertIsNotNone(db.get_issue(700004))
             self.assertEqual(result["data"]["meta"]["count_source"], "redmine_live")
 
     def test_department_resolved_detail_uses_profile_members(self):

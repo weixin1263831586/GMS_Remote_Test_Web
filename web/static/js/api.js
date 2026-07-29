@@ -35,6 +35,29 @@ function applyClientIdentityHeadersToXhr(xhr) {
     });
 }
 
+function normalizeApiErrorMessage(message, status) {
+    const text = String(message || '').trim();
+    if (status !== 409) return text || 'Request failed';
+    if (
+        text === 'worker capacity is exhausted'
+        || text === 'worker already has the maximum number of active jobs'
+    ) {
+        return 'Worker 已达到最大并发任务数，请等待当前测试结束，或由管理员调整 max_jobs';
+    }
+    const claimed = text.match(/^device is already claimed by (.+)$/);
+    if (claimed) {
+        return `所选设备正被 ${claimed[1]} 占用，请等待任务结束或由管理员释放设备`;
+    }
+    const unavailable = text.match(/^device is not available: (.+)$/);
+    if (unavailable) {
+        return `设备当前不可用：${unavailable[1]}，请刷新设备状态后重试`;
+    }
+    if (text === 'Selected suite is not available on the Worker') {
+        return '所选测试套件在目标 Worker 上不可用，请重新选择该 Worker 已安装的套件';
+    }
+    return text || '请求与当前资源状态冲突';
+}
+
 async function apiCall(url, method = 'GET', data = null) {
     return _apiCallOnce(url, method, data, { _elevationRetried: false });
 }
@@ -114,9 +137,16 @@ async function _apiCallOnce(url, method, data, opts) {
                     return _apiCallOnce(url, method, data, { _elevationRetried: true });
                 }
             }
+            const rawMessage = (
+                (typeof detail === 'string'
+                    ? detail
+                    : detail && (detail.message || detail.detail))
+                || result.error
+                || result.message
+                || 'Request failed'
+            );
             const error = new Error(
-                (typeof detail === 'string' ? detail : detail && (detail.message || detail.detail)) ||
-                result.error || result.message || 'Request failed'
+                normalizeApiErrorMessage(rawMessage, response.status)
             );
             error.status = response.status;
             if (response.status === 401) error.suppressToast = true;

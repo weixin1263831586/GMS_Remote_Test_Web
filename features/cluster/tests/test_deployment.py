@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -149,6 +150,178 @@ class WorkerDeploymentTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.stdout, "/home/worker/GMS-Suite")
+
+    def test_bundled_adbproxy_package_is_valid(self):
+        from features.cluster.deployment_api import _validated_adbproxy_package
+
+        project_root = Path(__file__).resolve().parents[3]
+        package, checksum = _validated_adbproxy_package(project_root)
+
+        self.assertTrue(package.is_file())
+        self.assertTrue(checksum.is_file())
+        self.assertEqual(
+            package.name,
+            "adbproxy-rs-linux-x86_64-musl.tar.gz",
+        )
+        with tarfile.open(package, "r:gz") as archive:
+            build_info_file = archive.extractfile("./BUILDINFO")
+            self.assertIsNotNone(build_info_file)
+            build_info = build_info_file.read().decode("utf-8")
+        self.assertIn("version=0.4.5", build_info)
+        self.assertIn(
+            "source_commit=f2beb4ff1bece8ab8f5d63c04dbfd6bf90aae8ee",
+            build_info,
+        )
+
+    def test_rejects_tampered_adbproxy_package(self):
+        from features.cluster.deployment_api import _validated_adbproxy_package
+
+        with tempfile.TemporaryDirectory() as directory:
+            project_root = Path(directory)
+            dist = project_root / "tools/adbproxy-rs/dist"
+            dist.mkdir(parents=True)
+            package = dist / "adbproxy-rs-linux-x86_64-musl.tar.gz"
+            package.write_bytes(b"tampered")
+            package.with_name(f"{package.name}.sha256").write_text(
+                f"{'0' * 64}  {package.name}\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                _validated_adbproxy_package(project_root)
+
+    def test_worker_bundle_contains_adbproxy_installer_package(self):
+        from features.cluster.deployment_api import _add_adbproxy_package
+
+        project_root = Path(__file__).resolve().parents[3]
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
+            with tarfile.open(archive.name, "w:gz") as bundle:
+                bundle.add(
+                    project_root / "scripts/install_adbproxy_rs.sh",
+                    arcname="scripts/install_adbproxy_rs.sh",
+                )
+                _add_adbproxy_package(bundle, project_root)
+            with tarfile.open(archive.name, "r:gz") as bundle:
+                names = set(bundle.getnames())
+
+        self.assertIn("scripts/install_adbproxy_rs.sh", names)
+        self.assertIn(
+            "tools/adbproxy-rs/dist/"
+            "adbproxy-rs-linux-x86_64-musl.tar.gz",
+            names,
+        )
+        self.assertIn(
+            "tools/adbproxy-rs/dist/"
+            "adbproxy-rs-linux-x86_64-musl.tar.gz.sha256",
+            names,
+        )
+
+    def test_adbproxy_installer_uses_the_offline_package(self):
+        project_root = Path(__file__).resolve().parents[3]
+        installer = project_root / "scripts/install_adbproxy_rs.sh"
+        installer_source = installer.read_text(encoding="utf-8")
+        self.assertNotIn("curl ", installer_source)
+        self.assertNotIn("github.com", installer_source)
+        with tempfile.TemporaryDirectory() as directory:
+            install_dir = Path(directory) / "bin"
+            environment = dict(os.environ)
+            environment["GMS_ADB_PROXY_INSTALL_DIR"] = str(install_dir)
+            environment.pop("GMS_ADB_PROXY_ARCHIVE_FILE", None)
+            environment.pop("GMS_ADB_PROXY_ARCHIVE_SHA256", None)
+            completed = subprocess.run(
+                [str(installer)],
+                cwd=project_root,
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertIn("0.4.5", completed.stdout)
+            for binary_name in ("adb-proxy", "adb-hub", "adb-hubd"):
+                self.assertTrue((install_dir / binary_name).is_file())
+
+    def test_manual_deploy_command_includes_offline_adbproxy_package(self):
+        page_js = (
+            Path(__file__).resolve().parents[1] / "ui/page.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("scripts/install_adbproxy_rs.sh", page_js)
+        self.assertIn("tools/adbproxy-rs/dist", page_js)
+
+    def test_source_only_deployment_waits_for_adb_proxy_capability(self):
+        from features.cluster.deployment_api import deploy_adb_proxy_source
+
+        worker_id = "adb-source-192-0-2-10-12345678"
+        cluster = SimpleNamespace(
+            repository=SimpleNamespace(
+                get_worker=lambda _worker_id: {
+                    "last_heartbeat_at": "2026-01-01T00:00:02Z",
+                    "capabilities": {
+                        "adb_proxy": True,
+                        "adb_proxy_source_only": True,
+                    },
+                }
+            ),
+            config=SimpleNamespace(worker_registration_timeout_seconds=1),
+        )
+        with patch(
+            "features.cluster.deployment_api._adb_proxy_source_worker_id",
+            return_value=worker_id,
+        ), patch(
+            "features.cluster.deployment_api.asyncio.to_thread",
+            new=AsyncMock(return_value={
+                "success": True,
+                "worker_id": worker_id,
+                "ssh_host": "user@192.0.2.10",
+            }),
+        ), patch(
+            "features.cluster.deployment_api.service",
+            return_value=cluster,
+        ), patch(
+            "features.cluster.deployment_api.utc_now",
+            return_value="2026-01-01T00:00:01Z",
+        ):
+            result = asyncio.run(deploy_adb_proxy_source({
+                "ssh_host": "user@192.0.2.10",
+                "password": "secret",
+                "controller_url": "https://controller.example",
+            }))
+
+        self.assertTrue(result["registered"])
+        self.assertEqual(result["worker_id"], worker_id)
+
+    def test_source_only_install_command_passes_token_by_file(self):
+        from features.cluster.deployment_api import (
+            _adb_proxy_source_install_command,
+        )
+
+        command = _adb_proxy_source_install_command(
+            worker_id="adb-source-host",
+            controller_url="https://controller.example",
+            hostname="192.0.2.10",
+            remote_archive="/tmp/source.tar.gz",
+            remote_token="/tmp/source.token",
+            controller_ca_arg="-",
+            require_sudo=True,
+        )
+
+        self.assertIn("/tmp/source.token", command)
+        self.assertNotIn("worker-secret", command)
+        self.assertIn("rm -f /tmp/source.tar.gz /tmp/source.token", command)
+
+    def test_source_only_installer_is_minimal_and_offline(self):
+        script = (
+            Path(__file__).resolve().parents[3]
+            / "scripts/install_adb_proxy_source_worker.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("install_adbproxy_rs.sh", script)
+        self.assertIn('"source_only": True', script)
+        self.assertNotIn("GTS_CREDENTIAL", script)
+        self.assertNotIn("x11vnc", script)
+        self.assertNotIn("curl ", script)
 
 
 class LocalSoftwareReconfigurationTests(unittest.TestCase):

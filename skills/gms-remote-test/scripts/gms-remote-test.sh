@@ -591,34 +591,62 @@ convert_devices_to_json() {
 }
 
 # ==============================================================================
-# ADB Port Forward Commands
+# ADB Proxy Commands
 # ==============================================================================
 
-# Start ADB Port forwarding
-gms-rt-adb-forward-start() {
-    local device_host="$1"
-    local device_password
-    device_password=$(_secret_value "${2:-${GMS_REMOTE_DEVICE_PASSWORD:-}}")
-    [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-adb-forward-start <device_host> <device_password>"; return 1; }
-    [ -z "$device_password" ] && { error "Device password required. Usage: gms-rt-adb-forward-start <device_host> <device_password>"; return 1; }
+gms-rt-adb-forward-status() {
     check_jq
-    echo "🔌 Starting ADB Port forward..."
-    local data
-    data=$(jq -cn --arg device_host "$device_host" --arg device_password "$device_password" \
-        '{device_host: $device_host, device_password: $device_password}')
-    local response=$(api_call "/adb-forward/start" "POST" "$data")
+    local response
+    response=$(api_call "/adb-forward/status")
     echo "$response" | jq '.'
 }
 
-# Stop ADB port forwarding
-gms-rt-adb-forward-stop() {
-    local device_host="$1"
-    [ -z "$device_host" ] && { error "Device host required. Usage: gms-rt-adb-forward-stop <device_host>"; return 1; }
+# Connect selected source devices to a target Worker.
+gms-rt-adb-forward-start() {
+    local source_worker_id="${1:-}"
+    local target_worker_id="${2:-}"
+    if [[ -z "$source_worker_id" || -z "$target_worker_id" || $# -lt 3 ]]; then
+        error "Usage: gms-rt-adb-forward-start <source_worker_id> <target_worker_id> <serial> [serial...]"
+        return 2
+    fi
+    shift 2
     check_jq
-    echo "🛑 Stopping ADB Port forward..."
+    echo "🔌 Connecting ADB devices through adbproxy-rs..."
+    local devices data response
+    devices=$(printf '%s\n' "$@" | jq -Rsc 'split("\n")[:-1]')
+    data=$(jq -cn \
+        --arg source_worker_id "$source_worker_id" \
+        --arg target_worker_id "$target_worker_id" \
+        --argjson devices "$devices" \
+        '{
+            source_worker_id: $source_worker_id,
+            target_worker_id: $target_worker_id,
+            devices: $devices
+        }')
+    response=$(api_call "/adb-forward/start" "POST" "$data")
+    echo "$response" | jq '.'
+}
+
+# Disconnect one source-to-target assignment.
+gms-rt-adb-forward-stop() {
+    local source_worker_id="${1:-}"
+    local target_worker_id="${2:-}"
+    if [[ -z "$source_worker_id" || -z "$target_worker_id" ]]; then
+        error "Usage: gms-rt-adb-forward-stop <source_worker_id> <target_worker_id>"
+        return 2
+    fi
+    check_jq
+    echo "🛑 Disconnecting ADB Proxy assignment..."
     local data
-    data=$(jq -cn --arg device_host "$device_host" '{device_host: $device_host}')
-    local response=$(api_call "/adb-forward/stop" "POST" "$data")
+    data=$(jq -cn \
+        --arg source_worker_id "$source_worker_id" \
+        --arg target_worker_id "$target_worker_id" \
+        '{
+            source_worker_id: $source_worker_id,
+            target_worker_id: $target_worker_id
+        }')
+    local response
+    response=$(api_call "/adb-forward/stop" "POST" "$data")
     echo "$response" | jq '.'
 }
 
@@ -2317,7 +2345,7 @@ gms-rt-commands() {
             elif test(
                 "burn-|config-update|bootloader-(lock|unlock)|devices-(reboot|remount|push|wifi)"
                 + "|reports-delete|terminal-push|test-(start|stop|clean)|usbip-(install|connect|disconnect)"
-                + "|vpn-(connect|disconnect)|adb-forward-|desktop-vnc-(start|stop)|users-set-username"
+                + "|vpn-(connect|disconnect)|adb-forward-(start|stop)|desktop-vnc-(start|stop)|users-set-username"
             )
             then "mutating"
             else "read_only"
@@ -2390,9 +2418,10 @@ gms-rt-system-help() {
 ${BLUE}GMS Remote Test API Helper (FastAPI Port 5001)${NC}
 ========================================
 
-${YELLOW}ADB Port forward:${NC}
-  gms-rt-adb-forward-start       - Start ADB port forwarding
-  gms-rt-adb-forward-stop        - Stop ADB port forwarding
+${YELLOW}ADB Proxy:${NC}
+  gms-rt-adb-forward-status      - List ADB Proxy hosts and assignments
+  gms-rt-adb-forward-start       - Connect selected devices between Workers
+  gms-rt-adb-forward-stop        - Disconnect a source-to-target assignment
 
 ${YELLOW}Authentication:${NC}
   gms-rt-auth-login [username]   - Log in and save an API session

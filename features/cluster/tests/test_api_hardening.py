@@ -172,6 +172,40 @@ class ClusterApiHardeningTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("already claimed", response.json()["detail"])
 
+    def test_adb_proxy_device_rejects_fastboot_and_flashing_actions(self):
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [],
+            "devices": [{
+                "serial": "PROXY",
+                "state": "available",
+                "transport": "adb_proxy",
+                "properties": {
+                    "adb_proxy_source_worker_id": "worker-source",
+                },
+            }],
+            "suites": [],
+        })
+
+        action = self.client.post(
+            "/api/cluster/devices/actions",
+            json={
+                "worker_id": "worker-246",
+                "devices": ["PROXY"],
+                "action": "bootloader_unlock",
+            },
+        )
+        gsi = self.client.post(
+            "/api/cluster/gsi/stage",
+            data={"worker_id": "worker-246", "devices": "PROXY"},
+            files={"system_file": ("system.img", b"image")},
+        )
+
+        self.assertEqual(action.status_code, 409)
+        self.assertIn("no local USB/Fastboot", action.json()["detail"])
+        self.assertEqual(gsi.status_code, 409)
+        self.assertIn("local USB", gsi.json()["detail"])
+
     def test_agent_backed_endpoints_reject_controller_local_worker(self):
         self.repo.register_worker({
             "worker_id": "worker-local",

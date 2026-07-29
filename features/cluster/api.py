@@ -14,11 +14,10 @@ from features.auth import (
     CurrentUser,
     authentication_required,
     get_authenticated_user,
-    require_elevated_admin_when_auth_required,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
+    require_elevated_admin_when_auth_required,
     require_role,
-    require_role_when_auth_required,
 )
 
 from .config import ClusterConfig
@@ -356,6 +355,20 @@ def _local_execute(command_type: str, payload: dict) -> dict:
         return _read_local_worker_config()
     if command_type == "update_config":
         return _update_local_worker_config(payload)
+    if command_type == "adb_proxy":
+        from features.devices.adb_proxy_security import pair_code_for_worker
+        from worker_agent.adb_proxy import execute_adb_proxy_action
+
+        action = str(payload.get("action") or "")
+        pair_code = ""
+        if action in {"source_start", "target_connect"}:
+            source_worker_id = str(payload.get("source_worker_id") or "")
+            pair_code = pair_code_for_worker(
+                source_worker_id,
+                service().config.local_worker_id,
+                str(payload.get("access_token") or ""),
+            )
+        return execute_adb_proxy_action(action, payload, pair_code=pair_code)
     raise HTTPException(400, f"local execution not supported for {command_type}")
 
 

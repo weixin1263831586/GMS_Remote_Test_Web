@@ -21,6 +21,7 @@ class WorkerConfig:
     heartbeat_interval: int = 15
     suite_scan_interval: int = 300
     max_jobs: int = 1
+    source_only: bool = False
     data_root: Path = Path.home() / "gms-worker-data"
     suite_roots: list[Path] = field(default_factory=list)
 
@@ -61,6 +62,7 @@ class WorkerConfig:
             heartbeat_interval=int(raw.get("heartbeat_interval_seconds", 15)),
             suite_scan_interval=int(raw.get("suite_scan_interval_seconds", 300)),
             max_jobs=int(raw.get("max_jobs", 1)),
+            source_only=bool(raw.get("source_only", False)),
             data_root=Path(raw.get("data_root", Path.home() / "gms-worker-data")),
             suite_roots=[Path(item).expanduser() for item in roots],
         )

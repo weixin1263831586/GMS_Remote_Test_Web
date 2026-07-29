@@ -13,6 +13,16 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .adb_proxy import (
+    capability_status as adb_proxy_capability_status,
+)
+from .adb_proxy import (
+    execute_adb_proxy_action,
+    pair_code_from_grant,
+)
+from .adb_proxy import (
+    recover_managed_state as recover_adb_proxy_state,
+)
 from .android_inspection import _aapt2_path, prepare_device_export
 from .client import ControllerClient
 from .config import WorkerConfig
@@ -113,6 +123,7 @@ class WorkerAgent:
         self.config = config
         self.client = ControllerClient(config)
         self.runtime = WorkerRuntime(config)
+        self.runtime.prune_inactive_fences()
         self.session_id = f"worker-session-{uuid.uuid4().hex}"
         self.suites = []
         self.last_suite_scan = 0.0
@@ -123,6 +134,7 @@ class WorkerAgent:
             has_aapt2 = True
         except RuntimeError:
             has_aapt2 = False
+        adb_proxy = adb_proxy_capability_status()
         capabilities = {"adb": shutil.which("adb") is not None,
                         "fastboot": shutil.which("fastboot") is not None,
                         "tradefed": True,
@@ -133,7 +145,22 @@ class WorkerAgent:
                             and os.access("/usr/local/libexec/gms-worker-usbip", os.X_OK)
                         ),
                         "aapt2": has_aapt2,
+                        "adb_proxy": bool(adb_proxy.get("installed")),
+                        "adb_proxy_version": str(adb_proxy.get("version") or ""),
+                        "adb_proxy_source_only": self.config.source_only,
                         "ssh_user": self.config.ssh_user or getpass.getuser()}
+        if self.config.source_only:
+            capabilities.update({
+                "fastboot": False,
+                "tradefed": False,
+                "cts": False,
+                "gts": False,
+                "vts": False,
+                "sts": False,
+                "device_inspection": False,
+                "usbip_client": False,
+                "aapt2": False,
+            })
         # noVNC 能力要求端口开放且 RFB 握手有效。
         if _port_listening(NOVNC_PORT) and _rfb_handshake_ok():
             capabilities["novnc_port"] = NOVNC_PORT
@@ -145,6 +172,17 @@ class WorkerAgent:
                 "capabilities": capabilities}
 
     def heartbeat(self):
+        proxy_recovery = recover_adb_proxy_state(secret=self.config.token)
+        if proxy_recovery["recovered"]:
+            logger.info(
+                "recovered ADB Proxy roles: %s",
+                ", ".join(proxy_recovery["recovered"]),
+            )
+        if proxy_recovery["errors"]:
+            logger.debug(
+                "ADB Proxy recovery pending: %s",
+                "; ".join(proxy_recovery["errors"]),
+            )
         now = time.monotonic()
         include_suites = not self.suites or now - self.last_suite_scan >= self.config.suite_scan_interval
         if include_suites:
@@ -186,8 +224,11 @@ class WorkerAgent:
         previous = self.runtime.previous_command(command["id"])
         if previous:
             # Controller 可能重复投递，运行中的命令不得再次执行。
+            if command.get("command_type") == "device_action":
+                self.runtime.release_fencing(command)
             self._ack_command(command["id"], previous["status"], previous["result"], previous["error"])
             return
+        release_after_command = command.get("command_type") == "device_action"
         try:
             self.runtime.validate_fencing(command)
             kind = command["command_type"]
@@ -200,6 +241,35 @@ class WorkerAgent:
             elif kind == "device_action":
                 payload = command.get("payload", {})
                 result = execute_device_action(payload.get("action", ""), payload.get("devices", []), payload)
+            elif kind == "adb_proxy":
+                payload = command.get("payload", {})
+                action = str(payload.get("action") or "")
+                pair_code = ""
+                if action == "source_start":
+                    pair_code = pair_code_from_grant(
+                        self.config.token,
+                        str(payload.get("access_token") or ""),
+                    )
+                elif action == "target_connect":
+                    pair_code = self.client.adb_proxy_pair_code(
+                        str(payload.get("source_worker_id") or ""),
+                        str(payload.get("access_token") or ""),
+                    )
+                result = execute_adb_proxy_action(
+                    action,
+                    payload,
+                    pair_code=pair_code,
+                )
+                if action in {"target_connect", "target_disconnect"}:
+                    try:
+                        # Publish the changed adb-hub inventory before the
+                        # command ACK, so the Controller/UI can refresh at once.
+                        self.heartbeat()
+                    except Exception:
+                        logger.warning(
+                            "failed to publish ADB Proxy inventory immediately",
+                            exc_info=True,
+                        )
             elif kind in {"usbip_attach", "usbip_detach"}:
                 self.runtime.save_command(command["id"], "running", {})
                 self._ack_command(command["id"], "running", {})
@@ -268,10 +338,14 @@ class WorkerAgent:
             else:
                 raise ValueError(f"unsupported command type: {kind}")
             self.runtime.save_command(command["id"], "completed", result)
+            if release_after_command:
+                self.runtime.release_fencing(command)
             self._ack_command(command["id"], "completed", result)
         except Exception as exc:
             logger.exception("command %s failed", command.get("id"))
             self.runtime.save_command(command["id"], "failed", error=str(exc))
+            if release_after_command:
+                self.runtime.release_fencing(command)
             self._ack_command(command["id"], "failed", error=str(exc))
 
     # ---- 可配置参数读写（通过 Controller 远程下发） ----
@@ -317,6 +391,7 @@ class WorkerAgent:
         return {"updated": changed, "applied": bool(changed), "restarted": False}
 
     def monitor_job(self, command_id: str, worker_job_id: str):
+        row = None
         try:
             # Resolve controller identifiers from the durable jobs table.
             with self.runtime.connect() as conn:
@@ -359,6 +434,9 @@ class WorkerAgent:
                 self._ack_command(command_id, "failed", error=str(exc))
             except Exception:
                 logger.exception("failed to report job monitor failure")
+        finally:
+            if row:
+                self.runtime.release_attempt_fencing(str(row["attempt_id"] or ""))
 
     def run_suite_action(self, command: dict):
         try:
@@ -404,6 +482,8 @@ class WorkerAgent:
                     command["id"], "failed", error=error
                 )
             )
+        finally:
+            self.runtime.release_fencing(command)
 
     def run_suite_export(self, command: dict):
         path = None
@@ -451,6 +531,7 @@ class WorkerAgent:
             except Exception:
                 logger.exception("failed to acknowledge device export failure")
         finally:
+            self.runtime.release_fencing(command)
             if path is not None:
                 path.unlink(missing_ok=True)
 
@@ -490,6 +571,7 @@ class WorkerAgent:
             self.runtime.save_command(command["id"], "failed", error=error)
             self._retry(lambda: self._ack_command(command["id"], "failed", error=error))
         finally:
+            self.runtime.release_fencing(command)
             if directory is not None:
                 shutil.rmtree(directory, ignore_errors=True)
 
@@ -626,6 +708,7 @@ class WorkerAgent:
         self._upload_tradefed_results(row, work_dir)
         self.runtime.save_command(job["command_id"], status, result, error)
         self._retry(lambda: self._ack_command(job["command_id"], status, result, error))
+        self.runtime.release_attempt_fencing(str(job.get("attempt_id") or ""))
 
 
 def main():

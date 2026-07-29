@@ -48,6 +48,19 @@ def strip_ansi_codes(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text or "")
 
 
+def _adb_proxy_devices(devices: list[str]) -> list[str]:
+    try:
+        from worker_agent.adb_proxy import imported_device_for_serial
+
+        return [
+            device_id
+            for device_id in devices
+            if imported_device_for_serial(device_id) is not None
+        ]
+    except (ImportError, OSError, RuntimeError, ValueError):
+        return []
+
+
 def _remote_file_exists(ssh, path: str) -> bool:
     check_cmd = (
         f"test -f {shlex.quote(path)} "
@@ -429,6 +442,13 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
 
         if not devices:
             return error_response("No devices selected")
+        proxy_devices = _adb_proxy_devices(devices)
+        if proxy_devices:
+            return error_response(
+                "ADB Proxy远程设备不支持固件烧写，请在设备来源主机操作: "
+                + ", ".join(proxy_devices),
+                status_code=409,
+            )
 
         locked_devices, lock_err = await _lock_devices(request, client_id, devices, "The following devices are occupied")
         if lock_err:
@@ -646,6 +666,13 @@ async def burn_gsi(request: Request):
 
         if not devices:
             return error_response("No devices selected")
+        proxy_devices = _adb_proxy_devices(devices)
+        if proxy_devices:
+            return error_response(
+                "ADB Proxy远程设备不支持GSI烧写，请在设备来源主机操作: "
+                + ", ".join(proxy_devices),
+                status_code=409,
+            )
         if not script_path:
             return error_response("Script path is required")
         if not system_img:

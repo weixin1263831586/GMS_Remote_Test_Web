@@ -51,12 +51,11 @@ class SecurityAuditIntegrityTests(unittest.TestCase):
             with patch.dict(
                 "os.environ",
                 {"GMS_AUDIT_HMAC_KEY": "b" * 64, "GMS_ENV": "production"},
+            ), self.assertRaisesRegex(
+                RuntimeError,
+                "active audit key does not match",
             ):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "active audit key does not match",
-                ):
-                    audit.log_event({"operation": "foreign-key-event"})
+                audit.log_event({"operation": "foreign-key-event"})
 
             self.assertEqual(path.read_bytes(), original)
             with patch.dict(

@@ -73,6 +73,22 @@ class ControllerClient:
             {"status": status, "result": result or {}, "error": error},
         )
 
+    def adb_proxy_pair_code(
+        self, source_worker_id: str, access_token: str
+    ) -> str:
+        result = self.request(
+            "POST",
+            f"/api/cluster/workers/{quote(self.config.worker_id)}/adb-proxy/pair-code",
+            {
+                "source_worker_id": source_worker_id,
+                "access_token": access_token,
+            },
+        )
+        pair_code = str(result.get("access_token") or "")
+        if not pair_code:
+            raise RuntimeError("Controller未返回ADB Proxy配对凭据")
+        return pair_code
+
     def events(self, job_id: str, attempt_id: str, events: list[dict[str, Any]]):
         path = f"/api/cluster/jobs/{quote(job_id)}/events"
         body = {"attempt_id": attempt_id, "events": events}

@@ -122,10 +122,12 @@ class LocalWorkerBridge:
 
     def _registration(self) -> dict[str, Any]:
         from foundation.config import config_manager
+        from worker_agent.adb_proxy import capability_status
 
         config = config_manager.load_config()
         ubuntu_user = config_manager.get_ubuntu_user(config)
         ubuntu_host = config_manager.get_ubuntu_host(config) or socket.gethostname()
+        adb_proxy = capability_status()
         return {
             "worker_id": self.worker_id,
             "name": f"{ubuntu_user}@{ubuntu_host}",
@@ -136,6 +138,8 @@ class LocalWorkerBridge:
             "capabilities": {
                 "adb": True, "fastboot": True, "tradefed": True,
                 "cts": True, "gts": True, "vts": True, "sts": True,
+                "adb_proxy": bool(adb_proxy.get("installed")),
+                "adb_proxy_version": str(adb_proxy.get("version") or ""),
                 "ssh_user": ubuntu_user or getpass.getuser(),
                 "novnc_port": int(os.getenv("GMS_NOVNC_PORT", "6080")),
             },
@@ -164,6 +168,23 @@ class LocalWorkerBridge:
     def _heartbeat(self) -> None:
         if self._real_agent_active():
             return
+        from features.devices.adb_proxy_security import local_proxy_secret
+        from worker_agent.adb_proxy import recover_managed_state
+
+        try:
+            recovery = recover_managed_state(secret=local_proxy_secret())
+            if recovery["recovered"]:
+                logger.info(
+                    "recovered local ADB Proxy roles: %s",
+                    ", ".join(recovery["recovered"]),
+                )
+            if recovery["errors"]:
+                logger.debug(
+                    "local ADB Proxy recovery pending: %s",
+                    "; ".join(recovery["errors"]),
+                )
+        except Exception:
+            logger.warning("local ADB Proxy recovery failed", exc_info=True)
         now_mono = time.monotonic()
         include_suites = (not self._suites
                           or now_mono - self._last_suite_scan >= self._suite_scan_interval)

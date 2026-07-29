@@ -70,4 +70,7 @@ fi
 
 python3 "${PROJECT_ROOT}/scripts/configure_gms_host_tools.py" \
     "${RUN_HOME}/.bashrc"
+GMS_ADB_PROXY_INSTALL_DIR="${RUN_HOME}/.local/bin" \
+    "${PROJECT_ROOT}/scripts/install_adbproxy_rs.sh"
+install -d -m 700 "${RUN_HOME}/.local/state/gms-adbproxy"
 "${SOFTWARE_ROOT}/GMS-Host-Tools/verify.sh"

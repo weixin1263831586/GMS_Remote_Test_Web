@@ -60,12 +60,27 @@ def _probe_device_details(serial: str) -> dict[str, str]:
 
 
 def probe_devices(include_details: bool = False) -> list[dict[str, Any]]:
+    try:
+        from .adb_proxy import imported_devices, sync_source_policy
+
+        sync_source_policy()
+        proxy_imports = imported_devices()
+    except (OSError, RuntimeError, ValueError):
+        proxy_imports = {}
     devices = []
     for line in _run(["adb", "devices", "-l"]).splitlines()[1:]:
         parts = line.split()
         if len(parts) < 2 or parts[1] not in {"device", "offline", "unauthorized"}:
             continue
         serial, adb_state = parts[0], parts[1]
+        proxy_source = next(
+            (
+                metadata
+                for imported, metadata in proxy_imports.items()
+                if serial == imported or serial.endswith(f":{imported}")
+            ),
+            None,
+        )
         # Skip stale USB/IP TCP sessions that ADB keeps reporting as offline.
         if serial.startswith("localhost:") and adb_state != "device":
             continue
@@ -74,10 +89,17 @@ def probe_devices(include_details: bool = False) -> list[dict[str, Any]]:
             key, separator, value = item.partition(":")
             if separator:
                 properties[key] = value
+        if proxy_source:
+            properties.update({
+                "adb_proxy_source_worker_id": proxy_source["source_worker_id"],
+                "adb_proxy_source_address": proxy_source["source_address"],
+                "adb_proxy_source_serial": proxy_source["source_serial"],
+            })
         if include_details and adb_state == "device":
             properties.update(_probe_device_details(serial))
         devices.append({
-            "serial": serial, "transport": "local_usb",
+            "serial": serial,
+            "transport": "adb_proxy" if proxy_source else "local_usb",
             "state": "available" if adb_state == "device" else adb_state,
             "properties": properties,
         })
@@ -129,7 +151,7 @@ def _probe_devices_until_settled(max_attempts: int = 6, interval: float = 1.0) -
     still attached. This helper re-probes until no stale offline entries remain
     (or the attempt budget is exhausted).
     """
-    for attempt in range(max_attempts):
+    for _attempt in range(max_attempts):
         devices = probe_devices(include_details=True)
         if not any(item.get("state") in {"offline", "unauthorized"} for item in devices):
             return devices
@@ -325,12 +347,21 @@ def execute_usbip_action(action: str, source_host: str, busids: list[str]) -> di
 
 def execute_device_action(action: str, device_ids: list[str], options: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute one strictly allow-listed Android device operation."""
-    allowed = {item["serial"] for item in probe_devices()}
+    attached = {item["serial"]: item for item in probe_devices()}
     serials = []
     for device_id in device_ids:
         serial = str(device_id).split(":", 1)[-1]
-        if serial not in allowed:
+        if serial not in attached:
             raise ValueError(f"device is not attached to this worker: {serial}")
+        if (
+            attached[serial].get("transport") == "adb_proxy"
+            and action in {
+                "reboot_bootloader", "bootloader_lock", "bootloader_unlock",
+            }
+        ):
+            raise ValueError(
+                f"ADB Proxy remote device has no local USB/Fastboot channel: {serial}"
+            )
         serials.append(serial)
     options = options or {}
     inspection_actions = {
@@ -754,8 +785,11 @@ def flash_firmware(config: WorkerConfig, firmware: Path, device_ids: list[str]) 
     if len(device_ids) != 1:
         raise ValueError("firmware flashing requires exactly one device")
     serial = str(device_ids[0]).split(":", 1)[-1]
-    if serial not in {item["serial"] for item in probe_devices()}:
+    attached = {item["serial"]: item for item in probe_devices()}
+    if serial not in attached:
         raise ValueError("device is not attached to this Worker")
+    if attached[serial].get("transport") == "adb_proxy":
+        raise ValueError("firmware flashing requires a device attached by local USB")
     firmware = firmware.resolve()
     allowed_root = (config.data_root / "firmware").resolve()
     if not firmware.is_file() or not firmware.is_relative_to(allowed_root):
@@ -785,8 +819,11 @@ def flash_gsi(config: WorkerConfig, system_img: Path, vendor_img: Path | None,
     if len(device_ids) != 1:
         raise ValueError("GSI flashing requires exactly one device")
     serial = str(device_ids[0]).split(":", 1)[-1]
-    if serial not in {item["serial"] for item in probe_devices()}:
+    attached = {item["serial"]: item for item in probe_devices()}
+    if serial not in attached:
         raise ValueError("device is not attached to this Worker")
+    if attached[serial].get("transport") == "adb_proxy":
+        raise ValueError("GSI flashing requires a device attached by local USB")
     allowed = (config.data_root / "firmware").resolve()
     for image in (system_img, vendor_img):
         if image and (not image.resolve().is_relative_to(allowed) or not image.is_file()):

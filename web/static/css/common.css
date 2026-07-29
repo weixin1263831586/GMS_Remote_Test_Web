@@ -1595,6 +1595,137 @@ select option {
     height: min(390px, calc(100dvh - 16px));
 }
 
+.adb-proxy-modal-content {
+    width: min(620px, 100%);
+    max-width: 620px;
+    height: auto;
+    max-height: min(86vh, calc(100dvh - 16px));
+}
+
+.adb-proxy-modal-content .modal-body {
+    flex: 0 1 auto;
+    padding: 14px 16px;
+}
+
+.adb-proxy-modal-content select:not(.usbip-device-select) {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.adb-proxy-section-title {
+    margin: 0 0 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.adb-proxy-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.adb-proxy-section-head .adb-proxy-section-title {
+    margin-bottom: 0;
+}
+
+.adb-proxy-assignments {
+    min-height: 32px;
+    max-height: 104px;
+    margin: 7px 0 10px;
+    padding: 6px 8px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--card-bg);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.adb-proxy-assignment {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.adb-proxy-assignment:last-child {
+    border-bottom: 0;
+}
+
+.adb-proxy-assignment-info {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.adb-proxy-device-row {
+    align-items: flex-start;
+    min-height: 76px;
+    margin-bottom: 4px;
+}
+
+.adb-proxy-host-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+}
+
+.adb-proxy-routing-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.adb-proxy-host-grid .modal-form-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+}
+
+.adb-proxy-routing-fields .modal-form-row label {
+    min-width: 66px;
+}
+
+.adb-proxy-host-grid .modal-form-row label {
+    min-width: 0;
+}
+
+.adb-proxy-ubuntu-source-panel {
+    margin: 0 0 10px;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: rgba(59, 130, 246, 0.06);
+}
+
+.adb-proxy-inline-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.adb-proxy-modal-content .modal-info-text {
+    margin-top: 7px;
+    padding: 7px 9px;
+}
+
+.adb-proxy-modal-content .modal-buttons {
+    margin-top: 10px;
+}
+
 .usbip-device-select {
     flex: 1;
     width: 100%;
@@ -1606,6 +1737,18 @@ select option {
     color: var(--text-primary);
     font-size: 13px;
     resize: none;
+}
+
+@media (max-width: 640px) {
+    .adb-proxy-host-grid {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+
+    .adb-proxy-inline-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
 }
 
 /* 设备配置弹框加宽大尺寸 */

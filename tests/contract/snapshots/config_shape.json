@@ -52,6 +52,16 @@
     "grafana_url": "str",
     "router_icon_url": "str"
   },
+  "firmware_shares": {
+    "default_host": "str",
+    "default_path": "str",
+    "default_user": "str",
+    "hosts": {
+      "<dynamic-key>": {
+        "password_env": "str"
+      }
+    }
+  },
   "gerrit_dashboard": {
     "base_url": "str",
     "cache_ttl": "int",
