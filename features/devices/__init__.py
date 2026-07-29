@@ -2,6 +2,8 @@ from .locks import DeviceLockManager, device_lock_manager
 from .manager import device_manager
 from .models import (
     ADBForwardStartRequest,
+    ADBForwardStopRequest,
+    ADBProxyPairCodeRequest,
     DeviceActionRequest,
     DeviceLockRequest,
     DeviceShellRequest,
@@ -46,6 +48,8 @@ def __getattr__(name: str):
 
 __all__ = [
     "ADBForwardStartRequest",
+    "ADBForwardStopRequest",
+    "ADBProxyPairCodeRequest",
     "DeviceActionRequest",
     "DeviceLockManager",
     "DeviceLockRequest",

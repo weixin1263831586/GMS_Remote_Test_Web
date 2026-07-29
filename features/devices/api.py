@@ -117,15 +117,25 @@ async def get_connected_devices(
     for item in cached_devices:
         if not isinstance(item, dict) or not item.get("device_id"):
             continue
-        cached_inventory.append(
-            {
+        cached_inventory.append({
+            key: value
+            for key, value in {
                 "device_id": item["device_id"],
                 "status": item.get("status") or "online",
                 "protocol": item.get("protocol") or (
                     "fastboot" if item.get("status") == "fastboot" else "adb"
                 ),
-            }
-        )
+                "transport": item.get("transport") or "local_usb",
+                "adb_proxy_source_worker_id": item.get(
+                    "adb_proxy_source_worker_id"
+                ),
+                "adb_proxy_source_address": item.get(
+                    "adb_proxy_source_address"
+                ),
+                "adb_proxy_source_serial": item.get("adb_proxy_source_serial"),
+            }.items()
+            if value not in {None, ""}
+        })
     cached_ids = [item["device_id"] for item in cached_inventory]
     cache_fresh = bool(
         cached_ids
@@ -145,10 +155,34 @@ async def get_connected_devices(
             device_manager.get_fastboot_devices,
         )
         if adb_devices:
-            inventory = [
-                {"device_id": device_id, "status": "online", "protocol": "adb"}
-                for device_id in adb_devices
-            ]
+            try:
+                from worker_agent.adb_proxy import imported_device_for_serial
+            except ImportError:
+                imported_device_for_serial = None
+            inventory = []
+            for device_id in adb_devices:
+                proxy_source = (
+                    imported_device_for_serial(device_id)
+                    if imported_device_for_serial
+                    else None
+                )
+                observed = {
+                    "device_id": device_id,
+                    "status": "online",
+                    "protocol": "adb",
+                    "transport": "adb_proxy" if proxy_source else "local_usb",
+                }
+                if proxy_source:
+                    observed.update({
+                        "adb_proxy_source_worker_id": proxy_source[
+                            "source_worker_id"
+                        ],
+                        "adb_proxy_source_address": proxy_source[
+                            "source_address"
+                        ],
+                        "adb_proxy_source_serial": proxy_source["source_serial"],
+                    })
+                inventory.append(observed)
         elif cached_inventory:
             logger.warning("[Device] ADB scan returned no devices; keeping cached device list")
             inventory = list(cached_inventory)
@@ -162,6 +196,7 @@ async def get_connected_devices(
                 "device_id": device_id,
                 "status": "fastboot",
                 "protocol": "fastboot",
+                "transport": "local_usb",
             }
         inventory = list(inventory_by_id.values())
 
@@ -205,8 +240,16 @@ async def get_connected_devices(
             "device_id": device_id,
             "status": observed.get("status") or "online",
             "protocol": observed.get("protocol") or "adb",
+            "transport": observed.get("transport") or "local_usb",
             "locked": False,
         }
+        for key in (
+            "adb_proxy_source_worker_id",
+            "adb_proxy_source_address",
+            "adb_proxy_source_serial",
+        ):
+            if observed.get(key):
+                device_info[key] = observed[key]
 
         # 所属分组（仅内存查表，不增加网络往返）
         device_info["groups"] = group_map.get(device_id, [])
@@ -237,7 +280,11 @@ async def get_connected_devices(
         cache_records.append(
             {
                 key: device_info[key]
-                for key in ("device_id", "status", "protocol", "source", "is_usbip")
+                for key in (
+                    "device_id", "status", "protocol", "transport",
+                    "source", "is_usbip", "adb_proxy_source_worker_id",
+                    "adb_proxy_source_address", "adb_proxy_source_serial",
+                )
                 if key in device_info
             }
         )

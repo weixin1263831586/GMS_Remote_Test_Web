@@ -87,9 +87,23 @@ def require_role(*roles: str):
 
     def dependency(request: Request) -> CurrentUser:
         user = require_authenticated_user(request)
-        if user.role not in allowed:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        return user
+        if user.role in allowed:
+            return user
+        # Temporary administrator verification intentionally does not mutate
+        # the client's account role. Legacy admin-only dependencies must honor
+        # that elevated session, otherwise the UI receives a plain
+        # "Permission denied" after successful administrator verification.
+        if "admin" in allowed:
+            if is_elevated(request):
+                return user
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "Elevation required",
+                    "elevation_required": True,
+                },
+            )
+        raise HTTPException(status_code=403, detail="Permission denied")
 
     return dependency
 

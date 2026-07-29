@@ -50,6 +50,19 @@ def _adb_state_is_ready(output: str, code: int) -> bool:
     return code == 0 and output.strip() == "device"
 
 
+def _adb_proxy_devices(devices: list[str]) -> list[str]:
+    try:
+        from worker_agent.adb_proxy import imported_device_for_serial
+
+        return [
+            device_id
+            for device_id in devices
+            if imported_device_for_serial(device_id) is not None
+        ]
+    except (ImportError, OSError, RuntimeError, ValueError):
+        return []
+
+
 def _bootloader_operation_response(results: list[dict], action_text: str):
     success_count = sum(item.get("success", False) for item in results)
     payload = {
@@ -82,6 +95,13 @@ async def _manage_bootloader_lock(
     try:
         if not devices:
             return _api_error("No devices selected", status_code=400)
+        proxy_devices = _adb_proxy_devices(devices)
+        if proxy_devices:
+            return _api_error(
+                "ADB Proxy远程设备没有本地USB/Fastboot通道，不能锁定或解锁: "
+                + ", ".join(proxy_devices),
+                status_code=409,
+            )
         conflict = device_claim_conflict_response(
             devices, client_id, allow_owner=True
         )

@@ -15,6 +15,8 @@ HELPER = ROOT / "skills" / "gms-remote-test" / "scripts" / "gms-remote-test.sh"
 
 
 class _ApiHandler(BaseHTTPRequestHandler):
+    requests: list[tuple[str, dict]] = []
+
     def _write_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
@@ -23,7 +25,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if self.path == "/api/devices/list":
             self._write_json(
                 403,
@@ -38,12 +40,27 @@ class _ApiHandler(BaseHTTPRequestHandler):
         if self.path == "/api/system/health":
             self._write_json(200, {"success": True, "status": "healthy"})
             return
+        if self.path == "/api/adb-forward/status":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "connected": False,
+                    "hosts": [],
+                    "assignments": [],
+                },
+            )
+            return
         self._write_json(404, {"detail": "Not found"})
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         content_length = int(self.headers.get("Content-Length", "0"))
-        if content_length:
-            self.rfile.read(content_length)
+        raw_body = self.rfile.read(content_length) if content_length else b""
+        try:
+            parsed_body = json.loads(raw_body) if raw_body else {}
+        except json.JSONDecodeError:
+            parsed_body = {}
+        self.__class__.requests.append((self.path, parsed_body))
         if self.path == "/api/config/update":
             self._write_json(409, {"detail": "Configuration is busy"})
             return
@@ -60,9 +77,12 @@ class _ApiHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if self.path in {"/api/adb-forward/start", "/api/adb-forward/stop"}:
+            self._write_json(200, {"success": True})
+            return
         self._write_json(404, {"detail": "Not found"})
 
-    def do_DELETE(self) -> None:  # noqa: N802
+    def do_DELETE(self) -> None:
         if self.path.startswith("/api/reports/delete?timestamp="):
             self._write_json(200, {"success": True, "deleted": True})
             return
@@ -127,6 +147,10 @@ class SkillCliTests(unittest.TestCase):
         self.assertEqual(commands["gms-rt-devices-list"]["mode"], "read_only")
         self.assertEqual(commands["gms-rt-burn-firmware"]["mode"], "mutating")
         self.assertEqual(commands["gms-rt-terminal-open"]["mode"], "interactive")
+        self.assertEqual(
+            commands["gms-rt-adb-forward-status"]["mode"],
+            "read_only",
+        )
 
     def test_json_mode_returns_structured_success(self):
         result = self._run("gms-rt-system-health", "--json", "--non-interactive")
@@ -229,6 +253,46 @@ class SkillCliTests(unittest.TestCase):
         self.assertTrue(envelope["data"]["elevated"])
         self.assertNotIn(secret, result.stdout)
         self.assertNotIn(secret, result.stderr)
+
+    def test_adb_proxy_cli_uses_worker_aware_payloads(self):
+        _ApiHandler.requests.clear()
+
+        started = self._run(
+            "gms-rt-adb-forward-start",
+            "worker-source",
+            "worker-target",
+            "SERIAL-1",
+            "SERIAL-2",
+        )
+        stopped = self._run(
+            "gms-rt-adb-forward-stop",
+            "worker-source",
+            "worker-target",
+        )
+
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertIn(
+            (
+                "/api/adb-forward/start",
+                {
+                    "source_worker_id": "worker-source",
+                    "target_worker_id": "worker-target",
+                    "devices": ["SERIAL-1", "SERIAL-2"],
+                },
+            ),
+            _ApiHandler.requests,
+        )
+        self.assertIn(
+            (
+                "/api/adb-forward/stop",
+                {
+                    "source_worker_id": "worker-source",
+                    "target_worker_id": "worker-target",
+                },
+            ),
+            _ApiHandler.requests,
+        )
 
 
 if __name__ == "__main__":

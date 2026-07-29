@@ -204,7 +204,10 @@
     "client_hosts": {
         "172.16.14.66": "hcq",
         "127.0.0.1": "hcq",
-        "172.16.14.65": "cp2-share"
+        "172.16.14.65": "cp2-share",
+        "172.16.14.233": "hcq",
+        "172.16.14.76": "admin",
+        "10.10.10.206": "hcq"
     },
     "client_ssh_credentials": [
         {
@@ -220,20 +223,17 @@
         {
             "device_host": "wlq@172.16.14.244",
             "username": "wlq",
-            "host": "172.16.14.244",
-            "encrypted_password": "gAAAAABqXxU2Z_5WyafbtXULJxBndEtCSsaG_lZTIqN7V0_-SDxMwxIBkw3o_xYLh5GBnaNqruTR8plLRAAJj5HoWlJFxUcboQ=="
+            "host": "172.16.14.244"
         },
         {
             "device_host": "wlq@172.16.14.246",
             "username": "wlq",
-            "host": "172.16.14.246",
-            "encrypted_password": "gAAAAABqXyH2sd8tA3dPj1uYlexhVSyhLQM2Bq7fJmu_KwfYqtpLKPx3KSSLbxh3nZCU9_d0Jv-hzlvg5LMxOrabdgJAWJ1ucg=="
+            "host": "172.16.14.246"
         },
         {
             "device_host": "hcq@172.16.14.118",
             "username": "hcq",
-            "host": "172.16.14.118",
-            "encrypted_password": "gAAAAABqXzNtoo8ehTtQCQAKbdSwIPdtq97BPYC-NTQABk5Exgpy5wLszPV3CXRDl9Il05CwrXH3bSlRM-uvuWecGPhs-wLeFA=="
+            "host": "172.16.14.118"
         }
     ],
     "sidebar_order": [

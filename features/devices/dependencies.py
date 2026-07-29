@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .adb_forward import adb_forward_manager
+from .adb_proxy_service import adb_proxy_service
 from .manager import device_manager
 from .runtime import configure_runtime
 from .usbip import usbip_manager
@@ -30,6 +31,7 @@ def configure_device_dependencies(
     usbip_manager.config_manager = config_manager
     adb_forward_manager.ssh_manager = ssh_manager
     adb_forward_manager.config_manager = config_manager
+    adb_proxy_service.config_manager = config_manager
     device_manager.ssh_manager = ssh_manager
     device_manager.config_manager = config_manager
     configure_runtime(

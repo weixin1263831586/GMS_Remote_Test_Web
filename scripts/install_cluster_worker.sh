@@ -135,6 +135,7 @@ install -m 600 "${GTS_CREDENTIAL_FILE}" \
 
 # 幂等更新 Shell 环境配置块。
 python3 "${PROJECT_ROOT}/scripts/configure_gms_host_tools.py" "${HOME}/.bashrc"
+"${PROJECT_ROOT}/scripts/install_adbproxy_rs.sh"
 
 # 安装 Worker 桌面功能依赖。
 if ! command -v x11vnc >/dev/null 2>&1 || \
@@ -242,7 +243,8 @@ Environment=JAVA_HOME=${SOFTWARE_ROOT}/jdk-11
 Environment=JRE_HOME=${SOFTWARE_ROOT}/jdk-11
 Environment=APE_API_KEY=${SOFTWARE_ROOT}/gts-rockchip.json
 Environment=GMS_WORKER_AAPT2_PATH=${SOFTWARE_ROOT}/platform-tools/aapt2
-Environment=PATH=${SOFTWARE_ROOT}/platform-tools:${SOFTWARE_ROOT}/jdk-11/bin:${INSTALL_ROOT}/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=GMS_ADB_PROXY_BIN_DIR=${HOME}/.local/bin
+Environment=PATH=${HOME}/.local/bin:${SOFTWARE_ROOT}/platform-tools:${SOFTWARE_ROOT}/jdk-11/bin:${INSTALL_ROOT}/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/python3 -m worker_agent.app
 Restart=on-failure
 RestartSec=5

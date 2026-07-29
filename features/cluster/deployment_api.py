@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
+import secrets
 import shlex
 import stat
 import subprocess
@@ -21,7 +23,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from features.auth import (
     CurrentUser,
     require_elevated_admin_when_auth_required,
-    require_role_when_auth_required,
 )
 from foundation.config import config_manager
 from foundation.networking import split_host_port
@@ -39,6 +40,9 @@ router = APIRouter()
 _LOCAL_SOFTWARE_LOCK = threading.Lock()
 _LOCAL_SOFTWARE_TASKS: dict[str, dict] = {}
 _LOCAL_SOFTWARE_ACTIVE_TASK = ""
+_ADBPROXY_PACKAGE_RELATIVE = Path(
+    "tools/adbproxy-rs/dist/adbproxy-rs-linux-x86_64-musl.tar.gz"
+)
 
 
 def _local_software_service_name() -> str:
@@ -110,7 +114,9 @@ def _run_local_software_task(task_id: str) -> None:
 
 @router.post("/workers/local/software/reconfigure")
 async def reconfigure_local_worker_software(
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _admin: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
 ):
     """Reinstall bundled tools used by the Controller Local Worker."""
     svc = service()
@@ -147,13 +153,48 @@ async def reconfigure_local_worker_software(
 @router.get("/workers/local/software/reconfigure/{task_id}")
 def local_worker_software_reconfiguration_status(
     task_id: str,
-    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+    _admin: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
 ):
     with _LOCAL_SOFTWARE_LOCK:
         task = _LOCAL_SOFTWARE_TASKS.get(task_id)
         if task is None:
             raise HTTPException(404, "local Software task not found")
         return {"success": True, "task": dict(task)}
+
+
+def _validated_adbproxy_package(project_root: Path) -> tuple[Path, Path]:
+    package = project_root / _ADBPROXY_PACKAGE_RELATIVE
+    checksum = package.with_name(f"{package.name}.sha256")
+    if not package.is_file() or not checksum.is_file():
+        raise RuntimeError(
+            "adbproxy-rs offline package is missing; run "
+            "scripts/build_adbproxy_rs.sh on the Controller"
+        )
+    fields = checksum.read_text(encoding="utf-8").split()
+    if (
+        len(fields) < 2
+        or not re.fullmatch(r"[0-9a-fA-F]{64}", fields[0])
+        or Path(fields[1]).name != package.name
+    ):
+        raise RuntimeError("adbproxy-rs package checksum file is invalid")
+    digest = hashlib.sha256()
+    with package.open("rb") as package_file:
+        for chunk in iter(lambda: package_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest().lower() != fields[0].lower():
+        raise RuntimeError("adbproxy-rs offline package checksum mismatch")
+    return package, checksum
+
+
+def _add_adbproxy_package(bundle: tarfile.TarFile, project_root: Path) -> None:
+    package, checksum = _validated_adbproxy_package(project_root)
+    bundle.add(package, arcname=str(_ADBPROXY_PACKAGE_RELATIVE))
+    bundle.add(
+        checksum,
+        arcname=f"{_ADBPROXY_PACKAGE_RELATIVE}.sha256",
+    )
 
 
 def _validate_gts_credential(path: Path) -> Path:
@@ -259,6 +300,216 @@ async def trust_worker_ssh_host_key(
     return {"success": True, "host": hostname, "port": port, "keys": trusted}
 
 
+def _adb_proxy_source_worker_id(connection: str, hostname: str) -> str:
+    host_label = re.sub(r"[^a-z0-9]+", "-", hostname.lower()).strip("-")
+    digest = hashlib.sha256(connection.encode("utf-8")).hexdigest()[:8]
+    return f"adb-source-{host_label[:32] or 'host'}-{digest}"
+
+
+def _adb_proxy_source_install_command(
+    *,
+    worker_id: str,
+    controller_url: str,
+    hostname: str,
+    remote_archive: str,
+    remote_token: str,
+    controller_ca_arg: str,
+    require_sudo: bool,
+) -> str:
+    install = (
+        "set -e; "
+        "cleanup() { rm -f "
+        f"{shlex.quote(remote_archive)} "
+        f"{shlex.quote(remote_token)}; }}; "
+        "trap cleanup EXIT; "
+        "rm -rf ~/gms-adb-proxy-source-setup && "
+        "mkdir -p ~/gms-adb-proxy-source-setup && "
+        f"tar -xzf {shlex.quote(remote_archive)} "
+        "-C ~/gms-adb-proxy-source-setup && "
+        "cd ~/gms-adb-proxy-source-setup && "
+        "bash scripts/install_adb_proxy_source_worker.sh "
+        f"{shlex.quote(worker_id)} "
+        f"{shlex.quote(controller_url)} "
+        f"{shlex.quote(remote_token)} "
+        f"{shlex.quote(controller_ca_arg)} "
+        f"{shlex.quote(hostname)}"
+    )
+    return "sudo -S -p '' -v && " + install if require_sudo else install
+
+
+@router.post("/workers/deploy-adb-proxy-source")
+async def deploy_adb_proxy_source(
+    body: dict,
+    _admin: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
+):
+    """Install a source-only Worker and bundled adbproxy-rs on an Ubuntu host."""
+    connection = str(body.get("ssh_host") or "").strip()
+    password = str(body.get("password") or "")
+    controller_url = str(body.get("controller_url") or "").strip().rstrip("/")
+    if not controller_url.startswith("https://"):
+        raise HTTPException(400, "Controller URL must use HTTPS")
+    username, hostname, ssh_port = _deployment_host(connection)
+    worker_id = _adb_proxy_source_worker_id(connection, hostname)
+    token = secrets.token_urlsafe(36)
+
+    def _deploy() -> dict:
+        from features.system import ssh_manager
+
+        try:
+            ssh = ssh_manager.create_connection(
+                {
+                    "host": hostname,
+                    "port": ssh_port,
+                    "username": username,
+                    "password": password,
+                },
+                raise_on_error=True,
+            )
+        except paramiko.AuthenticationException as exc:
+            raise RuntimeError(
+                f"SSH authentication failed for {username}@{hostname}; "
+                "please verify the SSH username and password"
+            ) from exc
+        except (TimeoutError, OSError) as exc:
+            raise RuntimeError(
+                f"cannot connect to {hostname}:{ssh_port}: {exc}"
+            ) from exc
+        except paramiko.SSHException as exc:
+            raise RuntimeError(
+                f"SSH negotiation failed for {username}@{hostname}: {exc}"
+            ) from exc
+        if ssh is None:
+            raise RuntimeError("SSH connection failed")
+
+        archive_path: Path | None = None
+        remote_archive = f"/tmp/gms-adb-source-{worker_id}.tar.gz"
+        remote_token = f"/tmp/gms-adb-source-{worker_id}.token"
+        try:
+            project_root = Path(__file__).resolve().parents[2]
+            with tempfile.NamedTemporaryFile(
+                suffix=".tar.gz", delete=False
+            ) as temporary:
+                archive_path = Path(temporary.name)
+            with tarfile.open(archive_path, "w:gz") as bundle:
+                bundle.add(project_root / "worker_agent", arcname="worker_agent")
+                bundle.add(
+                    project_root / "scripts/install_adb_proxy_source_worker.sh",
+                    arcname="scripts/install_adb_proxy_source_worker.sh",
+                )
+                bundle.add(
+                    project_root / "scripts/install_adbproxy_rs.sh",
+                    arcname="scripts/install_adbproxy_rs.sh",
+                )
+                _add_adbproxy_package(bundle, project_root)
+                controller_certificate = Path(
+                    os.getenv(
+                        "GMS_CERT_CRT",
+                        str(project_root / "configs/certs/gms-local.crt"),
+                    )
+                )
+                if controller_certificate.is_file():
+                    bundle.add(
+                        controller_certificate,
+                        arcname="controller-ca.crt",
+                    )
+            sftp = ssh.open_sftp()
+            try:
+                sftp.put(str(archive_path), remote_archive)
+                with sftp.open(remote_token, "w") as token_file:
+                    sftp.chmod(remote_token, 0o600)
+                    token_file.write((token + "\n").encode("utf-8"))
+            except Exception:
+                for remote_path in (remote_archive, remote_token):
+                    try:
+                        sftp.remove(remote_path)
+                    except OSError:
+                        pass
+                raise
+            finally:
+                sftp.close()
+            controller_ca_arg = (
+                "controller-ca.crt"
+                if controller_certificate.is_file()
+                else "-"
+            )
+            install = _adb_proxy_source_install_command(
+                worker_id=worker_id,
+                controller_url=controller_url,
+                hostname=hostname,
+                remote_archive=remote_archive,
+                remote_token=remote_token,
+                controller_ca_arg=controller_ca_arg,
+                require_sudo=bool(password),
+            )
+            previous_tokens = worker_tokens()
+            persist_worker_token(worker_id, token)
+            try:
+                stdin, stdout, stderr = ssh.exec_command(
+                    install,
+                    timeout=900,
+                    get_pty=True,
+                )
+                if password:
+                    stdin.write(password + "\n")
+                    stdin.flush()
+                exit_code = stdout.channel.recv_exit_status()
+                output = (stdout.read() + stderr.read()).decode(
+                    "utf-8",
+                    errors="replace",
+                )[-12000:]
+                if exit_code != 0:
+                    raise RuntimeError(
+                        output or f"installer exited with {exit_code}"
+                    )
+            except Exception:
+                write_worker_tokens(previous_tokens)
+                raise
+            return {
+                "success": True,
+                "worker_id": worker_id,
+                "ssh_host": connection,
+                "output": output,
+            }
+        finally:
+            ssh.close()
+            if archive_path:
+                archive_path.unlink(missing_ok=True)
+
+    try:
+        result = await asyncio.to_thread(_deploy)
+        installed_at = utc_now()
+        timeout = service().config.worker_registration_timeout_seconds
+        for _ in range(timeout):
+            worker = service().repository.get_worker(worker_id)
+            heartbeat_at = str((worker or {}).get("last_heartbeat_at") or "")
+            capabilities = (worker or {}).get("capabilities") or {}
+            if (
+                heartbeat_at > installed_at
+                and capabilities.get("adb_proxy")
+                and capabilities.get("adb_proxy_source_only")
+            ):
+                return {
+                    **result,
+                    "registered": True,
+                    "last_heartbeat_at": heartbeat_at,
+                }
+            await asyncio.sleep(1)
+        raise HTTPException(
+            502,
+            f"adbproxy-rs已安装，但来源 Agent 在 {timeout} 秒内未产生有效心跳。"
+            "请在目标主机检查 systemctl --user status gms-worker-agent",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            502,
+            f"ADB Proxy source deployment failed: {exc}",
+        ) from exc
+
+
 @router.post("/workers/deploy")
 async def deploy_worker(
     body: dict,
@@ -335,6 +586,11 @@ async def deploy_worker(
                     project_root / "scripts/install_cluster_worker.sh",
                     arcname="scripts/install_cluster_worker.sh",
                 )
+                bundle.add(
+                    project_root / "scripts/install_adbproxy_rs.sh",
+                    arcname="scripts/install_adbproxy_rs.sh",
+                )
+                _add_adbproxy_package(bundle, project_root)
                 bundle.add(
                     project_root / "scripts/gms_worker_usbip.sh",
                     arcname="scripts/gms_worker_usbip.sh",

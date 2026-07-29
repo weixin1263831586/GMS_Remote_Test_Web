@@ -49,6 +49,28 @@ def test_registration_advertises_novnc_when_rfb_handshake_succeeds(tmp_path):
     assert capabilities["novnc_port"] == 6080
 
 
+def test_source_only_registration_disables_test_host_capabilities(tmp_path):
+    config = worker_config(tmp_path)
+    config.source_only = True
+    agent = WorkerAgent(config)
+
+    with patch(
+        "worker_agent.app.adb_proxy_capability_status",
+        return_value={"installed": True, "version": "adb-proxy 0.4.5"},
+    ), patch(
+        "worker_agent.app.shutil.which",
+        side_effect=lambda name: f"/usr/bin/{name}" if name == "adb" else None,
+    ):
+        capabilities = agent.registration()["capabilities"]
+
+    assert capabilities["adb"] is True
+    assert capabilities["adb_proxy"] is True
+    assert capabilities["adb_proxy_source_only"] is True
+    assert capabilities["tradefed"] is False
+    assert capabilities["fastboot"] is False
+    assert capabilities["usbip_client"] is False
+
+
 def test_restart_vnc_command_kills_and_restarts(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()
@@ -287,6 +309,34 @@ def test_new_fencing_generation_revokes_previous_attempt(tmp_path):
     )
 
 
+def test_completed_device_action_releases_its_fencing_generation(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+    completed = {
+        "command_type": "device_action",
+        "payload": {
+            "devices": ["worker-test:ABC"],
+            "lease_tokens": [{
+                "device_id": "worker-test:ABC", "lease_id": "claim-2",
+                "attempt_id": "operation-done", "generation": 2,
+            }],
+        },
+    }
+    runtime.validate_fencing(completed)
+
+    assert runtime.release_fencing(completed) == 1
+
+    runtime.validate_fencing({
+        "command_type": "device_action",
+        "payload": {
+            "devices": ["worker-test:ABC"],
+            "lease_tokens": [{
+                "device_id": "worker-test:ABC", "lease_id": "claim-1",
+                "attempt_id": "operation-new", "generation": 1,
+            }],
+        },
+    })
+
+
 def test_heartbeat_replays_unsynced_command_state_after_reconnect(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.runtime.save_command("cmd-1", "completed", {"worker_job_id": "wj-1"})
@@ -305,6 +355,9 @@ def test_heartbeat_replays_unsynced_command_state_after_reconnect(tmp_path):
         "worker_agent.app.host_metrics", return_value={}
     ), patch(
         "worker_agent.app.probe_devices", return_value=[]
+    ), patch(
+        "worker_agent.app.recover_adb_proxy_state",
+        return_value={"recovered": [], "errors": []},
     ), patch("worker_agent.app.discover_tradefed_processes", return_value=[]):
         agent.heartbeat()
 

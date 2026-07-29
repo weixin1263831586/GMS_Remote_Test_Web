@@ -137,11 +137,10 @@ class FirmwareShareHomeTests(unittest.TestCase):
         with patch(
             "features.firmware.shares_api._sftp_client",
             side_effect=fake_client,
-        ):
-            with self.assertRaisesRegex(ValueError, "不在允许范围内"):
-                shares_api._list_remote_dir(
-                    "172.16.14.66", "hcq", "/C:/Windows", {},
-                )
+        ), self.assertRaisesRegex(ValueError, "不在允许范围内"):
+            shares_api._list_remote_dir(
+                "172.16.14.66", "hcq", "/C:/Windows", {},
+            )
 
     def test_browse_without_configured_path_forwards_empty_path(self):
         captured = {}

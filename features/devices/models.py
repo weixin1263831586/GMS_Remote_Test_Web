@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from enum import Enum
 import re
+from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -22,6 +22,19 @@ def _validated_usbip_busids(values: list[str]) -> list[str]:
 
 class ADBForwardStartRequest(BaseModel):
     device_host: str = ""
+    source_worker_id: str = Field(default="", max_length=128)
+    target_worker_id: str = Field(default="", max_length=128)
+    devices: list[str] = Field(default_factory=list, max_length=32)
+
+
+class ADBForwardStopRequest(BaseModel):
+    source_worker_id: str = Field(default="", max_length=128)
+    target_worker_id: str = Field(default="", max_length=128)
+
+
+class ADBProxyPairCodeRequest(BaseModel):
+    source_worker_id: str = Field(min_length=1, max_length=128)
+    access_token: str = Field(min_length=32, max_length=2048)
 
 
 class USBIPStartRequest(BaseModel):

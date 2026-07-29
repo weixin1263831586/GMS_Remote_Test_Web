@@ -27,6 +27,7 @@ SENSITIVE_KEYWORDS = (
     'apikey',
     'authorization',
     'cookie',
+    'pair_code',
 )
 
 _WORD_BOUNDARY_PATTERN = re.compile(r'(?:' + '|'.join(re.escape(kw) for kw in SENSITIVE_KEYWORDS) + r')', re.IGNORECASE)

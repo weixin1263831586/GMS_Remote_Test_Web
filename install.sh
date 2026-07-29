@@ -736,6 +736,8 @@ Group=${RUN_GROUP}
 WorkingDirectory=${INSTALL_DIR}
 Environment=GMS_ENV=production
 Environment=GMS_WORKER_CONFIG=${INSTALL_DIR}/data/local-worker/config.json
+Environment=GMS_ADB_PROXY_BIN_DIR=${RUN_HOME}/.local/bin
+Environment=GMS_ADB_PROXY_STATE_ROOT=${RUN_HOME}/.local/state/gms-adbproxy
 Environment=PYTHONPYCACHEPREFIX=${INSTALL_DIR}/data/pycache-worker
 ExecStart=${INSTALL_DIR}/.venv/bin/python -m worker_agent.app
 Restart=on-failure
@@ -751,7 +753,7 @@ ProtectHome=read-only
 ProtectControlGroups=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
-ReadWritePaths=${INSTALL_DIR}/data ${RUN_HOME}/GMS-Suite
+ReadWritePaths=${INSTALL_DIR}/data ${RUN_HOME}/GMS-Suite ${RUN_HOME}/.local/state/gms-adbproxy
 
 [Install]
 WantedBy=multi-user.target

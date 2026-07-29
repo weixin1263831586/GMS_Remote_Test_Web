@@ -192,29 +192,20 @@ async def get_workload_statistics(
     # 解析目标用户：指定姓名或当前登录用户。映射到 user_map 时拉取实时数据
     user_map = _user_map_for_request(request)
     live_stats: dict[str, Any] = {}
+    snapshot_user_id: int | None = None
     candidate_names = [name] if name else []
     if not candidate_names:
         candidate_names = await _resolve_owner_names(request, service)
     mapped = find_user_mapping_for_names(user_map, candidate_names) if candidate_names else None
     if mapped:
+        snapshot_user_id = int(mapped["id"])
         owner_names = display_names_from_mapping(mapped)
         display_names = owner_names
-        live_stats = await _live_stats_for_user(service, int(mapped["id"]), freshness_days=freshness_days)
-        if refresh:
-            try:
-                client = service.agent._make_client()
-                try:
-                    await refresh_assignee_issue_snapshots(
-                        client,
-                        service.repository,
-                        int(mapped["id"]),
-                        issue_limit=max(list_limit, 100),
-                        window_days=stats_cfg["window_days"],
-                    )
-                finally:
-                    await client.close()
-            except Exception as exc:
-                logger.warning("Failed to refresh Redmine snapshots for user %s: %s", mapped.get("id"), exc)
+        live_stats = await _live_stats_for_user(
+            service,
+            snapshot_user_id,
+            freshness_days=freshness_days,
+        )
     else:
         # /users 会为当前 Redmine 用户插入合成选项，前端回传其显示名。
         # 将其视为当前 Redmine 账号而非回退到不完整的本地快照。
@@ -227,9 +218,14 @@ async def get_workload_statistics(
             )
         )
         if selected_is_current:
+            snapshot_user_id = int(current_user["id"])
             owner_names = display_names_from_mapping(current_user)
             display_names = owner_names
-            live_stats = await _live_stats_for_user(service, int(current_user["id"]), freshness_days=freshness_days)
+            live_stats = await _live_stats_for_user(
+                service,
+                snapshot_user_id,
+                freshness_days=freshness_days,
+            )
         else:
             owner_names = [n for n in candidate_names if n]
             display_names = owner_names
@@ -252,6 +248,44 @@ async def get_workload_statistics(
         window_days=stats_cfg["window_days"],
         organization_user_map=user_map,
     )
+    snapshot_refresh_needed = bool(
+        snapshot_user_id is not None
+        and (
+            refresh
+            or (
+                int(live_stats.get("open_count") or 0) > 0
+                and int(data.get("open_count") or 0) == 0
+            )
+        )
+    )
+    if snapshot_refresh_needed:
+        try:
+            client = service.agent._make_client()
+            try:
+                changed = await refresh_assignee_issue_snapshots(
+                    client,
+                    service.repository,
+                    snapshot_user_id,
+                    issue_limit=max(list_limit, 100),
+                    window_days=stats_cfg["window_days"],
+                )
+            finally:
+                await client.close()
+            if changed:
+                data = service.repository.get_workload_statistics(
+                    owner_names=all_names,
+                    stale_days=stale_days,
+                    list_limit=list_limit,
+                    display_names=display_names,
+                    window_days=stats_cfg["window_days"],
+                    organization_user_map=user_map,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to refresh Redmine snapshots for user %s: %s",
+                snapshot_user_id,
+                exc,
+            )
     if refresh:
         stale_items = list((data.get("lists") or {}).get("no_reply_3_days") or [])
         refresh_one = getattr(service, "refresh_issue_metadata", None)

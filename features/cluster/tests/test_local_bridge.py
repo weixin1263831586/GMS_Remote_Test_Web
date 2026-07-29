@@ -6,6 +6,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from features.cluster.config import ClusterConfig
 from features.cluster.repository import ClusterRepository
@@ -39,10 +40,18 @@ class LocalBridgeTests(unittest.TestCase):
         config = ClusterConfig(enabled=False, local_worker_id="worker-local")
         bridge = LocalWorkerBridge(self.repo, config)
         bridge._register()
-        bridge._heartbeat()
+        with patch(
+            "worker_agent.adb_proxy.recover_managed_state",
+            return_value={"recovered": ["target"], "errors": []},
+        ) as recover, patch(
+            "features.devices.adb_proxy_security.local_proxy_secret",
+            return_value=b"x" * 32,
+        ):
+            bridge._heartbeat()
         worker = self.repo.get_worker("worker-local")
         self.assertIsNotNone(worker)
         self.assertGreaterEqual(worker["disk_free_gb"], 0)
+        recover.assert_called_once_with(secret=b"x" * 32)
 
     def test_bridge_re_registers_after_offline(self):
         from features.cluster.local_bridge import LocalWorkerBridge

@@ -16,7 +16,6 @@ from features.auth import (
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
     require_role,
-    require_role_when_auth_required,
 )
 from features.automation.repository import AutomationStore
 from features.automation.service import (

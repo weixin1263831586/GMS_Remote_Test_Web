@@ -162,7 +162,9 @@ class WorkerRuntime:
                     )
                 ):
                     raise ValueError(
-                        f"stale fencing token for device {device_id}: generation {generation}"
+                        f"stale fencing token for device {device_id}: "
+                        f"generation {generation}, current generation "
+                        f"{int(current['generation'])}"
                     )
                 if current and generation > int(current["generation"]):
                     revoked_attempts.add(str(current["attempt_id"] or ""))
@@ -183,6 +185,51 @@ class WorkerRuntime:
                     attempt_id,
                     "superseded by a newer device fencing generation",
                 )
+
+    def release_fencing(self, command: dict[str, Any]) -> int:
+        """Release only fences owned by the command's exact lease tokens."""
+        tokens = (command.get("payload") or {}).get("lease_tokens") or []
+        removed = 0
+        with self.connect() as conn:
+            for token in tokens:
+                try:
+                    generation = int(token.get("generation") or 0)
+                except (TypeError, ValueError):
+                    continue
+                cursor = conn.execute(
+                    """DELETE FROM device_fences
+                       WHERE device_id=? AND generation=?
+                       AND lease_id=? AND attempt_id=?""",
+                    (
+                        str(token.get("device_id") or ""),
+                        generation,
+                        str(token.get("lease_id") or ""),
+                        str(token.get("attempt_id") or ""),
+                    ),
+                )
+                removed += cursor.rowcount
+        return removed
+
+    def release_attempt_fencing(self, attempt_id: str) -> int:
+        if not attempt_id:
+            return 0
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM device_fences WHERE attempt_id=?",
+                (attempt_id,),
+            )
+        return cursor.rowcount
+
+    def prune_inactive_fences(self) -> int:
+        """Remove stale fences while preserving every currently running job."""
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """DELETE FROM device_fences
+                   WHERE attempt_id NOT IN (
+                       SELECT attempt_id FROM jobs WHERE status='running'
+                   )"""
+            )
+        return cursor.rowcount
 
     def revoke_attempt(self, attempt_id: str, reason: str) -> list[str]:
         with self.connect() as conn:

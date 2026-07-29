@@ -14,6 +14,8 @@ def worker_device(
     operation: str,
     reservation_id: str = "",
     automation_run_id: str = "",
+    *,
+    require_local_usb: bool = False,
 ) -> str:
     requested = [item.strip() for item in devices.split(",") if item.strip()]
     if len(requested) != 1:
@@ -35,6 +37,11 @@ def worker_device(
     )
     if device.get("state") != "available" and not reserved_for_request:
         raise HTTPException(409, "device is not available on worker")
+    if require_local_usb and device.get("transport") == "adb_proxy":
+        raise HTTPException(
+            409,
+            f"cluster {operation} requires a device attached by local USB",
+        )
     return device_id
 
 

@@ -352,6 +352,20 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("loadRuns().catch(err => toast(err.message))", automation_text)
         self.assertIn("loadBuildJobs().catch(err => toast(err.message))", automation_text)
 
+    def test_local_software_reconfigure_elevates_before_posting(self):
+        cluster_text = read_text("features/cluster/ui/page.js")
+        function_text = cluster_text.split(
+            "async function reconfigureLocalSoftware(button)",
+            1,
+        )[1].split("async function redeployWorker", 1)[0]
+        elevation = function_text.index("requestElevatedAccess")
+        submit = function_text.index(
+            "api('/api/cluster/workers/local/software/reconfigure'"
+        )
+
+        self.assertLess(elevation, submit)
+        self.assertIn("if (!state.authRequired)", read_text("web/static/js/navigation.js"))
+
     def test_modal_pages_support_escape_close(self):
         for label, paths in [
             ("main", ["web/shell/shell.html"]),

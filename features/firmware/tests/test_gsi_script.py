@@ -16,7 +16,7 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
-def test_gsi_script_only_executes_supplied_fastboot_sequence(tmp_path: Path) -> None:
+def test_gsi_script_stops_when_fastbootd_transition_fails(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     command_log = tmp_path / "fastboot.log"
@@ -53,18 +53,56 @@ exit 0
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
     assert command_log.read_text().splitlines() == [
         "-s RK3572GMS1 oem board:unlock",
         "-s RK3572GMS1 reboot fastboot",
-        "-s RK3572GMS1 delete-logical-partition product",
-        "-s RK3572GMS1 delete-logical-partition product_a",
-        "-s RK3572GMS1 delete-logical-partition product_b",
-        "-s RK3572GMS1 flash system /images/system.img",
-        "-s RK3572GMS1 flash misc /images/misc.img",
-        "-s RK3572GMS1 flash vendor_boot /images/vendor_boot-debug.img",
-        "-s RK3572GMS1 reboot",
     ]
+
+
+def test_gsi_script_waits_for_fastbootd_before_flashing(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    command_log = tmp_path / "fastboot.log"
+    _write_executable(
+        bin_dir / "fastboot",
+        """#!/bin/bash
+printf '%s\\n' "$*" >> "$FASTBOOT_LOG"
+if [[ "$3" == "getvar" && "$4" == "is-userspace" ]]; then
+    printf 'is-userspace: yes\\n' >&2
+fi
+exit 0
+""",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(GSI_SCRIPT),
+            "RK3572GMS1",
+            "board:unlock",
+            "/images/system.img",
+            "/images/misc.img",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "FASTBOOT_LOG": str(command_log),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    commands = command_log.read_text().splitlines()
+    assert commands[:3] == [
+        "-s RK3572GMS1 oem board:unlock",
+        "-s RK3572GMS1 reboot fastboot",
+        "-s RK3572GMS1 getvar is-userspace",
+    ]
+    assert commands[3] == "-s RK3572GMS1 delete-logical-partition product"
 
 
 def test_locked_fastboot_output_has_actionable_diagnosis() -> None:

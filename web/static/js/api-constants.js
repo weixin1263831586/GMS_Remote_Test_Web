@@ -528,22 +528,32 @@ const API_DETAILS_MAP = {
         usage: '停止Ubuntu主机桌面VNC服务'
     },
     '/api/adb-forward/start': {
-        title: '启动ADB端口转发',
-        description: '使用服务端 SSH 密钥和 known_hosts 启动ADB端口转发',
+        title: '接入ADB Proxy设备',
+        description: '通过adbproxy-rs将来源Worker的指定ADB设备接入目标Worker',
         params: [
-            { name: 'device_host', type: 'string', required: false, desc: '已授权设备主机地址；不传则使用服务端配置' }
+            { name: 'source_worker_id', type: 'string', required: true, desc: 'ADB设备来源Worker' },
+            { name: 'target_worker_id', type: 'string', required: true, desc: 'ADB接入目标Worker' },
+            { name: 'devices', type: 'array', required: true, desc: '接入的ADB设备序列号' }
         ],
-        response: '{ "success": true, "forwarding": [] }',
-        usage: '启动ADB端口转发'
+        response: '{ "success": true, "assignment": { "status": "connected" } }',
+        usage: 'gms-rt-adb-forward-start <source_worker_id> <target_worker_id> <serial> [serial...]'
     },
     '/api/adb-forward/stop': {
-        title: '停止ADB端口转发',
-        description: '停止ADB端口转发',
+        title: '断开ADB Proxy设备',
+        description: '断开指定来源Worker到目标Worker的ADB Proxy接入',
         params: [
-            { name: 'device_id', type: 'string', required: true, desc: '设备序列号' }
+            { name: 'source_worker_id', type: 'string', required: true, desc: 'ADB设备来源Worker' },
+            { name: 'target_worker_id', type: 'string', required: true, desc: 'ADB接入目标Worker' }
         ],
-        response: '{ "success": true, "message": "ADB端口转发已停止" }',
-        usage: '停止ADB端口转发'
+        response: '{ "success": true, "message": "ADB接入已断开" }',
+        usage: 'gms-rt-adb-forward-stop <source_worker_id> <target_worker_id>'
+    },
+    '/api/adb-forward/status': {
+        title: '查询ADB Proxy状态',
+        description: '查询ADB Proxy主机能力、设备和当前接入关系',
+        params: [],
+        response: '{ "success": true, "connected": false, "hosts": [], "assignments": [] }',
+        usage: 'gms-rt-adb-forward-status'
     },
     '/api/usbip/status': {
         title: '检查 USB/IP 状态',

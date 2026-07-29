@@ -59,7 +59,12 @@ async def stage_worker_firmware(
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     _online_worker(worker_id)
     device_id = worker_device(
-        worker_id, devices, "firmware flashing", reservation_id, automation_run_id
+        worker_id,
+        devices,
+        "firmware flashing",
+        reservation_id,
+        automation_run_id,
+        require_local_usb=True,
     )
     if automation_run_id:
         existing = service().repository.find_correlated_command(
@@ -160,7 +165,12 @@ async def stage_worker_gsi(
 ):
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     _online_worker(worker_id)
-    device_id = worker_device(worker_id, devices, "GSI flashing")
+    device_id = worker_device(
+        worker_id,
+        devices,
+        "GSI flashing",
+        require_local_usb=True,
+    )
     stage_id = "fw-" + os.urandom(16).hex()
     claim_payload = operation_claim_for_request(
         request, worker_id, device_id, stage_id

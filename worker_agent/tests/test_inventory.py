@@ -62,3 +62,37 @@ def test_probe_keeps_fastbootd_device_visible():
         "state": "fastboot",
         "properties": {},
     }]
+
+
+def test_probe_reports_adb_proxy_import_with_source_metadata():
+    with patch(
+        "worker_agent.inventory._run",
+        side_effect=[
+            "List of devices attached\nRK3576GMS1 device model:Box\n",
+            "",
+        ],
+    ), patch(
+        "worker_agent.adb_proxy.sync_source_policy"
+    ), patch(
+        "worker_agent.adb_proxy.imported_devices",
+        return_value={
+            "RK3576GMS1": {
+                "source_worker_id": "worker-local",
+                "source_address": "172.16.14.233",
+                "source_serial": "RK3576GMS1",
+            }
+        },
+    ):
+        devices = probe_devices()
+
+    assert devices == [{
+        "serial": "RK3576GMS1",
+        "transport": "adb_proxy",
+        "state": "available",
+        "properties": {
+            "model": "Box",
+            "adb_proxy_source_worker_id": "worker-local",
+            "adb_proxy_source_address": "172.16.14.233",
+            "adb_proxy_source_serial": "RK3576GMS1",
+        },
+    }]

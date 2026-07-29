@@ -86,9 +86,8 @@ class UsbipCredentialTests(unittest.TestCase):
 
     def test_usbip_request_models_reject_shell_metacharacters_in_busids(self):
         for model in (USBIPStartRequest, USBIPDisconnectRequest):
-            with self.subTest(model=model.__name__):
-                with self.assertRaises(ValidationError):
-                    model(busids=["1-1 & whoami"])
+            with self.subTest(model=model.__name__), self.assertRaises(ValidationError):
+                model(busids=["1-1 & whoami"])
     def test_usbipd_persisted_guid_is_not_treated_as_busid(self):
         output = """
 Connected:

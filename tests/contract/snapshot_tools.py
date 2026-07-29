@@ -66,7 +66,7 @@ def normalized_openapi(app) -> dict[str, Any]:
 
 def config_shape(value: Any, path: tuple[str, ...] = ()) -> Any:
     if isinstance(value, dict):
-        if path == ('client_hosts',):
+        if path in {('client_hosts',), ('firmware_shares', 'hosts')}:
             sample = next(iter(value.values()), '')
             return {'<dynamic-key>': config_shape(sample, (*path, '<dynamic-key>'))}
         return {
