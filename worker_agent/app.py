@@ -466,6 +466,7 @@ class WorkerAgent:
                 "attach" if kind == "usbip_attach" else "detach",
                 str(payload.get("source_host") or ""),
                 list(payload.get("busids") or []),
+                str(payload.get("adb_server_socket") or "") or None,
             )
             self.runtime.save_command(command["id"], "completed", result)
             self._retry(

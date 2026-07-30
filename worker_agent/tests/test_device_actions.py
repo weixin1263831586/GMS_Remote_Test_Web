@@ -71,6 +71,34 @@ def test_usbip_attach_uses_root_owned_helper_and_validated_argv():
     assert run.call_args.kwargs["check"] is False
 
 
+def test_usbip_attach_probes_side_adb_when_proxy_is_active():
+    completed = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    probes = []
+
+    def probe(*args, **kwargs):
+        probes.append(kwargs.get("adb_server_socket"))
+        return []
+
+    with patch(
+        "worker_agent.inventory.subprocess.run",
+        return_value=completed,
+    ), patch(
+        "worker_agent.inventory.time.sleep"
+    ), patch(
+        "worker_agent.inventory.probe_devices",
+        side_effect=probe,
+    ):
+        execute_usbip_action(
+            "attach",
+            "192.0.2.10",
+            ["1-2"],
+            "tcp:127.0.0.1:5039",
+        )
+
+    assert probes
+    assert set(probes) == {"tcp:127.0.0.1:5039"}
+
+
 def test_usbip_attach_retries_transient_export_busy_error():
     busy = subprocess.CompletedProcess(
         [], 1, stdout="",

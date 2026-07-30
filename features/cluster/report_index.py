@@ -10,6 +10,10 @@ from .api import service
 def index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
     """Expose completed Worker results through the Reports page."""
     from features.reports import XMLReportParser, test_report_db
+    from features.reports.display import (
+        report_client_display_id,
+        report_name_from_result_dir,
+    )
 
     request_data = job.get("request") or {}
     suite_key = job.get("suite_key") or "XTS"
@@ -33,7 +37,11 @@ def index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
         "test_case": request_data.get("test_case", ""),
         "client_id": job.get("owner_id", "cluster"),
         "owner_id": job.get("owner_id", "cluster"),
-        "display_client_id": job.get("owner_id", "cluster"),
+        "display_client_id": report_client_display_id({
+            "owner_id": owner_id,
+            "worker_id": job.get("assigned_worker_id", ""),
+        }),
+        "report_name": report_name_from_result_dir(str(result_dir)),
         "devices": [item["device_id"] for item in job.get("leases", [])],
         "result_dir": str(result_dir),
         "suite_path": job.get("suite_path", ""),

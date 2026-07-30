@@ -71,6 +71,40 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(device["properties"]["product"], "rk")
         self.assertEqual(self.repo.list_suites("worker-246")[0]["suite_key"], "CTS:17_r1")
 
+    def test_heartbeat_updates_transport_for_same_device_id(self):
+        self.register()
+        base = {
+            "agent_version": "1",
+            "running_jobs": [],
+            "suites": [],
+        }
+        self.repo.heartbeat("worker-246", {
+            **base,
+            "devices": [{
+                "serial": "ABC",
+                "transport": "adb_proxy",
+                "state": "available",
+                "properties": {"adb_proxy_source_worker_id": "worker-local"},
+            }],
+        })
+
+        worker = self.repo.heartbeat("worker-246", {
+            **base,
+            "devices": [{
+                "serial": "ABC",
+                "transport": "local_usb",
+                "state": "available",
+                "properties": {"usb": "2-1"},
+            }],
+        })
+
+        self.assertEqual(worker["status"], "online")
+        devices = self.repo.list_devices("worker-246")
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0]["id"], "worker-246:ABC")
+        self.assertEqual(devices[0]["transport"], "local_usb")
+        self.assertEqual(devices[0]["properties"], {"usb": "2-1"})
+
     def test_suite_api_includes_cluster_inventory_display_fields(self):
         self.register()
         self.repo.heartbeat("worker-246", {

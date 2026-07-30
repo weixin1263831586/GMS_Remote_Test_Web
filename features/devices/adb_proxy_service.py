@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from typing import Any
@@ -17,6 +18,10 @@ class ADBProxyService:
     def __init__(self) -> None:
         self.config_manager: Any = None
         self._lock = threading.RLock()
+        # adb-hub and the persisted assignment map are shared resources.
+        # Serialize connect/add/disconnect workflows so concurrent requests
+        # cannot restart the same Hub from stale snapshots or lose devices.
+        self._operation_lock = asyncio.Lock()
 
     def assignments(self) -> dict[str, dict[str, Any]]:
         if self.config_manager is None:
@@ -120,6 +125,19 @@ class ADBProxyService:
         target_worker_id: str,
         devices: list[str],
     ) -> dict[str, Any]:
+        async with self._operation_lock:
+            return await self._connect(
+                source_worker_id,
+                target_worker_id,
+                devices,
+            )
+
+    async def _connect(
+        self,
+        source_worker_id: str,
+        target_worker_id: str,
+        devices: list[str],
+    ) -> dict[str, Any]:
         from features.cluster import get_cluster_service
         from features.cluster.api import _require_cluster_enabled, _run_worker_command
 
@@ -172,6 +190,51 @@ class ADBProxyService:
         if previous_assignment and not additions:
             raise HTTPException(409, "所选ADB设备已全部接入该目标主机")
         requested_devices = [*previous_devices, *additions]
+        from .integrations_api import _usbip_assignments
+
+        usbip_assignments = [
+            item for item in _usbip_assignments().values()
+            if str(item.get("worker_id") or "") == target_worker_id
+            and item.get("status") in {
+                "attaching", "attached", "unknown", "cleanup_required",
+            }
+        ]
+        if any(
+            item.get("status") in {"attaching", "unknown", "cleanup_required"}
+            for item in usbip_assignments
+        ):
+            raise HTTPException(
+                409,
+                f"{target_worker_id} 正在更新USB/IP设备，请稍后重试ADB接入",
+            )
+        usbip_serials = {
+            str(serial or "").strip()
+            for item in usbip_assignments
+            for serial in item.get("device_serials") or []
+            if str(serial or "").strip()
+        }
+        usbip_conflicts = sorted(set(additions) & usbip_serials)
+        if usbip_conflicts:
+            raise HTTPException(
+                409,
+                "接入主机已有同序列号USB/IP设备，请先断开USB/IP接入: "
+                + ", ".join(usbip_conflicts),
+            )
+        assigned_proxy_serials = {
+            str(serial or "").strip()
+            for current_key, item in self.assignments().items()
+            if current_key != key
+            and str(item.get("target_worker_id") or "") == target_worker_id
+            for serial in item.get("devices") or []
+            if str(serial or "").strip()
+        }
+        proxy_conflicts = sorted(set(additions) & assigned_proxy_serials)
+        if proxy_conflicts:
+            raise HTTPException(
+                409,
+                "接入主机的其他ADB Proxy来源已有同序列号设备: "
+                + ", ".join(proxy_conflicts),
+            )
         source_devices = {
             str(item.get("serial") or ""): item
             for item in cluster.repository.list_devices(source_worker_id)
@@ -257,7 +320,7 @@ class ADBProxyService:
                     "devices": requested_devices,
                     "access_token": grant,
                 },
-                timeout=30,
+                timeout=90,
             )
         except Exception:
             restored = False
@@ -291,7 +354,7 @@ class ADBProxyService:
                             "devices": previous_devices,
                             "access_token": restore_grant,
                         },
-                        timeout=30,
+                        timeout=90,
                     )
                     restored = True
                 except Exception:
@@ -332,6 +395,7 @@ class ADBProxyService:
             "success": True,
             "message": (
                 f"ADB设备已从 {source_worker_id} 接入 {target_worker_id}；"
+                f"设备：{', '.join(requested_devices)}；"
                 "目标主机可执行ADB/测试操作，Fastboot、锁定和烧写操作已禁用"
             ),
             "assignment": assignment,
@@ -339,6 +403,14 @@ class ADBProxyService:
         }
 
     async def disconnect(
+        self,
+        source_worker_id: str,
+        target_worker_id: str,
+    ) -> dict[str, Any]:
+        async with self._operation_lock:
+            return await self._disconnect(source_worker_id, target_worker_id)
+
+    async def _disconnect(
         self,
         source_worker_id: str,
         target_worker_id: str,
@@ -367,7 +439,7 @@ class ADBProxyService:
                     "action": "target_disconnect",
                     "source_worker_id": source_worker_id,
                 },
-                timeout=20,
+                timeout=90,
             )
         except Exception as exc:
             target_error = exc

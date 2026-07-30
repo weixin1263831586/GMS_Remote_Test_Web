@@ -32,6 +32,7 @@ from .suite_local_files import (
     local_suite_directory_response,
     local_suite_file_info,
     local_suite_file_response,
+    run_folder_suffix,
     search_suite_files_local,
 )
 from .suite_modules import search_latest_suite_modules
@@ -443,14 +444,14 @@ async def download_suite_directory(suite_path: str = Query(...), path: str = Que
     """Download a directory from the test suite as a zip archive (folder tree preserved)."""
     config = runtime.config_manager.load_config()
     try:
-        suite_root, _, remote_path = _build_suite_remote_path(suite_path, path, config)
+        suite_root, rel_path, remote_path = _build_suite_remote_path(suite_path, path, config)
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
 
     if is_config_host_local(config):
         try:
             return await asyncio.to_thread(
-                local_suite_directory_response, suite_root, remote_path
+                local_suite_directory_response, suite_root, remote_path, rel_path
             )
         except (ValueError, FileNotFoundError) as exc:
             status = 400 if isinstance(exc, ValueError) else 404
@@ -473,7 +474,7 @@ async def download_suite_directory(suite_path: str = Query(...), path: str = Que
         raise
 
     folder_name = info.get("name") or os.path.basename(remote_path) or "download"
-    filename = f"{folder_name}.zip"
+    filename = f"{folder_name}{run_folder_suffix(rel_path)}.zip"
     ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or "download.zip"
     quoted_filename = urllib.parse.quote(filename)
     zip_path = info["zip_path"]

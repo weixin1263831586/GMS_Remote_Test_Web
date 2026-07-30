@@ -199,6 +199,45 @@ def _merge_device_protocols(
     return list(protocols), protocols
 
 
+def _local_adb_proxy_sources(device_ids: list[str]) -> dict[str, dict[str, str]]:
+    """Resolve connected Controller imports from persisted ADB Proxy routes."""
+    try:
+        from features.cluster import get_cluster_service
+
+        local_worker_id = get_cluster_service().config.local_worker_id
+    except Exception:
+        local_worker_id = "worker-local"
+    try:
+        from .adb_proxy_service import adb_proxy_service
+
+        assignments = adb_proxy_service.assignments().values()
+    except Exception as exc:
+        logger.info("[ADB Proxy] Failed to read assignments for management: %s", exc)
+        return {}
+
+    sources: dict[str, dict[str, str]] = {}
+    for assignment in assignments:
+        if (
+            assignment.get("status") != "connected"
+            or str(assignment.get("target_worker_id") or "") != local_worker_id
+        ):
+            continue
+        source_worker_id = str(assignment.get("source_worker_id") or "")
+        target_worker_id = str(assignment.get("target_worker_id") or local_worker_id)
+        for source_serial in assignment.get("devices") or []:
+            source_serial = str(source_serial or "").strip()
+            if not source_serial:
+                continue
+            for device_id in device_ids:
+                if device_id == source_serial or device_id.endswith(f":{source_serial}"):
+                    sources[device_id] = {
+                        "source_worker_id": source_worker_id,
+                        "source_serial": source_serial,
+                        "target_worker_id": target_worker_id,
+                    }
+    return sources
+
+
 def _build_devices_management_payload(
     device_ids: list[str],
     device_data: dict[str, dict[str, str]],
@@ -217,10 +256,17 @@ def _build_devices_management_payload(
     all_sources = _prune_inactive_usbip_sources(
         device_ids, _known_usbip_sources(), config
     )
+    adb_proxy_sources = _local_adb_proxy_sources(device_ids)
     for device_id in device_ids:
         source = all_sources.get(device_id)
+        proxy_source = adb_proxy_sources.get(device_id)
         device_data.setdefault(device_id, {})["source_host"] = (
-            source.get("source", "Unknown")
+            (
+                f"{proxy_source['source_worker_id']} → "
+                f"{proxy_source['target_worker_id']}"
+            )
+            if proxy_source
+            else source.get("source", "Unknown")
             if source
             else f"{ubuntu_user}@{ubuntu_host}"
         )
@@ -232,7 +278,23 @@ def _build_devices_management_payload(
         props = device_data.get(device_id, {})
         lock_info = locks.get(device_id, {})
         source = all_sources.get(device_id)
+        proxy_source = adb_proxy_sources.get(device_id)
         protocol = device_protocols.get(device_id, "adb")
+        source_type = (
+            "adb_proxy" if proxy_source
+            else "usbip" if source
+            else "local"
+        )
+        source_host = (
+            (
+                f"{proxy_source['source_worker_id']} → "
+                f"{proxy_source['target_worker_id']}"
+            )
+            if proxy_source
+            else source.get("source", "Unknown")
+            if source
+            else f"{ubuntu_user}@{ubuntu_host}"
+        )
         devices_info.append(
             {
                 "device_id": device_id,
@@ -241,8 +303,25 @@ def _build_devices_management_payload(
                 "android_version": props.get("android_version", ""),
                 "battery_level": props.get("battery_level", ""),
                 "soc_model": props.get("soc_model", ""),
-                "source_type": "usbip" if source else "local",
-                "source_host": source.get("source", "Unknown") if source else f"{ubuntu_user}@{ubuntu_host}",
+                "source_type": source_type,
+                "source_host": source_host,
+                "transport": (
+                    "adb_proxy" if proxy_source
+                    else "usbip" if source
+                    else "local_usb"
+                ),
+                "is_usbip": bool(source),
+                "usbip_source_host": (
+                    source.get("source", "") if source else ""
+                ),
+                "adb_proxy_source_worker_id": (
+                    proxy_source.get("source_worker_id", "")
+                    if proxy_source else ""
+                ),
+                "adb_proxy_source_serial": (
+                    proxy_source.get("source_serial", "")
+                    if proxy_source else ""
+                ),
                 "status": "fastboot" if protocol == "fastboot" else "online",
                 "protocol": protocol,
                 "locked_by": lock_info.get("username", ""),
@@ -268,6 +347,11 @@ def _cached_management_payload(client_id: str) -> dict[str, Any] | None:
         if not device_id:
             continue
         lock = device_lock_manager.get_lock_status(device_id) or {}
+        is_adb_proxy = device.get("transport") == "adb_proxy"
+        is_usbip = bool(device.get("is_usbip"))
+        proxy_source_worker = str(
+            device.get("adb_proxy_source_worker_id") or ""
+        )
         devices_info.append(
             {
                 "device_id": device_id,
@@ -276,8 +360,25 @@ def _cached_management_payload(client_id: str) -> dict[str, Any] | None:
                 "android_version": device.get("android_version") or "",
                 "battery_level": device.get("battery_level") or "",
                 "soc_model": device.get("soc_model") or "",
-                "source_type": "usbip" if device.get("is_usbip") else "local",
-                "source_host": device.get("source") or device.get("source_host") or "-",
+                "source_type": (
+                    "adb_proxy" if is_adb_proxy
+                    else "usbip" if is_usbip
+                    else "local"
+                ),
+                "source_host": (
+                    f"{proxy_source_worker} → worker-local"
+                    if is_adb_proxy and proxy_source_worker
+                    else device.get("source")
+                    or device.get("source_host")
+                    or "-"
+                ),
+                "transport": device.get("transport") or "local_usb",
+                "is_usbip": is_usbip,
+                "usbip_source_host": device.get("source") or "",
+                "adb_proxy_source_worker_id": proxy_source_worker,
+                "adb_proxy_source_serial": (
+                    device.get("adb_proxy_source_serial") or ""
+                ),
                 "status": device.get("status") or "online",
                 "protocol": device.get("protocol") or (
                     "fastboot" if device.get("status") == "fastboot" else "adb"

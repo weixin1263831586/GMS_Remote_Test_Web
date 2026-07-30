@@ -5,7 +5,7 @@ set -euo pipefail
 # only the resulting static Linux package and never need GitHub or Rust.
 ADBPROXY_VERSION="0.4.5"
 ADBPROXY_SOURCE_COMMIT="f2beb4ff1bece8ab8f5d63c04dbfd6bf90aae8ee"
-ADBPROXY_SOURCE_SHA256="f2d39f873636da56bec8039fe97530eeda24b459191ca97c87bd23839b344dea"
+ADBPROXY_SOURCE_SHA256="347a1885fcd36cc721287d1f124370dacef8e2e1e2649d4f6c73516a87bf4d06"
 ADBPROXY_TARGET="x86_64-unknown-linux-musl"
 ADBPROXY_BUILDER_IMAGE="${GMS_ADB_PROXY_BUILDER_IMAGE:-rust:1.88-bookworm}"
 

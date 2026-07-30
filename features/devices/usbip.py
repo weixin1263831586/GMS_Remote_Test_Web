@@ -156,6 +156,7 @@ class USBIPManager:
         device_password: str | None = None,
         usbip_attach_host: str | None = None,
         selected_busids: list[str] | None = None,
+        adb_server_socket: str | None = None,
     ) -> dict[str, Any]:
         """Start USB/IP forwarding to the Ubuntu host over the given Windows device_host.
 
@@ -246,7 +247,8 @@ class USBIPManager:
                     attached, device_list = self._attach_devices(
                         ubuntu_ssh,
                         usbip_attach_host,
-                        busids
+                        busids,
+                        adb_server_socket=adb_server_socket,
                     )
 
                     if not attached:
@@ -259,7 +261,10 @@ class USBIPManager:
                         }
 
                     protocol_status = self._scope_protocol_status(
-                        self.probe_protocol_status(ubuntu_ssh),
+                        self.probe_protocol_status(
+                            ubuntu_ssh,
+                            adb_server_socket=adb_server_socket,
+                        ),
                         device_list,
                     )
 
@@ -321,21 +326,150 @@ class USBIPManager:
                 output, config.get("usbip_vid_pid")
             )
             labels = {}
+            vid_pid_by_busid: dict[str, str] = {}
             for line in output.splitlines():
                 stripped = line.strip()
                 parts = stripped.split()
                 if parts and parts[0] in busids:
-                    labels[parts[0]] = re.sub(r"\s+", " ", stripped)
+                    clean = re.sub(r"\s+", " ", stripped)
+                    labels[parts[0]] = clean
+                    vp = re.search(r"([0-9A-Fa-f]{4}):([0-9A-Fa-f]{4})", clean)
+                    if vp:
+                        vid_pid_by_busid[parts[0]] = f"{vp[1].lower()}:{vp[2].lower()}"
+            serial_by_vid_pid = self._query_windows_usb_serials(
+                ssh,
+                {
+                    value.split(":", 1)[0]
+                    for value in vid_pid_by_busid.values()
+                },
+            )
+            serial_by_busid = {
+                busid: (
+                    serial_by_vid_pid.get(vid_pid_by_busid[busid], "")
+                    or (
+                        serial_by_vid_pid.get("*", "")
+                        if len(busids) == 1 else ""
+                    )
+                )
+                for busid in busids
+                if busid in vid_pid_by_busid
+            }
+            if len(busids) == 1 and not serial_by_busid.get(busids[0]):
+                adb_serials = self._query_windows_adb_serials(ssh)
+                if len(adb_serials) == 1:
+                    serial_by_busid[busids[0]] = adb_serials[0]
             return {
                 "success": True,
                 "device_host": device_host,
                 "devices": [
-                    {"busid": item, "label": labels.get(item, item)}
+                    {
+                        "busid": item,
+                        "serial": serial_by_busid.get(item, ""),
+                        "label": self._append_serial(
+                            labels.get(item, item),
+                            serial_by_busid.get(item),
+                        ),
+                    }
                     for item in busids
                 ],
             }
         finally:
             ssh.close()
+
+    def _query_windows_usb_serials(
+        self,
+        ssh,
+        vendor_ids: set[str] | None = None,
+    ) -> dict[str, str]:
+        """Query Windows for USB device serials, keyed by ``vid:pid``.
+
+        Parses ``Get-PnpDevice`` output to extract device IDs like
+        ``USB\\VID_xxxx&PID_yyyy\\SERIAL``. When multiple devices share the same
+        VID:PID the value is cleared (``""``) since the serial cannot be
+        uniquely mapped back to a busid.
+        """
+        ps = (
+            "Get-PnpDevice -PresentOnly -Class USB | "
+            "ForEach-Object { $_.InstanceId }"
+        )
+        try:
+            stdout, _stderr, code = self.ssh_manager.execute_command(
+                ssh, f'powershell -NoProfile -Command "{ps}"', timeout=15
+            )
+        except Exception:
+            return {}
+        if code != 0 or not stdout:
+            return {}
+        raw: dict[str, list[str]] = {}
+        candidates: list[str] = []
+        for line in stdout.splitlines():
+            match = re.search(
+                r"USB\\VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})"
+                r"([^\\]*)\\(.+)",
+                line.strip(),
+            )
+            if not match:
+                continue
+            vid, pid, interface, rest = match.groups()
+            vid = vid.lower()
+            pid = pid.lower()
+            if vendor_ids and vid not in vendor_ids:
+                continue
+            # Interface instance IDs (MI_XX) are Windows-generated values, not
+            # stable Android serials.
+            if "&MI_" in interface.upper():
+                continue
+            serial = rest.strip().split("&")[0].strip()
+            if not serial or serial.startswith(("REV_", "MI_")):
+                continue
+            raw.setdefault(f"{vid}:{pid}", []).append(serial)
+            candidates.append(serial)
+        result = {
+            key: (values[0] if len(set(values)) == 1 else "")
+            for key, values in raw.items()
+        }
+        unique_candidates = set(candidates)
+        if len(unique_candidates) == 1:
+            # Android changes PID across adb/recovery/rockusb modes. When the
+            # selected USB/IP inventory contains exactly one busid, this
+            # vendor-scoped fallback still maps that physical device safely.
+            result["*"] = next(iter(unique_candidates))
+        return result
+
+    def _query_windows_adb_serials(self, ssh) -> list[str]:
+        """Return stable Android serials visible to Windows ADB."""
+        try:
+            stdout, stderr, code = self.ssh_manager.execute_command(
+                ssh,
+                "adb devices",
+                timeout=15,
+            )
+        except Exception:
+            return []
+        if code != 0:
+            logger.debug(
+                "[USB/IP] Windows adb inventory failed: %s",
+                (stderr or stdout or "").strip(),
+            )
+            return []
+        states = parse_adb_device_states(stdout)
+        return sorted({
+            serial
+            for serial, state in states.items()
+            if state in {
+                "device",
+                "recovery",
+                "sideload",
+                "unauthorized",
+                "offline",
+            }
+        })
+
+    @staticmethod
+    def _append_serial(label: str, serial: str | None) -> str:
+        if not serial:
+            return label
+        return f"{label}  [{serial}]"
 
     def bind_source_devices(
         self,
@@ -659,11 +793,18 @@ class USBIPManager:
         self,
         ssh,
         device_ip: str,
-        busids: list[str]
+        busids: list[str],
+        adb_server_socket: str | None = None,
     ) -> tuple[list[str], list[str]]:
         """Attach the busids on Ubuntu, returning (attached_busids, newly-seen adb device ids)."""
         try:
-            stdout_before, _, _ = self.ssh_manager.execute_command(ssh, 'adb devices')
+            adb_devices_command = self._adb_devices_command(
+                adb_server_socket
+            )
+            stdout_before, _, _ = self.ssh_manager.execute_command(
+                ssh,
+                adb_devices_command,
+            )
             devices_before = set(DeviceUtils.parse_adb_devices(stdout_before))
             adb_states_before = parse_adb_device_states(stdout_before)
             fastboot_before_out, fastboot_before_err, _ = self.ssh_manager.execute_command(
@@ -687,7 +828,10 @@ class USBIPManager:
                     attached.append(busid)
 
             if not attached:
-                protocol_status = self.probe_protocol_status(ssh)
+                protocol_status = self.probe_protocol_status(
+                    ssh,
+                    adb_server_socket=adb_server_socket,
+                )
                 visible_devices = protocol_status.get("adb_ready") or []
                 if visible_devices:
                     logger.info(
@@ -711,7 +855,11 @@ class USBIPManager:
             devices_after = set()
             deadline = time.time() + 30
             while time.time() < deadline:
-                stdout_after, _, _ = self.ssh_manager.execute_command(ssh, 'adb devices', timeout=8)
+                stdout_after, _, _ = self.ssh_manager.execute_command(
+                    ssh,
+                    adb_devices_command,
+                    timeout=8,
+                )
                 adb_states = parse_adb_device_states(stdout_after)
                 devices_after = set(DeviceUtils.parse_adb_devices(stdout_after))
                 logger.info(f"Devices after attach: {devices_after}")
@@ -766,7 +914,21 @@ class USBIPManager:
             logger.error(f"Error attaching devices: {e}")
             return [], []
 
-    def probe_protocol_status(self, ssh) -> dict[str, Any]:
+    @staticmethod
+    def _adb_devices_command(adb_server_socket: str | None = None) -> str:
+        if not adb_server_socket:
+            return "adb devices"
+        return (
+            "ADB_SERVER_SOCKET="
+            + shlex.quote(adb_server_socket)
+            + " adb devices"
+        )
+
+    def probe_protocol_status(
+        self,
+        ssh,
+        adb_server_socket: str | None = None,
+    ) -> dict[str, Any]:
         """Probe Android protocol states after USB/IP transport is attached."""
         status: dict[str, Any] = {
             "adb": {},
@@ -779,7 +941,11 @@ class USBIPManager:
             "mode": "unknown",
         }
         try:
-            adb_out, adb_err, _ = self.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
+            adb_out, adb_err, _ = self.ssh_manager.execute_command(
+                ssh,
+                self._adb_devices_command(adb_server_socket),
+                timeout=8,
+            )
             adb_states = parse_adb_device_states(adb_out or adb_err or "")
             status["adb"] = adb_states
             status["adb_ready"] = [serial for serial, state in adb_states.items() if state == "device"]

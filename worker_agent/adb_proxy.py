@@ -356,7 +356,9 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     try:
         _restart_hub(config_path)
         missing = list(devices)
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + _hub_device_wait_seconds(
+            len(config.get("backend") or [])
+        )
         while missing and time.monotonic() < deadline:
             visible = {
                 item["serial"] for item in _adb_devices()
@@ -449,19 +451,20 @@ def _status() -> dict[str, Any]:
 
 def _restart_hub(config_path: Path) -> None:
     root = _state_root()
+    config = _read_hub_config(config_path)
     _stop_managed(root / "hub.pid", "adb-hub")
-    subprocess.run(
-        ["adb", "kill-server"],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
+    # Kill any ADB server that may still own :5037 or :5039. A leftover
+    # fork-server on either port prevents the new adb-hub (and its side
+    # ADB on local_adb_port=5039) from binding cleanly, which surfaces as
+    # "protocol fault (couldn't read status): Connection reset by peer".
+    _force_kill_adb_port(5037)
+    _force_kill_adb_port(5039)
     process = subprocess.Popen(
         [
             _binary("adb-hub"),
             "--config", str(config_path),
             "--daemon",
+            "--single-user",
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -469,10 +472,51 @@ def _restart_hub(config_path: Path) -> None:
         start_new_session=True,
     )
     _write_pid(root / "hub.pid", process.pid)
-    ready = _wait_tcp("127.0.0.1", 5037)
-    if not ready or process.poll() is not None:
+    tcp_ready = _wait_tcp("127.0.0.1", 5037)
+    adb_ready, adb_error = (
+        _wait_adb_server(
+            process,
+            timeout=_hub_start_wait_seconds(
+                len(config.get("backend") or [])
+            ),
+        )
+        if tcp_ready
+        else (False, "")
+    )
+    if not adb_ready or process.poll() is not None:
         _stop_managed(root / "hub.pid", "adb-hub")
-        raise RuntimeError("adb-hub 未能监听5037端口")
+        detail = f": {adb_error}" if adb_error else ""
+        raise RuntimeError(f"adb-hub 未能在5037端口完成ADB协议初始化{detail}")
+
+
+def _hub_start_wait_seconds(backend_count: int) -> float:
+    """Allow for adb-hub's sequential compatibility and inventory probes."""
+    return float(max(20, 15 + max(0, backend_count) * 15))
+
+
+def _hub_device_wait_seconds(backend_count: int) -> float:
+    """Wait for the initial poller to publish all configured backends."""
+    return float(max(15, 10 + max(0, backend_count) * 10))
+
+
+def _force_kill_adb_port(port: int) -> None:
+    """Kill every process listening on the given loopback port.
+
+    ``adb kill-server`` can fail when the server is in a half-broken state
+    (the exact scenario that triggers the protocol fault). Use ``fuser`` to
+    forcefully clear the port so adb-hub can bind cleanly.
+    """
+    for socket_addr in (f"127.0.0.1:{port}", f"127.0.0.1:{port}"):
+        _kill_adb_server(socket_addr)
+    # fuser fallback: OS-level kill of anything still on the port.
+    subprocess.run(
+        ["fuser", "-k", f"{port}/tcp"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    time.sleep(0.5)
 
 
 def _read_hub_config(path: Path) -> dict[str, Any]:
@@ -602,9 +646,16 @@ def _private_bind_address(value: str) -> str:
         )[0]
 
 
-def _stop_side_adb() -> None:
+def _kill_adb_server(socket_addr: str = "127.0.0.1:5037") -> None:
+    """Kill an ADB server on the given socket address.
+
+    adb-hub spawns a side ADB server on local_adb_port (5039). Both the main
+    (:5037) and side (:5039) servers must be stopped before (re)starting the
+    hub, otherwise a stale fork-server keeps the port and the new instance
+    fails its ADB protocol handshake.
+    """
     env = dict(os.environ)
-    env["ADB_SERVER_SOCKET"] = "tcp:127.0.0.1:5039"
+    env["ADB_SERVER_SOCKET"] = f"tcp:{socket_addr}"
     subprocess.run(
         ["adb", "kill-server"],
         capture_output=True,
@@ -613,6 +664,10 @@ def _stop_side_adb() -> None:
         check=False,
         env=env,
     )
+
+
+def _stop_side_adb() -> None:
+    _kill_adb_server("127.0.0.1:5039")
 
 
 def _toml_string(value: Any) -> str:
@@ -628,6 +683,68 @@ def _wait_tcp(host: str, port: int, timeout: float = 8.0) -> bool:
         except OSError:
             time.sleep(0.1)
     return False
+
+
+def _wait_adb_server(process: Any, timeout: float = 20.0) -> tuple[bool, str]:
+    """Wait until the managed Hub answers an ADB inventory request.
+
+    A bound TCP socket is not sufficient: adb-hub reserves :5037 before its
+    side ADB server and remote backends finish initialization. An immediate
+    ``adb devices`` can therefore hit a short connection-refused/startup
+    window. Retry that protocol request while the managed process is alive.
+    """
+    deadline = time.monotonic() + timeout
+    last_error = ""
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False, last_error or "adb-hub进程已退出"
+        try:
+            _adb_devices_safe()
+            return True, ""
+        except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            last_error = str(exc).strip()
+            time.sleep(0.5)
+    return False, last_error
+
+
+def _adb_devices_safe() -> list[dict[str, str]]:
+    """Like _adb_devices but never auto-starts an ADB server.
+
+    During hub startup the default ``adb devices`` client may try to spawn
+    its own :5037 server if the hub is not ready yet, which races with the
+    hub for the port. Forcing start-server=0 avoids that.
+    """
+    env = dict(os.environ)
+    env["ADB_SERVER_SOCKET"] = "tcp:127.0.0.1:5037"
+    completed = subprocess.run(
+        ["adb", "devices", "-l"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+        env=env,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or "adb devices failed").strip())
+    devices: list[dict[str, str]] = []
+    for line in completed.stdout.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        serial, state = fields[:2]
+        properties = {
+            key: value
+            for field in fields[2:]
+            if ":" in field
+            for key, value in [field.split(":", 1)]
+        }
+        devices.append({
+            "serial": serial,
+            "state": state,
+            "model": properties.get("model", ""),
+            "product": properties.get("product", ""),
+        })
+    return devices
 
 
 def _managed_running(path: Path, expected: str) -> bool:

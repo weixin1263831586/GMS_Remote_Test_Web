@@ -225,6 +225,103 @@ class RuntimeUiHarness(unittest.TestCase):
 
 
 class RuntimeUiSmokeTests(RuntimeUiHarness):
+    def test_user_actions_and_report_identity_use_friendly_horizontal_display(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """
+                () => {
+                    displayUsersList([{
+                        client_id: 'hcq@172.16.14.66',
+                        user_id: 'N387pLbIBhpMw5JsWUL9hg',
+                        username: 'hcq',
+                        ip: '172.16.14.66',
+                        source_label: '内网',
+                        source: 'internal',
+                        running: true,
+                        configured: true,
+                        devices: ['RK3576GMS6'],
+                        cluster_jobs: [{
+                            id: 'job-1',
+                            worker_id: 'worker-local',
+                            attempt_id: 'attempt-1',
+                            status: 'running'
+                        }]
+                    }, {
+                        client_id: 'wlq@172.16.14.67',
+                        username: 'wlq',
+                        ip: '172.16.14.67',
+                        source_label: '内网',
+                        source: 'internal',
+                        running: false,
+                        configured: true,
+                        devices: [],
+                        cluster_jobs: []
+                    }]);
+                    const actions = Array.from(document.querySelectorAll(
+                        '#users-table-body tr td:last-child > div'
+                    ));
+                    const buttons = Array.from(
+                        document.querySelectorAll('#users-table-body button')
+                    );
+                    displayTestReports([{
+                        timestamp: 'cluster-job-941843984fd44e1b9111532981e188c9',
+                        report_name: '2026.07.30_10.39.50.173_6846',
+                        display_client_id: 'hcq@172.16.14.233',
+                        test_type: 'CTS',
+                        suite_version: '17_r1',
+                        worker_id: 'worker-local',
+                        pass: 1,
+                        fail: 0,
+                        total: 1
+                    }]);
+                    const reportCells = document.querySelectorAll(
+                        '#reports-table-body tr:first-child td'
+                    );
+                    return {
+                        actionDisplays: actions.map(
+                            action => getComputedStyle(action).display
+                        ),
+                        actionColumns: actions.map(
+                            action => getComputedStyle(action).gridTemplateColumns
+                        ),
+                        buttonLabels: buttons.map(button => button.textContent.trim()),
+                        removeLefts: Array.from(
+                            document.querySelectorAll(
+                                '#users-table-body button[onclick^="removeUser"]'
+                            )
+                        ).map(button => Math.round(
+                            button.getBoundingClientRect().left
+                        )),
+                        reportClient: reportCells[0].textContent.trim(),
+                        reportSuite: reportCells[2].textContent.trim(),
+                        reportWorker: reportCells[3].textContent.trim(),
+                        reportName: reportCells[4].textContent.trim(),
+                        reportTimestampTitle: reportCells[4].title
+                    };
+                }
+                """
+            )
+
+            self.assertEqual(result["actionDisplays"], ["grid", "grid"])
+            self.assertEqual(result["actionColumns"], ["44px 44px", "44px 44px"])
+            self.assertEqual(result["buttonLabels"], ["任务", "移除", "移除"])
+            self.assertEqual(len(set(result["removeLefts"])), 1)
+            self.assertEqual(result["reportClient"], "hcq@172.16.14.233")
+            self.assertEqual(result["reportSuite"], "android-cts-17_r1")
+            self.assertEqual(result["reportWorker"], "worker-local")
+            self.assertEqual(
+                result["reportName"],
+                "2026.07.30_10.39.50.173_6846",
+            )
+            self.assertEqual(
+                result["reportTimestampTitle"],
+                "cluster-job-941843984fd44e1b9111532981e188c9",
+            )
+        finally:
+            page.close()
+
     def test_auth_status_failure_does_not_stack_terminal_elevation_dialog(self):
         page = self.new_page()
         page.route(
@@ -792,6 +889,37 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     body='{"success":true,"devices":[{"busid":"1-2","label":"Android 1-2"}]}',
                 )
                 return
+            if path.startswith("/api/usbip/status"):
+                requests.append({
+                    "method": request.method,
+                    "path": path,
+                    "body": None,
+                })
+                connected = any(
+                    item["method"] == "POST"
+                    and item["path"] == "/api/usbip/connect"
+                    for item in requests
+                ) and not any(
+                    item["method"] == "POST"
+                    and item["path"] == "/api/usbip/disconnect"
+                    for item in requests
+                )
+                selection = (
+                    ',"cluster_selections":[{"device_host":"tester@192.0.2.10",'
+                    '"source_host":"","worker_id":"worker-local","busids":["1-2"],'
+                    '"device_serials":["D1"],'
+                    '"device_serials_by_busid":{"1-2":["D1"]}}]'
+                    if connected else ',"cluster_selections":[]'
+                )
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=(
+                        f'{{"success":true,"connected":{str(connected).lower()},'
+                        f'"device_host":"tester@192.0.2.10"{selection}}}'
+                    ),
+                )
+                return
             if path == "/api/adb-forward/status":
                 requests.append({
                     "method": request.method,
@@ -871,14 +999,21 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 }"""
             )
             self.assertEqual(attach_style["resize"], "none")
-            self.assertEqual(attach_style["width"], 560)
-            self.assertEqual(attach_style["height"], 410)
+            self.assertEqual(attach_style["width"], 620)
+            expect(
+                page.locator("#usbip-attach-modal .modal-content")
+            ).to_have_class(re.compile(r"\bdevice-routing-modal-content\b"))
             page.evaluate("submitUsbipAttach()")
+            self.assertTrue(page.locator("#usbip-attach-modal").is_visible())
+            expect(page.locator("#usbip-source-device")).to_be_disabled()
+            expect(page.locator("#usbip-source-device")).to_contain_text(
+                "该来源设备均已接入"
+            )
             page.evaluate("setupAdbPortForward()")
             self.assertTrue(page.locator("#adb-proxy-modal").is_visible())
-            self.assertIn(
-                "10.10.10.206",
-                page.locator("#adb-proxy-source-host").inner_text(),
+            self.assertEqual(
+                page.locator("#adb-proxy-source-host").inner_text().strip(),
+                "worker-source",
             )
             page.evaluate("submitAdbProxyConnect()")
 
@@ -890,8 +1025,12 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     ("POST", "/api/devices/wifi"),
                     ("POST", "/api/devices/bootloader-lock"),
                     ("POST", "/api/devices/scrcpy"),
+                    ("GET", "/api/usbip/status"),
+                    ("GET", "/api/usbip/status"),
                     ("GET", "/api/devices/list?force_refresh=1"),
                     ("POST", "/api/usbip/connect"),
+                    ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
+                    ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
                     ("GET", "/api/adb-forward/status"),
                     ("POST", "/api/adb-forward/start"),
                     ("GET", "/api/adb-forward/status"),
@@ -906,7 +1045,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(requests[3]["body"], {"devices": ["D1"]})
             self.assertEqual(requests[4]["body"], {"devices": ["D1"]})
             self.assertEqual(
-                requests[6]["body"],
+                next(
+                    item["body"] for item in requests
+                    if item["path"] == "/api/usbip/connect"
+                ),
                 {
                     "device_host": "tester@192.0.2.10",
                     "worker_id": "worker-local",
@@ -915,7 +1057,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 },
             )
             self.assertEqual(
-                requests[8]["body"],
+                next(
+                    item["body"] for item in requests
+                    if item["path"] == "/api/adb-forward/start"
+                ),
                 {
                     "source_worker_id": "worker-source",
                     "target_worker_id": "worker-local",
@@ -924,10 +1069,15 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
 
             requests.clear()
+            page.evaluate("closeAdbProxyModal()")
             page.evaluate("setupUsbipForward()")
-            self.assertTrue(page.locator("#usbip-detach-modal").is_visible())
-            detach_style = page.locator(
-                "#usbip-detach-modal .modal-content"
+            self.assertTrue(page.locator("#usbip-attach-modal").is_visible())
+            self.assertIn(
+                "D1",
+                page.locator("#usbip-assignments").inner_text(),
+            )
+            manage_style = page.locator(
+                "#usbip-attach-modal .modal-content"
             ).evaluate(
                 """element => {
                     const style = getComputedStyle(element);
@@ -938,23 +1088,50 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     };
                 }"""
             )
-            self.assertEqual(detach_style["resize"], "none")
-            self.assertEqual(detach_style["width"], 560)
-            self.assertEqual(detach_style["height"], 390)
-            page.evaluate("submitUsbipDetach()")
-            self.assertEqual(
-                [(item["method"], item["path"]) for item in requests],
-                [
-                    ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
-                    ("POST", "/api/usbip/disconnect"),
-                    # Remote/Worker detachments do not emit a local USB hotplug
-                    # event, so the UI must refresh the device list itself right
-                    # after the backend confirms the disconnect.
-                    ("GET", "/api/devices/list?force_refresh=1"),
-                ],
+            self.assertEqual(manage_style["resize"], "none")
+            self.assertEqual(manage_style["width"], 620)
+            expect(
+                page.locator("#usbip-attach-modal .modal-content")
+            ).to_have_class(re.compile(r"\bdevice-routing-modal-content\b"))
+            page.evaluate(
+                "document.querySelector('#usbip-assignments button').click()"
+            )
+            for _ in range(20):
+                if any(
+                    item["path"] == "/api/usbip/disconnect"
+                    for item in requests
+                ):
+                    break
+                page.wait_for_timeout(50)
+            relevant = [
+                (index, item)
+                for index, item in enumerate(requests)
+                if item["path"] == "/api/usbip/disconnect"
+                or item["path"].startswith("/api/usbip/status?device_host=")
+            ]
+            disconnect_index = next(
+                index for index, item in enumerate(requests)
+                if item["path"] == "/api/usbip/disconnect"
             )
             self.assertEqual(
-                requests[1]["body"],
+                [
+                    (item["method"], item["path"])
+                    for index, item in relevant
+                    if index <= disconnect_index
+                ],
+                [
+                    ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
+                    ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
+                    ("POST", "/api/usbip/disconnect"),
+                ],
+            )
+            self.assertTrue(page.locator("#usbip-attach-modal").is_visible())
+            self.assertTrue(any(
+                item["path"] == "/api/devices/list?force_refresh=1"
+                for item in requests[disconnect_index + 1:]
+            ))
+            self.assertEqual(
+                requests[disconnect_index]["body"],
                 {
                     "device_host": "tester@192.0.2.10",
                     "worker_id": "worker-local",
@@ -1063,19 +1240,48 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
     def test_adb_proxy_device_is_visible_for_tests_but_blocks_usb_actions(self):
         page = self.new_page()
         try:
+            page.set_viewport_size({"width": 1920, "height": 1080})
             self.goto_shell(page)
             page.evaluate(
                 """
-                state.devices = [{
-                    device_id: 'ats-worker-246:RK3576GMS1',
-                    serial: 'RK3576GMS1',
-                    worker_id: 'ats-worker-246',
-                    status: 'online',
-                    protocol: 'adb',
-                    transport: 'adb_proxy',
-                    adb_proxy_source_worker_id: 'worker-local',
-                    locked: false
-                }];
+                state.devices = [
+                    {
+                        device_id: 'ats-worker-246:RK3576GMS1',
+                        serial: 'RK3576GMS1',
+                        worker_id: 'ats-worker-246',
+                        status: 'online',
+                        protocol: 'adb',
+                        transport: 'adb_proxy',
+                        adb_proxy_source_worker_id: 'worker-local',
+                        locked: false
+                    },
+                    {
+                        device_id: 'LOCAL-2',
+                        serial: 'LOCAL-2',
+                        status: 'online',
+                        protocol: 'adb',
+                        transport: 'local_usb',
+                        locked: false
+                    },
+                    {
+                        device_id: 'LOCAL-3',
+                        serial: 'LOCAL-3',
+                        status: 'online',
+                        protocol: 'adb',
+                        transport: 'local_usb',
+                        locked: false
+                    },
+                    {
+                        device_id: 'ats-worker-246:USBIP001',
+                        serial: 'USBIP001',
+                        status: 'online',
+                        protocol: 'adb',
+                        transport: 'usbip',
+                        is_usbip: true,
+                        usbip_source_host: 'tester@192.0.2.10',
+                        locked: false
+                    }
+                ];
                 state.selectedDevices = new Set(['ats-worker-246:RK3576GMS1']);
                 renderDevices();
                 """
@@ -1085,8 +1291,64 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 '.device-item[data-device-id="ats-worker-246:RK3576GMS1"]'
             )
             expect(device.locator(".device-id")).to_have_text("RK3576GMS1")
-            expect(device).to_contain_text(
-                "ADB Proxy · worker-local → ats-worker-246"
+            expect(device.locator(".device-source")).to_have_text(
+                "ADB · worker-local"
+            )
+            expect(
+                page.locator(
+                    '.device-item[data-device-id="ats-worker-246:USBIP001"] '
+                    + '.device-source'
+                )
+            ).to_have_text("USB/IP · 192.0.2.10")
+            locked_usbip = page.evaluate(
+                """() => {
+                    const card = buildDeviceItemEl({
+                        deviceId: 'USBIP-LOCKED',
+                        displaySerial: 'RK3576GMS1',
+                        isLocked: true,
+                        lockedBy: 'hcq@172.16.14.66',
+                        selectable: false,
+                        transport: 'usbip',
+                        isUsbip: true,
+                        usbipSourceHost: 'hcq@172.16.14.66'
+                    });
+                    return {
+                        infoLines: Array.from(
+                            card.querySelector('.device-info').children
+                        ).map(element => element.textContent),
+                        status: card.querySelector('.device-status').textContent,
+                        lockRows: card.querySelectorAll('.lock-status').length,
+                        title: card.title
+                    };
+                }"""
+            )
+            self.assertEqual(
+                locked_usbip["infoLines"],
+                ["RK3576GMS1", "USB/IP · 172.16.14.66"],
+            )
+            self.assertEqual(locked_usbip["status"], "已分配")
+            self.assertEqual(locked_usbip["lockRows"], 0)
+            self.assertIn("占用：hcq@172.16.14.66", locked_usbip["title"])
+            self.assertEqual(
+                device.locator(".device-info").evaluate(
+                    "element => getComputedStyle(element).columnGap"
+                ),
+                "12px",
+            )
+            self.assertEqual(
+                page.locator("#device-list-left .device-item").count(),
+                4,
+            )
+            self.assertEqual(
+                page.locator("#device-list-left").evaluate(
+                    """element => getComputedStyle(element)
+                        .gridTemplateColumns.split(' ').length"""
+                ),
+                3,
+            )
+            self.assertEqual(
+                page.locator("#device-list-right .device-item").count(),
+                0,
             )
             expect(device.locator('input[type="checkbox"]')).to_be_enabled()
             self.assertTrue(page.evaluate("validateDeviceSelection()"))
@@ -1181,12 +1443,22 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     };
                     adbProxyOperationRunning = false;
                     renderAdbProxyHosts();
+                    renderAdbProxyAssignments();
                     return {
                         source: document.getElementById('adb-proxy-source-host').value,
+                        sourceLabel: document.getElementById(
+                            'adb-proxy-source-host'
+                        ).selectedOptions[0]?.textContent,
                         target: document.getElementById('adb-proxy-target-host').value,
+                        targetLabel: document.getElementById(
+                            'adb-proxy-target-host'
+                        ).selectedOptions[0]?.textContent,
                         devices: Array.from(
                             document.getElementById('adb-proxy-source-devices').options
                         ).map(option => option.value).filter(Boolean),
+                        assignment: document.getElementById(
+                            'adb-proxy-assignments'
+                        ).textContent,
                         message: document.getElementById('adb-proxy-message').textContent,
                         submitDisabled: document.getElementById(
                             'adb-proxy-connect-submit'
@@ -1197,8 +1469,16 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
 
             self.assertEqual(result["source"], "worker-source")
+            self.assertEqual(result["sourceLabel"], "worker-source")
             self.assertEqual(result["target"], "worker-target")
+            self.assertEqual(result["targetLabel"], "worker-target")
             self.assertEqual(result["devices"], ["RK-B"])
+            self.assertIn(
+                "worker-source → worker-target｜设备：RK-A",
+                result["assignment"],
+            )
+            self.assertNotIn("172.16.14.", result["assignment"])
+            self.assertNotIn("connected", result["assignment"])
             self.assertIn("还有 1 台", result["message"])
             self.assertFalse(result["submitDisabled"])
         finally:
@@ -1268,6 +1548,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "#adb-proxy-modal .adb-proxy-modal-content"
             ).bounding_box()["height"]
             self.assertLess(modal_height, 550)
+            expect(
+                page.locator("#adb-proxy-modal .modal-content")
+            ).to_have_class(re.compile(r"\bdevice-routing-modal-content\b"))
         finally:
             page.close()
 
@@ -1530,6 +1813,16 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "source_host": "ui-admin@127.0.0.1",
                     "status": "fastboot",
                     "protocol": "fastboot",
+                }, {
+                    "device_id": "REMOTE-PROXY",
+                    "serial_no": "REMOTE-PROXY",
+                    "source_type": "adb_proxy",
+                    "source_host": "worker-1 → worker-local",
+                    "transport": "adb_proxy",
+                    "adb_proxy_source_worker_id": "worker-1",
+                    "adb_proxy_source_serial": "REMOTE-PROXY",
+                    "status": "online",
+                    "protocol": "adb",
                 }],
             }),
         )
@@ -1552,6 +1845,18 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "worker_id": "worker-1",
                     "state": "available",
                     "properties": {"model": "Remote Model"},
+                }, {
+                    "id": "worker-1:REMOTE-PROXY",
+                    "serial": "REMOTE-PROXY",
+                    "worker_id": "worker-1",
+                    "state": "available",
+                    "properties": {"model": "Proxy Source"},
+                }, {
+                    "id": "worker-1:REMOTE-OFFLINE",
+                    "serial": "REMOTE-OFFLINE",
+                    "worker_id": "worker-1",
+                    "state": "offline",
+                    "properties": {"model": "Offline Model"},
                 }],
             })
 
@@ -1600,12 +1905,15 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.evaluate("switchPage('devices')")
             expect(page.locator("#devices-table-body")).to_contain_text("LOCAL-1")
             expect(page.locator("#devices-table-body")).to_contain_text("LOCAL-FB")
+            expect(page.locator("#devices-table-body")).to_contain_text("REMOTE-PROXY")
+            expect(page.locator("#devices-table-body")).to_contain_text("ADB Proxy")
             expect(page.locator("#devices-table-body")).to_contain_text("Fastboot")
             expect(page.locator("#devices-table-body")).not_to_contain_text("REMOTE-1")
             expect(page.locator("#devices-table-body")).to_contain_text("Local Group")
             expect(page.locator("#devices-table-body")).not_to_contain_text("Remote Group")
             expect(page.locator("#cluster-devices-count").locator("..")).to_be_hidden()
             expect(page.locator("#fastboot-devices-count")).to_have_text("1")
+            expect(page.locator("#local-devices-count")).to_have_text("3")
             fastboot_row = page.locator("#devices-table-body tr", has_text="LOCAL-FB")
             expect(fastboot_row.get_by_role("button", name="🐧 adb shell")).to_be_disabled()
             self.assertEqual(cluster_device_requests, [])
@@ -1614,15 +1922,22 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "GmsWorkspace.update({scope_mode: 'cluster', worker_id: 'worker-1'})"
             )
             expect(page.locator("#devices-table-body")).to_contain_text("REMOTE-1")
+            expect(
+                page.locator("#devices-table-body tr", has_text="REMOTE-PROXY")
+            ).to_have_count(2)
+            expect(page.locator("#devices-table-body")).not_to_contain_text(
+                "REMOTE-OFFLINE"
+            )
             expect(page.locator("#devices-table-body")).not_to_contain_text("Remote Group")
             expect(
                 page.locator(
                     "#devices-table-body tr.device-group-row",
-                    has_text="Worker 1 · worker-1",
+                    has_text="worker-1",
                 )
-            ).to_contain_text("Worker 1 · worker-1")
+            ).to_contain_text("worker-1")
             expect(page.locator("#cluster-devices-count").locator("..")).to_be_visible()
-            expect(page.locator("#cluster-devices-count")).to_have_text("1")
+            expect(page.locator("#cluster-devices-count")).to_have_text("2")
+            expect(page.locator("#local-devices-count")).to_have_text("3")
             self.assertGreaterEqual(len(cluster_device_requests), 1)
         finally:
             page.evaluate(
@@ -1878,10 +2193,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             self.assertFalse(ready["disabled"])
             self.assertEqual(ready["busy"], "false")
-            self.assertEqual(
-                ready["label"],
-                "ATS Controller Local Worker (ats-041055-64g)",
-            )
+            self.assertEqual(ready["label"], "worker-local")
         finally:
             page.close()
 
@@ -1922,7 +2234,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.wait_for_function(
                 """() => document.querySelector(
                     '#cluster-worker option[value="worker-local"]'
-                )?.textContent === 'ATS Controller Local Worker (ats-041055-64g)'"""
+                )?.textContent === 'worker-local'"""
             )
             result = page.evaluate(
                 """async workers => {
@@ -1959,7 +2271,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 workers,
             )
 
-            expected_label = "ATS Controller Local Worker (ats-041055-64g)"
+            expected_label = "worker-local"
             self.assertEqual(result["during"]["visibility"], "visible")
             self.assertEqual(result["during"]["value"], "worker-local")
             self.assertEqual(result["during"]["label"], expected_label)

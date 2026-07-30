@@ -283,7 +283,20 @@ def list_devices(worker_id: str = Query(default="")):
         if worker_id and worker_id != svc.config.local_worker_id:
             raise HTTPException(409, "cluster mode is disabled")
         worker_id = svc.config.local_worker_id
-    return {"success": True, "devices": svc.repository.list_devices(worker_id)}
+    devices = svc.repository.list_devices(worker_id)
+    try:
+        from features.devices.integrations_api import (
+            annotate_cluster_usbip_devices,
+        )
+
+        devices = annotate_cluster_usbip_devices(devices, worker_id)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning(
+            "failed to annotate USB/IP inventory for %s: %s",
+            worker_id or "all workers",
+            exc,
+        )
+    return {"success": True, "devices": devices}
 
 
 @router.get("/commands/{command_id}")
