@@ -12,7 +12,7 @@ from features.auth import (
     auth_service,
     validate_websocket_request,
 )
-from features.users import get_client_ip
+from features.users import format_client_display_id, get_client_ip
 from foundation.config import config_manager
 
 
@@ -37,11 +37,7 @@ def get_websocket_client_identity(
     )
     client_ip = get_websocket_client_ip(websocket)
     if user:
-        display_id = (
-            f"{user.username}@{client_ip}"
-            if client_ip and client_ip != "unknown"
-            else user.username
-        )
+        display_id = format_client_display_id(user.username, client_ip)
         if path_client_id.startswith("terminal_"):
             return f"{user.id}:{path_client_id}", display_id, user.username
         return user.id, display_id, user.username
@@ -56,11 +52,7 @@ def get_websocket_client_identity(
     except Exception:
         username = "unknown"
 
-    display_id = (
-        f"{username}@{client_ip}"
-        if username != "unknown" and client_ip != "unknown"
-        else client_ip
-    )
+    display_id = format_client_display_id(username, client_ip)
     if path_client_id.startswith("terminal_"):
         return path_client_id, display_id or path_client_id, username
     resolved_id = display_id or path_client_id or "unknown"

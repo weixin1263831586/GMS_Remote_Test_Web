@@ -1,4 +1,5 @@
 from .clients import (
+    format_client_display_id,
     get_client_display_id_from_request,
     get_client_id_from_request,
     get_client_ip,
@@ -6,9 +7,11 @@ from .clients import (
     get_client_username_from_request,
     hide_sensitive_info,
     is_manual_username_fallback_error,
+    normalize_client_display_id,
     owner_id_from_request,
     parse_client_id,
     probe_windows_usbipd,
+    resolve_client_display_id,
     resolve_tailscale_device_host,
 )
 from .device_groups import (
@@ -36,6 +39,7 @@ __all__ = [
     "cluster_device_properties",
     "current_username_for_request",
     "enforce_exclusive_device_group",
+    "format_client_display_id",
     "get_client_display_id_from_request",
     "get_client_id_from_request",
     "get_client_ip",
@@ -46,10 +50,12 @@ __all__ = [
     "list_users",
     "load_device_groups",
     "load_workspace_context",
+    "normalize_client_display_id",
     "normalize_device_groups",
     "owner_id_from_request",
     "parse_client_id",
     "probe_windows_usbipd",
+    "resolve_client_display_id",
     "resolve_tailscale_device_host",
     "save_device_groups",
     "save_workspace_context",

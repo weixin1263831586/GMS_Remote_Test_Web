@@ -82,3 +82,25 @@ def test_operation_claim_rejects_untrusted_device_ids():
     assert source_id == ""
     assert records == []
     assert conflict.status_code == 400
+
+
+def test_lock_status_resolves_internal_owner_to_user_management_identity():
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="worker-local",
+        )
+        success, _ = manager.lock_device(
+            "SERIAL-1",
+            "N387pLbIBhpMw5JsWUL9hg",
+            "N387pLbIBhpMw5JsWUL9hg",
+        )
+        assert success
+        with patch(
+            "features.users.resolve_client_display_id",
+            return_value="hcq@172.16.14.66",
+        ):
+            assert (
+                manager.get_lock_status("SERIAL-1")["locked_by"]
+                == "hcq@172.16.14.66"
+            )

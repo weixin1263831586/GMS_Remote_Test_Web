@@ -97,13 +97,112 @@ def get_client_username_from_request(request, fallback: str | None = None) -> st
     return username or 'unknown'
 
 
+def normalize_client_display_id(value: str) -> str:
+    """Collapse a repeated host suffix in a persisted username@ip identity."""
+    normalized = str(value or '').strip()
+    while '@' in normalized:
+        prefix, separator, host = normalized.rpartition('@')
+        if not separator or not host or not prefix.endswith(f'@{host}'):
+            break
+        normalized = prefix
+    return normalized
+
+
+def format_client_display_id(username: str, client_ip: str) -> str:
+    """Build username@ip without appending the same host more than once."""
+    normalized_username = normalize_client_display_id(username)
+    normalized_ip = str(client_ip or '').strip()
+    if not normalized_username or normalized_username == 'unknown':
+        return normalized_ip
+    if not normalized_ip or normalized_ip == 'unknown':
+        return normalized_username
+    if normalized_username.endswith(f'@{normalized_ip}'):
+        return normalized_username
+    return f"{normalized_username}@{normalized_ip}"
+
+
 def get_client_display_id_from_request(request) -> str:
     """Return username@ip for UI and tools that require a reachable client host."""
     client_ip = get_client_ip(request)
     username = get_client_username_from_request(request)
-    if username and username != 'unknown' and client_ip and client_ip != 'unknown':
-        return f"{username}@{client_ip}"
-    return username if username and username != 'unknown' else client_ip
+    return format_client_display_id(username, client_ip)
+
+
+def resolve_client_display_id(
+    client_id: str,
+    stored_display_id: str = "",
+) -> str:
+    """Resolve an internal account id to the user-management display identity."""
+    identity = str(client_id or "").strip()
+    stored = normalize_client_display_id(stored_display_id)
+    account_username = ""
+    try:
+        from features.auth import auth_service
+
+        account = next(
+            (
+                item for item in auth_service.list_users()
+                if str(item.get("id") or "") == identity
+            ),
+            None,
+        )
+        if account:
+            account_username = normalize_client_display_id(str(
+                account.get("username") or account.get("display_name") or ""
+            ).strip())
+    except Exception:
+        pass
+    account_base_username = (
+        parse_client_id(account_username)[0] if account_username else ""
+    )
+
+    try:
+        with runtime.global_state.user_states_lock:
+            states = list(runtime.global_state.user_states.items())
+        for state_id, state in states:
+            state_display = normalize_client_display_id(
+                state.get("display_client_id") or ""
+            )
+            state_username = normalize_client_display_id(
+                state.get("client_username") or ""
+            )
+            state_ip = str(state.get("client_ip") or "").strip()
+            matches = (
+                str(state_id) == identity
+                or (stored and state_display == stored)
+                or (
+                    account_base_username
+                    and parse_client_id(state_username)[0] == account_base_username
+                )
+            )
+            if not matches:
+                continue
+            if state_display:
+                return state_display
+            if state_username and state_ip:
+                return format_client_display_id(state_username, state_ip)
+    except Exception:
+        pass
+
+    if account_username:
+        try:
+            config = runtime.config_manager.load_config()
+            matching_ips = [
+                str(ip)
+                for ip, username in (config.get("client_hosts") or {}).items()
+                if str(username or "").strip() == account_base_username
+            ]
+            if len(matching_ips) == 1:
+                return format_client_display_id(
+                    account_base_username,
+                    matching_ips[0],
+                )
+        except Exception:
+            pass
+
+    if stored and stored != identity:
+        return stored
+    return account_username or stored or identity or "unknown"
 
 
 def parse_client_id(client_id: str) -> tuple[str, str]:

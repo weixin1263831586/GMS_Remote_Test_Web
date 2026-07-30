@@ -44,14 +44,16 @@ class DeviceLockManager:
 
     def _display_username(self, client_id: str, username: str | None) -> str:
         cleaned = str(username or "").strip()
-        if cleaned and cleaned != "unknown":
+        with contextlib.suppress(Exception):
+            from features.users import resolve_client_display_id
+
+            return resolve_client_display_id(client_id, cleaned)
+        if cleaned and cleaned not in {"unknown", client_id}:
             return cleaned
         with contextlib.suppress(Exception):
             for user in auth_service.list_users():
                 if str(user.get("id") or "") == str(client_id):
-                    return str(
-                        user.get("display_name") or user.get("username") or client_id
-                    )
+                    return str(user.get("username") or user.get("display_name") or client_id)
         return cleaned or client_id
 
     @staticmethod

@@ -347,7 +347,8 @@ class ClusterInventoryRepositoryMixin:
                     (id,worker_id,serial,transport,state,properties_json,
                      first_seen_at,last_seen_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(worker_id,serial,transport) DO UPDATE SET
+                ON CONFLICT(id) DO UPDATE SET
+                    transport=excluded.transport,
                     state=CASE WHEN EXISTS(
                         SELECT 1 FROM device_leases
                         WHERE device_id=excluded.id AND status='active'

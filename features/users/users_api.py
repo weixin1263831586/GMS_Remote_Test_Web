@@ -17,6 +17,7 @@ from foundation.responses import error_response
 
 from . import runtime
 from .clients import (
+    format_client_display_id,
     get_client_display_id_from_request,
     get_client_id_from_request,
     get_client_ip,
@@ -24,6 +25,7 @@ from .clients import (
     get_client_username_from_request,
     is_manual_username_fallback_error,
     parse_client_id,
+    resolve_client_display_id,
 )
 from .models import ClientInfoRequest
 from .sessions import client_manager
@@ -114,7 +116,7 @@ async def set_client_username(req: ClientInfoRequest, request: Request):
         # 更新内存中的映射
         client_manager.client_hosts = client_hosts
 
-        display_client_id = f"{username}@{client_ip}" if client_ip and client_ip != "unknown" else username
+        display_client_id = format_client_display_id(username, client_ip)
         client_id = get_client_id_from_request(request)
         with runtime.global_state.user_states_lock:
             state = runtime.global_state.user_states.get(client_id)
@@ -195,9 +197,7 @@ async def list_users(
             username = str(username or '').strip() or 'unknown'
             if not ip or ip in local_addresses or ip in vpn_gateway_addresses:
                 continue
-            display_client_id = (
-                f"{username}@{ip}" if username and username != 'unknown' else ip
-            )
+            display_client_id = format_client_display_id(username, ip)
             temp_users[f"configured:{display_client_id}"] = {
                 'client_id': display_client_id,
                 'user_id': '',
@@ -228,9 +228,10 @@ async def list_users(
             if username == 'unknown':
                 username = username_from_id
             ip = state.get('client_ip') or ip_from_id
-            display_client_id = state.get('display_client_id') or (
-                f"{username}@{ip}" if username and username != 'unknown' and ip and ip != 'unknown' else client_id
-            )
+            display_client_id = format_client_display_id(
+                state.get('display_client_id') or username,
+                ip,
+            ) or client_id
 
             # 过滤本地地址和VPN网关地址
             if ip in local_addresses or ip in vpn_gateway_addresses:
@@ -244,7 +245,7 @@ async def list_users(
                 or (configured_username and username != configured_username)
             ):
                 username = configured_username
-                display_client_id = f"{username}@{ip}" if ip and ip != 'unknown' else username
+                display_client_id = format_client_display_id(username, ip)
 
             user_info = {
                 'client_id': display_client_id,
@@ -264,7 +265,10 @@ async def list_users(
             user_key = f"host:{display_client_id}" if display_client_id else (client_id or ip)
             temp_users.pop(f"configured:{display_client_id}", None)
             if is_configured and configured_username:
-                temp_users.pop(f"configured:{configured_username}@{ip}", None)
+                temp_users.pop(
+                    f"configured:{format_client_display_id(configured_username, ip)}",
+                    None,
+                )
             existing = temp_users.get(user_key)
             if existing is None or (existing['username'] == 'unknown' and username != 'unknown'):
                 temp_users[user_key] = user_info
@@ -288,6 +292,7 @@ async def list_users(
         if owner_id:
             jobs_by_owner.setdefault(owner_id, []).append(job)
     for owner_id, owner_jobs in jobs_by_owner.items():
+        owner_display_id = resolve_client_display_id(owner_id)
         active_jobs = [job for job in owner_jobs if job.get("status") in active_statuses]
         leased_devices = [
             lease.get("device_id")
@@ -298,13 +303,14 @@ async def list_users(
         user_info = next((item for item in users if owner_id in {
             str(item.get("user_id") or ""), str(item.get("client_id") or ""),
             str(item.get("username") or ""),
-        }), None)
+        } or owner_display_id == str(item.get("client_id") or "")), None)
         if user_info is None:
+            owner_username, owner_ip = parse_client_id(owner_display_id)
             user_info = {
-                "client_id": owner_id,
+                "client_id": owner_display_id,
                 "user_id": owner_id,
-                "username": owner_id,
-                "ip": "",
+                "username": owner_username,
+                "ip": "" if owner_ip == "unknown" else owner_ip,
                 "source": "cluster",
                 "source_label": "集群",
                 "running": False,

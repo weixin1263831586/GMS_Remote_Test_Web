@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260727-auth-account-hint">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260729-device-grid">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
@@ -24,7 +24,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260728-gms-config-fastboot-refresh" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260729-usbip-routing" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -801,7 +801,7 @@
                     </div>
                     <div class="device-list-container">
                         <div class="device-canvas device-canvas-empty" id="device-canvas">
-                            <div class="device-column" id="device-list-left">
+                            <div class="device-column device-grid" id="device-list-left">
                                 <div class="empty-message">点击刷新按钮获取设备列表...</div>
                             </div>
                             <div class="device-column" id="device-list-right">
@@ -971,7 +971,7 @@
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">连接时间</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">最后活跃</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 90px;">操作</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 120px;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
@@ -1159,10 +1159,11 @@
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">客户端</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 150px;">客户端</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">类型</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 110px;">测试套件</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">时间戳</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 120px;">测试套件</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 120px;">测试主机</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 240px;">报告名称</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">通过</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">失败</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">总计</th>
@@ -1173,7 +1174,7 @@
                     </thead>
                     <tbody id="reports-table-body">
                         <tr>
-                            <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -1962,38 +1963,34 @@
 
     <!-- adbproxy-rs ADB设备接入弹框 -->
     <div id="adb-proxy-modal" class="modal">
-        <div class="modal-content usbip-modal-content adb-proxy-modal-content">
+        <div class="modal-content device-routing-modal-content adb-proxy-modal-content">
             <div class="modal-header">
                 <span class="modal-title">🔌 ADB设备接入</span>
                 <span class="modal-close" onclick="closeAdbProxyModal()">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="adb-proxy-section-head">
-                    <div class="adb-proxy-section-title">当前接入</div>
-                    <button class="btn-xxs" id="adb-proxy-add-ubuntu-toggle" type="button" onclick="toggleAdbProxyUbuntuSource()">＋ 添加Ubuntu设备来源</button>
-                </div>
-                <div id="adb-proxy-assignments" class="adb-proxy-assignments">
-                    正在读取接入状态...
-                </div>
-                <div id="adb-proxy-ubuntu-source-panel" class="adb-proxy-ubuntu-source-panel" hidden>
-                    <div class="adb-proxy-host-grid">
-                        <div class="modal-form-row">
-                            <label for="adb-proxy-ubuntu-host">SSH主机</label>
-                            <input id="adb-proxy-ubuntu-host" type="text" placeholder="用户名@IP 或 用户名@[IPv6]:端口" autocomplete="off">
-                        </div>
-                        <div class="modal-form-row">
-                            <label for="adb-proxy-ubuntu-password">SSH密码</label>
-                            <input id="adb-proxy-ubuntu-password" type="password" placeholder="仅用于本次安装" autocomplete="new-password">
-                        </div>
-                    </div>
-                    <div class="adb-proxy-inline-actions">
-                        <span>将校验SSH指纹并离线安装adbproxy-rs，不保存密码。</span>
-                        <button class="btn-xxs btn-primary" id="adb-proxy-ubuntu-deploy" type="button" onclick="deployAdbProxyUbuntuSource()">安装并添加</button>
-                    </div>
-                </div>
                 <form id="adb-proxy-form" onsubmit="event.preventDefault(); submitAdbProxyConnect();" autocomplete="off">
-                    <div class="adb-proxy-section-title">新建接入</div>
-                    <div class="adb-proxy-routing-fields">
+                    <div class="adb-proxy-section-head">
+                        <div class="adb-proxy-section-title">新建接入</div>
+                        <button class="btn-xxs" id="adb-proxy-add-ubuntu-toggle" type="button" onclick="toggleAdbProxyUbuntuSource()">＋ 添加Ubuntu设备来源</button>
+                    </div>
+                    <div id="adb-proxy-ubuntu-source-panel" class="adb-proxy-ubuntu-source-panel" hidden>
+                        <div class="adb-proxy-host-grid">
+                            <div class="modal-form-row">
+                                <label for="adb-proxy-ubuntu-host">SSH主机</label>
+                                <input id="adb-proxy-ubuntu-host" type="text" placeholder="用户名@IP 或 用户名@[IPv6]:端口" autocomplete="off">
+                            </div>
+                            <div class="modal-form-row">
+                                <label for="adb-proxy-ubuntu-password">SSH密码</label>
+                                <input id="adb-proxy-ubuntu-password" type="password" placeholder="仅用于本次安装" autocomplete="new-password">
+                            </div>
+                        </div>
+                        <div class="adb-proxy-inline-actions">
+                            <span>将校验SSH指纹并离线安装adbproxy-rs，不保存密码。</span>
+                            <button class="btn-xxs btn-primary" id="adb-proxy-ubuntu-deploy" type="button" onclick="deployAdbProxyUbuntuSource()">安装并添加</button>
+                        </div>
+                    </div>
+                    <div class="device-routing-fields">
                         <div class="modal-form-row">
                             <label for="adb-proxy-source-host">设备来源</label>
                             <select id="adb-proxy-source-host" onchange="renderAdbProxySourceDevices()"></select>
@@ -2003,85 +2000,72 @@
                             <select id="adb-proxy-target-host"></select>
                         </div>
                     </div>
-                    <div class="modal-form-row adb-proxy-device-row">
+                    <div class="modal-form-row device-routing-device-row">
                         <label for="adb-proxy-source-devices">ADB设备</label>
                         <select id="adb-proxy-source-devices" class="usbip-device-select" multiple size="3">
                             <option value="">请选择设备来源</option>
                         </select>
                     </div>
                 </form>
+                <div class="adb-proxy-section-head">
+                    <div class="adb-proxy-section-title">当前接入</div>
+                    <button class="btn-xxs" type="button" onclick="refreshAdbProxyAssignments()">🔄 刷新</button>
+                </div>
+                <div id="adb-proxy-assignments" class="adb-proxy-assignments">
+                    正在读取接入状态...
+                </div>
                 <div id="adb-proxy-message" class="modal-info-text">
                     ADB通过adbproxy-rs接入后会显示在目标主机；可执行ADB和测试操作，Fastboot、锁定及烧写操作将被禁用。
                 </div>
-                <div class="modal-buttons">
-                    <button class="btn-xxs" type="button" onclick="closeAdbProxyModal()">关闭</button>
-                    <button class="btn-xxs btn-primary" id="adb-proxy-connect-submit" type="button" onclick="submitAdbProxyConnect()">接入</button>
-                </div>
+            </div>
+            <div class="modal-buttons device-routing-modal-buttons">
+                <button class="btn-xxs" type="button" onclick="closeAdbProxyModal()">关闭</button>
+                <button class="btn-xxs btn-primary" id="adb-proxy-connect-submit" type="button" onclick="submitAdbProxyConnect()">接入</button>
             </div>
         </div>
     </div>
 
-    <!-- USB/IP 本地设备接入弹框 -->
+    <!-- USB/IP 设备接入弹框 -->
     <div id="usbip-attach-modal" class="modal">
-        <div class="modal-content usbip-modal-content usbip-attach-modal-content">
+        <div class="modal-content device-routing-modal-content adb-proxy-modal-content">
             <div class="modal-header">
-                <span class="modal-title">📱 本地设备接入</span>
+                <span class="modal-title">📱 USB/IP设备接入</span>
                 <span class="modal-close" onclick="closeUsbipAttachModal()">&times;</span>
             </div>
             <div class="modal-body">
                 <form id="usbip-attach-form" onsubmit="event.preventDefault(); submitUsbipAttach();" autocomplete="off">
-                    <div class="modal-form-row">
-                        <label for="usbip-source-host" style="white-space:nowrap;min-width:84px;">设备来源:</label>
-                        <select id="usbip-source-host" onchange="loadUsbipSourceDevices()" style="flex:1;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:var(--card-bg);color:var(--text-primary);font-size:13px;"></select>
+                    <div class="adb-proxy-section-title">新建接入</div>
+                    <div class="device-routing-fields">
+                        <div class="modal-form-row">
+                            <label for="usbip-source-host">设备来源</label>
+                            <select id="usbip-source-host" onchange="loadUsbipSourceDevices()"></select>
+                        </div>
+                        <div class="modal-form-row">
+                            <label for="usbip-target-worker">接入主机</label>
+                            <select id="usbip-target-worker"></select>
+                        </div>
                     </div>
-                    <div class="modal-form-row">
-                        <label for="usbip-target-worker" style="white-space:nowrap;min-width:84px;">接入主机:</label>
-                        <select id="usbip-target-worker" style="flex:1;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:var(--card-bg);color:var(--text-primary);font-size:13px;"></select>
-                    </div>
-                    <div class="modal-form-row">
-                        <label for="usbip-source-device" style="white-space:nowrap;min-width:84px;">USB设备:</label>
+                    <div class="modal-form-row device-routing-device-row">
+                        <label for="usbip-source-device">USB设备</label>
                         <select id="usbip-source-device" class="usbip-device-select" multiple size="4">
                             <option value="">请选择设备来源以加载USB设备</option>
                         </select>
                     </div>
                 </form>
+                <div class="adb-proxy-section-head">
+                    <div class="adb-proxy-section-title">当前接入</div>
+                    <button class="btn-xxs" type="button" onclick="refreshUsbipAssignments()">🔄 刷新</button>
+                </div>
+                <div id="usbip-assignments" class="adb-proxy-assignments">
+                    正在读取接入状态...
+                </div>
                 <div id="usbip-attach-message" class="modal-info-text">
                     可多选USB设备；同一设备同一时间只能接入一台主机。
                 </div>
-                <div class="modal-buttons">
-                    <button class="btn-xxs" type="button" onclick="closeUsbipAttachModal()">取消</button>
-                    <button class="btn-xxs btn-primary" id="usbip-attach-submit" type="button" onclick="submitUsbipAttach()">连接</button>
-                </div>
             </div>
-        </div>
-    </div>
-
-    <!-- USB/IP 断开设备弹框 -->
-    <div id="usbip-detach-modal" class="modal">
-        <div class="modal-content usbip-modal-content usbip-detach-modal-content">
-            <div class="modal-header">
-                <span class="modal-title">📱 断开USB/IP设备</span>
-                <span class="modal-close" onclick="closeUsbipDetachModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="modal-form-row" style="align-items:flex-start;">
-                    <label for="usbip-detach-devices">已接入设备:</label>
-                    <select id="usbip-detach-devices" class="usbip-device-select" multiple size="6"></select>
-                </div>
-                <div class="modal-form-row">
-                    <label for="usbip-detach-all">断开范围:</label>
-                    <label style="flex:1;text-align:left;width:auto;">
-                        <input type="checkbox" id="usbip-detach-all" onchange="toggleUsbipDetachAll()" />
-                        全部断开（仅限弹框中列出的设备）
-                    </label>
-                </div>
-                <div id="usbip-detach-message" class="modal-info-text">
-                    可多选设备；不会影响其他设备来源或未列出的Worker。
-                </div>
-                <div class="modal-buttons">
-                    <button class="btn-xxs" type="button" onclick="closeUsbipDetachModal()">取消</button>
-                    <button class="btn-xxs btn-primary" type="button" onclick="submitUsbipDetach()">断开</button>
-                </div>
+            <div class="modal-buttons device-routing-modal-buttons">
+                <button class="btn-xxs" type="button" onclick="closeUsbipAttachModal()">关闭</button>
+                <button class="btn-xxs btn-primary" id="usbip-attach-submit" type="button" onclick="submitUsbipAttach()">接入</button>
             </div>
         </div>
     </div>
@@ -2259,7 +2243,7 @@
                     <div class="modal-form-row" style="margin-bottom: 0;">
                         <label>远端固件:</label>
                         <div class="input-with-btn">
-                            <input type="text" id="firmware-share-remote" placeholder="user@host:/absolute/path/to/firmware.img" />
+                            <input type="text" id="firmware-share-remote" placeholder="user@host:/absolute/path" />
                             <button class="btn-small" onclick="browseRemoteFileForFirmwareShare()">编译服务器</button>
                         </div>
                     </div>
@@ -2516,7 +2500,7 @@
 
     <!-- 文件浏览器弹框 -->
     <div id="file-browser-modal" class="modal" style="z-index: 10060;">
-        <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-content" style="max-width: 1200px;">
             <div class="modal-header">
                 <span class="modal-title" id="file-browser-title">浏览文件</span>
                 <span class="modal-close" onclick="closeFileBrowserModal()">&times;</span>
@@ -3089,7 +3073,7 @@
                     .map(host => ({
                         id: `cluster:${host.worker_id}`,
                         worker_id: host.worker_id,
-                        name: `${host.name || host.worker_id}${host.status === 'offline' ? '（离线）' : ''}`,
+                        name: `${host.worker_id}${host.status === 'offline' ? '（离线）' : ''}`,
                         connection: `${host.ssh_user}@${host.address}`,
                         cluster_managed: true,
                         offline: host.status === 'offline'
@@ -3728,11 +3712,11 @@
                 // 仅 config_runtime.client_hosts 中的用户可移除。
                 const safeIp = String(user.ip || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 const removeCell = user.configured
-                    ? `<button class="btn-xxs" style="background: var(--danger-color, #e74c3c);" onclick="removeUser('${safeIp}', this)">移除</button>`
-                    : '<span class="muted" style="font-size:11px;color:var(--text-secondary);">临时会话</span>';
+                    ? `<button class="btn-xxs" style="width:44px;background: var(--danger-color, #e74c3c);" onclick="removeUser('${safeIp}', this)">移除</button>`
+                    : '<span title="临时会话" style="width:44px;text-align:center;color:var(--text-secondary);">-</span>';
                 const clusterCell = activeClusterJob
-                    ? `<button class="btn-xxs" data-cluster-job="${escapeHtml(activeClusterJob.id)}" data-worker-id="${escapeHtml(activeClusterJob.worker_id || '')}" data-attempt-id="${escapeHtml(activeClusterJob.attempt_id || '')}">任务</button>`
-                    : '';
+                    ? `<button class="btn-xxs" style="width:44px;" data-cluster-job="${escapeHtml(activeClusterJob.id)}" data-worker-id="${escapeHtml(activeClusterJob.worker_id || '')}" data-attempt-id="${escapeHtml(activeClusterJob.attempt_id || '')}">任务</button>`
+                    : '<span aria-hidden="true" style="width:44px;"></span>';
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
@@ -3759,7 +3743,9 @@
                             ${escapeHtml(devices)}
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">
-                            ${clusterCell} ${removeCell}
+                            <div style="display:grid;grid-template-columns:44px 44px;justify-content:center;align-items:center;column-gap:6px;">
+                                ${clusterCell}${removeCell}
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -3868,6 +3854,11 @@
                 allDevices.forEach(d => {
                     if (!d.worker_id) d.worker_id = localWorkerId;
                 });
+                allDevices = allDevices.filter(device =>
+                    !['offline', 'unknown'].includes(
+                        String(device.status || '').toLowerCase()
+                    )
+                );
                 const hostsData = hostsResp && hostsResp.ok ? await hostsResp.json() : {};
                 const hostDirectory = new Map((hostsData.hosts || []).map(host => [
                     host.worker_id,
@@ -3875,7 +3866,7 @@
                 ]));
                 const hostNames = new Map((hostsData.hosts || []).map(host => [
                     host.worker_id,
-                    host.name || host.ssh_connection || host.worker_id
+                    host.worker_id
                 ]));
                 allDevices.forEach(device => {
                     device.host_display_name = hostNames.get(device.worker_id)
@@ -3885,12 +3876,19 @@
                 if (clusterMode && clusterResp && clusterResp.ok) {
                     const clusterData = await clusterResp.json();
                     const remoteDevices = (clusterData.devices || [])
-                        .filter(device => device.worker_id !== localWorkerId)
+                        .filter(device =>
+                            device.worker_id !== localWorkerId
+                            && !['offline', 'unknown'].includes(device.state)
+                        )
                         .map(device => {
                             const host = hostDirectory.get(device.worker_id) || {};
                             const capabilities = host.capabilities || {};
                             const properties = device.properties || {};
                             const isAdbProxy = device.transport === 'adb_proxy';
+                            const isUsbip = (
+                                device.transport === 'usbip'
+                                || properties.is_usbip === true
+                            );
                             const sourceWorkerId = String(
                                 properties.adb_proxy_source_worker_id || ''
                             );
@@ -3906,9 +3904,16 @@
                                 host_display_name: targetHostName,
                                 source_host: isAdbProxy
                                     ? `${sourceHostName} → ${targetHostName}`
+                                    : isUsbip
+                                    ? (properties.usbip_source_host || '来源未知')
                                     : targetHostName,
-                                source_type: isAdbProxy ? 'adb_proxy' : 'cluster',
+                                source_type: isAdbProxy
+                                    ? 'adb_proxy'
+                                    : isUsbip ? 'usbip' : 'cluster',
                                 transport: device.transport || 'local_usb',
+                                is_usbip: isUsbip,
+                                usbip_source_host:
+                                    properties.usbip_source_host || '',
                                 adb_proxy_source_worker_id: sourceWorkerId,
                                 adb_proxy_source_serial:
                                     properties.adb_proxy_source_serial || '',
@@ -4018,7 +4023,10 @@
 
             // 更新统计数据
             const totalCount = allDevices.length;
-            const localCount = allDevices.filter(d => d.source_type === 'local').length;
+            const localCount = allDevices.filter(d =>
+                !d.cluster_readonly
+                && d.worker_id === workspaceLocalWorkerId()
+            ).length;
             const usbipCount = allDevices.filter(d => d.source_type === 'usbip').length;
             const clusterCount = allDevices.filter(d => d.cluster_readonly).length;
             const fastbootCount = allDevices.filter(d =>
@@ -8449,41 +8457,19 @@
             }
             // 默认数据
             ut_categorizedTools = {
-                'Gerrit工具': [
+                '常用工具': [
+                    {
+                        icon: '📦',
+                        title: '共享固件',
+                        description: '登记编译服务器上的固件路径，其他客户端可直接从远端主机流式下载',
+                        action: 'shareFirmware',
+                        builtin_id: 'builtin-share-firmware'
+                    },
                     {
                         icon: '📦',
                         title: 'Gerrit Patch导出与导入',
                         description: '从Gerrit导出patch并应用到本地Android源码，支持批量导出Change的patch文件到指定目录，也支持将patch应用到本地代码',
                         file_path: 'gerrit_patch_export_and_apply_tool.sh'
-                    }
-                ],
-                '设备工具': [
-                    {
-                        icon: '📱',
-                        title: 'scrcpy 屏幕投影',
-                        description: 'Android设备屏幕投影工具，支持无线连接、录屏、文件推送等功能',
-                        file_path: 'scrcpy-linux-x86_64-v3.3.4.tar.gz'
-                    }
-                ],
-            '烧写工具': [
-                {
-                    icon: '📦',
-                    title: '共享固件',
-                    description: '登记编译服务器上的固件路径，其他客户端可直接从远端主机流式下载',
-                    action: 'shareFirmware',
-                    builtin_id: 'builtin-share-firmware'
-                },
-                {
-                    icon: '🔥',
-                    title: 'upgrade_tool',
-                        description: 'Rockchip固件烧写工具，用于将固件镜像烧写到设备eMMC/NVMe存储',
-                        file_path: 'upgrade_tool'
-                    },
-                    {
-                        icon: '💾',
-                        title: 'misc.img',
-                        description: 'Android misc分区镜像文件，用于设备启动模式切换（bootloader/recovery）',
-                        file_path: 'misc.img'
                     }
                 ],
                 '测试工具': []
@@ -8493,14 +8479,33 @@
             ut_renderToolsGrid();
         }
 
+        const UT_HIDDEN_BUILTINS_KEY = 'gms_utility_tools_hidden_builtins';
+
+        function ut_getHiddenBuiltins() {
+            try {
+                return new Set(JSON.parse(localStorage.getItem(UT_HIDDEN_BUILTINS_KEY) || '[]'));
+            } catch (e) {
+                return new Set();
+            }
+        }
+
+        function ut_hideBuiltin(builtinId) {
+            const hidden = ut_getHiddenBuiltins();
+            hidden.add(builtinId);
+            localStorage.setItem(UT_HIDDEN_BUILTINS_KEY, JSON.stringify([...hidden]));
+        }
+
         function ut_ensureBuiltInTools() {
             let changed = false;
+            const hidden = ut_getHiddenBuiltins();
             Object.entries(UT_BUILTIN_TOOLS).forEach(([category, tools]) => {
                 if (!ut_categorizedTools[category]) {
                     ut_categorizedTools[category] = [];
                     changed = true;
                 }
                 tools.forEach((builtinTool) => {
+                    // Skip builtins the user has explicitly hidden/deleted.
+                    if (hidden.has(builtinTool.builtin_id)) return;
                     const existingIndex = ut_categorizedTools[category].findIndex(tool => tool.builtin_id === builtinTool.builtin_id);
                     if (existingIndex >= 0) {
                         ut_categorizedTools[category][existingIndex] = {
@@ -8792,6 +8797,33 @@
                     ut_deleteTool(category, index);
                 });
                 actions.appendChild(deleteBtn);
+            }
+
+            // Built-in tools get a hide button so users can remove them.
+            if (tool.builtin_id) {
+                const hideBtn = document.createElement('button');
+                hideBtn.textContent = '🗑️';
+                hideBtn.title = '隐藏此内置工具';
+                hideBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
+                hideBtn.addEventListener('mouseenter', () => {
+                    hideBtn.style.background = 'var(--danger-color)';
+                    hideBtn.style.color = 'white';
+                    hideBtn.style.borderColor = 'var(--danger-color)';
+                });
+                hideBtn.addEventListener('mouseleave', () => {
+                    hideBtn.style.background = 'transparent';
+                    hideBtn.style.color = 'var(--text-muted)';
+                    hideBtn.style.borderColor = 'var(--border-color)';
+                });
+                hideBtn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    ut_hideBuiltin(tool.builtin_id);
+                    ut_categorizedTools[category].splice(index, 1);
+                    ut_saveCategories();
+                    ut_renderToolsGrid();
+                    showToast(`已隐藏「${tool.title}」`, 'info');
+                });
+                actions.appendChild(hideBtn);
             }
 
             card.appendChild(actions);
@@ -9467,7 +9499,7 @@
             select.innerHTML = hosts.map(host => {
                 const disabled = host.status === 'offline' ? ' disabled' : '';
                 const suffix = host.status === 'offline' ? '（离线）' : '';
-                return `<option value="${escapeHtml(host.worker_id)}"${disabled}>${escapeHtml(host.name || host.worker_id)} ${suffix}</option>`;
+                return `<option value="${escapeHtml(host.worker_id)}"${disabled}>${escapeHtml(host.worker_id)}${suffix}</option>`;
             }).join('');
             if (hosts.some(host => host.worker_id === previous && host.status !== 'offline')) select.value = previous;
             // Refreshing the host directory is not a user host switch. Keep

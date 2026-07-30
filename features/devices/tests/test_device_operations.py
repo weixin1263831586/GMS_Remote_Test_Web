@@ -234,6 +234,46 @@ class DeviceOperationsTests(unittest.TestCase):
         self.assertEqual(devices["USBIP001"]["source_host"], "hcq@172.16.14.66")
         self.assertEqual(devices["LOCAL001"]["source_type"], "local")
 
+    def test_management_payload_labels_local_adb_proxy_import(self):
+        with (
+            patch.object(
+                management_api.device_lock_manager,
+                "get_all_locks",
+                return_value={},
+            ),
+            patch.object(management_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(management_api, "_known_usbip_sources", return_value={}),
+            patch.object(
+                management_api,
+                "_local_adb_proxy_sources",
+                return_value={
+                    "RK3576GMS6": {
+                        "source_worker_id": "ats-worker-118",
+                        "source_serial": "RK3576GMS6",
+                        "target_worker_id": "worker-local",
+                    },
+                },
+            ),
+        ):
+            payload = management_api._build_devices_management_payload(
+                ["RK3576GMS6"],
+                {"RK3576GMS6": {"serial_no": "RK3576GMS6"}},
+                {},
+                client_id="alice@10.0.0.8",
+            )
+
+        device = payload["devices"][0]
+        self.assertEqual(device["source_type"], "adb_proxy")
+        self.assertEqual(device["transport"], "adb_proxy")
+        self.assertEqual(
+            device["source_host"],
+            "ats-worker-118 → worker-local",
+        )
+        self.assertEqual(
+            device["adb_proxy_source_worker_id"],
+            "ats-worker-118",
+        )
+
     def test_management_payload_clears_stale_usbip_source_without_active_port(self):
         runtime_config = {
             "usbip_devices_source": {

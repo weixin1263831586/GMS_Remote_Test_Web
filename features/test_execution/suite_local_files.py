@@ -63,8 +63,22 @@ def local_suite_file_response(
     )
 
 
+def run_folder_suffix(rel_path: str) -> str:
+    """Return '-results' or '-logs' when rel_path is inside a results/logs folder.
+
+    rel_path is relative to the suite root (e.g. "results/2026.06.25_10.57.05"
+    or "android-cts/results/2026.06.25_10.57.05"). The first segment named
+    exactly "results" or "logs" determines the suffix.
+    """
+    for seg in (rel_path or "").split("/"):
+        kind = seg.lower()
+        if kind in {"results", "logs"}:
+            return f"-{kind}"
+    return ""
+
+
 def local_suite_directory_response(
-    suite_root: str, target_path: str
+    suite_root: str, target_path: str, rel_path: str = ""
 ) -> StreamingResponse:
     target = resolve_local_suite_target(suite_root, target_path)
     if not os.path.isdir(target):
@@ -89,7 +103,8 @@ def local_suite_directory_response(
         raise
 
     folder_name = os.path.basename(target) or "download"
-    filename = f"{folder_name}.zip"
+    suffix = run_folder_suffix(rel_path or target_path)
+    filename = f"{folder_name}{suffix}.zip"
     ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or "download.zip"
     quoted_filename = urllib.parse.quote(filename)
 

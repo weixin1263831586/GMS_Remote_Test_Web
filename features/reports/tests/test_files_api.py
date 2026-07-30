@@ -140,6 +140,44 @@ class ReportFilesApiTests(unittest.TestCase):
         )
         self.assertEqual(report["display_client_id"], "hcq")
 
+    def test_cluster_report_uses_worker_connection_and_tradefed_folder_name(self):
+        with TemporaryDirectory() as tmp:
+            result_dir = Path(tmp)
+            (result_dir / "stdout.log").write_text(
+                "RESULT DIRECTORY : "
+                "/suite/results/2026.07.30_10.39.50.173_6846\n",
+                encoding="utf-8",
+            )
+            cluster = SimpleNamespace(
+                repository=SimpleNamespace(
+                    get_worker=lambda worker_id: {
+                        "id": worker_id,
+                        "address": "172.16.14.233",
+                        "capabilities": {"ssh_user": "hcq"},
+                    }
+                )
+            )
+            with patch(
+                "features.cluster.get_cluster_service",
+                return_value=cluster,
+            ):
+                report = _decorate_report_for_client({
+                    "timestamp": "cluster-job-941843984fd44e1b9111532981e188c9",
+                    "owner_id": "N387pLbIBhpMw5JsWUL9hg",
+                    "display_client_id": "N387pLbIBhpMw5JsWUL9hg",
+                    "worker_id": "worker-local",
+                    "result_dir": str(result_dir),
+                })
+
+        self.assertEqual(
+            report["display_client_id"],
+            "hcq@172.16.14.233",
+        )
+        self.assertEqual(
+            report["report_name"],
+            "2026.07.30_10.39.50.173_6846",
+        )
+
     def test_list_reports_filters_exact_automation_job_attempt(self):
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         reports = [

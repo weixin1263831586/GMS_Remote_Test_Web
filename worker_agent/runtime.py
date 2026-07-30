@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -306,6 +307,27 @@ class WorkerRuntime:
                            "last_output_age_seconds": log_age, "warning": warning})
         return result
 
+    def _ensure_test_script(self, executable: Path) -> None:
+        """Copy run_GMS_Test_Auto.sh from the Worker install dir if missing.
+
+        The script is installed to both ``INSTALL_ROOT/scripts/`` and the
+        suite root during deployment. If the suite-root copy is later removed
+        (manual cleanup, directory rebuild), restore it from the install dir
+        so test execution does not fail with "executable not found".
+        """
+        if executable.name != "run_GMS_Test_Auto.sh":
+            return
+        # INSTALL_ROOT is two levels above this module: worker_agent/ → install root.
+        install_script = Path(__file__).resolve().parent.parent / "scripts" / "run_GMS_Test_Auto.sh"
+        if not install_script.is_file():
+            return
+        try:
+            executable.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(install_script, executable)
+            executable.chmod(0o755)
+        except OSError:
+            pass
+
     def start_process(self, command: dict[str, Any]) -> dict[str, Any]:
         payload = command.get("payload", {})
         argv = payload.get("argv")
@@ -316,6 +338,8 @@ class WorkerRuntime:
                       for root in self.config.suite_roots)
         if not allowed:
             raise ValueError("test executable is outside configured suite roots")
+        if not executable.is_file():
+            self._ensure_test_script(executable)
         if not executable.is_file():
             configured = ", ".join(str(r) for r in self.config.suite_roots)
             raise ValueError(

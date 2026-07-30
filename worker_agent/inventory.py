@@ -21,15 +21,36 @@ from .fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_parti
 from .suite_detection import suite_details
 
 
-def _run(argv: list[str], timeout: int = 10) -> str:
+def _run(
+    argv: list[str],
+    timeout: int = 10,
+    env: dict[str, str] | None = None,
+) -> str:
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
-                              check=False).stdout
+        return subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=env,
+        ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
 
-def _probe_device_details(serial: str) -> dict[str, str]:
+def _adb_environment(adb_server_socket: str | None) -> dict[str, str] | None:
+    if not adb_server_socket:
+        return None
+    env = dict(os.environ)
+    env["ADB_SERVER_SOCKET"] = adb_server_socket
+    return env
+
+
+def _probe_device_details(
+    serial: str,
+    adb_server_socket: str | None = None,
+) -> dict[str, str]:
     """Read management attributes in one ADB round trip."""
     output = _run([
         "adb", "-s", serial, "shell",
@@ -37,7 +58,7 @@ def _probe_device_details(serial: str) -> dict[str, str]:
         "echo __ANDROID__; getprop ro.build.version.release; "
         "echo __BATTERY__; dumpsys battery | grep '^  level:' | head -n 1; "
         "echo __SOC__; getprop ro.soc.model",
-    ], timeout=3)
+    ], timeout=3, env=_adb_environment(adb_server_socket))
     markers = {
         "__MODEL__": "model",
         "__ANDROID__": "android_version",
@@ -59,16 +80,25 @@ def _probe_device_details(serial: str) -> dict[str, str]:
     return details
 
 
-def probe_devices(include_details: bool = False) -> list[dict[str, Any]]:
-    try:
-        from .adb_proxy import imported_devices, sync_source_policy
+def probe_devices(
+    include_details: bool = False,
+    adb_server_socket: str | None = None,
+) -> list[dict[str, Any]]:
+    proxy_imports = {}
+    if not adb_server_socket:
+        try:
+            from .adb_proxy import imported_devices, sync_source_policy
 
-        sync_source_policy()
-        proxy_imports = imported_devices()
-    except (OSError, RuntimeError, ValueError):
-        proxy_imports = {}
+            sync_source_policy()
+            proxy_imports = imported_devices()
+        except (OSError, RuntimeError, ValueError):
+            proxy_imports = {}
     devices = []
-    for line in _run(["adb", "devices", "-l"]).splitlines()[1:]:
+    adb_env = _adb_environment(adb_server_socket)
+    for line in _run(
+        ["adb", "devices", "-l"],
+        env=adb_env,
+    ).splitlines()[1:]:
         parts = line.split()
         if len(parts) < 2 or parts[1] not in {"device", "offline", "unauthorized"}:
             continue
@@ -96,7 +126,9 @@ def probe_devices(include_details: bool = False) -> list[dict[str, Any]]:
                 "adb_proxy_source_serial": proxy_source["source_serial"],
             })
         if include_details and adb_state == "device":
-            properties.update(_probe_device_details(serial))
+            properties.update(
+                _probe_device_details(serial, adb_server_socket)
+            )
         devices.append({
             "serial": serial,
             "transport": "adb_proxy" if proxy_source else "local_usb",
@@ -177,7 +209,12 @@ def _run_usbip_helper(argv: list[str], timeout: int = 10) -> subprocess.Complete
         )
 
 
-def execute_usbip_action(action: str, source_host: str, busids: list[str]) -> dict[str, Any]:
+def execute_usbip_action(
+    action: str,
+    source_host: str,
+    busids: list[str],
+    adb_server_socket: str | None = None,
+) -> dict[str, Any]:
     """Attach or detach selected USB/IP exports on this Worker."""
     if not re.fullmatch(r"[A-Za-z0-9._:-]{1,255}", source_host or ""):
         raise ValueError("invalid USB/IP source host")
@@ -191,7 +228,12 @@ def execute_usbip_action(action: str, source_host: str, busids: list[str]) -> di
         raise ValueError("at least one USB/IP busid is required")
     helper = os.getenv("GMS_WORKER_USBIP_HELPER", "/usr/local/libexec/gms-worker-usbip")
     if action == "attach":
-        devices_before = {item["serial"] for item in probe_devices()}
+        devices_before = {
+            item["serial"]
+            for item in probe_devices(
+                adb_server_socket=adb_server_socket
+            )
+        }
         attached = []
         already_attached = []
         newly_attached = []
@@ -290,7 +332,10 @@ def execute_usbip_action(action: str, source_host: str, busids: list[str]) -> di
         new_serials = set()
         for _ in range(15):
             time.sleep(1)
-            devices = probe_devices(include_details=True)
+            devices = probe_devices(
+                include_details=True,
+                adb_server_socket=adb_server_socket,
+            )
             new_serials = {item["serial"] for item in devices} - devices_before
             if new_serials:
                 break

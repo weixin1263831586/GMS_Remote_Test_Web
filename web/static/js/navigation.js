@@ -85,6 +85,7 @@ let pendingUsbipDeviceHost = '';
 let activeUsbipSelection = null;
 let usbipSourceLoadPromise = null;
 const usbipSourceDeviceCache = new Map();
+const usbipAssignedBusidsBySource = new Map();
 let pendingDevicePasswordAction = 'usbip';
 let pendingDevicePasswordRetry = null;
 let usbipReconnectTimer = null;
@@ -1147,12 +1148,12 @@ async function loadClusterWorkers() {
             const context = window.GmsWorkspace?.get?.() || {};
             const optionData = [];
             if (!workers.some(worker => worker.id === localWorkerId)) {
-                optionData.push({value: localWorkerId, label: `本机 ${localWorkerId}`});
+                optionData.push({value: localWorkerId, label: localWorkerId});
             }
             for (const worker of workers) {
                 optionData.push({
                     value: worker.id,
-                    label: `${worker.name || worker.id} (${worker.hostname || worker.id})`,
+                    label: worker.id,
                 });
             }
 
@@ -1863,6 +1864,21 @@ function getReportSuiteVersion(report) {
     return versionMatch ? versionMatch[1] : '-';
 }
 
+function getReportSuiteDisplayName(report) {
+    const suitePath = String(report?.suite_path || '').replace(/\\/g, '/');
+    const pathName = suitePath
+        .split('/')
+        .find(part => /^android-(?:cts|gts|vts|sts|xts)-/i.test(part));
+    if (pathName) return pathName;
+
+    const version = getReportSuiteVersion(report);
+    const type = normalizeReportTestType(report?.test_type);
+    if (type && version && version !== '-') {
+        return `android-${type}-${version}`;
+    }
+    return report?.suite_key || version || '-';
+}
+
 function getSuiteReleasePath(suite) {
     const toolsPath = suite?.tools_path || '';
     const version = suite?.version || '';
@@ -2002,17 +2018,17 @@ async function loadSuiteWorkerSelector() {
         const saved = workspace.worker_id || localWorkerId;
         const workers = (payload.workers || []).filter(worker => worker.status !== 'offline');
         select.innerHTML = workers.map(worker =>
-            `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`
+            `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.id)}</option>`
         ).join('');
         if (!workers.some(worker => worker.id === localWorkerId)) {
-            select.insertAdjacentHTML('afterbegin', `<option value="${escapeHtml(localWorkerId)}">本机 ${escapeHtml(localWorkerId)}</option>`);
+            select.insertAdjacentHTML('afterbegin', `<option value="${escapeHtml(localWorkerId)}">${escapeHtml(localWorkerId)}</option>`);
         }
         if (Array.from(select.options).some(option => option.value === saved)) select.value = saved;
         select.dataset.loaded = '1';
         select.disabled = false;
     } catch (error) {
         debugLog('[Suites] Worker selector unavailable:', error);
-        select.innerHTML = `<option value="${escapeHtml(workspaceLocalWorkerId())}">本机 ${escapeHtml(workspaceLocalWorkerId())}</option>`;
+        select.innerHTML = `<option value="${escapeHtml(workspaceLocalWorkerId())}">${escapeHtml(workspaceLocalWorkerId())}</option>`;
         select.disabled = false;
     } })();
     try {
@@ -3551,7 +3567,8 @@ async function downloadSuiteDir(path, name = '') {
     }
     const link = document.createElement('a');
     link.href = `/api/test/suites/download-dir?${buildReadablePathQuery(params)}`;
-    link.download = `${name || path.split('/').pop() || 'download'}.zip`;
+    const dirSuffix = getSuiteRunFolderKind(path) ? `-${getSuiteRunFolderKind(path)}` : '';
+    link.download = `${name || path.split('/').pop() || 'download'}${dirSuffix}.zip`;
     link.target = frame.name;
     link.style.display = 'none';
     document.body.appendChild(link);
@@ -3728,7 +3745,7 @@ function renderDevices() {
 
     deviceCanvas.classList.remove('device-canvas-empty');
 
-    // 将设备交替分配到左右两栏
+    // 设备统一放入响应式网格，由可用宽度自动决定一至三列。
     // ADB 区按"关注"筛选：开启且有关注分组时，只显示属于任一关注分组的设备
     const followedIds = new Set(
         (state.deviceGroups || []).filter(g => g.followed).flatMap(g => g.device_ids || [])
@@ -3740,9 +3757,8 @@ function renderDevices() {
         })
         : state.devices;
 
-    const leftDevices = [];
-    const rightDevices = [];
-    visibleDevices.forEach((device, index) => {
+    const deviceInfos = [];
+    visibleDevices.forEach(device => {
         // Handle both string device IDs and device objects
         const deviceId = typeof device === 'string' ? device : device.device_id;
         const isLocked = typeof device === 'object' && device.locked;
@@ -3760,44 +3776,34 @@ function renderDevices() {
         const adbProxyTargetWorkerId = typeof device === 'object'
             ? (device.cluster_worker_id || device.worker_id || '')
             : '';
+        const isUsbip = typeof device === 'object'
+            && (device.is_usbip === true || transport === 'usbip');
+        const usbipSourceHost = typeof device === 'object'
+            ? (device.usbip_source_host || device.source || '')
+            : '';
         const displaySerial = typeof device === 'object'
             ? (device.adb_proxy_source_serial || device.serial || deviceId)
             : deviceId;
 
-        if (index % 2 === 0) {
-            leftDevices.push({
-                deviceId, isLocked, lockedBy, status, selectable,
-                transport, adbProxySourceWorkerId, adbProxyTargetWorkerId,
-                displaySerial
-            });
-        } else {
-            rightDevices.push({
-                deviceId, isLocked, lockedBy, status, selectable,
-                transport, adbProxySourceWorkerId, adbProxyTargetWorkerId,
-                displaySerial
-            });
-        }
+        deviceInfos.push({
+            deviceId, isLocked, lockedBy, status, selectable,
+            transport, adbProxySourceWorkerId, adbProxyTargetWorkerId,
+            isUsbip, usbipSourceHost, displaySerial
+        });
     });
 
     // 使用DocumentFragment优化DOM操作
     // 容器统一使用事件委托。
     const renderDeviceItem = (info) => buildDeviceItemEl(info);
 
-    // 渲染左侧栏
-    const leftFragment = document.createDocumentFragment();
-    leftDevices.forEach(deviceInfo => {
-        leftFragment.appendChild(renderDeviceItem(deviceInfo));
+    // 旧的左右栏 ID 保持不变以兼容现有页面选择器；主栏承载响应式网格。
+    const deviceFragment = document.createDocumentFragment();
+    deviceInfos.forEach(deviceInfo => {
+        deviceFragment.appendChild(renderDeviceItem(deviceInfo));
     });
     leftContainer.innerHTML = '';
-    leftContainer.appendChild(leftFragment);
-
-    // 渲染右侧栏
-    const rightFragment = document.createDocumentFragment();
-    rightDevices.forEach(deviceInfo => {
-        rightFragment.appendChild(renderDeviceItem(deviceInfo));
-    });
+    leftContainer.appendChild(deviceFragment);
     rightContainer.innerHTML = '';
-    rightContainer.appendChild(rightFragment);
 
     // 按 data 属性初始化一次事件委托。
     const setupDeviceDelegation = (container) => {
@@ -3828,6 +3834,8 @@ function buildDeviceItemEl({
     transport = 'local_usb',
     adbProxySourceWorkerId = '',
     adbProxyTargetWorkerId = '',
+    isUsbip = false,
+    usbipSourceHost = '',
     displaySerial = ''
 }) {
     const div = document.createElement('div');
@@ -3835,8 +3843,15 @@ function buildDeviceItemEl({
     div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
     div.dataset.deviceId = deviceId;
     if (!selectable) div.dataset.locked = 'true';
+    const adbProxyTargetHint = adbProxyTargetWorkerId
+        ? `；接入：${adbProxyTargetWorkerId}`
+        : '';
+    const usbipSource = String(usbipSourceHost || '').split('@').pop() || '来源未知';
+    const lockHint = isLocked ? `；占用：${lockedBy}` : '';
     div.title = transport === 'adb_proxy'
-        ? `ADB Proxy远程设备，来源：${adbProxySourceWorkerId || '未知'}；可执行ADB/测试，不能执行Fastboot、锁定或烧写`
+        ? `ADB Proxy远程设备，来源：${adbProxySourceWorkerId || '未知'}${adbProxyTargetHint}；可执行ADB/测试，不能执行Fastboot、锁定或烧写${lockHint}`
+        : isUsbip
+        ? `USB/IP远程设备，来源：${usbipSource}${lockHint}`
         : isLocked
         ? `已被 ${lockedBy} 占用`
         : status === 'fastboot'
@@ -3857,20 +3872,16 @@ function buildDeviceItemEl({
     info.appendChild(idDiv);
     if (transport === 'adb_proxy') {
         const sourceStatus = document.createElement('div');
-        sourceStatus.className = 'lock-status';
+        sourceStatus.className = 'device-source';
         const source = adbProxySourceWorkerId || '来源未知';
-        sourceStatus.textContent = adbProxyTargetWorkerId
-            ? `ADB Proxy · ${source} → ${adbProxyTargetWorkerId}`
-            : `ADB Proxy · ${source}`;
+        sourceStatus.textContent = `ADB · ${source}`;
+        info.appendChild(sourceStatus);
+    } else if (isUsbip) {
+        const sourceStatus = document.createElement('div');
+        sourceStatus.className = 'device-source';
+        sourceStatus.textContent = `USB/IP · ${usbipSource}`;
         info.appendChild(sourceStatus);
     }
-    if (isLocked && transport !== 'adb_proxy') {
-        const lockStatus = document.createElement('div');
-        lockStatus.className = 'lock-status';
-        lockStatus.textContent = `🔒 ${lockedBy}`;
-        info.appendChild(lockStatus);
-    }
-
     const statusEl = document.createElement('span');
     statusEl.className = 'device-status';
     const displayStatus = String(status || '').toLowerCase() === 'fastboot'
@@ -4382,6 +4393,11 @@ async function browseRemoteFileForFirmwareShare() {
     document.getElementById('file-browser-title').textContent = '选择共享固件';
     ModalManager.open('file-browser-modal');
     await loadFileDirectory(defaults.path);
+}
+
+function browseLocalFileForFirmwareShare() {
+    // Removed: shared firmware only accepts remote server paths (user@host:/path).
+    // Kept as a no-op stub in case legacy callers reference it.
 }
 
 function closeFirmwareShareModal() {
@@ -5300,10 +5316,7 @@ function closeAdbProxyModal() {
 }
 
 function adbProxyHostLabel(host) {
-    const name = host.name || host.worker_id;
-    const address = host.address || host.hostname || '地址未知';
-    const role = host.adb_proxy_source_only ? 'Ubuntu来源' : host.worker_id;
-    return `${name} · ${address}（${role}）`;
+    return host.worker_id || '未知 Worker';
 }
 
 function toggleAdbProxyUbuntuSource(forceOpen) {
@@ -5526,7 +5539,7 @@ function renderAdbProxySourceDevices() {
     } else if (sourceId && existingAssignment && devices.length) {
         message.textContent = (
             `该来源还有 ${devices.length} 台ADB设备可追加接入 `
-            + `${existingAssignment.target_name || existingAssignment.target_worker_id}。`
+            + `${existingAssignment.target_worker_id}。`
         );
     } else if (sourceId && devices.length && targetHosts.length) {
         message.textContent = `请选择要接入的ADB设备，共 ${devices.length} 台可用。`;
@@ -5540,6 +5553,17 @@ function renderAdbProxySourceDevices() {
         message.textContent = '没有可用于接入该来源设备的目标主机。';
     } else {
         message.textContent = '该来源当前没有可接入的ADB设备。';
+    }
+}
+
+async function refreshAdbProxyAssignments() {
+    const container = document.getElementById('adb-proxy-assignments');
+    if (container) container.textContent = '正在刷新接入状态...';
+    try {
+        adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
+        renderAdbProxyAssignments();
+    } catch (error) {
+        if (container) container.textContent = `刷新失败: ${error.message}`;
     }
 }
 
@@ -5557,13 +5581,16 @@ function renderAdbProxyAssignments() {
         row.className = 'adb-proxy-assignment';
         const info = document.createElement('div');
         info.className = 'adb-proxy-assignment-info';
-        const source = assignment.source_name || assignment.source_worker_id;
-        const target = assignment.target_name || assignment.target_worker_id;
+        const statusLabels = {
+            connecting: '正在接入',
+            connect_failed: '接入失败',
+            host_offline: '主机离线',
+        };
+        const status = statusLabels[assignment.status] || '';
         info.textContent = (
-            `${source} · ${assignment.source_address || '地址未知'} → `
-            + `${target} · ${assignment.target_address || '地址未知'}`
+            `${assignment.source_worker_id} → ${assignment.target_worker_id}`
             + `｜设备：${(assignment.devices || []).join(', ') || '无'}`
-            + `｜状态：${assignment.status || 'unknown'}`
+            + (status ? `｜${status}` : '')
         );
         const disconnect = document.createElement('button');
         disconnect.type = 'button';
@@ -5665,113 +5692,125 @@ async function setupUsbipForward() {
     const btn = $('usbip-btn');
     if (!btn) return;
 
-    // 防止并发操作
     if (btn.disabled) return;
-
     debugLog('[setupUsbipForward] Called, state.usbipConnected =', state.usbipConnected);
-
-    if (state.usbipConnected) {
-        const granted = await requestElevatedAccess('断开/移除设备');
-        if (!granted) {
-            addLogEntry('已取消断开设备（需要管理员权限）', 'warning');
-            return;
-        }
-        await openUsbipDetachModal();
-    } else {
-        const granted = await requestElevatedAccess('枚举和接入USB/IP设备');
-        if (!granted) return;
-        await openUsbipAttachModal();
-    }
+    const granted = await requestElevatedAccess('管理USB/IP设备接入');
+    if (!granted) return;
+    await openUsbipAttachModal();
 }
 
-async function openUsbipDetachModal() {
-    const select = document.getElementById('usbip-detach-devices');
-    const all = document.getElementById('usbip-detach-all');
-    const message = document.getElementById('usbip-detach-message');
-    if (!select || !all) return;
-    select.innerHTML = '<option value="">正在读取已接入设备...</option>';
-    select.disabled = true;
-    all.checked = false;
-    ModalManager.open('usbip-detach-modal');
+function usbipSelectionSerials(group, busid) {
+    const mapped = group?.device_serials_by_busid?.[busid];
+    const values = Array.isArray(mapped) ? mapped : (group?.device_serials || []);
+    return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)));
+}
+
+function usbipAssignmentLabel(selection, busid) {
+    const serials = usbipSelectionSerials(selection, busid);
+    return (
+        `${selection.device_host} → ${selection.worker_id || 'Controller'} · ${busid}`
+        + `｜设备：${serials.join('、') || '尚未识别'}`
+    );
+}
+
+async function refreshUsbipAssignments() {
+    await loadUsbipAssignments();
+}
+
+async function loadUsbipAssignments() {
+    const container = document.getElementById('usbip-assignments');
+    if (!container) return;
+    container.textContent = '正在读取接入状态...';
     try {
         const statusPath = pendingUsbipDeviceHost
             ? '/api/usbip/status?device_host=' + encodeURIComponent(pendingUsbipDeviceHost)
             : '/api/usbip/status';
         const status = await apiCall(statusPath, 'GET');
         const selections = status.cluster_selections || [];
-        select.innerHTML = '';
+        const statusSource = status.device_host || pendingUsbipDeviceHost || '';
+        if (statusSource) usbipAssignedBusidsBySource.set(statusSource, new Set());
+        const rows = [];
         selections.forEach(group => {
+            const assignedBusids = usbipAssignedBusidsBySource.get(group.device_host)
+                || new Set();
             (group.busids || []).forEach(busid => {
-                const selection = {...group, busids: [busid]};
-                const label = `${group.device_host} → ${group.worker_id} · ${busid}`;
-                select.append(new Option(label, JSON.stringify(selection)));
+                assignedBusids.add(busid);
+                const deviceSerials = usbipSelectionSerials(group, busid);
+                rows.push({
+                    ...group,
+                    busids: [busid],
+                    device_serials: deviceSerials,
+                });
             });
+            usbipAssignedBusidsBySource.set(group.device_host, assignedBusids);
         });
-        if (!select.options.length && activeUsbipSelection?.busids?.length) {
+        if (!rows.length && activeUsbipSelection?.busids?.length) {
             activeUsbipSelection.busids.forEach(busid => {
-                const selection = {...activeUsbipSelection, busids: [busid]};
-                select.append(new Option(
-                    `${selection.device_host} → ${selection.worker_id || 'Controller'} · ${busid}`,
-                    JSON.stringify(selection)
-                ));
+                rows.push({...activeUsbipSelection, busids: [busid]});
             });
         }
-        if (!select.options.length && status.connected) {
-            const legacy = {device_host: status.device_host || pendingUsbipDeviceHost};
-            select.append(new Option(
-                `${legacy.device_host} · 全部历史USB/IP设备（无busid记录）`,
-                JSON.stringify(legacy)
-            ));
+        container.replaceChildren();
+        rows.forEach(selection => {
+            const busid = selection.busids[0];
+            const row = document.createElement('div');
+            row.className = 'adb-proxy-assignment';
+            const info = document.createElement('div');
+            info.className = 'adb-proxy-assignment-info';
+            info.textContent = usbipAssignmentLabel(selection, busid);
+            const disconnect = document.createElement('button');
+            disconnect.type = 'button';
+            disconnect.className = 'btn-xxs btn-danger';
+            disconnect.textContent = '断开';
+            disconnect.addEventListener('click', async () => {
+                await performUsbipDisconnect([selection]);
+            });
+            row.append(info, disconnect);
+            container.append(row);
+        });
+        if (!rows.length && status.connected) {
+            const legacy = {
+                device_host: status.device_host || pendingUsbipDeviceHost,
+                worker_id: workspaceLocalWorkerId(),
+            };
+            const row = document.createElement('div');
+            row.className = 'adb-proxy-assignment';
+            const info = document.createElement('div');
+            info.className = 'adb-proxy-assignment-info';
+            info.textContent = `${legacy.device_host}｜历史USB/IP接入（无端口记录）`;
+            const disconnect = document.createElement('button');
+            disconnect.type = 'button';
+            disconnect.className = 'btn-xxs btn-danger';
+            disconnect.textContent = '断开';
+            disconnect.addEventListener('click', async () => {
+                await performUsbipDisconnect([legacy]);
+            });
+            row.append(info, disconnect);
+            container.append(row);
         }
-        select.disabled = !select.options.length;
-        if (select.options.length) select.options[0].selected = true;
-        if (message) message.textContent = select.options.length
-            ? `共 ${select.options.length} 个可断开项。`
-            : '未找到可断开的USB/IP设备。';
+        if (!container.children.length) {
+            container.textContent = '当前没有通过USB/IP接入的设备。';
+        }
+        state.usbipConnected = Boolean(rows.length || status.connected);
+        updateUsbipButtonStatus(state.usbipConnected);
     } catch (error) {
-        select.innerHTML = '<option value="">读取失败</option>';
-        if (message) message.textContent = `读取USB/IP分配失败：${error.message}`;
+        container.textContent = `读取USB/IP接入状态失败：${error.message}`;
     }
+}
+
+async function openUsbipDetachModal() {
+    await openUsbipAttachModal();
 }
 
 function closeUsbipDetachModal() {
-    ModalManager.close('usbip-detach-modal');
+    closeUsbipAttachModal();
 }
 
 function toggleUsbipDetachAll() {
-    const select = document.getElementById('usbip-detach-devices');
-    const checked = document.getElementById('usbip-detach-all')?.checked;
-    if (!select) return;
-    Array.from(select.options).forEach(option => { option.selected = Boolean(checked); });
-    select.disabled = Boolean(checked);
+    // Kept as a compatibility no-op for older cached pages.
 }
 
 async function submitUsbipDetach() {
-    const select = document.getElementById('usbip-detach-devices');
-    const useAll = document.getElementById('usbip-detach-all')?.checked;
-    const options = useAll
-        ? Array.from(select?.options || [])
-        : Array.from(select?.selectedOptions || []);
-    const selections = options.map(option => {
-        try { return JSON.parse(option.value); } catch (_error) { return null; }
-    }).filter(Boolean);
-    if (!selections.length) {
-        showToast('请选择需要断开的USB设备', 'warning');
-        return;
-    }
-    const grouped = new Map();
-    selections.forEach(selection => {
-        const key = [
-            selection.device_host || '',
-            selection.source_host || '',
-            selection.worker_id || ''
-        ].join('|');
-        const current = grouped.get(key) || {...selection, busids: []};
-        current.busids.push(...(selection.busids || []));
-        grouped.set(key, current);
-    });
-    closeUsbipDetachModal();
-    await performUsbipDisconnect(Array.from(grouped.values()));
+    showToast('请在“当前接入”中选择对应设备并点击断开', 'warning');
 }
 
 async function performUsbipDisconnect(selections) {
@@ -5786,35 +5825,70 @@ async function performUsbipDisconnect(selections) {
             usbipReconnectTimer = null;
         }
         const workerBaselines = new Map();
+        const expectedUsbipSerials = new Map();
         selections.forEach(selection => {
-            if (!selection.worker_id || workerBaselines.has(selection.worker_id)) return;
-            const serials = new Set(
-                (state.devices || [])
-                    .filter(device => (
-                        device.worker_id === selection.worker_id
-                        || String(device.device_id || '').startsWith(`${selection.worker_id}:`)
-                    ))
-                    .map(device => String(device.serial || device.device_id || '').split(':').pop())
-            );
-            workerBaselines.set(selection.worker_id, serials);
+            const workerId = selection.worker_id || workspaceLocalWorkerId();
+            if (!workerBaselines.has(workerId)) {
+                const serials = new Set(
+                    (state.devices || [])
+                        .filter(device => (
+                            device.worker_id === workerId
+                            || String(device.device_id || '').startsWith(`${workerId}:`)
+                            || (
+                                workerId === workspaceLocalWorkerId()
+                                && !device.worker_id
+                            )
+                        ))
+                        .map(device => String(device.serial || device.device_id || '').split(':').pop())
+                );
+                workerBaselines.set(workerId, serials);
+            }
+            const expected = expectedUsbipSerials.get(workerId) || new Set();
+            (selection.device_serials || []).forEach(serial => {
+                if (serial) expected.add(String(serial));
+            });
+            expectedUsbipSerials.set(workerId, expected);
         });
         for (const selection of selections) {
-            const result = await apiCall('/api/usbip/disconnect', 'POST', selection);
+            const disconnectPayload = {
+                device_host: selection.device_host,
+                source_host: selection.source_host || '',
+                worker_id: selection.worker_id || '',
+                busids: selection.busids || [],
+            };
+            const result = await apiCall(
+                '/api/usbip/disconnect',
+                'POST',
+                disconnectPayload
+            );
             addLogEntry(result.message || 'USB/IP设备已断开', 'success');
+            const workerId = selection.worker_id || workspaceLocalWorkerId();
+            const expected = expectedUsbipSerials.get(workerId) || new Set();
+            (result.removed_devices || []).forEach(serial => {
+                if (serial) expected.add(String(serial));
+            });
+            expectedUsbipSerials.set(workerId, expected);
             if (Array.isArray(result.remaining_devices) && result.remaining_devices.length) {
                 addLogEntry('断开后仍在线: ' + result.remaining_devices.join(' '), 'warning');
             }
         }
         activeUsbipSelection = null;
-        state.usbipConnected = false;
-        btn.textContent = '📱 本地设备';
+        selections.forEach(selection => {
+            usbipSourceDeviceCache.delete(selection.device_host);
+        });
+        await loadUsbipAssignments();
+        await loadUsbipSourceDevices(true);
         btn.disabled = false;
         // Refresh the global device list immediately after the backend confirms
         // the disconnect. Remote Worker detachments do not emit a local USB
         // hotplug event, so without this the UI keeps showing the detached
         // device until the slower background poll notices it is gone.
         await loadDevices(true);
-        void refreshUsbipDetachedWorkers(workerBaselines, operationGeneration);
+        void refreshUsbipDetachedWorkers(
+            workerBaselines,
+            expectedUsbipSerials,
+            operationGeneration
+        );
         setTimeout(() => {
             if (operationGeneration === usbipOperationGeneration) {
                 checkUsbipStatus();
@@ -5827,7 +5901,16 @@ async function performUsbipDisconnect(selections) {
     }
 }
 
-async function refreshUsbipDetachedWorkers(workerBaselines, operationGeneration) {
+async function refreshUsbipDetachedWorkers(
+    workerBaselines,
+    expectedUsbipSerials = new Map(),
+    operationGeneration = usbipOperationGeneration
+) {
+    // Compatibility with older cached callers that passed generation second.
+    if (typeof expectedUsbipSerials === 'number') {
+        operationGeneration = expectedUsbipSerials;
+        expectedUsbipSerials = new Map();
+    }
     for (const delay of [2000, 3000, 5000, 8000, 12000, 15000]) {
         await new Promise(resolve => setTimeout(resolve, delay));
         if (operationGeneration !== usbipOperationGeneration) return;
@@ -5838,7 +5921,34 @@ async function refreshUsbipDetachedWorkers(workerBaselines, operationGeneration)
                 const visible = new Set(
                     (devices || []).map(device => String(device.serial || device.device_id || '').split(':').pop())
                 );
-                if (baseline.size && [...baseline].some(serial => !visible.has(serial))) {
+                const expected = expectedUsbipSerials.get(workerId) || new Set();
+                const usbipVisible = new Set(
+                    (devices || [])
+                        .filter(device => (
+                            device.transport === 'usbip'
+                            || device.is_usbip === true
+                            || device.properties?.is_usbip === true
+                        ))
+                        .map(device => String(device.serial || device.device_id || '').split(':').pop())
+                );
+                if (
+                    (expected.size && ![...expected].some(serial => usbipVisible.has(serial)))
+                    || (
+                        !expected.size
+                        && baseline.size
+                        && [...baseline].some(serial => !visible.has(serial))
+                    )
+                ) {
+                    const stillOnlineElsewhere = [...expected].filter(serial => (
+                        visible.has(serial) && !usbipVisible.has(serial)
+                    ));
+                    if (stillOnlineElsewhere.length) {
+                        addLogEntry(
+                            'USB/IP已断开；同序列号设备仍通过其他ADB传输在线: '
+                            + stillOnlineElsewhere.join(' '),
+                            'warning'
+                        );
+                    }
                     changed = true;
                     break;
                 }
@@ -5892,7 +6002,7 @@ async function openUsbipAttachModal() {
 
     const localWorkerId = workspaceLocalWorkerId();
     targetSelect.innerHTML = '';
-    targetSelect.append(new Option(`${localWorkerId}（Controller）`, localWorkerId));
+    targetSelect.append(new Option(localWorkerId, localWorkerId));
     try {
         const response = await fetch('/api/cluster/hosts', {
             credentials: 'same-origin',
@@ -5902,8 +6012,7 @@ async function openUsbipAttachModal() {
         if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
         (payload.hosts || []).forEach(host => {
             if (!host.worker_id || host.worker_id === localWorkerId) return;
-            const label = `${host.worker_id} · ${host.hostname || host.address || ''}`;
-            const option = new Option(label, host.worker_id);
+            const option = new Option(host.worker_id, host.worker_id);
             const online = ['online', 'busy'].includes(host.status);
             const usbipCapable = host.capabilities?.usbip_client === true;
             option.disabled = !online || !usbipCapable;
@@ -5921,7 +6030,11 @@ async function openUsbipAttachModal() {
         ? preferredWorker : localWorkerId;
     if (submit) submit.disabled = !sourceSelect.value;
     ModalManager.open('usbip-attach-modal');
+    await loadUsbipAssignments();
     await loadUsbipSourceDevices();
+    // Source enumeration also repairs older assignments that were persisted
+    // before ADB exposed their serial. Refresh the current rows afterwards.
+    await loadUsbipAssignments();
 }
 
 function closeUsbipAttachModal() {
@@ -5946,8 +6059,22 @@ async function submitUsbipAttach() {
         showToast('请至少选择一个USB设备', 'warning');
         return;
     }
-    closeUsbipAttachModal();
-    await connectUsbipDeviceHost(deviceHost, workerId, busids);
+    const submit = document.getElementById('usbip-attach-submit');
+    const message = document.getElementById('usbip-attach-message');
+    if (submit) submit.disabled = true;
+    if (message) message.textContent = '正在接入USB/IP设备，请稍候...';
+    try {
+        await connectUsbipDeviceHost(deviceHost, workerId, busids);
+    } finally {
+        const sourceDevice = document.getElementById('usbip-source-device');
+        if (submit) {
+            submit.disabled = (
+                !sourceDevice
+                || sourceDevice.disabled
+                || !sourceDevice.value
+            );
+        }
+    }
 }
 
 async function loadUsbipSourceDevices(force = false) {
@@ -5996,15 +6123,24 @@ function renderUsbipSourceDevices(source, devices) {
     const message = document.getElementById('usbip-attach-message');
     if (!select) return;
     select.innerHTML = '';
-    devices.forEach(device => {
+    const assignedBusids = usbipAssignedBusidsBySource.get(source) || new Set();
+    const availableDevices = devices.filter(device => !assignedBusids.has(device.busid));
+    availableDevices.forEach(device => {
         const option = new Option(device.label || device.busid, device.busid);
         option.selected = true;
         select.append(option);
     });
-    if (!devices.length) select.append(new Option('未发现Android USB设备', ''));
-    select.disabled = !devices.length;
-    if (message) message.textContent = devices.length
-        ? `发现 ${devices.length} 个 USB 设备。多选时，Windows/Linux 按住 Ctrl，macOS 按住 Command。`
+    if (!availableDevices.length) {
+        select.append(new Option(
+            devices.length ? '该来源设备均已接入' : '未发现Android USB设备',
+            ''
+        ));
+    }
+    select.disabled = !availableDevices.length;
+    if (message) message.textContent = availableDevices.length
+        ? `发现 ${availableDevices.length} 个可接入 USB 设备。多选时，Windows/Linux 按住 Ctrl，macOS 按住 Command。`
+        : devices.length
+        ? '该来源当前没有剩余可接入的Android USB设备。'
         : '设备源未发现可接入的Android USB设备。';
 }
 
@@ -6036,12 +6172,19 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
             state.usbipConnected = true;
             pendingUsbipDeviceHost = result.device_host || deviceHost;
             activeUsbipSelection.source_host = result.source_host || '';
+            activeUsbipSelection.device_serials = (
+                result.device_serials || result.new_devices || result.device_list || []
+            );
             btn.textContent = '📱 断开设备';
             btn.disabled = false;
             addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
+            usbipSourceDeviceCache.delete(deviceHost);
+            await loadUsbipAssignments();
+            await loadUsbipSourceDevices(true);
+            await loadUsbipAssignments();
             refreshUsbipTargetWorker(
                 workerId,
-                result.new_devices || [],
+                result.device_serials || result.new_devices || [],
                 targetSerialsBefore,
                 operationGeneration
             );
@@ -6102,12 +6245,19 @@ async function refreshUsbipTargetWorker(
             const visible = new Set(
                 state.devices.map(device => String(device.serial || device.device_id || ''))
             );
+            const discoveredSerials = expectedSerials.length
+                ? expectedSerials.filter(serial => visible.has(serial))
+                : [...visible].filter(serial => !baseline.has(serial));
             if (
                 expectedSerials.length
                 ? expectedSerials.every(serial => visible.has(serial))
                 : [...visible].some(serial => !baseline.has(serial))
             ) {
-                addLogEntry(`已刷新 ${workerId} 设备列表，找到 ${state.devices.length} 台设备`, 'success');
+                addLogEntry(
+                    `已刷新 ${workerId} 设备列表，ADB在线：`
+                    + (discoveredSerials.join(', ') || '序列号尚未识别'),
+                    'success'
+                );
                 return;
             }
         } catch (error) {
@@ -6115,7 +6265,11 @@ async function refreshUsbipTargetWorker(
         }
     }
     if (operationGeneration !== usbipOperationGeneration) return;
-    addLogEntry(`USB/IP传输已连接，但 ${workerId} 尚未枚举到新设备，请稍后刷新`, 'warning');
+    addLogEntry(
+        `USB/IP传输已连接，设备：${expectedSerials.join(', ') || '尚未识别'}；`
+        + `${workerId} 尚未完成ADB枚举，请稍后刷新`,
+        'warning'
+    );
 }
 
 function scheduleUsbipReconnect(reason) {
@@ -7393,6 +7547,15 @@ function renderFirmwareShareBrowseError(host, message) {
     `;
 }
 
+function formatFileBrowserDate(timestamp) {
+    const ts = Number(timestamp);
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    if (isNaN(d.getTime())) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function renderFileList(files) {
     const listContainer = document.getElementById('file-browser-list');
     const pathDisplay = document.getElementById('file-browser-current-path');
@@ -7422,12 +7585,17 @@ function renderFileList(files) {
         name.textContent = file.name;
         item.appendChild(name);
 
-        const sizeInfo = file.type === 'file' ? formatBytes(file.size, true) : '';
-        if (sizeInfo) {
-            const size = document.createElement('span');
-            size.style.cssText = 'color: var(--text-muted); font-size: 11px;';
-            size.textContent = sizeInfo;
-            item.appendChild(size);
+        const sizeInfo = document.createElement('span');
+        sizeInfo.className = 'file-browser-meta';
+        sizeInfo.style.textAlign = 'right';
+        sizeInfo.textContent = file.type === 'file' ? formatBytes(file.size, true) : '—';
+        item.appendChild(sizeInfo);
+
+        if (file.modified || file.mtime) {
+            const mtime = document.createElement('span');
+            mtime.className = 'file-browser-meta';
+            mtime.textContent = formatFileBrowserDate(file.modified || file.mtime);
+            item.appendChild(mtime);
         }
 
         listContainer.appendChild(item);
@@ -8840,7 +9008,7 @@ async function loadReportWorkers() {
         const workspace = window.GmsWorkspace?.get?.() || {};
         const previous = workspace.worker_id || '';
         select.innerHTML = '<option value="">全部 Worker</option>' + (payload.workers || []).map(worker =>
-            `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name || worker.id)}</option>`
+            `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.id)}</option>`
         ).join('');
         if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
         reportsWorkersLoaded = true;
@@ -8923,7 +9091,7 @@ async function loadTestReports(userOnly = false) {
         if (tbody) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                    <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                         加载失败
                     </td>
                 </tr>
@@ -8954,7 +9122,7 @@ function displayTestReports(reports) {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="9" style="padding: 60px 40px; text-align: center; color: var(--text-secondary);">
+                <td colspan="10" style="padding: 60px 40px; text-align: center; color: var(--text-secondary);">
                     暂无测试报告
                 </td>
             </tr>
@@ -8988,7 +9156,8 @@ function displayTestReports(reports) {
         const failCount = report.fail !== undefined ? report.fail : '-';
         const totalCount = report.total !== undefined ? report.total : '-';
         const passRate = report.total > 0 ? ((report.pass / report.total) * 100).toFixed(1) + '%' : '-';
-        const suiteVersion = `${getReportSuiteVersion(report)}${report.worker_id ? ` · ${report.worker_id}` : ''}`;
+        const suiteName = getReportSuiteDisplayName(report);
+        const workerId = report.worker_id || workspaceLocalWorkerId() || '-';
 
         const passRateStyle = report.total > 0 ? (report.pass / report.total >= 0.9 ? 'color: var(--success-color);' : 'color: var(--warning-color);') : '';
 
@@ -9010,8 +9179,9 @@ function displayTestReports(reports) {
         tr.innerHTML = `
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(displayClient)}</td>
             <td style="padding: 4px 6px; text-align: center; font-weight: 700; font-size: 13px; color: ${typeColor};">${testType}</td>
-            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px; color: var(--text-primary);">${escapeHtml(suiteVersion)}</td>
-            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${report.timestamp}</td>
+            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px; color: var(--text-primary);">${escapeHtml(suiteName)}</td>
+            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(workerId)}</td>
+            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;" title="${escapeIconAttr(report.timestamp || '')}">${escapeHtml(report.report_name || report.timestamp || '-')}</td>
             <td style="padding: 4px 6px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 13px;">${passCount}</td>
             <td style="padding: 4px 6px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 13px;">${failCount}</td>
             <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px;">${totalCount}</td>

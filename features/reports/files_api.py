@@ -21,6 +21,7 @@ from .api_helpers import (
     os,
     test_report_db,
 )
+from .display import report_client_display_id, report_name_from_result_dir
 
 
 router = APIRouter()
@@ -66,11 +67,13 @@ def _decorate_report_for_client(
     """Return a browser-safe report record without host paths or owner keys."""
 
     item = dict(report)
-    stored_display = str(item.get("display_client_id") or item.get("client_name") or "").strip()
-    if stored_display:
-        item["display_client_id"] = stored_display
-    elif display_id:
-        item["display_client_id"] = display_id
+    item["display_client_id"] = report_client_display_id(item, display_id)
+    report_name = str(item.get("report_name") or "").strip()
+    if not report_name or report_name.startswith("cluster-job-"):
+        report_name = report_name_from_result_dir(
+            str(item.get("result_dir") or "")
+        )
+    item["report_name"] = report_name or str(item.get("timestamp") or "")
     for private_key in ("owner_id", "client_id", "result_dir"):
         item.pop(private_key, None)
     return item
@@ -152,7 +155,13 @@ async def list_reports(
                 if str(report.get("worker_id") or "") == worker_id
             ]
         all_reports = [
-            _decorate_report_for_client(report, display_id)
+            _decorate_report_for_client(
+                report,
+                display_id
+                if principal
+                and str(report.get("owner_id") or "") == principal.id
+                else "",
+            )
             for report in all_reports[:30]
         ]
         db_time = (time.time() - db_start) * 1000

@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -66,6 +67,29 @@ class _Repository:
             for key, values in self.devices.items()
             for item in values
         ]
+
+
+@pytest.mark.asyncio
+async def test_proxy_mutations_are_serialized():
+    service = ADBProxyService()
+    active = 0
+    max_active = 0
+
+    async def fake_connect(source, target, devices):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return {"source": source, "target": target, "devices": devices}
+
+    with patch.object(service, "_connect", side_effect=fake_connect):
+        await asyncio.gather(
+            service.connect("source-1", "target", ["D1"]),
+            service.connect("source-2", "target", ["D2"]),
+        )
+
+    assert max_active == 1
 
 
 @pytest.mark.asyncio
@@ -144,6 +168,146 @@ async def test_connect_refuses_device_that_is_not_available():
 
 
 @pytest.mark.asyncio
+async def test_connect_refuses_same_serial_already_attached_over_usbip():
+    repository = _Repository()
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="worker-local"),
+        effective_enabled=True,
+    )
+    service = ADBProxyService()
+    service.config_manager = _ConfigManager()
+
+    with patch(
+        "features.cluster.get_cluster_service", return_value=cluster
+    ), patch(
+        "features.cluster.api._require_cluster_enabled"
+    ), patch(
+        "features.devices.integrations_api._usbip_assignments",
+        return_value={
+            "source|1-8": {
+                "worker_id": "worker-target",
+                "device_serials": ["RK3572GMS1"],
+                "status": "attached",
+            }
+        },
+    ), pytest.raises(HTTPException, match="同序列号USB/IP设备"):
+        await service.connect(
+            "worker-source",
+            "worker-target",
+            ["RK3572GMS1"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_connect_refuses_same_serial_from_another_proxy_source():
+    repository = _Repository()
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="worker-local"),
+        effective_enabled=True,
+    )
+    service = ADBProxyService()
+    service.config_manager = _ConfigManager()
+    service.config_manager.runtime["adb_proxy_assignments"] = {
+        "worker-other|worker-target": {
+            "source_worker_id": "worker-other",
+            "target_worker_id": "worker-target",
+            "devices": ["RK3572GMS1"],
+            "status": "connected",
+        },
+    }
+
+    with patch(
+        "features.cluster.get_cluster_service", return_value=cluster
+    ), patch(
+        "features.cluster.api._require_cluster_enabled"
+    ), patch(
+        "features.devices.integrations_api._usbip_assignments",
+        return_value={},
+    ), pytest.raises(HTTPException, match="其他ADB Proxy来源"):
+        await service.connect(
+            "worker-source",
+            "worker-target",
+            ["RK3572GMS1"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_multiple_proxy_sources_share_one_target_and_disconnect_independently():
+    repository = _Repository()
+    repository.workers["worker-source-2"] = {
+        "id": "worker-source-2",
+        "name": "Second Device Host",
+        "hostname": "source-2",
+        "address": "10.10.10.208",
+        "status": "online",
+        "capabilities": {
+            "adb_proxy": True,
+            "adb_proxy_version": "adb-proxy 0.4.5",
+        },
+    }
+    repository.devices["worker-source-2"] = [{
+        "serial": "ATS357629",
+        "state": "available",
+        "transport": "local_usb",
+        "properties": {"model": "RK3576"},
+    }]
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="worker-local"),
+        effective_enabled=True,
+        list_workers=lambda: list(repository.workers.values()),
+    )
+    service = ADBProxyService()
+    service.config_manager = _ConfigManager()
+    run = AsyncMock(side_effect=[
+        {"running": True},
+        {"connected": True},
+        {"running": True},
+        {"connected": True},
+        {"connected": True},
+        {"running": False},
+    ])
+
+    with patch(
+        "features.cluster.get_cluster_service", return_value=cluster
+    ), patch(
+        "features.cluster.api._require_cluster_enabled"
+    ), patch(
+        "features.cluster.api._run_worker_command", run
+    ), patch(
+        "features.devices.adb_proxy_service.create_pair_grant",
+        return_value="short-lived-grant",
+    ), patch(
+        "features.devices.integrations_api._usbip_assignments",
+        return_value={},
+    ):
+        await service.connect(
+            "worker-source",
+            "worker-target",
+            ["RK3572GMS1"],
+        )
+        await service.connect(
+            "worker-source-2",
+            "worker-target",
+            ["ATS357629"],
+        )
+        assignments = service.assignments()
+        assert set(assignments) == {
+            "worker-source|worker-target",
+            "worker-source-2|worker-target",
+        }
+        await service.disconnect("worker-source", "worker-target")
+
+    remaining = service.assignments()
+    assert set(remaining) == {"worker-source-2|worker-target"}
+    assert remaining["worker-source-2|worker-target"]["devices"] == [
+        "ATS357629"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_connect_adds_remaining_device_to_existing_assignment():
     repository = _Repository()
     repository.devices["worker-source"].append({
@@ -203,6 +367,7 @@ async def test_connect_adds_remaining_device_to_existing_assignment():
     assert run.await_args_list[0].args[2]["devices"] == expected
     assert run.await_args_list[1].args[2]["devices"] == expected
     assert result["assignment"]["devices"] == expected
+    assert "设备：RK3572GMS1, RK3576GMS1" in result["message"]
 
 
 @pytest.mark.asyncio
