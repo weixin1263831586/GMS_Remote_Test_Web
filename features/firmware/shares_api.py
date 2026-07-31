@@ -14,9 +14,10 @@ from typing import Any
 from urllib.parse import quote
 
 import paramiko
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from features.auth import require_elevated_admin_when_auth_required
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
 from foundation.ssh_security import configure_strict_host_keys
@@ -357,7 +358,10 @@ async def list_firmware_shares():
 
 
 @router.post("/api/firmware-shares")
-async def create_firmware_share(request: Request):
+async def create_firmware_share(
+    request: Request,
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
     try:
         payload = await request.json()
         remote = str(payload.get("remote") or payload.get("remote_path") or "").strip()
@@ -396,7 +400,10 @@ async def create_firmware_share(request: Request):
 
 
 @router.post("/api/firmware-shares/validate")
-async def validate_firmware_share(request: Request):
+async def validate_firmware_share(
+    request: Request,
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
     try:
         payload = await request.json()
         host, user, path = _parse_remote_spec(str(payload.get("remote") or "").strip())
@@ -411,7 +418,10 @@ async def validate_firmware_share(request: Request):
 
 
 @router.post("/api/firmware-shares/browse")
-async def browse_firmware_share_remote(request: Request):
+async def browse_firmware_share_remote(
+    request: Request,
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
     try:
         payload = await request.json()
         remote = str(payload.get("remote") or "").strip()
@@ -471,7 +481,10 @@ async def browse_firmware_share_remote(request: Request):
 
 
 @router.delete("/api/firmware-shares/{share_id}")
-async def delete_firmware_share(share_id: str):
+async def delete_firmware_share(
+    share_id: str,
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
     with _records_lock:
         records = _load_records()
         kept = [record for record in records if record.get("id") != share_id]
@@ -482,7 +495,11 @@ async def delete_firmware_share(share_id: str):
 
 
 @router.post("/api/firmware-shares/{share_id}/credentials")
-async def update_firmware_share_credentials(share_id: str, request: Request):
+async def update_firmware_share_credentials(
+    share_id: str,
+    request: Request,
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
     records, record = _find_record(share_id)
     if not record:
         return error_response("固件分享不存在", 404)

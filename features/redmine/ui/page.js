@@ -645,6 +645,13 @@ function notifyUser(title, message, level) {
   setTimeout(function(){ if (toast.parentNode) toast.remove(); }, 3600);
 }
 
+async function confirmUserAction(title, message) {
+  if (typeof window.parent?.showConfirmDialog === 'function') {
+    return window.parent.showConfirmDialog(title, message);
+  }
+  return window.confirm(message);
+}
+
 function openRedmineReplyModal(issueId, replyText, meta) {
   issueId = String(issueId || '').trim();
   meta = meta || {};
@@ -2039,7 +2046,10 @@ async function startScan() {
 async function triggerSync() {
   const assignee = getSelectedStatsAssignee();
   const target = assignee ? `「${assignee}」名下的` : '指派给你的';
-  if (!confirm(`确认全量同步 ${target} Redmine 工单？这可能需要几分钟。`)) return;
+  if (!await confirmUserAction(
+    '全量同步 Redmine',
+    `确认全量同步 ${target} Redmine 工单？\n这可能需要几分钟。`
+  )) return;
   const params = new URLSearchParams({max_analyze: '30'});
   if (assignee) params.set('assignee_name', assignee);
   const btn = document.getElementById('syncBtn');
@@ -2391,7 +2401,10 @@ async function sendReplyToRedmine(issueId, btn) {
   if (!area) { notifyUser('无回复内容', '请先生成回复草稿', 'error'); return; }
   const text = (area.value || '').trim();
   if (!text) { notifyUser('回复为空', '请先生成或编辑回复草稿', 'error'); return; }
-  if (!confirm('确认将此回复发送到 Redmine #' + issueId + ' ?')) return;
+  if (!await confirmUserAction(
+    '发送 Redmine 回复',
+    '确认将此回复发送到 Redmine #' + issueId + '？'
+  )) return;
   if (btn) { btn.disabled = true; var old = btn.textContent; btn.textContent = '⏳ 发送中…'; }
   try {
     const data = await api('/api/redmine/reply', {

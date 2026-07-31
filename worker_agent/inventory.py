@@ -328,6 +328,18 @@ def execute_usbip_action(
                     f"请先在原接入主机断开后重试。{details}"
                 )
             raise RuntimeError(details or "USB/IP attach failed")
+        if len(already_attached) == len(selected) and not newly_attached:
+            return {
+                "attached_busids": attached,
+                "already_attached_busids": already_attached,
+                "errors": {},
+                "devices": probe_devices(
+                    include_details=True,
+                    adb_server_socket=adb_server_socket,
+                ),
+                "new_devices": [],
+                "enumeration_pending": False,
+            }
         devices = []
         new_serials = set()
         for _ in range(15):

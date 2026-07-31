@@ -319,6 +319,64 @@ class SecurityBoundaryTests(unittest.TestCase):
                 pass
             self.assertEqual(raised.exception.code, 4403)
 
+    def test_regular_user_must_elevate_before_device_burning(self):
+        self.assertEqual(self._setup_admin().status_code, 200)
+        auth_service.create_user("alice", "alicepass1", role="user")
+        login = self.client.post(
+            "/api/auth/login",
+            headers={"Origin": "https://testserver"},
+            json={"username": "alice", "password": "alicepass1"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+        responses = (
+            self.client.post(
+                "/api/burn/firmware?devices=ABC",
+                headers={"Origin": "https://testserver"},
+                files={"firmware_file": ("update.img", b"firmware")},
+            ),
+            self.client.post(
+                "/api/burn/gsi",
+                headers={"Origin": "https://testserver"},
+                json={
+                    "devices": ["ABC"],
+                    "script_path": "/tmp/run.sh",
+                    "system_img": "/tmp/system.img",
+                },
+            ),
+            self.client.post(
+                "/api/burn/serial",
+                headers={"Origin": "https://testserver"},
+                json={"devices": ["ABC"], "sn_code": "SERIAL"},
+            ),
+        )
+
+        for response in responses:
+            self.assertEqual(response.status_code, 403)
+            self.assertTrue(response.json()["detail"]["elevation_required"])
+
+        for path in (
+            "/api/devices/bootloader-lock",
+            "/api/devices/bootloader-unlock",
+        ):
+            response = self.client.post(
+                path,
+                headers={"Origin": "https://testserver"},
+                json={"devices": ["ABC"]},
+            )
+            self.assertEqual(response.status_code, 403)
+            self.assertTrue(response.json()["detail"]["elevation_required"])
+
+        firmware_share = self.client.post(
+            "/api/firmware-shares/browse",
+            headers={"Origin": "https://testserver"},
+            json={"remote": "user@example.test:/firmware"},
+        )
+        self.assertEqual(firmware_share.status_code, 403)
+        self.assertTrue(
+            firmware_share.json()["detail"]["elevation_required"]
+        )
+
     def test_worker_token_routes_bypass_browser_session_but_still_validate_token(self):
         previous_service = cluster_api.cluster_service
         repository = ClusterRepository(Path(self.tmp.name) / "cluster.sqlite3")

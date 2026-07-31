@@ -1058,12 +1058,17 @@ function onDeviceHostConfirm() {
     // 如需修改，请直接编辑configs/config.json文件
 }
 
-function onLocalServerConfirm() {
+async function onLocalServerConfirm() {
     const localServer = document.getElementById('local-server').value.trim();
-    addLogEntry(`本地主机地址已更新: ${localServer}`, 'info');
-    showToast('本地主机地址已更新', 'success');
-    // Save to backend
-    apiCall('/api/config/update', 'POST', { local_server: localServer });
+    try {
+        await apiCall('/api/config/update', 'POST', {
+            local_server: localServer
+        });
+        addLogEntry(`本地主机地址已更新: ${localServer}`, 'info');
+        showToast('本地主机地址已更新', 'success');
+    } catch (error) {
+        addLogEntry(`本地主机地址更新失败: ${error.message}`, 'error');
+    }
 }
 
 // ==================== Drag and Drop ====================
@@ -2442,10 +2447,12 @@ window.showExtractSuiteModal = async function showExtractSuiteModal() {
 
     try {
         const suiteWorkerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
-        const response = await fetch(isLocalWorkspaceWorker(suiteWorkerId)
-            ? '/api/test/suites/archives'
-            : `/api/cluster/suites/archives?worker_id=${encodeURIComponent(suiteWorkerId)}`);
-        const result = await response.json();
+        const result = await apiCall(
+            isLocalWorkspaceWorker(suiteWorkerId)
+                ? '/api/test/suites/archives'
+                : `/api/cluster/suites/archives?worker_id=${encodeURIComponent(suiteWorkerId)}`,
+            'GET'
+        );
         const archives = result.success ? (result.archives || []) : [];
         select.innerHTML = '<option value="">手动输入压缩包路径</option>' + archives.map(archive => {
             const sizeMb = ((archive.size || 0) / 1024 / 1024).toFixed(1);
@@ -2540,18 +2547,21 @@ window.submitExtractSuite = async function submitExtractSuite() {
         }
 
         const suiteWorkerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
-        const response2 = await fetch(isLocalWorkspaceWorker(suiteWorkerId)
-            ? '/api/test/suites/extract-start' : '/api/cluster/suites/extract', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(isLocalWorkspaceWorker(suiteWorkerId) ? {
+        const result2 = await apiCall(
+            isLocalWorkspaceWorker(suiteWorkerId)
+                ? '/api/test/suites/extract-start'
+                : '/api/cluster/suites/extract',
+            'POST',
+            isLocalWorkspaceWorker(suiteWorkerId) ? {
                 archive_path: archivePath,
                 extract_dir: getDefaultSuitesPath(),
                 target_dir_name: folderName
-            } : {worker_id: suiteWorkerId, archive_path: archivePath, target_dir_name: folderName})
-        });
-
-        const result2 = await response2.json();
+            } : {
+                worker_id: suiteWorkerId,
+                archive_path: archivePath,
+                target_dir_name: folderName
+            }
+        );
 
         if (result2.success && (result2.task_id || result2.command_id)) {
             let completedTask;
@@ -3887,7 +3897,7 @@ function buildDeviceItemEl({
     const displayStatus = String(status || '').toLowerCase() === 'fastboot'
         ? 'Fastboot'
         : String(status || '').toLowerCase() === 'unauthorized'
-        ? 'Unauthorized'
+        ? '未授权'
         : isLocked ? '已分配' : selectable ? '可用' : status;
     statusEl.textContent = isLocked && displayStatus !== '已分配'
         ? `${displayStatus} · 已占用`
@@ -4134,6 +4144,8 @@ async function lockSelectedDevices(action) {
     }
 
     try {
+        const granted = await requestElevatedAccess(`${actionText}设备 Bootloader`);
+        if (!granted) return;
         addLogEntry(`正在${actionText}设备...`, 'info');
         const workerId = selectedClusterWorker();
         let result;
@@ -4404,15 +4416,30 @@ function closeFirmwareShareModal() {
     ModalManager.close('firmware-share-modal');
 }
 
-async function firmwareShareApi(path, options = {}) {
+async function firmwareShareApi(path, options = {}, elevationRetried = false) {
     const response = await fetch(path, {
         credentials: 'same-origin',
         headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
         ...options,
     });
     const data = await response.json().catch(() => ({}));
+    const detail = data?.detail;
+    if (
+        response.status === 403
+        && !elevationRetried
+        && detail
+        && typeof detail === 'object'
+        && detail.elevation_required
+    ) {
+        const granted = await requestElevatedAccess('管理远端固件分享');
+        if (granted) return firmwareShareApi(path, options, true);
+    }
     if (!response.ok || data.success === false) {
-        throw new Error(data.error || data.detail || `HTTP ${response.status}`);
+        throw new Error(
+            data.error
+            || (typeof detail === 'object' ? detail.message : detail)
+            || `HTTP ${response.status}`
+        );
     }
     return data;
 }
@@ -4481,13 +4508,30 @@ async function firmwareShareApiWithAuth(path, body, host) {
         method: 'POST',
         body: JSON.stringify({ ...body, ...(password ? { password } : {}) }),
     });
+    const send = async (password, elevationRetried = false) => {
+        const response = await fetch(path, {
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            ...buildOptions(password),
+        });
+        const data = await response.json().catch(() => ({}));
+        const detail = data?.detail;
+        if (
+            response.status === 403
+            && !elevationRetried
+            && detail
+            && typeof detail === 'object'
+            && detail.elevation_required
+        ) {
+            const granted = await requestElevatedAccess('访问远端固件主机');
+            if (granted) return send(password, true);
+        }
+        return {response, data};
+    };
     const cached = getShareFirmwarePassword(host);
-    const response = await fetch(path, {
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        ...buildOptions(cached),
-    });
-    const data = await response.json().catch(() => ({}));
+    const initial = await send(cached);
+    const response = initial.response;
+    const data = initial.data;
     if (response.status === 401) {
         const message = data.error || '连接远端固件主机认证失败';
         const password = await promptFirmwareSharePassword(host, message);
@@ -4495,21 +4539,29 @@ async function firmwareShareApiWithAuth(path, body, host) {
             throw new Error(message);
         }
         setShareFirmwarePassword(host, password);
-        const retry = await fetch(path, {
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
-            ...buildOptions(password),
-        });
-        const retryData = await retry.json().catch(() => ({}));
+        const retried = await send(password);
+        const retry = retried.response;
+        const retryData = retried.data;
         if (!retry.ok || retryData.success === false) {
             // 密码错误也清除缓存，避免反复用错密码
             if (retry.status === 401) setShareFirmwarePassword(host, '');
-            throw new Error(retryData.error || retryData.detail || `HTTP ${retry.status}`);
+            const retryDetail = retryData?.detail;
+            throw new Error(
+                retryData.error
+                || (typeof retryDetail === 'object'
+                    ? retryDetail.message : retryDetail)
+                || `HTTP ${retry.status}`
+            );
         }
         return retryData;
     }
     if (!response.ok || data.success === false) {
-        throw new Error(data.error || data.detail || `HTTP ${response.status}`);
+        const detail = data?.detail;
+        throw new Error(
+            data.error
+            || (typeof detail === 'object' ? detail.message : detail)
+            || `HTTP ${response.status}`
+        );
     }
     return data;
 }
@@ -4681,6 +4733,8 @@ async function submitFirmwareBurn() {
 
     const devices = Array.from(state.selectedDevices);
     try {
+        const granted = await requestElevatedAccess('烧写设备固件');
+        if (!granted) return;
         closeFirmwareModal();
         showToast('正在烧写固件...', 'info');
         addLogEntry(`开始烧写固件: ${firmwarePath}`, 'info');
@@ -4961,6 +5015,11 @@ async function browseRemoteFileForGsiVendor() {
 }
 
 async function uploadGsiVendorBootToTestHost(file) {
+    const granted = await requestElevatedAccess(
+        '上传 Vendor Boot 镜像到测试主机'
+    );
+    if (!granted) throw new Error('已取消管理员提权');
+    await apiCall('/api/terminal/open');
     const targetDir = getDefaultSuitesPath();
     const formData = new FormData();
     formData.append('file', file);
@@ -5090,6 +5149,8 @@ async function executeBurnOperation(endpoint, data, operationName, closeModalFun
     const devices = Array.from(state.selectedDevices);
     let stopDeviceProtocolRefresh = () => {};
     try {
+        const granted = await requestElevatedAccess(operationName);
+        if (!granted) return;
         if (closeModalFunc) {
             closeModalFunc();
         }
@@ -5362,7 +5423,8 @@ async function deployAdbProxyUbuntuSource() {
             key => `${key.key_type}  ${key.fingerprint}`
         ).join('\n');
         if (!fingerprints) throw new Error('目标主机没有返回可校验的SSH指纹');
-        if (!window.confirm(
+        if (!await showConfirmDialog(
+            '确认 SSH 主机指纹',
             `请核对 ${scan.host}:${scan.port} 的SSH指纹：\n\n`
             + `${fingerprints}\n\n确认无误后继续安装。`
         )) {
@@ -6443,12 +6505,20 @@ function _markElevated(elevatedUntilIso) {
  */
 let _elevationRequestPromise = null;
 async function requestElevatedAccess(actionLabel = '需要管理员权限') {
-    if (!state.authRequired) {
-        return true;
-    }
     if (state.elevated) {
-        debugLog('[Elevation] already elevated, skipping prompt');
-        return true;
+        try {
+            const status = await fetchAuthStatus();
+            if (status.elevated) {
+                _markElevated(status.elevated_until);
+                debugLog('[Elevation] server confirmed the active elevation');
+                return true;
+            }
+            state.elevated = false;
+            state.elevatedUntil = null;
+        } catch (error) {
+            debugLog('[Elevation] could not verify the active elevation', error);
+            return true;
+        }
     }
     if (!state.currentUser && state.authSetupRequired) {
         showAuthGate(true);
@@ -7241,8 +7311,11 @@ async function handleUploadFile() {
         showToast('请先选择要上传的文件', 'warning');
         return;
     }
+    const granted = await requestElevatedAccess('上传文件到测试主机');
+    if (!granted) return;
 
     try {
+        await apiCall('/api/terminal/open');
         addLogEntry(`正在上传文件: ${file.name}`, 'info');
         const progressFill = document.getElementById('upload-progress-fill');
         const progressInfo = document.getElementById('progress-info');
@@ -7591,12 +7664,11 @@ function renderFileList(files) {
         sizeInfo.textContent = file.type === 'file' ? formatBytes(file.size, true) : '—';
         item.appendChild(sizeInfo);
 
-        if (file.modified || file.mtime) {
-            const mtime = document.createElement('span');
-            mtime.className = 'file-browser-meta';
-            mtime.textContent = formatFileBrowserDate(file.modified || file.mtime);
-            item.appendChild(mtime);
-        }
+        const mtime = document.createElement('span');
+        mtime.className = 'file-browser-meta';
+        mtime.style.textAlign = 'right';
+        mtime.textContent = (file.modified || file.mtime) ? formatFileBrowserDate(file.modified || file.mtime) : '';
+        item.appendChild(mtime);
 
         listContainer.appendChild(item);
     });
@@ -8137,6 +8209,21 @@ async function showConfig() {
             <label>测试套件路径:</label>
             <input type="text" id="config-suites-path" value="${config.suites_path || ''}" />
         </div>
+
+        <div style="margin-top:14px;border-top:1px solid var(--border-color);padding-top:10px;">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">日志显示设置</div>
+            <div class="modal-form-row">
+                <label>历史日志条数:</label>
+                <input type="number" id="config-log-history-limit" min="10" max="2000"
+                       value="${localStorage.getItem('gms-log-history-limit') || 100}" />
+            </div>
+            <div class="modal-form-row">
+                <label>实时日志上限:</label>
+                <input type="number" id="config-log-max-entries" min="50" max="10000"
+                       value="${localStorage.getItem('gms-log-max-entries') || 1000}" />
+            </div>
+            <small style="color:var(--text-secondary);">历史日志：首次加载状态时显示的条数；实时日志：页面每个Tab最多保留的条数。保存后即时生效。</small>
+        </div>
         </form>
 
         <!-- 客户端 SSH 凭据管理（增删独立于上方静态配置，即时生效） -->
@@ -8162,14 +8249,11 @@ async function showConfig() {
             </div>
             <small style="color:var(--text-secondary);margin-top:4px;">填入已有主机的地址+新密码可覆盖更新；密码不会回显明文。</small>
         </div>
-
-        <div class="modal-buttons">
-            <button class="btn-xxs" onclick="closeModal()">取消</button>
-            <button class="btn-xxs btn-primary" onclick="saveConfig()">保存</button>
-        </div>
     `;
 
     ModalManager.open('config-modal');
+    const footer = document.getElementById('config-modal-footer');
+    if (footer) footer.style.display = '';
     loadClientCredentials();
 }
 
@@ -8299,7 +8383,10 @@ async function addClientCredential() {
 
 async function deleteClientCredential(deviceHost) {
     if (!deviceHost) return;
-    if (!confirm(`确认删除凭据：${deviceHost}？`)) return;
+    if (!await showConfirmDialog(
+        '删除 SSH 凭据',
+        `确认删除凭据：${deviceHost}？`
+    )) return;
     try {
         await apiCall('/api/config/client-ssh-credentials', 'DELETE', { device_host: deviceHost });
         showToast('凭据已删除', 'success');
@@ -8351,6 +8438,12 @@ async function saveConfig() {
     if (devicePassword) {
         config.device_pswd = devicePassword;
     }
+
+    // Save UI log settings to localStorage (frontend-only)
+    const historyLimit = parseInt(document.getElementById('config-log-history-limit')?.value) || 100;
+    const maxEntries = parseInt(document.getElementById('config-log-max-entries')?.value) || 1000;
+    localStorage.setItem('gms-log-history-limit', String(historyLimit));
+    localStorage.setItem('gms-log-max-entries', String(maxEntries));
 
     try {
         addLogEntry('正在保存配置...', 'info');
@@ -8417,6 +8510,13 @@ function addNormalizedLogEntry(log) {
     addLogEntry(entry.message, entry.type, true, entry.source);
 }
 
+function getLogDisplayLimit() {
+    return parseInt(localStorage.getItem('gms-log-history-limit')) || 100;
+}
+function getLogMaxEntries() {
+    return parseInt(localStorage.getItem('gms-log-max-entries')) || 1000;
+}
+
 function addLogEntry(message, type = 'info', showTimestamp = true, source = 'system') {
     // Queue the log entry
     _logQueue.push({
@@ -8445,7 +8545,7 @@ function flushLogQueue() {
     if (entries.length === 0) return;
 
     // Route each entry to its log container by source
-    const maxLogs = 500;
+    const maxLogs = getLogMaxEntries();
     const buckets = { system: [], module: [] };
     entries.forEach(entry => (buckets[entry.source] || buckets.system).push(entry));
 
@@ -8824,7 +8924,7 @@ async function checkInitialTestStatus() {
             if (moduleOut) moduleOut.innerHTML = '';
 
             // 只显示最近100条历史日志，避免卡顿（按 source 路由到对应 Tab）
-            const recentLogs = status.logs.slice(-100);
+            const recentLogs = status.logs.slice(-getLogDisplayLimit());
             recentLogs.forEach(addNormalizedLogEntry);
 
             const activeOut = getLogContainer(state.currentLogTab || 'system');
@@ -9753,7 +9853,7 @@ function selectReportSource() {
     modal.className = 'modal';
     modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-content modal-xs">
             <div class="modal-header">
                 <span class="modal-title">选择上传方式</span>
                 <span class="modal-close" onclick="closeReportSourceModal()">&times;</span>
@@ -10181,7 +10281,7 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
     modal.className = 'modal show';
     modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-content modal-xs">
             <div class="modal-header">
                 <span class="modal-title">🔐 Redmine 认证</span>
                 <span class="modal-close" onclick="ModalManager.unregisterDynamic('redmine-auth-modal'); resetReportUploadProgress();">&times;</span>
@@ -12909,8 +13009,12 @@ async function showTailscaleInfoModal() {
 
     display.value = '正在检查 Tailscale...';
     try {
-        const response = await fetch('/api/tailscale/ensure', { method: 'POST' });
-        const data = await response.json();
+        const granted = await requestElevatedAccess('启动或检查 Tailscale');
+        if (!granted) {
+            display.value = '已取消管理员提权';
+            return;
+        }
+        const data = await apiCall('/api/tailscale/ensure', 'POST');
 
         if (!data.success || !data.public_url) {
             throw new Error(data.error || 'Tailscale 不可用');
@@ -15085,7 +15189,7 @@ function ensureSecurityAuditDetailModal() {
     modal.id = 'security-audit-detail-modal';
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: min(980px, 92vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="modal-content" style="width: min(980px, 92vw); max-width: min(980px, 92vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
             <div class="modal-header">
                 <span class="modal-title">安全审计详情</span>
                 <span class="modal-close" onclick="closeSecurityAuditDetailModal()">&times;</span>
@@ -15167,7 +15271,14 @@ async function showSecurityAuditDetail(auditId) {
     }
 }
 
-function exportSecurityAudit() {
+async function exportSecurityAudit() {
+    const granted = await requestElevatedAccess('导出安全审计日志');
+    if (!granted) return;
+    try {
+        await apiCall('/api/security-audit/verify');
+    } catch (_error) {
+        return;
+    }
     window.open('/api/security-audit/export', '_blank');
 }
 

@@ -50,11 +50,66 @@ class WorkerRuntime:
                 device_id TEXT PRIMARY KEY, generation INTEGER NOT NULL,
                 lease_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS usbip_assignments (
+                source_host TEXT NOT NULL, busid TEXT NOT NULL,
+                adb_server_socket TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(source_host,busid))""")
 
     def connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def remember_usbip_assignments(
+        self,
+        source_host: str,
+        busids: list[str],
+        adb_server_socket: str = "",
+    ) -> None:
+        values = [
+            (str(source_host).strip(), str(busid).strip(), str(adb_server_socket or ""))
+            for busid in dict.fromkeys(busids or [])
+            if str(source_host).strip() and str(busid).strip()
+        ]
+        if not values:
+            return
+        with self.connect() as conn:
+            conn.executemany(
+                """INSERT INTO usbip_assignments(
+                       source_host,busid,adb_server_socket
+                   ) VALUES(?,?,?)
+                   ON CONFLICT(source_host,busid) DO UPDATE SET
+                       adb_server_socket=excluded.adb_server_socket,
+                       updated_at=CURRENT_TIMESTAMP""",
+                values,
+            )
+
+    def forget_usbip_assignments(
+        self,
+        source_host: str,
+        busids: list[str],
+    ) -> None:
+        values = [
+            (str(source_host).strip(), str(busid).strip())
+            for busid in dict.fromkeys(busids or [])
+            if str(source_host).strip() and str(busid).strip()
+        ]
+        if not values:
+            return
+        with self.connect() as conn:
+            conn.executemany(
+                "DELETE FROM usbip_assignments WHERE source_host=? AND busid=?",
+                values,
+            )
+
+    def usbip_assignments(self) -> list[dict[str, str]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT source_host,busid,adb_server_socket,updated_at
+                   FROM usbip_assignments ORDER BY source_host,busid"""
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def previous_command(self, command_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:

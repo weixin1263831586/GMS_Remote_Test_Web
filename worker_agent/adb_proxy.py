@@ -357,7 +357,7 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
         _restart_hub(config_path)
         missing = list(devices)
         deadline = time.monotonic() + _hub_device_wait_seconds(
-            len(config.get("backend") or [])
+            len(backends)
         )
         while missing and time.monotonic() < deadline:
             visible = {

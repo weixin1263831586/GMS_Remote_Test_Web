@@ -43,7 +43,7 @@ from .runtime import WorkerRuntime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("gms-worker")
-AGENT_VERSION = "0.5.0"
+AGENT_VERSION = "0.5.1"
 
 
 VNC_PORT = 5900
@@ -127,6 +127,8 @@ class WorkerAgent:
         self.session_id = f"worker-session-{uuid.uuid4().hex}"
         self.suites = []
         self.last_suite_scan = 0.0
+        self.next_usbip_recovery_at = 0.0
+        self.usbip_operation_lock = threading.Lock()
 
     def registration(self):
         try:
@@ -183,6 +185,25 @@ class WorkerAgent:
                 "ADB Proxy recovery pending: %s",
                 "; ".join(proxy_recovery["errors"]),
             )
+        if time.monotonic() >= self.next_usbip_recovery_at:
+            usbip_recovery = self.recover_usbip_assignments()
+            if usbip_recovery["recovered"]:
+                logger.info(
+                    "recovered USB/IP assignments: %s",
+                    ", ".join(usbip_recovery["recovered"]),
+                )
+            if usbip_recovery["errors"]:
+                logger.warning(
+                    "USB/IP recovery pending: %s",
+                    "; ".join(usbip_recovery["errors"]),
+                )
+                self.next_usbip_recovery_at = time.monotonic() + 30
+            else:
+                self.next_usbip_recovery_at = (
+                    time.monotonic() + 60
+                    if self.runtime.usbip_assignments()
+                    else float("inf")
+                )
         now = time.monotonic()
         include_suites = not self.suites or now - self.last_suite_scan >= self.config.suite_scan_interval
         if include_suites:
@@ -462,12 +483,28 @@ class WorkerAgent:
         try:
             payload = command.get("payload", {})
             kind = command.get("command_type", "")
-            result = execute_usbip_action(
-                "attach" if kind == "usbip_attach" else "detach",
-                str(payload.get("source_host") or ""),
-                list(payload.get("busids") or []),
-                str(payload.get("adb_server_socket") or "") or None,
-            )
+            with self.usbip_operation_lock:
+                result = execute_usbip_action(
+                    "attach" if kind == "usbip_attach" else "detach",
+                    str(payload.get("source_host") or ""),
+                    list(payload.get("busids") or []),
+                    str(payload.get("adb_server_socket") or "") or None,
+                )
+                source_host = str(payload.get("source_host") or "")
+                busids = list(payload.get("busids") or [])
+                if kind == "usbip_attach":
+                    self.runtime.remember_usbip_assignments(
+                        source_host,
+                        busids,
+                        str(payload.get("adb_server_socket") or ""),
+                    )
+                else:
+                    self.runtime.forget_usbip_assignments(source_host, busids)
+                self.next_usbip_recovery_at = (
+                    time.monotonic() + 60
+                    if self.runtime.usbip_assignments()
+                    else float("inf")
+                )
             self.runtime.save_command(command["id"], "completed", result)
             self._retry(
                 lambda: self._ack_command(
@@ -485,6 +522,46 @@ class WorkerAgent:
             )
         finally:
             self.runtime.release_fencing(command)
+
+    def recover_usbip_assignments(self) -> dict[str, list[str]]:
+        recovered: list[str] = []
+        errors: list[str] = []
+        if not self.usbip_operation_lock.acquire(blocking=False):
+            return {
+                "recovered": [],
+                "errors": ["USB/IP operation is already in progress"],
+            }
+        try:
+            grouped: dict[tuple[str, str], list[str]] = {}
+            for assignment in self.runtime.usbip_assignments():
+                key = (
+                    str(assignment.get("source_host") or ""),
+                    str(assignment.get("adb_server_socket") or ""),
+                )
+                grouped.setdefault(key, []).append(
+                    str(assignment.get("busid") or "")
+                )
+            for (source_host, adb_server_socket), busids in grouped.items():
+                selected = [busid for busid in busids if busid]
+                if not source_host or not selected:
+                    continue
+                try:
+                    execute_usbip_action(
+                        "attach",
+                        source_host,
+                        selected,
+                        adb_server_socket or None,
+                    )
+                    recovered.extend(
+                        f"{source_host}:{busid}" for busid in selected
+                    )
+                except Exception as exc:
+                    errors.append(
+                        f"{source_host} ({', '.join(selected)}): {exc}"
+                    )
+        finally:
+            self.usbip_operation_lock.release()
+        return {"recovered": recovered, "errors": errors}
 
     def run_suite_export(self, command: dict):
         path = None

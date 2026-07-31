@@ -4,7 +4,7 @@ from worker_agent.inventory import probe_devices
 
 
 def test_detailed_probe_enriches_management_properties_in_one_adb_shell_call():
-    def run(argv, timeout=10):
+    def run(argv, timeout=10, env=None):
         if argv[:3] == ["adb", "devices", "-l"]:
             return "List of devices attached\nABC device product:rk model:Box transport_id:1\n"
         if argv[:4] == ["adb", "-s", "ABC", "shell"]:

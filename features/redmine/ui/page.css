@@ -55,6 +55,9 @@
         .modal-content { max-height:calc(100dvh - 16px); }
     }
 
+    /* 统计设置弹框：标题字号与其他页面统一 */
+    #settingsModal .modal-title { font-size:16px; }
+
     /* Tabs — inline in header, left side */
     .tabs { display:flex; gap:0; }
     .tab { padding:8px 16px; cursor:pointer; font-size:13px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; }

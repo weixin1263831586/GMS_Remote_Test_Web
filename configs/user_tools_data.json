@@ -120,10 +120,15 @@
                     "icon": "/static/icons/favicons/638e10eba5b902b462fc02d26eac303e8641d3cf80c3d952afa01430c1c52a43.ico",
                     "title": "Ngrok",
                     "url": "https://dashboard.ngrok.com/get-started/setup/windows"
+                },
+                {
+                    "icon": "/static/icons/favicons/f277b2dc17e3c4f64f07ff472f73513830ac7ee85d72a62e0c2d447ed84bcecb.png",
+                    "title": "Kimi",
+                    "url": "https://www.kimi.com/?chat_enter_method=new_chat"
                 }
             ]
         },
-        "last_updated": "2026-07-21T14:19:18.870633",
+        "last_updated": "2026-07-30T19:35:59.452635",
         "client_ip": "172.16.14.66"
     }
 }

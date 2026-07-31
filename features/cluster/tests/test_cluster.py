@@ -105,6 +105,52 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(devices[0]["transport"], "local_usb")
         self.assertEqual(devices[0]["properties"], {"usb": "2-1"})
 
+    def test_device_api_resolves_claim_owner_without_exposing_internal_id(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [],
+            "suites": [],
+            "devices": [{
+                "serial": "ABC",
+                "transport": "local_usb",
+                "state": "available",
+            }],
+        })
+        acquired, _claims = self.repo.claims.acquire(
+            [{
+                "device_key": "worker-246:ABC",
+                "worker_id": "worker-246",
+                "serial": "ABC",
+            }],
+            owner_id="N387pLbIBhpMw5JsWUL9hg",
+            username="N387pLbIBhpMw5JsWUL9hg",
+            source_type="cluster-job",
+            source_id="job:1",
+            ttl_seconds=60,
+        )
+        self.assertTrue(acquired)
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            app = FastAPI()
+            app.include_router(cluster_api.router)
+            with patch(
+                "features.users.clients.resolve_client_display_id",
+                return_value="hcq@172.16.14.66",
+            ), TestClient(app) as client:
+                response = client.get(
+                    "/api/cluster/devices?worker_id=worker-246"
+                )
+        finally:
+            cluster_api.cluster_service = previous
+
+        self.assertEqual(response.status_code, 200, response.text)
+        device = response.json()["devices"][0]
+        self.assertEqual(device["claimed_by"], "hcq@172.16.14.66")
+        self.assertNotIn("claim_owner_id", device)
+        self.assertNotIn("claim_username", device)
+
     def test_suite_api_includes_cluster_inventory_display_fields(self):
         self.register()
         self.repo.heartbeat("worker-246", {
@@ -462,6 +508,28 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(worker_id, "worker-246")
         self.assertEqual(devices, ["worker-246:ABC"])
 
+    def test_scheduler_can_exclude_adb_proxy_devices(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [],
+            "devices": [
+                {"serial": "PROXY", "state": "available", "transport": "adb_proxy"},
+                {"serial": "USB", "state": "available", "transport": "usbip"},
+            ],
+            "suites": [{
+                "suite_type": "CTS", "suite_version": "17_r1",
+                "suite_key": "CTS:17_r1", "tools_path": "/suite/tools",
+                "available": True,
+            }],
+        })
+
+        worker_id, devices = ClusterService(self.repo).select_worker(
+            "CTS:17_r1", 1, excluded_transports={"adb_proxy"}
+        )
+
+        self.assertEqual(worker_id, "worker-246")
+        self.assertEqual(devices, ["worker-246:USB"])
+
     def test_scheduler_can_exclude_controller_local_worker(self):
         for worker_id in ("worker-local", "worker-246"):
             self.repo.register_worker({
@@ -542,7 +610,10 @@ class ClusterRepositoryTests(unittest.TestCase):
             "worker-246", ["worker-246:ABC"],
             owner_id="alice", source_id="ats-run-1",
         )
-        self.assertEqual(self.repo.list_devices("worker-246")[0]["state"], "reserved")
+        reserved_device = self.repo.list_devices("worker-246")[0]
+        self.assertEqual(reserved_device["state"], "reserved")
+        self.assertEqual(reserved_device["claim_owner_id"], "alice")
+        self.assertEqual(reserved_device["claim_username"], "alice")
 
         self.repo.heartbeat("worker-246", heartbeat)
         self.assertEqual(self.repo.list_devices("worker-246")[0]["state"], "reserved")

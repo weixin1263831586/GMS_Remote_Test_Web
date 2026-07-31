@@ -242,7 +242,7 @@ async def get_config(request: Request):
     safe_config["effective_suites_path"] = effective_suites_path
     wifi = config.get("wifi") if isinstance(config.get("wifi"), dict) else {}
     if isinstance(safe_config.get("wifi"), dict):
-        safe_config["wifi"]["password"] = wifi.get("password") or ""
+        safe_config["wifi"]["password"] = ""
         safe_config["wifi"].pop("encrypted_password", None)
         safe_config["wifi"]["has_password"] = bool(
             os.getenv("GMS_WIFI_PASSWORD")

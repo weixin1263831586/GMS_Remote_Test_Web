@@ -123,6 +123,21 @@ def heartbeat(worker_id: str, body: WorkerHeartbeat, authorization: str | None =
         raise HTTPException(409, str(exc)) from exc
     if worker is None:
         raise HTTPException(404, "worker is not registered")
+    try:
+        from features.devices.integrations_api import (
+            reconcile_cluster_usbip_heartbeat,
+        )
+
+        reconcile_cluster_usbip_heartbeat(
+            worker_id,
+            [item.model_dump() for item in body.devices],
+        )
+    except Exception:
+        logger.warning(
+            "Failed to reconcile USB/IP inventory for Worker %s",
+            worker_id,
+            exc_info=True,
+        )
     reconciled = []
     from .commands_api import synchronize_command
 
@@ -276,6 +291,41 @@ def list_hosts():
     return {"success": True, "hosts": hosts}
 
 
+def _annotate_adb_proxy_source(devices: list[dict]) -> list[dict]:
+    """Stamp ADB Proxy devices with their source worker name/address."""
+    from features.devices.adb_proxy_service import adb_proxy_service
+
+    source_by_serial: dict[str, str] = {}
+    for assignment in adb_proxy_service.assignments().values():
+        target = str(assignment.get("target_worker_id") or "")
+        for serial in assignment.get("devices") or []:
+            serial = str(serial or "").strip()
+            if serial:
+                source_by_serial[serial] = target
+    if not source_by_serial:
+        return devices
+    for device in devices:
+        if str(device.get("transport") or "") != "adb_proxy":
+            continue
+        serial = str(device.get("serial") or "")
+        target_worker = source_by_serial.get(serial)
+        if not target_worker:
+            continue
+        for assignment in adb_proxy_service.assignments().values():
+            if serial in (assignment.get("devices") or []) \
+                    and str(assignment.get("target_worker_id") or "") == target_worker:
+                properties = device.get("properties") or {}
+                properties.setdefault("adb_proxy_source_worker_id", str(
+                    assignment.get("source_worker_id") or ""))
+                properties.setdefault("adb_proxy_source_name", str(
+                    assignment.get("source_name") or ""))
+                properties.setdefault("adb_proxy_source_address", str(
+                    assignment.get("source_address") or ""))
+                device["properties"] = properties
+                break
+    return devices
+
+
 @router.get("/devices")
 def list_devices(worker_id: str = Query(default="")):
     svc = service()
@@ -285,6 +335,26 @@ def list_devices(worker_id: str = Query(default="")):
         worker_id = svc.config.local_worker_id
     devices = svc.repository.list_devices(worker_id)
     try:
+        from features.users.clients import resolve_client_display_id
+
+        for device in devices:
+            owner_id = str(
+                device.get("claim_owner_id")
+                or device.get("claim_username")
+                or ""
+            ).strip()
+            if owner_id:
+                device["claimed_by"] = resolve_client_display_id(owner_id)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning(
+            "failed to annotate device claim owners for %s: %s",
+            worker_id or "all workers",
+            exc,
+        )
+    for device in devices:
+        device.pop("claim_owner_id", None)
+        device.pop("claim_username", None)
+    try:
         from features.devices.integrations_api import (
             annotate_cluster_usbip_devices,
         )
@@ -293,6 +363,14 @@ def list_devices(worker_id: str = Query(default="")):
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.warning(
             "failed to annotate USB/IP inventory for %s: %s",
+            worker_id or "all workers",
+            exc,
+        )
+    try:
+        _annotate_adb_proxy_source(devices)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning(
+            "failed to annotate ADB Proxy source for %s: %s",
             worker_id or "all workers",
             exc,
         )

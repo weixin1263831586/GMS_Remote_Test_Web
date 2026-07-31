@@ -6,6 +6,9 @@
 button:disabled{cursor:not-allowed;opacity:.5}.mode-status{margin-top:5px;color:var(--blue)!important}
 #library th:nth-child(1),#library td:nth-child(1){max-width:320px;overflow:hidden;text-overflow:ellipsis}
 #library th:nth-child(5),#library td:nth-child(5){min-width:380px;width:380px}
+#suites-table th:nth-child(2),#suites-table td:nth-child(1){min-width:120px;width:120px}
+#suites-table th:nth-child(2),#suites-table td:nth-child(2){min-width:80px;width:80px}
+#suites-table th:nth-child(3),#suites-table td:nth-child(3){min-width:80px;width:80px}
 #library td:nth-child(5) input{width:100%;min-width:360px}
 #library th:nth-child(6),#library td:nth-child(6){min-width:340px;padding-left:28px}
 .progress-wrap{min-width:180px;width:180px;gap:4px;margin-left:6px}
@@ -14,6 +17,17 @@ button:disabled{cursor:not-allowed;opacity:.5}.mode-status{margin-top:5px;color:
 .deploy-progress{display:block;max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .modal-backdrop{z-index:10000;padding:clamp(8px,2.5vw,20px);overflow:hidden;overscroll-behavior:contain}
 .onboarding-modal{width:min(920px,100%);max-width:100%;max-height:min(92vh,calc(100dvh - 16px));min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;overflow-wrap:anywhere}
+.onboarding-modal.compact{width:min(500px,96vw);max-width:min(500px,96vw);min-height:240px;height:auto;max-height:min(80vh,calc(100dvh - 16px));border-radius:6px;padding:0;overflow:hidden}
+.onboarding-modal.compact>.section-head{padding:12px 20px;border-bottom:1px solid var(--border);margin-bottom:0}
+.onboarding-modal.compact>.onboarding-grid,.onboarding-modal.compact>.hint,.onboarding-modal.compact>.actions,.onboarding-modal.compact>pre{padding:0 20px}
+.onboarding-modal.compact>.actions{padding-bottom:16px}
+#worker-config-modal .onboarding-modal.compact{box-shadow:0 18px 48px rgba(0,0,0,.42)}
+#worker-config-modal .section-head{padding:15px 20px}
+#worker-config-modal .section-head h2{font-size:16px;font-weight:600}
+#worker-config-modal .onboarding-grid{padding:20px}
+#worker-config-modal .hint{padding:0 20px;margin-top:0}
+#worker-config-modal .actions{justify-content:flex-end;gap:10px;padding:0 20px 20px;margin-top:12px}
+#worker-config-modal .actions button{min-width:80px}
 .onboarding-modal>*{min-width:0;max-width:100%}
 .onboarding-grid>*{min-width:0}
 .onboarding-grid input,.onboarding-grid select,.input-action{min-width:0;max-width:100%}
@@ -34,15 +48,15 @@ body.modal-open{overflow:hidden}
     <p class="hint">自动部署会把 JDK、adb、fastboot、aapt/aapt2 安装到目标账号的 ~/Software，并幂等配置 ~/.bashrc；目标账号需支持免密 sudo（或填写 SSH 密码）。密码默认只用于本次请求，勾选后才保存为主机终端凭据。</p>
   </section></div>
   <section><div class="section-head"><div class="section-head-copy"><h2>Worker 主机</h2><p id="cluster-mode-status" class="mode-status">正在读取集群模式…</p></div><div class="actions"><input id="cluster-search" class="compact-filter" type="search" placeholder="搜索主机、设备或套件"><button id="show-onboarding" class="stable-action">＋ 添加主机</button><button id="refresh" class="primary stable-action">↻ 刷新</button></div></div><div id="workers" class="cards"><div class="empty">加载中…</div></div></section>
-  <div id="worker-config-modal" class="modal-backdrop" hidden><section class="onboarding-modal"><div class="section-head"><div><h2>Worker 配置</h2><p id="config-worker-name">—</p></div><button id="close-config-modal">×</button></div>
+  <div id="worker-config-modal" class="modal-backdrop" hidden><section class="onboarding-modal compact"><div class="section-head"><div><h2>Worker 配置</h2><p id="config-worker-name">—</p></div><button id="close-config-modal">×</button></div>
     <div class="onboarding-grid"><label>最大并发任务 (max_jobs)<input id="config-max-jobs" type="number" min="1" max="32" step="1" placeholder="1"></label></div>
     <p class="hint">配置将在 Agent 内即时生效；有测试运行时不允许修改。</p>
     <div class="actions"><button id="save-worker-config" class="primary">保存配置</button></div>
     <pre id="config-error" class="host-warning" hidden style="white-space:pre-wrap;"></pre>
   </section></div>
-  <section><div class="section-head"><div class="section-head-copy"><h2>测试套件压缩包库</h2><p>统一读取 Controller 的 GMS-Suite 根目录，可一键下发并解压到指定 Worker</p></div><button id="reload-library" class="stable-action">↻ 刷新压缩包</button></div><div class="table-wrap"><table><thead><tr><th>压缩包</th><th>大小</th><th>修改时间</th><th>目标 Worker</th><th>解压目录</th><th>操作</th></tr></thead><tbody id="library"></tbody></table></div></section>
-  <section class="grid"><div><div class="section-head"><h2>设备池</h2></div><div class="table-wrap"><table><thead><tr><th>Worker</th><th>Serial</th><th>状态</th><th>型号</th></tr></thead><tbody id="devices"></tbody></table></div></div>
-  <div><div class="section-head"><h2>已部署套件</h2></div><div class="table-wrap"><table><thead><tr><th>Worker</th><th>套件</th><th>版本</th><th>路径</th></tr></thead><tbody id="suites"></tbody></table></div></div></section>
+  <section class="grid"><div><div class="section-head"><h2>设备资源池</h2></div><div class="table-wrap"><table><thead><tr><th>Worker</th><th>Serial</th><th>类型</th><th>来源</th><th>状态</th><th>型号</th></tr></thead><tbody id="devices"></tbody></table></div></div>
+  <div><div class="section-head"><h2>已部署套件</h2></div><div class="table-wrap"><table id="suites-table"><thead><tr><th>Worker</th><th>套件</th><th>版本</th><th>路径</th></tr></thead><tbody id="suites"></tbody></table></div></div></section>
+  <section><div class="section-head"><div class="section-head-copy"><h2>测试套件压缩包</h2><p>统一读取 Controller 的 GMS-Suite 根目录，可一键下发并解压到指定 Worker</p></div><button id="reload-library" class="stable-action">↻ 刷新测试套件</button></div><div class="table-wrap"><table><thead><tr><th>压缩包</th><th>大小</th><th>修改时间</th><th>目标 Worker</th><th>解压目录</th><th>操作</th></tr></thead><tbody id="library"></tbody></table></div></section>
   <section><div class="section-head"><div class="section-head-copy"><h2>集群任务监控</h2><p>任务请从“测试界面”或“GMS ATS”创建；此处统一查看状态、日志与报告。</p></div><select id="job-status-filter" class="compact-filter"><option value="">全部任务</option><option value="active">运行中</option><option value="completed">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option></select></div>
     <div class="onboarding-grid" id="job-create-form" hidden aria-hidden="true" style="display:none!important;">
       <label>Worker<select id="job-worker"><option value="auto">自动选择</option></select></label>

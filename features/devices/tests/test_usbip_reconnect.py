@@ -489,6 +489,58 @@ UNAUTH001	unauthorized
         )
         self.assertEqual(devices[0]["properties"]["usbip_busids"], ["1-1"])
 
+    def test_cluster_heartbeat_marks_missing_usbip_device_unknown_and_recovers(
+        self,
+    ):
+        import features.devices.integrations_api as integrations
+
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "hcq@172.16.14.66|1-8": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "worker-local",
+                    "busid": "1-8",
+                    "device_serials": ["RK3576GMS6"],
+                    "status": "attached",
+                    "timestamp": 1,
+                }
+            }
+        }
+
+        with patch.object(
+            integrations.runtime,
+            "config_manager",
+            SimpleNamespace(
+                get_runtime_config=lambda: runtime_config,
+                update_runtime_config=(
+                    lambda updates: runtime_config.update(updates) or True
+                ),
+            ),
+        ):
+            changed = integrations.reconcile_cluster_usbip_heartbeat(
+                "worker-local",
+                [],
+            )
+            self.assertTrue(changed)
+            assignment = runtime_config["usbip_cluster_assignments"][
+                "hcq@172.16.14.66|1-8"
+            ]
+            self.assertEqual(assignment["status"], "unknown")
+
+            changed = integrations.reconcile_cluster_usbip_heartbeat(
+                "worker-local",
+                [{"serial": "RK3576GMS6", "state": "available"}],
+            )
+            self.assertTrue(changed)
+            self.assertEqual(assignment["status"], "unknown")
+            self.assertEqual(
+                runtime_config["usbip_cluster_assignments"][
+                    "hcq@172.16.14.66|1-8"
+                ]["status"],
+                "attached",
+            )
+
     def test_terminal_detach_ack_reconciles_inventory_after_http_timeout(self):
         import features.devices.integrations_api as integrations
 
