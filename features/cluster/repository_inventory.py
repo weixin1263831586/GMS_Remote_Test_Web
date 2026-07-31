@@ -522,6 +522,8 @@ class ClusterInventoryRepositoryMixin:
             device["claimed"] = claim is not None
             if claim is not None:
                 device["claim_source_type"] = claim.get("source_type") or ""
+                device["claim_owner_id"] = claim.get("owner_id") or ""
+                device["claim_username"] = claim.get("username") or ""
         return devices
 
     def list_suites(self, worker_id: str = "") -> list[dict[str, Any]]:

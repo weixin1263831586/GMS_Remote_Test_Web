@@ -316,6 +316,54 @@ class AutomationApiTests(unittest.TestCase):
         self.assertEqual(result['test_suite'], '/suite/tools')
         self.assertEqual(result['devices'], ['worker-1:ABC'])
 
+    def test_live_preflight_rejects_adb_proxy_for_firmware_flash(self):
+        class Repository:
+            @staticmethod
+            def list_suites():
+                return [{
+                    'worker_id': 'worker-1', 'available': True,
+                    'suite_type': 'CTS', 'suite_version': '17_r1',
+                    'suite_key': 'CTS:17_r1', 'tools_path': '/suite/tools',
+                    'last_scanned_at': '2026-07-13T00:00:00Z',
+                }]
+
+            @staticmethod
+            def list_devices(worker_id):
+                return [{
+                    'id': f'{worker_id}:ABC', 'serial': 'ABC',
+                    'state': 'available', 'transport': 'adb_proxy',
+                }]
+
+        cluster = SimpleNamespace(
+            effective_enabled=True,
+            repository=Repository(),
+            config=SimpleNamespace(local_worker_id='worker-local'),
+            has_command_agent=lambda _worker_id: True,
+            list_workers=lambda: [{
+                'id': 'worker-1', 'status': 'online',
+                'running_jobs': 0, 'max_jobs': 1,
+                'disk_free_gb': 100, 'memory_available_gb': 32,
+            }],
+        )
+        with TemporaryDirectory() as tmp:
+            service = AutomationService(
+                store=AutomationStore(Path(tmp) / 'automation.sqlite3'),
+                profiles_path=Path(tmp) / 'profiles.json',
+                cluster_provider=lambda: cluster,
+            )
+            with self.assertRaisesRegex(
+                ValueError, 'ADB Proxy devices cannot be used'
+            ):
+                service.preflight({
+                    'artifact_url': 'https://jenkins.example/artifact/update.img',
+                    'devices': ['ABC'],
+                    'test_plan': {
+                        'worker_id': 'worker-1',
+                        'test_type': 'CTS',
+                        'jenkins': {'base_url': 'https://jenkins.example'},
+                    },
+                })
+
     def test_index_template_has_gms_ats_nav_entry(self):
         template = Path('web/shell/shell.html').read_text(
             encoding='utf-8'

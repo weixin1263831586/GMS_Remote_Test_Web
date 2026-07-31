@@ -265,13 +265,16 @@
         .filter-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
         /* 弹框居中样式 - 通用 */
         .modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: var(--modal-z-index, 10000); padding: clamp(8px, 2.5vw, 20px); box-sizing: border-box; overflow: hidden; overscroll-behavior: contain; }
-        #usage-examples-modal .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); max-width: 90%; max-height: 90%; overflow: hidden; display: flex; flex-direction: column; }
-        #usage-examples-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; }
+        #usage-examples-modal .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); width: min(760px, 96vw); max-width: min(760px, 96vw); height: min(560px, 72vh); overflow: hidden; display: flex; flex-direction: column; }
+        #usage-examples-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
         #usage-examples-modal .modal-title { color: #fff; font-size: 16px; font-weight: 600; }
         #usage-examples-modal .modal-close { color: #fff; font-size: 24px; cursor: pointer; line-height: 1; }
         #usage-examples-modal .modal-close:hover { color: #ccc; }
         #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: var(--card-bg); }
         #usage-examples-modal.modal.show { display: flex !important; }
+        /* 系统配置：渐变标题栏与统一标准对齐 */
+        #config-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); }
+        #config-modal .modal-title, #config-modal .modal-close { color: #fff; }
         #page-architecture .architecture-container { background: rgba(15,23,42,0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1rem; flex: 1; min-height: 0; overflow: hidden; }
         #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 0.5rem; }
     </style>
@@ -1053,7 +1056,7 @@
         <div class="container page-content" id="page-devices">
             <div style="position: relative; margin-bottom: 6px;">
                 <div class="section-title" style="margin: 0;">📱 设备管理</div>
-                <div class="device-group-toolbar" style="position: absolute; top: 0; right: 0;">
+                <div class="device-group-toolbar" style="position: absolute; top: -4px; right: 0;">
                     <button class="btn-xxs" onclick="openCreateGroupModal()" title="新建分组">➕ 新建分组</button>
                     <select class="btn-xxs" onchange="autoGroupDevices(this.value); this.value=''" title="按属性自动分组">
                         <option value="">⊞ 自动分组…</option>
@@ -1062,11 +1065,12 @@
                         <option value="android_version">按Android版本</option>
                         <option value="soc">按SOC系列</option>
                     </select>
-                    <select class="btn-xxs" id="device-group-filter" onchange="onGroupFilterChange()" title="按组筛选" style="max-width:160px;">
+                    <select class="btn-xxs" id="device-group-filter" onchange="onGroupFilterChange()" title="按组筛选" style="width:150px;max-width:160px;box-sizing:border-box;">
                         <option value="">全部设备</option>
                     </select>
                 </div>
             </div>
+            <div id="devices-scope-hint" style="color:var(--text-secondary);font-size:12px;"></div>
 
             <!-- 设备统计卡片 -->
             <div style="display: flex; gap: 15px; margin-bottom: 10px;">
@@ -1141,11 +1145,11 @@
 
         <!-- 报告管理页面 -->
         <div class="container page-content" id="page-reports">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <div style="position: relative; margin-bottom: 6px;">
                 <div class="section-title" style="margin: 0;">📊 报告管理</div>
-                <div style="display:flex;align-items:center;gap:10px;">
+                <div style="position: absolute; top: 0; right: 0; display:flex;align-items:center;gap:10px;">
                 <label class="reports-host-filter" style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-primary);">主机
-                    <select id="reports-worker-filter" onchange="switchReportsWorker()" style="padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;"><option value="">全部 Worker</option></select>
+                    <select id="reports-worker-filter" onchange="switchReportsWorker()" style="width:130px;padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;box-sizing:border-box;"><option value="">全部 Worker</option></select>
                 </label>
                 <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-primary); cursor: pointer;">
                     <input type="checkbox" id="filter-user-checkbox" onchange="toggleUserReports()" style="cursor: pointer;">
@@ -1247,7 +1251,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <div class="section-title">📚 测试套件</div>
                 <label style="font-size:12px;color:var(--text-secondary);">主机
-                    <select id="suite-worker-select" onchange="switchSuiteWorker()" disabled style="padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;"><option value="">正在加载主机...</option></select>
+                    <select id="suite-worker-select" onchange="switchSuiteWorker()" disabled style="width:130px;padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;box-sizing:border-box;"><option value="">正在加载主机...</option></select>
                 </label>
             </div>
 
@@ -1293,7 +1297,7 @@
                     <div class="suite-browser-header">
                         <div>
                             <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
-                            <div id="suite-browser-path" class="suite-browser-path">-</div>
+                            <div id="suite-browser-path" class="suite-browser-path"></div>
                         </div>
                         <div style="display: flex; gap: 6px; align-items: center;">
                             <button id="btn-test-results" class="btn-xs" onclick="openTestResultsModal()" style="white-space: nowrap; height: 28px;" title="执行 tradefed list results 查看该套件的测试结果">
@@ -1598,12 +1602,12 @@
 
         <!-- GMS助手页面 -->
         <div class="container page-content" id="page-gms-assistant">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <div style="position: relative; margin-bottom: 6px;">
                 <div class="section-title" style="margin: 0;">🎓 GMS助手</div>
-                <button class="btn-xxs" type="button" onclick="showGmsAssistantConfig()">配置助手</button>
+                <button class="btn-xxs" type="button" onclick="showGmsAssistantConfig()" style="position: absolute; top: -4px; right: 0;">助手配置</button>
             </div>
             <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
-                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
+                    style="width: 100%; flex: 1; min-height: 0; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); box-sizing: border-box;">
             </iframe>
         </div>
 
@@ -1641,9 +1645,9 @@
 
         <!-- 对话Agent页面 -->
         <div class="container page-content" id="page-agent">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <div style="position: relative; margin-bottom: 6px;">
                 <div class="section-title" style="margin: 0;">💬 对话Agent</div>
-                <div style="display: flex; align-items: center; gap: 6px; padding-top: 2px;">
+                <div style="position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 6px;">
                     <button class="btn-xs" onclick="newAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 22px;">新会话</button>
                     <button class="btn-xs" onclick="cancelAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 22px;">取消Agent</button>
                 </div>
@@ -1724,7 +1728,7 @@
         </div>
 
         <div id="kb-upload-modal" class="modal" style="z-index: 10091;">
-            <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-content modal-m">
                 <div class="modal-header">
                     <span class="modal-title">上传文件到知识库</span>
                     <span class="modal-close" onclick="kbCloseUpload()">&times;</span>
@@ -1744,7 +1748,7 @@
 
         <!-- 添加分类弹框 -->
         <div id="category-modal" class="modal" style="display: none;">
-            <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-content modal-xs">
                 <div class="modal-header">
                     <span class="modal-title">添加分类</span>
                     <span class="modal-close" onclick="closeCategoryModal()">&times;</span>
@@ -1771,7 +1775,7 @@
 
         <!-- 添加工具弹框 -->
         <div id="tool-modal" class="modal" style="display: none;">
-            <div class="modal-content" style="max-width: 450px; max-height: 80vh; overflow-y: auto;">
+            <div class="modal-content modal-m">
                 <div class="modal-header">
                     <span class="modal-title" id="tool-modal-title">添加工具</span>
                     <span class="modal-close" onclick="closeToolModal()">&times;</span>
@@ -1821,7 +1825,7 @@
 
         <!-- 常用工具 - 添加分类弹框 -->
         <div id="ut-category-modal" class="modal" style="display: none;">
-            <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-content modal-xs">
                 <div class="modal-header">
                     <span class="modal-title">添加工具分类</span>
                     <span class="modal-close" onclick="ut_closeCategoryModal()">&times;</span>
@@ -1848,7 +1852,7 @@
 
         <!-- 常用工具 - 添加/编辑工具弹框 -->
         <div id="ut-tool-modal" class="modal" style="display: none;">
-            <div class="modal-content" style="max-width: 450px; max-height: 80vh; overflow-y: auto;">
+            <div class="modal-content modal-m">
                 <div class="modal-header">
                     <span class="modal-title" id="ut-tool-modal-title">添加工具</span>
                     <span class="modal-close" onclick="ut_closeToolModal()">&times;</span>
@@ -1901,7 +1905,7 @@
 
     <!-- 弹框 -->
     <div id="config-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-l" style="height: min(560px, 72vh);">
             <div class="modal-header">
                 <span class="modal-title">系统配置</span>
                 <span class="modal-close" onclick="closeModal()">&times;</span>
@@ -1909,12 +1913,16 @@
             <div class="modal-body" id="config-modal-body">
                 <!-- 动态生成配置表单 -->
             </div>
+            <div id="config-modal-footer" class="modal-buttons" style="display:none;border-top:1px solid var(--border-color);padding:10px 20px;background:var(--light-bg);flex-shrink:0;">
+                <button class="btn-xxs" onclick="closeModal()">取消</button>
+                <button class="btn-xxs btn-primary" onclick="saveConfig()">保存</button>
+            </div>
         </div>
     </div>
 
     <!-- GMS助手配置弹框 -->
     <div id="gms-assistant-config-modal" class="modal">
-        <div class="modal-content" style="max-width:760px;">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">GMS助手配置</span>
                 <span class="modal-close" onclick="ModalManager.close('gms-assistant-config-modal')">&times;</span>
@@ -1937,7 +1945,7 @@
 
     <!-- WiFi配置弹框 -->
     <div id="wifi-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">连接Wi-Fi</span>
                 <span class="modal-close" onclick="closeWifiModal()">&times;</span>
@@ -1952,11 +1960,11 @@
                     <label>Wi-Fi 密码:</label>
                     <input type="text" id="wifi-password" placeholder="请输入 Wi-Fi 密码" autocomplete="off" />
                 </div>
-                </form>
                 <div class="modal-buttons">
-                    <button class="btn-xxs" onclick="closeWifiModal()">取消</button>
-                    <button class="btn-xxs btn-primary" onclick="submitWifiConfig()">连接</button>
+                    <button type="button" class="btn-xxs" onclick="closeWifiModal()">取消</button>
+                    <button type="submit" class="btn-xxs btn-primary">连接</button>
                 </div>
+                </form>
             </div>
         </div>
     </div>
@@ -2017,6 +2025,9 @@
                 <div id="adb-proxy-message" class="modal-info-text">
                     ADB通过adbproxy-rs接入后会显示在目标主机；可执行ADB和测试操作，Fastboot、锁定及烧写操作将被禁用。
                 </div>
+                <div class="modal-info-text" style="margin-top:6px;">
+                    single-user 仅表示每台 Worker 共用一个 Linux 运行账号，不限制平台多用户并发。
+                </div>
             </div>
             <div class="modal-buttons device-routing-modal-buttons">
                 <button class="btn-xxs" type="button" onclick="closeAdbProxyModal()">关闭</button>
@@ -2072,7 +2083,7 @@
 
     <!-- 设备主机密码弹框 -->
     <div id="device-password-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title" id="device-password-modal-title">设备主机 SSH 密码</span>
                 <span class="modal-close" onclick="closeDevicePasswordModal()">&times;</span>
@@ -2098,7 +2109,7 @@
 
     <!-- VPN Credential Modal -->
     <div id="vpn-credential-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">🔒 选择 VPN 连接</span>
                 <span class="modal-close" onclick="closeVpnCredentialModal()">&times;</span>
@@ -2123,7 +2134,7 @@
 
     <!-- Tailscale Info Modal -->
     <div id="tailscale-info-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">🌐 Tailscale 组网</span>
                 <span class="modal-close" onclick="closeTailscaleInfoModal()">&times;</span>
@@ -2166,7 +2177,7 @@
 
     <!-- Username Detection Modal -->
     <div id="username-detect-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">👤 客户端用户名识别</span>
                 <span class="modal-close" onclick="closeUsernameDetectModal()">&times;</span>
@@ -2199,7 +2210,7 @@
 
     <!-- 管理员提权弹框（敏感操作：移除用户/设备） -->
     <div id="elevate-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">🔐 管理员验证</span>
                 <span class="modal-close" onclick="cancelElevate()">&times;</span>
@@ -2326,7 +2337,7 @@
 
     <!-- 共享固件远端密码弹框 -->
     <div id="firmware-share-password-modal" class="modal" style="z-index: 10080;">
-        <div class="modal-content" style="max-width: 460px;">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">远端固件主机认证</span>
                 <span class="modal-close" onclick="closeFirmwareSharePasswordModal()">&times;</span>
@@ -2375,7 +2386,7 @@
 
     <!-- 烧写固件弹框 -->
     <div id="firmware-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">烧写固件</span>
                 <span class="modal-close" onclick="closeFirmwareModal()">&times;</span>
@@ -2402,7 +2413,7 @@
 
     <!-- 烧写GSI弹框 -->
     <div id="gsi-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">烧写GSI镜像</span>
                 <span class="modal-close" onclick="closeGsiModal()">&times;</span>
@@ -2477,7 +2488,7 @@
 
     <!-- 烧写SN码弹框 -->
     <div id="sn-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">烧写SN码</span>
                 <span class="modal-close" onclick="closeSnModal()">&times;</span>
@@ -2500,14 +2511,20 @@
 
     <!-- 文件浏览器弹框 -->
     <div id="file-browser-modal" class="modal" style="z-index: 10060;">
-        <div class="modal-content" style="max-width: 1200px;">
-            <div class="modal-header">
-                <span class="modal-title" id="file-browser-title">浏览文件</span>
-                <span class="modal-close" onclick="closeFileBrowserModal()">&times;</span>
+        <div class="modal-content" style="width: min(760px, 96vw); max-width: min(760px, 96vw); height: min(560px, 72vh); overflow: hidden;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #667eea, #764ba2);">
+                <span class="modal-title" id="file-browser-title" style="color:#fff;">浏览文件</span>
+                <span class="modal-close" onclick="closeFileBrowserModal()" style="color:#fff;">&times;</span>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" style="overflow: hidden; display: flex; flex-direction: column;">
                 <div class="file-browser-path" id="file-browser-current-path" style="margin-bottom: 10px;"></div>
-                <div class="file-browser-list" id="file-browser-list">
+                <div class="file-browser-header">
+                    <span class="file-browser-icon"></span>
+                    <span>名称</span>
+                    <span style="text-align:right;">大小</span>
+                    <span style="text-align:right;">修改时间</span>
+                </div>
+                <div class="file-browser-list" id="file-browser-list" style="flex: 1; overflow-y: auto; min-height: 0;">
                     <!-- 文件列表将动态生成 -->
                 </div>
                 <div class="modal-buttons" style="justify-content: space-between;">
@@ -2660,7 +2677,7 @@
 
     <!-- 添加本地测试套件路径弹框 -->
     <div id="add-local-suite-modal" class="modal" style="display: none;" onkeydown="handleAddLocalSuiteKeydown(event)">
-        <div class="modal-content" style="max-width: 550px;">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">➕ 添加本地测试套件路径</span>
                 <span class="modal-close" onclick="closeAddLocalSuiteModal()">&times;</span>
@@ -2686,7 +2703,7 @@
 
     <!-- 新建/编辑设备分组弹框 -->
     <div id="device-group-modal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 480px;">
+        <div class="modal-content modal-m">
             <div class="modal-header">
                 <span class="modal-title" id="device-group-modal-title">新建分组</span>
                 <span class="modal-close" onclick="ModalManager.close('device-group-modal')">&times;</span>
@@ -2714,7 +2731,7 @@
 
     <!-- 解压测试套件弹框 -->
     <div id="extract-suite-modal" class="modal" style="display: none;" onkeydown="handleExtractSuiteKeydown(event)">
-        <div class="modal-content" style="max-width: 620px;">
+        <div class="modal-content modal-m">
             <div class="modal-header">
                 <span class="modal-title">📦 解压测试套件</span>
                 <span class="modal-close" onclick="closeExtractSuiteModal()">&times;</span>
@@ -2747,7 +2764,7 @@
 
     <!-- 安装指南弹框 -->
     <div id="install-guide-modal" class="modal">
-        <div class="modal-content" style="max-width: 620px;">
+        <div class="modal-content modal-m">
             <div class="modal-header">
                 <span class="modal-title">⚠️ usbipd 安装指南</span>
                 <span class="modal-close" onclick="closeInstallGuide()">&times;</span>
@@ -2788,7 +2805,7 @@
 
     <!-- SSHD 安装指南弹框 -->
     <div id="sshd-install-guide-modal" class="modal">
-        <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-content modal-m">
             <div class="modal-header">
                 <span class="modal-title">⚠️ SSHD 安装指南</span>
                 <span class="modal-close" onclick="closeSshdInstallGuide()">&times;</span>
@@ -2814,12 +2831,13 @@
 
     <!-- 统一确认对话框 -->
     <div id="confirm-modal" class="modal" style="z-index: 10090;">
-        <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title" id="confirm-title">确认操作</span>
+                <span class="modal-close" onclick="ModalManager.close('confirm-modal')">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="modal-info-text" id="confirm-message" style="margin-bottom: 15px; background: rgba(231, 76, 60, 0.1); border-left-color: var(--danger-color); color: var(--danger-color);">
+                <div class="modal-info-text" id="confirm-message" style="margin-bottom: 15px; background: rgba(231, 76, 60, 0.1); border-left-color: var(--danger-color); color: var(--danger-color); white-space: pre-wrap; overflow-wrap: anywhere;">
                     确定要执行此操作吗？
                 </div>
                 <div class="modal-buttons" style="margin-top: 20px;">
@@ -2832,7 +2850,7 @@
 
     <!-- Mainline包豁免项扫描模式 -->
     <div id="mainline-sync-modal" class="modal">
-        <div class="modal-content" style="max-width: 460px;">
+        <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">选择扫描方式</span>
                 <span class="modal-close" onclick="ut_closeMainlineSyncModal()">&times;</span>
@@ -3542,7 +3560,7 @@
             const parts=String(host.connection||'').split('@'),user=parts.shift()||'',address=parts.join('@'),workerId=host.worker_id||(host.id==='default'?workspaceLocalWorkerId():'');
             body.addEventListener('dragover',event=>{event.preventDefault();body.style.outline='2px dashed var(--primary-color)';});
             body.addEventListener('dragleave',()=>{body.style.outline='';});
-            body.addEventListener('drop',async event=>{event.preventDefault();body.style.outline='';const file=event.dataTransfer?.files?.[0];if(!file)return;term.writeln(`\r\n\x1b[33m📤 正在上传 ${file.name}...\x1b[0m`);const form=new FormData();form.append('file',file);form.append('worker_id',workerId);try{const response=await fetch('/api/terminal/push',{method:'POST',body:form});const result=await response.json();if(!response.ok||!result.success)throw new Error(result.error||result.message||`HTTP ${response.status}`);term.writeln(`\r\n\x1b[32m✅ 已上传到 ${result.remote_path}\x1b[0m`);}catch(error){term.writeln(`\r\n\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);}finally{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input:'\r'}));term.focus();}});
+            body.addEventListener('drop',async event=>{event.preventDefault();body.style.outline='';const file=event.dataTransfer?.files?.[0];if(!file)return;if(!await ensureTerminalElevation(false,'上传文件到主机','主机文件上传'))return;term.writeln(`\r\n\x1b[33m📤 正在上传 ${file.name}...\x1b[0m`);const form=new FormData();form.append('file',file);form.append('worker_id',workerId);try{const result=await apiCall('/api/terminal/push','POST',form);term.writeln(`\r\n\x1b[32m✅ 已上传到 ${result.remote_path}\x1b[0m`);}catch(error){term.writeln(`\r\n\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);}finally{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input:'\r'}));term.focus();}});
             const protocol=location.protocol==='https:'?'wss:':'ws:',socket=new WebSocket(`${protocol}//${location.host}/api/system/websocket/terminal_workspace_${index}_${Date.now()}_${Math.random().toString(36).slice(2)}`);instance.socket=socket;
             term.writeln(`\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
             term.onData(input=>{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input}));const broadcastable=terminalWorkspace.broadcast&&!/[\x00-\x1f\x7f]/.test(input);if(broadcastable)terminalWorkspace.instances.forEach((t,j)=>{if(j!==index&&t.socket?.readyState===WebSocket.OPEN)t.socket.send(JSON.stringify({type:'terminal_input',input}));});});
@@ -3623,7 +3641,10 @@
         // 移除配置型用户（从 config_runtime.client_hosts 删除）。二次确认后调 DELETE。
         async function removeUser(ip, btn) {
             if (!ip) return;
-            if (!confirm(`确定移除用户 ${ip} 吗？\n（仅删除其配置映射，不影响当前会话；测试中的用户不可移除）`)) return;
+            if (!await showConfirmDialog(
+                '移除用户',
+                `确定移除用户 ${ip} 吗？\n仅删除其配置映射，不影响当前会话；测试中的用户不可移除。`
+            )) return;
             // Sensitive operation: require temporary admin elevation.
             const granted = window.requestElevatedAccess
                 ? await window.requestElevatedAccess(`移除用户 ${ip}`)
@@ -3631,19 +3652,9 @@
             if (!granted) return;
             if (btn) { btn.disabled = true; btn.textContent = '...'; }
             try {
-                const resp = await fetch('/api/users/remove', {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip })
-                });
-                const data = await resp.json();
-                if (resp.ok && data.success) {
-                    showToast(`已移除用户 ${ip}`, 'success');
-                    loadUsersList();
-                } else {
-                    showToast(data.detail?.message || data.error || '移除失败', 'error');
-                    if (btn) { btn.disabled = false; btn.textContent = '移除'; }
-                }
+                await apiCall('/api/users/remove', 'DELETE', { ip });
+                showToast(`已移除用户 ${ip}`, 'success');
+                loadUsersList();
             } catch (e) {
                 showToast(`移除失败: ${e.message}`, 'error');
                 if (btn) { btn.disabled = false; btn.textContent = '移除'; }
@@ -3716,7 +3727,7 @@
                     : '<span title="临时会话" style="width:44px;text-align:center;color:var(--text-secondary);">-</span>';
                 const clusterCell = activeClusterJob
                     ? `<button class="btn-xxs" style="width:44px;" data-cluster-job="${escapeHtml(activeClusterJob.id)}" data-worker-id="${escapeHtml(activeClusterJob.worker_id || '')}" data-attempt-id="${escapeHtml(activeClusterJob.attempt_id || '')}">任务</button>`
-                    : '<span aria-hidden="true" style="width:44px;"></span>';
+                    : '';
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
@@ -3743,7 +3754,7 @@
                             ${escapeHtml(devices)}
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">
-                            <div style="display:grid;grid-template-columns:44px 44px;justify-content:center;align-items:center;column-gap:6px;">
+                            <div style="display:flex;justify-content:center;align-items:center;gap:6px;">
                                 ${clusterCell}${removeCell}
                             </div>
                         </td>
@@ -3850,6 +3861,7 @@
                 const statusData = statusResp && statusResp.ok ? await statusResp.json() : {};
                 const localWorkerId = statusData.local_worker_id || 'worker-local';
                 const clusterMode = Boolean(includeCluster && statusData.enabled);
+                const scopeHint = document.getElementById('devices-scope-hint');
                 // 为本地设备补全 worker_id，使按主机分组时本地和远端设备都能正确归类
                 allDevices.forEach(d => {
                     if (!d.worker_id) d.worker_id = localWorkerId;
@@ -3930,7 +3942,7 @@
                                 claimed: Boolean(device.claimed),
                                 claim_source_type: device.claim_source_type || '',
                                 locked_by: device.claimed
-                                    ? ({
+                                    ? device.claimed_by || ({
                                         'cluster-firmware': '固件烧写',
                                         'cluster-job': '测试任务',
                                         'cluster-device-action': '设备操作'
@@ -4090,8 +4102,10 @@
                     ? `<span style="color: ${clusterStatus[0]}; font-weight: 600; font-size: 12px;">${clusterStatus[1]}</span>`
                     : localStatus
                     ? `<span style="color: ${localStatus[0]}; font-weight: 600; font-size: 12px;">${localStatus[1]}</span>`
+                    : device.locked_by
+                    ? '<span style="color: var(--warning-color); font-weight: 600; font-size: 12px;">● 已分配</span>'
                     : device.status === 'online'
-                    ? '<span style="color: var(--success-color); font-weight: 600; font-size: 12px;">● 在线</span>'
+                    ? '<span style="color: var(--success-color); font-weight: 600; font-size: 12px;">● 可用</span>'
                     : '<span style="color: var(--text-secondary); font-weight: 600; font-size: 12px;">○ 离线</span>';
 
                 // 电池电量显示
@@ -4419,7 +4433,10 @@
                     const gid = delEl.dataset.mgmtDel;
                     const g = (state.deviceGroups || []).find(x => x.id === gid);
                     if (!g) return;
-                    if (!confirm(`确定删除分组「${g.name}」？组内设备将变为未分组。`)) return;
+                    if (!await showConfirmDialog(
+                        '删除设备分组',
+                        `确定删除分组「${g.name}」？\n组内设备将变为未分组。`
+                    )) return;
                     try {
                         await apiCall('/api/device-groups', 'POST', { action: 'delete', id: gid });
                         // 同步刷新设备列表的 groups 字段，否则被删组里的设备会同时
@@ -4542,17 +4559,17 @@
                 `确定要强制释放设备 ${serialNo} 的占用锁吗？`
             );
             if (!confirmed) return;
+            const granted = await requestElevatedAccess(
+                `强制释放设备 ${serialNo}`
+            );
+            if (!granted) return;
 
             try {
-                const response = await fetch('/api/devices/force-release', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ device_id: serialNo })
-                });
-                const result = await response.json();
-                if (!response.ok || !result.success) {
-                    throw new Error(result.error || result.message || '释放失败');
-                }
+                await apiCall(
+                    '/api/devices/force-release',
+                    'POST',
+                    { device_id: serialNo }
+                );
                 showToast('设备占用锁已释放', 'success');
                 await loadDevicesManagement();
                 if (typeof refreshDevices === 'function') {
@@ -6425,14 +6442,22 @@
         }
 
         async function kbRestoreVersion(versionId) {
-            if (!kbState.currentDocId || !versionId || !confirm('恢复这个历史版本？当前内容也会保留为新版本。')) return;
+            if (!kbState.currentDocId || !versionId) return;
+            if (!await showConfirmDialog(
+                '恢复历史版本',
+                '恢复这个历史版本？\n当前内容也会保留为新版本。'
+            )) return;
             const doc = await kbFetch('/api/knowledge/docs/' + encodeURIComponent(kbState.currentDocId) + '/versions/' + encodeURIComponent(versionId) + '/restore', {method:'POST'});
             await kbOpenDoc(doc.doc_id);
             showToast('历史版本已恢复', 'success');
         }
 
         async function kbDeleteCurrent() {
-            if (!kbState.currentNodeId || !confirm('删除当前文档？')) return;
+            if (!kbState.currentNodeId) return;
+            if (!await showConfirmDialog(
+                '删除知识库文档',
+                '确定删除当前文档？此操作不可恢复。'
+            )) return;
             await kbFetch('/api/knowledge/nodes/' + encodeURIComponent(kbState.currentNodeId), {method:'DELETE'});
             kbClearEditor();
             await kbRefreshAll();
@@ -8908,9 +8933,11 @@
             button.disabled = true;
             button.textContent = '扫描中';
             try {
-                const response = await fetch('/api/mainline-known-issues/sync?mode=' + encodeURIComponent(mode), { method: 'POST' });
-                const result = await response.json();
-                if (!response.ok || !result.success) {
+                const result = await apiCall(
+                    '/api/mainline-known-issues/sync?mode=' + encodeURIComponent(mode),
+                    'POST'
+                );
+                if (!result.success) {
                     throw new Error(result.error || '启动扫描失败');
                 }
                 showToast('Mainline包豁免项' + modeText + '已启动', 'info');
@@ -9008,9 +9035,11 @@
             try {
                 const params = new URLSearchParams({ mode });
                 sources.forEach(source => params.append('source', source));
-                const response = await fetch('/api/gms-update-monitor/sync?' + params.toString(), { method: 'POST' });
-                const result = await response.json();
-                if (!response.ok || !result.success) {
+                const result = await apiCall(
+                    '/api/gms-update-monitor/sync?' + params.toString(),
+                    'POST'
+                );
+                if (!result.success) {
                     throw new Error(result.error || '启动扫描失败');
                 }
                 showToast(syncTitle + modeText + '已启动', 'info');
@@ -10017,6 +10046,11 @@
                 const file = files[0];
                 const fileName = file.name;
 
+                if (!await ensureTerminalElevation(
+                    false,
+                    '上传文件到主机',
+                    '主机文件上传'
+                )) return;
                 terminal.writeln(`\r\n\x1b[33m📤 正在上传文件: ${fileName} (${formatFileSize(file.size)})\x1b[0m`);
 
                 try {
@@ -10024,34 +10058,21 @@
                     formData.append('file', file);
                     formData.append('worker_id', terminalConfig.worker_id);
 
-                    const response = await fetch('/api/terminal/push', {
-                        method: 'POST',
-                        body: formData
-                    });
+                    const result = await apiCall(
+                        '/api/terminal/push',
+                        'POST',
+                        formData
+                    );
+                    terminal.writeln(`\x1b[32m✅ 文件已上传到: ${result.remote_path}\x1b[0m`);
+                    terminal.writeln(`\x1b[90m使用: adb push ${result.remote_path} <目标路径>\x1b[0m`);
+                    terminal.writeln(`\x1b[90m示例: adb push ${result.remote_path} /data/local/tmp/\x1b[0m`);
 
-                    const result = await response.json();
-
-                    if (result.success) {
-                        terminal.writeln(`\x1b[32m✅ 文件已上传到: ${result.remote_path}\x1b[0m`);
-                        terminal.writeln(`\x1b[90m使用: adb push ${result.remote_path} <目标路径>\x1b[0m`);
-                        terminal.writeln(`\x1b[90m示例: adb push ${result.remote_path} /data/local/tmp/\x1b[0m`);
-
-                        // 发送回车键,刷新提示符
-                        if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
-                            terminalSocket.send(JSON.stringify({
-                                type: 'terminal_input',
-                                input: '\r'
-                            }));
-                        }
-                    } else {
-                        terminal.writeln(`\x1b[31m❌ 上传失败: ${result.error}\x1b[0m`);
-                        // 发送回车键
-                        if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
-                            terminalSocket.send(JSON.stringify({
-                                type: 'terminal_input',
-                                input: '\r'
-                            }));
-                        }
+                    // 发送回车键,刷新提示符
+                    if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
+                        terminalSocket.send(JSON.stringify({
+                            type: 'terminal_input',
+                            input: '\r'
+                        }));
                     }
                 } catch (error) {
                     terminal.writeln(`\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);
@@ -10389,12 +10410,12 @@
 
     <!-- 使用实例弹框 -->
     <div id="usage-examples-modal" class="modal">
-        <div class="modal-content" style="max-width: 1000px;">
+        <div class="modal-content modal-l">
             <div class="modal-header">
                 <span class="modal-title">📖 GMS测试流程指南</span>
                 <span class="modal-close" onclick="closeUsageExamplesModal()">&times;</span>
             </div>
-            <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+            <div class="modal-body">
                 <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.6; color: var(--text-primary);">
                     <h3 style="color: var(--primary-color); margin-bottom: 10px; border-bottom: 2px solid var(--primary-color); padding-bottom: 8px;">🚀 完整测试流程指南</h3>
 

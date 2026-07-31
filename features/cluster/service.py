@@ -96,15 +96,25 @@ class ClusterService:
         device_count: int = 1,
         include_local: bool = True,
         require_agent: bool = False,
+        excluded_transports: set[str] | None = None,
     ) -> tuple[str, list[str]]:
         """Select a healthy worker with a local suite and enough devices."""
+        blocked_transports = {
+            str(value).strip().lower()
+            for value in (excluded_transports or set())
+            if str(value).strip()
+        }
         suites_by_worker = {}
         for suite in self.repository.list_suites():
             if suite["available"] and (not suite_key or suite["suite_key"] == suite_key):
                 suites_by_worker.setdefault(suite["worker_id"], []).append(suite)
         devices_by_worker = {}
         for device in self.repository.list_devices():
-            if device["state"] == "available":
+            if (
+                device["state"] == "available"
+                and str(device.get("transport") or "").strip().lower()
+                not in blocked_transports
+            ):
                 devices_by_worker.setdefault(device["worker_id"], []).append(device)
         candidates = []
         minimum_disk = float(os.getenv("GMS_CLUSTER_MIN_DISK_FREE_GB", "50"))

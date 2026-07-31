@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from unittest.mock import MagicMock, patch
 
@@ -127,6 +128,81 @@ def test_background_usbip_command_reports_completion(tmp_path):
     assert saved["result"] == result
     agent.client.ack.assert_called_once_with(
         "cmd-usbip", "completed", result, ""
+    )
+    assert [
+        (item["source_host"], item["busid"], item["adb_server_socket"])
+        for item in agent.runtime.usbip_assignments()
+    ] == [("192.0.2.10", "1-1", "")]
+    assert math.isfinite(agent.next_usbip_recovery_at)
+
+
+def test_background_usbip_detach_disables_recovery_after_last_assignment(
+    tmp_path,
+):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    agent.runtime.remember_usbip_assignments(
+        "192.0.2.10", ["1-1"], "tcp:127.0.0.1:5039"
+    )
+    command = {
+        "id": "cmd-usbip-detach",
+        "command_type": "usbip_detach",
+        "payload": {"source_host": "192.0.2.10", "busids": ["1-1"]},
+    }
+
+    with patch(
+        "worker_agent.app.execute_usbip_action",
+        return_value={"detached_busids": ["1-1"]},
+    ):
+        agent.run_usbip_action(command)
+
+    assert agent.runtime.usbip_assignments() == []
+    assert math.isinf(agent.next_usbip_recovery_at)
+
+
+def test_usbip_assignment_survives_runtime_restart_and_detach_clears_it(tmp_path):
+    config = worker_config(tmp_path)
+    runtime = WorkerRuntime(config)
+    runtime.remember_usbip_assignments(
+        "192.0.2.10", ["1-1", "1-2"], "tcp:127.0.0.1:5039"
+    )
+
+    restarted = WorkerRuntime(config)
+    assert [
+        (item["source_host"], item["busid"], item["adb_server_socket"])
+        for item in restarted.usbip_assignments()
+    ] == [
+        ("192.0.2.10", "1-1", "tcp:127.0.0.1:5039"),
+        ("192.0.2.10", "1-2", "tcp:127.0.0.1:5039"),
+    ]
+
+    restarted.forget_usbip_assignments("192.0.2.10", ["1-1"])
+    assert [
+        item["busid"] for item in restarted.usbip_assignments()
+    ] == ["1-2"]
+
+
+def test_worker_recovers_persisted_usbip_with_proxy_side_adb(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.runtime.remember_usbip_assignments(
+        "192.0.2.10", ["1-1", "1-2"], "tcp:127.0.0.1:5039"
+    )
+
+    with patch(
+        "worker_agent.app.execute_usbip_action",
+        return_value={"attached_busids": ["1-1", "1-2"]},
+    ) as execute:
+        result = agent.recover_usbip_assignments()
+
+    assert result == {
+        "recovered": ["192.0.2.10:1-1", "192.0.2.10:1-2"],
+        "errors": [],
+    }
+    execute.assert_called_once_with(
+        "attach",
+        "192.0.2.10",
+        ["1-1", "1-2"],
+        "tcp:127.0.0.1:5039",
     )
 
 

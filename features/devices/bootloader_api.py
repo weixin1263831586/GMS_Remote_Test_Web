@@ -7,8 +7,9 @@ import re
 import shlex
 import time
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
+from features.auth import require_elevated_admin_when_auth_required
 from features.test_execution import get_default_suites_path
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
@@ -212,6 +213,7 @@ async def lock_bootloader(
     request: Request,
     help: bool = Query(False),
     req: DeviceLockRequest = Body(None),
+    _admin=Depends(require_elevated_admin_when_auth_required),
 ):
     response = _help_or_continue(help, "POST", "/api/devices/bootloader-lock")
     if response:
@@ -229,6 +231,7 @@ async def unlock_bootloader(
     request: Request,
     help: bool = Query(False),
     req: DeviceLockRequest = Body(None),
+    _admin=Depends(require_elevated_admin_when_auth_required),
 ):
     response = _help_or_continue(help, "POST", "/api/devices/bootloader-unlock")
     if response:

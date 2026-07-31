@@ -7,7 +7,10 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 
-from features.auth import require_authenticated_user
+from features.auth import (
+    require_authenticated_user,
+    require_elevated_admin_when_auth_required,
+)
 from foundation.config import config_manager
 
 from .api import _require_cluster_enabled, service
@@ -19,6 +22,8 @@ router = APIRouter()
 
 @router.post("/devices/actions")
 async def device_action(body: ClusterDeviceAction, request: Request):
+    if body.action in {"bootloader_lock", "bootloader_unlock"}:
+        require_elevated_admin_when_auth_required(request)
     repository = service().repository
     is_local = body.worker_id == service().config.local_worker_id
     _require_cluster_enabled(remote=not is_local)

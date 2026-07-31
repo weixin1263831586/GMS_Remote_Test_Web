@@ -967,6 +967,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 state.adbForwardRunning = false;
                 state.usbipConnected = false;
                 state.elevated = true;
+                requestElevatedAccess = async () => true;
                 state.config = {...(state.config || {}), device_host: 'tester@192.0.2.10'};
                 showConfirmDialog = async () => true;
                 initAndStartVnc = async () => true;
@@ -1113,6 +1114,13 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 index for index, item in enumerate(requests)
                 if item["path"] == "/api/usbip/disconnect"
             )
+            for _ in range(20):
+                if any(
+                    item["path"] == "/api/devices/list?force_refresh=1"
+                    for item in requests[disconnect_index + 1:]
+                ):
+                    break
+                page.wait_for_timeout(50)
             self.assertEqual(
                 [
                     (item["method"], item["path"])
@@ -1208,6 +1216,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "**/api/devices/bootloader-unlock",
                 handle_bootloader_request,
             )
+            page.evaluate("requestElevatedAccess = async () => true")
             operation_logs = page.evaluate(
                 """async () => {
                     const originalAddLogEntry = window.addLogEntry;
@@ -1857,6 +1866,12 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "worker_id": "worker-1",
                     "state": "offline",
                     "properties": {"model": "Offline Model"},
+                }, {
+                    "id": "worker-1:REMOTE-UNKNOWN",
+                    "serial": "REMOTE-UNKNOWN",
+                    "worker_id": "worker-1",
+                    "state": "unknown",
+                    "properties": {"model": "Unknown Model"},
                 }],
             })
 
@@ -1927,6 +1942,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             ).to_have_count(2)
             expect(page.locator("#devices-table-body")).not_to_contain_text(
                 "REMOTE-OFFLINE"
+            )
+            expect(page.locator("#devices-table-body")).not_to_contain_text(
+                "REMOTE-UNKNOWN"
             )
             expect(page.locator("#devices-table-body")).not_to_contain_text("Remote Group")
             expect(
@@ -3376,6 +3394,95 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_automation_admin_action_prompts_and_retries_after_elevation(self):
+        page = self.new_page()
+        tick_attempts = []
+
+        def fulfill_automation(route):
+            path = route.request.url.split("?", 1)[0]
+            if path.endswith("/api/automation/worker/tick"):
+                tick_attempts.append(route.request.url)
+                if len(tick_attempts) == 1:
+                    route.fulfill(
+                        status=403,
+                        content_type="application/json",
+                        body=json.dumps({
+                            "detail": {
+                                "message": "Elevation required",
+                                "elevation_required": True,
+                            }
+                        }),
+                    )
+                    return
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": None}),
+            )
+
+        page.route("**/api/automation/**", fulfill_automation)
+        page.route(
+            "**/api/cluster/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "enabled": False,
+                    "local_worker_id": "worker-local",
+                }),
+            ),
+        )
+        page.route(
+            "**/api/devices/list*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body="[]",
+            ),
+        )
+        page.route(
+            "**/api/test/suites",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"suites":[]}',
+            ),
+        )
+        try:
+            page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.wait_for_function(
+                "document.body.dataset.automationReady === 'true'"
+            )
+            result = page.evaluate(
+                """async () => {
+                    window.__elevationLabels = [];
+                    window.requestElevatedAccess = async label => {
+                        window.__elevationLabels.push(label);
+                        return true;
+                    };
+                    const response = await api(
+                        '/api/automation/worker/tick?executor=stub',
+                        {method: 'POST'}
+                    );
+                    return {
+                        response,
+                        labels: window.__elevationLabels,
+                        allocatedLabel: statusLabel('allocated'),
+                        failedLabel: statusLabel('test_failed')
+                    };
+                }"""
+            )
+            self.assertEqual(len(tick_attempts), 2)
+            self.assertEqual(
+                result["labels"],
+                ["执行 GMS ATS 管理操作"],
+            )
+            self.assertEqual(result["allocatedLabel"], "已分配")
+            self.assertEqual(result["failedLabel"], "测试失败")
+        finally:
+            page.close()
+
     def test_automation_lunch_targets_follow_selected_workspace(self):
         page = self.new_page()
 
@@ -3581,7 +3688,14 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 payload = {
                     "success": True,
                     "devices": [
-                        {"id": f"worker-1:DEVICE-{index}", "state": "available"}
+                        {
+                            "id": f"worker-1:DEVICE-{index}",
+                            "state": "available",
+                            "transport": "adb_proxy" if index == 1 else "local_usb",
+                            "properties": {
+                                "adb_proxy_source_worker_id": "worker-source"
+                            } if index == 1 else {},
+                        }
                         for index in range(1, 5)
                     ],
                 }
@@ -3611,6 +3725,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "element => getComputedStyle(element).gridTemplateColumns.split(' ').length"
             )
             self.assertEqual(columns, 2)
+            expect(page.locator("#automation-device-list")).to_contain_text(
+                "ADB Proxy · worker-source · 仅免刷机测试"
+            )
         finally:
             page.close()
 

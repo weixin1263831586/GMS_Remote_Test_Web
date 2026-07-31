@@ -313,6 +313,55 @@ def annotate_cluster_usbip_devices(
     return annotated
 
 
+def reconcile_cluster_usbip_heartbeat(
+    worker_id: str,
+    devices: list[dict],
+) -> bool:
+    """Keep persisted USB/IP route state aligned with Worker ADB inventory.
+
+    A target Worker restores its saved USB/IP attachments before publishing a
+    heartbeat.  If the source export is unavailable after either host reboots,
+    the route must not continue to look healthy merely because the Controller
+    still has an ``attached`` record.
+    """
+    online_serials = {
+        str(item.get("serial") or "").strip()
+        for item in devices or []
+        if str(item.get("serial") or "").strip()
+        and str(item.get("state") or "").lower()
+        not in {"offline", "unknown", "unauthorized"}
+    }
+    changed = False
+    with _usbip_assignment_lock:
+        assignments = _usbip_assignments()
+        for key, assignment in list(assignments.items()):
+            if str(assignment.get("worker_id") or "") != str(worker_id or ""):
+                continue
+            if assignment.get("status") not in {"attached", "unknown"}:
+                continue
+            expected = {
+                str(serial or "").strip()
+                for serial in assignment.get("device_serials") or []
+                if str(serial or "").strip()
+            }
+            if not expected:
+                continue
+            next_status = (
+                "attached" if expected.issubset(online_serials) else "unknown"
+            )
+            if assignment.get("status") == next_status:
+                continue
+            assignments[key] = {
+                **assignment,
+                "status": next_status,
+                "timestamp": time.time(),
+            }
+            changed = True
+        if changed:
+            _save_usbip_assignments(assignments)
+    return changed
+
+
 def reconcile_cluster_usbip_command(command: dict, repository) -> None:
     """Apply a terminal Worker USB/IP result even after its HTTP waiter timed out."""
     command_type = str(command.get("command_type") or "")

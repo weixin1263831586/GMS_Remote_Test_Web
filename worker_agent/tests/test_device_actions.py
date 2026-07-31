@@ -128,6 +128,7 @@ def test_usbip_attach_reuses_matching_existing_worker_port():
         result = execute_usbip_action("attach", "192.0.2.10", ["1-2"])
     assert result["attached_busids"] == ["1-2"]
     assert result["already_attached_busids"] == ["1-2"]
+    assert result["enumeration_pending"] is False
     assert run.call_count == 1
     assert run.call_args.args[0][-1] == "port"
 

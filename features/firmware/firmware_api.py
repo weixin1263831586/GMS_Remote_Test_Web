@@ -11,9 +11,10 @@ import tempfile
 import threading
 import time
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from features.auth import require_elevated_admin_when_auth_required
 from features.devices import parse_adb_device_states
 from features.devices.utils import DeviceUtils
 from features.test_execution import get_default_suites_path
@@ -417,7 +418,12 @@ async def get_firmware_upload_progress(request: Request):
 
 
 @router.post("/api/burn/firmware")
-async def burn_firmware(request: Request, h: str | None = Query(None), help: bool = Query(False)):
+async def burn_firmware(
+    request: Request,
+    h: str | None = Query(None),
+    help: bool = Query(False),
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
     """Firmware burning - supports file upload."""
     resp = runtime.generate_help_or_continue(help, "POST", "/api/burn/firmware")
     if resp:
@@ -654,7 +660,10 @@ async def burn_firmware(request: Request, h: str | None = Query(None), help: boo
         return error_response(str(e), 500)
 
 @router.post("/api/burn/gsi")
-async def burn_gsi(request: Request):
+async def burn_gsi(
+    request: Request,
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
     """GSI burning using run_GSI_Burn.sh script."""
     try:
         client_id = runtime.get_client_id_from_request(request)
@@ -875,7 +884,10 @@ async def burn_gsi(request: Request):
 
 
 @router.post("/api/burn/serial")
-async def burn_sn(req: SNBurnRequest):
+async def burn_sn(
+    req: SNBurnRequest,
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
     """SN burning - burn serial number to selected devices."""
     try:
         devices = req.devices

@@ -275,9 +275,36 @@ class HttpAutomationExecutor:
                 plan.get("device_selector"), dict
             ) else {}
             minimum = max(1, int(selector.get("min_count") or 1))
+            flash_plan = plan.get("flash") if isinstance(
+                plan.get("flash"), dict
+            ) else {}
+            requires_local_usb = flash_plan.get("mode") != "skip"
 
             existing = cluster.repository.get_reservation_by_source(run["id"])
             if existing:
+                inventory = {
+                    item["id"]: item
+                    for item in cluster.repository.list_devices(existing["worker_id"])
+                }
+                unsupported = [
+                    item["id"] for item in existing["devices"]
+                    if (
+                        requires_local_usb
+                        and str(
+                            (inventory.get(item["id"]) or {}).get("transport") or ""
+                        ).lower() == "adb_proxy"
+                    )
+                ]
+                if unsupported:
+                    return {
+                        "success": False,
+                        "error": (
+                            "ADB Proxy devices cannot be used for ATS firmware "
+                            "flashing because they have no USB/Fastboot channel: "
+                            f"{', '.join(unsupported)}; set flash.mode=skip for "
+                            "test-only runs"
+                        ),
+                    }
                 cluster.repository.renew_reservation(existing["id"])
                 return {
                     "success": True,
@@ -298,7 +325,10 @@ class HttpAutomationExecutor:
                     None,
                 )
                 worker_id, auto_devices = cluster.select_worker(
-                    (suite or {}).get("suite_key", ""), minimum, require_agent=True
+                    (suite or {}).get("suite_key", ""),
+                    minimum,
+                    require_agent=True,
+                    excluded_transports={"adb_proxy"} if requires_local_usb else None,
                 )
                 if not devices:
                     devices = auto_devices
@@ -313,6 +343,29 @@ class HttpAutomationExecutor:
                     value if value.startswith(f"{worker_id}:") else f"{worker_id}:{value}"
                     for value in devices
                 ]
+                inventory = {
+                    item["id"]: item
+                    for item in cluster.repository.list_devices(worker_id)
+                }
+                unsupported = [
+                    device_id for device_id in normalized
+                    if (
+                        requires_local_usb
+                        and str(
+                            (inventory.get(device_id) or {}).get("transport") or ""
+                        ).lower() == "adb_proxy"
+                    )
+                ]
+                if unsupported:
+                    return {
+                        "success": False,
+                        "error": (
+                            "ADB Proxy devices cannot be used for ATS firmware "
+                            "flashing because they have no USB/Fastboot channel: "
+                            f"{', '.join(unsupported)}; set flash.mode=skip for "
+                            "test-only runs"
+                        ),
+                    }
             else:
                 prefix = str(selector.get("serial_prefix") or "")
                 board = str(selector.get("board") or "").lower()
@@ -323,6 +376,11 @@ class HttpAutomationExecutor:
                         properties.get("board") or properties.get("product") or ""
                     ).lower()
                     if item.get("state") != "available":
+                        continue
+                    if (
+                        requires_local_usb
+                        and str(item.get("transport") or "").lower() == "adb_proxy"
+                    ):
                         continue
                     if prefix and not str(item.get("serial") or "").startswith(prefix):
                         continue

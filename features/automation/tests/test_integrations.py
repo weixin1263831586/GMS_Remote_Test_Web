@@ -132,6 +132,47 @@ class GerritTriggerTests(unittest.TestCase):
 
 
 class HttpAutomationExecutorTests(unittest.TestCase):
+    def test_select_devices_rejects_adb_proxy_for_firmware_flash(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        class Repository:
+            @staticmethod
+            def get_reservation_by_source(_source_id):
+                return None
+
+            @staticmethod
+            def list_devices(_worker_id):
+                return [{
+                    "id": "worker-1:ABC",
+                    "serial": "ABC",
+                    "state": "available",
+                    "transport": "adb_proxy",
+                    "properties": {},
+                }]
+
+            @staticmethod
+            def reserve_devices(*_args, **_kwargs):
+                raise AssertionError("ADB Proxy device must not be reserved for flashing")
+
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="worker-local"),
+            repository=Repository(),
+            has_command_agent=lambda _worker_id: True,
+        )
+        run = {
+            "id": "run_proxy_flash",
+            "worker_id": "worker-1",
+            "created_by": "owner-1",
+            "devices_json": '[{"serial":"worker-1:ABC"}]',
+            "test_plan_json": '{"worker_id":"worker-1","flash":{"mode":"firmware"}}',
+        }
+
+        with patch("features.cluster.get_cluster_service", return_value=cluster):
+            result = HttpAutomationExecutor().select_devices(run)
+
+        self.assertFalse(result["success"])
+        self.assertIn("ADB Proxy devices cannot be used", result["error"])
+
     def test_post_flash_verification_accepts_product_device_or_board_identity(self):
         from features.automation.executors import HttpAutomationExecutor
 

@@ -226,6 +226,7 @@ class AutomationService:
         ) else {}
         minimum = max(1, int(selector.get('min_count') or 1))
         flash = plan.get('flash') if isinstance(plan.get('flash'), dict) else {}
+        requires_local_usb = flash.get('mode') != 'skip'
         full_suite = not (
             plan.get('retry_dir') or plan.get('test_module')
             or plan.get('test_case') or plan.get('modules')
@@ -234,7 +235,7 @@ class AutomationService:
             float(os.getenv('GMS_CTS_FULL_MEMORY_GB', '28'))
             if full_suite and test_type == 'CTS' else 0
         )
-        if flash.get('mode') != 'skip' and minimum != 1:
+        if requires_local_usb and minimum != 1:
             raise ValueError('Firmware flashing requires device_selector.min_count = 1')
 
         all_suites = [
@@ -256,7 +257,10 @@ class AutomationService:
             ):
                 try:
                     candidate, _ = cluster.select_worker(
-                        suite.get('suite_key', ''), minimum, require_agent=True
+                        suite.get('suite_key', ''),
+                        minimum,
+                        require_agent=True,
+                        excluded_transports={'adb_proxy'} if requires_local_usb else None,
                     )
                 except ValueError as exc:
                     last_error = str(exc)
@@ -347,6 +351,20 @@ class AutomationService:
             ]
             if unavailable:
                 raise ValueError(f'Devices are unavailable on {worker_id}: {", ".join(unavailable)}')
+            unsupported = [
+                device_id for device_id in requested_devices
+                if (
+                    requires_local_usb
+                    and str(inventory[device_id].get('transport') or '').lower()
+                    == 'adb_proxy'
+                )
+            ]
+            if unsupported:
+                raise ValueError(
+                    'ADB Proxy devices cannot be used for ATS firmware flashing '
+                    f'because they have no USB/Fastboot channel: {", ".join(unsupported)}; '
+                    'set flash.mode=skip for test-only runs'
+                )
             if len(requested_devices) < minimum:
                 raise ValueError(f'At least {minimum} devices are required')
         else:
@@ -355,6 +373,10 @@ class AutomationService:
             available = [
                 item for item in inventory.values()
                 if item.get('state') == 'available'
+                and (
+                    not requires_local_usb
+                    or str(item.get('transport') or '').lower() != 'adb_proxy'
+                )
                 and (
                     not prefix
                     or str(item.get('serial') or '').startswith(prefix)
@@ -372,14 +394,19 @@ class AutomationService:
                 raise ValueError(
                     f'Worker {worker_id} has {len(available)} idle devices; {minimum} required'
                 )
-        if flash.get('mode') != 'skip' and requested_devices and len(requested_devices) != 1:
+        if requires_local_usb and requested_devices and len(requested_devices) != 1:
             raise ValueError('Firmware flashing requires exactly one device')
         body['devices'] = requested_devices
         return {
             'runtime_checked': True,
             'suite_key': selected.get('suite_key', ''),
             'available_device_count': sum(
-                item.get('state') == 'available' for item in inventory.values()
+                item.get('state') == 'available'
+                and (
+                    not requires_local_usb
+                    or str(item.get('transport') or '').lower() != 'adb_proxy'
+                )
+                for item in inventory.values()
             ),
         }
 

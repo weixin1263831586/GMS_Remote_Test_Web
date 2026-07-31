@@ -181,8 +181,29 @@ const FAILURE_STAGE_INDEX = {
     jenkins_failed: 2, artifact_missing: 3, flash_failed: 6,
     test_failed: 9, analysis_failed: 11, reporting_failed: 12,
 };
+const STATUS_LABELS_ZH = {
+    online: '在线', offline: '离线', busy: '忙碌', draining: '停止派发',
+    available: '可用', allocated: '已分配', reserved: '已预留',
+    external_busy: '外部占用', unauthorized: '未授权', unknown: '未知',
+    created: '已创建', queued: '排队', running: '运行中',
+    jenkins_queued: '构建排队',
+    jenkins_building: '编译中', artifact_ready: '固件就绪',
+    waiting_device: '等待设备', device_locked: '设备已锁',
+    flashing: '刷机中', flash_verified: '刷机校验',
+    testing: '启动测试', test_running: '测试中',
+    report_collecting: '收集报告', analyzing: '分析中',
+    reporting: '上报中', completed: '完成', cancelled: '已取消',
+    failed: '失败', jenkins_failed: '构建失败',
+    artifact_missing: '固件缺失', flash_failed: '刷机失败',
+    test_failed: '测试失败', analysis_failed: '分析失败',
+    reporting_failed: '上报失败',
+};
 
 function qs(id) { return document.getElementById(id); }
+function statusLabel(value) {
+    const status = String(value || 'unknown');
+    return STATUS_LABELS_ZH[status] || status;
+}
 function syncAutomationOverlayState() {
     const hasOverlay = Boolean(
         document.querySelector('.password-backdrop')
@@ -257,7 +278,7 @@ function renderStageBar(status, currentStage) {
         return `<span class="stage-cell ${cls}" title="${esc(label)}（${esc(stage)}）"></span>`;
     }).join('')}</div>`;
 }
-async function api(path, options) {
+async function api(path, options, retried = false) {
     const resp = await fetch(path, options);
     const text = await resp.text();
     let data;
@@ -266,8 +287,25 @@ async function api(path, options) {
     } catch (_error) {
         data = {success: false, error: text || `HTTP ${resp.status}`};
     }
+    const detail = data && data.detail;
+    if (
+        resp.status === 403
+        && !retried
+        && detail
+        && typeof detail === 'object'
+        && detail.elevation_required
+        && typeof window.parent?.requestElevatedAccess === 'function'
+    ) {
+        const granted = await window.parent.requestElevatedAccess(
+            '执行 GMS ATS 管理操作'
+        );
+        if (granted) return api(path, options, true);
+    }
     if (!resp.ok || !data.success) {
-        throw new Error(data.error || data.message || `请求失败 (HTTP ${resp.status})`);
+        const message = typeof detail === 'object'
+            ? (detail.message || JSON.stringify(detail))
+            : (detail || data.error || data.message);
+        throw new Error(message || `请求失败 (HTTP ${resp.status})`);
     }
     return data.data;
 }
@@ -710,7 +748,18 @@ async function loadDevices(forceRefresh = false) {
                 const unavailable = isLocalAutomationWorker(workerId)
                     ? Boolean(d.locked || ['offline', 'unauthorized', 'unknown', 'fastboot'].includes(deviceState))
                     : Boolean(d.claimed || deviceState !== 'available');
-                const label = `${id}${unavailable ? ` (${deviceState})` : ''}`;
+                const transport = String(d.transport || d.properties?.transport || '').toLowerCase();
+                const sourceWorker = d.adb_proxy_source_worker_id
+                    || d.properties?.adb_proxy_source_worker_id
+                    || d.usbip_source_worker_id
+                    || d.properties?.usbip_source_worker_id
+                    || '';
+                const transportLabel = transport === 'adb_proxy'
+                    ? ` · ADB Proxy${sourceWorker ? ` · ${sourceWorker}` : ''} · 仅免刷机测试`
+                    : (transport === 'usbip'
+                        ? ` · USB/IP${sourceWorker ? ` · ${sourceWorker}` : ''}`
+                        : '');
+                const label = `${id}${transportLabel}${unavailable ? `（${statusLabel(deviceState)}）` : ''}`;
                 return `<label class="checkbox-item${unavailable ? ' muted' : ''}"><input type="checkbox" value="${esc(id)}"${unavailable ? ' disabled' : ''} onchange="syncAutomationWorkspaceSelection()"> <span>${esc(label)}</span></label>`;
             }).join('')
             : '<div class="muted">未发现设备</div>';
@@ -764,7 +813,7 @@ async function loadRuns() {
         <article class="run-card${run.id === selectedRunId ? ' active' : ''}" onclick="loadEvents('${esc(run.id)}')">
             <div class="run-main">
                 <div class="run-title">
-                    <span class="badge ${esc(run.status)}">${esc(run.status)}</span>
+                    <span class="badge ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
                     <strong>${esc(run.profile_id || 'manual')}</strong>
                     <span class="muted">${esc(run.source_type || 'manual')}</span>
                 </div>
@@ -812,7 +861,7 @@ async function loadRuns() {
                 <article class="report-card">
                     <div class="report-card-main">
                         <div class="run-title">
-                            <span class="badge ${esc(run.status)}">${esc(run.status)}</span>
+                            <span class="badge ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
                             <strong>${esc(run.profile_id || 'manual')}</strong>
                             <span class="muted">${esc(run.source_type || 'manual')}</span>
                         </div>
@@ -936,7 +985,7 @@ async function loadBuildJobs() {
         ? buildJobs.map(job => {
             const terminal = TERMINAL_STATUSES.has(job.status);
             return `<div class="build-job ${job.id === selectedBuildJobId ? 'active' : ''}" onclick="loadBuildLog('${esc(job.id)}')">
-                <div class="build-job-head"><span class="badge ${esc(job.status)}">${esc(job.status)}</span><strong>${esc(job.template_id)}</strong>
+                <div class="build-job-head"><span class="badge ${esc(job.status)}" title="${esc(job.status)}">${esc(statusLabel(job.status))}</span><strong>${esc(job.template_id)}</strong>
                 ${terminal ? `<button type="button" class="build-job-delete" title="删除历史任务" onclick="event.stopPropagation(); deleteBuildJob('${esc(job.id)}')">删除</button>` : ''}</div>
                 <div class="muted">${esc(job.id)} / ${esc(job.remote_workspace || '')}</div><div>${esc((job.artifacts || [])[0]?.path || job.error || '')}</div></div>`;
         }).join('')
@@ -944,7 +993,13 @@ async function loadBuildJobs() {
 }
 
 async function deleteBuildJob(jobId) {
-    if (!window.confirm(`确定删除历史构建任务 ${jobId}？\n此操作只删除平台记录，不删除远端源码和构建产物。`)) return;
+    const confirmed = typeof window.parent?.showConfirmDialog === 'function'
+        ? await window.parent.showConfirmDialog(
+            '删除构建任务',
+            `确定删除历史构建任务 ${jobId}？\n此操作只删除平台记录，不删除远端源码和构建产物。`
+        )
+        : window.confirm(`确定删除历史构建任务 ${jobId}？`);
+    if (!confirmed) return;
     try {
         await api(`/api/build/jobs/${encodeURIComponent(jobId)}`, {method: 'DELETE'});
         if (selectedBuildJobId === jobId) {
@@ -1006,8 +1061,8 @@ async function loadBuildLog(jobId, {silent = false} = {}) {
             logEl.scrollTop = previousTop;
         }
         logEl.dataset.loaded = '1';
-        qs('build-log-title').textContent = `${job.id} / ${job.status}`;
-        if (!silent) toast(`构建任务 ${job.id}: ${job.status}`);
+        qs('build-log-title').textContent = `${job.id} / ${statusLabel(job.status)}`;
+        if (!silent) toast(`构建任务 ${job.id}：${statusLabel(job.status)}`);
         await loadBuildJobs();
     } catch (err) { toast(err.message); }
 }
@@ -1080,7 +1135,9 @@ async function pollGerrit() {
 async function tickWorker(executor) {
     try {
         const run = await api(`/api/automation/worker/tick?executor=${encodeURIComponent(executor)}`, {method: 'POST'});
-        toast(run ? `推进到 ${run.status}: ${run.id}` : '没有可推进的运行');
+        toast(run
+            ? `推进到 ${statusLabel(run.status)}：${run.id}`
+            : '没有可推进的运行');
         await loadRuns();
         if (run && run.id) await loadEvents(run.id);
     } catch (err) { toast(err.message); }

@@ -123,17 +123,6 @@
                 "id": "chaoqun-huang",
                 "name": "chaoqun.huang",
                 "owner": "chaoqun.huang@rock-chips.com",
-                "department_id": "",
-                "department": "",
-                "list_limit": 50,
-                "query_limit": 500,
-                "query_page_size": 500,
-                "max_history_changes": 0
-            },
-            {
-                "id": "jake-wu-rock-chips-com",
-                "name": "吴崇杰",
-                "owner": "jake.wu@rock-chips.com",
                 "department_id": "system-2",
                 "department": "系统二部",
                 "list_limit": 50,
@@ -201,41 +190,6 @@
         "scan_minute": 0,
         "scan_hours_window": 24
     },
-    "client_hosts": {
-        "172.16.14.66": "hcq",
-        "127.0.0.1": "hcq",
-        "172.16.14.65": "cp2-share",
-        "172.16.14.233": "hcq",
-        "172.16.14.76": "admin",
-        "10.10.10.206": "hcq"
-    },
-    "client_ssh_credentials": [
-        {
-            "device_host": "hcq@172.16.14.66",
-            "username": "hcq",
-            "host": "172.16.14.66"
-        },
-        {
-            "device_host": "admin@172.16.14.76",
-            "username": "admin",
-            "host": "172.16.14.76"
-        },
-        {
-            "device_host": "wlq@172.16.14.244",
-            "username": "wlq",
-            "host": "172.16.14.244"
-        },
-        {
-            "device_host": "wlq@172.16.14.246",
-            "username": "wlq",
-            "host": "172.16.14.246"
-        },
-        {
-            "device_host": "hcq@172.16.14.118",
-            "username": "hcq",
-            "host": "172.16.14.118"
-        }
-    ],
     "sidebar_order": [
         "test",
         "desktop",
@@ -257,64 +211,6 @@
         "gerrit-dashboard",
         "agent"
     ],
-    "device_groups": [
-        {
-            "id": "auto_worker_hcq_172_16_14_233",
-            "name": "worker: hcq@172.16.14.233",
-            "color": "#3b82f6",
-            "device_ids": [
-                "RK3576GMS5",
-                "RK3576GMS4",
-                "RK3572GMS6",
-                "RK3576GMS6",
-                "c3d9b8674f4b94f6",
-                "RK3576GMS2"
-            ],
-            "followed": false
-        },
-        {
-            "id": "auto_worker_ats-worker-246",
-            "name": "worker: ats-worker-246",
-            "color": "#764ba2",
-            "device_ids": [
-                "ats-worker-246:ATS357629",
-                "ats-worker-246:ATS357630",
-                "ats-worker-246:ATS357631",
-                "ats-worker-246:RK3572GMS1"
-            ],
-            "followed": false
-        },
-        {
-            "id": "auto_worker_ats-worker-118",
-            "name": "worker: ats-worker-118",
-            "color": "#10b981",
-            "device_ids": [
-                "ats-worker-118:c3d9b8674f4b94f6"
-            ],
-            "followed": false
-        },
-        {
-            "id": "auto_worker_test_user_192_168_0_2",
-            "name": "worker: test user@192.168.0.2",
-            "color": "#f59e0b",
-            "device_ids": [
-                "USBIP001",
-                "LOCAL001",
-                "ABC-123"
-            ],
-            "followed": false
-        },
-        {
-            "id": "auto_worker_hcq_172_16_14_66",
-            "name": "worker: hcq@172.16.14.66",
-            "color": "#ef4444",
-            "device_ids": [
-                "USBIP001"
-            ],
-            "followed": false
-        }
-    ],
-    "usbip_devices_source": {},
     "sidebar_visible_pages": [
         "test",
         "desktop",

@@ -134,9 +134,6 @@ body {
 #elevate-modal {
     z-index: 15000;
 }
-#elevate-modal .modal-content {
-    max-width: 380px;
-}
 
 .auth-submit {
     width: 100%;
@@ -1616,6 +1613,12 @@ select option {
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
 }
 
+/* ==================== 弹框统一尺寸档位 ==================== */
+.modal-content.modal-xs { width: min(420px, 96vw); max-width: min(420px, 96vw); min-height: 180px; }
+.modal-content.modal-s  { width: min(500px, 96vw); max-width: min(500px, 96vw); min-height: 240px; }
+.modal-content.modal-m  { width: min(620px, 96vw); max-width: min(620px, 96vw); min-height: 280px; max-height: min(620px, 85vh, calc(100dvh - 16px)); }
+.modal-content.modal-l  { width: min(760px, 96vw); max-width: min(760px, 96vw); max-height: min(85vh, calc(100dvh - 16px)); }
+
 /* ADB Proxy 与 USB/IP 接入/断开共用同一弹框骨架。 */
 .device-routing-modal-content {
     width: min(620px, 100%);
@@ -2337,8 +2340,20 @@ body.modal-open {
     padding: 5px;
 }
 
+.file-browser-header {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) 90px 140px;
+    align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
 .file-browser-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) 90px 140px;
     align-items: center;
     padding: 8px 10px;
     cursor: pointer;
@@ -2358,25 +2373,21 @@ body.modal-open {
 }
 
 .file-browser-icon {
-    margin-right: 10px;
     font-size: 16px;
-    min-width: 20px;
 }
 
 .file-browser-name {
-    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    padding-right: 16px;
 }
 
 .file-browser-meta {
     color: var(--text-muted);
     font-size: 11px;
-    min-width: 90px;
-    margin-left: 12px;
     white-space: nowrap;
-    flex-shrink: 0;
 }
 
 .file-browser-breadcrumb {
@@ -2978,13 +2989,14 @@ body.modal-open {
 .route-check-content {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
-    max-width: 600px;
-    width: 90%;
-    max-height: 80vh;
+    border-radius: 6px;
+    width: min(500px, 96vw);
+    max-width: min(500px, 96vw);
+    min-height: 240px;
+    max-height: min(80vh, calc(100dvh - 16px));
     display: flex;
     flex-direction: column;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
     overflow: hidden;
 }
 
@@ -2992,7 +3004,7 @@ body.modal-open {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 24px;
+    padding: 15px 20px;
     border-bottom: 1px solid var(--border-color);
     background: var(--card-bg);
     position: sticky;
@@ -3004,7 +3016,8 @@ body.modal-open {
 .route-check-header h3 {
     color: var(--text-primary);
     margin: 0;
-    font-size: 18px;
+    font-size: 16px;
+    font-weight: 600;
 }
 
 .route-check-close {
@@ -3035,59 +3048,60 @@ body.modal-open {
 }
 
 .route-check-form {
-    padding: 24px;
+    padding: 20px;
     overflow-y: auto;
     flex: 1;
 }
 
 .route-check-form .form-group {
-    margin-bottom: 16px;
+    margin-bottom: 8px;
 }
 
 .route-check-form label {
     display: block;
     color: var(--text-secondary);
-    margin-bottom: 6px;
-    font-size: 14px;
+    margin-bottom: 4px;
+    font-size: 13px;
     font-weight: 500;
 }
 
 .route-check-form input[type="text"] {
     width: 100%;
-    padding: 10px 12px;
-    background: var(--light-bg);
+    padding: 8px 10px;
+    background: var(--darker-bg);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: 4px;
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: 13px;
     transition: var(--transition-fast);
 }
 
 .route-check-form input[type="text"]:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .route-check-form small {
     display: block;
     color: var(--text-muted);
     font-size: 12px;
-    margin-top: 4px;
+    margin-top: 2px;
 }
 
 .route-check-actions {
     display: flex;
-    gap: 12px;
-    margin: 20px 0 16px;
+    gap: 10px;
+    margin: 12px 0 0;
+    justify-content: flex-end;
 }
 
 .route-check-actions button {
-    flex: 1;
-    padding: 10px 16px;
+    flex: 0 0 auto;
+    min-width: 80px;
+    padding: 8px 16px;
     border: none;
-    border-radius: 6px;
-    font-size: 14px;
+    border-radius: 4px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     transition: var(--transition-fast);
