@@ -177,20 +177,18 @@ async def test_connect_refuses_same_serial_already_attached_over_usbip():
     )
     service = ADBProxyService()
     service.config_manager = _ConfigManager()
+    service.config_manager.runtime["usbip_cluster_assignments"] = {
+        "source|1-8": {
+            "worker_id": "worker-target",
+            "device_serials": ["RK3572GMS1"],
+            "status": "attached",
+        }
+    }
 
     with patch(
         "features.cluster.get_cluster_service", return_value=cluster
     ), patch(
         "features.cluster.api._require_cluster_enabled"
-    ), patch(
-        "features.devices.integrations_api._usbip_assignments",
-        return_value={
-            "source|1-8": {
-                "worker_id": "worker-target",
-                "device_serials": ["RK3572GMS1"],
-                "status": "attached",
-            }
-        },
     ), pytest.raises(HTTPException, match="同序列号USB/IP设备"):
         await service.connect(
             "worker-source",

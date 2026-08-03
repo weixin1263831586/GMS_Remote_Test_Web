@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from features.auth import require_authenticated_user
+from features.auth import require_authenticated_user_when_auth_required
 from features.devices import get_or_create_user_state, update_user_state_field
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
@@ -20,8 +20,16 @@ router = APIRouter()
 
 
 def _request_log_scope(request: Request) -> tuple[str, bool]:
-    current_user = require_authenticated_user(request)
-    return current_user.id, current_user.role == "admin"
+    """Resolve the log owner and admin flag.
+
+    Uses an authenticated user when available; in dev/anonymous deployments
+    (authentication_required() == False), falls back to the stable anonymous
+    client id so log save/get/list still work without a session.
+    """
+    current_user = require_authenticated_user_when_auth_required(request)
+    if current_user:
+        return current_user.id, current_user.role == "admin"
+    return runtime.get_client_id_from_request(request), False
 
 
 # ==================== Clean Logs ====================

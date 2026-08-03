@@ -36,6 +36,15 @@ def _request_owner_id(request: Request) -> str:
     return owner_id_from_request(request)
 
 
+def _request_owner_username(request: Request) -> str:
+    user = get_authenticated_user(request)
+    if user:
+        return user.username
+    if authentication_required():
+        return require_authenticated_user(request).username
+    return ""
+
+
 def _require_job_access(request: Request, job: dict) -> None:
     user = get_authenticated_user(request)
     if user is None:
@@ -61,6 +70,7 @@ def create_job(body: ClusterJobCreate, request: Request):
     data["trace_id"] = str(getattr(request.state, "trace_id", "") or "")
     # 所有者必须取自认证账户，不接受浏览器传入值。
     data["owner_id"] = _request_owner_id(request)
+    data["owner_username"] = _request_owner_username(request)
     if data["worker_id"] == "auto":
         try:
             data["worker_id"], selected_devices = service().select_worker(

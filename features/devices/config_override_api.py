@@ -5,9 +5,10 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
+from features.auth import require_elevated_admin_when_auth_required
 from features.users import get_client_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
@@ -149,6 +150,7 @@ async def api_status(
 async def api_apply(
     request: Request,
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
+    _admin=Depends(require_elevated_admin_when_auth_required),
 ):
     """Rebuild the overlay APK from all stored overrides, push, reboot.
 
@@ -169,6 +171,7 @@ async def api_apply(
 async def api_revert(
     request: Request,
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
+    _admin=Depends(require_elevated_admin_when_auth_required),
 ):
     """Delete the overlay APK from the device and reboot (host store kept)."""
     if conflict := _mutation_claim_error(request, device_id):
@@ -185,6 +188,7 @@ async def api_revert(
 async def api_disable_verity(
     request: Request,
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
+    _admin=Depends(require_elevated_admin_when_auth_required),
 ):
     """One-time bootstrap: ``adb disable-verity``. Returns needs_reboot; the UI
     then chains POST /api/config-override/reboot (or skips if already disabled).
@@ -203,6 +207,7 @@ async def api_disable_verity(
 async def api_enable_verity(
     request: Request,
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
+    _admin=Depends(require_elevated_admin_when_auth_required),
 ):
     """Restore verified boot. Returns needs_reboot."""
     if conflict := _mutation_claim_error(request, device_id):
@@ -219,6 +224,7 @@ async def api_enable_verity(
 async def api_reboot(
     request: Request,
     device_id: str = Query("", description="adb serial；为空时用默认设备"),
+    _admin=Depends(require_elevated_admin_when_auth_required),
 ):
     """Reboot the device via the local adb connection (same path as
     disable/enable-verity, so the device_id is unambiguous)."""

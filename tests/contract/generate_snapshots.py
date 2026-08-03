@@ -15,7 +15,11 @@ def main() -> None:
     write_json('openapi.json', normalized_openapi(app))
     write_json(
         'config_shape.json',
-        config_shape(config_manager.load_config(force_reload=True)),
+        # Runtime config contains deployment-specific/dynamic assignment keys.
+        # Freeze only the versioned static configuration contract here; runtime
+        # persistence has dedicated tests and must not make this snapshot vary
+        # with the Controller's current devices or users.
+        config_shape(config_manager._load_static_config()),
     )
     write_json('ui_controls.json', ui_controls(ui_source_groups()))
 

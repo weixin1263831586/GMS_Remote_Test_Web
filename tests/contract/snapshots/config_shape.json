@@ -25,27 +25,6 @@
       }
     }
   },
-  "client_hosts": {
-    "<dynamic-key>": "str"
-  },
-  "client_ssh_credentials": [
-    {
-      "device_host": "str",
-      "host": "str",
-      "username": "str"
-    }
-  ],
-  "device_groups": [
-    {
-      "color": "str",
-      "device_ids": [
-        "str"
-      ],
-      "followed": "bool",
-      "id": "str",
-      "name": "str"
-    }
-  ],
   "external_services": {
     "crm_icon_url": "str",
     "gms_assistant_url": "str",
@@ -194,7 +173,6 @@
   "ubuntu_host": "str",
   "ubuntu_pswd": "str",
   "ubuntu_user": "str",
-  "usbip_devices_source": {},
   "usbip_vid_pid": "str",
   "use_key_auth": "bool",
   "vnc_password": "str",

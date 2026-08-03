@@ -616,6 +616,7 @@ async def get_usbip_status(
                 "busids": [],
                 "device_serials": [],
                 "device_serials_by_busid": {},
+                "statuses_by_busid": {},
             })
             busid = str(item.get("busid") or "")
             serials = list(dict.fromkeys(
@@ -626,6 +627,9 @@ async def get_usbip_status(
             if busid:
                 grouped_item["busids"].append(busid)
                 grouped_item["device_serials_by_busid"][busid] = serials
+                grouped_item["statuses_by_busid"][busid] = str(
+                    item.get("status") or "unknown"
+                )
             for serial in serials:
                 if serial not in grouped_item["device_serials"]:
                     grouped_item["device_serials"].append(serial)
@@ -639,6 +643,7 @@ async def get_usbip_status(
                 "device_serials_by_busid": (
                     grouped_item["device_serials_by_busid"]
                 ),
+                "statuses_by_busid": grouped_item["statuses_by_busid"],
             }
             for (worker_id, source_host), grouped_item in grouped.items()
         ]
@@ -1418,11 +1423,14 @@ async def stop_usbip(
 
     if req and req.worker_id:
         from features.cluster import get_cluster_service
-        from features.cluster.api import _require_cluster_enabled, _run_worker_command
+        from features.cluster.api import _run_worker_command
 
         cluster = get_cluster_service()
         if req.worker_id != cluster.config.local_worker_id:
-            _require_cluster_enabled(remote=True)
+            # Cleanup must remain possible after cluster mode is disabled;
+            # otherwise a persisted/physical remote attachment becomes
+            # impossible to detach from the UI. New remote attaches still
+            # require cluster mode in start_usbip().
             if not req.device_host or not req.busids:
                 return error_response(
                     "远端 Worker 断开需要 device_host 和 busids", status_code=400
@@ -1474,6 +1482,7 @@ async def stop_usbip(
                             source_type="cluster-usbip",
                             source_id=claim_source,
                             ttl_seconds=10 * 60,
+                            username=_elevated.username,
                         )
                     )
                 except ValueError as exc:

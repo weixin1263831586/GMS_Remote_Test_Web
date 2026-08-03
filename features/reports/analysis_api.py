@@ -42,6 +42,7 @@ from .api_helpers import (
     test_report_manager,
 )
 from .knowledge_ranking import android_version_from_request, rank_kb_hits
+from .display import report_display_name
 from .uploads import ReportUploadTooLargeError, stage_report_uploads
 
 
@@ -188,7 +189,7 @@ async def analyze_reports(
             }
             result["report_id"] = report.get("report_id") or report_timestamp
             result["report_timestamp"] = report_timestamp
-            result.setdefault("report_name", report_timestamp)
+            result["report_name"] = report_display_name(report)
 
             return JSONResponse(content={"success": True, "data": result, "mode": "saved"})
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
-from features.auth import principal_owner_id
+from features.auth import principal_display_name, principal_owner_id
 
 from .api import service
 from .operation_claims import operation_claim_payload
@@ -61,6 +61,7 @@ def operation_claim_for_request(
         operation_id,
         owner_id,
         reservation_id=reservation_id,
+        username=principal_display_name(request),
     )
     request.state.device_lease_tokens = [
         {**token, "owner_id": owner_id}

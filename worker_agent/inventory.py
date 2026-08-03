@@ -111,8 +111,10 @@ def probe_devices(
             ),
             None,
         )
-        # Skip stale USB/IP TCP sessions that ADB keeps reporting as offline.
-        if serial.startswith("localhost:") and adb_state != "device":
+        # Skip localhost:<port> devices entirely: these are Microdroid/vsock
+        # virtual machines created by GTS/VTS virtualization tests, not real
+        # physical devices.
+        if serial.startswith("localhost:"):
             continue
         properties = {}
         for item in parts[2:]:

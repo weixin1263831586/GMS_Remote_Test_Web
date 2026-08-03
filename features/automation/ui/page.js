@@ -122,6 +122,7 @@ async function loadClusterWorkers() {
         const payload = await response.json();
         const workers = payload.workers || [];
         const workerAvailability = worker => {
+            if (worker.status === 'draining') return '停止派发';
             if (!['online', 'busy'].includes(worker.status)) return '离线';
             if (
                 isLocalAutomationWorker(worker.id)
@@ -185,6 +186,7 @@ const STATUS_LABELS_ZH = {
     online: '在线', offline: '离线', busy: '忙碌', draining: '停止派发',
     available: '可用', allocated: '已分配', reserved: '已预留',
     external_busy: '外部占用', unauthorized: '未授权', unknown: '未知',
+    fastboot: 'Fastboot',
     created: '已创建', queued: '排队', running: '运行中',
     jenkins_queued: '构建排队',
     jenkins_building: '编译中', artifact_ready: '固件就绪',

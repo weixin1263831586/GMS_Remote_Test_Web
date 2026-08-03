@@ -67,6 +67,7 @@ class ClusterReservationRepositoryMixin:
         owner_id: str,
         source_id: str,
         ttl_seconds: int = 6 * 60 * 60,
+        username: str = "",
     ) -> dict[str, Any]:
         requested = []
         for raw in devices:
@@ -103,7 +104,7 @@ class ClusterReservationRepositoryMixin:
                 acquired, conflicts = self.claims.acquire(
                     claim_devices,
                     owner_id=owner_id,
-                    username=owner_id,
+                    username=username or owner_id,
                     source_type="cluster-reservation",
                     source_id=f"reservation:{reservation_id}",
                     ttl_seconds=ttl_seconds,
@@ -139,7 +140,7 @@ class ClusterReservationRepositoryMixin:
             acquired, conflicts = self.claims.acquire(
                 claim_devices,
                 owner_id=owner_id,
-                username=owner_id,
+                username=username or owner_id,
                 source_type="cluster-reservation",
                 source_id=f"reservation:{reservation_id}",
                 ttl_seconds=ttl_seconds,

@@ -184,12 +184,13 @@ class ReportAnalysisAgentTests(unittest.TestCase):
     def test_saved_report_manager_analyzes_related_logs_with_agent(self):
         from features.reports import TestReportManager
 
-        timestamp = "2026.03.07_08.49.59.870_8298"
+        report_name = "2026.03.07_08.49.59.870_8298"
+        timestamp = "cluster-job-1"
         with TemporaryDirectory() as tmp:
             suite_root = Path(tmp) / "android-gts"
-            result_dir = suite_root / "results" / timestamp
-            log_dir_one = suite_root / "logs" / timestamp / "inv_mcts_7505152775443919750"
-            log_dir_two = suite_root / "logs" / timestamp / "inv_static_xts_12399479541396617616"
+            result_dir = suite_root / "results" / report_name
+            log_dir_one = suite_root / "logs" / report_name / "inv_mcts_7505152775443919750"
+            log_dir_two = suite_root / "logs" / report_name / "inv_static_xts_12399479541396617616"
             result_dir.mkdir(parents=True)
             log_dir_one.mkdir(parents=True)
             log_dir_two.mkdir(parents=True)
@@ -208,11 +209,17 @@ class ReportAnalysisAgentTests(unittest.TestCase):
 
             manager = TestReportManager()
             manager.test_report_db = Mock()
-            manager.test_report_db.get_report_by_timestamp.return_value = {"result_dir": str(result_dir)}
+            manager.test_report_db.get_report_by_timestamp.return_value = {
+                "timestamp": timestamp,
+                "report_name": report_name,
+                "source_timestamp": report_name,
+                "result_dir": str(result_dir),
+            }
 
             result = manager.analyze_report(timestamp)
 
         self.assertIsNotNone(result)
+        self.assertEqual(result["report_name"], report_name)
         self.assertEqual(result["details"]["soc_platform"], "RK3588")
         self.assertEqual(len(result["analysis_sources"]["host_logs"]), 2)
         self.assertEqual(len(result["analysis_sources"]["device_logs"]), 2)

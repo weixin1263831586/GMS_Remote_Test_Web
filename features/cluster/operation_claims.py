@@ -13,6 +13,7 @@ def operation_claim_payload(
     owner_id: str,
     *,
     reservation_id: str = "",
+    username: str = "",
 ) -> dict:
     if reservation_id:
         reservation = repository.get_reservation(reservation_id)
@@ -37,6 +38,7 @@ def operation_claim_payload(
                 source_type="cluster-firmware",
                 source_id=claim_source,
                 ttl_seconds=6 * 60 * 60,
+                username=username,
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc

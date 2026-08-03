@@ -9,8 +9,8 @@ from fastapi.responses import JSONResponse
 from features.auth import (
     CurrentUser,
     get_authenticated_user,
-    require_authenticated_user_when_auth_required,
     require_elevated_admin,
+    require_elevated_admin_when_auth_required,
 )
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
@@ -34,6 +34,7 @@ from .sessions import client_manager
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+USER_ONLINE_WINDOW = timedelta(minutes=5)
 
 
 @router.get("/api/users/current")
@@ -179,7 +180,7 @@ async def remove_configured_user(request: Request, _elevated=Depends(require_ele
 @router.get("/api/users/list")
 @handle_api_errors
 async def list_users(
-    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
+    _user: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
 ):
     """获取所有在线用户列表"""
     now = datetime.now()
@@ -205,6 +206,7 @@ async def list_users(
                 'ip': ip,
                 **get_client_source(ip),
                 'running': False,
+                'status': 'offline',
                 'devices': [],
                 'last_seen': '',
                 'created_at': '',
@@ -213,11 +215,13 @@ async def list_users(
 
         for client_id, state in runtime.global_state.user_states.items():
             # 检查会话是否活跃（最近24小时内有活动）
+            is_online = False
             if 'last_seen' in state:
                 try:
                     last_seen = datetime.fromisoformat(state['last_seen'])
                     if (now - last_seen) > timedelta(hours=24):
                         continue
+                    is_online = (now - last_seen) <= USER_ONLINE_WINDOW
                 except (ValueError, TypeError):
                     continue
 
@@ -254,6 +258,9 @@ async def list_users(
                 'ip': ip,
                 **get_client_source(ip),
                 'running': state.get('running', False),
+                'status': 'testing' if state.get('running', False) else (
+                    'online' if is_online else 'offline'
+                ),
                 'devices': state.get('devices', []),
                 'last_seen': state.get('last_seen', ''),
                 'created_at': state.get('created_at', ''),
@@ -314,6 +321,7 @@ async def list_users(
                 "source": "cluster",
                 "source_label": "集群",
                 "running": False,
+                "status": "offline",
                 "devices": [],
                 "last_seen": owner_jobs[0].get("updated_at", ""),
                 "created_at": owner_jobs[-1].get("created_at", ""),
@@ -322,6 +330,8 @@ async def list_users(
             users.append(user_info)
         user_info["cluster_running"] = bool(active_jobs)
         user_info["running"] = bool(user_info.get("running") or active_jobs)
+        if active_jobs:
+            user_info["status"] = "testing"
         user_info["devices"] = list(dict.fromkeys([*(user_info.get("devices") or []), *leased_devices]))
         user_info["worker_ids"] = sorted({
             str(job.get("assigned_worker_id") or "") for job in active_jobs
@@ -334,6 +344,12 @@ async def list_users(
             "status": job.get("status", ""),
             "suite_key": job.get("suite_key", ""),
         } for job in owner_jobs[:20]]
+
+    for user_info in users:
+        if user_info.get("running"):
+            user_info["status"] = "testing"
+        elif user_info.get("status") not in {"online", "offline"}:
+            user_info["status"] = "offline"
 
     return JSONResponse(content={
         'total': len(users),

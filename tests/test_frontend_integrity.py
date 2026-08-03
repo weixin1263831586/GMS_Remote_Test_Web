@@ -366,6 +366,23 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertLess(elevation, submit)
         self.assertIn("if (!state.authRequired)", read_text("web/static/js/navigation.js"))
 
+    def test_user_actions_use_stable_grid_and_safe_event_binding(self):
+        main_text = read_text("web/shell/shell.html")
+        css_text = read_text("web/static/css/common.css")
+
+        self.assertIn('class="user-actions-grid"', main_text)
+        self.assertIn('data-remove-user=', main_text)
+        self.assertNotIn('onclick="removeUser(', main_text)
+        self.assertIn("grid-template-columns: 44px 44px", css_text)
+
+    def test_config_override_device_mutations_prompt_before_request(self):
+        main_text = read_text("web/shell/shell.html")
+
+        self.assertIn("dcfgRequireElevation('应用设备 RRO 配置覆盖')", main_text)
+        self.assertIn("dcfgRequireElevation('撤销设备 RRO 配置覆盖')", main_text)
+        self.assertIn("requestElevatedAccess(actionLabel, {allowAnonymousDev: true})", main_text)
+        self.assertIn("return apiCall(path + sep + qs", main_text)
+
     def test_modal_pages_support_escape_close(self):
         for label, paths in [
             ("main", ["web/shell/shell.html"]),

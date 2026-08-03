@@ -1,3 +1,5 @@
+import asyncio
+
 from features.auth import (
     authentication_required,
     require_authenticated_user,
@@ -21,7 +23,17 @@ from .api_helpers import (
     os,
     test_report_db,
 )
-from .display import report_client_display_id, report_name_from_result_dir
+from .display import (
+    report_client_display_id,
+    report_display_name,
+    report_download_filename,
+    tradefed_result_folder_name,
+)
+from .downloads import (
+    create_local_report_bundle,
+    create_remote_report_bundle,
+    remove_report_bundle,
+)
 
 
 router = APIRouter()
@@ -68,12 +80,18 @@ def _decorate_report_for_client(
 
     item = dict(report)
     item["display_client_id"] = report_client_display_id(item, display_id)
-    report_name = str(item.get("report_name") or "").strip()
-    if not report_name or report_name.startswith("cluster-job-"):
-        report_name = report_name_from_result_dir(
-            str(item.get("result_dir") or "")
-        )
-    item["report_name"] = report_name or str(item.get("timestamp") or "")
+    report_name = report_display_name(item)
+    item["report_name"] = report_name
+    # Older cluster records stored XML start_display ("Fri Jul ...") in
+    # source_timestamp.  Derive the actual Tradefed folder without exposing
+    # the controller artifact path to the browser.
+    source_timestamp = tradefed_result_folder_name(
+        report_name,
+        item.get("source_timestamp"),
+        item.get("result_dir"),
+        item.get("timestamp"),
+    )
+    item["source_timestamp"] = source_timestamp
     for private_key in ("owner_id", "client_id", "result_dir"):
         item.pop(private_key, None)
     return item
@@ -187,11 +205,8 @@ async def download_report(
     path: str = Query(None, include_in_schema=False),
 ):
     """Unified report interface: list files, download ZIP, or view file content."""
-    FileUtils = dependencies.file_utils
-    if FileUtils is None:
-        return error_response("Report file service is not configured", 500)
-
     require_authenticated_user(request)
+    FileUtils = dependencies.file_utils
     try:
         if path:
             return error_response(
@@ -218,6 +233,38 @@ async def download_report(
                 return error_response("Report not found", 404)
 
             report_timestamp = str(report.get("timestamp") or report_timestamp or "")
+            display_name = report_display_name(report)
+            download_filename = report_download_filename(report)
+
+            if download:
+                bundle = await asyncio.to_thread(create_local_report_bundle, report)
+                if bundle is None:
+                    bundle = await create_remote_report_bundle(
+                        report,
+                        owner_id=principal.id,
+                    )
+                if bundle is None:
+                    return error_response(
+                        "Report results and logs directories were not found",
+                        404,
+                    )
+                logger.info(
+                    "[DOWNLOAD] Report bundle ready: report_id='%s', filename='%s', "
+                    "sources=%s, files=%s",
+                    report.get("report_id") or report_timestamp,
+                    download_filename,
+                    ",".join(bundle.sources),
+                    bundle.file_count,
+                )
+                from fastapi.responses import FileResponse
+                from starlette.background import BackgroundTask
+
+                return FileResponse(
+                    bundle.path,
+                    media_type="application/zip",
+                    filename=download_filename,
+                    background=BackgroundTask(remove_report_bundle, bundle.path),
+                )
 
             report_dir = report.get("result_dir")
             if not report_dir or not os.path.exists(report_dir):
@@ -225,29 +272,13 @@ async def download_report(
                 return error_response(f"Report directory not found: {report_dir}", 404)
 
             android_suite_dir = os.path.dirname(os.path.dirname(report_dir))
-            logs_dir = os.path.join(android_suite_dir, "logs", report_timestamp)
+            run_folder = tradefed_result_folder_name(
+                display_name,
+                report.get("source_timestamp"),
+                report_timestamp,
+            ) or report_timestamp
+            logs_dir = os.path.join(android_suite_dir, "logs", run_folder)
             has_logs = os.path.exists(logs_dir)
-
-            if download:
-                logger.info(f"[DOWNLOAD] Download report ZIP: timestamp='{report_timestamp}'")
-                dir_mapping = {report_dir: ""}
-                if has_logs:
-                    dir_mapping[logs_dir] = "logs"
-
-                result = FileUtils.create_zip_from_multiple_directories(dir_mapping, zip_filename=f"{report_timestamp}.zip")
-                if result is None:
-                    logger.warning("[DOWNLOAD] No files found")
-                    return error_response("No files found", 500)
-
-                zip_data, file_count = result
-                logger.info(f"[DOWNLOAD] ZIP created: {report_timestamp}.zip, {file_count} files")
-
-                from fastapi.responses import Response
-                return Response(
-                    content=zip_data,
-                    media_type="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{report_timestamp}.zip"'},
-                )
 
             if file:
                 relative = str(file or "").strip().replace("\\", "/")
@@ -279,6 +310,8 @@ async def download_report(
                 })
 
             logger.info(f"[DOWNLOAD] Get report file list: timestamp='{report_timestamp}'")
+            if FileUtils is None:
+                return error_response("Report file service is not configured", 500)
             all_files = []
             result_files = FileUtils.list_directory_files(report_dir, max_files=100, relative_to=report_dir)
             all_files.extend(result_files)

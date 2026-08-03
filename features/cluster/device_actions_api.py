@@ -22,7 +22,11 @@ router = APIRouter()
 
 @router.post("/devices/actions")
 async def device_action(body: ClusterDeviceAction, request: Request):
-    if body.action in {"bootloader_lock", "bootloader_unlock"}:
+    if body.action in {
+        "bootloader_lock", "bootloader_unlock", "override_apply",
+        "override_revert", "override_disable_verity",
+        "override_enable_verity", "override_reboot",
+    }:
         require_elevated_admin_when_auth_required(request)
     repository = service().repository
     is_local = body.worker_id == service().config.local_worker_id
@@ -80,6 +84,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             source_type="cluster-device-action",
             source_id=claim_source,
             ttl_seconds=3600,
+            username=user.username,
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc

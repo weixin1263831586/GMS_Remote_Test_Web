@@ -418,7 +418,10 @@ async function continueAppInitialization() {
     const needsTestWorkspace = initialPage === 'test';
 
     // 📱 测试页优先加载设备列表，缩短首屏等待时间。
+    // 必须先等待 workspace 上下文加载完成，否则 workspaceWorkerId() 会返回
+    // 默认的 worker-local，先加载本机设备再跳到实际主机，造成闪屏。
     if (needsTestWorkspace) {
+        await (window.GmsWorkspace?.ready || Promise.resolve());
         loadDevices();
     }
 
@@ -1135,9 +1138,9 @@ let _loadClusterWorkersInFlight = null;
 async function loadClusterWorkers() {
     const select = document.getElementById('cluster-worker');
     if (!select) return;
-    // 页面恢复和主初始化可能同时触发，统一等待同一次集群状态初始化，
-    // 避免先按单机状态渲染、随后又切换成集群状态。
-    await initializeClusterMode();
+    if (typeof initializeClusterMode === 'function') {
+        await initializeClusterMode();
+    }
     if (_loadClusterWorkersInFlight) return _loadClusterWorkersInFlight;
     _loadClusterWorkersInFlight = (async () => {
         try {
@@ -1451,6 +1454,14 @@ async function switchTestWorker() {
     }, {source: 'test'});
     syncWorkspaceWorkerSelectors(workerId);
     updateTestHostScopedControls(workerId);
+    // 立即清除旧主机的测试状态。旧 job 继续在后端跑，但 UI 必须切到空闲状态。
+    // refreshTestStatusForWorker 会异步查询新主机状态并在有活跃测试时恢复。
+    state.clusterJobId = '';
+    state.clusterEventSequence = -1;
+    state.testing = false;
+    state.testStopping = false;
+    updateTestToggleButton(false);
+    refreshTestStatusForWorker(workerId);
     try {
         testSuitesCache = [];
         testSuitesWorkerId = '';
@@ -1468,6 +1479,41 @@ async function switchTestWorker() {
 }
 
 window.switchTestWorker = switchTestWorker;
+
+let _refreshTestStatusGeneration = 0;
+async function refreshTestStatusForWorker(workerId) {
+    const generation = ++_refreshTestStatusGeneration;
+    try {
+        const status = await apiCall('/api/test/status?logs=false');
+        // 丢弃过期响应：用户可能又切换到了另一台主机
+        if (generation !== _refreshTestStatusGeneration) return;
+        const activeJobs = Array.isArray(status.active_jobs) ? status.active_jobs : [];
+        const job = activeJobs.find(j => j.worker_id === workerId);
+        if (job) {
+            state.testing = true;
+            state.clusterJobId = job.id;
+            state.clusterEventSequence = -1;
+            state.testStopping = job.status === 'stopping';
+            sessionStorage.setItem('active_cluster_job', job.id);
+            window.GmsWorkspace?.update(
+                {cluster_job_id: job.id, attempt_id: job.attempt_id || ''},
+                {source: 'worker-switch'}
+            );
+            updateTestToggleButton(true);
+            wakeTestStatusPolling();
+        } else {
+            // 当前主机没有活跃测试，恢复空闲状态
+            state.testing = false;
+            state.testStopping = false;
+            state.clusterJobId = '';
+            state.clusterEventSequence = -1;
+            updateTestToggleButton(false);
+        }
+    } catch (error) {
+        debugLog('[Worker Switch] Failed to check test status:', error);
+        // 请求失败时保守地保持当前状态不变，避免误清测试状态
+    }
+}
 
 let deviceRefreshGeneration = 0;
 const deviceRefreshFlights = new Map();
@@ -1835,6 +1881,14 @@ function normalizeReportTestType(testType) {
     return String(testType || '').trim().toLowerCase().replace(/_/g, '-');
 }
 
+function tradefedResultFolderName(value) {
+    const normalized = String(value || '').trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    const name = normalized.split('/').filter(Boolean).pop() || '';
+    return /^\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}(?:\.\d+)?(?:_\d+)?$/.test(name)
+        ? name
+        : '';
+}
+
 function findSuitePathForReport(testType, suitePath = '') {
     const normalizedSuitePath = String(suitePath || '').trim();
     if (normalizedSuitePath) {
@@ -2075,6 +2129,13 @@ async function switchSuiteWorker() {
     }, {source: 'suites'});
     syncWorkspaceWorkerSelectors(workerId);
     clearSuiteBrowserSelection('正在加载 Worker 套件...');
+    // 立即清除旧主机的测试状态，再异步查询新主机状态。
+    state.clusterJobId = '';
+    state.clusterEventSequence = -1;
+    state.testing = false;
+    state.testStopping = false;
+    updateTestToggleButton(false);
+    refreshTestStatusForWorker(workerId);
     try {
         testSuitesCache = [];
         await loadSuitesForBrowserWorker(true);
@@ -5641,11 +5702,16 @@ function renderAdbProxyAssignments() {
     assignments.forEach(assignment => {
         const row = document.createElement('div');
         row.className = 'adb-proxy-assignment';
+        if (['connected', 'connecting', 'connect_failed', 'disconnect_failed', 'host_offline'].includes(assignment.status)) {
+            row.classList.add(`routing-status-${assignment.status}`);
+        }
         const info = document.createElement('div');
         info.className = 'adb-proxy-assignment-info';
         const statusLabels = {
+            connected: '已接入',
             connecting: '正在接入',
             connect_failed: '接入失败',
+            disconnect_failed: '断开失败，需重试',
             host_offline: '主机离线',
         };
         const status = statusLabels[assignment.status] || '';
@@ -5769,9 +5835,19 @@ function usbipSelectionSerials(group, busid) {
 
 function usbipAssignmentLabel(selection, busid) {
     const serials = usbipSelectionSerials(selection, busid);
+    const rawStatus = selection?.statuses_by_busid?.[busid]
+        || selection?.status
+        || 'attached';
+    const statusLabels = {
+        attaching: '正在接入',
+        attached: '已接入',
+        unknown: '状态待确认',
+        cleanup_required: '需断开清理',
+    };
     return (
         `${selection.device_host} → ${selection.worker_id || 'Controller'} · ${busid}`
         + `｜设备：${serials.join('、') || '尚未识别'}`
+        + `｜${statusLabels[rawStatus] || rawStatus}`
     );
 }
 
@@ -5816,6 +5892,12 @@ async function loadUsbipAssignments() {
             const busid = selection.busids[0];
             const row = document.createElement('div');
             row.className = 'adb-proxy-assignment';
+            const assignmentStatus = selection?.statuses_by_busid?.[busid]
+                || selection?.status
+                || 'attached';
+            if (['attaching', 'attached', 'unknown', 'cleanup_required'].includes(assignmentStatus)) {
+                row.classList.add(`routing-status-${assignmentStatus}`);
+            }
             const info = document.createElement('div');
             info.className = 'adb-proxy-assignment-info';
             info.textContent = usbipAssignmentLabel(selection, busid);
@@ -6504,7 +6586,10 @@ function _markElevated(elevatedUntilIso) {
  * @returns {Promise<boolean>}
  */
 let _elevationRequestPromise = null;
-async function requestElevatedAccess(actionLabel = '需要管理员权限') {
+async function requestElevatedAccess(actionLabel = '需要管理员权限', options = {}) {
+    if (!state.authRequired) {
+        if (options.allowAnonymousDev) return true;
+    }
     if (state.elevated) {
         try {
             const status = await fetchAuthStatus();
@@ -8074,7 +8159,6 @@ function updateTestToggleButton(isTesting) {
 
     // 禁用/启用测试相关输入框
     const testInputs = [
-        'cluster-worker', // 测试执行期间不可切换目标主机
         'test-type',      // 测试类型
         'test-module',    // 测试模块
         'test-case',      // 测试用例
@@ -8085,14 +8169,26 @@ function updateTestToggleButton(isTesting) {
     testInputs.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
-            element.disabled = id === 'cluster-worker'
-                ? Boolean(isTesting || !(
-                    state.clusterStatus?.enabled
-                    && window.GmsWorkspace?.get?.().scope_mode === 'cluster'
-                ))
-                : isTesting;
+            element.disabled = isTesting;
         }
     });
+
+    // 测试主机下拉框在测试期间也保持可用：切换主机不会中断正在运行的测试
+    // （测试在后端按 clusterJobId 运行，停止操作也通过 clusterJobId 执行）。
+    const workerSelect = document.getElementById('cluster-worker');
+    if (workerSelect) {
+        const clusterEnabled = Boolean(
+            state.clusterStatus?.enabled
+            && window.GmsWorkspace?.get?.().scope_mode === 'cluster'
+        );
+        const workersLoaded = workerSelect.dataset.workersLoaded === 'true';
+        workerSelect.disabled = !clusterEnabled || !workersLoaded;
+        workerSelect.title = clusterEnabled
+            ? (workersLoaded
+                ? '选择执行测试的 Cluster Worker'
+                : '正在加载测试主机列表')
+            : '当前为单机模式；切换到集群模式后可选择远端测试主机';
+    }
 
     // 禁用/启用浏览按钮
     const browseButtons = document.querySelectorAll('button[onclick*="browseRemoteFile"]');
@@ -8697,8 +8793,10 @@ function startStatusPolling() {
                     apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(state.clusterEventSequence ?? -1))}&limit=1000`)
                 ]);
                 const job = jobResponse.job;
+                // 轮询只更新 job/attempt 元数据，不覆盖用户手动选择的 worker。
+                // 否则正在运行的旧任务会反复把 worker_id 刷回它分配的主机，
+                // 导致用户切换主机后立刻被还原。
                 window.GmsWorkspace?.update({
-                    worker_id: job.assigned_worker_id || workspaceWorkerId(),
                     cluster_job_id: job.id || state.clusterJobId,
                     attempt_id: job.current_attempt_id || ''
                 }, {source: 'test-poll'});
@@ -8711,9 +8809,17 @@ function startStatusPolling() {
                     source: ['stdout', 'stderr'].includes(event.source) ? 'module' : undefined}));
                 if (events.length) state.clusterEventSequence = Math.max(...events.map(event => Number(event.sequence)));
                 const active = ['created', 'queued', 'leasing', 'assigned', 'dispatching', 'running', 'stopping', 'collecting', 'worker_lost'].includes(job.status);
-                state.testStopping = job.status === 'stopping';
-                state.testing = active;
-                updateTestToggleButton(active);
+
+                // 只在 job 属于当前选中主机时才更新测试状态。
+                // 用户可能已切换到另一台主机：旧 job 继续在后端跑，但 UI
+                // 不应把当前主机显示为"测试中"。
+                const jobBelongsToCurrentWorker = !job.assigned_worker_id
+                    || job.assigned_worker_id === workspaceWorkerId();
+                if (jobBelongsToCurrentWorker) {
+                    state.testStopping = job.status === 'stopping';
+                    state.testing = active;
+                    updateTestToggleButton(active);
+                }
                 if (!active) {
                     const level = job.status === 'completed' ? 'success' : 'error';
                     addLogEntry(`分布式测试 ${job.status}${job.error ? `: ${job.error}` : ''}`, level);
@@ -8755,19 +8861,20 @@ function startStatusPolling() {
             // Worker when a tab or workspace has lost its current job id.
             const activeJobs = Array.isArray(status.active_jobs) ? status.active_jobs : [];
             if (!state.clusterJobId && activeJobs.length) {
-                const recoveredJob = activeJobs.find(job => job.worker_id === workspaceWorkerId()) || activeJobs[0];
-                state.clusterJobId = recoveredJob.id;
-                state.clusterEventSequence = -1;
-                state.testStopping = recoveredJob.status === 'stopping';
-                sessionStorage.setItem('active_cluster_job', recoveredJob.id);
-                window.GmsWorkspace?.update({
-                    worker_id: recoveredJob.worker_id || workspaceWorkerId(),
-                    device_ids: recoveredJob.devices || [],
-                    cluster_job_id: recoveredJob.id,
-                    attempt_id: recoveredJob.attempt_id || ''
-                }, {source: 'test-durable-recovery'});
-                pollRequested = true;
-                return;
+                // 只恢复属于当前选中主机的活跃任务，不把用户切到别的 worker。
+                const recoveredJob = activeJobs.find(job => job.worker_id === workspaceWorkerId());
+                if (recoveredJob) {
+                    state.clusterJobId = recoveredJob.id;
+                    state.clusterEventSequence = -1;
+                    state.testStopping = recoveredJob.status === 'stopping';
+                    sessionStorage.setItem('active_cluster_job', recoveredJob.id);
+                    window.GmsWorkspace?.update({
+                        cluster_job_id: recoveredJob.id,
+                        attempt_id: recoveredJob.attempt_id || ''
+                    }, {source: 'test-durable-recovery'});
+                    pollRequested = true;
+                    return;
+                }
             }
 
             // 检测 WebSocket 日志停滞：服务端 log_count 在涨、本地却没有跟进时累计计数。
@@ -8800,10 +8907,15 @@ function startStatusPolling() {
             }
 
             // 更新测试状态按钮
-            if (status.running && !state.testing) {
+            // status.running 和 active_jobs 是所有主机的全局状态。
+            // 只根据当前选中主机的活跃 job 来决定测试状态，避免 A 主机的
+            // 测试导致切换到 B 主机后仍显示"测试中"。
+            const currentWorkerActiveJobs = activeJobs.filter(j => j.worker_id === workspaceWorkerId());
+            const currentWorkerRunning = currentWorkerActiveJobs.length > 0;
+            if (currentWorkerRunning && !state.testing) {
                 state.testing = true;
                 updateTestToggleButton(true);
-            } else if (!status.running && state.testing) {
+            } else if (!currentWorkerRunning && state.testing) {
                 state.testing = false;
                 updateTestToggleButton(false);
             }
@@ -8824,11 +8936,11 @@ function startStatusPolling() {
 
             // 动态调整轮询间隔：如果测试正在运行，使用快速轮询；否则退避
             // Use exponential backoff when no changes detected
-            if (status.running) {
+            if (currentWorkerRunning) {
                 pollInterval = 2000;  // 测试运行时：2秒
             } else {
                 // If nothing changed since last poll, increase backoff faster
-                const stateChanged = (status.running !== state.testing) ||
+                const stateChanged = (currentWorkerRunning !== state.testing) ||
                                      (status.vpn_connected !== undefined && status.vpn_connected !== state.vpnConnected);
                 if (stateChanged) {
                     pollInterval = 2000;  // Reset to fast polling on state change
@@ -8874,11 +8986,45 @@ async function checkInitialTestStatus() {
                 state.clusterJobId = savedClusterJob;
                 state.clusterEventSequence = -1;
             }
-            const response = await apiCall(`/api/cluster/jobs/${encodeURIComponent(savedClusterJob)}`);
-            const active = ['created', 'queued', 'leasing', 'assigned', 'dispatching', 'running', 'stopping', 'collecting', 'worker_lost'].includes(response.job.status);
-            state.testStopping = response.job.status === 'stopping';
-            state.testing = active;
-            updateTestToggleButton(active);
+            let response;
+            try {
+                response = await apiCall(`/api/cluster/jobs/${encodeURIComponent(savedClusterJob)}`);
+            } catch (fetchError) {
+                // 网络错误或 job 不存在：清理残留状态，不阻塞页面初始化。
+                debugLog('[Init] Failed to fetch cluster job, clearing stale state:', fetchError);
+                sessionStorage.removeItem('active_cluster_job');
+                state.clusterJobId = '';
+                state.testing = false;
+                state.testStopping = false;
+                updateTestToggleButton(false);
+                window.GmsWorkspace?.update(
+                    {cluster_job_id: '', attempt_id: ''},
+                    {source: 'test-recovery-failed'}
+                );
+                return;
+            }
+            const jobStatus = response?.job?.status;
+            if (!jobStatus) {
+                // Job 不存在或响应异常：清理残留状态。
+                sessionStorage.removeItem('active_cluster_job');
+                state.clusterJobId = '';
+                state.testing = false;
+                state.testStopping = false;
+                updateTestToggleButton(false);
+                window.GmsWorkspace?.update(
+                    {cluster_job_id: '', attempt_id: ''},
+                    {source: 'test-recovery-missing'}
+                );
+                return;
+            }
+            const active = ['created', 'queued', 'leasing', 'assigned', 'dispatching', 'running', 'stopping', 'collecting', 'worker_lost'].includes(jobStatus);
+            // 只在 job 属于当前选中主机时才显示测试中状态。
+            const jobWorkerId = response?.job?.assigned_worker_id || '';
+            const jobBelongsToCurrentWorker = !jobWorkerId
+                || jobWorkerId === workspaceWorkerId();
+            state.testStopping = jobStatus === 'stopping' && jobBelongsToCurrentWorker;
+            state.testing = active && jobBelongsToCurrentWorker;
+            updateTestToggleButton(state.testing);
             if (active) {
                 wakeTestStatusPolling();
                 return;
@@ -8893,26 +9039,30 @@ async function checkInitialTestStatus() {
         const status = await apiCall('/api/test/status');
         const activeJobs = Array.isArray(status.active_jobs) ? status.active_jobs : [];
         if (activeJobs.length) {
-            const recoveredJob = activeJobs.find(job => job.worker_id === workspaceWorkerId()) || activeJobs[0];
-            state.clusterJobId = recoveredJob.id;
-            state.clusterEventSequence = -1;
-            state.testStopping = recoveredJob.status === 'stopping';
-            state.testing = true;
-            sessionStorage.setItem('active_cluster_job', recoveredJob.id);
-            window.GmsWorkspace?.update({
-                worker_id: recoveredJob.worker_id || workspaceWorkerId(),
-                device_ids: recoveredJob.devices || [],
-                cluster_job_id: recoveredJob.id,
-                attempt_id: recoveredJob.attempt_id || ''
-            }, {source: 'test-initial-durable-recovery'});
-            updateTestToggleButton(true);
-            wakeTestStatusPolling();
-            return;
+            // 只恢复属于当前选中主机的活跃任务，不把用户切到别的 worker。
+            const recoveredJob = activeJobs.find(job => job.worker_id === workspaceWorkerId());
+            if (recoveredJob) {
+                state.clusterJobId = recoveredJob.id;
+                state.clusterEventSequence = -1;
+                state.testStopping = recoveredJob.status === 'stopping';
+                state.testing = true;
+                sessionStorage.setItem('active_cluster_job', recoveredJob.id);
+                window.GmsWorkspace?.update({
+                    cluster_job_id: recoveredJob.id,
+                    attempt_id: recoveredJob.attempt_id || ''
+                }, {source: 'test-initial-durable-recovery'});
+                updateTestToggleButton(true);
+                wakeTestStatusPolling();
+                return;
+            }
         }
-        state.testing = status.running;
+        // 只根据当前选中主机的活跃 job 来判断测试状态。
+        const initialWorkerActiveJobs = activeJobs.filter(j => j.worker_id === workspaceWorkerId());
+        const initialWorkerRunning = initialWorkerActiveJobs.length > 0;
+        state.testing = initialWorkerRunning;
         state.testStopping = false;
-        updateTestToggleButton(status.running);
-        if (status.running) wakeTestStatusPolling();
+        updateTestToggleButton(initialWorkerRunning);
+        if (initialWorkerRunning) wakeTestStatusPolling();
         // 重置停滞计数：页面刚加载，WebSocket 可能尚未就绪或尚未投递日志。
         state.wsLogStallTicks = 0;
 
@@ -9275,6 +9425,7 @@ function displayTestReports(reports) {
         tr.dataset.reportId = report.report_id || report.timestamp || '';
         tr.dataset.artifactId = report.artifact_id || '';
         tr.dataset.sourceTimestamp = report.source_timestamp || '';
+        tr.dataset.reportName = report.report_name || '';
 
         tr.innerHTML = `
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(displayClient)}</td>
@@ -9328,6 +9479,7 @@ function handleReportAction(event) {
         report_timestamp: timestamp,
         artifact_id: tr.dataset.artifactId || '',
         source_timestamp: tr.dataset.sourceTimestamp || '',
+        report_name: tr.dataset.reportName || '',
         suite_path: suitePath || '',
         origin_page: 'reports'
     };
@@ -9340,10 +9492,10 @@ function handleReportAction(event) {
             analyzeReport(timestamp, reportContext.report_id);
             break;
         case 'retry':
-            retryReportWithSuite(timestamp, testType, suitePath, reportContext);
+            retryReportWithSuite(reportContext.report_name || timestamp, testType, suitePath, reportContext);
             break;
         case 'download':
-            downloadReport(timestamp, reportContext.report_id);
+            downloadReport(timestamp, reportContext.report_id, reportContext.report_name);
             break;
         case 'results':
             openReportSuiteDirectory(timestamp, suitePath, testType, 'results', reportContext);
@@ -9352,7 +9504,7 @@ function handleReportAction(event) {
             openReportSuiteDirectory(timestamp, suitePath, testType, 'logs', reportContext);
             break;
         case 'delete':
-            deleteReport(timestamp, reportContext.report_id);
+            deleteReport(timestamp, reportContext.report_id, reportContext.report_name);
             break;
     }
 }
@@ -9380,15 +9532,25 @@ async function openReportSuiteDirectory(timestamp, suitePath, testType, kind, re
         return;
     }
 
-    const targetPath = `${kind}/${reportContext.source_timestamp || timestamp}`;
+    // 旧集群报告可能把 start_display（"Fri Jul 31 ..."）误存到
+    // source_timestamp。只接受 Tradefed 目录格式，并优先使用报告名恢复。
+    const folderName = tradefedResultFolderName(reportContext.report_name)
+        || tradefedResultFolderName(reportContext.source_timestamp)
+        || tradefedResultFolderName(timestamp);
+    if (!folderName) {
+        showToast('报告缺少有效的 Tradefed 结果目录，请刷新报告列表后重试', 'error');
+        return;
+    }
+    const targetPath = `${kind}/${folderName}`;
     switchPage('test-suites', null);
     await selectTestSuiteForBrowser(resolvedSuitePath, targetPath);
 }
 
-async function deleteReport(timestamp, reportId = '') {
+async function deleteReport(timestamp, reportId = '', reportName = '') {
+    const displayName = reportName || timestamp;
     const confirmed = await showConfirmDialog(
         '删除报告',
-        `确定要删除报告 ${timestamp} 吗？此操作不可恢复。`
+        `确定要删除报告 ${displayName} 吗？此操作不可恢复。`
     );
 
     if (!confirmed) return;
@@ -9587,10 +9749,10 @@ async function retryReportWithSuite(timestamp, testType, suitePath, reportContex
     }
 }
 
-async function downloadReport(timestamp, reportId = '') {
+async function downloadReport(timestamp, reportId = '', reportName = '') {
     try {
         debugLog('[downloadReport] Starting download for timestamp:', timestamp);
-        await downloadReportAsZip(timestamp, reportId);
+        await downloadReportAsZip(timestamp, reportId, reportName);
     } catch (error) {
         console.error('Download report error:', error);
         notifyOperationResult('报告下载失败', error.message, 'error', 'report-download', { timestamp });
@@ -9598,7 +9760,7 @@ async function downloadReport(timestamp, reportId = '') {
 }
 
 // 回退方案：下载为 ZIP
-async function downloadReportAsZip(timestamp, reportId = '') {
+async function downloadReportAsZip(timestamp, reportId = '', reportName = '') {
     try {
         const identity = reportId
             ? `report_id=${encodeURIComponent(reportId)}`
@@ -9632,7 +9794,7 @@ async function downloadReportAsZip(timestamp, reportId = '') {
 
         // 获取文件名
         const contentDisposition = response.headers.get('Content-Disposition');
-        let filename = `${timestamp}.zip`;
+        let filename = `${reportName || timestamp}.zip`;
 
         if (contentDisposition) {
             const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);

@@ -433,7 +433,7 @@ copy_to_remote_server() {
 main() {
     parse_args "$@"
 
-    log "🚀 开始测试: $Test_Type"
+    log "🚀 测试类型: $Test_Type"
     log "📦 测试模块: $Test_Module"
     log "🧪 测试用例: $Test_Case"
     log "📱 测试设备: $DEVICE_ARGS"

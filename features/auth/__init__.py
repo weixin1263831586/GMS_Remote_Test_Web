@@ -1,6 +1,7 @@
 from .access import (
     get_authenticated_user,
     is_elevated,
+    principal_display_name,
     principal_owner_id,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
@@ -39,6 +40,7 @@ __all__ = [
     "csrf_rejection_reason",
     "get_authenticated_user",
     "is_elevated",
+    "principal_display_name",
     "principal_owner_id",
     "require_authenticated_user",
     "require_authenticated_user_when_auth_required",
