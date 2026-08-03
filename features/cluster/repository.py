@@ -371,6 +371,7 @@ class ClusterRepository(
         owner_id = str(data.get("owner_id") or "").strip()
         if not owner_id:
             raise ValueError("authenticated owner_id is required")
+        owner_username = str(data.get("owner_username") or "").strip()
         reservation_id = str(data.get("device_reservation_id") or "")
         job_source = f"job:{job_id}"
         reservation_source = f"reservation:{reservation_id}"
@@ -410,7 +411,7 @@ class ClusterRepository(
             acquired, claim_records = self.claims.acquire(
                 devices,
                 owner_id=owner_id,
-                username=owner_id,
+                username=owner_username or owner_id,
                 source_type="cluster-job",
                 source_id=job_source,
                 ttl_seconds=self.claim_lease_ttl_seconds,

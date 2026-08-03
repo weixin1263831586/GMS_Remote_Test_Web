@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260729-device-grid">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260803-user-grid">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
@@ -24,7 +24,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260729-usbip-routing" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260803-status-elevation" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -950,11 +950,11 @@
             <div class="users-stats" style="display: flex; gap: 15px; margin-bottom: 10px;">
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-users-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">在线用户数</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">用户总数</div>
                 </div>
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="active-users-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">活跃用户数</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">在线用户数</div>
                 </div>
                 <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="testing-users-count">-</div>
@@ -974,7 +974,7 @@
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">连接时间</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">最后活跃</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 120px;">操作</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 112px;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
@@ -2023,7 +2023,7 @@
                     正在读取接入状态...
                 </div>
                 <div id="adb-proxy-message" class="modal-info-text">
-                    ADB通过adbproxy-rs接入后会显示在目标主机；可执行ADB和测试操作，Fastboot、锁定及烧写操作将被禁用。
+                    ADB通过adbproxy-rs接入后会显示在目标主机；可执行ADB和测试操作，Fastboot、锁定及烧写操作将被禁用。来源与目标需版本兼容且内网/VPN可直达。
                 </div>
                 <div class="modal-info-text" style="margin-top:6px;">
                     single-user 仅表示每台 Worker 共用一个 Linux 运行账号，不限制平台多用户并发。
@@ -2071,7 +2071,7 @@
                     正在读取接入状态...
                 </div>
                 <div id="usbip-attach-message" class="modal-info-text">
-                    可多选USB设备；同一设备同一时间只能接入一台主机。
+                    可多选USB设备；同一设备同一时间只能接入一台主机。来源需 Windows usbipd + SSH，目标需 Linux USB/IP；网络中断可使分配进入待确认/待清理。
                 </div>
             </div>
             <div class="modal-buttons device-routing-modal-buttons">
@@ -3627,15 +3627,29 @@
                     if (granted) {
                         return loadUsersList(true);
                     }
+                    displayUsersListAccessMessage('需要管理员提权后查看用户管理');
                     return;
                 }
 
+                if (!resp.ok) {
+                    const detail = typeof data.detail === 'object'
+                        ? data.detail.message
+                        : data.detail;
+                    throw new Error(detail || data.error || `HTTP ${resp.status}`);
+                }
                 if (data.users) {
                     displayUsersList(data.users);
                 }
             } catch (e) {
                 console.error('[Users] Error loading users:', e);
+                displayUsersListAccessMessage(`用户列表加载失败：${e.message}`);
             }
+        }
+
+        function displayUsersListAccessMessage(message) {
+            const tbody = document.getElementById('users-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = `<tr><td colspan="8" class="users-empty-message">${escapeHtml(message)}</td></tr>`;
         }
 
         // 移除配置型用户（从 config_runtime.client_hosts 删除）。二次确认后调 DELETE。
@@ -3685,8 +3699,8 @@
 
             // 更新统计数据
             const totalCount = users.length;
-            const activeCount = users.filter(u => !u.running && u.last_seen).length;
-            const testingCount = users.filter(u => u.running).length;
+            const activeCount = users.filter(u => u.status === 'online').length;
+            const testingCount = users.filter(u => u.status === 'testing').length;
 
             document.getElementById('total-users-count').textContent = totalCount;
             document.getElementById('active-users-count').textContent = activeCount;
@@ -3696,7 +3710,7 @@
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                            暂无在线用户
+                            暂无用户
                         </td>
                     </tr>
                 `;
@@ -3705,15 +3719,19 @@
 
             // 渲染用户列表
             tbody.innerHTML = users.map(user => {
-                const isTesting = user.running;
-                const statusClass = isTesting ? 'status-testing' : 'status-online';
                 const activeClusterJob = (user.cluster_jobs || []).find(job =>
                     ['created','queued','leasing','assigned','dispatching','running','stopping','collecting','worker_lost'].includes(job.status));
-                const accountStatus = user.running ? '测试中' : '在线';
+                const normalizedStatus = activeClusterJob ? 'testing' : (user.status || (user.running ? 'testing' : 'offline'));
+                const statusLabels = { testing: '测试中', online: '在线', offline: '离线' };
+                const statusColors = {
+                    testing: 'var(--warning-color)',
+                    online: 'var(--success-color)',
+                    offline: 'var(--text-secondary)'
+                };
                 const statusText = activeClusterJob
                     ? `集群测试中 · ${activeClusterJob.worker_id || '-'}`
-                    : accountStatus;
-                const statusColor = user.running ? 'var(--warning-color)' : 'var(--success-color)';
+                    : (statusLabels[normalizedStatus] || '离线');
+                const statusColor = statusColors[normalizedStatus] || 'var(--text-secondary)';
 
                 const lastSeen = user.last_seen ? formatTime(user.last_seen) : '-';
                 const createdAt = user.created_at ? formatTime(user.created_at) : '-';
@@ -3721,13 +3739,12 @@
                 const sourceLabel = user.source_label || '-';
                 const sourceColor = user.source === 'internal' ? 'var(--primary-color)' : (user.source === 'public' ? 'var(--warning-color)' : 'var(--text-secondary)');
                 // 仅 config_runtime.client_hosts 中的用户可移除。
-                const safeIp = String(user.ip || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 const removeCell = user.configured
-                    ? `<button class="btn-xxs" style="width:44px;background: var(--danger-color, #e74c3c);" onclick="removeUser('${safeIp}', this)">移除</button>`
-                    : '<span title="临时会话" style="width:44px;text-align:center;color:var(--text-secondary);">-</span>';
+                    ? `<button class="btn-xxs user-remove-button" data-remove-user="${escapeHtml(user.ip || '')}">移除</button>`
+                    : '<span class="user-action-placeholder" title="临时会话">-</span>';
                 const clusterCell = activeClusterJob
                     ? `<button class="btn-xxs" style="width:44px;" data-cluster-job="${escapeHtml(activeClusterJob.id)}" data-worker-id="${escapeHtml(activeClusterJob.worker_id || '')}" data-attempt-id="${escapeHtml(activeClusterJob.attempt_id || '')}">任务</button>`
-                    : '';
+                    : '<span class="user-action-placeholder" aria-hidden="true">-</span>';
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
@@ -3754,7 +3771,7 @@
                             ${escapeHtml(devices)}
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">
-                            <div style="display:flex;justify-content:center;align-items:center;gap:6px;">
+                            <div class="user-actions-grid">
                                 ${clusterCell}${removeCell}
                             </div>
                         </td>
@@ -3769,6 +3786,12 @@
                     attempt_id: button.dataset.attemptId || '',
                     origin_page: 'users'
                 }));
+            });
+            tbody.querySelectorAll('[data-remove-user]').forEach(button => {
+                button.addEventListener('click', () => removeUser(
+                    button.dataset.removeUser || '',
+                    button
+                ));
             });
         }
 
@@ -4997,7 +5020,11 @@
             }
             const qs = `device_id=${encodeURIComponent(dcfgStorageDeviceId())}`;
             const sep = path.includes('?') ? '&' : '?';
-            return fetch(path + sep + qs, init).then(r => r.json());
+            return apiCall(path + sep + qs, init?.method || 'GET');
+        }
+
+        async function dcfgRequireElevation(actionLabel) {
+            return requestElevatedAccess(actionLabel, {allowAnonymousDev: true});
         }
 
         function dcfgDebounce(fn, delay = 120) {
@@ -5146,9 +5173,7 @@
                 resource_type: type,
                 value,
             };
-            const r = await fetch('/api/config-override/entries', {
-                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
-            }).then(r => r.json());
+            const r = await apiCall('/api/config-override/entries', 'POST', body);
             if (!r.success) {
                 showToast('添加失败：' + (r.error || ''), 'error');
                 return;
@@ -5217,6 +5242,7 @@
                 '将编译 RRO 覆盖包，推送到 /product/overlay 并重启设备（约 40 秒后恢复连接）。期间设备的其他操作会中断。继续？'
             );
             if (!ok) return;
+            if (!await dcfgRequireElevation('应用设备 RRO 配置覆盖')) return;
             showToast('正在编译并推送 overlay…', 'info');
             const r = await dcfgOvrApi('/api/config-override/apply', { method: 'POST' });
             if (!r.success) { showToast('应用失败：' + (r.error || ''), 'error'); return; }
@@ -5232,6 +5258,7 @@
                 '将删除设备上的 overlay 包并重启（host 覆盖列表保留，可重新应用）。继续？'
             );
             if (!ok) return;
+            if (!await dcfgRequireElevation('撤销设备 RRO 配置覆盖')) return;
             const r = await dcfgOvrApi('/api/config-override/revert', { method: 'POST' });
             if (!r.success) { showToast('撤销失败：' + (r.error || ''), 'error'); return; }
             dcfgOvrSetBusy(45);
@@ -5254,6 +5281,7 @@
                 : '恢复验证启动（dm-verity）。需要重启设备生效。继续？';
             const ok = await showConfirmDialog(title, desc);
             if (!ok) return;
+            if (!await dcfgRequireElevation(`${title}并重启设备`)) return;
             const path = isDisable ? '/api/config-override/disable-verity' : '/api/config-override/enable-verity';
             const r = await dcfgOvrApi(path, { method: 'POST' });
             if (!r.success) { showToast((isDisable ? '关闭' : '恢复') + '失败：' + (r.error || ''), 'error'); return; }
@@ -6033,7 +6061,12 @@
                 if (typeof loadClusterWorkers === 'function') {
                     loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
                 }
-                if (typeof loadDevices === 'function') loadDevices(false).catch(() => {});
+                // 等待 workspace 上下文就绪后再加载设备，避免先闪现本机设备。
+                if (typeof loadDevices === 'function') {
+                    (window.GmsWorkspace?.ready || Promise.resolve())
+                        .then(() => loadDevices(false))
+                        .catch(() => {});
+                }
                 if (typeof loadTestSuites === 'function') loadTestSuites(false).catch(() => {});
                 if (typeof checkInitialTestStatus === 'function') checkInitialTestStatus().catch(() => {});
             }

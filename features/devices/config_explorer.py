@@ -450,6 +450,8 @@ def list_devices() -> list[dict[str, str]]:
         if not line or "\t" not in line:
             continue
         serial, state = line.split("\t", 1)
+        if serial.strip().startswith("localhost:"):
+            continue
         devices.append({"serial": serial.strip(), "state": state.strip()})
     return devices
 

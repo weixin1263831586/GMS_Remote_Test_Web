@@ -686,6 +686,7 @@ UNAUTH001	unauthorized
         fake_cluster = SimpleNamespace(
             config=SimpleNamespace(local_worker_id="worker-local"),
             repository=repository,
+            effective_enabled=False,
         )
         run_worker = AsyncMock(return_value={
             "detached_ports": ["00"],
@@ -705,8 +706,6 @@ UNAUTH001	unauthorized
             return_value="hcq@172.16.14.66",
         ), patch.object(
             cluster_module, "get_cluster_service", return_value=fake_cluster
-        ), patch.object(
-            cluster_api, "_require_cluster_enabled"
         ), patch.object(
             cluster_api, "_run_worker_command", run_worker
         ):
@@ -1549,6 +1548,10 @@ UNAUTH001	unauthorized
         self.assertEqual(
             selection["device_serials_by_busid"],
             {"1-8": ["RK3576GMS6"]},
+        )
+        self.assertEqual(
+            selection["statuses_by_busid"],
+            {"1-8": "attached"},
         )
 
     def test_usbip_status_source_record_does_not_imply_transport_restored(self):

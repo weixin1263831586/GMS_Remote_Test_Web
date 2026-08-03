@@ -115,7 +115,7 @@ class AgentRegressionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.success)
-        self.assertIn("Permission denied", result.error)
+        self.assertIn("elevation_required", result.error)
 
     def test_agent_cannot_bypass_elevation_dependency_for_config_update(self):
         result = asyncio.run(

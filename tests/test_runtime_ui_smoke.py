@@ -231,7 +231,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.goto_shell(page)
             result = page.evaluate(
                 """
-                () => {
+                async () => {
                     displayUsersList([{
                         client_id: 'hcq@172.16.14.66',
                         user_id: 'N387pLbIBhpMw5JsWUL9hg',
@@ -268,6 +268,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     displayTestReports([{
                         timestamp: 'cluster-job-941843984fd44e1b9111532981e188c9',
                         report_name: '2026.07.30_10.39.50.173_6846',
+                        source_timestamp: 'Fri Jul 30 10:39:53 CST 2026',
                         display_client_id: 'hcq@172.16.14.233',
                         test_type: 'CTS',
                         suite_version: '17_r1',
@@ -279,6 +280,18 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     const reportCells = document.querySelectorAll(
                         '#reports-table-body tr:first-child td'
                     );
+                    let deletePrompt = '';
+                    const originalConfirm = showConfirmDialog;
+                    showConfirmDialog = async (_title, message) => {
+                        deletePrompt = message;
+                        return false;
+                    };
+                    await deleteReport(
+                        'cluster-job-941843984fd44e1b9111532981e188c9',
+                        'cluster:job-1:attempt-1',
+                        '2026.07.30_10.39.50.173_6846'
+                    );
+                    showConfirmDialog = originalConfirm;
                     return {
                         actionDisplays: actions.map(
                             action => getComputedStyle(action).display
@@ -289,7 +302,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         buttonLabels: buttons.map(button => button.textContent.trim()),
                         removeLefts: Array.from(
                             document.querySelectorAll(
-                                '#users-table-body button[onclick^="removeUser"]'
+                                '#users-table-body button[data-remove-user]'
                             )
                         ).map(button => Math.round(
                             button.getBoundingClientRect().left
@@ -298,7 +311,17 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         reportSuite: reportCells[2].textContent.trim(),
                         reportWorker: reportCells[3].textContent.trim(),
                         reportName: reportCells[4].textContent.trim(),
-                        reportTimestampTitle: reportCells[4].title
+                        reportTimestampTitle: reportCells[4].title,
+                        reportFolder: tradefedResultFolderName(
+                            '/suite/results/2026.07.30_10.39.50.173_6846'
+                        ),
+                        legacyStartDisplayFolder: tradefedResultFolderName(
+                            'Fri Jul 30 10:39:53 CST 2026'
+                        ),
+                        reportNameDataset: document.querySelector(
+                            '#reports-table-body tr:first-child'
+                        ).dataset.reportName,
+                        deletePrompt
                     };
                 }
                 """
@@ -318,6 +341,19 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(
                 result["reportTimestampTitle"],
                 "cluster-job-941843984fd44e1b9111532981e188c9",
+            )
+            self.assertEqual(
+                result["reportFolder"],
+                "2026.07.30_10.39.50.173_6846",
+            )
+            self.assertEqual(result["legacyStartDisplayFolder"], "")
+            self.assertEqual(
+                result["reportNameDataset"],
+                "2026.07.30_10.39.50.173_6846",
+            )
+            self.assertEqual(
+                result["deletePrompt"],
+                "确定要删除报告 2026.07.30_10.39.50.173_6846 吗？此操作不可恢复。",
             )
         finally:
             page.close()

@@ -1,13 +1,20 @@
 import asyncio
 import json
 import unittest
+import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from features.auth import CurrentUser
+from features.cluster.report_index import index_cluster_report
 from features.reports import files_api
+from features.reports.downloads import (
+    create_remote_report_bundle,
+    merge_remote_report_exports,
+    remove_report_bundle,
+)
 from features.reports.files_api import (
     _decorate_report_for_client,
     _is_registered_report_file_path,
@@ -66,6 +73,175 @@ class ReportFilesApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(payload["content"], "<html>本机报告</html>")
             self.assertEqual(payload["content_type"], "text/html")
+
+    def test_cluster_report_download_uses_tradefed_report_name(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            suite_root = root / "android-gts"
+            run_folder = "2026.07.31_18.04.00.815_7887"
+            result_dir = suite_root / "results" / run_folder
+            logs_dir = suite_root / "logs" / run_folder
+            (suite_root / "tools").mkdir(parents=True)
+            result_dir.mkdir(parents=True)
+            logs_dir.mkdir(parents=True)
+            (result_dir / "test_result.xml").write_text(
+                "<Result />", encoding="utf-8"
+            )
+            (logs_dir / "host_log.txt").write_text("log", encoding="utf-8")
+            report = {
+                "report_id": "cluster:job-1:attempt-1",
+                "timestamp": "cluster-job-1",
+                "report_name": run_folder,
+                "source_timestamp": run_folder,
+                "result_dir": str(result_dir),
+                "suite_path": str(suite_root / "tools"),
+                "worker_id": "worker-local",
+                "owner_id": CURRENT_USER.id,
+            }
+            fake_db = SimpleNamespace(
+                get_report=lambda *args, **kwargs: report,
+            )
+            request = SimpleNamespace(
+                state=SimpleNamespace(current_user=CURRENT_USER)
+            )
+
+            with patch("features.reports.files_api.test_report_db", fake_db), patch(
+                "features.reports.files_api.can_access_report",
+                return_value=True,
+            ):
+                response = asyncio.run(download_report(
+                    request,
+                    report_id=report["report_id"],
+                    report_timestamp=None,
+                    download=True,
+                    file=None,
+                    path=None,
+                ))
+
+        expected = "2026.07.31_18.04.00.815_7887.zip"
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'filename="{expected}"', response.headers["content-disposition"])
+        bundle_path = Path(response.path)
+        try:
+            with zipfile.ZipFile(bundle_path) as bundle:
+                self.assertEqual(
+                    set(bundle.namelist()),
+                    {
+                        f"results/{run_folder}/test_result.xml",
+                        f"logs/{run_folder}/host_log.txt",
+                    },
+                )
+        finally:
+            remove_report_bundle(bundle_path)
+
+    def test_remote_report_exports_are_merged_under_results_and_logs(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            results_export = root / "results.zip"
+            logs_export = root / "logs.zip"
+            run_folder = "2026.07.31_18.04.00.815_7887"
+            with zipfile.ZipFile(results_export, "w") as archive:
+                archive.writestr(f"{run_folder}/test_result.xml", "result")
+                archive.writestr("../escape.txt", "ignored")
+            with zipfile.ZipFile(logs_export, "w") as archive:
+                archive.writestr(f"{run_folder}/inv_1/host_log.txt", "log")
+
+            bundle = merge_remote_report_exports({
+                "results": results_export,
+                "logs": logs_export,
+            })
+
+        self.assertIsNotNone(bundle)
+        try:
+            with zipfile.ZipFile(bundle.path) as archive:
+                self.assertEqual(
+                    set(archive.namelist()),
+                    {
+                        f"results/{run_folder}/test_result.xml",
+                        f"logs/{run_folder}/inv_1/host_log.txt",
+                    },
+                )
+        finally:
+            remove_report_bundle(bundle.path)
+
+    def test_remote_report_download_uses_existing_worker_export_channel(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            transfer_root = root / "transfers"
+            transfer_root.mkdir()
+            run_folder = "2026.07.31_18.04.00.815_7887"
+            for kind, filename in (("results", "test_result.xml"), ("logs", "host_log.txt")):
+                with zipfile.ZipFile(transfer_root / f"{kind}.zip", "w") as archive:
+                    archive.writestr(f"{run_folder}/{filename}", kind)
+
+            class FakeRepository:
+                db_path = root / "cluster.sqlite3"
+
+                @staticmethod
+                def get_worker(_worker_id):
+                    return {"status": "online"}
+
+                @staticmethod
+                def create_transfer(_worker_id, owner_id="", metadata=None):
+                    kind = str((metadata or {}).get("path") or "").split("/", 1)[0]
+                    return {"id": f"transfer-{kind}"}
+
+                @staticmethod
+                def create_command(data):
+                    kind = str(data["payload"]["path"]).split("/", 1)[0]
+                    return {"id": f"command-{kind}"}
+
+                @staticmethod
+                def get_transfer(transfer_id):
+                    kind = transfer_id.removeprefix("transfer-")
+                    return {
+                        "status": "completed",
+                        "relative_path": f"{kind}.zip",
+                    }
+
+                @staticmethod
+                def get_command(_command_id):
+                    return {"status": "completed"}
+
+                @staticmethod
+                def update_transfer(*_args, **_kwargs):
+                    return None
+
+            cluster = SimpleNamespace(
+                config=SimpleNamespace(local_worker_id="worker-local"),
+                repository=FakeRepository(),
+                has_command_agent=lambda _worker_id: True,
+            )
+            report = {
+                "report_id": "cluster:job-1:attempt-1",
+                "timestamp": "cluster-job-1",
+                "report_name": run_folder,
+                "source_timestamp": run_folder,
+                "suite_path": str(root / "android-gts" / "tools"),
+                "worker_id": "worker-remote",
+            }
+            with patch(
+                "features.cluster.get_cluster_service",
+                return_value=cluster,
+            ):
+                bundle = asyncio.run(create_remote_report_bundle(
+                    report,
+                    owner_id=CURRENT_USER.id,
+                    timeout_seconds=1,
+                ))
+
+        self.assertIsNotNone(bundle)
+        try:
+            with zipfile.ZipFile(bundle.path) as archive:
+                self.assertEqual(
+                    set(archive.namelist()),
+                    {
+                        f"results/{run_folder}/test_result.xml",
+                        f"logs/{run_folder}/host_log.txt",
+                    },
+                )
+        finally:
+            remove_report_bundle(bundle.path)
 
     def test_registered_report_file_path_allows_result_and_logs(self):
         with TemporaryDirectory() as tmp:
@@ -176,6 +352,69 @@ class ReportFilesApiTests(unittest.TestCase):
         self.assertEqual(
             report["report_name"],
             "2026.07.30_10.39.50.173_6846",
+        )
+        self.assertEqual(
+            report["source_timestamp"],
+            "2026.07.30_10.39.50.173_6846",
+        )
+
+    def test_legacy_cluster_start_display_is_replaced_by_report_folder(self):
+        report = _decorate_report_for_client({
+            "timestamp": "cluster-job-d5568545c51946c58915dab6c110ad29",
+            "owner_id": CURRENT_USER.id,
+            "report_name": "2026.07.31_18.04.00.815_7887",
+            "source_timestamp": "Fri Jul 31 18:04:53 CST 2026",
+        })
+
+        self.assertEqual(
+            report["source_timestamp"],
+            "2026.07.31_18.04.00.815_7887",
+        )
+
+    def test_cluster_index_keeps_start_display_separate_from_result_folder(self):
+        with TemporaryDirectory() as tmp:
+            result_dir = Path(tmp)
+            folder_name = "2026.07.31_18.04.00.815_7887"
+            (result_dir / "stdout.log").write_text(
+                f"RESULT DIRECTORY : /suite/results/{folder_name}\n",
+                encoding="utf-8",
+            )
+            (result_dir / "test_result.xml").write_text(
+                '<Result suite_name="GTS" start_display="Fri Jul 31 18:04:53 CST 2026">'
+                '<Summary pass="1" failed="0" /></Result>',
+                encoding="utf-8",
+            )
+            saved = []
+            fake_db = SimpleNamespace(
+                get_report_by_timestamp=lambda *args, **kwargs: None,
+                add_report=lambda report: saved.append(report) or True,
+            )
+            job = {
+                "id": "job-1",
+                "owner_id": CURRENT_USER.id,
+                "suite_key": "GTS:14_r1",
+                "suite_path": "/suite/tools",
+                "request": {},
+                "leases": [],
+            }
+            artifact = {
+                "id": "artifact-1",
+                "attempt_id": "attempt-1",
+                "filename": "test_result.xml",
+                "artifact_type": "report",
+            }
+
+            with patch("features.reports.test_report_db", fake_db), patch(
+                "features.reports.display.report_client_display_id",
+                return_value="hcq",
+            ):
+                index_cluster_report(job, result_dir, artifact)
+
+        self.assertEqual(saved[0]["report_name"], folder_name)
+        self.assertEqual(saved[0]["source_timestamp"], folder_name)
+        self.assertEqual(
+            saved[0]["start_time"],
+            "Fri Jul 31 18:04:53 CST 2026",
         )
 
     def test_list_reports_filters_exact_automation_job_attempt(self):

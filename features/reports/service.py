@@ -15,6 +15,7 @@ from typing import Any
 
 from .analysis_agent import ReportAnalysisAgent
 from .analyzer import HostLogParser, ReportAnalyzer
+from .display import report_display_name, tradefed_result_folder_name
 from .repository import test_report_db
 
 
@@ -155,6 +156,7 @@ class TestReportManager:
                 logger.warning(f"Report not found: {report_timestamp}")
                 return None
             report_timestamp = str(report.get("timestamp") or report_timestamp)
+            display_name = report_display_name(report)
 
             result_dir = report.get('result_dir')
             if not result_dir or not os.path.exists(result_dir):
@@ -163,7 +165,12 @@ class TestReportManager:
 
             related_paths = [result_dir]
             android_suite_dir = os.path.dirname(os.path.dirname(result_dir))
-            log_dir_candidate = os.path.join(android_suite_dir, 'logs', report_timestamp)
+            run_folder = tradefed_result_folder_name(
+                display_name,
+                report.get('source_timestamp'),
+                report_timestamp,
+            ) or report_timestamp
+            log_dir_candidate = os.path.join(android_suite_dir, 'logs', run_folder)
             if os.path.exists(log_dir_candidate):
                 related_paths.append(log_dir_candidate)
 
@@ -173,7 +180,7 @@ class TestReportManager:
                 return None
 
             analysis = {
-                'report_name': report_timestamp,  # 显示报告时间戳
+                'report_name': display_name,
                 'summary': result.get('summary', {}),
                 'details': {
                     'device': result.get('details', {}).get('device', ''),

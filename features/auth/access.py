@@ -45,6 +45,12 @@ def principal_owner_id(request: Request) -> str:
     return require_authenticated_user(request).id
 
 
+def principal_display_name(request: Request) -> str:
+    """Return the human-readable username for device claim records."""
+
+    return require_authenticated_user(request).username
+
+
 def require_resource_owner(
     request: Request,
     owner_id: object,

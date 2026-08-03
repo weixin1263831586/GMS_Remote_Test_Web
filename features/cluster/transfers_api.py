@@ -14,6 +14,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from features.auth import (
+    principal_display_name,
     principal_owner_id,
     require_resource_owner,
 )
@@ -287,6 +288,7 @@ def create_device_export(
         records = service().repository.acquire_device_operation_claim(
             worker_id, [device], owner_id=owner_id,
             source_type="cluster-device-export", source_id=claim_source,
+            username=principal_display_name(request),
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc

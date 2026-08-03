@@ -114,6 +114,35 @@ class UsersListApiTests(unittest.TestCase):
         self.assertEqual(body["total"], 1)
         self.assertEqual(body["users"][0]["client_id"], "cp2-share@172.16.14.65")
         self.assertTrue(body["users"][0]["configured"])
+        self.assertEqual(body["users"][0]["status"], "online")
+
+    def test_configured_user_without_recent_session_is_offline(self):
+        import features.users.users_api as users_api
+
+        old_config_manager = users_api.runtime.config_manager
+        old_global_state = users_api.runtime.global_state
+        users_api.runtime.config_manager = SimpleNamespace(
+            load_config=lambda: {
+                "client_hosts": {"172.16.14.80": "offline-user"},
+                "vpn_gateways": [],
+            }
+        )
+        users_api.runtime.global_state = SimpleNamespace(
+            user_states={},
+            user_states_lock=threading.Lock(),
+        )
+        try:
+            with patch(
+                "features.cluster.get_cluster_service",
+                side_effect=RuntimeError("cluster not configured in unit test"),
+            ):
+                resp = asyncio.run(users_api.list_users())
+        finally:
+            users_api.runtime.config_manager = old_config_manager
+            users_api.runtime.global_state = old_global_state
+
+        body = json.loads(resp.body.decode("utf-8"))
+        self.assertEqual(body["users"][0]["status"], "offline")
 
 
 if __name__ == "__main__":

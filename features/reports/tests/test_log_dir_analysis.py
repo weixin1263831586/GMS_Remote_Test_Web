@@ -85,13 +85,18 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
         )
 
         # Point suites_path at the temp root so the boundary check passes.
+        from features.reports import analysis_api
         from foundation.config import config_manager as _cm
-        self._orig_config = _cm.load_config()
-        self._config_patch = {
-            **(self._orig_config or {}),
+        config_values = {
+            **(_cm.load_config() or {}),
             "suites_path": str(self.tmp.name),
         }
-        _cm.save_config(self._config_patch)
+        self._config_load_patch = patch.object(
+            analysis_api.config_manager,
+            "load_config",
+            return_value=config_values,
+        )
+        self._config_load_patch.start()
         self.client = TestClient(create_app())
         # The endpoint is auth-gated like all /api routes; create + log in an
         # admin so the requests pass the gate.
@@ -130,8 +135,7 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
     def tearDown(self):
         self._report_store_patch.stop()
         self.client.close()
-        from foundation.config import config_manager as _cm
-        _cm.save_config(self._orig_config)
+        self._config_load_patch.stop()
         from features.auth import auth_service
         auth_service.db_path = self._orig_auth_db
         auth_service._initialized = False

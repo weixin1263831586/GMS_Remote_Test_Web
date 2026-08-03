@@ -151,6 +151,78 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertNotIn("claim_owner_id", device)
         self.assertNotIn("claim_username", device)
 
+    def test_device_api_hides_other_owner_from_regular_user(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [],
+            "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        })
+        acquired, _claims = self.repo.claims.acquire(
+            [{
+                "device_key": "worker-246:ABC",
+                "worker_id": "worker-246",
+                "serial": "ABC",
+            }],
+            owner_id="other-id",
+            username="other-user",
+            source_type="cluster-job",
+            source_id="job:privacy",
+            ttl_seconds=60,
+        )
+        self.assertTrue(acquired)
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            app = FastAPI()
+
+            @app.middleware("http")
+            async def regular_identity(request, call_next):
+                request.state.current_user = CurrentUser(
+                    id="viewer-id", username="viewer", role="user"
+                )
+                return await call_next(request)
+
+            app.include_router(cluster_api.router)
+            with patch.dict("os.environ", {"GMS_AUTH_REQUIRED": "true"}), \
+                    TestClient(app) as client:
+                response = client.get(
+                    "/api/cluster/devices?worker_id=worker-246"
+                )
+        finally:
+            cluster_api.cluster_service = previous
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["devices"][0]["claimed_by"], "occupied")
+
+    def test_device_api_marks_inventory_offline_with_its_worker(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [],
+            "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        })
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            app = FastAPI()
+            app.include_router(cluster_api.router)
+            with patch.object(
+                cluster_api.cluster_service,
+                "list_workers",
+                return_value=[{"id": "worker-246", "status": "offline"}],
+            ), TestClient(app) as client:
+                response = client.get(
+                    "/api/cluster/devices?worker_id=worker-246"
+                )
+        finally:
+            cluster_api.cluster_service = previous
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["devices"][0]["state"], "offline")
+
     def test_suite_api_includes_cluster_inventory_display_fields(self):
         self.register()
         self.repo.heartbeat("worker-246", {

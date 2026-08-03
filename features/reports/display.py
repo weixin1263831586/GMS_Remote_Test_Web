@@ -9,6 +9,19 @@ from typing import Any
 
 
 _RESULT_DIRECTORY_RE = re.compile(r"RESULT DIRECTORY\s*:\s*(\S+)")
+_TRADEFED_RESULT_FOLDER_RE = re.compile(
+    r"^\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}(?:\.\d+)?(?:_\d+)?$"
+)
+
+
+def tradefed_result_folder_name(*values: object) -> str:
+    """Return the first value that names a Tradefed results directory."""
+    for value in values:
+        text = str(value or "").strip().replace("\\", "/").rstrip("/")
+        name = text.rsplit("/", 1)[-1] if text else ""
+        if _TRADEFED_RESULT_FOLDER_RE.fullmatch(name):
+            return name
+    return ""
 
 
 def report_name_from_result_dir(result_dir: str) -> str:
@@ -26,6 +39,35 @@ def report_name_from_result_dir(result_dir: str) -> str:
         return ""
     matches = _RESULT_DIRECTORY_RE.findall(text)
     return Path(matches[-1]).name if matches else ""
+
+
+def report_display_name(report: dict[str, Any]) -> str:
+    """Return a stable user-facing name while keeping internal IDs private."""
+    stored_name = str(report.get("report_name") or "").strip()
+    if stored_name and not stored_name.startswith("cluster-job-"):
+        return stored_name
+    detected_name = report_name_from_result_dir(
+        str(report.get("result_dir") or "")
+    )
+    return (
+        detected_name
+        or tradefed_result_folder_name(
+            report.get("source_timestamp"),
+            report.get("timestamp"),
+        )
+        or stored_name
+        or str(report.get("timestamp") or "").strip()
+        or "report"
+    )
+
+
+def report_download_filename(report: dict[str, Any]) -> str:
+    """Return an ASCII-safe ZIP filename derived from the display name."""
+    stem = report_display_name(report)
+    if stem.lower().endswith(".zip"):
+        stem = stem[:-4]
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._")
+    return f"{safe_stem or 'report'}.zip"
 
 
 def report_client_display_id(

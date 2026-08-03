@@ -41,11 +41,12 @@ class ClusterClaimRepositoryMixin:
         source_type: str,
         source_id: str,
         ttl_seconds: int = 3600,
+        username: str = "",
     ) -> list[dict[str, Any]]:
         acquired, records = self.claims.acquire(
             self._claim_devices(worker_id, devices),
             owner_id=owner_id,
-            username=owner_id,
+            username=username or owner_id,
             source_type=source_type,
             source_id=source_id,
             ttl_seconds=ttl_seconds,

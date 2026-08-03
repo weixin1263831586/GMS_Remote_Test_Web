@@ -39,6 +39,19 @@ class ADBProxyService:
         if not saved:
             raise RuntimeError("无法保存ADB Proxy接入状态")
 
+    def usbip_assignments(self) -> dict[str, dict[str, Any]]:
+        """Read USB/IP routes from the same injected runtime config.
+
+        Keeping this lookup on the service avoids coupling ADB Proxy checks to
+        the process-global devices runtime.  It also guarantees that status
+        validation and assignment writes observe the same config backend.
+        """
+        if self.config_manager is None:
+            return {}
+        runtime = self.config_manager.get_runtime_config() or {}
+        values = runtime.get("usbip_cluster_assignments") or {}
+        return dict(values) if isinstance(values, dict) else {}
+
     def status(self) -> dict[str, Any]:
         from features.cluster import get_cluster_service
 
@@ -190,22 +203,26 @@ class ADBProxyService:
         if previous_assignment and not additions:
             raise HTTPException(409, "所选ADB设备已全部接入该目标主机")
         requested_devices = [*previous_devices, *additions]
-        from .integrations_api import _usbip_assignments
-
         usbip_assignments = [
-            item for item in _usbip_assignments().values()
+            item for item in self.usbip_assignments().values()
             if str(item.get("worker_id") or "") == target_worker_id
             and item.get("status") in {
                 "attaching", "attached", "unknown", "cleanup_required",
             }
         ]
-        if any(
-            item.get("status") in {"attaching", "unknown", "cleanup_required"}
-            for item in usbip_assignments
-        ):
+        usbip_statuses = {
+            str(item.get("status") or "") for item in usbip_assignments
+        }
+        if usbip_statuses & {"unknown", "cleanup_required"}:
             raise HTTPException(
                 409,
-                f"{target_worker_id} 正在更新USB/IP设备，请稍后重试ADB接入",
+                f"{target_worker_id} 存在待确认或待清理的USB/IP分配，"
+                "请先在USB/IP当前接入中断开并清理",
+            )
+        if "attaching" in usbip_statuses:
+            raise HTTPException(
+                409,
+                f"{target_worker_id} 正在接入USB/IP设备，请稍后重试ADB接入",
             )
         usbip_serials = {
             str(serial or "").strip()

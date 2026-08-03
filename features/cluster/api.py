@@ -327,24 +327,47 @@ def _annotate_adb_proxy_source(devices: list[dict]) -> list[dict]:
 
 
 @router.get("/devices")
-def list_devices(worker_id: str = Query(default="")):
+def list_devices(
+    worker_id: str = Query(default=""),
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     svc = service()
     if not svc.effective_enabled:
         if worker_id and worker_id != svc.config.local_worker_id:
             raise HTTPException(409, "cluster mode is disabled")
         worker_id = svc.config.local_worker_id
     devices = svc.repository.list_devices(worker_id)
+    worker_statuses = {
+        str(worker.get("id") or ""): str(worker.get("status") or "offline")
+        for worker in svc.list_workers()
+    }
+    for device in devices:
+        # A heartbeat inventory can outlive its Worker. Do not advertise a
+        # previously available device as usable after that host goes offline.
+        if worker_statuses.get(str(device.get("worker_id") or "")) == "offline":
+            device["state"] = "offline"
     try:
         from features.users.clients import resolve_client_display_id
 
         for device in devices:
-            owner_id = str(
-                device.get("claim_owner_id")
-                or device.get("claim_username")
-                or ""
-            ).strip()
+            claim_owner_id = str(device.get("claim_owner_id") or "").strip()
+            claim_username = str(device.get("claim_username") or "").strip()
+            owner_id = claim_owner_id or claim_username
             if owner_id:
-                device["claimed_by"] = resolve_client_display_id(owner_id)
+                is_self = bool(
+                    _user
+                    and (
+                        _user.id == claim_owner_id
+                        or _user.username in {claim_owner_id, claim_username}
+                    )
+                )
+                device["claimed_by"] = (
+                    resolve_client_display_id(owner_id)
+                    if _user is None or _user.role == "admin" or is_self
+                    else "occupied"
+                )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.warning(
             "failed to annotate device claim owners for %s: %s",

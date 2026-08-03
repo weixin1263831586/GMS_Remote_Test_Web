@@ -1623,8 +1623,8 @@ select option {
 .device-routing-modal-content {
     width: min(620px, 100%);
     max-width: 620px;
-    height: min(600px, 88vh, calc(100dvh - 16px));
-    max-height: min(600px, 88vh, calc(100dvh - 16px));
+    height: min(540px, 88vh, calc(100dvh - 16px));
+    max-height: min(540px, 88vh, calc(100dvh - 16px));
     resize: none;
 }
 
@@ -1693,6 +1693,24 @@ select option {
     flex: 1;
     min-width: 0;
     overflow-wrap: anywhere;
+}
+
+.routing-status-connected .adb-proxy-assignment-info,
+.routing-status-attached .adb-proxy-assignment-info {
+    color: var(--success-color);
+}
+
+.routing-status-connecting .adb-proxy-assignment-info,
+.routing-status-attaching .adb-proxy-assignment-info,
+.routing-status-unknown .adb-proxy-assignment-info,
+.routing-status-host_offline .adb-proxy-assignment-info {
+    color: var(--warning-color);
+}
+
+.routing-status-connect_failed .adb-proxy-assignment-info,
+.routing-status-disconnect_failed .adb-proxy-assignment-info,
+.routing-status-cleanup_required .adb-proxy-assignment-info {
+    color: var(--danger-color);
 }
 
 .device-routing-device-row {
@@ -5392,6 +5410,34 @@ body.apk-resizing {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     background: var(--darker-bg);
+}
+
+.user-actions-grid {
+    display: grid;
+    grid-template-columns: 44px 44px;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+}
+
+.user-actions-grid > * {
+    width: 44px;
+    min-width: 44px;
+}
+
+.user-action-placeholder {
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.user-remove-button {
+    background: var(--danger-color, #e74c3c);
+}
+
+.users-empty-message {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-secondary);
 }
 
 @media (max-width: 980px) {

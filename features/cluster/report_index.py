@@ -13,6 +13,7 @@ def index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
     from features.reports.display import (
         report_client_display_id,
         report_name_from_result_dir,
+        tradefed_result_folder_name,
     )
 
     request_data = job.get("request") or {}
@@ -28,6 +29,11 @@ def index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
     artifact_ids = list(existing.get("artifact_ids") or [])
     if artifact.get("id") and artifact["id"] not in artifact_ids:
         artifact_ids.append(artifact["id"])
+    report_name = report_name_from_result_dir(str(result_dir))
+    source_timestamp = tradefed_result_folder_name(
+        report_name,
+        existing.get("source_timestamp"),
+    )
     report_info = {
         **existing,
         "timestamp": timestamp,
@@ -41,7 +47,7 @@ def index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
             "owner_id": owner_id,
             "worker_id": job.get("assigned_worker_id", ""),
         }),
-        "report_name": report_name_from_result_dir(str(result_dir)),
+        "report_name": report_name or existing.get("report_name", ""),
         "devices": [item["device_id"] for item in job.get("leases", [])],
         "result_dir": str(result_dir),
         "suite_path": job.get("suite_path", ""),
@@ -59,6 +65,8 @@ def index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
         "redmine_issue_id": request_data.get("redmine_issue_id", ""),
         "source_type": job.get("source_type", "cluster"),
     }
+    if source_timestamp:
+        report_info["source_timestamp"] = source_timestamp
     if artifact.get("artifact_type") == "report-archive":
         report_info["archive_artifact_id"] = artifact["id"]
     if artifact.get("filename") == "test_result.xml":
@@ -72,7 +80,7 @@ def index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
                 "total": parsed.total,
                 "suite_version": parsed.suite_version,
                 "android_version": parsed.android_version,
-                "source_timestamp": parsed.start_time if parsed.start_time != "未知时间" else "",
+                "start_time": parsed.start_time if parsed.start_time != "未知时间" else "",
             })
             # 默认 GTS 类型不能覆盖任务中已知的测试类型。
             if parsed.test_type and parsed.test_type.upper() != "GTS":
