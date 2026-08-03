@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from features.auth import require_elevated_admin
@@ -28,6 +28,14 @@ router = APIRouter()
 @router.get("/api/adb-forward/status")
 async def adb_forward_status(_admin=Depends(require_elevated_admin)):
     return JSONResponse(content=adb_proxy_service.status())
+
+
+@router.get("/api/adb-forward/logs")
+async def adb_proxy_logs(
+    worker_id: str = Query(min_length=1, max_length=128),
+    _admin=Depends(require_elevated_admin),
+):
+    return JSONResponse(content=await adb_proxy_service.logs(worker_id))
 
 
 @router.post("/api/adb-forward/start")

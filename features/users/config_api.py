@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from features.auth import (
     CurrentUser,
+    get_authenticated_user,
     require_authenticated_user_when_auth_required,
     require_elevated_admin,
     require_elevated_admin_when_auth_required,
@@ -242,8 +243,17 @@ async def get_config(request: Request):
     safe_config["effective_suites_path"] = effective_suites_path
     wifi = config.get("wifi") if isinstance(config.get("wifi"), dict) else {}
     if isinstance(safe_config.get("wifi"), dict):
-        safe_config["wifi"]["password"] = ""
         safe_config["wifi"].pop("encrypted_password", None)
+        # Wi-Fi password is only shown to elevated admin sessions. Client
+        # sessions (role="user") that have been verified by an admin count
+        # as elevated; ordinary users still see an empty string.
+        from features.auth import is_elevated
+
+        if is_elevated(request):
+            defaults = config_manager.get_wifi_defaults(config)
+            safe_config["wifi"]["password"] = defaults.get("password", "")
+        else:
+            safe_config["wifi"]["password"] = ""
         safe_config["wifi"]["has_password"] = bool(
             os.getenv("GMS_WIFI_PASSWORD")
             or wifi.get("encrypted_password")

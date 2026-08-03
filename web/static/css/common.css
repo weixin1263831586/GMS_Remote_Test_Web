@@ -1695,6 +1695,27 @@ select option {
     overflow-wrap: anywhere;
 }
 
+.device-routing-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(56px, auto);
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.transport-diagnostics-output {
+    max-height: 240px;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-color);
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
 .routing-status-connected .adb-proxy-assignment-info,
 .routing-status-attached .adb-proxy-assignment-info {
     color: var(--success-color);
@@ -1707,9 +1728,20 @@ select option {
     color: var(--warning-color);
 }
 
+.routing-status-recovering .adb-proxy-assignment-info,
+.routing-status-device_missing .adb-proxy-assignment-info,
+.routing-status-detaching .adb-proxy-assignment-info {
+    color: var(--warning-color);
+}
+
 .routing-status-connect_failed .adb-proxy-assignment-info,
 .routing-status-disconnect_failed .adb-proxy-assignment-info,
 .routing-status-cleanup_required .adb-proxy-assignment-info {
+    color: var(--danger-color);
+}
+
+.routing-status-degraded_source .adb-proxy-assignment-info,
+.routing-status-degraded_target .adb-proxy-assignment-info {
     color: var(--danger-color);
 }
 

@@ -117,6 +117,32 @@ def create_job(body: ClusterJobCreate, request: Request):
         if not executable:
             raise HTTPException(409, "suite executable not found")
         data["argv"] = [executable, "list", "devices"]
+    from features.devices.transport_policy import incompatible_test_devices
+
+    inventory = {
+        str(item.get("serial") or ""): item
+        for item in service().repository.list_devices(data["worker_id"])
+    }
+    selected_inventory = []
+    for device_id in data["devices"]:
+        serial = str(device_id or "")
+        prefix = f"{data['worker_id']}:"
+        if serial.startswith(prefix):
+            serial = serial[len(prefix):]
+        if serial in inventory:
+            selected_inventory.append(inventory[serial])
+    incompatible, policy = incompatible_test_devices(
+        selected_inventory,
+        data["argv"],
+        data.get("env") or {},
+    )
+    if incompatible:
+        raise HTTPException(
+            409,
+            f"所选测试需要真实USB/Fastboot通道，不能使用ADB Proxy设备: "
+            f"{', '.join(incompatible)}；请改用USB/IP或在设备来源Worker本地执行。"
+            f"原因：{policy['reason']}",
+        )
     try:
         job = service().repository.create_job_with_leases(data)
         request.state.device_lease_tokens = [

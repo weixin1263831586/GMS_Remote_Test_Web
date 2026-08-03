@@ -63,10 +63,16 @@ def _is_registered_report_file_path(
         result_dir = report.get("result_dir")
         if result_dir and _is_path_under(path, result_dir):
             return True
-        timestamp = report.get("timestamp", "")
-        if result_dir and timestamp:
+        # Derive the real Tradefed run folder rather than the internal
+        # timestamp (which is "cluster-job-..." for durable Cluster jobs).
+        run_folder = tradefed_result_folder_name(
+            report_display_name(report),
+            report.get("source_timestamp"),
+            report.get("timestamp"),
+        )
+        if result_dir and run_folder:
             android_suite_dir = os.path.dirname(os.path.dirname(result_dir))
-            logs_dir = os.path.join(android_suite_dir, "logs", timestamp)
+            logs_dir = os.path.join(android_suite_dir, "logs", run_folder)
             if _is_path_under(path, logs_dir):
                 return True
     return False
@@ -239,10 +245,19 @@ async def download_report(
             if download:
                 bundle = await asyncio.to_thread(create_local_report_bundle, report)
                 if bundle is None:
-                    bundle = await create_remote_report_bundle(
-                        report,
-                        owner_id=principal.id,
-                    )
+                    try:
+                        bundle = await create_remote_report_bundle(
+                            report,
+                            owner_id=principal.id,
+                        )
+                    except RuntimeError as exc:
+                        logger.warning(
+                            "[DOWNLOAD] Remote report bundle failed: %s", exc
+                        )
+                        return error_response(
+                            "远端报告导出失败，请稍后重试或检查 Worker 状态",
+                            502,
+                        )
                 if bundle is None:
                     return error_response(
                         "Report results and logs directories were not found",

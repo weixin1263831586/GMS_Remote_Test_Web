@@ -93,6 +93,60 @@ async def test_proxy_mutations_are_serialized():
 
 
 @pytest.mark.asyncio
+async def test_logs_fall_back_to_heartbeat_summary_for_older_worker():
+    repository = _Repository()
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="worker-local"),
+    )
+    service = ADBProxyService()
+    service.observe_worker("worker-source", {
+        "recent_errors": {"proxy": "backend temporarily unavailable"},
+    })
+
+    with patch("features.cluster.get_cluster_service", return_value=cluster), patch(
+        "features.cluster.api._run_worker_command",
+        new=AsyncMock(),
+    ) as run:
+        result = await service.logs("worker-source")
+
+    run.assert_not_awaited()
+    assert result["success"] is True
+    assert result["supported"] is False
+    assert result["proxy"] == ["backend temporarily unavailable"]
+
+
+@pytest.mark.asyncio
+async def test_logs_use_worker_action_when_capability_is_advertised():
+    repository = _Repository()
+    repository.workers["worker-source"]["capabilities"]["adb_proxy_logs"] = True
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="worker-local"),
+    )
+    service = ADBProxyService()
+    run = AsyncMock(return_value={
+        "proxy": ["proxy-line"],
+        "hub": ["hub-line"],
+    })
+
+    with patch("features.cluster.get_cluster_service", return_value=cluster), patch(
+        "features.cluster.api._run_worker_command",
+        run,
+    ):
+        result = await service.logs("worker-source")
+
+    run.assert_awaited_once_with(
+        "worker-source",
+        "adb_proxy",
+        {"action": "logs"},
+        timeout=20,
+    )
+    assert result["supported"] is True
+    assert result["proxy"] == ["proxy-line"]
+
+
+@pytest.mark.asyncio
 async def test_connect_coordinates_source_then_target_without_pair_code_in_state():
     repository = _Repository()
     cluster = SimpleNamespace(
@@ -516,6 +570,121 @@ def test_status_does_not_report_failed_or_offline_assignment_as_connected():
 
     assert status["connected"] is False
     assert status["assignments"][0]["status"] == "host_offline"
+
+
+def test_status_reconciles_both_worker_processes_and_inventory():
+    repository = _Repository()
+    repository.devices["worker-target"] = [{
+        "serial": "worker-source:RK3572GMS1",
+        "state": "available",
+        "transport": "adb_proxy",
+        "properties": {},
+    }]
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="worker-local"),
+        effective_enabled=True,
+        list_workers=lambda: list(repository.workers.values()),
+    )
+    service = ADBProxyService()
+    service.config_manager = _ConfigManager()
+    service.config_manager.runtime["adb_proxy_assignments"] = {
+        "worker-source|worker-target": {
+            "source_worker_id": "worker-source",
+            "target_worker_id": "worker-target",
+            "devices": ["RK3572GMS1"],
+            "generation": 12,
+            "status": "connected",
+        }
+    }
+    service.observe_worker("worker-source", {
+        "proxy_running": True,
+        "source": {
+            "running": True,
+            "devices": ["RK3572GMS1"],
+            "generation": 12,
+        },
+    })
+    service.observe_worker("worker-target", {
+        "hub_running": True,
+        "target": {"imports": [{
+            "source_worker_id": "worker-source",
+            "devices": ["RK3572GMS1"],
+            "generation": 12,
+        }]},
+    })
+
+    with patch("features.cluster.get_cluster_service", return_value=cluster):
+        status = service.status()
+
+    assert status["connected"] is True
+    assert status["assignments"][0]["status"] == "connected"
+
+
+def test_status_hides_stale_generation_during_heartbeat_grace_period():
+    service = ADBProxyService()
+    assignment = {
+        "source_worker_id": "worker-source",
+        "target_worker_id": "worker-target",
+        "devices": ["RK3572GMS1"],
+        "generation": 12,
+        "status": "connected",
+        "updated_at": 1_000,
+    }
+    service.observe_worker("worker-source", {
+        "proxy_running": True,
+        "source": {
+            "running": True,
+            "devices": ["RK3572GMS1"],
+            "generation": 11,
+        },
+    })
+    service.observe_worker("worker-target", {
+        "hub_running": True,
+        "target": {"imports": [{
+            "source_worker_id": "worker-source",
+            "devices": ["RK3572GMS1"],
+            "generation": 11,
+        }]},
+    })
+
+    with patch("features.devices.adb_proxy_service.time.time", return_value=1_010):
+        reconciled = service._reconciled_status(assignment, [])
+
+    assert reconciled == "recovering"
+
+
+def test_status_reports_stale_generation_after_heartbeat_grace_period():
+    service = ADBProxyService()
+    assignment = {
+        "source_worker_id": "worker-source",
+        "target_worker_id": "worker-target",
+        "devices": ["RK3572GMS1"],
+        "generation": 12,
+        "status": "connected",
+        "updated_at": 1_000,
+    }
+    service.observe_worker("worker-source", {
+        "proxy_running": True,
+        "source": {
+            "running": True,
+            "devices": ["RK3572GMS1"],
+            "generation": 11,
+        },
+    })
+    service.observe_worker("worker-target", {
+        "hub_running": True,
+        "target": {"imports": [{
+            "source_worker_id": "worker-source",
+            "devices": ["RK3572GMS1"],
+            "generation": 11,
+        }]},
+    })
+
+    with patch("features.devices.adb_proxy_service.time.time", return_value=1_040):
+        reconciled = service._reconciled_status(assignment, [])
+
+    assert reconciled == "degraded_source"
 
 
 @pytest.mark.asyncio

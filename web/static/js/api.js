@@ -149,6 +149,11 @@ async function _apiCallOnce(url, method, data, opts) {
                 normalizeApiErrorMessage(rawMessage, response.status)
             );
             error.status = response.status;
+            const structured = detail && typeof detail === 'object' ? detail : result;
+            error.code = structured?.error_code || '';
+            error.retryable = structured?.retryable === true;
+            error.remediation = structured?.remediation || '';
+            error.details = structured?.error_details || structured?.network_quality || {};
             if (response.status === 401) error.suppressToast = true;
             if (needsElevation) error.suppressToast = true;
             if (result.need_password) {
