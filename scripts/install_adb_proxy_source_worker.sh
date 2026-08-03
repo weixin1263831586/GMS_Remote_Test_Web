@@ -28,8 +28,9 @@ mkdir -p \
     "${UNIT_ROOT}" \
     "${HOME}/.cache/gms-worker/pycache" \
     "${HOME}/gms-worker-data"
-rm -rf "${INSTALL_ROOT}/worker_agent"
+rm -rf "${INSTALL_ROOT}/worker_agent" "${INSTALL_ROOT}/foundation"
 cp -a "${PROJECT_ROOT}/worker_agent" "${INSTALL_ROOT}/worker_agent"
+cp -a "${PROJECT_ROOT}/foundation" "${INSTALL_ROOT}/foundation"
 
 [[ -f "${TOKEN_FILE}" ]] || {
     echo "Worker token file does not exist: ${TOKEN_FILE}" >&2

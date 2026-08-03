@@ -34,6 +34,7 @@ def test_registration_only_advertises_novnc_when_both_ports_are_ready(tmp_path):
         capabilities = agent.registration()["capabilities"]
 
     assert capabilities["adb"] is True
+    assert capabilities["adb_proxy_logs"] is True
     assert "novnc_port" not in capabilities
 
 

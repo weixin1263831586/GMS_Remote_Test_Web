@@ -16,6 +16,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from foundation.transport_contract import execute_transport, transport_result
+
 from .config import WorkerConfig
 from .fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_partition
 from .suite_detection import suite_details
@@ -111,10 +113,11 @@ def probe_devices(
             ),
             None,
         )
-        # Skip localhost:<port> devices entirely: these are Microdroid/vsock
-        # virtual machines created by GTS/VTS virtualization tests, not real
-        # physical devices.
-        if serial.startswith("localhost:"):
+        # Skip localhost:<port> devices that are NOT ADB Proxy imports.
+        # These are Microdroid/vsock virtual machines created by GTS/VTS
+        # virtualization tests.  ADB Proxy imported devices also use
+        # localhost:<port> serials and must be preserved.
+        if serial.startswith("localhost:") and not proxy_source:
             continue
         properties = {}
         for item in parts[2:]:
@@ -216,6 +219,7 @@ def execute_usbip_action(
     source_host: str,
     busids: list[str],
     adb_server_socket: str | None = None,
+    generation: int = 0,
 ) -> dict[str, Any]:
     """Attach or detach selected USB/IP exports on this Worker."""
     if not re.fullmatch(r"[A-Za-z0-9._:-]{1,255}", source_host or ""):
@@ -228,6 +232,35 @@ def execute_usbip_action(
         selected.append(busid)
     if not selected:
         raise ValueError("at least one USB/IP busid is required")
+    payload = {
+        "source_host": source_host,
+        "busids": selected,
+        "adb_server_socket": adb_server_socket or "",
+        "generation": max(0, int(generation or 0)),
+    }
+    return execute_transport(
+        "GMS_USBIP_CONTROL_BIN",
+        transport="usbip",
+        action=action,
+        payload=payload,
+        timeout=180 if action == "attach" else 60,
+        builtin=lambda: _execute_usbip_action_builtin(
+            action,
+            source_host,
+            selected,
+            adb_server_socket,
+            generation,
+        ),
+    )
+
+
+def _execute_usbip_action_builtin(
+    action: str,
+    source_host: str,
+    selected: list[str],
+    adb_server_socket: str | None,
+    generation: int,
+) -> dict[str, Any]:
     helper = os.getenv("GMS_WORKER_USBIP_HELPER", "/usr/local/libexec/gms-worker-usbip")
     if action == "attach":
         devices_before = {
@@ -331,7 +364,7 @@ def execute_usbip_action(
                 )
             raise RuntimeError(details or "USB/IP attach failed")
         if len(already_attached) == len(selected) and not newly_attached:
-            return {
+            return transport_result("usbip", {
                 "attached_busids": attached,
                 "already_attached_busids": already_attached,
                 "errors": {},
@@ -341,7 +374,8 @@ def execute_usbip_action(
                 ),
                 "new_devices": [],
                 "enumeration_pending": False,
-            }
+            }, transport_state="attached", protocol_state="adb",
+                readiness="test_ready", generation=generation)
         devices = []
         new_serials = set()
         for _ in range(15):
@@ -353,14 +387,17 @@ def execute_usbip_action(
             new_serials = {item["serial"] for item in devices} - devices_before
             if new_serials:
                 break
-        return {
+        protocol_state = "adb" if new_serials else "enumerating"
+        return transport_result("usbip", {
             "attached_busids": attached,
             "already_attached_busids": already_attached,
             "errors": errors,
             "devices": devices,
             "new_devices": sorted(new_serials),
             "enumeration_pending": not bool(new_serials),
-        }
+        }, transport_state="attached", protocol_state=protocol_state,
+            readiness="test_ready" if new_serials else "transport_ready",
+            generation=generation)
     if action == "detach":
         result = _run_usbip_helper(
             ["sudo", "-n", helper, "port"],
@@ -379,11 +416,12 @@ def execute_usbip_action(
             # Worker (already detached, or never attached). Returning success
             # lets the controller clear stale assignment records instead of
             # looping on 502 retries for a device that is already gone.
-            return {
+            return transport_result("usbip", {
                 "detached_ports": [],
                 "already_detached": True,
                 "devices": probe_devices(include_details=True),
-            }
+            }, transport_state="disconnected", readiness="not_ready",
+                generation=generation)
         detached = []
         for port in matched_ports:
             detached_result = _run_usbip_helper(
@@ -393,14 +431,15 @@ def execute_usbip_action(
                 detached.append(port)
         if len(detached) != len(matched_ports):
             raise RuntimeError("部分USB/IP端口断开失败")
-        return {
+        return transport_result("usbip", {
             "detached_ports": detached,
             # Give the local ADB daemon a moment to reap the just-removed USB/IP
             # serials: detached devices briefly linger as "offline" in
             # `adb devices` until the USB hotplug event is processed. Returning
             # the list too early makes the UI believe the device is still online.
             "devices": _probe_devices_until_settled(),
-        }
+        }, transport_state="disconnected", readiness="not_ready",
+            generation=generation)
     raise ValueError(f"unsupported USB/IP action: {action}")
 
 

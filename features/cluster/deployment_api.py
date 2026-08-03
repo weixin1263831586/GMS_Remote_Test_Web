@@ -197,6 +197,15 @@ def _add_adbproxy_package(bundle: tarfile.TarFile, project_root: Path) -> None:
     )
 
 
+def _add_worker_python_runtime(
+    bundle: tarfile.TarFile,
+    project_root: Path,
+) -> None:
+    """Bundle every in-repository Python package imported by the Worker."""
+    bundle.add(project_root / "worker_agent", arcname="worker_agent")
+    bundle.add(project_root / "foundation", arcname="foundation")
+
+
 def _validate_gts_credential(path: Path) -> Path:
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
@@ -393,7 +402,7 @@ async def deploy_adb_proxy_source(
             ) as temporary:
                 archive_path = Path(temporary.name)
             with tarfile.open(archive_path, "w:gz") as bundle:
-                bundle.add(project_root / "worker_agent", arcname="worker_agent")
+                _add_worker_python_runtime(bundle, project_root)
                 bundle.add(
                     project_root / "scripts/install_adb_proxy_source_worker.sh",
                     arcname="scripts/install_adb_proxy_source_worker.sh",
@@ -581,7 +590,7 @@ async def deploy_worker(
             ) as temporary:
                 archive_path = Path(temporary.name)
             with tarfile.open(archive_path, "w:gz") as bundle:
-                bundle.add(project_root / "worker_agent", arcname="worker_agent")
+                _add_worker_python_runtime(bundle, project_root)
                 bundle.add(
                     project_root / "scripts/install_cluster_worker.sh",
                     arcname="scripts/install_cluster_worker.sh",

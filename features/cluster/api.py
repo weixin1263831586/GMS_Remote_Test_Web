@@ -124,6 +124,7 @@ def heartbeat(worker_id: str, body: WorkerHeartbeat, authorization: str | None =
     if worker is None:
         raise HTTPException(404, "worker is not registered")
     try:
+        from features.devices.adb_proxy_service import adb_proxy_service
         from features.devices.integrations_api import (
             reconcile_cluster_usbip_heartbeat,
         )
@@ -132,6 +133,7 @@ def heartbeat(worker_id: str, body: WorkerHeartbeat, authorization: str | None =
             worker_id,
             [item.model_dump() for item in body.devices],
         )
+        adb_proxy_service.observe_worker(worker_id, body.adb_proxy)
     except Exception:
         logger.warning(
             "Failed to reconcile USB/IP inventory for Worker %s",
@@ -550,6 +552,12 @@ async def _run_worker_command(worker_id: str, command_type: str, payload: dict, 
         current = service().repository.get_command(command["id"])
         if current and current["status"] in {"completed", "failed", "cancelled"}:
             if current["status"] != "completed":
+                result = current.get("result") or {}
+                if result.get("error_code"):
+                    raise HTTPException(502, {
+                        "message": current.get("error") or "worker command failed",
+                        **result,
+                    })
                 raise HTTPException(502, current.get("error") or "worker command failed")
             return current.get("result") or {}
     raise HTTPException(504, "worker command timed out")

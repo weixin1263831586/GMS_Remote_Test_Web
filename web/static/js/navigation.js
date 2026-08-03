@@ -95,10 +95,17 @@ let usbipReconnectWaiting = false;
 let usbipOperationGeneration = 0;
 let adbProxyStatus = null;
 let adbProxyOperationRunning = false;
+let adbProxyDeviceRefreshTimer = null;
+let adbProxyDeviceRefreshRunning = false;
+let usbipSourceRefreshTimer = null;
+let usbipSourceRefreshRunning = false;
+let usbipRoutingOperationRunning = false;
+const usbipPendingAssignmentKeys = new Set();
 const USBIP_RECONNECT_MAX_ATTEMPTS = 30;
 const USBIP_RECONNECT_INTERVAL_MS = 5000;
 const USBIP_RECONNECT_INITIAL_DELAY_MS = 1500;
 const USBIP_MANUAL_DISCONNECT_SUPPRESS_MS = 5 * 60 * 1000;
+const DEVICE_ROUTING_REFRESH_INTERVAL_MS = 3000;
 
 const PARAM_TYPES = {
     STRING: 'string',
@@ -4140,7 +4147,7 @@ async function remountDevices() {
 
 async function connectWifi() {
     if (!validateDeviceSelection()) return;
-    // 预填 config.wifi 的默认 SSID/密码（已在 loadConfig() 中加载）
+    // 预填 config.wifi 的默认 SSID/密码（管理员在 /api/config/read 中拿到明文密码）
     const wifi = state.config?.wifi || {};
     const ssidInput = document.getElementById('wifi-ssid');
     const pwdInput = document.getElementById('wifi-password');
@@ -5420,6 +5427,7 @@ async function openAdbProxyModal() {
     message.textContent = '正在读取设备来源和接入主机...';
     submit.disabled = true;
     ModalManager.open('adb-proxy-modal');
+    startAdbProxyDeviceRefresh();
     try {
         adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
         state.adbForwardRunning = Boolean(adbProxyStatus.connected);
@@ -5434,7 +5442,57 @@ async function openAdbProxyModal() {
 }
 
 function closeAdbProxyModal() {
+    stopAdbProxyDeviceRefresh();
     ModalManager.close('adb-proxy-modal');
+}
+
+function adbProxySelectionSnapshot() {
+    const deviceSelect = document.getElementById('adb-proxy-source-devices');
+    return {
+        sourceWorkerId: document.getElementById('adb-proxy-source-host')?.value || '',
+        targetWorkerId: document.getElementById('adb-proxy-target-host')?.value || '',
+        knownDeviceSerials: new Set(
+            Array.from(deviceSelect?.options || []).map(option => option.value).filter(Boolean)
+        ),
+        selectedDeviceSerials: new Set(
+            Array.from(deviceSelect?.selectedOptions || []).map(option => option.value).filter(Boolean)
+        ),
+    };
+}
+
+function stopAdbProxyDeviceRefresh() {
+    if (adbProxyDeviceRefreshTimer) clearInterval(adbProxyDeviceRefreshTimer);
+    adbProxyDeviceRefreshTimer = null;
+    adbProxyDeviceRefreshRunning = false;
+}
+
+function startAdbProxyDeviceRefresh() {
+    stopAdbProxyDeviceRefresh();
+    const refresh = async () => {
+        if (
+            !ModalManager.isOpen('adb-proxy-modal')
+            || adbProxyDeviceRefreshRunning
+            || adbProxyOperationRunning
+        ) return;
+        adbProxyDeviceRefreshRunning = true;
+        const selection = adbProxySelectionSnapshot();
+        try {
+            adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
+            state.adbForwardRunning = Boolean(adbProxyStatus.connected);
+            renderAdbProxyAssignments();
+            renderAdbProxyHosts(selection);
+            updateAdbProxyButton();
+        } catch (error) {
+            debugLog('[ADB Proxy] automatic source refresh failed:', error.message);
+        } finally {
+            adbProxyDeviceRefreshRunning = false;
+        }
+    };
+    adbProxyDeviceRefreshTimer = setInterval(
+        () => void refresh(),
+        DEVICE_ROUTING_REFRESH_INTERVAL_MS
+    );
+    ModalManager.onClose('adb-proxy-modal', stopAdbProxyDeviceRefresh);
 }
 
 function adbProxyHostLabel(host) {
@@ -5543,45 +5601,36 @@ async function deployAdbProxyUbuntuSource() {
     }
 }
 
-function renderAdbProxyHosts() {
+function renderAdbProxyHosts(selection = null) {
     const sourceSelect = document.getElementById('adb-proxy-source-host');
     const targetSelect = document.getElementById('adb-proxy-target-host');
     const message = document.getElementById('adb-proxy-message');
     if (!sourceSelect || !targetSelect || !adbProxyStatus) return;
+    const previousSource = selection?.sourceWorkerId || sourceSelect.value;
     const hosts = adbProxyStatus.hosts || [];
     const activeAssignments = adbProxyStatus.assignments || [];
     const activeTargets = new Set(
         activeAssignments.map(item => item.target_worker_id)
     );
-    const assignedBySource = new Map(
-        activeAssignments.map(item => [
-            item.source_worker_id,
-            new Set(item.devices || [])
-        ])
-    );
     const capable = hosts.filter(host => (
         host.adb_proxy && host.status === 'online'
     ));
-    const sourceHosts = capable.filter(host => (
-        !activeTargets.has(host.worker_id)
-        && (
-            host.adb_proxy_source_only
-            || (host.devices || []).some(device => (
-                device.state === 'available'
-                && device.transport !== 'adb_proxy'
-                && !assignedBySource.get(host.worker_id)?.has(device.serial)
-            ))
-        )
-    ));
+    // Keep an online source selectable while its last device is unplugged, so
+    // the open modal can show the device again as soon as a heartbeat reports
+    // the hotplug event. Targets that currently aggregate a source remain
+    // excluded from becoming sources themselves.
+    const sourceHosts = capable.filter(host => !activeTargets.has(host.worker_id));
     sourceSelect.replaceChildren();
     sourceHosts.forEach(host => sourceSelect.append(
         new Option(adbProxyHostLabel(host), host.worker_id)
     ));
     if (!sourceHosts.length) {
         sourceSelect.append(new Option('没有可用的ADB设备来源', ''));
+    } else if (sourceHosts.some(host => host.worker_id === previousSource)) {
+        sourceSelect.value = previousSource;
     }
 
-    renderAdbProxySourceDevices();
+    renderAdbProxySourceDevices(selection);
     if (!adbProxyStatus.cluster_enabled && capable.length < 2) {
         message.textContent = (
             '单机模式下本机ADB设备已直接可用，无需再次接入。若设备连接在另一台Ubuntu主机，'
@@ -5590,7 +5639,7 @@ function renderAdbProxyHosts() {
     }
 }
 
-function renderAdbProxySourceDevices() {
+function renderAdbProxySourceDevices(selection = null) {
     const sourceId = document.getElementById('adb-proxy-source-host')?.value || '';
     const targetSelect = document.getElementById('adb-proxy-target-host');
     const deviceSelect = document.getElementById('adb-proxy-source-devices');
@@ -5608,7 +5657,7 @@ function renderAdbProxySourceDevices() {
     const capable = (adbProxyStatus?.hosts || []).filter(item => (
         item.adb_proxy && item.status === 'online'
     ));
-    const previousTarget = targetSelect.value;
+    const previousTarget = selection?.targetWorkerId || targetSelect.value;
     const targetHosts = existingAssignment
         ? capable.filter(item => (
             item.worker_id === existingAssignment.target_worker_id
@@ -5647,7 +5696,9 @@ function renderAdbProxySourceDevices() {
             `${device.serial}${detail ? ` · ${detail}` : ''}`,
             device.serial
         );
-        option.selected = true;
+        option.selected = selection?.knownDeviceSerials?.has(device.serial)
+            ? selection.selectedDeviceSerials.has(device.serial)
+            : true;
         deviceSelect.append(option);
     });
     if (!devices.length) {
@@ -5683,8 +5734,10 @@ async function refreshAdbProxyAssignments() {
     const container = document.getElementById('adb-proxy-assignments');
     if (container) container.textContent = '正在刷新接入状态...';
     try {
+        const selection = adbProxySelectionSnapshot();
         adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
         renderAdbProxyAssignments();
+        renderAdbProxyHosts(selection);
     } catch (error) {
         if (container) container.textContent = `刷新失败: ${error.message}`;
     }
@@ -5702,7 +5755,8 @@ function renderAdbProxyAssignments() {
     assignments.forEach(assignment => {
         const row = document.createElement('div');
         row.className = 'adb-proxy-assignment';
-        if (['connected', 'connecting', 'connect_failed', 'disconnect_failed', 'host_offline'].includes(assignment.status)) {
+        if (['connected', 'connecting', 'connect_failed', 'disconnect_failed', 'host_offline',
+            'recovering', 'degraded_source', 'degraded_target', 'device_missing'].includes(assignment.status)) {
             row.classList.add(`routing-status-${assignment.status}`);
         }
         const info = document.createElement('div');
@@ -5713,6 +5767,10 @@ function renderAdbProxyAssignments() {
             connect_failed: '接入失败',
             disconnect_failed: '断开失败，需重试',
             host_offline: '主机离线',
+            recovering: '正在核对',
+            degraded_source: '来源代理异常',
+            degraded_target: '目标Hub异常',
+            device_missing: '目标设备缺失',
         };
         const status = statusLabels[assignment.status] || '';
         info.textContent = (
@@ -5720,6 +5778,24 @@ function renderAdbProxyAssignments() {
             + `｜设备：${(assignment.devices || []).join(', ') || '无'}`
             + (status ? `｜${status}` : '')
         );
+        const actions = document.createElement('div');
+        actions.className = 'device-routing-actions';
+        const canInspectFailure = [
+            'connect_failed',
+            'disconnect_failed',
+            'host_offline',
+            'degraded_source',
+            'degraded_target',
+            'device_missing',
+        ].includes(assignment.status);
+        if (canInspectFailure) {
+            const inspectFailure = document.createElement('button');
+            inspectFailure.type = 'button';
+            inspectFailure.className = 'btn-xxs';
+            inspectFailure.textContent = '查看原因';
+            inspectFailure.addEventListener('click', () => showAdbProxyDiagnostics(assignment));
+            actions.append(inspectFailure);
+        }
         const disconnect = document.createElement('button');
         disconnect.type = 'button';
         disconnect.className = 'btn-xxs btn-danger';
@@ -5729,9 +5805,53 @@ function renderAdbProxyAssignments() {
             assignment.source_worker_id,
             assignment.target_worker_id
         ));
-        row.append(info, disconnect);
+        actions.append(disconnect);
+        row.append(info, actions);
         container.append(row);
     });
+}
+
+async function showAdbProxyDiagnostics(assignment) {
+    const {modal, modalId} = createAnalysisModal(
+        'adb-proxy-diagnostics',
+        'ADB Proxy 诊断',
+        '正在读取双端状态和最近日志...'
+    );
+    try {
+        const workers = Array.from(new Set([
+            assignment.source_worker_id,
+            assignment.target_worker_id,
+        ].filter(Boolean)));
+        const logs = await Promise.all(workers.map(workerId => apiCall(
+            '/api/adb-forward/logs?worker_id=' + encodeURIComponent(workerId),
+            'GET'
+        )));
+        const body = modal.querySelector('.modal-body');
+        body.replaceChildren();
+        const status = document.createElement('pre');
+        status.className = 'transport-diagnostics-output';
+        status.textContent = JSON.stringify({
+            status: assignment.status,
+            generation: assignment.generation || 0,
+            health: assignment.health || {},
+        }, null, 2);
+        body.append(status);
+        logs.forEach(item => {
+            const heading = document.createElement('h4');
+            heading.textContent = item.worker_id;
+            const output = document.createElement('pre');
+            output.className = 'transport-diagnostics-output';
+            output.textContent = [
+                ...(item.notice ? [`说明：${item.notice}`] : []),
+                '--- proxy.log ---', ...(item.proxy || []),
+                '--- hub.log ---', ...(item.hub || []),
+            ].join('\n');
+            body.append(heading, output);
+        });
+    } catch (error) {
+        showModalError(modal, error.message);
+    }
+    ModalManager.onClose(modalId, () => modal.remove());
 }
 
 async function submitAdbProxyConnect() {
@@ -5843,12 +5963,37 @@ function usbipAssignmentLabel(selection, busid) {
         attached: '已接入',
         unknown: '状态待确认',
         cleanup_required: '需断开清理',
+        detaching: '正在断开',
     };
     return (
         `${selection.device_host} → ${selection.worker_id || 'Controller'} · ${busid}`
         + `｜设备：${serials.join('、') || '尚未识别'}`
         + `｜${statusLabels[rawStatus] || rawStatus}`
     );
+}
+
+function usbipAssignmentOperationKey(selection) {
+    const host = String(selection?.device_host || '');
+    const worker = String(selection?.worker_id || workspaceLocalWorkerId());
+    const busids = (selection?.busids || [])
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+        .sort()
+        .join(',') || '*';
+    return `${host}|${worker}|${busids}`;
+}
+
+function updateUsbipAssignmentOperationButtons() {
+    document.querySelectorAll('[data-usbip-operation-key]').forEach(button => {
+        const pending = usbipPendingAssignmentKeys.has(
+            button.dataset.usbipOperationKey
+        );
+        const detaching = button.dataset.usbipDetaching === 'true';
+        button.disabled = usbipRoutingOperationRunning || pending || detaching;
+        button.textContent = pending || detaching
+            ? '断开中...'
+            : button.dataset.usbipIdleLabel || '断开';
+    });
 }
 
 async function refreshUsbipAssignments() {
@@ -5895,20 +6040,36 @@ async function loadUsbipAssignments() {
             const assignmentStatus = selection?.statuses_by_busid?.[busid]
                 || selection?.status
                 || 'attached';
-            if (['attaching', 'attached', 'unknown', 'cleanup_required'].includes(assignmentStatus)) {
+            if (['attaching', 'attached', 'unknown', 'cleanup_required', 'detaching'].includes(assignmentStatus)) {
                 row.classList.add(`routing-status-${assignmentStatus}`);
             }
             const info = document.createElement('div');
             info.className = 'adb-proxy-assignment-info';
             info.textContent = usbipAssignmentLabel(selection, busid);
+            const actions = document.createElement('div');
+            actions.className = 'device-routing-actions';
+            if (['unknown', 'cleanup_required'].includes(assignmentStatus)) {
+                const inspectFailure = document.createElement('button');
+                inspectFailure.type = 'button';
+                inspectFailure.className = 'btn-xxs';
+                inspectFailure.textContent = '查看原因';
+                inspectFailure.addEventListener('click', () => showUsbipDiagnostics(selection));
+                actions.append(inspectFailure);
+            }
             const disconnect = document.createElement('button');
             disconnect.type = 'button';
             disconnect.className = 'btn-xxs btn-danger';
-            disconnect.textContent = '断开';
+            const idleLabel = assignmentStatus === 'cleanup_required'
+                ? '清理' : assignmentStatus === 'unknown' ? '核对并断开' : '断开';
+            disconnect.textContent = idleLabel;
+            disconnect.dataset.usbipOperationKey = usbipAssignmentOperationKey(selection);
+            disconnect.dataset.usbipIdleLabel = idleLabel;
+            disconnect.dataset.usbipDetaching = String(assignmentStatus === 'detaching');
             disconnect.addEventListener('click', async () => {
                 await performUsbipDisconnect([selection]);
             });
-            row.append(info, disconnect);
+            actions.append(disconnect);
+            row.append(info, actions);
             container.append(row);
         });
         if (!rows.length && status.connected) {
@@ -5925,6 +6086,9 @@ async function loadUsbipAssignments() {
             disconnect.type = 'button';
             disconnect.className = 'btn-xxs btn-danger';
             disconnect.textContent = '断开';
+            disconnect.dataset.usbipOperationKey = usbipAssignmentOperationKey(legacy);
+            disconnect.dataset.usbipIdleLabel = '断开';
+            disconnect.dataset.usbipDetaching = 'false';
             disconnect.addEventListener('click', async () => {
                 await performUsbipDisconnect([legacy]);
             });
@@ -5936,9 +6100,48 @@ async function loadUsbipAssignments() {
         }
         state.usbipConnected = Boolean(rows.length || status.connected);
         updateUsbipButtonStatus(state.usbipConnected);
+        updateUsbipAssignmentOperationButtons();
     } catch (error) {
         container.textContent = `读取USB/IP接入状态失败：${error.message}`;
     }
+}
+
+async function showUsbipDiagnostics(selection) {
+    const {modal, modalId} = createAnalysisModal(
+        'usbip-diagnostics',
+        'USB/IP 诊断',
+        '正在读取传输、协议和网络质量状态...'
+    );
+    try {
+        const status = await apiCall(
+            '/api/usbip/status?device_host=' + encodeURIComponent(selection.device_host),
+            'GET'
+        );
+        const body = modal.querySelector('.modal-body');
+        body.replaceChildren();
+        const output = document.createElement('pre');
+        output.className = 'transport-diagnostics-output';
+        output.textContent = JSON.stringify(status, null, 2);
+        const download = document.createElement('button');
+        download.type = 'button';
+        download.className = 'btn-xxs btn-primary';
+        download.textContent = '导出诊断 JSON';
+        download.addEventListener('click', () => {
+            const blob = new Blob([JSON.stringify(status, null, 2)], {
+                type: 'application/json'
+            });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = `usbip-diagnostics-${Date.now()}.json`;
+            anchor.click();
+            URL.revokeObjectURL(url);
+        });
+        body.append(download, output);
+    } catch (error) {
+        showModalError(modal, error.message);
+    }
+    ModalManager.onClose(modalId, () => modal.remove());
 }
 
 async function openUsbipDetachModal() {
@@ -5958,8 +6161,22 @@ async function submitUsbipDetach() {
 }
 
 async function performUsbipDisconnect(selections) {
+    const operationKeys = Array.from(new Set(
+        (selections || []).map(usbipAssignmentOperationKey)
+    ));
+    if (!operationKeys.length) return;
+    if (
+        usbipRoutingOperationRunning
+        || operationKeys.some(key => usbipPendingAssignmentKeys.has(key))
+    ) {
+        showToast('USB/IP操作正在进行，请等待完成', 'warning');
+        return;
+    }
     const btn = $('usbip-btn');
     const operationGeneration = ++usbipOperationGeneration;
+    usbipRoutingOperationRunning = true;
+    operationKeys.forEach(key => usbipPendingAssignmentKeys.add(key));
+    updateUsbipAssignmentOperationButtons();
     try {
         btn.textContent = '📱 断开中...';
         btn.disabled = true;
@@ -6021,14 +6238,11 @@ async function performUsbipDisconnect(selections) {
             usbipSourceDeviceCache.delete(selection.device_host);
         });
         await loadUsbipAssignments();
-        await loadUsbipSourceDevices(true);
-        btn.disabled = false;
-        // Refresh the global device list immediately after the backend confirms
-        // the disconnect. Remote Worker detachments do not emit a local USB
-        // hotplug event, so without this the UI keeps showing the detached
-        // device until the slower background poll notices it is gone.
-        await loadDevices(true);
-        void refreshUsbipDetachedWorkers(
+        // Source USB enumeration and the global ADB refresh can take tens of
+        // seconds after a detach.  The backend has already confirmed the
+        // operation, so release the UI now and finish those reads in the
+        // background instead of holding the connect button disabled.
+        void refreshUsbipAfterDisconnect(
             workerBaselines,
             expectedUsbipSerials,
             operationGeneration
@@ -6042,7 +6256,32 @@ async function performUsbipDisconnect(selections) {
         btn.textContent = '📱 断开设备';
         btn.disabled = false;
         addLogEntry('停止 USB/IP 失败: ' + error.message, 'error');
+    } finally {
+        operationKeys.forEach(key => usbipPendingAssignmentKeys.delete(key));
+        usbipRoutingOperationRunning = false;
+        if (btn) btn.disabled = false;
+        updateUsbipAssignmentOperationButtons();
     }
+}
+
+async function refreshUsbipAfterDisconnect(
+    workerBaselines,
+    expectedUsbipSerials,
+    operationGeneration
+) {
+    await Promise.allSettled([
+        loadUsbipSourceDevices(true, {
+            silent: true,
+            preserveSelection: true,
+        }),
+        loadDevices(true, {silent: true}),
+    ]);
+    if (operationGeneration !== usbipOperationGeneration) return;
+    await refreshUsbipDetachedWorkers(
+        workerBaselines,
+        expectedUsbipSerials,
+        operationGeneration
+    );
 }
 
 async function refreshUsbipDetachedWorkers(
@@ -6179,13 +6418,52 @@ async function openUsbipAttachModal() {
     // Source enumeration also repairs older assignments that were persisted
     // before ADB exposed their serial. Refresh the current rows afterwards.
     await loadUsbipAssignments();
+    startUsbipSourceRefresh();
 }
 
 function closeUsbipAttachModal() {
+    stopUsbipSourceRefresh();
     ModalManager.close('usbip-attach-modal');
 }
 
+function stopUsbipSourceRefresh() {
+    if (usbipSourceRefreshTimer) clearInterval(usbipSourceRefreshTimer);
+    usbipSourceRefreshTimer = null;
+    usbipSourceRefreshRunning = false;
+}
+
+function startUsbipSourceRefresh() {
+    stopUsbipSourceRefresh();
+    const refresh = async () => {
+        if (
+            !ModalManager.isOpen('usbip-attach-modal')
+            || usbipSourceRefreshRunning
+            || usbipRoutingOperationRunning
+        ) return;
+        usbipSourceRefreshRunning = true;
+        try {
+            await loadUsbipSourceDevices(true, {
+                silent: true,
+                preserveSelection: true,
+            });
+        } catch (error) {
+            debugLog('[USB/IP] automatic source refresh failed:', error.message);
+        } finally {
+            usbipSourceRefreshRunning = false;
+        }
+    };
+    usbipSourceRefreshTimer = setInterval(
+        () => void refresh(),
+        DEVICE_ROUTING_REFRESH_INTERVAL_MS
+    );
+    ModalManager.onClose('usbip-attach-modal', stopUsbipSourceRefresh);
+}
+
 async function submitUsbipAttach() {
+    if (usbipRoutingOperationRunning) {
+        showToast('USB/IP操作正在进行，请等待完成', 'warning');
+        return;
+    }
     const deviceHost = document.getElementById('usbip-source-host')?.value || '';
     const workerId = document.getElementById('usbip-target-worker')?.value || '';
     const busids = Array.from(
@@ -6221,17 +6499,29 @@ async function submitUsbipAttach() {
     }
 }
 
-async function loadUsbipSourceDevices(force = false) {
+async function loadUsbipSourceDevices(force = false, options = {}) {
     const source = document.getElementById('usbip-source-host')?.value || '';
     const select = document.getElementById('usbip-source-device');
     const message = document.getElementById('usbip-attach-message');
     if (!select) return;
-    select.disabled = true;
-    select.innerHTML = '<option value="">正在读取USB设备...</option>';
+    const knownBusids = new Set(
+        Array.from(select.options || []).map(option => option.value).filter(Boolean)
+    );
+    const selectedBusids = new Set(
+        Array.from(select.selectedOptions || []).map(option => option.value).filter(Boolean)
+    );
+    if (!options.silent) {
+        select.disabled = true;
+        select.innerHTML = '<option value="">正在读取USB设备...</option>';
+    }
     if (!source) return;
     const cached = usbipSourceDeviceCache.get(source);
     if (!force && cached && Date.now() - cached.timestamp < 5000) {
-        renderUsbipSourceDevices(source, cached.devices);
+        renderUsbipSourceDevices(source, cached.devices, {
+            ...options,
+            knownBusids,
+            selectedBusids,
+        });
         return;
     }
     if (usbipSourceLoadPromise?.source === source) {
@@ -6247,11 +6537,19 @@ async function loadUsbipSourceDevices(force = false) {
         const result = await request;
         const devices = result.devices || [];
         usbipSourceDeviceCache.set(source, {timestamp: Date.now(), devices});
-        renderUsbipSourceDevices(source, devices);
+        renderUsbipSourceDevices(source, devices, {
+            ...options,
+            knownBusids,
+            selectedBusids,
+        });
     } catch (error) {
-        select.innerHTML = '<option value="">USB设备加载失败</option>';
-        if (message) message.textContent = `USB设备加载失败：${error.message}`;
-        if (error.needPassword || error.need_password) {
+        if (options.silent) {
+            debugLog('[USB/IP] source device polling failed:', error.message);
+        } else {
+            select.innerHTML = '<option value="">USB设备加载失败</option>';
+            if (message) message.textContent = `USB设备加载失败：${error.message}`;
+        }
+        if (!options.silent && (error.needPassword || error.need_password)) {
             showDevicePasswordModal(source, 'usbip-list', loadUsbipSourceDevices);
         }
     } finally {
@@ -6261,7 +6559,7 @@ async function loadUsbipSourceDevices(force = false) {
     }
 }
 
-function renderUsbipSourceDevices(source, devices) {
+function renderUsbipSourceDevices(source, devices, options = {}) {
     if (document.getElementById('usbip-source-host')?.value !== source) return;
     const select = document.getElementById('usbip-source-device');
     const message = document.getElementById('usbip-attach-message');
@@ -6271,7 +6569,9 @@ function renderUsbipSourceDevices(source, devices) {
     const availableDevices = devices.filter(device => !assignedBusids.has(device.busid));
     availableDevices.forEach(device => {
         const option = new Option(device.label || device.busid, device.busid);
-        option.selected = true;
+        option.selected = options.preserveSelection && options.knownBusids?.has(device.busid)
+            ? options.selectedBusids.has(device.busid)
+            : true;
         select.append(option);
     });
     if (!availableDevices.length) {
@@ -6281,6 +6581,14 @@ function renderUsbipSourceDevices(source, devices) {
         ));
     }
     select.disabled = !availableDevices.length;
+    const submit = document.getElementById('usbip-attach-submit');
+    if (submit) {
+        submit.disabled = (
+            usbipRoutingOperationRunning
+            || !availableDevices.length
+            || !select.value
+        );
+    }
     if (message) message.textContent = availableDevices.length
         ? `发现 ${availableDevices.length} 个可接入 USB 设备。多选时，Windows/Linux 按住 Ctrl，macOS 按住 Command。`
         : devices.length
@@ -6289,8 +6597,14 @@ function renderUsbipSourceDevices(source, devices) {
 }
 
 async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
+    if (usbipRoutingOperationRunning) {
+        showToast('USB/IP操作正在进行，请等待完成', 'warning');
+        return;
+    }
     const btn = $('usbip-btn');
     const operationGeneration = ++usbipOperationGeneration;
+    usbipRoutingOperationRunning = true;
+    updateUsbipAssignmentOperationButtons();
     activeUsbipSelection = {device_host: deviceHost, worker_id: workerId, busids};
     debugLog('[USB/IP] Connecting source:', deviceHost);
     try {
@@ -6322,6 +6636,15 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
             btn.textContent = '📱 断开设备';
             btn.disabled = false;
             addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
+            if (['warning', 'poor'].includes(result.network_quality?.rating)) {
+                addLogEntry(
+                    `USB/IP网络质量${result.network_quality.rating === 'poor' ? '较差' : '一般'}：`
+                    + `RTT ${result.network_quality.average_rtt_ms ?? '-'}ms，`
+                    + `丢包 ${result.network_quality.loss_percent ?? '-'}%；`
+                    + '完整CTS或大流量操作建议改在来源Worker本地执行',
+                    'warning'
+                );
+            }
             usbipSourceDeviceCache.delete(deviceHost);
             await loadUsbipAssignments();
             await loadUsbipSourceDevices(true);
@@ -6346,7 +6669,13 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
             addLogEntry('启动 USB/IP 失败: ' + (result.error || '未知错误'), 'error');
         } else {
             activeUsbipSelection = null;
-            addLogEntry('启动 USB/IP 失败: ' + (result.error || result.message || '未知错误'), 'error');
+            const remediation = result.remediation ? `；建议：${result.remediation}` : '';
+            addLogEntry(
+                '启动 USB/IP 失败: '
+                + (result.error || result.message || '未知错误')
+                + remediation,
+                'error'
+            );
         }
     } catch (error) {
         btn.textContent = '📱 本地设备';
@@ -6360,7 +6689,11 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
         } else {
             activeUsbipSelection = null;
         }
-        addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
+        const remediation = error.remediation ? `；建议：${error.remediation}` : '';
+        addLogEntry('启动 USB/IP 失败: ' + error.message + remediation, 'error');
+    } finally {
+        usbipRoutingOperationRunning = false;
+        updateUsbipAssignmentOperationButtons();
     }
 }
 
@@ -6387,7 +6720,9 @@ async function refreshUsbipTargetWorker(
             await loadDevices(true);
             if (operationGeneration !== usbipOperationGeneration) return;
             const visible = new Set(
-                state.devices.map(device => String(device.serial || device.device_id || ''))
+                state.devices.map(device => (
+                    String(device.serial || device.device_id || '').split(':').pop()
+                ))
             );
             const discoveredSerials = expectedSerials.length
                 ? expectedSerials.filter(serial => visible.has(serial))

@@ -140,6 +140,7 @@ class LocalWorkerBridge:
                 "cts": True, "gts": True, "vts": True, "sts": True,
                 "adb_proxy": bool(adb_proxy.get("installed")),
                 "adb_proxy_version": str(adb_proxy.get("version") or ""),
+                "adb_proxy_logs": True,
                 "ssh_user": ubuntu_user or getpass.getuser(),
                 "novnc_port": int(os.getenv("GMS_NOVNC_PORT", "6080")),
             },
@@ -169,7 +170,7 @@ class LocalWorkerBridge:
         if self._real_agent_active():
             return
         from features.devices.adb_proxy_security import local_proxy_secret
-        from worker_agent.adb_proxy import recover_managed_state
+        from worker_agent.adb_proxy import execute_adb_proxy_action, recover_managed_state
 
         try:
             recovery = recover_managed_state(secret=local_proxy_secret())
@@ -191,16 +192,35 @@ class LocalWorkerBridge:
         if include_suites:
             self._suites = _scan_suites(_suite_roots())
             self._last_suite_scan = now_mono
+        try:
+            adb_proxy_status = execute_adb_proxy_action("status")
+        except Exception as exc:
+            logger.warning("local ADB Proxy status probe failed: %s", exc)
+            adb_proxy_status = {
+                "transport_state": "failed",
+                "protocol_state": "unknown",
+                "readiness": "not_ready",
+                "error": str(exc),
+            }
         payload: dict[str, Any] = {
             "agent_version": AGENT_VERSION,
             **_host_metrics(),
             "running_jobs": discover_tradefed_processes(),
             "devices": _probe_devices(),
+            "adb_proxy": adb_proxy_status,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         if include_suites:
             payload["suites"] = self._suites
         result = self.repository.heartbeat(self.worker_id, payload)
+        try:
+            from features.devices.adb_proxy_service import adb_proxy_service
+
+            adb_proxy_service.observe_worker(
+                self.worker_id, payload.get("adb_proxy") or {}
+            )
+        except Exception:
+            logger.warning("local ADB Proxy status reconcile failed", exc_info=True)
         if result is None:
             self._registered = False
 

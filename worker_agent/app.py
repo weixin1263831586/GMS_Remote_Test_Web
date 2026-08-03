@@ -13,6 +13,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from foundation.network_quality import probe_tcp_quality
+from foundation.transport_contract import TransportOperationError
+
 from .adb_proxy import (
     capability_status as adb_proxy_capability_status,
 )
@@ -118,6 +121,19 @@ def _port_listening(port: int) -> bool:
     return f":{port} " in result.stdout
 
 
+def _safe_adb_proxy_status() -> dict:
+    try:
+        return execute_adb_proxy_action("status")
+    except Exception as exc:
+        logger.warning("ADB Proxy status probe failed: %s", exc)
+        return {
+            "transport_state": "failed",
+            "protocol_state": "unknown",
+            "readiness": "not_ready",
+            "error": str(exc),
+        }
+
+
 class WorkerAgent:
     def __init__(self, config: WorkerConfig):
         self.config = config
@@ -146,9 +162,11 @@ class WorkerAgent:
                             shutil.which("usbip") is not None
                             and os.access("/usr/local/libexec/gms-worker-usbip", os.X_OK)
                         ),
+                        "usbip_preflight": True,
                         "aapt2": has_aapt2,
                         "adb_proxy": bool(adb_proxy.get("installed")),
                         "adb_proxy_version": str(adb_proxy.get("version") or ""),
+                        "adb_proxy_logs": True,
                         "adb_proxy_source_only": self.config.source_only,
                         "ssh_user": self.config.ssh_user or getpass.getuser()}
         if self.config.source_only:
@@ -161,6 +179,7 @@ class WorkerAgent:
                 "sts": False,
                 "device_inspection": False,
                 "usbip_client": False,
+                "usbip_preflight": False,
                 "aapt2": False,
             })
         # noVNC 能力要求端口开放且 RFB 握手有效。
@@ -214,6 +233,7 @@ class WorkerAgent:
         command_states = self.runtime.unsynced_commands()
         payload = {"agent_version": AGENT_VERSION, **host_metrics(self.config),
                    "running_jobs": running_jobs, "devices": probe_devices(include_details=True),
+                   "adb_proxy": _safe_adb_proxy_status(),
                    "session_id": self.client.session_id or self.session_id,
                    "connection_generation": self.client.connection_generation,
                    "command_states": command_states,
@@ -301,6 +321,12 @@ class WorkerAgent:
                     daemon=True,
                 ).start()
                 return
+            elif kind == "usbip_preflight":
+                payload = command.get("payload", {})
+                source_host = str(payload.get("source_host") or "").strip("[]")
+                result = {
+                    "network_quality": probe_tcp_quality(source_host, 3240)
+                }
             elif kind == "suite_action":
                 if command.get("payload", {}).get("action") in {"download_url", "extract"}:
                     self.runtime.save_command(command["id"], "running", {})
@@ -484,11 +510,32 @@ class WorkerAgent:
             payload = command.get("payload", {})
             kind = command.get("command_type", "")
             with self.usbip_operation_lock:
-                result = execute_usbip_action(
+                requested_generation = int(payload.get("generation") or 0)
+                source_value = str(payload.get("source_host") or "")
+                selected_busids = {str(item) for item in payload.get("busids") or []}
+                newer = [
+                    item for item in self.runtime.usbip_assignments()
+                    if str(item.get("source_host") or "") == source_value
+                    and str(item.get("busid") or "") in selected_busids
+                    and int(item.get("generation") or 0) > requested_generation
+                ]
+                if newer:
+                    raise TransportOperationError(
+                        "TRANSPORT_STALE_GENERATION",
+                        "已拒绝过期的USB/IP操作结果",
+                        details={"generation": requested_generation},
+                    )
+                execute_args = [
                     "attach" if kind == "usbip_attach" else "detach",
                     str(payload.get("source_host") or ""),
                     list(payload.get("busids") or []),
                     str(payload.get("adb_server_socket") or "") or None,
+                ]
+                generation = int(payload.get("generation") or 0)
+                result = (
+                    execute_usbip_action(*execute_args, generation)
+                    if generation
+                    else execute_usbip_action(*execute_args)
                 )
                 source_host = str(payload.get("source_host") or "")
                 busids = list(payload.get("busids") or [])
@@ -497,6 +544,7 @@ class WorkerAgent:
                         source_host,
                         busids,
                         str(payload.get("adb_server_socket") or ""),
+                        int(payload.get("generation") or 0),
                     )
                 else:
                     self.runtime.forget_usbip_assignments(source_host, busids)
@@ -514,10 +562,15 @@ class WorkerAgent:
         except Exception as exc:
             logger.exception("USB/IP command %s failed", command.get("id"))
             error = str(exc)
-            self.runtime.save_command(command["id"], "failed", error=error)
+            error_result = (
+                exc.as_dict() if isinstance(exc, TransportOperationError) else {}
+            )
+            self.runtime.save_command(
+                command["id"], "failed", error_result, error=error
+            )
             self._retry(
                 lambda: self._ack_command(
-                    command["id"], "failed", error=error
+                    command["id"], "failed", error_result, error=error
                 )
             )
         finally:
@@ -546,12 +599,14 @@ class WorkerAgent:
                 if not source_host or not selected:
                     continue
                 try:
-                    execute_usbip_action(
-                        "attach",
-                        source_host,
-                        selected,
-                        adb_server_socket or None,
-                    )
+                    generation = int(assignment.get("generation") or 0)
+                    execute_args = [
+                        "attach", source_host, selected, adb_server_socket or None
+                    ]
+                    if generation:
+                        execute_usbip_action(*execute_args, generation)
+                    else:
+                        execute_usbip_action(*execute_args)
                     recovered.extend(
                         f"{source_host}:{busid}" for busid in selected
                     )

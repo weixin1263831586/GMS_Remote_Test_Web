@@ -53,8 +53,19 @@ class WorkerRuntime:
             conn.execute("""CREATE TABLE IF NOT EXISTS usbip_assignments (
                 source_host TEXT NOT NULL, busid TEXT NOT NULL,
                 adb_server_socket TEXT NOT NULL DEFAULT '',
+                generation INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY(source_host,busid))""")
+            usbip_columns = {
+                row[1] for row in conn.execute(
+                    "PRAGMA table_info(usbip_assignments)"
+                ).fetchall()
+            }
+            if "generation" not in usbip_columns:
+                conn.execute(
+                    "ALTER TABLE usbip_assignments "
+                    "ADD COLUMN generation INTEGER NOT NULL DEFAULT 0"
+                )
 
     def connect(self):
         conn = sqlite3.connect(self.db_path)
@@ -66,9 +77,13 @@ class WorkerRuntime:
         source_host: str,
         busids: list[str],
         adb_server_socket: str = "",
+        generation: int = 0,
     ) -> None:
         values = [
-            (str(source_host).strip(), str(busid).strip(), str(adb_server_socket or ""))
+            (
+                str(source_host).strip(), str(busid).strip(),
+                str(adb_server_socket or ""), max(0, int(generation or 0)),
+            )
             for busid in dict.fromkeys(busids or [])
             if str(source_host).strip() and str(busid).strip()
         ]
@@ -77,10 +92,11 @@ class WorkerRuntime:
         with self.connect() as conn:
             conn.executemany(
                 """INSERT INTO usbip_assignments(
-                       source_host,busid,adb_server_socket
-                   ) VALUES(?,?,?)
+                       source_host,busid,adb_server_socket,generation
+                   ) VALUES(?,?,?,?)
                    ON CONFLICT(source_host,busid) DO UPDATE SET
                        adb_server_socket=excluded.adb_server_socket,
+                       generation=excluded.generation,
                        updated_at=CURRENT_TIMESTAMP""",
                 values,
             )
@@ -106,7 +122,7 @@ class WorkerRuntime:
     def usbip_assignments(self) -> list[dict[str, str]]:
         with self.connect() as conn:
             rows = conn.execute(
-                """SELECT source_host,busid,adb_server_socket,updated_at
+                """SELECT source_host,busid,adb_server_socket,generation,updated_at
                    FROM usbip_assignments ORDER BY source_host,busid"""
             ).fetchall()
         return [dict(row) for row in rows]

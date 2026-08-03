@@ -216,6 +216,29 @@ class WorkerDeploymentTests(unittest.TestCase):
             names,
         )
 
+    def test_worker_bundle_contains_all_python_runtime_packages(self):
+        from features.cluster.deployment_api import _add_worker_python_runtime
+
+        project_root = Path(__file__).resolve().parents[3]
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
+            with tarfile.open(archive.name, "w:gz") as bundle:
+                _add_worker_python_runtime(bundle, project_root)
+            with tarfile.open(archive.name, "r:gz") as bundle:
+                names = set(bundle.getnames())
+
+        self.assertIn("worker_agent/app.py", names)
+        self.assertIn("foundation/__init__.py", names)
+        self.assertIn("foundation/network_quality.py", names)
+        self.assertIn("foundation/transport_contract.py", names)
+
+        installer = (
+            project_root / "scripts/install_cluster_worker.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '"${PROJECT_ROOT}/foundation/" "${INSTALL_ROOT}/foundation/"',
+            installer,
+        )
+
     def test_adbproxy_installer_uses_the_offline_package(self):
         project_root = Path(__file__).resolve().parents[3]
         installer = project_root / "scripts/install_adbproxy_rs.sh"
@@ -249,6 +272,7 @@ class WorkerDeploymentTests(unittest.TestCase):
 
         self.assertIn("scripts/install_adbproxy_rs.sh", page_js)
         self.assertIn("tools/adbproxy-rs/dist", page_js)
+        self.assertIn("worker_agent foundation", page_js)
 
     def test_source_only_deployment_waits_for_adb_proxy_capability(self):
         from features.cluster.deployment_api import deploy_adb_proxy_source
@@ -318,6 +342,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("install_adbproxy_rs.sh", script)
+        self.assertIn('"${PROJECT_ROOT}/foundation"', script)
         self.assertIn('"source_only": True', script)
         self.assertNotIn("GTS_CREDENTIAL", script)
         self.assertNotIn("x11vnc", script)

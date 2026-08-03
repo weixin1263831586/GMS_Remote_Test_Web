@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
 import tempfile
@@ -233,7 +234,14 @@ async def create_remote_report_bundle(
             errors.append(f"{kind}: export timed out")
     if not exports:
         raise RuntimeError("; ".join(errors) or "Report results and logs are unavailable")
-    return await asyncio.to_thread(merge_remote_report_exports, exports)
+    bundle = await asyncio.to_thread(merge_remote_report_exports, exports)
+    # Clean up the individual Worker transfer archives now that they have been
+    # merged into the final bundle.  Leaving them on disk leaks a temp zip per
+    # partial-success download.
+    for archive_path in exports.values():
+        with contextlib.suppress(OSError):
+            archive_path.unlink(missing_ok=True)
+    return bundle
 
 
 def remove_report_bundle(path: Path | str) -> None:

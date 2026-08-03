@@ -11,15 +11,20 @@ import shutil
 import signal
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
+
+from foundation.transport_contract import execute_transport, transport_result
 
 
 ADB_PROXY_VERSION = "0.4.5"
 ADB_PROXY_PORT = 5038
 _SAFE_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _PAIR_CONTEXT = b"gms-adbproxy-rs-v0.4.5-grant"
+_LOG_MONITORS: set[str] = set()
+_LOG_MONITOR_LOCK = threading.Lock()
 
 
 def pair_code_from_grant(secret: str | bytes, grant: str) -> str:
@@ -153,6 +158,7 @@ def recover_managed_state(*, secret: str | bytes = "") -> dict[str, Any]:
                         source.get("allowed_peer_address") or ""
                     ),
                     "access_token": access_token,
+                    "generation": int(source.get("generation") or 0),
                 },
                 pair_code_from_grant(secret, access_token),
             )
@@ -184,18 +190,62 @@ def execute_adb_proxy_action(
     pair_code: str = "",
 ) -> dict[str, Any]:
     payload = payload or {}
+    external_payload = dict(payload)
+    if pair_code:
+        external_payload["pair_code"] = pair_code
+    return execute_transport(
+        "GMS_ADB_PROXY_CONTROL_BIN",
+        transport="adb_proxy",
+        action=action,
+        payload=external_payload,
+        timeout=120 if action == "target_connect" else 30,
+        builtin=lambda: _execute_adb_proxy_builtin(
+            action,
+            payload,
+            pair_code=pair_code,
+        ),
+    )
+
+
+def _execute_adb_proxy_builtin(
+    action: str,
+    payload: dict[str, Any],
+    *,
+    pair_code: str,
+) -> dict[str, Any]:
+    generation = int(payload.get("generation") or 0)
     if action == "status":
         return _status()
+    if action == "logs":
+        return {
+            "proxy": _tail_log("proxy", 100),
+            "hub": _tail_log("hub", 100),
+        }
     if action == "source_devices":
         return {"devices": _adb_devices()}
     if action == "source_start":
-        return _source_start(payload, pair_code)
+        result = _source_start(payload, pair_code)
+        return transport_result(
+            "adb_proxy", result, transport_state="connected",
+            protocol_state="adb", readiness="test_ready", generation=generation,
+        )
     if action == "source_stop":
-        return _source_stop()
+        return transport_result(
+            "adb_proxy", _source_stop(payload), transport_state="disconnected",
+            readiness="not_ready", generation=generation,
+        )
     if action == "target_connect":
-        return _target_connect(payload, pair_code)
+        result = _target_connect(payload, pair_code)
+        return transport_result(
+            "adb_proxy", result, transport_state="connected",
+            protocol_state="adb", readiness="test_ready", generation=generation,
+        )
     if action == "target_disconnect":
-        return _target_disconnect(payload)
+        result = _target_disconnect(payload)
+        return transport_result(
+            "adb_proxy", result, transport_state="disconnected",
+            readiness="not_ready", generation=generation,
+        )
     raise ValueError(f"unsupported adb-proxy action: {action}")
 
 
@@ -233,7 +283,12 @@ def _adb_devices() -> list[dict[str, str]]:
 def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     if not re.fullmatch(r"[A-Z0-9]{8}", pair_code or ""):
         raise ValueError("invalid adb-proxy pair code")
-    if (_read_json(_state_root() / "target.json").get("imports") or []):
+    root = _state_root()
+    current = _read_json(root / "source.json")
+    requested_generation = int(payload.get("generation") or 0)
+    if int(current.get("generation") or 0) > requested_generation:
+        raise RuntimeError("stale ADB Proxy source generation")
+    if (_read_json(root / "target.json").get("imports") or []):
         raise RuntimeError("同一主机不能同时作为 ADB Proxy 设备来源和接入主机")
     requested = _validated_serials(payload.get("devices") or [])
     live = _adb_devices()
@@ -276,8 +331,8 @@ def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     process = subprocess.Popen(
         proxy_args,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=_process_log("proxy"),
+        stderr=subprocess.STDOUT,
         start_new_session=True,
         env=env,
     )
@@ -297,6 +352,7 @@ def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
         "access_token": str(payload.get("access_token") or ""),
         "port": ADB_PROXY_PORT,
         "pid": process.pid,
+        "generation": int(payload.get("generation") or 0),
         "updated_at": time.time(),
     }
     _write_json(root / "source.json", state)
@@ -306,8 +362,12 @@ def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     }
 
 
-def _source_stop() -> dict[str, Any]:
+def _source_stop(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     root = _state_root()
+    current = _read_json(root / "source.json")
+    requested_generation = int((payload or {}).get("generation") or 0)
+    if requested_generation and int(current.get("generation") or 0) > requested_generation:
+        raise RuntimeError("stale ADB Proxy source generation")
     stopped = _stop_managed(root / "proxy.pid", "adb-proxy")
     (root / "source.json").unlink(missing_ok=True)
     (root / "proxy.toml").unlink(missing_ok=True)
@@ -341,6 +401,13 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     _write_hub_config(config_path, backends)
 
     state = _read_json(root / "target.json")
+    requested_generation = int(payload.get("generation") or 0)
+    current_import = next((
+        item for item in state.get("imports") or []
+        if item.get("source_worker_id") == source_worker_id
+    ), None)
+    if current_import and int(current_import.get("generation") or 0) > requested_generation:
+        raise RuntimeError("stale ADB Proxy target generation")
     imports = [
         item for item in state.get("imports") or []
         if item.get("source_worker_id") != source_worker_id
@@ -350,6 +417,7 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
         "source_address": source_address,
         "backend_name": backend_name,
         "devices": devices,
+        "generation": int(payload.get("generation") or 0),
         "updated_at": time.time(),
     })
     _write_json(root / "target.json", {"imports": imports})
@@ -398,6 +466,17 @@ def _target_disconnect(payload: dict[str, Any]) -> dict[str, Any]:
     backend_name = _backend_name(source_worker_id)
     root = _state_root()
     state = _read_json(root / "target.json")
+    requested_generation = int(payload.get("generation") or 0)
+    current_import = next((
+        item for item in state.get("imports") or []
+        if item.get("source_worker_id") == source_worker_id
+    ), None)
+    if (
+        requested_generation
+        and current_import
+        and int(current_import.get("generation") or 0) > requested_generation
+    ):
+        raise RuntimeError("stale ADB Proxy target generation")
     imports = [
         item for item in state.get("imports") or []
         if item.get("source_worker_id") != source_worker_id
@@ -436,6 +515,25 @@ def _status() -> dict[str, Any]:
     source = _read_json(root / "source.json")
     target = _read_json(root / "target.json")
     capability = capability_status()
+    proxy_running = _managed_running(root / "proxy.pid", "adb-proxy")
+    hub_running = _managed_running(root / "hub.pid", "adb-hub")
+    if proxy_running:
+        _ensure_log_monitor(_log_path("proxy"))
+    if hub_running:
+        _ensure_log_monitor(_log_path("hub"))
+    source_running = bool(source.get("running")) and proxy_running
+    imports = target.get("imports") or []
+    target_running = bool(imports) and hub_running
+    protocol_devices: list[dict[str, str]] = []
+    if source_running or target_running:
+        try:
+            protocol_devices = _adb_devices()
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
+            protocol_devices = []
+    ready_serials = [
+        item["serial"] for item in protocol_devices
+        if item.get("state") == "device"
+    ]
     return {
         "installed": capability.get("installed", False),
         "version": capability.get("version", ""),
@@ -444,8 +542,28 @@ def _status() -> dict[str, Any]:
             if key != "access_token"
         },
         "target": target,
-        "proxy_running": _managed_running(root / "proxy.pid", "adb-proxy"),
-        "hub_running": _managed_running(root / "hub.pid", "adb-hub"),
+        "proxy_running": proxy_running,
+        "hub_running": hub_running,
+        "transport_state": (
+            "connected" if source_running or target_running
+            else "degraded" if source.get("running") or imports
+            else "disconnected"
+        ),
+        "protocol_state": (
+            "adb" if ready_serials
+            else "enumerating" if source_running or target_running
+            else "unknown"
+        ),
+        "readiness": (
+            "test_ready" if ready_serials
+            else "transport_ready" if source_running or target_running
+            else "not_ready"
+        ),
+        "protocol_devices": protocol_devices,
+        "recent_errors": {
+            "proxy": _recent_error("proxy"),
+            "hub": _recent_error("hub"),
+        },
     }
 
 
@@ -467,8 +585,8 @@ def _restart_hub(config_path: Path) -> None:
             "--single-user",
         ],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=_process_log("hub"),
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     _write_pid(root / "hub.pid", process.pid)
@@ -487,6 +605,91 @@ def _restart_hub(config_path: Path) -> None:
         _stop_managed(root / "hub.pid", "adb-hub")
         detail = f": {adb_error}" if adb_error else ""
         raise RuntimeError(f"adb-hub 未能在5037端口完成ADB协议初始化{detail}")
+
+
+def _log_path(name: str) -> Path:
+    root = _state_root(create=True) / "logs"
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o700)
+    return root / f"{name}.log"
+
+
+def _process_log(name: str):
+    """Open a private append-only process log and keep it copy-truncated."""
+    path = _log_path(name)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    _ensure_log_monitor(path)
+    return os.fdopen(descriptor, "a", encoding="utf-8", buffering=1)
+
+
+def _ensure_log_monitor(path: Path) -> None:
+    key = str(path)
+    with _LOG_MONITOR_LOCK:
+        if key in _LOG_MONITORS:
+            return
+        _LOG_MONITORS.add(key)
+
+    def monitor() -> None:
+        while True:
+            try:
+                _rotate_log_if_needed(path)
+            except OSError:
+                pass
+            time.sleep(5)
+
+    threading.Thread(
+        target=monitor,
+        name=f"ADBProxyLog-{path.stem}",
+        daemon=True,
+    ).start()
+
+
+def _rotate_log_if_needed(path: Path) -> None:
+    max_bytes = max(
+        1024 * 1024,
+        int(os.getenv("GMS_ADB_PROXY_LOG_MAX_BYTES", str(10 * 1024 * 1024))),
+    )
+    backups = min(10, max(1, int(os.getenv("GMS_ADB_PROXY_LOG_BACKUPS", "4"))))
+    if not path.is_file() or path.stat().st_size <= max_bytes:
+        return
+    for index in range(backups, 1, -1):
+        previous = path.with_name(f"{path.name}.{index - 1}")
+        current = path.with_name(f"{path.name}.{index}")
+        if previous.exists():
+            os.replace(previous, current)
+    first = path.with_name(f"{path.name}.1")
+    shutil.copyfile(path, first)
+    first.chmod(0o600)
+    with path.open("r+", encoding="utf-8", errors="replace") as stream:
+        stream.truncate(0)
+
+
+def _tail_log(name: str, limit: int) -> list[str]:
+    path = _log_path(name)
+    if not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    return [_sanitize_log_line(line) for line in lines[-max(1, min(limit, 500)):]]
+
+
+def _recent_error(name: str) -> str:
+    markers = ("error", "failed", "panic", "refused", "reset", "timeout")
+    for line in reversed(_tail_log(name, 100)):
+        if any(marker in line.lower() for marker in markers):
+            return line[-500:]
+    return ""
+
+
+def _sanitize_log_line(line: str) -> str:
+    value = re.sub(
+        r"(?i)(pair[_ -]?code|grant|access[_ -]?token|secret)(\s*[:=]\s*)\S+",
+        r"\1\2[REDACTED]",
+        str(line or ""),
+    )
+    return value[-2000:]
 
 
 def _hub_start_wait_seconds(backend_count: int) -> float:

@@ -26,10 +26,12 @@ class DeviceUtils:
 
     @staticmethod
     def parse_adb_devices(output: str) -> list[str]:
-        """解析 `adb devices` 命令输出，返回设备ID列表。
+        """解析 `adb devices` 命令输出，返回处于 device 状态的设备ID列表。
 
         过滤掉 localhost:<port> 形式的 Microdroid/vsock 虚拟机设备，
         它们由 GTS/VTS 虚拟化测试临时创建，不属于真实物理设备。
+        adbproxy-rs 接入的设备使用独立的 inventory 探测路径（带 proxy_source
+        标记），不经过此函数。
         """
         return [
             line.split('\t')[0]

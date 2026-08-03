@@ -13,6 +13,7 @@ import shlex
 import time
 from typing import Any
 
+from foundation.network_quality import probe_tcp_quality
 from foundation.networking import parse_host_address, split_host_port
 from foundation.ssh_security import configure_strict_host_keys
 
@@ -41,6 +42,24 @@ USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
 USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
 {install_cmd}
 验证安装：usbipd --version'''
+
+
+def usbip_error(
+    code: str,
+    message: str,
+    *,
+    retryable: bool = False,
+    remediation: str = "",
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "success": False,
+        "error_code": code,
+        "error": message,
+        "retryable": retryable,
+        "remediation": remediation,
+        **extra,
+    }
 
 
 def detach_ubuntu_usbip_ports(
@@ -216,7 +235,23 @@ class USBIPManager:
                         'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD)
                     }
 
-                self.ssh_manager.execute_command(win_ssh, 'taskkill /F /IM adb.exe /T')
+                network_quality = probe_tcp_quality(usbip_attach_host, 3240)
+                if not network_quality["reachable"]:
+                    return usbip_error(
+                        "USBIP_TCP_UNREACHABLE",
+                        f"无法连接USB/IP来源 {usbip_attach_host}:3240",
+                        retryable=True,
+                        remediation="请检查usbipd服务、TCP 3240防火墙和网络路由。",
+                        network_quality=network_quality,
+                    )
+
+                adb_release = self._stop_windows_adb(win_ssh)
+                if not adb_release.get("success"):
+                    return usbip_error(
+                        "USBIP_ADB_RELEASE_FAILED",
+                        f"释放Windows ADB占用失败: {adb_release.get('error')}",
+                        remediation="请关闭占用设备的Android Studio、scrcpy或其他ADB任务后重试。",
+                    )
 
                 discovered_busids = self._find_android_devices(win_ssh, config)
                 requested = [str(item) for item in selected_busids or []]
@@ -284,6 +319,14 @@ class USBIPManager:
                         'devices': attached,
                         'device_list': device_list,
                         'transport_connected': True,
+                        'transport_state': 'attached',
+                        'protocol_state': protocol_status.get('mode') or 'unknown',
+                        'readiness': (
+                            'test_ready' if protocol_status.get('mode') in {'adb', 'fastboot', 'recovery'}
+                            else 'protocol_ready' if protocol_status.get('mode') not in {'unknown', 'offline', 'unauthorized'}
+                            else 'transport_ready'
+                        ),
+                        'network_quality': network_quality,
                         'protocol_status': protocol_status,
                     }
 
@@ -343,6 +386,13 @@ class USBIPManager:
                     for value in vid_pid_by_busid.values()
                 },
             )
+            identity_by_vid_pid = self._query_windows_usb_identities(
+                ssh,
+                {
+                    value.split(":", 1)[0]
+                    for value in vid_pid_by_busid.values()
+                },
+            )
             serial_by_busid = {
                 busid: (
                     serial_by_vid_pid.get(vid_pid_by_busid[busid], "")
@@ -365,6 +415,24 @@ class USBIPManager:
                     {
                         "busid": item,
                         "serial": serial_by_busid.get(item, ""),
+                        "logical_device_id": (
+                            serial_by_busid.get(item, "")
+                            or identity_by_vid_pid.get(
+                                vid_pid_by_busid.get(item, ""), {}
+                            ).get("pnp_instance_id", "")
+                            or item
+                        ),
+                        "usb_serial": identity_by_vid_pid.get(
+                            vid_pid_by_busid.get(item, ""), {}
+                        ).get("usb_serial", ""),
+                        "pnp_instance_id": identity_by_vid_pid.get(
+                            vid_pid_by_busid.get(item, ""), {}
+                        ).get("pnp_instance_id", ""),
+                        "location_path": identity_by_vid_pid.get(
+                            vid_pid_by_busid.get(item, ""), {}
+                        ).get("location_path", ""),
+                        "vid_pid": vid_pid_by_busid.get(item, ""),
+                        "current_busid": item,
                         "label": self._append_serial(
                             labels.get(item, item),
                             serial_by_busid.get(item),
@@ -435,6 +503,54 @@ class USBIPManager:
             # vendor-scoped fallback still maps that physical device safely.
             result["*"] = next(iter(unique_candidates))
         return result
+
+    def _query_windows_usb_identities(
+        self,
+        ssh,
+        vendor_ids: set[str] | None = None,
+    ) -> dict[str, dict[str, str]]:
+        """Return stable PnP and physical-location identity when unambiguous."""
+        ps = (
+            "Get-PnpDevice -PresentOnly -Class USB | ForEach-Object { "
+            "$l=(Get-PnpDeviceProperty -InstanceId $_.InstanceId "
+            "-KeyName 'DEVPKEY_Device_LocationPaths' -ErrorAction SilentlyContinue).Data; "
+            "Write-Output ($_.InstanceId + '|' + ($l -join ',')) }"
+        )
+        try:
+            stdout, _stderr, code = self.ssh_manager.execute_command(
+                ssh, f'powershell -NoProfile -Command "{ps}"', timeout=20
+            )
+        except Exception:
+            return {}
+        if code != 0 or not stdout:
+            return {}
+        grouped: dict[str, list[dict[str, str]]] = {}
+        for raw in stdout.splitlines():
+            instance_id, _separator, location = raw.strip().partition("|")
+            match = re.search(
+                r"USB\\VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})"
+                r"([^\\]*)\\(.+)",
+                instance_id,
+            )
+            if not match:
+                continue
+            vid, pid, interface, tail = match.groups()
+            vid = vid.lower()
+            if vendor_ids and vid not in vendor_ids:
+                continue
+            if "&MI_" in interface.upper():
+                continue
+            usb_serial = tail.strip().split("&")[0].strip()
+            grouped.setdefault(f"{vid}:{pid.lower()}", []).append({
+                "usb_serial": usb_serial,
+                "pnp_instance_id": instance_id,
+                "location_path": location.strip(),
+            })
+        return {
+            key: values[0]
+            for key, values in grouped.items()
+            if len({item["pnp_instance_id"] for item in values}) == 1
+        }
 
     def _query_windows_adb_serials(self, ssh) -> list[str]:
         """Return stable Android serials visible to Windows ADB."""
@@ -570,13 +686,6 @@ class USBIPManager:
                 return {"success": False, "error": "USB/IP仅支持Windows主机"}
             if not self.check_usbipd_installed(ssh)[0]:
                 return {"success": False, "error": "usbipd未安装"}
-
-            adb_release = self._stop_windows_adb(ssh)
-            if not adb_release.get("success"):
-                return {
-                    "success": False,
-                    "error": f"释放Windows ADB占用失败: {adb_release.get('error')}",
-                }
 
             detached = []
             errors = {}
@@ -750,10 +859,23 @@ class USBIPManager:
         return bound
 
     def _stop_windows_adb(self, ssh) -> dict[str, Any]:
-        """Release Android USB handles held by the Windows ADB server."""
+        """Gracefully stop Windows ADB and force it only when still running."""
+        list_out, list_err, list_code = self.ssh_manager.execute_command(
+            ssh,
+            'tasklist /FI "IMAGENAME eq adb.exe" /NH',
+            timeout=10,
+        )
+        if list_code != 0:
+            return {
+                "success": False,
+                "error": (list_err or list_out).strip() or "无法确认Windows ADB状态",
+            }
+        if "adb.exe" not in (list_out or "").lower():
+            return {"success": True, "stopped": False, "forced": False}
+
         stop_out, stop_err, stop_code = self.ssh_manager.execute_command(
             ssh,
-            "taskkill /F /IM adb.exe /T",
+            "adb kill-server",
             timeout=15,
         )
         time.sleep(1)
@@ -768,16 +890,37 @@ class USBIPManager:
                 "error": (list_err or list_out).strip() or "无法确认Windows ADB状态",
             }
         if "adb.exe" in (list_out or "").lower():
-            return {
-                "success": False,
-                "error": "Windows adb.exe 仍在运行，USB设备句柄未释放",
-            }
+            force_out, force_err, force_code = self.ssh_manager.execute_command(
+                ssh,
+                "taskkill /F /IM adb.exe /T",
+                timeout=15,
+            )
+            time.sleep(1)
+            verify_out, verify_err, verify_code = self.ssh_manager.execute_command(
+                ssh,
+                'tasklist /FI "IMAGENAME eq adb.exe" /NH',
+                timeout=10,
+            )
+            if verify_code != 0 or "adb.exe" in (verify_out or "").lower():
+                return {
+                    "success": False,
+                    "error": "Windows adb.exe 仍在运行，USB设备句柄未释放: " + (
+                        (verify_err or verify_out or force_err or force_out).strip()
+                        or "unknown process state"
+                    ),
+                }
+            logger.warning(
+                "Windows ADB required force stop before USB/IP export: code=%s detail=%s",
+                force_code,
+                (force_err or force_out).strip(),
+            )
+            return {"success": True, "stopped": True, "forced": True}
         logger.info(
-            "Windows ADB stopped before USB/IP export: code=%s detail=%s",
+            "Windows ADB stopped gracefully before USB/IP export: code=%s detail=%s",
             stop_code,
             (stop_err or stop_out).strip(),
         )
-        return {"success": True}
+        return {"success": True, "stopped": True, "forced": False}
 
     def _ensure_vhci_driver(self, ssh):
         try:

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from worker_agent.adb_proxy import (
+    _sanitize_log_line,
     execute_adb_proxy_action,
     imported_device_for_serial,
     pair_code_from_grant,
@@ -32,6 +33,15 @@ def test_pair_code_is_stable_per_grant_and_rotates_between_assignments():
     assert first != rotated
     assert len(first) == 8
     assert set(first) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+
+
+def test_proxy_log_lines_redact_credentials():
+    line = "pair_code=ABCD2345 access_token:grant-value secret = hidden"
+    sanitized = _sanitize_log_line(line)
+
+    assert "ABCD2345" not in sanitized
+    assert "grant-value" not in sanitized
+    assert "hidden" not in sanitized
 
 
 def test_imported_device_resolves_hub_prefixed_serial(tmp_path):
@@ -197,6 +207,7 @@ def test_recovery_restarts_persisted_source_after_host_reboot(tmp_path):
             "listen_address": "10.10.10.206",
             "allowed_peer_address": "10.10.10.207",
             "access_token": "signed-grant",
+            "generation": 0,
         },
         pair_code_from_grant("worker-secret", "signed-grant"),
     )
