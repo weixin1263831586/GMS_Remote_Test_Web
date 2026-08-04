@@ -25,6 +25,7 @@ class ClusterConfig:
     firmware_max_bytes: int = 20 * 1024**3
     transfer_max_bytes: int = 20 * 1024**3
     log_analysis_max_bytes: int = 5 * 1024**3
+    default_max_jobs: int = 6
 
     @classmethod
     def load(cls) -> ClusterConfig:
@@ -59,4 +60,5 @@ class ClusterConfig:
             log_analysis_max_bytes=max(
                 1, int(raw.get("log_analysis_max_bytes", 5 * 1024**3))
             ),
+            default_max_jobs=max(1, min(32, int(raw.get("default_max_jobs", 6)))),
         )

@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .config import ClusterConfig
+
 
 class WorkerRegistration(BaseModel):
     worker_id: str = Field(min_length=1, max_length=128)
@@ -11,7 +13,7 @@ class WorkerRegistration(BaseModel):
     hostname: str = ""
     address: str = ""
     agent_version: str = ""
-    max_jobs: int = Field(default=1, ge=1, le=32)
+    max_jobs: int = Field(default_factory=lambda: ClusterConfig.load().default_max_jobs, ge=1, le=32)
     capabilities: dict[str, Any] = Field(default_factory=dict)
     session_id: str = Field(default="", max_length=128)
 

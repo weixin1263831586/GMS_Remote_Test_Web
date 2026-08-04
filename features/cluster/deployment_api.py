@@ -32,6 +32,7 @@ from foundation.ssh_security import (
 )
 
 from .api import service
+from .config import ClusterConfig
 from .repository import utc_now
 from .worker_auth import persist_worker_token, worker_tokens, write_worker_tokens
 
@@ -336,6 +337,7 @@ def _adb_proxy_source_install_command(
         f"tar -xzf {shlex.quote(remote_archive)} "
         "-C ~/gms-adb-proxy-source-setup && "
         "cd ~/gms-adb-proxy-source-setup && "
+        f"GMS_DEFAULT_MAX_JOBS={ClusterConfig.load().default_max_jobs} "
         "bash scripts/install_adb_proxy_source_worker.sh "
         f"{shlex.quote(worker_id)} "
         f"{shlex.quote(controller_url)} "
@@ -696,6 +698,7 @@ async def deploy_worker(
                 "rm -rf ~/gms-worker-setup && mkdir -p ~/gms-worker-setup && "
                 f"tar -xzf {shlex.quote(remote_archive)} -C ~/gms-worker-setup && "
                 "cd ~/gms-worker-setup && "
+                f"GMS_DEFAULT_MAX_JOBS={ClusterConfig.load().default_max_jobs} "
                 f"bash scripts/install_cluster_worker.sh {shlex.quote(worker_id)} "
                 f"{shlex.quote(controller_url)} {shlex.quote(token)} "
                 f"{shlex.quote(controller_ca_arg)} "

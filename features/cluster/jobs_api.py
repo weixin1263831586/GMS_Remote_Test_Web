@@ -55,6 +55,17 @@ def _require_job_access(request: Request, job: dict) -> None:
         raise HTTPException(404, "job not found")
 
 
+def _job_response(job: dict) -> dict:
+    """Add a user-facing client identity while preserving access ownership."""
+    from features.users import resolve_client_display_id
+
+    item = dict(job or {})
+    item["client_display_id"] = resolve_client_display_id(
+        str(item.get("owner_id") or "")
+    )
+    return item
+
+
 @router.post("/jobs")
 def create_job(body: ClusterJobCreate, request: Request):
     local_worker_id = service().config.local_worker_id
@@ -183,7 +194,7 @@ def create_job(body: ClusterJobCreate, request: Request):
         service().repository.attach_command_to_job(job["id"], command)
         return {
             "success": True,
-            "job": service().repository.get_job(job["id"]),
+            "job": _job_response(service().repository.get_job(job["id"]) or {}),
             "command": command,
         }
     except ValueError as exc:
@@ -196,7 +207,13 @@ def list_jobs(request: Request, limit: int = Query(default=100, ge=1, le=500)):
     if user is None and authentication_required():
         user = require_authenticated_user(request)
     owner_id = user.id if user and user.role != "admin" else ""
-    return {"success": True, "jobs": service().repository.list_jobs(limit, owner_id=owner_id)}
+    return {
+        "success": True,
+        "jobs": [
+            _job_response(item)
+            for item in service().repository.list_jobs(limit, owner_id=owner_id)
+        ],
+    }
 
 
 @router.get("/jobs/{job_id}")
@@ -205,7 +222,7 @@ def get_job(job_id: str, request: Request):
     if not job:
         raise HTTPException(404, "job not found")
     _require_job_access(request, job)
-    return {"success": True, "job": job}
+    return {"success": True, "job": _job_response(job)}
 
 
 @router.delete("/jobs/{job_id}")

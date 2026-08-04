@@ -69,7 +69,12 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(persistedContext)
                 });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                if (!response.ok) {
+                    if (response.status === 401 && typeof window.showAuthGate === 'function') {
+                        window.showAuthGate(false);
+                    }
+                    throw new Error(`HTTP ${response.status}`);
+                }
                 const payload = await response.json();
                 const serverContext = payload?.data?.context;
                 // A response for an older host selection is only an ACK. It
@@ -132,6 +137,9 @@
             if (clusterResponse?.ok) {
                 const clusterStatus = await clusterResponse.json();
                 localWorkerId = String(clusterStatus.local_worker_id || localWorkerId);
+            }
+            if (!response.ok && response.status === 401 && typeof window.showAuthGate === 'function') {
+                window.showAuthGate(false);
             }
             const payload = await response.json();
             if (response.ok && payload?.data?.context) context = normalize(payload.data.context);

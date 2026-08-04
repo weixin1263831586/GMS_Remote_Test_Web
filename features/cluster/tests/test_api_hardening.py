@@ -329,6 +329,25 @@ class ClusterApiHardeningTests(unittest.TestCase):
         )
         self.assertEqual(own.status_code, 200)
 
+    def test_job_response_exposes_resolved_client_display_id(self):
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246",
+            "owner_id": "N387pLbIBhpMw5JsWUL9hg",
+            "devices": ["worker-246:ABC"],
+            "suite_key": "CTS:17_r1",
+        })
+
+        with patch(
+            "features.users.resolve_client_display_id",
+            return_value="hcq@172.16.14.66",
+        ):
+            response = self.client.get(f"/api/cluster/jobs/{job['id']}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["job"]
+        self.assertEqual(payload["owner_id"], "N387pLbIBhpMw5JsWUL9hg")
+        self.assertEqual(payload["client_display_id"], "hcq@172.16.14.66")
+
 
 if __name__ == "__main__":
     unittest.main()

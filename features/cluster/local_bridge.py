@@ -18,6 +18,8 @@ from worker_agent.process_inventory import discover_tradefed_processes
 from worker_agent.suite_detection import suite_details
 
 from .config import ClusterConfig
+
+from .config import ClusterConfig
 from .repository import ClusterRepository
 
 
@@ -134,7 +136,7 @@ class LocalWorkerBridge:
             "hostname": socket.gethostname(),
             "address": ubuntu_host,
             "agent_version": AGENT_VERSION,
-            "max_jobs": int(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", "1")),
+            "max_jobs": int(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", str(ClusterConfig.load().default_max_jobs))),
             "capabilities": {
                 "adb": True, "fastboot": True, "tradefed": True,
                 "cts": True, "gts": True, "vts": True, "sts": True,

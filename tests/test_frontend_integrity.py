@@ -136,6 +136,20 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("renderModeStatus();renderJobForm()", script)
         self.assertNotIn('集群模式已启用 · 本机', script)
         self.assertNotIn('集群能力已启用', script)
+        self.assertIn('>测试终端日志 (${Math.max(0,Number(stdout.size_bytes)||0)} bytes)</a>', script)
+        self.assertIn('data-action="open-job-report-file"', script)
+        self.assertIn('data-action="download-job-report"', script)
+        self.assertIn("window.parent.downloadReport", script)
+        self.assertIn("window.parent.openReportSuiteDirectory", script)
+        self.assertIn("test_result_failures_suite.html", script)
+        self.assertNotIn("job-artifact-card", script)
+        self.assertIn("origin_page:terminalJob(job.status)?'reports':'cluster'", script)
+
+        navigation = read_text("web/static/js/navigation.js")
+        self.assertIn("const filePath = targetFile ? `${targetPath}/${targetFile}` : '';", navigation)
+        self.assertIn("setSuiteBrowserHighlightedPath(filePath)", navigation)
+        self.assertIn("const reportProvenanceOnly = ['reports', 'report-analysis', 'report-download', 'test-suites']", navigation)
+        self.assertIn("contextJobId !== state.clusterJobId && !reportProvenanceOnly", navigation)
 
     def test_login_explains_client_ssh_account_and_finishes_identity_prefill(self):
         shell = read_text("web/shell/shell.html")

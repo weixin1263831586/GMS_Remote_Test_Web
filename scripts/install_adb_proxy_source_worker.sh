@@ -43,10 +43,11 @@ if [[ "${CONTROLLER_CERT}" != "-" ]]; then
     CONTROLLER_CA="${CONFIG_ROOT}/controller.crt"
 fi
 
-python3 - "${CONFIG_ROOT}/config.json" "${WORKER_ID}" "${CONTROLLER_URL}" \
+PYTHONPATH_PRESET="${INSTALL_ROOT}:${PYTHONPATH:-}" python3 - "${CONFIG_ROOT}/config.json" "${WORKER_ID}" "${CONTROLLER_URL}" \
     "${WORKER_ADDRESS}" "${CONTROLLER_CA}" "${CONFIG_ROOT}/token" \
     "${HOME}/gms-worker-data" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -68,7 +69,7 @@ payload = {
     "worker_token_file": token_file,
     "heartbeat_interval_seconds": 10,
     "suite_scan_interval_seconds": 3600,
-    "max_jobs": 1,
+    "max_jobs": int(os.getenv("GMS_DEFAULT_MAX_JOBS", "1")),
     "source_only": True,
     "suite_roots": [],
     "data_root": data_root,

@@ -10,6 +10,7 @@
   "firmware_max_bytes": 21474836480,
   "transfer_max_bytes": 21474836480,
   "log_analysis_max_bytes": 5368709120,
+  "default_max_jobs": 6,
   "remote_dispatch_enabled": true,
   "global_device_pool_enabled": true,
   "lease_enforcement_enabled": true
