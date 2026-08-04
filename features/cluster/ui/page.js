@@ -1,7 +1,8 @@
 const state={workers:[],devices:[],suites:[],jobs:[],tests:[],library:[],status:{local_worker_id:'worker-local'}};
 const activeDeployments=new Set();
-let clusterWorkspace={};
+let clusterWorkspace={scope_mode:'cluster'};
 let selectedClusterJob=null;
+let selectedClusterReport=null;
 let applyingClusterWorkspace=false;
 let refreshPromise=null;
 let toastTimer=null;
@@ -43,6 +44,7 @@ function localWorkerId(){return state.status.local_worker_id||'worker-local'}
 function terminalJob(status){return ['completed','failed','cancelled'].includes(status)}
 function renderModeStatus(){
  const modeHint=document.querySelector('#cluster-mode-status');if(!modeHint)return;
+ if(state.status.enabled===undefined)return;
  const localId=localWorkerId(),clusterMode=Boolean(state.status.enabled&&clusterWorkspace.scope_mode==='cluster');
  modeHint.textContent=clusterMode
   ? `集群模式 · 本机 ${localId} · 远端派发${state.status.remote_dispatch_enabled?'已启用':'未启用'}`
@@ -52,13 +54,16 @@ function activeDevices(workerId){return state.devices.filter(device=>device.work
 function workerAssessment(worker){
  const devices=activeDevices(worker.id);
  const cpu=Number(worker.cpu_percent||0),memory=Number(worker.memory_percent||0),running=Number(worker.running_jobs||0);
- let loadLabel='空闲',loadClass='ok';
- if(worker.status==='offline'){loadLabel='离线';loadClass='bad'}
- else if(worker.admission_blocked||worker.status==='draining'){loadLabel='已阻止派发';loadClass='bad'}
- else if(cpu>=75||memory>=85){loadLabel='高负载';loadClass='bad'}
- else if(running>0){loadLabel='测试中';loadClass='warn'}
- else if(cpu>=40||memory>=70){loadLabel='中负载';loadClass='warn'}
- return {devices,loadLabel,loadClass};
+ let labels=[];
+ if(worker.status==='offline'){labels=[{text:'离线',cls:'bad'}]}
+ else if(worker.admission_blocked||worker.status==='draining'){labels=[{text:'已阻止派发',cls:'bad'}]}
+ else{
+  if(running>0)labels.push({text:'测试中',cls:'warn'});
+  if(cpu>=75||memory>=85)labels.push({text:'高负载',cls:'bad'});
+  else if(cpu>=40||memory>=70)labels.push({text:'中负载',cls:'warn'});
+  if(!labels.length)labels=[{text:'空闲',cls:'ok'}];
+ }
+ return {devices,labels};
 }
 function commandWorkers(){
  return state.workers.filter(worker=>{
@@ -86,7 +91,7 @@ function render(){
   if(worker.id!==localId)menuItems.push(`<button data-action="redeploy-worker" data-worker-id="${esc(worker.id)}" data-ssh-host="${esc(sshHost)}">重新部署</button>`);
   if(worker.id!==localId)menuItems.push(`<button class="danger" data-action="delete-worker" data-worker-id="${esc(worker.id)}" ${deleteBlocked?'disabled':''}>${deleteBlocked?'删除(请先停测试)':'删除主机'}</button>`);
   const moreMenu=menuItems.length?`<span class="worker-menu-wrap"><button class="worker-menu-toggle" data-action="toggle-worker-menu">⋯</button><div class="worker-menu">${menuItems.join('')}</div></span>`:'';
-  return `<div class="card"><div class="card-title"><span>${esc(worker.name||worker.id)}</span><span>${badge(worker.status)}${configButton}${moreMenu}</span></div><p>${esc(worker.hostname)} · ${esc(worker.id)} · ${esc(worker.address||'')}</p><div class="meta"><div class="meta-row"><span>Agent ${esc(worker.agent_version||'-')}</span><span>心跳 ${relativeTime(worker.last_heartbeat_at)}</span><span>CPU ${oneDecimal(worker.cpu_percent)}%</span><span>内存 ${oneDecimal(worker.memory_percent)}%（可用 ${oneDecimal(worker.memory_available_gb)}G）</span><span>磁盘 ${oneDecimal(worker.disk_free_gb)}G</span><span>系统负载 ${oneDecimal(worker.load_1m)}</span></div><div class="meta-row"><span>设备 ${assessment.devices.length}</span><span>套件 ${state.suites.filter(suite=>suite.worker_id===worker.id&&suite.available).length}</span><span>任务 ${worker.running_jobs}/${worker.max_jobs}（外部 ${worker.external_jobs||0}）</span></div></div><div class="host-assessment"><span class="assessment ${assessment.loadClass}">负载：${assessment.loadLabel}</span></div><div class="capabilities"><span class="cap ${worker.capabilities?.ssh_user?'ok':''}">终端 ${worker.capabilities?.ssh_user?'✓':'未配置'}</span><span class="cap ${worker.capabilities?.novnc_port?'ok':''}">noVNC ${worker.capabilities?.novnc_port?'✓':'不可用'}</span><span class="cap ${worker.capabilities?.tradefed?'ok':''}">Tradefed ${worker.capabilities?.tradefed?'✓':'不可用'}</span></div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(value)}</div>`).join('')}<div class="host-tests">${tests.map(test=>`<div><strong>${test.source==='external'?'手工/外部':'平台'} ${esc(test.suite_type||'XTS')}</strong> · PID ${esc(test.pid||'-')} · 设备 ${esc((test.devices||[]).join(', ')||'未识别')} · 运行 ${Math.floor((test.elapsed_seconds||0)/3600)}h</div>`).join('')||'<span class="muted">当前无测试</span>'}</div></div>`;
+  return `<div class="card"><div class="card-title"><span>${esc(worker.name||worker.id)}</span><span>${badge(worker.status)}${configButton}${moreMenu}</span></div><p>${esc(worker.hostname)} · ${esc(worker.id)} · ${esc(worker.address||'')}</p><div class="meta"><div class="meta-row"><span>Agent ${esc(worker.agent_version||'-')}</span><span>心跳 ${relativeTime(worker.last_heartbeat_at)}</span><span>CPU ${oneDecimal(worker.cpu_percent)}%</span><span>内存 ${oneDecimal(worker.memory_percent)}%（可用 ${oneDecimal(worker.memory_available_gb)}G）</span><span>磁盘 ${oneDecimal(worker.disk_free_gb)}G</span><span>系统负载 ${oneDecimal(worker.load_1m)}</span></div><div class="meta-row"><span>设备 ${assessment.devices.length}</span><span>套件 ${state.suites.filter(suite=>suite.worker_id===worker.id&&suite.available).length}</span><span>任务 ${worker.running_jobs}/${worker.max_jobs}（外部 ${worker.external_jobs||0}）</span></div></div><div class="host-assessment">${assessment.labels.map(l=>`<span class="assessment ${l.cls}">${l.text}</span>`).join('')}</div><div class="capabilities"><span class="cap ${worker.capabilities?.ssh_user?'ok':''}">终端 ${worker.capabilities?.ssh_user?'✓':'未配置'}</span><span class="cap ${worker.capabilities?.novnc_port?'ok':''}">noVNC ${worker.capabilities?.novnc_port?'✓':'不可用'}</span><span class="cap ${worker.capabilities?.tradefed?'ok':''}">Tradefed ${worker.capabilities?.tradefed?'✓':'不可用'}</span></div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(value)}</div>`).join('')}<div class="host-tests">${tests.map(test=>`<div><strong>${test.source==='external'?'手工/外部':'平台'} ${esc(test.suite_type||'XTS')}</strong> · PID ${esc(test.pid||'-')} · 设备 ${esc((test.devices||[]).join(', ')||'未识别')} · 运行 ${Math.floor((test.elapsed_seconds||0)/3600)}h</div>`).join('')||'<span class="muted">当前无测试</span>'}</div></div>`;
  }).join('')||'<div class="empty">暂无 Worker，请点击“添加主机”查看接入命令</div>';
  document.querySelector('#devices').innerHTML=state.devices.filter(device=>!['offline','unknown'].includes(device.state)&&matches([device.worker_id,device.serial,device.properties?.model,device.properties?.product].join(' '))).map(device=>{const t=device.transport||'local_usb';const tInfo={'local_usb':['本地','t-local'],'usbip':['USB/IP','t-usbip'],'adb_proxy':['ADB Proxy','t-proxy']}[t]||[t,'t-local'];const p=device.properties||{};let source='-';if(t==='adb_proxy')source=p.adb_proxy_source_name||p.adb_proxy_source_worker_id||'-';else if(t==='usbip')source=p.usbip_source_host||'-';else if(device.worker_id)source=device.worker_id;return `<tr><td>${esc(device.worker_id)}</td><td>${esc(device.serial)}</td><td><span class="status ${esc(tInfo[1])}">${esc(tInfo[0])}</span></td><td>${esc(source)}</td><td>${badge(device.state)}</td><td>${esc(p.model||p.product||'')}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">暂无匹配的在线设备</td></tr>';
  document.querySelector('#suites').innerHTML=state.suites.filter(suite=>suite.available&&matches([suite.worker_id,suite.suite_type,suite.suite_version,suite.tools_path].join(' '))).map(suite=>`<tr><td>${esc(suite.worker_id)}</td><td>${esc(suite.suite_type)}</td><td>${esc(suite.suite_version)}</td><td title="${esc(suite.tools_path)}">${esc(suite.tools_path)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">暂无匹配的可用套件</td></tr>';
@@ -104,7 +109,7 @@ function render(){
 function formatBytes(v){const n=Number(v)||0;if(n>=1073741824)return `${(n/1073741824).toFixed(2)} GB`;if(n>=1048576)return `${(n/1048576).toFixed(1)} MB`;return `${n} B`}
 function archiveFolder(name){return String(name).replace(/\.(tar\.gz|tar\.bz2|zip|tgz|tar)$/i,'').replace(/[^A-Za-z0-9._+-]+/g,'_')}
 function renderLibrary(){const body=document.querySelector('#library');if(!body)return;const workers=commandWorkers();body.innerHTML=state.library.map((a,i)=>`<tr><td title="${esc(a.name)}">${esc(a.name)}</td><td>${formatBytes(a.size)}</td><td>${new Date(a.modified*1000).toLocaleString()}</td><td><select id="library-worker-${i}">${workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join('')}</select></td><td><input id="library-folder-${i}" value="${esc(archiveFolder(a.name))}"></td><td><button class="primary" data-action="deploy-archive" data-index="${i}" ${workers.length?'':'disabled title="没有可接收命令的在线 Worker"'}>下发并解压</button> <span class="progress-wrap"><span class="progress-track"><span class="progress-bar" id="library-bar-${i}"></span></span><span class="deploy-progress" id="library-progress-${i}"></span></span></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Controller 套件目录中没有压缩包</td></tr>'}
-async function loadLibrary(){const button=document.querySelector('#reload-library'),original=button?.textContent||'↻ 刷新压缩包';if(button){button.disabled=true;button.textContent='刷新中…'}try{const d=await api('/api/cluster/suite-library');state.library=d.archives||[];renderLibrary();toast('压缩包库已刷新')}catch(e){toast(e.message)}finally{if(button){button.disabled=false;button.textContent=original}}}
+async function loadLibrary(){const button=document.querySelector('#reload-library'),original=button?.textContent||'↻ 刷新测试套件';if(button){button.disabled=true;button.textContent='刷新中…'}try{const d=await api('/api/cluster/suite-library');state.library=d.archives||[];renderLibrary();toast('测试套件已更新')}catch(e){toast(e.message)}finally{if(button){button.disabled=false;button.textContent=original}}}
 async function waitCommand(id,progress,onProgress){for(let i=0;i<7200;i++){const d=await api(`/api/cluster/commands/${encodeURIComponent(id)}`),c=d.command;if(c.status==='completed')return c.result||{};if(['failed','cancelled'].includes(c.status))throw new Error(c.error||`${c.command_type}失败`);if(onProgress&&c.result?.downloaded_bytes)onProgress(c.result);else if(i%10===0)progress.textContent=`处理中 ${Math.floor(i/10)}s`;await new Promise(r=>setTimeout(r,1000))}throw new Error('操作超时')}
 async function deployArchive(index){
  const archive=state.library[index],worker=document.querySelector(`#library-worker-${index}`).value,folder=document.querySelector(`#library-folder-${index}`).value.trim(),progress=document.querySelector(`#library-progress-${index}`),bar=document.querySelector(`#library-bar-${index}`);if(!worker||!folder)return;activeDeployments.add(index);
@@ -148,7 +153,100 @@ async function applyClusterWorkspace(next,navigate=false){
 }
 async function refresh(){if(refreshPromise)return refreshPromise;const button=document.querySelector('#refresh'),original=button?.textContent||'↻ 刷新';if(button){button.disabled=true;button.textContent='刷新中…'}refreshPromise=(async()=>{const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]],results=await Promise.allSettled(requests.map(([,path])=>api(path))),errors=[];results.forEach((result,index)=>{const [stateKey,,payloadKey]=requests[index];if(result.status==='fulfilled')state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;else errors.push(`${stateKey}: ${result.reason.message}`)});render();await applyClusterWorkspace(clusterWorkspace);if(errors.length)toast(`部分数据刷新失败：${errors.join('；')}`)})().finally(()=>{refreshPromise=null;if(button){button.disabled=false;button.textContent=original}});return refreshPromise}
 async function createJob(){try{const device=document.querySelector('#job-device').value;const body={worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1};if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`任务已创建 ${d.job.id}`);syncClusterWorkspace({cluster_job_id:d.job.id,attempt_id:d.job.current_attempt_id||'',worker_id:d.job.assigned_worker_id||body.worker_id,device_ids:(d.job.leases||[]).map(x=>x.device_id),suite_key:d.job.suite_key||body.suite_key});await refresh();showJob(d.job.id)}catch(e){toast(e.message)}}
-async function showJob(id,scroll=true){try{const [j,e,a]=await Promise.all([api(`/api/cluster/jobs/${id}`),api(`/api/cluster/jobs/${id}/events`),api(`/api/cluster/jobs/${id}/artifacts`)]);selectedClusterJob=j.job;document.querySelector('#detail').hidden=false;document.querySelector('#job-summary').innerHTML=`<span>任务 ${esc(j.job.id)}</span><span>Worker ${esc(j.job.assigned_worker_id)}</span><span>状态 ${badge(j.job.status)}</span><span>设备 ${esc((j.job.leases||[]).map(x=>x.serial).join(', ')||'-')}</span><span>套件 ${esc(j.job.suite_key||'-')}</span>`;document.querySelector('#job-detail').textContent=JSON.stringify(j.job,null,2);document.querySelector('#job-logs').textContent=e.events.map(x=>`[${x.source}] ${x.message}`).join('\n')||'暂无日志';document.querySelector('#artifacts').innerHTML=a.artifacts.map(x=>`<a href="/api/cluster/jobs/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(x.id)}/download">${esc(x.filename)} (${x.size_bytes} bytes)</a>`).join(' · ');syncClusterWorkspace({scope_mode:'cluster',worker_id:j.job.assigned_worker_id,device_ids:(j.job.leases||[]).map(x=>x.device_id),suite_key:j.job.suite_key||'',cluster_job_id:j.job.id,attempt_id:j.job.current_attempt_id||'',artifact_id:a.artifacts[0]?.id||''});if(scroll)document.querySelector('#detail').scrollIntoView({behavior:'smooth'})}catch(e){toast(e.message)}}
+function displayJobData(job){
+ const client=String(job?.client_display_id||job?.owner_id||'unknown');
+ const convert=value=>{
+  if(Array.isArray(value))return value.map(convert);
+  if(!value||typeof value!=='object')return value;
+  const result={};
+  Object.entries(value).forEach(([key,item])=>{
+   if(key==='client_display_id')return;
+   if(key==='owner_id'){if(!Object.hasOwn(result,'client'))result.client=client;return}
+   result[key]=convert(item);
+  });
+  return result;
+ };
+ return convert(job);
+}
+function clusterReportContext(job,artifactId=''){
+ const attemptId=job.current_attempt_id||'';
+ return {scope_mode:'cluster',worker_id:job.assigned_worker_id,cluster_job_id:job.id,attempt_id:attemptId,report_id:attemptId?`cluster:${job.id}:${attemptId}`:'',report_timestamp:`cluster-${job.id}`,artifact_id:artifactId,origin_page:terminalJob(job.status)?'reports':'cluster'};
+}
+function openClusterJobReport(job=selectedClusterJob,artifactId=''){
+ if(!job)return;
+ const context=clusterReportContext(job,artifactId);
+ syncClusterWorkspace(context);
+ if(typeof window.parent?.analyzeReport==='function')window.parent.analyzeReport(context.report_timestamp,context.report_id);
+ else window.GmsEmbeddedWorkspace?.navigate('reports',context);
+}
+async function getClusterJobReport(job=selectedClusterJob){
+ if(!job)return null;
+ if(selectedClusterReport?.cluster_job_id===job.id&&(!job.current_attempt_id||selectedClusterReport.attempt_id===job.current_attempt_id))return selectedClusterReport;
+ const params=new URLSearchParams({cluster_job_id:job.id});
+ if(job.current_attempt_id)params.set('attempt_id',job.current_attempt_id);
+ const data=await api(`/api/reports/list?${params.toString()}`);
+ selectedClusterReport=(data.reports||[])[0]||null;
+ return selectedClusterReport;
+}
+function clusterReportWorkspace(job,report,artifactId=''){
+ return {...clusterReportContext(job,artifactId),report_id:report.report_id||'',report_timestamp:report.timestamp||'',source_timestamp:report.source_timestamp||'',report_name:report.report_name||'',suite_path:report.suite_path||job.suite_path||'',artifact_id:artifactId};
+}
+async function openClusterJobReportFile(job=selectedClusterJob,artifactId='',filename='test_result_failures_suite.html'){
+ if(!job)return;
+ try{
+  const report=await getClusterJobReport(job);
+  if(!report)throw new Error('尚未找到该任务对应的测试报告');
+  const context=clusterReportWorkspace(job,report,artifactId);
+  syncClusterWorkspace(context);
+  const testType=report.test_type||String(job.suite_key||'').split(':',1)[0];
+  if(typeof window.parent?.openReportSuiteDirectory==='function')await window.parent.openReportSuiteDirectory(report.timestamp,context.suite_path,testType,'results',context,filename);
+  else window.GmsEmbeddedWorkspace?.navigate('test-suites',context);
+ }catch(error){toast(`打开失败报告文件失败：${error.message}`)}
+}
+async function downloadClusterJobReport(job=selectedClusterJob,artifactId=''){
+ if(!job)return;
+ try{
+  const report=await getClusterJobReport(job);
+  if(!report)throw new Error('尚未找到该任务对应的测试报告');
+  const context=clusterReportWorkspace(job,report,artifactId);
+  syncClusterWorkspace(context);
+  if(typeof window.parent?.downloadReport==='function')await window.parent.downloadReport(report.timestamp,report.report_id||'',report.report_name||'');
+  else window.GmsEmbeddedWorkspace?.navigate('reports',context);
+ }catch(error){toast(`下载测试报告失败：${error.message}`)}
+}
+function artifactDownloadUrl(jobId,artifact){return `/api/cluster/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifact.id)}/download`}
+function renderJobArtifacts(job,artifacts,report=null){
+ const list=Array.isArray(artifacts)?artifacts:[];
+ if(!list.length)return '<span class="empty">暂无任务产物</span>';
+ const stdout=list.find(item=>item.filename==='stdout.log');
+ const stderr=list.find(item=>item.filename==='stderr.log');
+ const reportFiles=list.filter(item=>item.artifact_type==='report');
+ const reportArchive=list.find(item=>item.artifact_type==='report-archive'||item.filename==='tradefed-results.zip');
+ const handled=new Set([stdout,stderr,...reportFiles,reportArchive].filter(Boolean).map(item=>item.id));
+ const entries=[];
+ if(stdout)entries.push(`<a class="job-artifact-link" href="${artifactDownloadUrl(job.id,stdout)}" title="下载 stdout.log">测试终端日志 (${Math.max(0,Number(stdout.size_bytes)||0)} bytes)</a>`);
+ if(stderr)entries.push(`<a class="job-artifact-link" href="${artifactDownloadUrl(job.id,stderr)}" title="下载 stderr.log">stderr.log (${Math.max(0,Number(stderr.size_bytes)||0)} bytes)</a>`);
+ if(reportFiles.length)entries.push(`<button type="button" class="job-artifact-link" data-action="open-job-report-file" data-artifact-id="${esc(reportFiles[0].id)}" data-filename="test_result_failures_suite.html" title="定位失败报告文件">test_result_failures_suite.html</button>`);
+ if(reportArchive){const rn=esc(report?.report_name||'');entries.push(`<button type="button" class="job-artifact-link" data-action="download-job-report" data-artifact-id="${esc(reportArchive.id)}" title="按报告管理规则下载 results 和 logs">测试报告(${rn||'下载'})</button>`);}
+ list.filter(item=>!handled.has(item.id)).forEach(item=>entries.push(`<a class="job-artifact-link" href="${artifactDownloadUrl(job.id,item)}">${esc(item.filename)} (${Math.max(0,Number(item.size_bytes)||0)} bytes)</a>`));
+ return entries.join('<span class="job-artifact-separator">&nbsp;&nbsp;&nbsp;&nbsp;</span>');
+}
+async function showJob(id,scroll=true){
+ try{
+  const reportParams=new URLSearchParams({cluster_job_id:id});
+  const [j,e,a,r]=await Promise.all([api(`/api/cluster/jobs/${id}`),api(`/api/cluster/jobs/${id}/events`),api(`/api/cluster/jobs/${id}/artifacts`),api(`/api/reports/list?${reportParams.toString()}`).catch(()=>({reports:[]}))]);
+  selectedClusterJob=j.job;
+  selectedClusterReport=(r.reports||[]).find(item=>!j.job.current_attempt_id||item.attempt_id===j.job.current_attempt_id)||(r.reports||[])[0]||null;
+  document.querySelector('#detail').hidden=false;
+  document.querySelector('#job-summary').innerHTML=`<span>任务 ${esc(j.job.id)}</span><span>客户端 ${esc(j.job.client_display_id||'-')}</span><span>Worker ${esc(j.job.assigned_worker_id)}</span><span>状态 ${badge(j.job.status)}</span><span>设备 ${esc((j.job.leases||[]).map(x=>x.serial).join(', ')||'-')}</span><span>套件 ${esc(j.job.suite_key||'-')}</span>`;
+  document.querySelector('#job-detail').textContent=JSON.stringify(displayJobData(j.job),null,2);
+  document.querySelector('#job-logs').textContent=e.events.map(x=>`[${x.source}] ${x.message}`).join('\n')||'暂无日志';
+  document.querySelector('#artifacts').innerHTML=renderJobArtifacts(j.job,a.artifacts,selectedClusterReport);
+  const reportArtifact=(a.artifacts||[]).find(item=>String(item.artifact_type||'').startsWith('report'));
+  syncClusterWorkspace({...clusterReportContext(j.job,reportArtifact?.id||a.artifacts[0]?.id||''),device_ids:(j.job.leases||[]).map(x=>x.device_id),suite_key:j.job.suite_key||''});
+  if(scroll)document.querySelector('#detail').scrollIntoView({behavior:'smooth'});
+ }catch(e){toast(e.message)}
+}
 async function cancelJob(id){try{await api(`/api/cluster/jobs/${id}/cancel`,{method:'POST'});toast('停止命令已下发');await refresh()}catch(e){toast(e.message)}}
 async function deleteJob(id){if(!await confirmAction('删除任务历史','确定删除该任务历史及事件记录？'))return;try{await api(`/api/cluster/jobs/${id}`,{method:'DELETE'});toast('任务历史已删除');await refresh()}catch(e){toast(e.message)}}
 async function deleteWorker(id){if(!await confirmAction('删除集群主机',`确定停止 ${id} 上的 Worker Agent 并从集群删除？设备和套件记录会移除，但不会删除主机上的测试报告和测试数据。`))return;try{toast(`正在停止 ${id} 的 Worker Agent…`);await api(`/api/cluster/workers/${encodeURIComponent(id)}`,{method:'DELETE'});toast(`${id} 的 Worker Agent 已停止并从集群删除`);await refresh()}catch(e){toast(e.message)}}
@@ -178,7 +276,7 @@ async function openWorkerConfig(id){
  document.querySelector('#config-error').hidden=true;document.querySelector('#config-error').textContent='';
  const input=document.querySelector('#config-max-jobs');input.value='';input.disabled=true;input.placeholder='加载中…';
  modal.hidden=false;
- try{const d=await api(`/api/cluster/workers/${encodeURIComponent(id)}/config`);const cfg=d.config||{};input.value=cfg.max_jobs??'';input.disabled=false;input.placeholder='1'}
+ try{const d=await api(`/api/cluster/workers/${encodeURIComponent(id)}/config`);const cfg=d.config||{};input.value=cfg.max_jobs??'';input.disabled=false;input.placeholder='{{DEFAULT_MAX_JOBS}}'}
  catch(e){document.querySelector('#config-error').hidden=false;document.querySelector('#config-error').textContent=e.message}
 }
 async function saveWorkerConfig(){
@@ -190,7 +288,7 @@ async function saveWorkerConfig(){
  finally{btn.disabled=false;btn.textContent='保存配置'}
 }
 function normalizedWorkerId(value){return String(value||'').trim().toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')}
-function updateDeployCommand(){const id=normalizedWorkerId(document.querySelector('#new-worker-id').value)||'WORKER_ID',host=document.querySelector('#new-worker-host').value.trim()||'USER@HOST',address=host.includes('@')?host.split('@').slice(1).join('@'):'HOST',controller=document.querySelector('#controller-url').value.trim()||location.origin,root=document.querySelector('#suite-root').value.trim()||'~/GMS-Suite';document.querySelector('#deploy-command').textContent=`test -f tools/adbproxy-rs/dist/adbproxy-rs-linux-x86_64-musl.tar.gz || { echo '请先在 Controller 执行 scripts/build_adbproxy_rs.sh'; exit 1; }; rsync -azR worker_agent foundation scripts/install_cluster_worker.sh scripts/install_adbproxy_rs.sh scripts/gms_worker_usbip.sh scripts/run_GSI_Burn.sh scripts/run_GMS_Test_Auto.sh tools/adbproxy-rs/dist tools/upgrade_tool tools/misc.img tools/scrcpy-linux-x86_64-v3.3.4 tools/GMS-Host-Tools ${host}:~/gms-worker-setup/ && scp "$GMS_GTS_CREDENTIAL_FILE" ${host}:~/gms-worker-gts.json && ssh ${host} 'cd ~/gms-worker-setup && bash scripts/install_cluster_worker.sh ${id} ${controller} WORKER_TOKEN - ${root} ${address} ~/gms-worker-gts.json'`}
+function updateDeployCommand(){const id=normalizedWorkerId(document.querySelector('#new-worker-id').value)||'WORKER_ID',host=document.querySelector('#new-worker-host').value.trim()||'USER@HOST',address=host.includes('@')?host.split('@').slice(1).join('@'):'HOST',controller=document.querySelector('#controller-url').value.trim()||location.origin,root=document.querySelector('#suite-root').value.trim()||'~/GMS-Suite';document.querySelector('#deploy-command').textContent=`test -f tools/adbproxy-rs/dist/adbproxy-rs-linux-x86_64-musl.tar.gz || { echo '请先在 Controller 执行 scripts/build_adbproxy_rs.sh'; exit 1; }; rsync -azR worker_agent foundation scripts/install_cluster_worker.sh scripts/install_adbproxy_rs.sh scripts/gms_worker_usbip.sh scripts/run_GSI_Burn.sh scripts/run_GMS_Test_Auto.sh tools/adbproxy-rs/dist tools/upgrade_tool tools/misc.img tools/scrcpy-linux-x86_64-v3.3.4 tools/GMS-Host-Tools ${host}:~/gms-worker-setup/ && scp "$GMS_GTS_CREDENTIAL_FILE" ${host}:~/gms-worker-gts.json && ssh ${host} 'cd ~/gms-worker-setup && GMS_DEFAULT_MAX_JOBS={{DEFAULT_MAX_JOBS}} bash scripts/install_cluster_worker.sh ${id} ${controller} WORKER_TOKEN - ${root} ${address} ~/gms-worker-gts.json'`}
 async function autoDeployWorker(){
  const button=document.querySelector('#auto-deploy'),errorBox=document.querySelector('#deploy-error');
  const body={worker_id:normalizedWorkerId(document.querySelector('#new-worker-id').value),ssh_host:document.querySelector('#new-worker-host').value.trim(),controller_url:document.querySelector('#controller-url').value.trim(),suite_root:document.querySelector('#suite-root').value.trim(),token:document.querySelector('#worker-token').value,password:document.querySelector('#worker-password').value,save_password:Boolean(document.querySelector('#save-worker-password')?.checked)};
@@ -219,8 +317,10 @@ document.addEventListener('click',event=>{
  else if(action==='show-job')showJob(jobId);
  else if(action==='cancel-job')cancelJob(jobId);
  else if(action==='delete-job')deleteJob(jobId);
+ else if(action==='open-job-report-file')openClusterJobReportFile(selectedClusterJob,button.dataset.artifactId||'',button.dataset.filename||'test_result_failures_suite.html');
+ else if(action==='download-job-report')downloadClusterJobReport(selectedClusterJob,button.dataset.artifactId||'');
 });
 document.querySelector('#cluster-search')?.addEventListener('input',render);
 document.querySelector('#job-status-filter')?.addEventListener('change',render);
 window.addEventListener('gms:embedded-workspace',event=>applyClusterWorkspace(event.detail?.context||{},event.detail?.type==='workspace-context-navigate').catch(e=>toast(e.message)));
-window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;document.querySelector('#refresh').onclick=refresh;document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-worker').onchange=()=>{updateJobOptions();syncClusterWorkspace()};document.querySelector('#job-suite').onchange=()=>syncClusterWorkspace();document.querySelector('#job-device').onchange=()=>syncClusterWorkspace();document.querySelector('#create-job').onclick=createJob;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('reports',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.addEventListener('click',e=>{if(!e.target.closest('.worker-menu-wrap'))document.querySelectorAll('.worker-menu.open').forEach(m=>m.classList.remove('open'))});refresh();setInterval(refresh,15000);
+window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;document.querySelector('#refresh').onclick=refresh;document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-worker').onchange=()=>{updateJobOptions();syncClusterWorkspace()};document.querySelector('#job-suite').onchange=()=>syncClusterWorkspace();document.querySelector('#job-device').onchange=()=>syncClusterWorkspace();document.querySelector('#create-job').onclick=createJob;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>openClusterJobReport();document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.addEventListener('click',e=>{if(!e.target.closest('.worker-menu-wrap'))document.querySelectorAll('.worker-menu.open').forEach(m=>m.classList.remove('open'))});refresh();setInterval(refresh,15000);

@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
+from .config import ClusterConfig
 from .state_machine import InvalidJobTransitionError
 
 
@@ -69,7 +70,7 @@ class ClusterInventoryRepositoryMixin:
                 data["worker_id"], data.get("name", ""), data.get("hostname", ""),
                 data.get("address", ""), data.get("agent_version", ""),
                 json.dumps(data.get("capabilities", {}), separators=(",", ":")),
-                data.get("max_jobs", 1), session_id, generation, "",
+                data.get("max_jobs", ClusterConfig.load().default_max_jobs), session_id, generation, "",
                 now if recovered else "", now, now, now,
             ))
             self._append_timeline_conn(

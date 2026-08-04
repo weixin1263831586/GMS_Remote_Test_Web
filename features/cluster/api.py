@@ -78,6 +78,7 @@ def cluster_page():
     html = (ui_dir / "page.html").read_text(encoding="utf-8")
     html = html.replace("{{CLUSTER_CSS}}", (ui_dir / "page.css").read_text(encoding="utf-8"))
     html = html.replace("{{CLUSTER_JS}}", (ui_dir / "page.js").read_text(encoding="utf-8"))
+    html = html.replace("{{DEFAULT_MAX_JOBS}}", str(ClusterConfig.load().default_max_jobs))
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 

@@ -11,6 +11,7 @@ from typing import Any
 
 from foundation.device_claims import DeviceClaimRegistry
 
+from .config import ClusterConfig
 from .repository_claims import ClusterClaimRepositoryMixin
 from .repository_commands import ClusterCommandRepositoryMixin
 from .repository_inventory import ClusterInventoryRepositoryMixin
@@ -93,7 +94,7 @@ class ClusterRepository(
 
     def _init_schema(self) -> None:
         with self._lock, self._open_connection() as conn:
-            conn.executescript("""
+            schema = """
                 CREATE TABLE IF NOT EXISTS cluster_workers (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL, hostname TEXT NOT NULL,
                     address TEXT NOT NULL, agent_version TEXT NOT NULL,
@@ -104,7 +105,7 @@ class ClusterRepository(
                     memory_available_gb REAL NOT NULL DEFAULT 0,
                     load_1m REAL NOT NULL DEFAULT 0,
                     disk_free_gb REAL NOT NULL DEFAULT 0,
-                    max_jobs INTEGER NOT NULL DEFAULT 1,
+                    max_jobs INTEGER NOT NULL DEFAULT __MAX_JOBS__,
                     running_jobs INTEGER NOT NULL DEFAULT 0,
                     external_jobs INTEGER NOT NULL DEFAULT 0,
                     unknown_external_jobs INTEGER NOT NULL DEFAULT 0,
@@ -241,7 +242,8 @@ class ClusterRepository(
                     error TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                     completed_at TEXT NOT NULL
                 );
-            """)
+            """.replace("__MAX_JOBS__", str(ClusterConfig.load().default_max_jobs))
+            conn.executescript(schema)
             self._migrate_worker_metrics(conn)
             self._migrate_transfers(conn)
             self._migrate_device_lease_unique_constraint(conn)

@@ -192,10 +192,11 @@ mkdir -p "${SUITE_ROOT}"
 install -m 755 "${PROJECT_ROOT}/scripts/run_GMS_Test_Auto.sh" \
     "${SUITE_ROOT}/run_GMS_Test_Auto.sh"
 
-python3 - "${CONFIG_ROOT}/config.json" "${WORKER_ID}" "${CONTROLLER_URL}" \
+PYTHONPATH_PRESET="${INSTALL_ROOT}:${PYTHONPATH:-}" python3 - "${CONFIG_ROOT}/config.json" "${WORKER_ID}" "${CONTROLLER_URL}" \
     "${WORKER_ADDRESS}" "${CONTROLLER_CA}" "${CONFIG_ROOT}/token" \
     "${SUITE_ROOT}" "${HOME}/gms-worker-data" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -219,7 +220,7 @@ payload = {
     "worker_token_file": token_file,
     "heartbeat_interval_seconds": 15,
     "suite_scan_interval_seconds": 300,
-    "max_jobs": 1,
+    "max_jobs": int(os.getenv("GMS_DEFAULT_MAX_JOBS", "1")),
     "suite_roots": [suite_root, "/opt/GMS-Suite"],
     "data_root": data_root,
 }

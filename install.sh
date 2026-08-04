@@ -383,6 +383,7 @@ try:
 except Exception:
     cluster_config = {}
 worker_id = str(cluster_config.get("local_worker_id") or "worker-local")
+default_max_jobs = max(1, min(32, int(cluster_config.get("default_max_jobs", 6))))
 
 values = {}
 if env_path.exists():
@@ -444,7 +445,7 @@ worker_payload = {
     "worker_token_file": str(token_path),
     "heartbeat_interval_seconds": 15,
     "suite_scan_interval_seconds": 300,
-    "max_jobs": 1,
+    "max_jobs": default_max_jobs,
     "suite_roots": [str(Path(run_home) / "GMS-Suite"), "/opt/GMS-Suite"],
     "data_root": str(worker_config.parent / "runtime"),
 }

@@ -119,11 +119,6 @@ async function _apiCallOnce(url, method, data, opts) {
         }
 
         if (!response.ok) {
-            // Ordinary client usage is anonymous. Do not show the platform
-            // login gate for background 401s; sensitive actions use the
-            // elevation_required path below.
-            // Sensitive operation needs temporary admin elevation: prompt for
-            // admin credentials, and on success replay this exact request once.
             const detail = result && typeof result === 'object' ? result.detail : null;
             const needsElevation = response.status === 403
                 && detail
@@ -154,7 +149,10 @@ async function _apiCallOnce(url, method, data, opts) {
             error.retryable = structured?.retryable === true;
             error.remediation = structured?.remediation || '';
             error.details = structured?.error_details || structured?.network_quality || {};
-            if (response.status === 401) error.suppressToast = true;
+            if (response.status === 401) {
+                error.suppressToast = true;
+                if (state.authRequired) showAuthGate(false);
+            }
             if (needsElevation) error.suppressToast = true;
             if (result.need_password) {
                 error.needPassword = true;
@@ -335,7 +333,7 @@ async function submitAuthForm() {
         const detectOpen = typeof ModalManager !== 'undefined' && ModalManager.isOpen('username-detect-modal');
         if (detectOpen) {
             debugLog('[Auth] Login succeeded with username-detect open; recovering state without reload');
-            state.usernameDetectShown = true;  // keep the already-open modal, don't re-trigger
+            state.usernameDetectShown = true;
             try {
                 const cur = await fetch('/api/users/current', { credentials: 'same-origin' });
                 if (cur.ok) {
@@ -396,10 +394,6 @@ function applyRoleBasedUiAccess() {
     const isAdmin = isPlatformAdmin();
     document.querySelectorAll('[data-admin-only]').forEach(element => {
         if (!isAdmin && element.contains(document.activeElement)) {
-            // Do not hide an element that still owns focus; Chromium reports
-            // this as an aria-hidden accessibility violation. Returning focus
-            // to the document also avoids trapping keyboard users in a menu
-            // item that is no longer available to their role.
             document.activeElement.blur();
         }
         element.hidden = !isAdmin;

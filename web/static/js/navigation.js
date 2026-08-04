@@ -1430,7 +1430,11 @@ window.addEventListener('gms:workspace-context', event => {
             debugLog('[Devices] Scope refresh failed:', error)), 0);
     }
     const contextJobId = String(context.cluster_job_id || '');
-    if (contextJobId && contextJobId !== state.clusterJobId) {
+    const contextSource = String(event.detail?.source || '');
+    const reportProvenanceOnly = ['reports', 'report-analysis', 'report-download', 'test-suites']
+        .includes(String(context.origin_page || ''))
+        || ['reports', 'report-analysis'].includes(contextSource);
+    if (contextJobId && contextJobId !== state.clusterJobId && !reportProvenanceOnly) {
         state.clusterJobId = contextJobId;
         state.clusterEventSequence = -1;
         sessionStorage.setItem('active_cluster_job', contextJobId);
@@ -9844,7 +9848,7 @@ function handleReportAction(event) {
     }
 }
 
-async function openReportSuiteDirectory(timestamp, suitePath, testType, kind, reportContext = {}) {
+async function openReportSuiteDirectory(timestamp, suitePath, testType, kind, reportContext = {}, targetFile = '') {
     if (!timestamp || !['results', 'logs'].includes(kind)) {
         showToast('报告目录参数无效', 'error');
         return;
@@ -9878,7 +9882,15 @@ async function openReportSuiteDirectory(timestamp, suitePath, testType, kind, re
     }
     const targetPath = `${kind}/${folderName}`;
     switchPage('test-suites', null);
-    await selectTestSuiteForBrowser(resolvedSuitePath, targetPath);
+    const filePath = targetFile ? `${targetPath}/${targetFile}` : '';
+    if (filePath) state.suiteBrowser.highlightPath = filePath;
+    await selectTestSuiteForBrowser(resolvedSuitePath, targetPath, {
+        preserveHighlight: Boolean(filePath)
+    });
+    if (filePath) {
+        setSuiteBrowserHighlightedPath(filePath);
+        showToast(`已定位到 ${filePath}`, 'success');
+    }
 }
 
 async function deleteReport(timestamp, reportId = '', reportName = '') {
