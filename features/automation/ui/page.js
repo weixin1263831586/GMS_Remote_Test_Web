@@ -19,6 +19,11 @@ let pendingBuildLunchTarget = '';
 let workspaceDiscoveryRequest = 0;
 let lunchDiscoveryRequest = 0;
 let lunchOptionsContext = '';
+let atsTimelineEvents = [];
+let selectedRunTrace = null;
+let buildLogRaw = '';
+let lastPreflightSignature = '';
+let lastPreflightData = null;
 
 function isLocalAutomationWorker(workerId) {
     return !workerId || workerId === atsLocalWorkerId;
@@ -86,6 +91,7 @@ async function applyAutomationWorkspaceContext(next, navigate = false) {
                 await loadEvents(atsWorkspaceContext.automation_run_id);
             }
         }
+        updateStepIndicators();
     } finally {
         applyingWorkspaceContext = false;
     }
@@ -200,6 +206,34 @@ const STATUS_LABELS_ZH = {
     test_failed: '测试失败', analysis_failed: '分析失败',
     reporting_failed: '上报失败',
 };
+const TEST_TYPE_OPTIONS = ['CTS', 'GSI', 'GTS', 'GTS-ROOT', 'STS', 'VTS', 'APTS'];
+
+function suiteTypeForTest(testType) {
+    const normalized = String(testType || '').trim().toUpperCase();
+    if (normalized === 'GSI') return 'CTS';
+    if (normalized === 'GTS-ROOT') return 'GTS';
+    return normalized;
+}
+
+function suiteVersionParts(value) {
+    const text = String(value || '');
+    const match = text.match(/(\d+(?:\.\d+)*)(?:[_-][rR](\d+))?/);
+    return {
+        main: match ? match[1].split('.').map(Number) : [0],
+        revision: match ? Number(match[2] || 0) : 0,
+    };
+}
+
+function compareSuitesNewest(first, second) {
+    const a = suiteVersionParts(first.version || first.suite_version || first.tools_path);
+    const b = suiteVersionParts(second.version || second.suite_version || second.tools_path);
+    const length = Math.max(a.main.length, b.main.length);
+    for (let index = 0; index < length; index += 1) {
+        const difference = (b.main[index] || 0) - (a.main[index] || 0);
+        if (difference) return difference;
+    }
+    return b.revision - a.revision;
+}
 
 function qs(id) { return document.getElementById(id); }
 function statusLabel(value) {
@@ -251,7 +285,7 @@ function runMeta(run) {
     return parts.join(' · ');
 }
 function openRunReport(event, runId) {
-    event.stopPropagation();
+    event?.stopPropagation?.();
     const run = atsRuns.find(item => item.id === runId);
     if (!run?.report_timestamp) return;
     window.GmsEmbeddedWorkspace?.navigate('reports', {
@@ -263,6 +297,64 @@ function openRunReport(event, runId) {
         report_timestamp: run.report_timestamp,
         origin_page: 'automation',
     });
+}
+function openRunAnalysis(event, runId) {
+    event?.stopPropagation?.();
+    const run = atsRuns.find(item => item.id === runId);
+    if (!run?.report_timestamp) return;
+    syncAutomationWorkspaceSelection({
+        worker_id: run.worker_id || atsLocalWorkerId,
+        cluster_job_id: run.cluster_job_id || '',
+        attempt_id: run.attempt_id || '',
+        automation_run_id: run.id,
+        report_id: run.report_id || '',
+        report_timestamp: run.report_timestamp,
+        origin_page: 'automation',
+    });
+    if (typeof window.parent?.analyzeReport === 'function') {
+        window.parent.analyzeReport(run.report_timestamp, run.report_id || '');
+        return;
+    }
+    window.GmsEmbeddedWorkspace?.navigate('report-analysis', {
+        automation_run_id: run.id,
+        report_id: run.report_id || '',
+        report_timestamp: run.report_timestamp,
+        origin_page: 'automation',
+    });
+}
+
+function downloadText(filename, content) {
+    const blob = new Blob([String(content || '')], {type: 'text/plain;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function copyText(content, successMessage) {
+    const value = String(content || '');
+    if (!value) throw new Error('当前没有可复制的日志');
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(value);
+            toast(successMessage);
+            return;
+        } catch (_) { /* 非安全上下文时回退到隐藏 textarea */ }
+    }
+    const input = document.createElement('textarea');
+    input.value = value;
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    const copied = document.execCommand('copy');
+    input.remove();
+    if (!copied) throw new Error('浏览器未允许复制，请使用日志下载');
+    toast(successMessage);
 }
 function renderStageBar(status, currentStage) {
     // 单索引模型：cursor 是“当前/失败”段的下标；它之前的段全部 done。
@@ -380,10 +472,14 @@ function applySelectedProfile() {
     syncBuildSectionState();
 
     const testPlan = profile.test_plan || {};
+    const flashPlan = profile.flash || testPlan.flash || {};
+    setSelectValue('automation-flash-mode', flashPlan.mode || 'firmware');
     setSelectValue('automation-test-type', testPlan.test_type);
-    renderSuiteOptions();
-    setSelectValue('automation-test-suite', testPlan.test_suite);
+    renderSuiteOptions(testPlan.test_suite);
     qs('automation-test-module').value = testPlan.test_module || (testPlan.modules || [])[0] || '';
+    handleFlashModeChange({invalidate: false});
+    invalidateRunPreflight();
+    updateStepIndicators();
 }
 
 async function loadBuildConfig() {
@@ -396,9 +492,16 @@ async function loadBuildConfig() {
     renderBuildWorkspaces([]);
     invalidateLunchOptions('选择源码目录后自动读取该目录的 Lunch Target');
     qs('build-server').onchange = handleBuildServerChange;
-    qs('build-template').onchange = () => applyBuildTemplateDefaults();
+    qs('build-template').onchange = () => {
+        applyBuildTemplateDefaults();
+        invalidateRunPreflight();
+        updateStepIndicators();
+    };
     qs('build-workspace').onchange = handleBuildWorkspaceChange;
-    qs('build-command').onchange = syncBuildCommandTitle;
+    qs('build-command').onchange = () => {
+        syncBuildCommandTitle();
+        invalidateRunPreflight();
+    };
     syncBuildCommandTitle();
     syncArtifactMode();
     syncBuildSectionState();
@@ -544,7 +647,8 @@ function setBuildControlBusy(id, busy) {
 }
 
 function syncBuildSectionState() {
-    const enabled = !Boolean(qs('automation-artifact')?.value.trim());
+    const enabled = currentFlashMode() !== 'skip'
+        && !Boolean(qs('automation-artifact')?.value.trim());
     qs('automation-build-fields')?.classList.toggle('is-disabled', !enabled);
     const server = qs('build-server');
     const template = qs('build-template');
@@ -567,6 +671,7 @@ function syncBuildSectionState() {
     if (lunchRefresh) {
         lunchRefresh.disabled = !enabled || !workspace?.value || lunchRefresh.dataset.loading === 'true';
     }
+    updateStepIndicators();
 }
 
 function syncArtifactMode() {
@@ -574,11 +679,108 @@ function syncArtifactMode() {
     const hint = qs('artifact-mode-hint');
     if (hint) {
         hint.textContent = artifact
-            ? '本次运行将直接使用已有固件，下方源码编译参数已忽略'
+            ? '本次运行将直接使用已有固件，源码编译参数已隐藏'
             : '留空时按下方参数从源码编译；填写后直接使用该固件';
         hint.classList.toggle('ready', Boolean(artifact));
     }
+    const buildSection = qs('build-config-section');
+    if (buildSection) buildSection.hidden = Boolean(artifact);
     syncBuildSectionState();
+    invalidateRunPreflight();
+    updateStepIndicators();
+}
+
+function currentFlashMode() {
+    return qs('automation-flash-mode')?.value || 'firmware';
+}
+
+function handleFlashModeChange({invalidate = true} = {}) {
+    const skip = currentFlashMode() === 'skip';
+    const hint = qs('flash-mode-hint');
+    if (hint) {
+        hint.textContent = skip
+            ? '仅测试不会编译或烧写固件，可选择多台设备'
+            : '烧写模式只允许选择 1 台本地 USB / USB-IP 设备';
+        hint.classList.toggle('ready', skip);
+    }
+    const artifact = qs('automation-artifact');
+    if (artifact) artifact.disabled = skip;
+    const buildSection = qs('build-config-section');
+    if (buildSection) buildSection.hidden = skip || Boolean(artifact?.value.trim());
+    const label = qs('device-selection-label');
+    if (label) label.textContent = skip ? '目标设备（可多选）' : '目标设备（烧写模式限选 1 台）';
+    document.querySelectorAll('#automation-device-list input[type="checkbox"]').forEach(input => {
+        const baseDisabled = input.dataset.baseDisabled === 'true';
+        const flashUnsupported = !skip && input.dataset.transport === 'adb_proxy';
+        input.disabled = baseDisabled || flashUnsupported;
+        input.closest('.checkbox-item')?.classList.toggle('muted', input.disabled);
+        if (input.disabled) input.checked = false;
+    });
+    if (!skip) {
+        const checked = Array.from(document.querySelectorAll(
+            '#automation-device-list input[type="checkbox"]:checked'
+        ));
+        checked.slice(1).forEach(input => { input.checked = false; });
+    }
+    syncBuildSectionState();
+    syncAutomationWorkspaceSelection();
+    if (invalidate) invalidateRunPreflight();
+    updateStepIndicators();
+}
+
+function handleDeviceSelection(input) {
+    if (currentFlashMode() !== 'skip' && input?.checked) {
+        document.querySelectorAll('#automation-device-list input[type="checkbox"]:checked')
+            .forEach(item => { if (item !== input) item.checked = false; });
+    }
+    syncAutomationWorkspaceSelection();
+    invalidateRunPreflight();
+    updateStepIndicators();
+}
+
+function runFormSignature() {
+    const checked = Array.from(document.querySelectorAll(
+        '#automation-device-list input[type="checkbox"]:checked'
+    )).map(input => input.value);
+    return JSON.stringify({
+        profile: qs('automation-profile')?.value || '',
+        flash: currentFlashMode(), artifact: qs('automation-artifact')?.value.trim() || '',
+        server: qs('build-server')?.value || '', template: qs('build-template')?.value || '',
+        workspace: qs('build-workspace')?.value || '', lunch: qs('build-lunch-target')?.value || '',
+        command: qs('build-command')?.value || '', worker: selectedWorkerId(), devices: checked,
+        type: qs('automation-test-type')?.value || '', suite: qs('automation-test-suite')?.value || '',
+        module: qs('automation-test-module')?.value.trim() || '', extra: qs('automation-test-plan')?.value.trim() || '',
+    });
+}
+
+function invalidateRunPreflight(message = '参数已变更，请重新预检') {
+    if (!lastPreflightSignature && !lastPreflightData) return;
+    lastPreflightSignature = '';
+    lastPreflightData = null;
+    const result = qs('automation-preflight');
+    if (result) {
+        result.className = 'preflight-result idle';
+        result.innerHTML = `<strong>需要重新预检</strong><span>${esc(message)}</span>`;
+    }
+    updateStepIndicators();
+}
+
+function updateStepIndicators() {
+    const step1 = qs('step-1');
+    const step2 = qs('step-2');
+    const step3 = qs('step-3');
+    if (step1) step1.classList.toggle('done', Boolean(qs('automation-profile')?.options.length));
+    if (step2) {
+        const hasArtifact = Boolean(qs('automation-artifact')?.value.trim());
+        const hasBuildParams = qs('build-server')?.value && qs('build-template')?.value
+            && qs('build-workspace')?.value && qs('build-lunch-target')?.value;
+        step2.classList.toggle('done', currentFlashMode() === 'skip' || hasArtifact || Boolean(hasBuildParams));
+    }
+    if (step3) step3.classList.toggle('done', Boolean(selectedWorkerId() && qs('automation-test-type')?.value));
+    const step4 = qs('step-4');
+    if (step4) step4.classList.toggle('done', Boolean(
+        lastPreflightData?.ready && lastPreflightSignature === runFormSignature()
+    ));
 }
 
 function renderBuildWorkspaces(items, preferredWorkspace = '') {
@@ -595,6 +797,7 @@ function renderBuildWorkspaces(items, preferredWorkspace = '') {
         select.value = preferred;
     }
     syncBuildSectionState();
+    updateStepIndicators();
 }
 
 function renderLunchOptions(items, preferredTarget = '') {
@@ -607,6 +810,7 @@ function renderLunchOptions(items, preferredTarget = '') {
         select.value = preferred;
     }
     syncBuildSectionState();
+    updateStepIndicators();
 }
 
 function invalidateLunchOptions(message = '选择源码目录后自动读取该目录的 Lunch Target') {
@@ -618,6 +822,7 @@ function invalidateLunchOptions(message = '选择源码目录后自动读取该�
 }
 
 async function handleBuildServerChange() {
+    invalidateRunPreflight();
     workspaceDiscoveryRequest += 1;
     renderBuildTemplates();
     applyBuildTemplateDefaults();
@@ -628,6 +833,7 @@ async function handleBuildServerChange() {
 }
 
 async function handleBuildWorkspaceChange() {
+    invalidateRunPreflight();
     invalidateLunchOptions('正在读取所选源码目录的 Lunch Target…');
     if (qs('build-workspace').value) await refreshLunchOptions({silent: true});
 }
@@ -762,41 +968,69 @@ async function loadDevices(forceRefresh = false) {
                         ? ` · USB/IP${sourceWorker ? ` · ${sourceWorker}` : ''}`
                         : '');
                 const label = `${id}${transportLabel}${unavailable ? `（${statusLabel(deviceState)}）` : ''}`;
-                return `<label class="checkbox-item${unavailable ? ' muted' : ''}"><input type="checkbox" value="${esc(id)}"${unavailable ? ' disabled' : ''} onchange="syncAutomationWorkspaceSelection()"> <span>${esc(label)}</span></label>`;
+                const flashUnsupported = currentFlashMode() !== 'skip' && transport === 'adb_proxy';
+                return `<label class="checkbox-item${unavailable || flashUnsupported ? ' muted' : ''}"><input type="checkbox" value="${esc(id)}" data-transport="${esc(transport)}" data-base-disabled="${unavailable ? 'true' : 'false'}"${unavailable || flashUnsupported ? ' disabled' : ''} onchange="handleDeviceSelection(this)"> <span>${esc(label)}</span></label>`;
             }).join('')
             : '<div class="muted">未发现设备</div>';
         await applyAutomationWorkspaceContext(atsWorkspaceContext);
+        handleFlashModeChange({invalidate: false});
+        updateStepIndicators();
     } catch (err) { toast(err.message); }
 }
 
 async function loadTestSuitesForAutomation() {
     try {
+        const previousType = qs('automation-test-type')?.value || '';
+        const previousSuite = qs('automation-test-suite')?.value || '';
         const workerId = selectedWorkerId();
         const endpoint = isLocalAutomationWorker(workerId) ? '/api/test/suites'
             : `/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`;
         const resp = await fetch(endpoint, {cache: 'no-store'});
         const data = await resp.json();
-        testSuites = data.suites || data.data?.suites || [];
-        testSuites = testSuites.map(suite => ({...suite,
+        testSuites = (data.suites || data.data?.suites || [])
+            .filter(suite => suite.available !== false)
+            .map(suite => ({...suite,
             test_type: suite.test_type || suite.suite_type,
             full_path: suite.full_path || suite.tools_path}));
-        const types = [...new Set(testSuites.map(s => String(s.test_type || '').toUpperCase()).filter(Boolean))].sort();
-        qs('automation-test-type').innerHTML = types.length
-            ? types.map(type => `<option value="${esc(type)}">${esc(type)}</option>`).join('')
-            : ['CTS', 'GTS', 'VTS', 'STS'].map(type => `<option value="${type}">${type}</option>`).join('');
-        renderSuiteOptions();
-        if (atsWorkspaceContext.suite_path) {
-            setSelectValue('automation-test-suite', atsWorkspaceContext.suite_path);
-        }
+        qs('automation-test-type').innerHTML = TEST_TYPE_OPTIONS
+            .map(type => `<option value="${type}">${type}</option>`).join('');
+        setSelectValue('automation-test-type', TEST_TYPE_OPTIONS.includes(previousType) ? previousType : 'CTS');
+        renderSuiteOptions(atsWorkspaceContext.suite_path || previousSuite);
     } catch (err) { toast(err.message); }
 }
 
-function renderSuiteOptions() {
-    const type = String(qs('automation-test-type').value || '').toLowerCase();
-    const suites = testSuites.filter(s => String(s.test_type || '').toLowerCase() === type);
-    qs('automation-test-suite').innerHTML = suites.length
-        ? suites.map(s => `<option value="${esc(s.tools_path || '')}">${esc(s.version || s.suite_version || s.tools_path || '')}</option>`).join('')
-        : '<option value="">自动匹配最新套件</option>';
+function renderSuiteOptions(preferredSuite = '') {
+    const select = qs('automation-test-suite');
+    const grouped = {};
+    testSuites.forEach(suite => {
+        const groupType = String(suite.test_type || '').trim().toUpperCase();
+        if (!groupType) return;
+        if (!grouped[groupType]) grouped[groupType] = [];
+        grouped[groupType].push(suite);
+    });
+    const groups = Object.keys(grouped).sort().map(type => {
+        const options = grouped[type].sort(compareSuitesNewest).map(suite => {
+            const path = suite.tools_path || suite.full_path || '';
+            return `<option value="${esc(path)}">${esc(path)}</option>`;
+        }).join('');
+        return `<optgroup label="${esc(type)}">${options}</optgroup>`;
+    }).join('');
+    select.innerHTML = groups || '<option value="" disabled>当前 Worker 暂无测试套件</option>';
+
+    const preferred = String(preferredSuite || '');
+    const hasPreferred = preferred && Array.from(select.options).some(option => option.value === preferred);
+    if (hasPreferred) {
+        select.value = preferred;
+    } else {
+        const suiteType = suiteTypeForTest(qs('automation-test-type').value);
+        const latest = testSuites
+            .filter(suite => String(suite.test_type || '').trim().toUpperCase() === suiteType)
+            .sort(compareSuitesNewest)[0];
+        select.value = latest ? (latest.tools_path || latest.full_path || '') : '';
+    }
+    invalidateRunPreflight();
+    syncAutomationWorkspaceSelection();
+    updateStepIndicators();
 }
 
 async function loadRuns() {
@@ -835,7 +1069,7 @@ async function loadRuns() {
                     </div>
                     <div>
                         <div class="field-label">报告</div>
-                        <div class="run-value">${run.report_timestamp ? `<button type="button" onclick="openRunReport(event, '${esc(run.id)}')">查看报告</button>` : '<span class="muted">-</span>'}</div>
+                        <div class="run-value">${run.report_timestamp ? `<button type="button" onclick="openRunAnalysis(event, '${esc(run.id)}')">分析报告</button>` : '<span class="muted">-</span>'}</div>
                     </div>
                     ${(FAILURE_STATUSES.has(run.status) && run.error) ? `
                     <div style="grid-column: 1 / -1">
@@ -846,6 +1080,7 @@ async function loadRuns() {
                 ${renderStageBar(run.status, run.current_stage)}
             </div>
             <div class="run-actions">
+                <button type="button" onclick="event.stopPropagation(); loadEvents('${esc(run.id)}')">日志</button>
                 <button type="button" onclick="event.stopPropagation(); loadTrace('${esc(run.id)}')">链路</button>
                 ${TERMINAL_STATUSES.has(run.status)
                     ? `<button type="button" onclick="event.stopPropagation(); retryRun('${esc(run.id)}')">重试</button>`
@@ -874,7 +1109,10 @@ async function loadRuns() {
                             <span>运行：${esc(run.id)}</span>
                         </div>
                     </div>
-                    <button type="button" class="primary" onclick="openRunReport(event, '${esc(run.id)}')">打开报告</button>
+                    <div class="report-card-actions">
+                        <button type="button" onclick="openRunReport(event, '${esc(run.id)}')">报告详情</button>
+                        <button type="button" class="primary" onclick="openRunAnalysis(event, '${esc(run.id)}')">分析报告</button>
+                    </div>
                 </article>
             `).join('')
             : '<div class="empty-state">暂无已生成的测试报告。</div>';
@@ -896,34 +1134,109 @@ async function loadEvents(runId) {
         origin_page: 'automation'
     });
     qs('events-title').textContent = run ? `全链路时间线 / ${run.profile_id || run.id}` : '全链路时间线';
+    const traceButton = qs('events-trace-button');
+    if (traceButton) traceButton.disabled = false;
     qs('automation-runs').querySelectorAll('.run-card').forEach(el => el.classList.remove('active'));
     const card = qs('automation-runs').querySelector(`.run-card[onclick="loadEvents('${runId}')"]`);
     if (card) card.classList.add('active');
-    const data = await api(`/api/automation/runs/${encodeURIComponent(runId)}/timeline`);
-    const items = data.items || [];
-    qs('automation-events').innerHTML = items.length
-        ? items.map(ev => {
-            const level = String(ev.level || 'info').toLowerCase();
-            const levelClass = level.includes('error') || level.includes('fail')
-                ? 'error' : level.includes('warn') ? 'warning' : 'info';
-            return `<article class="event">
-                <div class="event-meta">
-                    <span class="event-time">${esc(compactTime(ev.created_at))}</span>
-                    <span class="badge">${esc(ev.domain || 'automation')}</span>
-                    <span class="badge">${esc(ev.stage || ev.to_state || ev.event_type || '-')}</span>
-                    <span class="event-level ${levelClass}">${esc(level)}</span>
-                </div>
-                <div class="event-body">
-                    <div class="event-message">${esc(ev.message)}</div>
-                    ${(ev.operation_id || ev.from_state || ev.to_state) ? `<div class="muted">${esc([
-                        ev.from_state && ev.to_state ? `${ev.from_state} → ${ev.to_state}` : '',
-                        ev.operation_id ? `operation ${ev.operation_id}` : '',
-                    ].filter(Boolean).join(' · '))}</div>` : ''}
-                </div>
-            </article>`;
-        }).join('')
-        : '<div class="muted">暂无事件。</div>';
+    const [data, trace] = await Promise.all([
+        api(`/api/automation/runs/${encodeURIComponent(runId)}/timeline`),
+        api(`/api/automation/runs/${encodeURIComponent(runId)}/trace`).catch(() => null),
+    ]);
+    atsTimelineEvents = data.items || [];
+    selectedRunTrace = trace;
+    await renderRunLogLinks(trace);
+    renderEventLog();
     switchWorkflowPane('events');
+}
+
+function eventLevelClass(event) {
+    const level = String(event.level || 'info').toLowerCase();
+    if (level.includes('error') || level.includes('fail')) return 'error';
+    if (level.includes('warn')) return 'warning';
+    return 'info';
+}
+
+function eventLogLine(event) {
+    const stage = event.stage || event.to_state || event.event_type || '-';
+    const detail = [
+        event.from_state && event.to_state ? `${event.from_state} -> ${event.to_state}` : '',
+        event.operation_id ? `op=${event.operation_id}` : '',
+    ].filter(Boolean).join(' ');
+    return `${compactTime(event.created_at)} ${eventLevelClass(event).toUpperCase().padEnd(5)} ${String(event.domain || 'automation').padEnd(10)} ${String(stage).padEnd(20)} ${event.message || ''}${detail ? ` | ${detail}` : ''}`;
+}
+
+function filteredTimelineEvents() {
+    const query = String(qs('events-search')?.value || '').trim().toLowerCase();
+    const level = qs('events-level')?.value || '';
+    return atsTimelineEvents.filter(event => {
+        if (level && eventLevelClass(event) !== level) return false;
+        return !query || eventLogLine(event).toLowerCase().includes(query);
+    });
+}
+
+function renderEventLog() {
+    const target = qs('automation-events');
+    if (!target) return;
+    const events = filteredTimelineEvents();
+    const autoFollow = qs('events-auto-follow')?.checked !== false;
+    const wasNearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 48;
+    const previousTop = target.scrollTop;
+    target.classList.remove('muted');
+    target.innerHTML = events.length ? events.map(event => {
+        const level = eventLevelClass(event);
+        const stage = event.stage || event.to_state || event.event_type || '-';
+        const detail = [
+            event.from_state && event.to_state ? `${event.from_state} → ${event.to_state}` : '',
+            event.operation_id ? `op=${event.operation_id}` : '',
+        ].filter(Boolean).join(' · ');
+        return `<div class="event-line">
+            <span class="event-line-time">${esc(compactTime(event.created_at))}</span>
+            <span class="event-line-level ${level}">${esc(level === 'warning' ? 'WARN' : level.toUpperCase())}</span>
+            <span class="event-line-domain">${esc(event.domain || 'automation')}</span>
+            <span class="event-line-stage">${esc(stage)}</span>
+            <span class="event-line-message">${esc(event.message || '-')}${detail ? ` <span class="event-line-detail">| ${esc(detail)}</span>` : ''}</span>
+        </div>`;
+    }).join('') : '<div class="event-log-empty">没有匹配当前筛选条件的日志。</div>';
+    if (autoFollow && (wasNearBottom || !target.dataset.loaded)) {
+        requestAnimationFrame(() => { target.scrollTop = target.scrollHeight; });
+    } else {
+        target.scrollTop = previousTop;
+    }
+    target.dataset.loaded = '1';
+}
+
+async function renderRunLogLinks(trace) {
+    const target = qs('run-log-links');
+    if (!target) return;
+    const links = [];
+    if (trace?.build_job_id) {
+        links.push(`<button type="button" onclick="jumpToBuildLog('${esc(trace.build_job_id)}')">构建原始日志</button>`);
+    }
+    if (trace?.cluster_job_id) {
+        try {
+            const response = await fetch(`/api/cluster/jobs/${encodeURIComponent(trace.cluster_job_id)}/artifacts`, {cache: 'no-store'});
+            const payload = await response.json();
+            if (response.ok && payload.success !== false) {
+                (payload.artifacts || []).filter(item => ['stdout.log', 'stderr.log'].includes(item.filename)).forEach(item => {
+                    const url = `/api/cluster/jobs/${encodeURIComponent(trace.cluster_job_id)}/artifacts/${encodeURIComponent(item.id)}/download`;
+                    links.push(`<a class="log-artifact-link" href="${url}">${esc(item.filename)}</a>`);
+                });
+            }
+        } catch (_) { /* 日志产物入口是增强信息，不阻断时间线 */ }
+    }
+    target.innerHTML = links.length ? links.join('') : '时间 · 级别 · 来源 · 阶段 · 消息';
+}
+
+function copyEventLog() {
+    copyText(filteredTimelineEvents().map(eventLogLine).join('\n'), '运行日志已复制')
+        .catch(error => toast(error.message));
+}
+
+function downloadEventLog() {
+    const content = filteredTimelineEvents().map(eventLogLine).join('\n');
+    if (!content) { toast('当前没有可下载的日志'); return; }
+    downloadText(`${selectedRunId || 'ats-run'}.log`, content);
 }
 
 async function refreshSelectedEvents() {
@@ -966,7 +1279,10 @@ function collectTestPlan() {
     const profilePlan = profile.test_plan || {};
     const plan = {
         ...profilePlan,
-        flash: profile.flash || profilePlan.flash || {},
+        flash: {
+            ...(profile.flash || profilePlan.flash || {}),
+            mode: currentFlashMode(),
+        },
         device_selector: profile.device_selector || profilePlan.device_selector || {},
         reporting: profile.reporting || profilePlan.reporting || {},
         ...extra,
@@ -975,8 +1291,9 @@ function collectTestPlan() {
         test_module: qs('automation-test-module').value.trim(),
         worker_id: selectedWorkerId(),
     };
-    const build = collectBuildPlan();
+    const build = currentFlashMode() === 'skip' ? null : collectBuildPlan();
     if (build) plan.build = build;
+    else delete plan.build;
     return plan;
 }
 
@@ -989,7 +1306,9 @@ async function loadBuildJobs() {
             return `<div class="build-job ${job.id === selectedBuildJobId ? 'active' : ''}" onclick="loadBuildLog('${esc(job.id)}')">
                 <div class="build-job-head"><span class="badge ${esc(job.status)}" title="${esc(job.status)}">${esc(statusLabel(job.status))}</span><strong>${esc(job.template_id)}</strong>
                 ${terminal ? `<button type="button" class="build-job-delete" title="删除历史任务" onclick="event.stopPropagation(); deleteBuildJob('${esc(job.id)}')">删除</button>` : ''}</div>
-                <div class="muted">${esc(job.id)} / ${esc(job.remote_workspace || '')}</div><div>${esc((job.artifacts || [])[0]?.path || job.error || '')}</div></div>`;
+                <div class="muted">${esc(job.id)} / ${esc(job.remote_workspace || '')}</div>
+                <div class="build-job-source">${job.automation_run_id ? `ATS ${esc(job.automation_run_id)}` : '独立调试构建'}</div>
+                <div>${esc((job.artifacts || [])[0]?.path || job.error || '')}</div></div>`;
         }).join('')
         : '<div class="muted">暂无构建任务。</div>';
 }
@@ -1006,6 +1325,7 @@ async function deleteBuildJob(jobId) {
         await api(`/api/build/jobs/${encodeURIComponent(jobId)}`, {method: 'DELETE'});
         if (selectedBuildJobId === jobId) {
             selectedBuildJobId = '';
+            buildLogRaw = '';
             qs('build-log-title').textContent = '未选择任务';
             qs('build-log').textContent = '选择构建任务查看日志。';
         }
@@ -1014,7 +1334,7 @@ async function deleteBuildJob(jobId) {
     } catch (err) { toast(err.message); }
 }
 
-async function createBuildJob() {
+async function compileAndJump() {
     try {
         const build = collectBuildPlan({forceBuild: true});
         if (!build) throw new Error('请填写编译服务器、模板、源码目录和 lunch target');
@@ -1030,7 +1350,8 @@ async function createBuildJob() {
                 source_type: 'manual-ui',
             }),
         });
-        toast(`已创建构建任务 ${job.id}`);
+        toast(`已创建独立构建任务 ${job.id}；该任务不会自动进入烧写和测试`);
+        switchWorkflowPane('build');
         await loadBuildJobs();
         await loadBuildLog(job.id);
     } catch (err) { toast(err.message); }
@@ -1052,21 +1373,43 @@ async function loadBuildLog(jobId, {silent = false} = {}) {
         }
         job = await api(`/api/build/jobs/${encodeURIComponent(jobId)}?poll=true`);
         const log = await api(`/api/build/jobs/${encodeURIComponent(jobId)}/log?lines=5000`);
-        const logEl = qs('build-log');
-        const autoFollow = qs('build-log-auto-follow')?.checked !== false;
-        const wasNearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 48;
-        const previousTop = logEl.scrollTop;
-        logEl.textContent = log.text || '暂无日志。';
-        if (autoFollow && (wasNearBottom || !logEl.dataset.loaded)) {
-            requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
-        } else {
-            logEl.scrollTop = previousTop;
-        }
-        logEl.dataset.loaded = '1';
+        buildLogRaw = log.text || '';
+        renderBuildLog();
         qs('build-log-title').textContent = `${job.id} / ${statusLabel(job.status)}`;
         if (!silent) toast(`构建任务 ${job.id}：${statusLabel(job.status)}`);
         await loadBuildJobs();
     } catch (err) { toast(err.message); }
+}
+
+function filteredBuildLog() {
+    const query = String(qs('build-log-search')?.value || '').trim().toLowerCase();
+    if (!query) return buildLogRaw;
+    return buildLogRaw.split('\n').filter(line => line.toLowerCase().includes(query)).join('\n');
+}
+
+function renderBuildLog() {
+    const logEl = qs('build-log');
+    if (!logEl) return;
+    const autoFollow = qs('build-log-auto-follow')?.checked !== false;
+    const wasNearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 48;
+    const previousTop = logEl.scrollTop;
+    logEl.textContent = filteredBuildLog() || (buildLogRaw ? '没有匹配的日志。' : '暂无日志。');
+    if (autoFollow && (wasNearBottom || !logEl.dataset.loaded)) {
+        requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+    } else {
+        logEl.scrollTop = previousTop;
+    }
+    logEl.dataset.loaded = '1';
+}
+
+function copyBuildLog() {
+    copyText(filteredBuildLog(), '构建日志已复制').catch(error => toast(error.message));
+}
+
+function downloadBuildLog() {
+    const content = filteredBuildLog();
+    if (!content) { toast('当前没有可下载的日志'); return; }
+    downloadText(`${selectedBuildJobId || 'build'}.log`, content);
 }
 
 function refreshSelectedBuildLog() {
@@ -1077,19 +1420,24 @@ function refreshSelectedBuildLog() {
     loadBuildLog(selectedBuildJobId).catch(err => toast(err.message));
 }
 
-async function createRun() {
-    try {
-        const artifact = qs('automation-artifact').value.trim();
-        const checkedDevices = Array.from(qs('automation-device-list').querySelectorAll('input[type="checkbox"]:checked'))
-            .map(opt => opt.value)
-            .filter(Boolean);
-        const devices = [...new Set(checkedDevices)];
-        const testPlan = collectTestPlan();
-        if (atsWorkspaceContext.redmine_issue_id) {
-            testPlan.redmine_issue_id = atsWorkspaceContext.redmine_issue_id;
-        }
-        const buildServerPassword = testPlan.build ? await getBuildPassword(testPlan.build.server_id) : '';
-        const payload = {
+async function collectRunPayload() {
+    const artifact = currentFlashMode() === 'skip'
+        ? '' : qs('automation-artifact').value.trim();
+    const checkedDevices = Array.from(qs('automation-device-list').querySelectorAll('input[type="checkbox"]:checked'))
+        .map(opt => opt.value)
+        .filter(Boolean);
+    const devices = [...new Set(checkedDevices)];
+    if (currentFlashMode() !== 'skip' && devices.length > 1) {
+        throw new Error('固件烧写只允许选择 1 台设备');
+    }
+    const testPlan = collectTestPlan();
+    if (atsWorkspaceContext.redmine_issue_id) {
+        testPlan.redmine_issue_id = atsWorkspaceContext.redmine_issue_id;
+    }
+    const buildServerPassword = testPlan.build
+        ? await getBuildPassword(testPlan.build.server_id) : '';
+    return {
+        payload: {
             profile_id: qs('automation-profile').value,
             source_type: 'manual',
             artifact_path: artifact.startsWith('http') ? '' : artifact,
@@ -1099,18 +1447,108 @@ async function createRun() {
             build_server_password: buildServerPassword,
             gerrit_change_id: atsWorkspaceContext.gerrit_change_id || '',
             gerrit_patchset: atsWorkspaceContext.gerrit_patchset || '',
-        };
-        const preflight = await api('/api/automation/runs/preflight', {
+        },
+        devices,
+    };
+}
+
+function renderPreflightResult(data, state = 'ready', error = '') {
+    const target = qs('automation-preflight');
+    if (!target) return;
+    target.className = `preflight-result ${state}`;
+    if (state === 'loading') {
+        target.innerHTML = '<strong>正在预检</strong><span>正在查询真实 Worker、设备库存、套件与构建配置…</span>';
+        return;
+    }
+    if (state === 'error') {
+        target.innerHTML = `<strong>预检未通过</strong><span>${esc(error || '资源或参数未就绪')}</span>`;
+        return;
+    }
+    const buildText = data.artifact_configured
+        ? '已有固件' : data.build_configured ? '自动编译' : '跳过固件';
+    const devices = (data.devices || []).length
+        ? (data.devices || []).map(item => typeof item === 'string' ? item : item.serial).join(', ')
+        : `自动选择（当前可用 ${data.available_device_count ?? '-'} 台）`;
+    target.innerHTML = `<strong>预检通过</strong><span>${esc([
+        `Worker ${data.worker_id || '-'}`,
+        buildText,
+        data.flash_mode === 'skip' ? '不烧写' : '烧写并校验',
+        `${data.test_type || '-'} / ${data.test_suite || '自动套件'}`,
+        `设备 ${devices}`,
+    ].join(' · '))}</span>`;
+}
+
+async function runPreflight() {
+    renderPreflightResult(null, 'loading');
+    try {
+        const request = await collectRunPayload();
+        const data = await api('/api/automation/runs/preflight', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload),
+            body: JSON.stringify(request.payload),
         });
+        lastPreflightSignature = runFormSignature();
+        lastPreflightData = data;
+        renderPreflightResult(data);
+        updateStepIndicators();
+        return {...request, preflight: data};
+    } catch (error) {
+        lastPreflightSignature = '';
+        lastPreflightData = null;
+        renderPreflightResult(null, 'error', error.message);
+        updateStepIndicators();
+        throw error;
+    }
+}
+
+async function preflightRunOnly() {
+    const button = qs('automation-preflight-run');
+    if (button) button.disabled = true;
+    try {
+        const {preflight} = await runPreflight();
+        toast(`预检通过：${preflight.worker_id} / ${preflight.test_type}`);
+    } catch (error) {
+        toast(error.message);
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function createRun() {
+    const button = qs('automation-create-run');
+    if (button?.dataset.busy === 'true') return;
+    if (button) {
+        button.dataset.busy = 'true';
+        button.disabled = true;
+        button.textContent = '正在预检…';
+    }
+    try {
+        const {payload, devices, preflight} = await runPreflight();
+        const flashText = preflight.flash_mode === 'skip'
+            ? '跳过固件烧写' : '将锁定单台设备并执行固件烧写；刷机阶段不可取消';
+        const message = [
+            `Worker：${preflight.worker_id || '-'}`,
+            `测试：${preflight.test_type || '-'} / ${preflight.test_suite || '自动套件'}`,
+            `设备：${formatDevices(preflight.devices || devices) === '-' ? '按 Profile 自动选择' : formatDevices(preflight.devices || devices)}`,
+            `固件：${preflight.artifact_configured ? '使用已有固件' : preflight.build_configured ? '自动编译' : '不使用固件'}`,
+            flashText,
+            '',
+            '确认创建持久化 ATS Run 并启动一条龙流程？',
+        ].join('\n');
+        const confirmed = typeof window.parent?.showConfirmDialog === 'function'
+            ? await window.parent.showConfirmDialog('启动 GMS ATS 流水线', message)
+            : window.confirm(message);
+        if (!confirmed) {
+            toast('已取消启动，预检结果仍然有效');
+            return;
+        }
+        if (button) button.textContent = '正在创建运行…';
         const run = await api('/api/automation/runs', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload),
         });
-        toast(`已创建 ${run.id} / ${preflight.worker_id} / ${preflight.test_type}`);
+        toast(`流水线已启动：${run.id} / ${preflight.worker_id} / ${preflight.test_type}`);
         syncAutomationWorkspaceSelection({
             automation_run_id: run.id,
             worker_id: preflight.worker_id,
@@ -1121,6 +1559,12 @@ async function createRun() {
         await loadEvents(run.id);
     } catch (err) {
         toast(err.message);
+    } finally {
+        if (button) {
+            button.dataset.busy = 'false';
+            button.disabled = false;
+            button.textContent = '预检并启动一条龙流程';
+        }
     }
 }
 
@@ -1190,7 +1634,7 @@ async function loadDashboard() {
     if (statusEl) {
         const entries = Object.entries(byStatus).sort((a, b) => b[1] - a[1]);
         statusEl.innerHTML = entries.length
-            ? entries.map(([s, c]) => `<div class="breakdown-row"><span class="badge ${esc(s)}">${esc(s)}</span><span class="breakdown-count">${esc(c)}</span></div>`).join('')
+            ? entries.map(([s, c]) => `<div class="breakdown-row"><span class="badge ${esc(s)}" title="${esc(s)}">${esc(statusLabel(s))}</span><span class="breakdown-count">${esc(c)}</span></div>`).join('')
             : '<div class="muted">暂无运行。</div>';
     }
 
@@ -1222,7 +1666,7 @@ async function loadTrace(runId) {
 
         const build = data.build_job;
         qs('trace-build').innerHTML = build ? [
-            `<div class="trace-key">状态</div><div class="trace-val"><span class="badge ${esc(build.status)}">${esc(build.status)}</span></div>`,
+            `<div class="trace-key">状态</div><div class="trace-val"><span class="badge ${esc(build.status)}" title="${esc(build.status)}">${esc(statusLabel(build.status))}</span></div>`,
             traceField('模板', build.template_id),
             traceField('工作目录', build.remote_workspace),
             traceField('产物', (build.artifacts || [])[0]?.path || ''),
@@ -1255,7 +1699,7 @@ async function loadTrace(runId) {
             ...Object.entries(summary).slice(0, 8).map(([k, v]) => traceField(k, typeof v === 'object' ? JSON.stringify(v) : v)),
         ].join('');
         qs('trace-report').innerHTML = reportRows
-            + (data.report_timestamp ? `<div class="trace-link-row"><button type="button" onclick="closeTrace(); openRunReport(event, '${esc(runId)}')">查看完整报告</button></div>` : '')
+            + (data.report_timestamp ? `<div class="trace-link-row"><button type="button" onclick="closeTrace(); openRunReport(event, '${esc(runId)}')">报告详情</button> <button type="button" class="primary" onclick="closeTrace(); openRunAnalysis(event, '${esc(runId)}')">分析报告</button></div>` : '')
             || '<div class="muted">尚未生成报告。</div>';
 
         openTrace();

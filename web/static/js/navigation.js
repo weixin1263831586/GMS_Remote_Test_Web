@@ -759,8 +759,9 @@ function initWebSocket() {
                         const connected = data.connected || [];
                         const disconnected = data.disconnected || [];
 
-                        // 刷新设备列表
-                        loadDevices(true).then(() => {
+                        // 刷新设备列表（静默：避免再打印一条泛泛的"[自动刷新]"日志，
+                        // 下方的"检测到 USB 设备变化"信息量更高，作为 USB 事件的唯一日志）
+                        loadDevices(true, {silent: true}).then(() => {
                             // 构建设备变化消息
                             let changeMessage = '检测到 USB 设备变化';
                             if (connected.length > 0) {
@@ -1431,7 +1432,7 @@ window.addEventListener('gms:workspace-context', event => {
     }
     const contextJobId = String(context.cluster_job_id || '');
     const contextSource = String(event.detail?.source || '');
-    const reportProvenanceOnly = ['reports', 'report-analysis', 'report-download', 'test-suites']
+    const reportProvenanceOnly = ['reports', 'report-analysis', 'report-download', 'test-suites', 'automation']
         .includes(String(context.origin_page || ''))
         || ['reports', 'report-analysis'].includes(contextSource);
     if (contextJobId && contextJobId !== state.clusterJobId && !reportProvenanceOnly) {
@@ -1566,14 +1567,18 @@ function selectedFastbootDeviceIds() {
     });
 }
 
-function fetchDevicesForWorker(workerId, forceRefresh) {
+function fetchDevicesForWorker(workerId, forceRefresh, source) {
     const requestKey = `${workerId}\n${forceRefresh ? 'force' : 'cached'}`;
     const existing = deviceRefreshFlights.get(requestKey);
     if (existing) return existing;
 
     const request = (async () => {
         if (isLocalWorkspaceWorker(workerId)) {
-            const url = forceRefresh ? '/api/devices/list?force_refresh=1' : '/api/devices/list';
+            const params = new URLSearchParams();
+            if (forceRefresh) params.set('force_refresh', '1');
+            if (source) params.set('source', source);
+            const query = params.toString();
+            const url = `/api/devices/list${query ? '?' + query : ''}`;
             return apiCall(url);
         }
         const response = await fetch(`/api/cluster/devices?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
@@ -1623,8 +1628,9 @@ async function loadDevices(forceRefresh = false, options = {}) {
     const workerId = workspaceWorkerId();
     const generation = ++deviceRefreshGeneration;
     const silent = Boolean(options && options.silent);
+    const source = (options && options.source) || 'auto';
     state.isRefreshingDevices = true;
-    state.deviceRefreshPromise = fetchDevicesForWorker(workerId, forceRefresh);
+    state.deviceRefreshPromise = fetchDevicesForWorker(workerId, forceRefresh, source);
 
     try {
         const devices = await state.deviceRefreshPromise;
@@ -1656,8 +1662,9 @@ async function loadDevices(forceRefresh = false, options = {}) {
         }
 
         if (!silent) {
-            // 显示设备信息，包含序列号
-            let deviceInfo = `已刷新设备列表，找到 ${devices.length} 台设备`;
+            // 显示设备信息，包含序列号和刷新来源
+            const sourceLabel = source === 'manual' ? '[手动刷新] ' : '[自动刷新] ';
+            let deviceInfo = `${sourceLabel}已刷新设备列表，找到 ${devices.length} 台设备`;
             if (devices.length > 0) {
                 // 支持 device_id 和 serial 两种字段名
                 const serials = devices.map(d => d.device_id || d.serial || '未知').filter(s => s).join(' ');
@@ -4035,8 +4042,8 @@ function toggleDevice(deviceId) {
 }
 
 async function refreshDevices() {
-    // 手动刷新时强制绕过缓存
-    await loadDevices(true);
+    // 手动刷新时强制绕过缓存，并标记来源为手动
+    await loadDevices(true, {source: 'manual'});
     showToast('正在刷新设备列表...', 'info');
 }
 
@@ -9432,7 +9439,6 @@ async function checkInitialTestStatus() {
 // ==================== UI Helpers ====================
 function updateConnectionStatus(connected) {
     state.connected = connected;
-    addLogEntry(connected ? '已连接到服务器' : '与服务器断开连接', connected ? 'success' : 'error');
 }
 
 // 统一确认对话框

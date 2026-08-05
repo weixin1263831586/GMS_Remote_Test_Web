@@ -216,6 +216,11 @@ class AutomationService:
                 raise ValueError('Firmware artifact is empty')
 
         test_type = str(plan.get('test_type') or '').strip().upper()
+        # 与主测试界面保持一致：GSI 运行 CTS 套件，GTS-ROOT 运行 GTS 套件。
+        suite_test_type = {
+            'GSI': 'CTS',
+            'GTS-ROOT': 'GTS',
+        }.get(test_type, test_type)
         worker_id = str(
             plan.get('worker_id') or cluster.config.local_worker_id
         ).strip()
@@ -233,7 +238,7 @@ class AutomationService:
         )
         required_memory = (
             float(os.getenv('GMS_CTS_FULL_MEMORY_GB', '28'))
-            if full_suite and test_type == 'CTS' else 0
+            if full_suite and suite_test_type == 'CTS' else 0
         )
         if requires_local_usb and minimum != 1:
             raise ValueError('Firmware flashing requires device_selector.min_count = 1')
@@ -241,7 +246,10 @@ class AutomationService:
         all_suites = [
             suite for suite in cluster.repository.list_suites()
             if suite.get('available')
-            and (not test_type or str(suite.get('suite_type') or '').upper() == test_type)
+            and (
+                not suite_test_type
+                or str(suite.get('suite_type') or '').upper() == suite_test_type
+            )
             and (not suite_path or suite.get('tools_path') == suite_path)
         ]
         if auto_selected:
