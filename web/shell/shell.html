@@ -204,6 +204,76 @@
         body.workspace-scope-single #page-terminal .host-workspace-layouts,
         body.workspace-scope-single [data-multi-host-control],
         body.workspace-scope-single #page-devices [data-cluster-mode-only] { display: none !important; }
+        body.workspace-scope-single #page-desktop .host-workspace-pane-header,
+        body.workspace-scope-single #page-terminal .host-workspace-pane-header { display: none !important; }
+        .host-workspace-single-bar { display: none; }
+        body.workspace-scope-single .host-workspace-single-bar { display: flex; align-items: center; gap: 6px; }
+        .host-workspace-mode-pending { display: none; }
+        /* 标题下沿与公共页面外框（40px）共用同一基准，避免顶部双框错位。 */
+        .host-workspace-title-row { position: relative; min-height: 24px; margin-bottom: 1px; }
+        .host-workspace-title-row > .section-title { height: 24px; line-height: 24px; }
+        .host-workspace-title-state { height: 24px; align-items: center; }
+        .host-workspace-title-state > .host-workspace-pane-status {
+            flex: 0 0 150px;
+            width: 150px;
+            max-width: 150px;
+            height: 24px;
+            margin-left: 0;
+            line-height: 24px;
+            text-align: right;
+        }
+        .host-workspace-title-state > .btn-xs {
+            flex: 0 0 auto;
+            min-height: 24px;
+        }
+        .host-workspace-mode-pending.host-workspace-title-state::after {
+            content: "";
+            flex: 0 0 24px;
+            width: 24px;
+            height: 24px;
+        }
+        .host-workspace-refresh-btn.btn-xs {
+            width: 24px;
+            min-width: 24px;
+            height: 24px;
+            min-height: 24px;
+            padding: 0;
+            border: 0;
+            border-radius: 4px;
+            background: transparent;
+            box-shadow: none;
+            transform: none;
+        }
+        .host-workspace-refresh-btn.btn-xs:hover,
+        .host-workspace-refresh-btn.btn-xs:focus-visible {
+            border: 0;
+            background: var(--lighter-bg);
+            box-shadow: none;
+            transform: none;
+        }
+        /* 单机模式使用公共页面外框；集群卡片统一内缩，避免与公共外框叠线。 */
+        body.workspace-scope-single #page-desktop .host-workspace-pane,
+        body.workspace-scope-single #page-terminal .host-workspace-pane {
+            border: 0;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-grid,
+        body.workspace-scope-cluster #page-terminal .host-workspace-grid {
+            padding: 8px;
+        }
+        body.workspace-scope-pending .host-workspace-mode-pending,
+        #page-desktop:not(.host-workspace-ready) .host-workspace-mode-pending,
+        #page-terminal:not(.host-workspace-ready) .host-workspace-mode-pending { display: flex; align-items: center; gap: 6px; }
+        body.workspace-scope-pending #page-desktop .host-workspace-layouts,
+        body.workspace-scope-pending #page-terminal .host-workspace-layouts,
+        body.workspace-scope-pending .host-workspace-single-bar,
+        #page-desktop:not(.host-workspace-ready) .host-workspace-layouts,
+        #page-terminal:not(.host-workspace-ready) .host-workspace-layouts,
+        #page-desktop:not(.host-workspace-ready) .host-workspace-single-bar,
+        #page-terminal:not(.host-workspace-ready) .host-workspace-single-bar { display: none !important; }
+        body.workspace-scope-pending #host-workspace-grid,
+        body.workspace-scope-pending #terminal-workspace-grid,
+        #page-desktop:not(.host-workspace-ready) #host-workspace-grid,
+        #page-terminal:not(.host-workspace-ready) #terminal-workspace-grid { visibility: hidden; }
         .reports-host-filter { min-width: 190px; justify-content: flex-end; }
         .project-guide { overflow-y: auto; padding: 0 4px 4px 0; color: var(--text-primary); }
         .project-guide-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; border: 1px solid rgba(102,126,234,0.45); border-radius: 10px; background: linear-gradient(135deg, rgba(102,126,234,0.18), rgba(118,75,162,0.10)); }
@@ -363,7 +433,7 @@
         }
     </style>
 </head>
-<body>
+<body class="workspace-scope-pending">
     <div id="auth-gate" class="auth-gate" style="display: none;">
         <form class="auth-panel" onsubmit="event.preventDefault(); submitAuthForm();" autocomplete="on">
             <span class="auth-close" id="auth-close" title="关闭" onclick="closeAuthGate()" style="display: none;">&times;</span>
@@ -900,7 +970,7 @@
 
         <!-- 多主机桌面 -->
         <div class="container page-content" id="page-desktop">
-            <div style="position:relative;margin-bottom:6px;">
+            <div class="host-workspace-title-row">
                 <div class="section-title" style="margin:0;">🖥️ 主机桌面</div>
                 <div class="host-workspace-layouts page-title-actions" role="group" aria-label="桌面布局">
                     <button class="btn-xs" data-workspace-layout="single" onclick="setHostWorkspaceLayout('single')">单屏</button>
@@ -908,13 +978,20 @@
                     <button class="btn-xs" data-workspace-layout="vertical" onclick="setHostWorkspaceLayout('vertical')">上下</button>
                     <button class="btn-xs" data-workspace-layout="quad" onclick="setHostWorkspaceLayout('quad')">四屏</button>
                 </div>
+                <div class="host-workspace-single-bar host-workspace-title-state page-title-actions">
+                    <span class="host-workspace-pane-status" id="host-workspace-status-single">准备中</span>
+                    <button class="btn-xs host-workspace-refresh-btn" onclick="refreshHostWorkspacePane(0)" title="重新连接" aria-label="刷新主机桌面">🔄</button>
+                </div>
+                <div class="host-workspace-mode-pending host-workspace-title-state page-title-actions">
+                    <span class="host-workspace-pane-status">正在准备工作区…</span>
+                </div>
             </div>
             <div id="host-workspace-grid" class="host-workspace-grid layout-single"></div>
         </div>
 
         <!-- 终端页面 -->
         <div class="container page-content" id="page-terminal">
-            <div style="position:relative;margin-bottom:6px;">
+            <div class="host-workspace-title-row">
                 <div class="section-title" style="margin: 0;">🐧 主机终端</div>
                 <div class="host-workspace-layouts page-title-actions" role="group" aria-label="终端布局">
                     <button class="btn-xs" data-terminal-layout="single" onclick="setTerminalWorkspaceLayout('single')">单屏</button>
@@ -934,6 +1011,13 @@
                     <button class="btn-xs" onclick="clearTerminal()" style="padding: 2px 6px; font-size: 10px;">🧹</button>
                     <button class="btn-xs" onclick="reconnectTerminal()" style="padding: 2px 6px; font-size: 10px;">🔄</button>
                     </span>
+                </div>
+                <div class="host-workspace-single-bar host-workspace-title-state page-title-actions">
+                    <span class="host-workspace-pane-status" id="terminal-workspace-status-single">准备中</span>
+                    <button class="btn-xs host-workspace-refresh-btn" onclick="refreshTerminalWorkspacePane(0)" title="重新连接" aria-label="刷新主机终端">🔄</button>
+                </div>
+                <div class="host-workspace-mode-pending host-workspace-title-state page-title-actions">
+                    <span class="host-workspace-pane-status">正在准备工作区…</span>
                 </div>
             </div>
             <div id="terminal-workspace-grid" class="host-workspace-grid layout-single"></div>
@@ -3138,7 +3222,31 @@
 
         // ==================== 多主机工作区 ====================
         const HOST_WORKSPACE_COUNTS = {single: 1, horizontal: 2, vertical: 2, quad: 4};
-        const hostWorkspace = {layout: 'single', panes: [], instances: new Map(), paneGenerations: new Map(), maximized: null, renderGeneration: 0};
+        let hostWorkspaceClusterEnabled = false;
+        const hostWorkspace = {layout: 'single', panes: [], instances: new Map(), paneGenerations: new Map(), maximized: null, renderGeneration: 0, clusterState: null};
+
+        function setHostWorkspaceSurfaceReady(pageName, ready) {
+            document.getElementById(`page-${pageName}`)?.classList.toggle(
+                'host-workspace-ready', Boolean(ready)
+            );
+        }
+
+        function snapshotHostClusterState() {
+            return {
+                layout: hostWorkspace.layout,
+                panes: hostWorkspace.panes.map(pane => ({...pane})),
+                maximized: hostWorkspace.maximized,
+            };
+        }
+
+        function useSingleHostWorkspaceState() {
+            const preferred = workspaceHostForWorker(workspaceLocalWorkerId())
+                || desktopHosts.find(host => host.id === 'default')
+                || desktopHosts[0];
+            hostWorkspace.layout = 'single';
+            hostWorkspace.maximized = null;
+            hostWorkspace.panes = [{type: 'desktop', hostId: preferred?.id || 'default'}];
+        }
 
         function loadHostWorkspaceState() {
             try {
@@ -3149,10 +3257,14 @@
                 console.warn('[Workspace] Invalid saved layout:', error);
             }
             normalizeHostWorkspacePanes();
-            const preferred = workspaceHostForWorker();
-            if (preferred && hostWorkspace.layout === 'single' && hostWorkspace.panes.length) {
-                hostWorkspace.panes[0] = {type: 'desktop', hostId: preferred.id};
+            if (hostWorkspaceClusterEnabled) {
+                const preferred = workspaceHostForWorker();
+                if (preferred && hostWorkspace.layout === 'single' && hostWorkspace.panes.length) {
+                    hostWorkspace.panes[0] = {type: 'desktop', hostId: preferred.id};
+                }
             }
+            hostWorkspace.clusterState = snapshotHostClusterState();
+            if (!hostWorkspaceClusterEnabled) useSingleHostWorkspaceState();
         }
 
         function normalizeHostWorkspacePanes() {
@@ -3175,9 +3287,13 @@
         }
 
         function saveHostWorkspaceState() {
+            if (hostWorkspaceClusterEnabled) {
+                hostWorkspace.clusterState = snapshotHostClusterState();
+            }
+            const stateToSave = hostWorkspace.clusterState || snapshotHostClusterState();
             localStorage.setItem('gms_host_workspace', JSON.stringify({
-                layout: hostWorkspace.layout,
-                panes: hostWorkspace.panes
+                layout: stateToSave.layout,
+                panes: stateToSave.panes
             }));
         }
 
@@ -3263,6 +3379,7 @@
                         });
                     }
                 }
+                setHostWorkspaceSurfaceReady('desktop', true);
                 return;
             }
             hostWorkspace.renderedSignature = signature;
@@ -3283,7 +3400,7 @@
                             ${hostWorkspaceHostOptions(pane.hostId, hostWorkspace.panes, index)}
                         </select>
                         <span class="host-workspace-pane-status" id="host-workspace-status-${index}">准备中</span>
-                        <button class="btn-xs" onclick="refreshHostWorkspacePane(${index})" title="重新连接">🔄</button>
+                        <button class="btn-xs host-workspace-refresh-btn" onclick="refreshHostWorkspacePane(${index})" title="重新连接" aria-label="刷新主机桌面">🔄</button>
                         <button data-multi-host-control class="btn-xs" onclick="maximizeHostWorkspacePane(${index})" title="${hostWorkspace.maximized === index ? '恢复布局' : '单屏显示'}">${hostWorkspace.maximized === index ? '▦' : '⛶'}</button>
                         <button data-multi-host-control class="btn-xs" onclick="closeHostWorkspacePane(${index})" title="关闭">×</button>
                     </div>
@@ -3300,6 +3417,7 @@
                     }
                 }, reconnectDelay);
             });
+            setHostWorkspaceSurfaceReady('desktop', true);
         }
 
         function setHostWorkspaceStatus(index, text, connected = false) {
@@ -3307,6 +3425,13 @@
             if (!status) return;
             status.textContent = text;
             status.style.color = connected ? 'var(--success-color)' : 'var(--text-secondary)';
+            // 单机模式下 pane header 被隐藏，状态文字和刷新按钮移到标题栏；
+            // pane 0 是单机唯一的桌面，同步更新标题栏的镜像状态。
+            const singleStatus = document.getElementById('host-workspace-status-single');
+            if (singleStatus && index === 0) {
+                singleStatus.textContent = text;
+                singleStatus.style.color = connected ? 'var(--success-color)' : 'var(--text-secondary)';
+            }
         }
 
         async function mountHostWorkspacePane(index, pane, generation = hostWorkspace.renderGeneration, paneGeneration = hostWorkspace.paneGenerations.get(index) || 0) {
@@ -3486,6 +3611,7 @@
 
         function setHostWorkspaceLayout(layout) {
             if (!HOST_WORKSPACE_COUNTS[layout]) return;
+            if (!hostWorkspaceClusterEnabled && layout !== 'single') return;
             hostWorkspace.layout = layout;
             renderHostWorkspace();
         }
@@ -3540,7 +3666,23 @@
         window.maximizeHostWorkspacePane = maximizeHostWorkspacePane;
 
         // ==================== 多主机终端工作区 ====================
-        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), paneGenerations:new Map(), broadcast:false, maximized:null, generation:0};
+        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), paneGenerations:new Map(), broadcast:false, maximized:null, generation:0, clusterState:null};
+        function snapshotTerminalClusterState() {
+            return {
+                layout: terminalWorkspace.layout,
+                panes: terminalWorkspace.panes.map(pane => ({...pane})),
+                broadcast: terminalWorkspace.broadcast,
+                maximized: terminalWorkspace.maximized,
+            };
+        }
+        function useSingleTerminalWorkspaceState() {
+            const preferred=workspaceHostForWorker(workspaceLocalWorkerId())
+                ||desktopHosts.find(host=>host.id==='default')||desktopHosts[0];
+            terminalWorkspace.layout='single';
+            terminalWorkspace.maximized=null;
+            terminalWorkspace.broadcast=false;
+            terminalWorkspace.panes=[{hostId:preferred?.id||'default'}];
+        }
         function normalizeTerminalWorkspace() {
             const count = HOST_WORKSPACE_COUNTS[terminalWorkspace.layout] || 1;
             const fallback = currentHost?.id || desktopHosts[0]?.id || 'default';
@@ -3557,7 +3699,11 @@
                 return {hostId};
             });
         }
-        function saveTerminalWorkspace() { localStorage.setItem('gms_terminal_workspace', JSON.stringify({layout:terminalWorkspace.layout, panes:terminalWorkspace.panes, broadcast:terminalWorkspace.broadcast})); }
+        function saveTerminalWorkspace() {
+            if(hostWorkspaceClusterEnabled)terminalWorkspace.clusterState=snapshotTerminalClusterState();
+            const stateToSave=terminalWorkspace.clusterState||snapshotTerminalClusterState();
+            localStorage.setItem('gms_terminal_workspace',JSON.stringify({layout:stateToSave.layout,panes:stateToSave.panes,broadcast:stateToSave.broadcast}));
+        }
         async function ensureTerminalWorkspaceInitialized() {
             if (!window.desktopHostsInitialized) {
                 await initDesktopHosts();
@@ -3565,6 +3711,9 @@
             }
             if (!window.terminalWorkspaceInitialized) {
                 try { const s=JSON.parse(localStorage.getItem('gms_terminal_workspace')||'{}'); if(HOST_WORKSPACE_COUNTS[s.layout]) terminalWorkspace.layout=s.layout; if(Array.isArray(s.panes)) terminalWorkspace.panes=s.panes; terminalWorkspace.broadcast=false; } catch(_) {}
+                normalizeTerminalWorkspace();
+                terminalWorkspace.clusterState=snapshotTerminalClusterState();
+                if(!hostWorkspaceClusterEnabled)useSingleTerminalWorkspaceState();
                 window.terminalWorkspaceInitialized=true;
             }
             const preferred=workspaceHostForWorker();if(preferred&&terminalWorkspace.layout==='single'&&terminalWorkspace.panes.length){terminalWorkspace.panes[0]={hostId:preferred.id};}
@@ -3600,6 +3749,7 @@
                         refreshTerminalWorkspacePane(index);
                     }
                 });
+                setHostWorkspaceSurfaceReady('terminal',true);
                 return;
             }
             terminalWorkspace.renderedSignature=signature;
@@ -3611,13 +3761,20 @@
                 <div class="host-workspace-pane-header"><span data-multi-host-control style="font-size:11px;">🐧 终端</span>
                 <select data-multi-host-control aria-label="主机" onchange="changeTerminalWorkspaceHost(${i},this.value)">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
                 <span class="host-workspace-pane-status" id="terminal-workspace-status-${i}">准备中</span>
-                <button class="btn-xs" onclick="refreshTerminalWorkspacePane(${i})">🔄</button>
+                <button class="btn-xs host-workspace-refresh-btn" onclick="refreshTerminalWorkspacePane(${i})" title="重新连接" aria-label="刷新主机终端">🔄</button>
                 <button data-multi-host-control class="btn-xs" onclick="maximizeTerminalWorkspacePane(${i})">${terminalWorkspace.maximized===i?'▦':'⛶'}</button></div>
                 <div class="host-workspace-pane-body" id="terminal-workspace-body-${i}"></div></section>`).join('');
             const generation=terminalWorkspace.generation;
             terminalWorkspace.panes.forEach((p,i)=>mountTerminalWorkspacePane(i,p,generation));
+            setHostWorkspaceSurfaceReady('terminal',true);
         }
-        function terminalWorkspaceStatus(i,text,ok=false){const e=document.getElementById(`terminal-workspace-status-${i}`);if(e){e.textContent=text;e.style.color=ok?'var(--success-color)':'var(--text-secondary)';}}
+        function terminalWorkspaceStatus(i,text,ok=false){
+            const color=ok?'var(--success-color)':'var(--text-secondary)';
+            const e=document.getElementById(`terminal-workspace-status-${i}`);
+            if(e){e.textContent=text;e.style.color=color;}
+            const singleStatus=document.getElementById('terminal-workspace-status-single');
+            if(singleStatus&&i===0){singleStatus.textContent=text;singleStatus.style.color=color;}
+        }
         async function mountTerminalWorkspacePane(index,pane,generation,paneGeneration=terminalWorkspace.paneGenerations.get(index)||0) {
             const body=document.getElementById(`terminal-workspace-body-${index}`),host=desktopHosts.find(h=>h.id===pane.hostId); if(!body)return;
             if(!host){body.innerHTML='<div class="host-workspace-empty">暂无更多可用主机</div>';terminalWorkspaceStatus(index,'空闲');return;}
@@ -3657,7 +3814,7 @@
             if(prompt){instance.shellReady=true;instance.initialData='';instance.terminal.write(prompt);}
         }
         function terminalWorkspaceRenderSignature(){return JSON.stringify({layout:terminalWorkspace.layout,panes:terminalWorkspace.panes,broadcast:terminalWorkspace.broadcast,maximized:terminalWorkspace.maximized});}
-        function setTerminalWorkspaceLayout(v){if(HOST_WORKSPACE_COUNTS[v]){terminalWorkspace.layout=v;terminalWorkspace.maximized=null;renderTerminalWorkspace();}}
+        function setTerminalWorkspaceLayout(v){if(HOST_WORKSPACE_COUNTS[v]&&(hostWorkspaceClusterEnabled||v==='single')){terminalWorkspace.layout=v;terminalWorkspace.maximized=null;renderTerminalWorkspace();}}
         function setTerminalWorkspaceBroadcast(v){terminalWorkspace.broadcast=Boolean(v);saveTerminalWorkspace();showToast(v?'终端输入广播已开启':'终端输入广播已关闭',v?'warning':'success');}
         function changeTerminalWorkspaceHost(i,v){
             const pane=terminalWorkspace.panes[i],host=desktopHosts.find(item=>item.id===v),select=document.querySelector(`[data-terminal-pane="${i}"] select[aria-label="主机"]`);
@@ -3690,17 +3847,30 @@
         }
         function maximizeTerminalWorkspacePane(i){terminalWorkspace.maximized=terminalWorkspace.maximized===i?null:i;renderTerminalWorkspace();}
         function applyHostWorkspaceScopeMode(clusterEnabled) {
-            if (clusterEnabled) return;
-            const preferred = workspaceHostForWorker(workspaceLocalWorkerId())
-                || desktopHosts.find(host => host.id === 'default')
-                || desktopHosts[0];
-            hostWorkspace.layout = 'single';
-            hostWorkspace.maximized = null;
-            hostWorkspace.panes = [{type: 'desktop', hostId: preferred?.id || 'default'}];
-            terminalWorkspace.layout = 'single';
-            terminalWorkspace.maximized = null;
-            terminalWorkspace.broadcast = false;
-            terminalWorkspace.panes = [{hostId: preferred?.id || 'default'}];
+            const nextClusterEnabled = Boolean(clusterEnabled);
+            setHostWorkspaceSurfaceReady('desktop', false);
+            setHostWorkspaceSurfaceReady('terminal', false);
+            if (!nextClusterEnabled && hostWorkspaceClusterEnabled) {
+                hostWorkspace.clusterState = snapshotHostClusterState();
+                terminalWorkspace.clusterState = snapshotTerminalClusterState();
+            }
+            hostWorkspaceClusterEnabled = nextClusterEnabled;
+            if (nextClusterEnabled) {
+                if (hostWorkspace.clusterState) {
+                    hostWorkspace.layout = hostWorkspace.clusterState.layout;
+                    hostWorkspace.panes = hostWorkspace.clusterState.panes.map(pane => ({...pane}));
+                    hostWorkspace.maximized = hostWorkspace.clusterState.maximized;
+                }
+                if (terminalWorkspace.clusterState) {
+                    terminalWorkspace.layout = terminalWorkspace.clusterState.layout;
+                    terminalWorkspace.panes = terminalWorkspace.clusterState.panes.map(pane => ({...pane}));
+                    terminalWorkspace.broadcast = terminalWorkspace.clusterState.broadcast;
+                    terminalWorkspace.maximized = terminalWorkspace.clusterState.maximized;
+                }
+            } else {
+                useSingleHostWorkspaceState();
+                useSingleTerminalWorkspaceState();
+            }
             if (window.hostWorkspaceInitialized) renderHostWorkspace();
             if (window.terminalWorkspaceInitialized) renderTerminalWorkspace();
         }
@@ -6153,6 +6323,12 @@
                     { once: true }
                 );
                 return;
+            }
+            if ((pageName === 'desktop' || pageName === 'terminal')
+                    && typeof initializeClusterMode === 'function') {
+                // Resolve infrastructure + persisted workspace scope before
+                // either host workspace is allowed to choose its layout.
+                await initializeClusterMode();
             }
             // 页面切换和刷新恢复使用相同初始化入口。
             if (pageName === 'test') {

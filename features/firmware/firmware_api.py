@@ -684,8 +684,8 @@ async def burn_gsi(
             )
         if not script_path:
             return error_response("Script path is required")
-        if not system_img:
-            return error_response("System image path is required")
+        if not system_img and not vendor_img:
+            return error_response("At least one of system image or vendor boot image is required")
 
         config = runtime.config_manager.load_config()
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
@@ -720,16 +720,18 @@ async def burn_gsi(
                     await runtime.release_firmware_devices(client_id, locked_devices)
                     return error_response(asset_error)
 
-                resolved_system, system_error = await asyncio.to_thread(
-                    _resolve_gsi_remote_image,
-                    ssh,
-                    gms_suite_dir,
-                    system_img,
-                    "System image",
-                )
-                if system_error:
-                    await runtime.release_firmware_devices(client_id, locked_devices)
-                    return error_response(system_error)
+                resolved_system = ""
+                if system_img:
+                    resolved_system, system_error = await asyncio.to_thread(
+                        _resolve_gsi_remote_image,
+                        ssh,
+                        gms_suite_dir,
+                        system_img,
+                        "System image",
+                    )
+                    if system_error:
+                        await runtime.release_firmware_devices(client_id, locked_devices)
+                        return error_response(system_error)
 
                 remote_vendor = ""
                 if vendor_img:

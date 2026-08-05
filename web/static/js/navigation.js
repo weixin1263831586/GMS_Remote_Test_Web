@@ -1306,7 +1306,15 @@ function updateClusterToggleUI(enabled) {
 }
 
 function applyClusterMode(enabled) {
-    document.body?.classList.toggle('workspace-scope-single', !enabled);
+    const body = document.body;
+    if (body) {
+        body.classList.remove(
+            'workspace-scope-pending',
+            'workspace-scope-single',
+            'workspace-scope-cluster'
+        );
+        body.classList.add(enabled ? 'workspace-scope-cluster' : 'workspace-scope-single');
+    }
     document.querySelectorAll('.sidebar-item[data-page="cluster"]').forEach(item => {
         // 集群管理页也是启用集群模式和接入 Worker 的入口，单机模式下也必须可见。
         item.style.display = '';
@@ -1406,6 +1414,7 @@ async function initializeClusterMode() {
             return enabled;
         } catch (error) {
             debugLog('[Cluster] Status unavailable, preserving single-host UI:', error);
+            applyClusterMode(false);
             return false;
         } finally {
             _clusterModeInitialized = true;
@@ -5143,20 +5152,20 @@ async function submitGsiBurn() {
         showToast('请选择GSI烧写脚本', 'error');
         return;
     }
-    if (!systemImg) {
-        showToast('请选择System镜像', 'error');
+    if (!systemImg && !vendorImg) {
+        showToast('请至少选择 System 镜像或 Vendor Boot 镜像之一', 'error');
         return;
     }
 
     try {
         const workerId = selectedClusterWorker();
         if (workerId) {
-            if (!state.gsiSystemFile) throw new Error('远端 GSI 烧写必须选择本机 System 镜像');
+            if (!state.gsiSystemFile && !state.gsiVendorFile) throw new Error('远端 GSI 烧写必须选择本机 System 或 Vendor Boot 镜像');
             if (state.selectedDevices.size !== 1) throw new Error('集群 GSI 烧写一次只允许一台设备');
             const form = new FormData();
             form.append('worker_id', workerId);
             form.append('devices', Array.from(state.selectedDevices).join(','));
-            form.append('system_file', state.gsiSystemFile, state.gsiSystemFile.name);
+            if (state.gsiSystemFile) form.append('system_file', state.gsiSystemFile, state.gsiSystemFile.name);
             if (state.gsiVendorFile) form.append('vendor_file', state.gsiVendorFile, state.gsiVendorFile.name);
             closeGsiModal();
             const staged = await apiCall('/api/cluster/gsi/stage', 'POST', form);

@@ -339,9 +339,12 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn('class="sidebar-text">${text}</span>', main_text)
         self.assertIn("data-multi-host-control", main_text)
         self.assertIn("workspace-scope-single", main_text)
+        self.assertIn("workspace-scope-pending", main_text)
+        self.assertIn("host-workspace-ready", main_text)
+        self.assertIn("terminal-workspace-status-single", main_text)
         self.assertIn("applyHostWorkspaceScopeMode", main_text)
         self.assertIn("reportsHostFilter.style.visibility", navigation_text)
-        self.assertIn("classList.toggle('workspace-scope-single', !enabled)", navigation_text)
+        self.assertIn("body.classList.add(enabled ? 'workspace-scope-cluster' : 'workspace-scope-single')", navigation_text)
 
     def test_terminal_page_switch_avoids_hidden_or_duplicate_resize(self):
         main_text = read_text("web/shell/shell.html")
