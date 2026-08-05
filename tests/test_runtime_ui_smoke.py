@@ -2939,6 +2939,319 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_host_workspace_mode_switch_restores_desktop_and_terminal_layouts(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof applyClusterMode === 'function'")
+            result = page.evaluate(
+                """() => {
+                  desktopHosts = [
+                    {id:'default',worker_id:'worker-local',name:'Local',connection:'local@127.0.0.1'},
+                    {id:'cluster:a',worker_id:'a',name:'A',connection:'a@192.0.2.10'},
+                    {id:'cluster:b',worker_id:'b',name:'B',connection:'b@192.0.2.11'},
+                    {id:'cluster:c',worker_id:'c',name:'C',connection:'c@192.0.2.12'},
+                  ];
+                  currentHost=desktopHosts[0];
+                  currentPage='reports';
+                  window.hostWorkspaceInitialized=true;
+                  window.terminalWorkspaceInitialized=true;
+                  hostWorkspaceClusterEnabled=true;
+                  hostWorkspace.layout='quad';
+                  hostWorkspace.panes=desktopHosts.map(host=>({type:'desktop',hostId:host.id}));
+                  hostWorkspace.maximized=null;
+                  hostWorkspace.instances.clear();
+                  hostWorkspace.renderedSignature=null;
+                  terminalWorkspace.layout='horizontal';
+                  terminalWorkspace.panes=[{hostId:'default'},{hostId:'cluster:a'}];
+                  terminalWorkspace.maximized=null;
+                  terminalWorkspace.instances.clear();
+                  terminalWorkspace.renderedSignature=null;
+                  document.getElementById('host-workspace-grid').replaceChildren();
+                  document.getElementById('terminal-workspace-grid').replaceChildren();
+
+                  applyClusterMode(false);
+                  const single = {
+                    bodyClass: document.body.className,
+                    desktopLayout: hostWorkspace.layout,
+                    terminalLayout: terminalWorkspace.layout,
+                    desktopPanes: hostWorkspace.panes.length,
+                    terminalPanes: terminalWorkspace.panes.length,
+                    desktopBar: getComputedStyle(document.querySelector('#page-desktop .host-workspace-single-bar')).display,
+                    terminalBar: getComputedStyle(document.querySelector('#page-terminal .host-workspace-single-bar')).display,
+                    desktopHeader: getComputedStyle(document.querySelector('#page-desktop .host-workspace-pane-header')).display,
+                    terminalHeader: getComputedStyle(document.querySelector('#page-terminal .host-workspace-pane-header')).display,
+                    desktopReady: document.getElementById('page-desktop').classList.contains('host-workspace-ready'),
+                    terminalReady: document.getElementById('page-terminal').classList.contains('host-workspace-ready'),
+                    savedDesktopLayout: JSON.parse(localStorage.getItem('gms_host_workspace')).layout,
+                    savedTerminalLayout: JSON.parse(localStorage.getItem('gms_terminal_workspace')).layout,
+                  };
+
+                  applyClusterMode(true);
+                  const cluster = {
+                    bodyClass: document.body.className,
+                    desktopLayout: hostWorkspace.layout,
+                    terminalLayout: terminalWorkspace.layout,
+                    desktopPanes: hostWorkspace.panes.map(pane=>pane.hostId),
+                    terminalPanes: terminalWorkspace.panes.map(pane=>pane.hostId),
+                    desktopBar: getComputedStyle(document.querySelector('#page-desktop .host-workspace-single-bar')).display,
+                    terminalBar: getComputedStyle(document.querySelector('#page-terminal .host-workspace-single-bar')).display,
+                    desktopHeader: getComputedStyle(document.querySelector('#page-desktop .host-workspace-pane-header')).display,
+                    terminalHeader: getComputedStyle(document.querySelector('#page-terminal .host-workspace-pane-header')).display,
+                    desktopReady: document.getElementById('page-desktop').classList.contains('host-workspace-ready'),
+                    terminalReady: document.getElementById('page-terminal').classList.contains('host-workspace-ready'),
+                  };
+                  return {single,cluster};
+                }"""
+            )
+            self.assertIn("workspace-scope-single", result["single"]["bodyClass"])
+            self.assertEqual(result["single"]["desktopLayout"], "single")
+            self.assertEqual(result["single"]["terminalLayout"], "single")
+            self.assertEqual(result["single"]["desktopPanes"], 1)
+            self.assertEqual(result["single"]["terminalPanes"], 1)
+            self.assertEqual(result["single"]["desktopBar"], "flex")
+            self.assertEqual(result["single"]["terminalBar"], "flex")
+            self.assertEqual(result["single"]["desktopHeader"], "none")
+            self.assertEqual(result["single"]["terminalHeader"], "none")
+            self.assertTrue(result["single"]["desktopReady"])
+            self.assertTrue(result["single"]["terminalReady"])
+            self.assertEqual(result["single"]["savedDesktopLayout"], "quad")
+            self.assertEqual(result["single"]["savedTerminalLayout"], "horizontal")
+
+            self.assertIn("workspace-scope-cluster", result["cluster"]["bodyClass"])
+            self.assertEqual(result["cluster"]["desktopLayout"], "quad")
+            self.assertEqual(result["cluster"]["terminalLayout"], "horizontal")
+            self.assertEqual(
+                result["cluster"]["desktopPanes"],
+                ["default", "cluster:a", "cluster:b", "cluster:c"],
+            )
+            self.assertEqual(result["cluster"]["terminalPanes"], ["default", "cluster:a"])
+            self.assertEqual(result["cluster"]["desktopBar"], "none")
+            self.assertEqual(result["cluster"]["terminalBar"], "none")
+            self.assertEqual(result["cluster"]["desktopHeader"], "flex")
+            self.assertEqual(result["cluster"]["terminalHeader"], "flex")
+            self.assertTrue(result["cluster"]["desktopReady"])
+            self.assertTrue(result["cluster"]["terminalReady"])
+        finally:
+            page.close()
+
+    def test_host_workspace_initial_scope_never_paints_the_wrong_mode(self):
+        for scope_mode, page_name in (
+            ("single", "desktop"),
+            ("cluster", "desktop"),
+            ("single", "terminal"),
+            ("cluster", "terminal"),
+        ):
+            with self.subTest(scope_mode=scope_mode, page_name=page_name):
+                page = self.new_page()
+
+                def json_response(route, payload):
+                    route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps(payload),
+                    )
+
+                page.route(
+                    "**/api/cluster/status",
+                    lambda route: json_response(route, {
+                        "success": True,
+                        "enabled": True,
+                        "local_worker_id": "worker-local",
+                    }),
+                )
+                page.route(
+                    "**/api/users/workspace-context",
+                    lambda route: json_response(route, {
+                        "success": True,
+                        "data": {"context": {
+                            "scope_mode": scope_mode,
+                            "worker_id": "worker-a" if scope_mode == "cluster" else "worker-local",
+                            "device_ids": [],
+                        }},
+                    }),
+                )
+                page.route(
+                    "**/api/cluster/hosts",
+                    lambda route: json_response(route, {
+                        "success": True,
+                        "hosts": [{
+                            "worker_id": "worker-a",
+                            "name": "Worker A",
+                            "status": "online",
+                            "address": "192.0.2.10",
+                            "ssh_user": "tester",
+                        }],
+                    }),
+                )
+                page.route(
+                    "**/api/cluster/workers",
+                    lambda route: json_response(route, {
+                        "success": True,
+                        "workers": [{"id": "worker-a", "name": "Worker A", "status": "online"}],
+                    }),
+                )
+                page.route(
+                    "**/api/desktop/novnc/access",
+                    lambda route: json_response(route, {"success": True, "url": "about:blank"}),
+                )
+                page.route(
+                    "**/api/desktop/vnc/status",
+                    lambda route: json_response(route, {"success": True, "running": True}),
+                )
+                page.add_init_script(
+                    """
+                    localStorage.setItem('gms_current_page','__PAGE_NAME__');
+                    window.__scopeClassHistory=[];
+                    window.addEventListener('gms:auth-ready',()=>{
+                      state.elevated=true;
+                      state.elevatedUntil=Date.now()+60000;
+                    });
+                    document.addEventListener('DOMContentLoaded',()=>{
+                      const record=()=>window.__scopeClassHistory.push(document.body.className);
+                      record();
+                      new MutationObserver(record).observe(document.body,{attributes:true,attributeFilter:['class']});
+                    });
+                    const nativeFetch=window.fetch.bind(window);
+                    window.fetch=(input,options={})=>{
+                      const request=nativeFetch(input,options);
+                      const url=String(input);
+                      if(url.includes('/api/cluster/status')||url.includes('/api/users/workspace-context')){
+                        return new Promise((resolve,reject)=>setTimeout(()=>request.then(resolve,reject),1000));
+                      }
+                      return request;
+                    };
+                    """
+                    .replace("__PAGE_NAME__", page_name)
+                )
+                try:
+                    elevated = page.request.post(
+                        f"{self.base_url}/api/auth/elevate",
+                        data={"username": "ui-admin", "password": "UiSmokeAdmin-2026!"},
+                    )
+                    self.assertTrue(elevated.ok, elevated.text())
+                    page.goto(self.base_url, wait_until="domcontentloaded")
+                    page_selector = f"#page-{page_name}"
+                    grid_selector = (
+                        "#host-workspace-grid"
+                        if page_name == "desktop"
+                        else "#terminal-workspace-grid"
+                    )
+                    expect(page.locator("body")).to_have_class(re.compile(r"workspace-scope-pending"))
+                    expect(page.locator(f"{page_selector} .host-workspace-mode-pending")).to_be_visible()
+                    expect(page.locator(f"{page_selector} .host-workspace-layouts")).to_be_hidden()
+                    expect(page.locator(f"{page_selector} .host-workspace-single-bar")).to_be_hidden()
+                    pending_status_box = page.locator(
+                        f"{page_selector} .host-workspace-mode-pending .host-workspace-pane-status"
+                    ).bounding_box()
+                    self.assertIsNotNone(pending_status_box)
+                    self.assertEqual(
+                        page.locator(grid_selector).evaluate(
+                            "grid=>getComputedStyle(grid).visibility"
+                        ),
+                        "hidden",
+                    )
+
+                    expected_class = f"workspace-scope-{scope_mode}"
+                    expect(page.locator("body")).to_have_class(re.compile(rf"\b{expected_class}\b"))
+                    expect(page.locator(page_selector)).to_have_class(
+                        re.compile(r"\bhost-workspace-ready\b")
+                    )
+                    expect(page.locator(f"{page_selector} .host-workspace-mode-pending")).to_be_hidden()
+                    self.assertEqual(
+                        page.locator(grid_selector).evaluate(
+                            "grid=>getComputedStyle(grid).visibility"
+                        ),
+                        "visible",
+                    )
+                    page_box = page.locator(page_selector).bounding_box()
+                    grid_box = page.locator(grid_selector).bounding_box()
+                    frame_geometry = page.locator(page_selector).evaluate(
+                        "page=>{const style=getComputedStyle(page);return {"
+                        "inset:parseFloat(style.getPropertyValue('--page-body-frame-inset'))||0,"
+                        "top:parseFloat(style.getPropertyValue('--page-body-frame-top'))||0}}"
+                    )
+                    self.assertIsNotNone(page_box)
+                    self.assertIsNotNone(grid_box)
+                    self.assertAlmostEqual(
+                        grid_box["x"], page_box["x"] + frame_geometry["inset"], delta=0.5
+                    )
+                    self.assertAlmostEqual(
+                        grid_box["y"], page_box["y"] + frame_geometry["top"], delta=0.5
+                    )
+                    self.assertAlmostEqual(
+                        grid_box["width"],
+                        page_box["width"] - (2 * frame_geometry["inset"]),
+                        delta=0.5,
+                    )
+                    self.assertAlmostEqual(
+                        grid_box["y"] + grid_box["height"],
+                        page_box["y"] + page_box["height"] - frame_geometry["inset"],
+                        delta=0.5,
+                    )
+                    if scope_mode == "single":
+                        status_selector = (
+                            "#host-workspace-status-single"
+                            if page_name == "desktop"
+                            else "#terminal-workspace-status-single"
+                        )
+                        final_status_box = page.locator(status_selector).bounding_box()
+                        title_box = page.locator(
+                            f"{page_selector} .host-workspace-title-row > .section-title"
+                        ).bounding_box()
+                        refresh_box = page.locator(
+                            f"{page_selector} .host-workspace-single-bar button"
+                        ).bounding_box()
+                        self.assertIsNotNone(final_status_box)
+                        self.assertIsNotNone(title_box)
+                        self.assertIsNotNone(refresh_box)
+                        for key in ("x", "y", "width", "height"):
+                            self.assertAlmostEqual(
+                                final_status_box[key], pending_status_box[key], delta=0.5
+                            )
+                        self.assertAlmostEqual(title_box["y"], pending_status_box["y"], delta=0.5)
+                        self.assertAlmostEqual(refresh_box["y"], pending_status_box["y"], delta=0.5)
+                        self.assertGreater(refresh_box["x"], final_status_box["x"])
+                        refresh_button = page.locator(
+                            f"{page_selector} .host-workspace-single-bar .host-workspace-refresh-btn"
+                        )
+                    else:
+                        refresh_button = page.locator(
+                            f"{page_selector} .host-workspace-pane-header .host-workspace-refresh-btn"
+                        ).first
+                    refresh_style = refresh_button.evaluate(
+                        "button=>({border:button.style.border||getComputedStyle(button).border,"
+                        "background:getComputedStyle(button).backgroundColor,"
+                        "boxShadow:getComputedStyle(button).boxShadow})"
+                    )
+                    self.assertIn(refresh_style["border"], ("0px", "0px none rgb(255, 255, 255)"))
+                    self.assertEqual(refresh_style["background"], "rgba(0, 0, 0, 0)")
+                    self.assertEqual(refresh_style["boxShadow"], "none")
+                    pane = page.locator(f"{page_selector} .host-workspace-pane").first
+                    pane_box = pane.bounding_box()
+                    pane_style = pane.evaluate(
+                        "pane=>{const style=getComputedStyle(pane);return {"
+                        "borderTop:style.borderTopWidth,borderRight:style.borderRightWidth,"
+                        "borderBottom:style.borderBottomWidth,borderLeft:style.borderLeftWidth}}"
+                    )
+                    self.assertIsNotNone(pane_box)
+                    if scope_mode == "single":
+                        self.assertEqual(set(pane_style.values()), {"0px"})
+                    else:
+                        self.assertGreaterEqual(pane_box["x"], grid_box["x"] + 8)
+                        self.assertGreaterEqual(pane_box["y"], grid_box["y"] + 8)
+                    history = page.evaluate("window.__scopeClassHistory")
+                    wrong_class = (
+                        "workspace-scope-cluster"
+                        if scope_mode == "single"
+                        else "workspace-scope-single"
+                    )
+                    self.assertFalse(any(wrong_class in value for value in history), history)
+                    self.assertTrue(any("workspace-scope-pending" in value for value in history), history)
+                    self.assertTrue(any(expected_class in value for value in history), history)
+                finally:
+                    page.close()
+
     def test_terminal_page_switch_reuses_websocket_and_buffer(self):
         page = self.new_page()
         terminal_websockets = []

@@ -36,7 +36,9 @@ fastboot -s "$SERIAL" delete-logical-partition product || true
 fastboot -s "$SERIAL" delete-logical-partition product_a || true
 fastboot -s "$SERIAL" delete-logical-partition product_b || true
 
-fastboot -s "$SERIAL" flash system "$SYSTEM_IMG"
+if [[ -n "$SYSTEM_IMG" ]]; then
+    fastboot -s "$SERIAL" flash system "$SYSTEM_IMG"
+fi
 fastboot -s "$SERIAL" flash misc "$MISC_IMG"
 
 if [[ -n "$VENDOR_IMG" ]]; then
