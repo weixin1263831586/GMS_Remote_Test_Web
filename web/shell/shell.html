@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260803-user-grid">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260805-analysis-fill-font">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
@@ -275,8 +275,8 @@
         /* 系统配置：渐变标题栏与统一标准对齐 */
         #config-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); }
         #config-modal .modal-title, #config-modal .modal-close { color: #fff; }
-        #page-architecture .architecture-container { background: rgba(15,23,42,0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1rem; flex: 1; min-height: 0; overflow: hidden; }
-        #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 0.5rem; }
+        #page-architecture .architecture-container { background: transparent; border-radius: 8px; border: 0; padding: 0; flex: 1; min-height: 0; overflow: hidden; }
+        #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 7px; }
     </style>
     <style>
         /* Snackbar 右下角通知样式 */
@@ -1192,22 +1192,22 @@
             <div class="section-title">📈 报告分析</div>
 
             <!-- 拖拽上传区域 -->
-            <div style="margin-bottom: 10px;">
+            <div class="analysis-upload-frame">
                 <div id="report-upload-zone" class="report-upload-zone">
                     <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz" style="display: none;" />
                     <input type="file" id="report-folder-input" webkitdirectory directory style="display: none;" />
                     <div class="report-upload-content">
                         <div>📁</div>
-                        <div>
-                            <div style="font-size: 16px; font-weight: 600; white-space: nowrap;">拖拽测试报告到此处</div>
-                            <div class="upload-instructions" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                        <div class="analysis-upload-copy">
+                            <div class="analysis-upload-title">拖拽测试报告到此处</div>
+                            <div class="upload-instructions">
                                 支持 .zip、.rar、.xml、.tar.gz 等文件格式<br><br>
                                 1. 点击按钮"📤 上传报告"选择测试报告<br>
                                 2. 直接拖拽测试报告上传<br>
                                 3. 直接拖拽 Redmine 附件上传
                             </div>
                         </div>
-                        <button class="btn-xs" onclick="document.getElementById('report-file-input').click()" style="font-size: 12px; padding: 10px 20px;">
+                        <button class="btn-xs" onclick="document.getElementById('report-file-input').click()">
                             📤 上传报告
                         </button>
                     </div>
@@ -1332,20 +1332,20 @@
             </div>
 
             <!-- 上传区域 -->
-            <div style="margin-bottom: 20px;">
+            <div class="analysis-upload-frame">
                 <div id="apk-upload-zone" class="apk-upload-zone upload-empty">
                     <input type="file" id="apk-file-input" accept=".apk,.jar" style="display: none;" />
                     <div class="apk-upload-content">
                         <div>📦</div>
-                        <div>
-                            <div style="font-size: 14px; font-weight: 600; white-space: nowrap;">拖拽 APK/JAR 文件到此处</div>
-                            <div class="upload-instructions" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                        <div class="analysis-upload-copy">
+                            <div class="analysis-upload-title">拖拽 APK/JAR 文件到此处</div>
+                            <div class="upload-instructions">
                                 支持 .apk 和 .jar 文件格式<br><br>
                                 1. 点击按钮"📤 选择 APK/JAR 文件"上传<br>
                                 2. 直接拖拽 APK/JAR 文件上传<br>
                             </div>
                         </div>
-                        <button class="btn-xs" onclick="document.getElementById('apk-file-input').click()" style="font-size: 12px; padding: 10px 20px;">
+                        <button class="btn-xs" onclick="document.getElementById('apk-file-input').click()">
                             📤 选择 APK/JAR 文件
                         </button>
                     </div>
@@ -3111,10 +3111,10 @@
                 desktopHosts = retained.concat(clusterHosts.filter(host => !localAlias || host.id !== localAlias.id));
                 const contextHost = workspaceHostForWorker();
                 currentHost = contextHost || desktopHosts.find(host => host.id === selectedId) || currentHost || desktopHosts[0];
-                if (contextHost && window.hostWorkspaceInitialized && hostWorkspace.panes.length) {
+                if (contextHost && window.hostWorkspaceInitialized && hostWorkspace.layout === 'single' && hostWorkspace.panes.length) {
                     hostWorkspace.panes[0] = {type: 'desktop', hostId: contextHost.id};
                 }
-                if (contextHost && window.terminalWorkspaceInitialized && terminalWorkspace.panes.length) {
+                if (contextHost && window.terminalWorkspaceInitialized && terminalWorkspace.layout === 'single' && terminalWorkspace.panes.length) {
                     terminalWorkspace.panes[0] = {hostId: contextHost.id};
                 }
                 if (window.hostWorkspaceInitialized && currentPage === 'desktop') renderHostWorkspace();
@@ -3138,7 +3138,7 @@
 
         // ==================== 多主机工作区 ====================
         const HOST_WORKSPACE_COUNTS = {single: 1, horizontal: 2, vertical: 2, quad: 4};
-        const hostWorkspace = {layout: 'single', panes: [], instances: new Map(), maximized: null, renderGeneration: 0};
+        const hostWorkspace = {layout: 'single', panes: [], instances: new Map(), paneGenerations: new Map(), maximized: null, renderGeneration: 0};
 
         function loadHostWorkspaceState() {
             try {
@@ -3150,7 +3150,7 @@
             }
             normalizeHostWorkspacePanes();
             const preferred = workspaceHostForWorker();
-            if (preferred && hostWorkspace.panes.length) {
+            if (preferred && hostWorkspace.layout === 'single' && hostWorkspace.panes.length) {
                 hostWorkspace.panes[0] = {type: 'desktop', hostId: preferred.id};
             }
         }
@@ -3216,13 +3216,24 @@
             Array.from(hostWorkspace.instances.keys()).forEach(disposeHostWorkspaceInstance);
         }
 
-        function hostWorkspaceHostOptions(selectedId) {
+        function hostWorkspaceHostOptions(selectedId, panes = [], paneIndex = -1) {
             const emptyOption = selectedId ? '' : '<option value="" selected>请选择主机</option>';
             return emptyOption + desktopHosts.map(host => {
-                const disabled = host.offline ? ' disabled' : '';
+                const assignedElsewhere = panes.some((pane, index) =>
+                    index !== paneIndex && pane?.hostId === host.id
+                );
+                const disabled = host.offline || assignedElsewhere ? ' disabled' : '';
                 const selected = host.id === selectedId ? ' selected' : '';
                 return `<option value="${escapeHtml(host.id)}"${selected}${disabled}>${escapeHtml(host.name)}</option>`;
             }).join('');
+        }
+
+        function hostWorkspaceRenderSignature() {
+            return JSON.stringify({
+                layout: hostWorkspace.layout,
+                panes: hostWorkspace.panes,
+                maximized: hostWorkspace.maximized,
+            });
         }
 
         function renderHostWorkspace() {
@@ -3232,17 +3243,32 @@
             // If the pane layout hasn't changed since the last render and the
             // DOM still has children, keep existing VNC connections alive and
             // skip the dispose + remount cycle.
-            const signature = JSON.stringify({
-                layout: hostWorkspace.layout,
-                panes: hostWorkspace.panes,
-                maximized: hostWorkspace.maximized,
-            });
+            const signature = hostWorkspaceRenderSignature();
             if (hostWorkspace.renderedSignature === signature && grid.children.length) {
+                // The grid may have been rendered while this page was hidden.
+                // In that case the delayed mount is intentionally skipped and
+                // the pane is left at "准备中". Resume only those never-started
+                // panes; keep live VNC/terminal instances untouched.
+                if (currentPage === 'desktop') {
+                    const pendingPanes = hostWorkspace.panes
+                        .map((pane, index) => ({pane, index}))
+                        .filter(({index}) => {
+                            const status = document.getElementById(`host-workspace-status-${index}`);
+                            return !hostWorkspace.instances.has(index) && status?.textContent === '准备中';
+                        });
+                    if (pendingPanes.length) {
+                        const generation = ++hostWorkspace.renderGeneration;
+                        pendingPanes.forEach(({pane, index}) => {
+                            mountHostWorkspacePane(index, pane, generation);
+                        });
+                    }
+                }
                 return;
             }
             hostWorkspace.renderedSignature = signature;
             const generation = ++hostWorkspace.renderGeneration;
             saveHostWorkspaceState();
+            const reconnectDelay = hostWorkspace.instances.size ? 350 : 0;
             disposeAllHostWorkspaceInstances();
             grid.className = `host-workspace-grid layout-${hostWorkspace.layout}`;
             document.querySelectorAll('[data-workspace-layout]').forEach(button => {
@@ -3254,7 +3280,7 @@
                     <div class="host-workspace-pane-header">
                         <span data-multi-host-control style="font-size:11px;">🖥️ 桌面</span>
                         <select data-multi-host-control aria-label="主机" onchange="changeHostWorkspacePaneHost(${index}, this.value)"${pane.type === 'empty' ? ' disabled' : ''}>
-                            ${hostWorkspaceHostOptions(pane.hostId)}
+                            ${hostWorkspaceHostOptions(pane.hostId, hostWorkspace.panes, index)}
                         </select>
                         <span class="host-workspace-pane-status" id="host-workspace-status-${index}">准备中</span>
                         <button class="btn-xs" onclick="refreshHostWorkspacePane(${index})" title="重新连接">🔄</button>
@@ -3266,11 +3292,14 @@
             // Give remote single-session VNC servers time to release the old
             // iframe socket. The generation guard also cancels mounts from a
             // superseded render, preventing duplicate connections.
-            hostWorkspace.panes.forEach((pane, index) => setTimeout(() => {
-                if (generation === hostWorkspace.renderGeneration && currentPage === 'desktop') {
-                    mountHostWorkspacePane(index, pane, generation);
-                }
-            }, 350));
+            hostWorkspace.panes.forEach((pane, index) => {
+                const paneGeneration = hostWorkspace.paneGenerations.get(index) || 0;
+                setTimeout(() => {
+                    if (generation === hostWorkspace.renderGeneration && currentPage === 'desktop') {
+                        mountHostWorkspacePane(index, pane, generation, paneGeneration);
+                    }
+                }, reconnectDelay);
+            });
         }
 
         function setHostWorkspaceStatus(index, text, connected = false) {
@@ -3280,9 +3309,10 @@
             status.style.color = connected ? 'var(--success-color)' : 'var(--text-secondary)';
         }
 
-        async function mountHostWorkspacePane(index, pane, generation = hostWorkspace.renderGeneration) {
+        async function mountHostWorkspacePane(index, pane, generation = hostWorkspace.renderGeneration, paneGeneration = hostWorkspace.paneGenerations.get(index) || 0) {
             const body = document.getElementById(`host-workspace-body-${index}`);
             if (!body) return;
+            if (paneGeneration !== (hostWorkspace.paneGenerations.get(index) || 0)) return;
             const host = desktopHosts.find(item => item.id === pane.hostId);
             if (pane.type === 'empty') {
                 body.innerHTML = `<div class="host-workspace-empty"><button class="btn-xs" onclick="reopenHostWorkspacePane(${index})">重新打开桌面</button></div>`;
@@ -3294,7 +3324,7 @@
                 setHostWorkspaceStatus(index, '离线');
                 return;
             }
-            await mountHostWorkspaceDesktop(index, host, body, generation, pane.hostId);
+            await mountHostWorkspaceDesktop(index, host, body, generation, pane.hostId, paneGeneration);
         }
 
         async function resolveWorkspaceVncUrl(host) {
@@ -3319,7 +3349,7 @@
             return requestNovncAccess(workerId);
         }
 
-        async function mountHostWorkspaceDesktop(index, host, body, generation, expectedHostId) {
+        async function mountHostWorkspaceDesktop(index, host, body, generation, expectedHostId, paneGeneration) {
             setHostWorkspaceStatus(index, '正在连接桌面…');
             try {
                 const granted = await ensureTerminalElevation(false, '打开主机桌面', '主机桌面');
@@ -3333,6 +3363,7 @@
                 const currentPane = hostWorkspace.panes[index];
                 if (!currentBody || currentBody !== body ||
                     generation !== hostWorkspace.renderGeneration ||
+                    paneGeneration !== (hostWorkspace.paneGenerations.get(index) || 0) ||
                     currentPane?.hostId !== expectedHostId) return;
                 const frame = document.createElement('iframe');
                 frame.allowFullscreen = true;
@@ -3459,15 +3490,43 @@
             renderHostWorkspace();
         }
         function changeHostWorkspacePaneHost(index, hostId) {
-            hostWorkspace.panes[index].hostId = hostId;
+            const pane = hostWorkspace.panes[index];
             const host = desktopHosts.find(item => item.id === hostId);
-            currentHost = host || currentHost;
-            updateWorkspaceForHost(host, 'desktop');
-            renderHostWorkspace();
+            const select = document.querySelector(`[data-workspace-pane="${index}"] select[aria-label="主机"]`);
+            if (!pane || !host || host.offline) {
+                if (select && pane) select.value = pane.hostId;
+                return;
+            }
+            if (hostWorkspace.panes.some((item, paneIndex) => paneIndex !== index && item.hostId === hostId)) {
+                if (select) select.value = pane.hostId;
+                showToast('该主机已在其他桌面窗格中显示', 'warning');
+                return;
+            }
+            if (pane.hostId === hostId) return;
+            pane.hostId = hostId;
+            pane.type = 'desktop';
+            if (hostWorkspace.layout === 'single') {
+                currentHost = host;
+                updateWorkspaceForHost(host, 'desktop');
+            }
+            saveHostWorkspaceState();
+            hostWorkspace.renderedSignature = hostWorkspaceRenderSignature();
+            hostWorkspace.panes.forEach((item, paneIndex) => {
+                const paneSelect = document.querySelector(`[data-workspace-pane="${paneIndex}"] select[aria-label="主机"]`);
+                if (paneSelect) paneSelect.innerHTML = hostWorkspaceHostOptions(item.hostId, hostWorkspace.panes, paneIndex);
+            });
+            refreshHostWorkspacePane(index);
         }
         function refreshHostWorkspacePane(index) {
+            const pane = hostWorkspace.panes[index];
+            const body = document.getElementById(`host-workspace-body-${index}`);
+            if (!pane || !body) return;
             disposeHostWorkspaceInstance(index);
-            mountHostWorkspacePane(index, hostWorkspace.panes[index], hostWorkspace.renderGeneration);
+            const paneGeneration = (hostWorkspace.paneGenerations.get(index) || 0) + 1;
+            hostWorkspace.paneGenerations.set(index, paneGeneration);
+            body.replaceChildren();
+            setHostWorkspaceStatus(index, '正在连接桌面…');
+            mountHostWorkspacePane(index, pane, hostWorkspace.renderGeneration, paneGeneration);
         }
         function closeHostWorkspacePane(index) { hostWorkspace.panes[index].type = 'empty'; renderHostWorkspace(); }
         function reopenHostWorkspacePane(index) { hostWorkspace.panes[index].type = 'desktop'; renderHostWorkspace(); }
@@ -3508,7 +3567,7 @@
                 try { const s=JSON.parse(localStorage.getItem('gms_terminal_workspace')||'{}'); if(HOST_WORKSPACE_COUNTS[s.layout]) terminalWorkspace.layout=s.layout; if(Array.isArray(s.panes)) terminalWorkspace.panes=s.panes; terminalWorkspace.broadcast=false; } catch(_) {}
                 window.terminalWorkspaceInitialized=true;
             }
-            const preferred=workspaceHostForWorker();if(preferred&&terminalWorkspace.panes.length){terminalWorkspace.panes[0]={hostId:preferred.id};}
+            const preferred=workspaceHostForWorker();if(preferred&&terminalWorkspace.layout==='single'&&terminalWorkspace.panes.length){terminalWorkspace.panes[0]={hostId:preferred.id};}
             renderTerminalWorkspace();
         }
         function disposeTerminalWorkspaceInstance(index) {
@@ -3529,8 +3588,20 @@
             // Keep existing terminal sessions alive when the layout hasn't
             // changed. Matches renderHostWorkspace: switching away no longer
             // disposes instances, so revisiting should reuse them.
-            const signature=JSON.stringify({layout:terminalWorkspace.layout,panes:terminalWorkspace.panes,broadcast:terminalWorkspace.broadcast,maximized:terminalWorkspace.maximized});
-            if(terminalWorkspace.renderedSignature===signature && grid.children.length) return;
+            const signature=terminalWorkspaceRenderSignature();
+            if(terminalWorkspace.renderedSignature===signature && grid.children.length) {
+                // A hidden-page mount stops after xterm finishes loading. On
+                // return, resume panes that never produced a live instance;
+                // refreshTerminalWorkspacePane invalidates any older pending
+                // mount so duplicate WebSockets cannot be created.
+                if(currentPage==='terminal') terminalWorkspace.panes.forEach((pane,index)=>{
+                    const status=document.getElementById(`terminal-workspace-status-${index}`)?.textContent;
+                    if(!terminalWorkspace.instances.has(index)&&(status==='准备中'||status==='正在加载终端…')) {
+                        refreshTerminalWorkspacePane(index);
+                    }
+                });
+                return;
+            }
             terminalWorkspace.renderedSignature=signature;
             disposeTerminalWorkspace();
             grid.className=`host-workspace-grid layout-${terminalWorkspace.layout}${terminalWorkspace.maximized!==null?' pane-maximized':''}`;
@@ -3538,7 +3609,7 @@
             const broadcast=document.getElementById('terminal-workspace-broadcast'); if(broadcast)broadcast.checked=terminalWorkspace.broadcast;
             grid.innerHTML=terminalWorkspace.panes.map((p,i)=>`<section class="host-workspace-pane${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}">
                 <div class="host-workspace-pane-header"><span data-multi-host-control style="font-size:11px;">🐧 终端</span>
-                <select data-multi-host-control aria-label="主机" onchange="changeTerminalWorkspaceHost(${i},this.value)">${hostWorkspaceHostOptions(p.hostId)}</select>
+                <select data-multi-host-control aria-label="主机" onchange="changeTerminalWorkspaceHost(${i},this.value)">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
                 <span class="host-workspace-pane-status" id="terminal-workspace-status-${i}">准备中</span>
                 <button class="btn-xs" onclick="refreshTerminalWorkspacePane(${i})">🔄</button>
                 <button data-multi-host-control class="btn-xs" onclick="maximizeTerminalWorkspacePane(${i})">${terminalWorkspace.maximized===i?'▦':'⛶'}</button></div>
@@ -3551,7 +3622,8 @@
             const body=document.getElementById(`terminal-workspace-body-${index}`),host=desktopHosts.find(h=>h.id===pane.hostId); if(!body)return;
             if(!host){body.innerHTML='<div class="host-workspace-empty">暂无更多可用主机</div>';terminalWorkspaceStatus(index,'空闲');return;}
             if(host.offline){body.innerHTML='<div class="host-workspace-empty">主机已离线</div>';terminalWorkspaceStatus(index,'离线');return;}
-            try{await loadXTermScripts();}catch(error){console.error('[Terminal workspace] xterm.js load failed:',error);body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';return;}
+            terminalWorkspaceStatus(index,'正在加载终端…');
+            try{await loadXTermScripts();}catch(error){console.error('[Terminal workspace] xterm.js load failed:',error);body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';terminalWorkspaceStatus(index,'加载失败');return;}
             if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;
             const el=document.createElement('div');el.className='host-workspace-terminal';body.replaceChildren(el);
             const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:{background:'#000',foreground:'#fff'},scrollback:2000,termName:'xterm-256color'});
@@ -3584,9 +3656,31 @@
             const lines=plain.split(/\r?\n/),prompt=[...lines].reverse().find(line=>/@[^\s:]+:[^\r\n]*[$#]\s*$/.test(line));
             if(prompt){instance.shellReady=true;instance.initialData='';instance.terminal.write(prompt);}
         }
+        function terminalWorkspaceRenderSignature(){return JSON.stringify({layout:terminalWorkspace.layout,panes:terminalWorkspace.panes,broadcast:terminalWorkspace.broadcast,maximized:terminalWorkspace.maximized});}
         function setTerminalWorkspaceLayout(v){if(HOST_WORKSPACE_COUNTS[v]){terminalWorkspace.layout=v;terminalWorkspace.maximized=null;renderTerminalWorkspace();}}
         function setTerminalWorkspaceBroadcast(v){terminalWorkspace.broadcast=Boolean(v);saveTerminalWorkspace();showToast(v?'终端输入广播已开启':'终端输入广播已关闭',v?'warning':'success');}
-        function changeTerminalWorkspaceHost(i,v){const host=desktopHosts.find(item=>item.id===v);terminalWorkspace.panes[i].hostId=v;updateWorkspaceForHost(host,'terminal');renderTerminalWorkspace();}
+        function changeTerminalWorkspaceHost(i,v){
+            const pane=terminalWorkspace.panes[i],host=desktopHosts.find(item=>item.id===v),select=document.querySelector(`[data-terminal-pane="${i}"] select[aria-label="主机"]`);
+            if(!pane||!host||host.offline){if(select&&pane)select.value=pane.hostId;return;}
+            if(terminalWorkspace.panes.some((item,paneIndex)=>paneIndex!==i&&item.hostId===v)){
+                if(select)select.value=pane.hostId;
+                showToast('该主机已在其他终端窗格中连接','warning');
+                return;
+            }
+            if(pane.hostId===v)return;
+            pane.hostId=v;
+            if(terminalWorkspace.layout==='single'){
+                currentHost=host;
+                updateWorkspaceForHost(host,'terminal');
+            }
+            saveTerminalWorkspace();
+            terminalWorkspace.renderedSignature=terminalWorkspaceRenderSignature();
+            terminalWorkspace.panes.forEach((item,paneIndex)=>{
+                const paneSelect=document.querySelector(`[data-terminal-pane="${paneIndex}"] select[aria-label="主机"]`);
+                if(paneSelect)paneSelect.innerHTML=hostWorkspaceHostOptions(item.hostId,terminalWorkspace.panes,paneIndex);
+            });
+            refreshTerminalWorkspacePane(i);
+        }
         function refreshTerminalWorkspacePane(i){
             const pane=terminalWorkspace.panes[i],body=document.getElementById(`terminal-workspace-body-${i}`);if(!pane||!body)return;
             disposeTerminalWorkspaceInstance(i);
@@ -6051,7 +6145,11 @@
             if (!state.authReady) {
                 window.addEventListener(
                     'gms:auth-ready',
-                    () => runPageInitializers(pageName),
+                    () => {
+                        // Do not initialize a page that the user already left;
+                        // entering it later will invoke this initializer again.
+                        if (currentPage === pageName) runPageInitializers(pageName);
+                    },
                     { once: true }
                 );
                 return;
@@ -6072,8 +6170,14 @@
             }
             if (pageName === 'terminal') {
                 if (!await ensureTerminalElevation()) return;
-                await loadTerminalClusterHosts().catch(error =>
-                    debugLog('[Terminal] Worker host directory unavailable:', error));
+                // Load local xterm assets while fetching the host directory so
+                // the first terminal pane can open immediately afterwards.
+                await Promise.all([
+                    loadTerminalClusterHosts().catch(error =>
+                        debugLog('[Terminal] Worker host directory unavailable:', error)),
+                    loadXTermScripts().catch(error =>
+                        debugLog('[Terminal] xterm assets unavailable:', error)),
+                ]);
                 const pendingCommand = sessionStorage.getItem('pending_terminal_command');
                 const commandSource = sessionStorage.getItem('command_source');
                 pendingAdbDevice = pendingAdbDevice || sessionStorage.getItem('pending_adb_device');

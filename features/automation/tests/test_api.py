@@ -316,6 +316,52 @@ class AutomationApiTests(unittest.TestCase):
         self.assertEqual(result['test_suite'], '/suite/tools')
         self.assertEqual(result['devices'], ['worker-1:ABC'])
 
+    def test_live_preflight_uses_same_gsi_suite_mapping_as_test_page(self):
+        class Repository:
+            @staticmethod
+            def list_suites():
+                return [{
+                    'worker_id': 'worker-1', 'available': True,
+                    'suite_type': 'CTS', 'suite_version': '17_r1',
+                    'suite_key': 'CTS:17_r1', 'tools_path': '/cts/tools',
+                    'last_scanned_at': '2026-07-13T00:00:00Z',
+                }]
+
+            @staticmethod
+            def list_devices(worker_id):
+                return [{
+                    'id': f'{worker_id}:ABC', 'serial': 'ABC',
+                    'state': 'available',
+                }]
+
+        cluster = SimpleNamespace(
+            effective_enabled=True,
+            repository=Repository(),
+            has_command_agent=lambda _worker_id: True,
+            list_workers=lambda: [{
+                'id': 'worker-1', 'status': 'online',
+                'running_jobs': 0, 'max_jobs': 1,
+                'disk_free_gb': 100, 'memory_available_gb': 32,
+            }],
+        )
+        with TemporaryDirectory() as tmp:
+            service = AutomationService(
+                store=AutomationStore(Path(tmp) / 'automation.sqlite3'),
+                profiles_path=Path(tmp) / 'profiles.json',
+                cluster_provider=lambda: cluster,
+            )
+            result = service.preflight({
+                'devices': ['ABC'],
+                'test_plan': {
+                    'worker_id': 'worker-1', 'test_type': 'GSI',
+                    'flash': {'mode': 'skip'},
+                    'test_module': 'CtsAppSecurityHostTestCases',
+                },
+            })
+
+        self.assertEqual(result['test_type'], 'GSI')
+        self.assertEqual(result['test_suite'], '/cts/tools')
+
     def test_live_preflight_rejects_adb_proxy_for_firmware_flash(self):
         class Repository:
             @staticmethod
@@ -377,9 +423,11 @@ class AutomationApiTests(unittest.TestCase):
         response = asyncio.run(automation_api.automation_page())
         html = response.body.decode('utf-8')
         self.assertIn(
-            'Gerrit → 构建 → 刷机 → GMS 测试 → 报告',
+            '配置 → 预检 → 固件编译 → 安全烧写 → GMS 测试 → 报告分析',
             html,
         )
+        self.assertIn('id="automation-preflight-run"', html)
+        self.assertIn('id="automation-flash-mode"', html)
         self.assertIn('id="automation-create-run"', html)
         self.assertIn('id="automation-runs"', html)
         self.assertIn('/api/automation/runs', html)

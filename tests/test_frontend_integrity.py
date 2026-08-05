@@ -148,7 +148,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         navigation = read_text("web/static/js/navigation.js")
         self.assertIn("const filePath = targetFile ? `${targetPath}/${targetFile}` : '';", navigation)
         self.assertIn("setSuiteBrowserHighlightedPath(filePath)", navigation)
-        self.assertIn("const reportProvenanceOnly = ['reports', 'report-analysis', 'report-download', 'test-suites']", navigation)
+        self.assertIn("const reportProvenanceOnly = ['reports', 'report-analysis', 'report-download', 'test-suites', 'automation']", navigation)
         self.assertIn("contextJobId !== state.clusterJobId && !reportProvenanceOnly", navigation)
 
     def test_login_explains_client_ssh_account_and_finishes_identity_prefill(self):
@@ -279,7 +279,11 @@ class FrontendIntegrityTests(unittest.TestCase):
             main_text,
         )
         self.assertIn(
-            "mountHostWorkspaceDesktop(index, host, body, generation, pane.hostId)",
+            "mountHostWorkspaceDesktop(index, host, body, generation, pane.hostId, paneGeneration)",
+            main_text,
+        )
+        self.assertIn(
+            "paneGeneration !== (hostWorkspace.paneGenerations.get(index) || 0)",
             main_text,
         )
 

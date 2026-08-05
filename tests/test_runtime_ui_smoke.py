@@ -890,12 +890,264 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         try:
             self.goto_shell(page)
             page.wait_for_function("typeof openAgentPageAction === 'function'")
+            test_page_frame = page.locator("#page-test").evaluate(
+                """container => ({
+                    borderTopWidth: getComputedStyle(container).borderTopWidth,
+                    marginTop: getComputedStyle(container).marginTop,
+                    paddingTop: getComputedStyle(container).paddingTop,
+                })"""
+            )
+            self.assertEqual(
+                test_page_frame,
+                {"borderTopWidth": "0px", "marginTop": "0px", "paddingTop": "15px"},
+            )
 
+            expected_page_frame = None
+            expected_analysis_upload_frame = None
             for page_name in self.visible_sidebar_pages(page):
                 with self.subTest(page=page_name):
                     page.evaluate("target => openAgentPageAction(target, '{}')", page_name)
                     expect(page.locator(f"#page-{page_name}")).to_have_class(re.compile(r"active"))
                     expect(page.locator(f'.sidebar-item[data-page="{page_name}"]')).to_have_class(re.compile(r"active"))
+                    if page_name != "test":
+                        page_geometry = page.locator(f"#page-{page_name}").evaluate(
+                            """container => {
+                                const pageRect = container.getBoundingClientRect();
+                                const title = container.querySelector('.section-title');
+                                const titleRect = title ? title.getBoundingClientRect() : null;
+                                const firstChild = container.firstElementChild;
+                                const content = firstChild && firstChild.nextElementSibling;
+                                const contentRect = content ? content.getBoundingClientRect() : null;
+                                const containerStyle = getComputedStyle(container);
+                                const frame = getComputedStyle(container, '::after');
+                                return {
+                                    pageLeft: pageRect.left,
+                                    pageTop: pageRect.top,
+                                    pageWidth: pageRect.width,
+                                    pageHeight: pageRect.height,
+                                    titleLeft: titleRect && titleRect.left,
+                                    titleTop: titleRect && titleRect.top,
+                                    contentLeft: contentRect && contentRect.left,
+                                    contentTop: contentRect && contentRect.top,
+                                    titleToContent: titleRect && contentRect && contentRect.top - titleRect.bottom,
+                                    frameTop: parseFloat(frame.top),
+                                    frameRight: parseFloat(frame.right),
+                                    frameBottom: parseFloat(frame.bottom),
+                                    frameLeft: parseFloat(frame.left),
+                                    frameBorder: frame.borderTopWidth,
+                                    frameDisplay: frame.display,
+                                    pageBorder: containerStyle.borderTopWidth,
+                                    pageMargin: containerStyle.marginTop,
+                                };
+                            }"""
+                        )
+                        page_frame = {
+                            key: page_geometry[key]
+                            for key in ["pageLeft", "pageTop", "pageWidth", "pageHeight"]
+                        }
+                        if expected_page_frame is None:
+                            expected_page_frame = page_frame
+                        else:
+                            self.assertEqual(page_frame, expected_page_frame)
+                        self.assertAlmostEqual(
+                            page_geometry["titleLeft"] - page_geometry["pageLeft"],
+                            15,
+                            delta=0.5,
+                        )
+                        self.assertAlmostEqual(
+                            page_geometry["titleTop"] - page_geometry["pageTop"],
+                            15,
+                            delta=0.5,
+                        )
+                        self.assertAlmostEqual(
+                            page_geometry["contentLeft"],
+                            page_geometry["titleLeft"],
+                            delta=0.5,
+                        )
+                        self.assertAlmostEqual(page_geometry["titleToContent"], 6, delta=0.5)
+                        self.assertAlmostEqual(page_geometry["frameLeft"], 15, delta=0.5)
+                        self.assertAlmostEqual(page_geometry["frameRight"], 15, delta=0.5)
+                        self.assertAlmostEqual(page_geometry["frameBottom"], 15, delta=0.5)
+                        self.assertAlmostEqual(
+                            page_geometry["pageTop"] + page_geometry["frameTop"],
+                            page_geometry["contentTop"],
+                            delta=0.5,
+                        )
+                        self.assertEqual(page_geometry["frameBorder"], "1px")
+                        self.assertEqual(page_geometry["pageBorder"], "0px")
+                        self.assertEqual(page_geometry["pageMargin"], "0px")
+                        overlapping_frames = page.locator(f"#page-{page_name}").evaluate(
+                            """container => {
+                                const pageRect = container.getBoundingClientRect();
+                                const frameStyle = getComputedStyle(container, '::after');
+                                if (frameStyle.display === 'none') return [];
+                                const target = {
+                                    left: pageRect.left + parseFloat(frameStyle.left),
+                                    top: pageRect.top + parseFloat(frameStyle.top),
+                                    right: pageRect.right - parseFloat(frameStyle.right),
+                                    bottom: pageRect.bottom - parseFloat(frameStyle.bottom),
+                                };
+                                return Array.from(container.querySelectorAll('*')).filter(node => {
+                                    const style = getComputedStyle(node);
+                                    if (style.display === 'none' || style.visibility === 'hidden') return false;
+                                    if (parseFloat(style.borderTopWidth) <= 0) return false;
+                                    const rect = node.getBoundingClientRect();
+                                    return Math.abs(rect.left - target.left) <= 1
+                                        && Math.abs(rect.top - target.top) <= 1
+                                        && Math.abs(rect.right - target.right) <= 1
+                                        && Math.abs(rect.bottom - target.bottom) <= 1;
+                                }).map(node => node.id || node.className || node.tagName);
+                            }"""
+                        )
+                        self.assertEqual(overlapping_frames, [])
+                        if page_name in {"report-analysis", "apk-analysis"}:
+                            upload_selector = (
+                                "#report-upload-zone"
+                                if page_name == "report-analysis"
+                                else "#apk-upload-zone"
+                            )
+                            expect(page.locator(upload_selector)).to_have_class(
+                                re.compile(r"\bupload-empty\b")
+                            )
+                            upload_geometry = page.locator(upload_selector).evaluate(
+                                """zone => {
+                                    const rect = zone.getBoundingClientRect();
+                                    const pageRect = zone.closest('.page-content').getBoundingClientRect();
+                                    const pageTitleStyle = getComputedStyle(
+                                        zone.closest('.page-content').querySelector(':scope > .section-title')
+                                    );
+                                    const title = zone.querySelector('.analysis-upload-title');
+                                    const instructions = zone.querySelector('.upload-instructions');
+                                    const button = zone.querySelector('button');
+                                    const titleRect = title.getBoundingClientRect();
+                                    const buttonRect = button.getBoundingClientRect();
+                                    const titleStyle = getComputedStyle(title);
+                                    const instructionsStyle = getComputedStyle(instructions);
+                                    const buttonStyle = getComputedStyle(button);
+                                    return {
+                                        left: rect.left - pageRect.left,
+                                        top: rect.top - pageRect.top,
+                                        bottom: pageRect.bottom - rect.bottom,
+                                        width: rect.width,
+                                        height: rect.height,
+                                        titleLeft: titleRect.left - pageRect.left,
+                                        titleTop: titleRect.top - pageRect.top,
+                                        buttonLeft: buttonRect.left - pageRect.left,
+                                        buttonTop: buttonRect.top - pageRect.top,
+                                        buttonWidth: buttonRect.width,
+                                        borderStyle: getComputedStyle(zone).borderTopStyle,
+                                        borderWidth: getComputedStyle(zone).borderTopWidth,
+                                        borderRadius: getComputedStyle(zone).borderTopLeftRadius,
+                                        minHeight: getComputedStyle(zone).minHeight,
+                                        pageTitleFont: [
+                                            pageTitleStyle.fontFamily,
+                                            pageTitleStyle.fontSize,
+                                            pageTitleStyle.fontWeight,
+                                            pageTitleStyle.lineHeight,
+                                        ],
+                                        titleFont: [
+                                            titleStyle.fontFamily,
+                                            titleStyle.fontSize,
+                                            titleStyle.fontWeight,
+                                            titleStyle.lineHeight,
+                                        ],
+                                        instructionsFont: [
+                                            instructionsStyle.fontFamily,
+                                            instructionsStyle.fontSize,
+                                            instructionsStyle.fontWeight,
+                                            instructionsStyle.lineHeight,
+                                        ],
+                                        buttonFont: [
+                                            buttonStyle.fontFamily,
+                                            buttonStyle.fontSize,
+                                            buttonStyle.fontWeight,
+                                            buttonStyle.lineHeight,
+                                        ],
+                                    };
+                                }"""
+                            )
+                            if expected_analysis_upload_frame is None:
+                                expected_analysis_upload_frame = upload_geometry
+                            else:
+                                self.assertEqual(
+                                    upload_geometry,
+                                    expected_analysis_upload_frame,
+                                )
+                            self.assertAlmostEqual(upload_geometry["left"], 15, delta=0.5)
+                            self.assertAlmostEqual(upload_geometry["top"], 40, delta=0.5)
+                            self.assertAlmostEqual(
+                                upload_geometry["height"],
+                                page.evaluate("window.innerHeight * 0.5"),
+                                delta=0.5,
+                            )
+                            self.assertGreater(upload_geometry["bottom"], 15)
+                            self.assertEqual(upload_geometry["borderStyle"], "solid")
+                            self.assertEqual(upload_geometry["borderWidth"], "1px")
+                            self.assertEqual(upload_geometry["borderRadius"], "8px")
+                            self.assertEqual(
+                                upload_geometry["minHeight"],
+                                f"{page.evaluate('window.innerHeight * 0.5'):g}px",
+                            )
+                            self.assertAlmostEqual(upload_geometry["buttonWidth"], 160, delta=0.5)
+                            self.assertEqual(page_geometry["frameDisplay"], "none")
+                            if page_name == "report-analysis":
+                                self.assertEqual(
+                                    page.locator("#report-upload-progress").evaluate(
+                                        "progress => getComputedStyle(progress).opacity"
+                                    ),
+                                    "0",
+                                )
+                                page.locator(upload_selector).evaluate(
+                                    "zone => zone.classList.remove('upload-empty')"
+                                )
+                                result_state_frame = page.locator(f"#page-{page_name}").evaluate(
+                                    """(container, selector) => {
+                                        const zone = container.querySelector(selector);
+                                        const frame = getComputedStyle(container, '::after');
+                                        return {
+                                            frameDisplay: frame.display,
+                                            uploadBorder: getComputedStyle(zone).borderTopWidth,
+                                            uploadHeight: zone.getBoundingClientRect().height,
+                                        };
+                                    }""",
+                                    upload_selector,
+                                )
+                                self.assertEqual(result_state_frame["frameDisplay"], "block")
+                                self.assertEqual(result_state_frame["uploadBorder"], "0px")
+                                self.assertAlmostEqual(
+                                    result_state_frame["uploadHeight"],
+                                    80,
+                                    delta=0.5,
+                                )
+                                page.locator(upload_selector).evaluate(
+                                    "zone => zone.classList.add('upload-empty')"
+                                )
+                        if page_name == "architecture":
+                            architecture_frame = page.locator(
+                                "#page-architecture .architecture-container"
+                            ).evaluate(
+                                """container => {
+                                    const style = getComputedStyle(container);
+                                    const iframeStyle = getComputedStyle(container.querySelector('iframe'));
+                                    return {
+                                        background: style.backgroundColor,
+                                        border: style.borderTopWidth,
+                                        padding: style.paddingTop,
+                                        radius: style.borderTopLeftRadius,
+                                        iframeRadius: iframeStyle.borderTopLeftRadius,
+                                    };
+                                }"""
+                            )
+                            self.assertEqual(
+                                architecture_frame,
+                                {
+                                    "background": "rgba(0, 0, 0, 0)",
+                                    "border": "0px",
+                                    "padding": "0px",
+                                    "radius": "8px",
+                                    "iframeRadius": "7px",
+                                },
+                            )
 
             page.evaluate("openAgentPageAction('redmine-agent', JSON.stringify({tab:'department', name:'黄超群'}))")
             redmine_src = page.locator("#redmine-agent-frame").get_attribute("src")
@@ -2745,6 +2997,194 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_hidden_host_workspaces_resume_automatically_on_page_entry(self):
+        page = self.new_page()
+        page.route(
+            "**/api/desktop/vnc/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"running":true}',
+            ),
+        )
+        page.route(
+            "**/api/desktop/novnc/access",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"url":"about:blank"}',
+            ),
+        )
+        try:
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                },
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            self.goto_shell(page)
+            page.wait_for_function("state.authReady")
+            page.evaluate(
+                """async () => {
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
+                  switchPage('reports', null);
+                  await ensureDesktopInitialized();
+                }"""
+            )
+            page.wait_for_timeout(450)
+            expect(page.locator("#host-workspace-status-0")).to_have_text("准备中")
+            expect(page.locator("#host-workspace-grid iframe")).to_have_count(0)
+
+            page.evaluate("switchPage('desktop', null)")
+            expect(page.locator("#host-workspace-grid iframe")).to_have_count(1)
+            expect(page.locator("#host-workspace-status-0")).not_to_have_text("准备中")
+
+            page.evaluate(
+                """async () => {
+                  switchPage('reports', null);
+                  await ensureTerminalWorkspaceInitialized();
+                }"""
+            )
+            page.wait_for_function("window.xtermLoaded === true")
+            expect(page.locator("#terminal-workspace-grid .host-workspace-terminal")).to_have_count(0)
+
+            page.evaluate("switchPage('terminal', null)")
+            expect(page.locator("#terminal-workspace-grid .host-workspace-terminal")).to_have_count(1)
+            expect(page.locator("#terminal-workspace-status-0")).not_to_have_text("准备中")
+        finally:
+            page.close()
+
+    def test_multi_host_switch_refreshes_only_selected_pane(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("window.GmsWorkspace && typeof renderHostWorkspace === 'function'")
+            result = page.evaluate(
+                """async () => {
+                  const originalDesktopMount = mountHostWorkspacePane;
+                  const originalTerminalMount = mountTerminalWorkspacePane;
+                  const desktopMounts = [];
+                  const terminalMounts = [];
+                  try {
+                    desktopHosts = [
+                      {id: 'default', worker_id: 'worker-local', name: 'Local', connection: 'local@127.0.0.1'},
+                      {id: 'cluster:worker-a', worker_id: 'worker-a', name: 'Worker A', connection: 'a@192.0.2.10'},
+                      {id: 'cluster:worker-b', worker_id: 'worker-b', name: 'Worker B', connection: 'b@192.0.2.11'},
+                    ];
+                    currentHost = desktopHosts[0];
+                    currentPage = 'desktop';
+                    hostWorkspace.layout = 'horizontal';
+                    hostWorkspace.panes = [
+                      {type: 'desktop', hostId: 'default'},
+                      {type: 'desktop', hostId: 'cluster:worker-a'},
+                    ];
+                    hostWorkspace.instances.clear();
+                    hostWorkspace.paneGenerations.clear();
+                    hostWorkspace.renderedSignature = null;
+                    document.getElementById('host-workspace-grid').replaceChildren();
+                    mountHostWorkspacePane = async (index, pane) => {
+                      const body = document.getElementById(`host-workspace-body-${index}`);
+                      const frame = document.createElement('iframe');
+                      frame.dataset.hostId = pane.hostId;
+                      body.replaceChildren(frame);
+                      hostWorkspace.instances.set(index, {
+                        type: 'desktop', hostId: pane.hostId, frame, disposed: false,
+                      });
+                      desktopMounts.push({index, hostId: pane.hostId});
+                    };
+                    renderHostWorkspace();
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                    const desktopFirst = hostWorkspace.instances.get(0);
+                    const workerBefore = GmsWorkspace.get().worker_id;
+                    changeHostWorkspacePaneHost(1, 'cluster:worker-b');
+                    const desktopAfter = hostWorkspace.instances.get(0);
+                    const desktopDuplicateDisabled = document.querySelector(
+                      '[data-workspace-pane="0"] option[value="cluster:worker-b"]'
+                    )?.disabled;
+                    const desktopMountCountBeforeDuplicate = desktopMounts.length;
+                    changeHostWorkspacePaneHost(1, 'default');
+
+                    currentPage = 'terminal';
+                    terminalWorkspace.layout = 'horizontal';
+                    terminalWorkspace.panes = [
+                      {hostId: 'default'},
+                      {hostId: 'cluster:worker-a'},
+                    ];
+                    terminalWorkspace.instances.clear();
+                    terminalWorkspace.paneGenerations.clear();
+                    terminalWorkspace.renderedSignature = null;
+                    document.getElementById('terminal-workspace-grid').replaceChildren();
+                    mountTerminalWorkspacePane = async (index, pane) => {
+                      const body = document.getElementById(`terminal-workspace-body-${index}`);
+                      const surface = document.createElement('div');
+                      surface.className = 'host-workspace-terminal';
+                      surface.dataset.hostId = pane.hostId;
+                      body.replaceChildren(surface);
+                      terminalWorkspace.instances.set(index, {
+                        type: 'terminal', hostId: pane.hostId, disposed: false,
+                      });
+                      terminalMounts.push({index, hostId: pane.hostId});
+                    };
+                    renderTerminalWorkspace();
+                    const terminalFirst = terminalWorkspace.instances.get(0);
+                    changeTerminalWorkspaceHost(1, 'cluster:worker-b');
+                    const terminalAfter = terminalWorkspace.instances.get(0);
+                    const terminalDuplicateDisabled = document.querySelector(
+                      '[data-terminal-pane="0"] option[value="cluster:worker-b"]'
+                    )?.disabled;
+                    const terminalMountCountBeforeDuplicate = terminalMounts.length;
+                    changeTerminalWorkspaceHost(1, 'default');
+
+                    return {
+                      desktopMounts,
+                      terminalMounts,
+                      desktopFirstPreserved: desktopFirst === desktopAfter,
+                      terminalFirstPreserved: terminalFirst === terminalAfter,
+                      desktopPaneHosts: hostWorkspace.panes.map(pane => pane.hostId),
+                      terminalPaneHosts: terminalWorkspace.panes.map(pane => pane.hostId),
+                      desktopDuplicateDisabled,
+                      terminalDuplicateDisabled,
+                      desktopDuplicateIgnored: desktopMounts.length === desktopMountCountBeforeDuplicate,
+                      terminalDuplicateIgnored: terminalMounts.length === terminalMountCountBeforeDuplicate,
+                      workerUnchanged: GmsWorkspace.get().worker_id === workerBefore,
+                    };
+                  } finally {
+                    mountHostWorkspacePane = originalDesktopMount;
+                    mountTerminalWorkspacePane = originalTerminalMount;
+                  }
+                }"""
+            )
+            self.assertEqual(
+                result["desktopMounts"],
+                [
+                    {"index": 0, "hostId": "default"},
+                    {"index": 1, "hostId": "cluster:worker-a"},
+                    {"index": 1, "hostId": "cluster:worker-b"},
+                ],
+            )
+            self.assertEqual(
+                result["terminalMounts"],
+                [
+                    {"index": 0, "hostId": "default"},
+                    {"index": 1, "hostId": "cluster:worker-a"},
+                    {"index": 1, "hostId": "cluster:worker-b"},
+                ],
+            )
+            self.assertTrue(result["desktopFirstPreserved"])
+            self.assertTrue(result["terminalFirstPreserved"])
+            self.assertEqual(result["desktopPaneHosts"], ["default", "cluster:worker-b"])
+            self.assertEqual(result["terminalPaneHosts"], ["default", "cluster:worker-b"])
+            self.assertTrue(result["desktopDuplicateDisabled"])
+            self.assertTrue(result["terminalDuplicateDisabled"])
+            self.assertTrue(result["desktopDuplicateIgnored"])
+            self.assertTrue(result["terminalDuplicateIgnored"])
+            self.assertTrue(result["workerUnchanged"])
+        finally:
+            page.close()
+
     def test_terminal_credential_dialog_saves_then_retries(self):
         page = self.new_page()
         saved = []
@@ -3410,13 +3850,14 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(page.locator("#artifact-mode-hint")).to_contain_text("直接使用已有固件")
             expect(page.locator("#build-server")).to_be_disabled()
             page.check('#automation-device-list input[value="TESTSERIAL001"]', force=True)
+            page.once("dialog", lambda dialog: dialog.accept())
             page.evaluate("document.getElementById('automation-create-run').click()")
-            expect(page.locator("#automation-toast")).to_contain_text("已创建")
-            expect(page.locator("#automation-events .event")).to_have_count(1)
-            expect(page.locator("#automation-events .event-message")).to_have_text("Tradefed started")
+            expect(page.locator("#automation-toast")).to_contain_text("流水线已启动")
+            expect(page.locator("#automation-events .event-line")).to_have_count(1)
+            expect(page.locator("#automation-events .event-line-message")).to_contain_text("Tradefed started")
             page.evaluate("switchWorkflowPane('reports')")
             expect(page.locator("#automation-runs-report .report-card")).to_have_count(1)
-            expect(page.locator("#automation-runs-report")).to_contain_text("打开报告")
+            expect(page.locator("#automation-runs-report")).to_contain_text("分析报告")
             page.evaluate("switchWorkflowPane('runs')")
             page.evaluate(
                 """async () => {
@@ -3627,21 +4068,42 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
             page.wait_for_function("document.body.dataset.automationReady === 'true'")
             page.evaluate("document.querySelector('button[data-workflow=\"create\"]').click()")
+            guided_copy_layout = page.locator("#workflow-pane-create .guided-copy").first.evaluate(
+                """element => ({
+                    display: getComputedStyle(element).display,
+                    whiteSpace: getComputedStyle(element).whiteSpace,
+                })"""
+            )
+            self.assertEqual(guided_copy_layout, {"display": "flex", "whiteSpace": "nowrap"})
             expect(page.locator("#automation-profile")).to_have_value("manual")
             expect(page.locator("#build-server")).to_have_value("mock-build")
             expect(page.locator("#build-template-hint")).to_contain_text("source build/envsetup.sh")
-            expect(page.locator(".build-panel-actions")).to_contain_text("编译固件")
-            expect(page.locator(".build-panel-actions")).to_contain_text("查看日志")
+            expect(page.locator(".build-panel-actions")).to_contain_text("仅编译（调试）")
+            build_select_edges = page.locator(".build-source-row").evaluate(
+                """element => {
+                    const server = element.querySelector('#build-server').getBoundingClientRect();
+                    const template = element.querySelector('#build-template').getBoundingClientRect();
+                    return {serverTop: server.top, serverBottom: server.bottom,
+                            templateTop: template.top, templateBottom: template.bottom};
+                }"""
+            )
+            self.assertAlmostEqual(build_select_edges["serverTop"], build_select_edges["templateTop"], delta=0.5)
+            self.assertAlmostEqual(build_select_edges["serverBottom"], build_select_edges["templateBottom"], delta=0.5)
             page.select_option("#build-template", "mock-clean-template")
             expect(page.locator("#build-command")).to_have_value("./build.sh -UACKApu -J 8")
-            command_and_workspace = page.locator("#automation-build-fields").evaluate(
+            command_and_targets = page.locator("#automation-build-fields").evaluate(
                 """element => {
                     const command = element.querySelector('#build-command').getBoundingClientRect();
                     const workspace = element.querySelector('#build-workspace').getBoundingClientRect();
-                    return {commandBottom: command.bottom, workspaceTop: workspace.top};
+                    const lunch = element.querySelector('#build-lunch-target').getBoundingClientRect();
+                    return {commandTop: command.top, workspaceBottom: workspace.bottom,
+                            workspaceTop: workspace.top, lunchTop: lunch.top};
                 }"""
             )
-            self.assertLess(command_and_workspace["commandBottom"], command_and_workspace["workspaceTop"])
+            self.assertLess(command_and_targets["workspaceBottom"], command_and_targets["commandTop"])
+            self.assertAlmostEqual(
+                command_and_targets["workspaceTop"], command_and_targets["lunchTop"], delta=0.5
+            )
             self.assertEqual(
                 page.locator(".workflow-tab").all_text_contents(),
                 ["概览", "创建运行", "运行监控", "构建日志", "事件诊断", "测试报告"],
@@ -3732,11 +4194,18 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                                 "adb_proxy_source_worker_id": "worker-source"
                             } if index == 1 else {},
                         }
-                        for index in range(1, 5)
+                        for index in range(1, 13)
                     ],
                 }
             elif path.endswith("/api/cluster/suites"):
-                payload = {"success": True, "suites": []}
+                payload = {"success": True, "suites": [
+                    {"available": True, "suite_type": "CTS", "suite_version": "15_r1",
+                     "tools_path": "/suite/android-cts-15_r1/tools"},
+                    {"available": True, "suite_type": "CTS", "suite_version": "16_r2",
+                     "tools_path": "/suite/android-cts-16_r2/tools"},
+                    {"available": True, "suite_type": "GTS", "suite_version": "14.1-R1",
+                     "tools_path": "/suite/android-gts-14.1-R1/tools"},
+                ]}
             else:
                 payload = {"success": True}
             json_response(route, payload)
@@ -3748,7 +4217,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.wait_for_function("document.body.dataset.automationReady === 'true'")
             page.evaluate("document.querySelector('button[data-workflow=\"create\"]').click()")
             page.wait_for_function(
-                "document.querySelectorAll('#automation-device-list input').length === 4"
+                "document.querySelectorAll('#automation-device-list input').length === 12"
             )
 
             local_option = page.locator('#automation-worker option[value="worker-local"]')
@@ -3761,8 +4230,115 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "element => getComputedStyle(element).gridTemplateColumns.split(' ').length"
             )
             self.assertEqual(columns, 2)
+            device_list_size = page.locator("#automation-device-list").evaluate(
+                "element => ({height: element.clientHeight, scrollHeight: element.scrollHeight})"
+            )
+            self.assertGreaterEqual(device_list_size["height"], 112)
+            self.assertLessEqual(device_list_size["height"], 124)
+            self.assertGreater(device_list_size["scrollHeight"], device_list_size["height"])
+            device_header_layout = page.locator(".device-field-copy").evaluate(
+                """element => ({
+                    display: getComputedStyle(element).display,
+                    whiteSpace: getComputedStyle(element).whiteSpace,
+                })"""
+            )
+            self.assertEqual(
+                device_header_layout,
+                {"display": "flex", "whiteSpace": "nowrap"},
+            )
             expect(page.locator("#automation-device-list")).to_contain_text(
                 "ADB Proxy · worker-source · 仅免刷机测试"
+            )
+            adb_proxy = page.locator('#automation-device-list input[data-transport="adb_proxy"]')
+            expect(adb_proxy).to_be_disabled()
+            page.select_option("#automation-flash-mode", "skip")
+            expect(adb_proxy).to_be_enabled()
+            expect(page.locator("#flash-mode-hint")).to_contain_text("仅测试")
+            self.assertEqual(
+                page.locator("#automation-test-type option").all_text_contents(),
+                ["CTS", "GSI", "GTS", "GTS-ROOT", "STS", "VTS", "APTS"],
+            )
+            expect(page.locator("#automation-test-suite")).to_have_value(
+                "/suite/android-cts-16_r2/tools"
+            )
+            self.assertIn(
+                "/suite/android-gts-14.1-R1/tools",
+                page.locator("#automation-test-suite option").all_text_contents(),
+            )
+            page.select_option("#automation-test-type", "GTS-ROOT")
+            expect(page.locator("#automation-test-suite")).to_have_value(
+                "/suite/android-gts-14.1-R1/tools"
+            )
+            create_layout_size = page.locator(".create-layout").evaluate(
+                "element => ({height: element.clientHeight, scrollHeight: element.scrollHeight})"
+            )
+            self.assertLessEqual(
+                create_layout_size["scrollHeight"],
+                create_layout_size["height"] + 1,
+            )
+            outer_spacing = page.locator(".ats-shell").evaluate(
+                """shell => {
+                    const toolbar = shell.querySelector('.ats-toolbar').getBoundingClientRect();
+                    const surface = shell.querySelector('.workflow-surface').getBoundingClientRect();
+                    const layout = shell.querySelector('.create-layout').getBoundingClientRect();
+                    const profile = shell.querySelector('.profile-panel').getBoundingClientRect();
+                    const launch = shell.querySelector('.launch-panel').getBoundingClientRect();
+                    const shellRect = shell.getBoundingClientRect();
+                    return {
+                        shellTop: shellRect.top,
+                        toolbarTop: toolbar.top,
+                        toolbarBottom: toolbar.bottom,
+                        surfaceTop: surface.top,
+                        layoutTop: layout.top,
+                        profileTop: profile.top,
+                        launchBottom: launch.bottom,
+                        shellBottom: shellRect.bottom,
+                        layoutBottom: layout.bottom,
+                    };
+                }"""
+            )
+            self.assertLessEqual(
+                outer_spacing["toolbarTop"] - outer_spacing["shellTop"],
+                8,
+            )
+            self.assertLessEqual(
+                outer_spacing["surfaceTop"] - outer_spacing["toolbarBottom"],
+                6,
+            )
+            self.assertLessEqual(
+                outer_spacing["layoutBottom"] - outer_spacing["launchBottom"],
+                1,
+            )
+            for workflow_name in ["overview", "create", "runs", "build", "events", "reports"]:
+                page.locator(f'.workflow-tab[data-workflow="{workflow_name}"]').click()
+                pane_top_gap = page.locator(f"#workflow-pane-{workflow_name}").evaluate(
+                    """pane => {
+                        const surface = pane.closest('.workflow-surface').getBoundingClientRect();
+                        return pane.getBoundingClientRect().top - surface.top;
+                    }"""
+                )
+                self.assertLessEqual(abs(pane_top_gap), 1)
+            page.locator('.workflow-tab[data-workflow="create"]').click()
+            page.set_viewport_size({"width": 1440, "height": 720})
+            create_panel_edges = page.locator("#workflow-pane-create").evaluate(
+                """element => {
+                    const testPanel = element.querySelector('.test-panel').getBoundingClientRect();
+                    const testContent = element.querySelector('.test-panel .advanced-test-options').getBoundingClientRect();
+                    const launchPanel = element.querySelector('.launch-panel').getBoundingClientRect();
+                    return {
+                        testPanelBottom: testPanel.bottom,
+                        testContentBottom: testContent.bottom,
+                        launchPanelTop: launchPanel.top,
+                    };
+                }"""
+            )
+            self.assertLessEqual(
+                create_panel_edges["testContentBottom"],
+                create_panel_edges["testPanelBottom"],
+            )
+            self.assertLess(
+                create_panel_edges["testPanelBottom"],
+                create_panel_edges["launchPanelTop"],
             )
         finally:
             page.close()

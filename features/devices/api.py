@@ -99,11 +99,15 @@ async def get_connected_devices(
     request: Request,
     help: Annotated[bool, Query()] = False,
     force_refresh: Annotated[bool, Query()] = False,
+    source: Annotated[str, Query()] = "auto",
 ):
     """Get all connected device list (same as adb devices)."""
     resp = _help_or_continue(help, "GET", "/api/devices/list")
     if resp:
         return resp
+
+    if force_refresh:
+        logger.info("设备列表刷新: source=%s, force_refresh=%s", source, force_refresh)
 
     # Track user access
     client_id = runtime.get_client_id_from_request(request)

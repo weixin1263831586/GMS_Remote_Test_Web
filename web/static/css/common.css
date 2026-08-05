@@ -414,6 +414,50 @@ body {
     display: flex;
 }
 
+/* 除测试工作台外，仅统一标题下方的内容外框；左上角标题保持在框外。 */
+.main-container > .page-content:not(#page-test) {
+    --page-body-frame-inset: 15px;
+    --page-body-frame-top: 40px;
+    position: relative;
+}
+
+.main-container > .page-content:not(#page-test)::after {
+    content: '';
+    position: absolute;
+    z-index: 20;
+    top: var(--page-body-frame-top);
+    right: var(--page-body-frame-inset);
+    bottom: var(--page-body-frame-inset);
+    left: var(--page-body-frame-inset);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm);
+    pointer-events: none;
+}
+
+/* 已有满尺寸内容面的页面由公共外框统一描边，避免两层边框重合。 */
+#page-reports > div:nth-child(2),
+#page-websites > .tools-container,
+#page-tools > .tools-container,
+#gms-assistant-frame {
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
+/* 分析页空状态的上传面本身就是唯一外框；进入结果态后改用公共外框。 */
+#page-report-analysis:has(#report-upload-zone.upload-empty)::after,
+#page-apk-analysis:has(#apk-upload-zone.upload-empty)::after {
+    display: none;
+}
+#report-upload-zone:not(.upload-empty),
+#apk-upload-zone:not(.upload-empty) {
+    border: 0;
+    flex: 0 0 80px;
+    height: 80px;
+    min-height: 80px;
+    max-height: 80px;
+}
+
 /* ==================== Desktop Page ==================== */
 .desktop-container {
     display: flex;
@@ -2719,11 +2763,11 @@ body.modal-open {
 
 .report-upload-zone {
     background: var(--light-bg);
-    border: 2px dashed var(--border-color);
-    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
     padding: 8px 12px;
     text-align: center;
-    transition: all 0.3s ease;
+    transition: border-color 0.3s ease, background-color 0.3s ease, transform 0.3s ease;
     cursor: pointer;
     position: relative;
     overflow: hidden;
@@ -2734,11 +2778,17 @@ body.modal-open {
     justify-content: center;
 }
 
+.analysis-upload-frame {
+    padding: 0;
+    margin-bottom: 10px;
+}
+
 /* 上传前占满屏幕 */
 .report-upload-zone.upload-empty {
+    height: 50vh;
     min-height: 50vh;
-    max-height: none;
-    flex: 1;
+    max-height: 50vh;
+    flex: 0 0 50vh;
 }
 
 .report-upload-zone:hover {
@@ -4732,25 +4782,26 @@ body.modal-open {
 
 /* ==================== APK Analysis ==================== */
 .apk-upload-zone {
-    border: 2px dashed var(--border-color);
-    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
     padding: 8px 12px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: border-color 0.3s ease, background-color 0.3s ease, transform 0.3s ease;
     background: var(--light-bg);
     position: relative;
     overflow: hidden;
-    min-height: 52px;
-    max-height: 52px;
+    min-height: 80px;
+    max-height: 80px;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 .apk-upload-zone.upload-empty {
+    height: 50vh;
     min-height: 50vh;
-    max-height: none;
-    flex: 1;
+    max-height: 50vh;
+    flex: 0 0 50vh;
 }
 .apk-upload-zone:hover {
     border-color: var(--primary-color);
@@ -4794,6 +4845,68 @@ body.modal-open {
     padding: 6px 12px;
     font-size: 11px;
 }
+.report-upload-content,
+.apk-upload-content {
+    align-items: flex-start;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.6;
+}
+#page-report-analysis > .section-title,
+#page-apk-analysis > .section-title {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.6;
+}
+.report-upload-content > div:first-child,
+.apk-upload-content > div:first-child {
+    flex: 0 0 28px;
+    width: 28px;
+    text-align: center;
+    align-self: center;
+}
+.report-upload-content .analysis-upload-copy,
+.apk-upload-content .analysis-upload-copy {
+    flex: 0 1 300px;
+    width: 300px;
+    max-width: 300px;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.report-upload-zone.upload-empty .analysis-upload-copy,
+.apk-upload-zone.upload-empty .analysis-upload-copy {
+    min-height: 122px;
+}
+.analysis-upload-title {
+    height: 22px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 22px;
+    white-space: nowrap;
+}
+.analysis-upload-copy .upload-instructions {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.6;
+}
+.report-upload-content button,
+.apk-upload-content button {
+    flex: 0 0 160px;
+    width: 160px;
+    margin-left: 6px;
+    align-self: center;
+    padding: 10px 20px;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.6;
+}
 .report-upload-progress {
     position: absolute;
     bottom: 0;
@@ -4801,8 +4914,10 @@ body.modal-open {
     right: 0;
     height: 4px;
     background: var(--darker-bg);
-    border-radius: 0 0 12px 12px;
+    border-radius: 0 0 7px 7px;
     overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.2s ease;
 }
 .report-upload-progress-bar {
     height: 100%;
@@ -5527,6 +5642,11 @@ body.apk-resizing {
 
     .container {
         padding: 8px;
+    }
+
+    .main-container > .page-content:not(#page-test) {
+        --page-body-frame-inset: 8px;
+        --page-body-frame-top: 33px;
     }
 
     #page-test,
