@@ -232,9 +232,9 @@ def _local_worker_id() -> str:
     try:
         from features.cluster import get_cluster_service
 
-        return str(get_cluster_service().config.local_worker_id or "worker-local")
+        return str(get_cluster_service().config.local_worker_id or "ats-worker-controller")
     except Exception:
-        return "worker-local"
+        return "ats-worker-controller"
 
 
 def _persist_local_usbip_sources(device_host: str, serials: list[str]) -> None:
@@ -918,7 +918,8 @@ async def start_usbip(
         unknown_busids: list[str] = []
         if worker_id:
             from features.cluster import get_cluster_service
-            from features.cluster.api import _require_cluster_enabled, _run_worker_command
+            from features.cluster import require_cluster_enabled as _require_cluster_enabled
+            from features.cluster import run_worker_command as _run_worker_command
 
             cluster = get_cluster_service()
             adb_proxy_routes = _adb_proxy_target_assignments(worker_id)
@@ -1646,7 +1647,7 @@ async def stop_usbip(
 
     if req and req.worker_id:
         from features.cluster import get_cluster_service
-        from features.cluster.api import _run_worker_command
+        from features.cluster import run_worker_command as _run_worker_command
 
         try:
             cluster = get_cluster_service()

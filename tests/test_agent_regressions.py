@@ -233,7 +233,7 @@ class AgentRegressionTests(unittest.TestCase):
         }
         plan = {
             "request": {
-                "worker_id": "worker-local",
+                "worker_id": "ats-worker-controller",
                 "devices": ["SERIAL-1"],
                 "test_type": "CTS",
                 "test_suite": "/suite/tools",
@@ -242,13 +242,13 @@ class AgentRegressionTests(unittest.TestCase):
 
         async def start_local_durable(_request, help=False, req=None):
             self.assertFalse(help)
-            self.assertEqual(req.worker_id, "worker-local")
+            self.assertEqual(req.worker_id, "ats-worker-controller")
             return {
                 "success": True,
                 "data": {
                     "cluster_job_id": "job-local",
                     "attempt_id": "attempt-local",
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                 },
             }
 
@@ -261,7 +261,7 @@ class AgentRegressionTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(session["workspace_context"]["scope_mode"], "single")
-        self.assertEqual(session["workspace_context"]["worker_id"], "worker-local")
+        self.assertEqual(session["workspace_context"]["worker_id"], "ats-worker-controller")
         self.assertEqual(session["active_run"]["cluster_job_id"], "job-local")
 
 

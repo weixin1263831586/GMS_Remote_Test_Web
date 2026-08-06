@@ -88,7 +88,7 @@ class RuntimeDataRecoveryTests(unittest.TestCase):
                     ("GET", "/api/test/status?logs=false", None),
                     ("GET", "/api/notifications?limit=100", None),
                     ("GET", "/api/users/list", None),
-                    ("GET", "/api/reports/list?worker_id=worker-local", None),
+                    ("GET", "/api/reports/list?worker_id=ats-worker-controller", None),
                     ("GET", "/api/automation/dashboard", None),
                     ("GET", "/api/automation/runs?limit=100", None),
                     ("GET", "/api/build/jobs?limit=20", None),

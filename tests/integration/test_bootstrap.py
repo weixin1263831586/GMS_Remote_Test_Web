@@ -1,10 +1,13 @@
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from bootstrap.application import create_app
+from bootstrap.dependencies import build_services
+from foundation.runtime_settings import RuntimeSettings
 
 
 class BootstrapTests(unittest.TestCase):
@@ -19,11 +22,20 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn('/api/system/health', paths)
 
     def test_requests_return_stable_request_and_trace_ids(self):
-        with TestClient(create_app()) as client:
-            response = client.get(
-                '/api/system/health',
-                headers={'X-Request-ID': 'req-ui-1', 'X-Trace-ID': 'ats-run-1'},
-            )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, {'GMS_DATA_ROOT': directory}),
+        ):
+            runtime_settings = RuntimeSettings.from_environment()
+            services = build_services(runtime_settings=runtime_settings)
+            with TestClient(create_app(services)) as client:
+                response = client.get(
+                    '/api/system/health',
+                    headers={
+                        'X-Request-ID': 'req-ui-1',
+                        'X-Trace-ID': 'ats-run-1',
+                    },
+                )
 
         self.assertEqual(response.headers['X-Request-ID'], 'req-ui-1')
         self.assertEqual(response.headers['X-Trace-ID'], 'ats-run-1')

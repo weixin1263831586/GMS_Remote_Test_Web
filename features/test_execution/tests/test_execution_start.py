@@ -15,11 +15,11 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = ClusterRepository(Path(directory) / "cluster.sqlite3")
             repository.register_worker({
-                "worker_id": "worker-local", "agent_version": "controller-0.1.0",
+                "worker_id": "ats-worker-controller", "agent_version": "controller-0.1.0",
                 "max_jobs": 1, "name": "local", "hostname": "local",
                 "address": "127.0.0.1", "capabilities": {},
             })
-            repository.heartbeat("worker-local", {
+            repository.heartbeat("ats-worker-controller", {
                 "running_jobs": [{"worker_job_id": "external-1", "job_id": "",
                                   "attempt_id": "", "status": "running",
                                   "devices": ["SERIAL-1"], "source": "external"}],
@@ -37,7 +37,7 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
                 ):
                     result = await execution_api.start_test(
                         SimpleNamespace(),
-                        req=StartRequest(worker_id="worker-local", devices=["SERIAL-1"]),
+                        req=StartRequest(worker_id="ats-worker-controller", devices=["SERIAL-1"]),
                     )
             finally:
                 cluster_api.cluster_service = previous
@@ -48,7 +48,7 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = ClusterRepository(Path(directory) / "cluster.sqlite3")
             repository.register_worker({
-                "worker_id": "worker-local", "agent_version": "0.2.0", "max_jobs": 1,
+                "worker_id": "ats-worker-controller", "agent_version": "0.2.0", "max_jobs": 1,
                 "name": "local", "hostname": "local", "address": "127.0.0.1",
                 "capabilities": {},
             })
@@ -63,7 +63,7 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
                 ):
                     result = await execution_api.start_test(
                         SimpleNamespace(),
-                        req=StartRequest(worker_id="worker-local", devices=["SERIAL-1"]),
+                        req=StartRequest(worker_id="ats-worker-controller", devices=["SERIAL-1"]),
                     )
             finally:
                 cluster_api.cluster_service = previous
@@ -121,7 +121,7 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = ClusterRepository(Path(directory) / "cluster.sqlite3")
             repository.register_worker({
-                "worker_id": "worker-local", "agent_version": "controller-0.1.0",
+                "worker_id": "ats-worker-controller", "agent_version": "controller-0.1.0",
                 "max_jobs": 1, "name": "local", "hostname": "local",
                 "address": "127.0.0.1", "capabilities": {},
             })

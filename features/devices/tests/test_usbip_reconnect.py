@@ -326,8 +326,8 @@ UNAUTH001	unauthorized
 
     def test_manual_remote_connect_reclaims_busy_export_once(self):
         import features.cluster as cluster_module
-        import features.cluster.api as cluster_api
         import features.devices.integrations_api as integrations
+        from features.cluster import api as cluster_api
 
         runtime_config = {}
 
@@ -364,7 +364,7 @@ UNAUTH001	unauthorized
 
         fake_manager = FakeUsbipManager()
         fake_cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=SimpleNamespace(
                 get_worker=lambda worker_id: {
                     "capabilities": {"usbip_client": True},
@@ -497,7 +497,7 @@ UNAUTH001	unauthorized
                 "hcq@172.16.14.66|1-8": {
                     "device_host": "hcq@172.16.14.66",
                     "source_host": "172.16.14.66",
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                     "busid": "1-8",
                     "device_serials": ["RK3576GMS6"],
                     "status": "attached",
@@ -517,7 +517,7 @@ UNAUTH001	unauthorized
             ),
         ):
             changed = integrations.reconcile_cluster_usbip_heartbeat(
-                "worker-local",
+                "ats-worker-controller",
                 [],
             )
             self.assertTrue(changed)
@@ -527,7 +527,7 @@ UNAUTH001	unauthorized
             self.assertEqual(assignment["status"], "unknown")
 
             changed = integrations.reconcile_cluster_usbip_heartbeat(
-                "worker-local",
+                "ats-worker-controller",
                 [{"serial": "RK3576GMS6", "state": "available"}],
             )
             self.assertTrue(changed)
@@ -549,7 +549,7 @@ UNAUTH001	unauthorized
                 "hcq@172.16.14.66|1-1": {
                     "device_host": "hcq@172.16.14.66",
                     "source_host": "172.16.14.66",
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                     "busid": "1-1",
                     "device_serials": ["RK3576GMS1"],
                     "status": "attached",
@@ -569,7 +569,7 @@ UNAUTH001	unauthorized
             ),
         ), patch.object(integrations.time, "time", return_value=1_015):
             changed = integrations.reconcile_cluster_usbip_heartbeat(
-                "worker-local",
+                "ats-worker-controller",
                 [],
             )
 
@@ -682,8 +682,8 @@ UNAUTH001	unauthorized
 
     def test_remote_detach_claims_devices_and_applies_empty_snapshot(self):
         import features.cluster as cluster_module
-        import features.cluster.api as cluster_api
         import features.devices.integrations_api as integrations
+        from features.cluster import api as cluster_api
 
         runtime_config = {
             "usbip_cluster_assignments": {
@@ -724,7 +724,7 @@ UNAUTH001	unauthorized
             "attempt_id": "operation-1",
         }]
         fake_cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=repository,
             effective_enabled=False,
         )
@@ -775,8 +775,8 @@ UNAUTH001	unauthorized
 
     def test_remote_detach_refuses_an_active_device_claim(self):
         import features.cluster as cluster_module
-        import features.cluster.api as cluster_api
         import features.devices.integrations_api as integrations
+        from features.cluster import api as cluster_api
 
         class FakeConfigManager:
             def load_config(self):
@@ -802,7 +802,7 @@ UNAUTH001	unauthorized
             "device is already claimed by active-test"
         )
         fake_cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=repository,
         )
         run_worker = AsyncMock()
@@ -837,8 +837,8 @@ UNAUTH001	unauthorized
 
     def test_remote_detach_rejects_duplicate_request_while_detaching(self):
         import features.cluster as cluster_module
-        import features.cluster.api as cluster_api
         import features.devices.integrations_api as integrations
+        from features.cluster import api as cluster_api
 
         class FakeConfigManager:
             def load_config(self):
@@ -861,7 +861,7 @@ UNAUTH001	unauthorized
         repository = MagicMock()
         repository.get_worker.return_value = {"status": "online"}
         fake_cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=repository,
         )
         run_worker = AsyncMock()
@@ -896,8 +896,8 @@ UNAUTH001	unauthorized
 
     def test_remote_detach_without_serial_mapping_does_not_claim_other_devices(self):
         import features.cluster as cluster_module
-        import features.cluster.api as cluster_api
         import features.devices.integrations_api as integrations
+        from features.cluster import api as cluster_api
 
         runtime_config = {
             "usbip_cluster_assignments": {
@@ -925,7 +925,7 @@ UNAUTH001	unauthorized
         repository = MagicMock()
         repository.get_worker.return_value = {"status": "busy"}
         fake_cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=repository,
         )
         run_worker = AsyncMock(return_value={
@@ -1252,7 +1252,7 @@ UNAUTH001	unauthorized
             }],
         }
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         )
         request = SimpleNamespace(
             headers={}, client=SimpleNamespace(host="127.0.0.1")
@@ -1278,7 +1278,7 @@ UNAUTH001	unauthorized
             response = asyncio.run(integrations.start_usbip(
                 req=USBIPStartRequest(
                     device_host="hcq@172.16.14.66",
-                    worker_id="worker-local",
+                    worker_id="ats-worker-controller",
                     busids=["1-8"],
                     manual_connect=True,
                 ),
@@ -1321,7 +1321,7 @@ UNAUTH001	unauthorized
             "transport_connected": True,
         }
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         )
         with patch.object(
             integrations.runtime, "config_manager", FakeConfigManager()
@@ -1344,7 +1344,7 @@ UNAUTH001	unauthorized
             response = asyncio.run(integrations.start_usbip(
                 req=USBIPStartRequest(
                     device_host="hcq@172.16.14.66",
-                    worker_id="worker-local",
+                    worker_id="ats-worker-controller",
                     busids=["1-8"],
                     manual_connect=True,
                 ),
@@ -1381,7 +1381,7 @@ UNAUTH001	unauthorized
             "transport_connected": True,
         }
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         )
         with patch.object(
             integrations.runtime, "config_manager", FakeConfigManager()
@@ -1408,7 +1408,7 @@ UNAUTH001	unauthorized
             response = asyncio.run(integrations.start_usbip(
                 req=USBIPStartRequest(
                     device_host="hcq@172.16.14.66",
-                    worker_id="worker-local",
+                    worker_id="ats-worker-controller",
                     busids=["1-8"],
                     manual_connect=True,
                 ),
@@ -1455,7 +1455,7 @@ UNAUTH001	unauthorized
             }],
         }
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         )
         request = SimpleNamespace(
             headers={}, client=SimpleNamespace(host="127.0.0.1")
@@ -1481,7 +1481,7 @@ UNAUTH001	unauthorized
             response = asyncio.run(integrations.start_usbip(
                 req=USBIPStartRequest(
                     device_host="hcq@172.16.14.66",
-                    worker_id="worker-local",
+                    worker_id="ats-worker-controller",
                     busids=["1-8"],
                 ),
                 request=request,
@@ -1524,7 +1524,7 @@ UNAUTH001	unauthorized
         }
         manager.device_sources = {}
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         )
         old_sources = {}
         with global_state.usbip_devices_source_lock:
@@ -1549,7 +1549,7 @@ UNAUTH001	unauthorized
                 response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(
                         device_host="hcq@172.16.14.66",
-                        worker_id="worker-local",
+                        worker_id="ats-worker-controller",
                         busids=["1-1"],
                     ),
                     request=SimpleNamespace(headers={}, client=None),
@@ -1616,7 +1616,7 @@ UNAUTH001	unauthorized
                         "hcq@172.16.14.66|1-8": {
                             "device_host": "hcq@172.16.14.66",
                             "source_host": "172.16.14.66",
-                            "worker_id": "worker-local",
+                            "worker_id": "ats-worker-controller",
                             "busid": "1-8",
                             "device_serials": ["RK3576GMS6"],
                             "status": "attached",
@@ -1842,14 +1842,14 @@ UNAUTH001	unauthorized
                 "hcq@172.16.14.66|1-2": {
                     "device_host": "hcq@172.16.14.66",
                     "source_host": "172.16.14.66",
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                     "busid": "1-2",
                     "status": "attached",
                     "timestamp": 1,
                 },
             },
         }
-        with patch.object(reconnect, "_local_worker_id", return_value="worker-local"), patch.object(
+        with patch.object(reconnect, "_local_worker_id", return_value="ats-worker-controller"), patch.object(
             reconnect.runtime.config_manager, "get_runtime_config", return_value=fake_runtime
         ):
             # A busid on this host belongs to a remote Worker.
@@ -1940,7 +1940,7 @@ UNAUTH001	unauthorized
                 patch.object(integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)), \
                 patch.object(integrations, "DeviceSSHConnection", FakeDeviceSSHConnection), \
                 patch.object(integrations, "notify_device_change", AsyncMock()), \
-                patch.object(integrations, "acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "worker-local:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
+                patch.object(integrations, "acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "ats-worker-controller:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
                 patch.object(integrations, "release_device_operation_claim"), \
                 patch.object(integrations, "audit_device_operation"), \
                 patch("features.devices.reconnect.stop_usbip_reconnect_for_host") as stop_reconnect, \
@@ -1969,7 +1969,7 @@ UNAUTH001	unauthorized
                 "hcq@172.16.14.66|1-1": {
                     "device_host": "hcq@172.16.14.66",
                     "source_host": "172.16.14.66",
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                     "busid": "1-1",
                     "device_serials": ["RK3576GMS1"],
                     "status": "attached",
@@ -2015,7 +2015,7 @@ UNAUTH001	unauthorized
                 return False
 
         fake_cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local")
+            config=SimpleNamespace(local_worker_id="ats-worker-controller")
         )
         detach_result = {
             "detached_ports": ["00"],
@@ -2053,7 +2053,7 @@ UNAUTH001	unauthorized
                 req=USBIPDisconnectRequest(
                     device_host="hcq@172.16.14.66",
                     source_host="172.16.14.66",
-                    worker_id="worker-local",
+                    worker_id="ats-worker-controller",
                     busids=["1-1"],
                 ),
                 _elevated=CurrentUser(
@@ -2124,7 +2124,7 @@ UNAUTH001	unauthorized
                 patch.object(integrations, "get_client_display_id_from_request", return_value="hcq@172.16.14.66"), \
                 patch.object(integrations, "DeviceSSHConnection", FakeDeviceSSHConnection), \
                 patch.object(integrations, "notify_device_change", AsyncMock()), \
-                patch.object(integrations, "acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "worker-local:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
+                patch.object(integrations, "acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "ats-worker-controller:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
                 patch.object(integrations, "release_device_operation_claim"), \
                 patch.object(integrations, "audit_device_operation"), \
                 patch("features.devices.reconnect.stop_usbip_reconnect_for_host"), \

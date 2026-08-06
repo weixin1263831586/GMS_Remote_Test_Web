@@ -742,7 +742,8 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                 members = bundle.infolist()
                 if any(not (destination / item.filename).resolve().is_relative_to(destination) for item in members):
                     raise ValueError("archive contains an unsafe path")
-                bundle.extractall(destination)
+                # Every archive path is resolved and confined above.
+                bundle.extractall(destination)  # nosec B202
                 # 恢复压缩包中的 Unix 权限，确保测试启动脚本可执行。
                 for item in members:
                     mode = (item.external_attr >> 16) & 0o777
@@ -753,9 +754,11 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
             with tarfile.open(archive) as bundle:
                 members = bundle.getmembers()
                 if any(not (destination / item.name).resolve().is_relative_to(destination)
-                           or item.issym() or item.islnk() for item in members):
+                           or not (item.isfile() or item.isdir()) for item in members):
                     raise ValueError("archive contains an unsafe path or link")
-                bundle.extractall(destination)
+                # Paths and member types are prevalidated above; the data
+                # filter adds stdlib ownership/mode/link protections.
+                bundle.extractall(destination, members=members, filter="data")
         else:
             raise ValueError("unsupported suite archive format")
         return {"extracted_path": str(destination), "message": f"extracted {archive.name}"}

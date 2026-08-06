@@ -34,10 +34,7 @@ from .worker_auth import (
     authenticate_worker as _authenticate,
 )
 from .worker_auth import (
-    worker_tokens as _worker_tokens,
-)
-from .worker_auth import (
-    write_worker_tokens as _write_worker_tokens,
+    revoke_worker_token as _revoke_worker_token,
 )
 
 
@@ -125,8 +122,8 @@ def heartbeat(worker_id: str, body: WorkerHeartbeat, authorization: str | None =
     if worker is None:
         raise HTTPException(404, "worker is not registered")
     try:
-        from features.devices.adb_proxy_service import adb_proxy_service
-        from features.devices.integrations_api import (
+        from features.devices import (
+            get_adb_proxy_service,
             reconcile_cluster_usbip_heartbeat,
         )
 
@@ -134,7 +131,7 @@ def heartbeat(worker_id: str, body: WorkerHeartbeat, authorization: str | None =
             worker_id,
             [item.model_dump() for item in body.devices],
         )
-        adb_proxy_service.observe_worker(worker_id, body.adb_proxy)
+        get_adb_proxy_service().observe_worker(worker_id, body.adb_proxy)
     except Exception:
         logger.warning(
             "Failed to reconcile USB/IP inventory for Worker %s",
@@ -214,7 +211,7 @@ async def delete_worker(
     svc = service()
     if worker_id == svc.config.local_worker_id:
         raise HTTPException(409, "local Worker cannot be deleted")
-    worker = svc.repository.get_worker(worker_id)
+    worker = next((item for item in svc.list_workers() if item.get("id") == worker_id), None)
     if worker is None:
         raise HTTPException(404, "worker not found")
     if int(worker.get("running_jobs") or 0) > 0:
@@ -222,16 +219,14 @@ async def delete_worker(
             409,
             "Worker has a running platform or external test and cannot be deleted",
         )
-    # Remove the remote Agent first.  This prevents an online host from
-    # reconnecting and recreating its Worker registration after the row is
-    # deleted.  The Agent ACKs before stopping its own systemd unit.
-    await _run_worker_command(worker_id, "uninstall_agent", {}, timeout=15)
+    # Remove a reachable remote Agent first.  An offline Worker cannot ACK an
+    # uninstall command, but its stale inventory and revoked token must still
+    # be removable from the Controller.
+    if worker.get("status") in {"online", "busy"}:
+        await _run_worker_command(worker_id, "uninstall_agent", {}, timeout=15)
     if not svc.repository.delete_worker(worker_id):
         raise HTTPException(409, "Worker has an active job and cannot be deleted")
-    tokens = _worker_tokens()
-    if worker_id in tokens:
-        tokens.pop(worker_id)
-        _write_worker_tokens(tokens)
+    _revoke_worker_token(worker_id)
     return {"success": True, "deleted": worker_id}
 
 
@@ -296,9 +291,9 @@ def list_hosts():
 
 def _annotate_adb_proxy_source(devices: list[dict]) -> list[dict]:
     """Stamp ADB Proxy devices with their source worker name/address."""
-    from features.devices.adb_proxy_service import adb_proxy_service
-
+    from features.devices import get_adb_proxy_service
     source_by_serial: dict[str, str] = {}
+    adb_proxy_service = get_adb_proxy_service()
     for assignment in adb_proxy_service.assignments().values():
         target = str(assignment.get("target_worker_id") or "")
         for serial in assignment.get("devices") or []:
@@ -352,7 +347,7 @@ def list_devices(
         if worker_statuses.get(str(device.get("worker_id") or "")) == "offline":
             device["state"] = "offline"
     try:
-        from features.users.clients import resolve_client_display_id
+        from features.users import resolve_client_display_id
 
         for device in devices:
             claim_owner_id = str(device.get("claim_owner_id") or "").strip()
@@ -381,7 +376,7 @@ def list_devices(
         device.pop("claim_owner_id", None)
         device.pop("claim_username", None)
     try:
-        from features.devices.integrations_api import (
+        from features.devices import (
             annotate_cluster_usbip_devices,
         )
 
@@ -458,7 +453,7 @@ def list_suites(worker_id: str = Query(default="")):
 
 
 def _local_execute(command_type: str, payload: dict) -> dict:
-    """Execute a command directly on the Controller host (worker-local)."""
+    """Execute a command directly on the Controller host (ats-worker-controller)."""
     from worker_agent.config import WorkerConfig
     from worker_agent.inventory import execute_suite_action as _exec_suite
 
@@ -473,7 +468,7 @@ def _local_execute(command_type: str, payload: dict) -> dict:
     if command_type == "update_config":
         return _update_local_worker_config(payload)
     if command_type == "adb_proxy":
-        from features.devices.adb_proxy_security import pair_code_for_worker
+        from features.devices import pair_code_for_worker
         from worker_agent.adb_proxy import execute_adb_proxy_action
 
         action = str(payload.get("action") or "")

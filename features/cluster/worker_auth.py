@@ -84,10 +84,55 @@ def write_worker_tokens(tokens: dict[str, str]) -> None:
         )
 
 
-def persist_worker_token(worker_id: str, token: str) -> None:
-    tokens = worker_tokens()
-    tokens[worker_id] = token
-    write_worker_tokens(tokens)
+def persist_worker_token(worker_id: str, token: str) -> str | None:
+    """Atomically set one Worker token and return its previous value."""
+    with _token_lock:
+        path = _worker_tokens_path()
+        tokens = _token_map(_read_token_raw(path))
+        previous = tokens.get(worker_id)
+        tokens[worker_id] = token
+        _write_private_json(
+            path,
+            {"worker_tokens": dict(sorted(tokens.items()))},
+        )
+        return previous
+
+
+def restore_worker_token(
+    worker_id: str,
+    installed_token: str,
+    previous_token: str | None,
+) -> bool:
+    """Roll back one deployment token without overwriting a newer deploy."""
+    with _token_lock:
+        path = _worker_tokens_path()
+        tokens = _token_map(_read_token_raw(path))
+        if tokens.get(worker_id) != installed_token:
+            return False
+        if previous_token:
+            tokens[worker_id] = previous_token
+        else:
+            tokens.pop(worker_id, None)
+        _write_private_json(
+            path,
+            {"worker_tokens": dict(sorted(tokens.items()))},
+        )
+        return True
+
+
+def revoke_worker_token(worker_id: str) -> bool:
+    """Atomically revoke one Worker token while preserving all peers."""
+    with _token_lock:
+        path = _worker_tokens_path()
+        tokens = _token_map(_read_token_raw(path))
+        if worker_id not in tokens:
+            return False
+        tokens.pop(worker_id)
+        _write_private_json(
+            path,
+            {"worker_tokens": dict(sorted(tokens.items()))},
+        )
+        return True
 
 
 def authenticate_worker(worker_id: str, authorization: str | None) -> None:

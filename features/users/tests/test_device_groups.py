@@ -109,8 +109,8 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
                     'properties': {'model': 'Offline'},
                 },
                 {
-                    'id': 'worker-local:LOCAL',
-                    'worker_id': 'worker-local',
+                    'id': 'ats-worker-controller:LOCAL',
+                    'worker_id': 'ats-worker-controller',
                     'state': 'available',
                     'properties': {'model': 'Local'},
                 },
@@ -118,7 +118,7 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
         )
         service = SimpleNamespace(
             effective_enabled=True,
-            config=SimpleNamespace(local_worker_id='worker-local'),
+            config=SimpleNamespace(local_worker_id='ats-worker-controller'),
             repository=repository,
             list_workers=lambda: [{'id': 'worker-a', 'name': 'Lab A'}],
         )

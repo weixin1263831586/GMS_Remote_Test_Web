@@ -62,9 +62,9 @@ class TestStatusApiPolling(unittest.IsolatedAsyncioTestCase):
             app=SimpleNamespace(state=SimpleNamespace()),
         )
         durable_jobs = [{
-            "id": "job-1", "status": "running", "worker_id": "worker-local",
+            "id": "job-1", "status": "running", "worker_id": "ats-worker-controller",
             "attempt_id": "attempt-1", "suite_key": "CTS:17",
-            "devices": ["worker-local:SERIAL-1"], "created_at": "", "updated_at": "",
+            "devices": ["ats-worker-controller:SERIAL-1"], "created_at": "", "updated_at": "",
         }]
         with (
             patch.object(status_api.runtime, "generate_help_or_continue", return_value=None),
@@ -78,5 +78,5 @@ class TestStatusApiPolling(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(response.body)
         active.assert_called_once_with("user-uuid")
         self.assertTrue(payload["running"])
-        self.assertEqual(payload["devices"], ["worker-local:SERIAL-1"])
+        self.assertEqual(payload["devices"], ["ats-worker-controller:SERIAL-1"])
         self.assertEqual(payload["active_jobs"][0]["id"], "job-1")

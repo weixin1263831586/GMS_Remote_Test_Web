@@ -250,7 +250,7 @@ class DeviceOperationsTests(unittest.TestCase):
                     "RK3576GMS6": {
                         "source_worker_id": "ats-worker-118",
                         "source_serial": "RK3576GMS6",
-                        "target_worker_id": "worker-local",
+                        "target_worker_id": "ats-worker-controller",
                     },
                 },
             ),
@@ -267,7 +267,7 @@ class DeviceOperationsTests(unittest.TestCase):
         self.assertEqual(device["transport"], "adb_proxy")
         self.assertEqual(
             device["source_host"],
-            "ats-worker-118 → worker-local",
+            "ats-worker-118 → ats-worker-controller",
         )
         self.assertEqual(
             device["adb_proxy_source_worker_id"],

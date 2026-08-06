@@ -383,7 +383,7 @@ class AutomationApiTests(unittest.TestCase):
         cluster = SimpleNamespace(
             effective_enabled=True,
             repository=Repository(),
-            config=SimpleNamespace(local_worker_id='worker-local'),
+            config=SimpleNamespace(local_worker_id='ats-worker-controller'),
             has_command_agent=lambda _worker_id: True,
             list_workers=lambda: [{
                 'id': 'worker-1', 'status': 'online',

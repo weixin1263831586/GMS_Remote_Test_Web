@@ -128,7 +128,7 @@ def create_job(body: ClusterJobCreate, request: Request):
         if not executable:
             raise HTTPException(409, "suite executable not found")
         data["argv"] = [executable, "list", "devices"]
-    from features.devices.transport_policy import incompatible_test_devices
+    from features.devices import incompatible_test_devices
 
     inventory = {
         str(item.get("serial") or ""): item

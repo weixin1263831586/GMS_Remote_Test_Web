@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -208,7 +208,7 @@ class ClusterApiHardeningTests(unittest.TestCase):
 
     def test_agent_backed_endpoints_reject_controller_local_worker(self):
         self.repo.register_worker({
-            "worker_id": "worker-local",
+            "worker_id": "ats-worker-controller",
             "name": "controller",
             "hostname": "controller",
             "address": "127.0.0.1",
@@ -219,12 +219,12 @@ class ClusterApiHardeningTests(unittest.TestCase):
 
         job = self.client.post(
             "/api/cluster/jobs",
-            json={"worker_id": "worker-local", "suite_key": "CTS:17_r1"},
+            json={"worker_id": "ats-worker-controller", "suite_key": "CTS:17_r1"},
         )
         export = self.client.post(
             "/api/cluster/suites/export",
             params={
-                "worker_id": "worker-local",
+                "worker_id": "ats-worker-controller",
                 "suite_path": "/tmp/suite",
                 "path": "results",
             },
@@ -234,7 +234,7 @@ class ClusterApiHardeningTests(unittest.TestCase):
         self.assertEqual(export.status_code, 409)
 
         self.repo.register_worker({
-            "worker_id": "worker-local",
+            "worker_id": "ats-worker-controller",
             "name": "local-agent",
             "hostname": "controller",
             "address": "127.0.0.1",
@@ -245,7 +245,7 @@ class ClusterApiHardeningTests(unittest.TestCase):
         accepted = self.client.post(
             "/api/cluster/suites/export",
             params={
-                "worker_id": "worker-local",
+                "worker_id": "ats-worker-controller",
                 "suite_path": "/tmp/suite",
                 "path": "results",
             },
@@ -269,6 +269,28 @@ class ClusterApiHardeningTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertIsNotNone(self.repo.get_worker("worker-246"))
+
+    def test_offline_worker_can_be_deleted_without_agent_ack(self):
+        with self.repo.connect() as conn:
+            conn.execute(
+                """UPDATE cluster_workers
+                   SET status='online', last_heartbeat_at='2000-01-01T00:00:00Z'
+                   WHERE id='worker-246'"""
+            )
+
+        with patch(
+            "features.cluster.api._run_worker_command",
+            new_callable=AsyncMock,
+        ) as run_command:
+            response = self.client.delete("/api/cluster/workers/worker-246")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self.repo.get_worker("worker-246"))
+        self.assertNotIn(
+            "worker-246",
+            json.loads(self.tokens_path.read_text(encoding="utf-8"))["worker_tokens"],
+        )
+        run_command.assert_not_awaited()
 
     def test_busy_worker_configuration_cannot_change(self):
         self.repo.heartbeat("worker-246", {

@@ -11,6 +11,7 @@ def test_cluster_defaults_disabled_when_config_is_absent(monkeypatch, tmp_path):
     config = ClusterConfig.load()
     assert config.enabled is False
     assert config.remote_dispatch_enabled is False
+    assert config.local_worker_id == "ats-worker-controller"
 
 
 def test_cluster_environment_can_force_single_host_fallback(monkeypatch, tmp_path):

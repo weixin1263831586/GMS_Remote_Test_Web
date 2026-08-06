@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import subprocess
+import tarfile
 import zipfile
 from unittest.mock import patch
 
@@ -471,6 +472,37 @@ def test_suite_extraction_rejects_zip_slip(tmp_path):
         assert "unsafe path" in str(exc)
     else:
         raise AssertionError("expected zip-slip rejection")
+
+
+def test_suite_extraction_rejects_special_tar_members(tmp_path):
+    root = tmp_path / "suites"
+    root.mkdir()
+    archive = root / "unsafe.tar"
+    with tarfile.open(archive, "w") as bundle:
+        member = tarfile.TarInfo("android-cts/unsafe.pipe")
+        member.type = tarfile.FIFOTYPE
+        bundle.addfile(member)
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://controller",
+        token="t",
+        suite_roots=[root],
+        data_root=tmp_path / "data",
+    )
+
+    try:
+        execute_suite_action(
+            config,
+            {
+                "action": "extract",
+                "archive_path": str(archive),
+                "target_dir_name": "unsafe-tar",
+            },
+        )
+    except ValueError as exc:
+        assert "unsafe path or link" in str(exc)
+    else:
+        raise AssertionError("expected unsafe tar member rejection")
 
 
 def test_prepare_suite_directory_export_creates_zip(tmp_path):

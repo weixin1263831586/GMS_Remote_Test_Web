@@ -9,10 +9,11 @@ from .api import service
 
 def index_cluster_report(job: dict, result_dir: Path, artifact: dict) -> None:
     """Expose completed Worker results through the Reports page."""
-    from features.reports import XMLReportParser, test_report_db
-    from features.reports.display import (
+    from features.reports import (
+        XMLReportParser,
         report_client_display_id,
         report_name_from_result_dir,
+        test_report_db,
         tradefed_result_folder_name,
     )
 

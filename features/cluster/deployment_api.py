@@ -34,7 +34,7 @@ from foundation.ssh_security import (
 from .api import service
 from .config import ClusterConfig
 from .repository import utc_now
-from .worker_auth import persist_worker_token, worker_tokens, write_worker_tokens
+from .worker_auth import persist_worker_token, restore_worker_token
 
 
 router = APIRouter()
@@ -454,8 +454,7 @@ async def deploy_adb_proxy_source(
                 controller_ca_arg=controller_ca_arg,
                 require_sudo=bool(password),
             )
-            previous_tokens = worker_tokens()
-            persist_worker_token(worker_id, token)
+            previous_token = persist_worker_token(worker_id, token)
             try:
                 stdin, stdout, stderr = ssh.exec_command(
                     install,
@@ -475,7 +474,7 @@ async def deploy_adb_proxy_source(
                         output or f"installer exited with {exit_code}"
                     )
             except Exception:
-                write_worker_tokens(previous_tokens)
+                restore_worker_token(worker_id, token, previous_token)
                 raise
             return {
                 "success": True,
@@ -707,8 +706,7 @@ async def deploy_worker(
             )
             if password:
                 install = "sudo -S -p '' -v && " + install
-            previous_tokens = worker_tokens()
-            persist_worker_token(worker_id, token)
+            previous_token = persist_worker_token(worker_id, token)
             try:
                 stdin, stdout, stderr = ssh.exec_command(
                     install, timeout=900, get_pty=True
@@ -723,7 +721,7 @@ async def deploy_worker(
                 if exit_code != 0:
                     raise RuntimeError(output or f"installer exited with {exit_code}")
             except Exception:
-                write_worker_tokens(previous_tokens)
+                restore_worker_token(worker_id, token, previous_token)
                 raise
             return {"success": True, "worker_id": worker_id, "output": output}
         finally:

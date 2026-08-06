@@ -206,7 +206,7 @@ def _local_adb_proxy_sources(device_ids: list[str]) -> dict[str, dict[str, str]]
 
         local_worker_id = get_cluster_service().config.local_worker_id
     except Exception:
-        local_worker_id = "worker-local"
+        local_worker_id = "ats-worker-controller"
     try:
         from .adb_proxy_service import adb_proxy_service
 
@@ -366,7 +366,7 @@ def _cached_management_payload(client_id: str) -> dict[str, Any] | None:
                     else "local"
                 ),
                 "source_host": (
-                    f"{proxy_source_worker} → worker-local"
+                    f"{proxy_source_worker} → ats-worker-controller"
                     if is_adb_proxy and proxy_source_worker
                     else device.get("source")
                     or device.get("source_host")

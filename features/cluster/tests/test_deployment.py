@@ -395,7 +395,7 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         )
 
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=SimpleNamespace(
                 get_worker=MagicMock(return_value={"running_jobs": 0})
             ),
@@ -414,7 +414,7 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertTrue(result["accepted"])
-        self.assertEqual(result["task"]["worker_id"], "worker-local")
+        self.assertEqual(result["task"]["worker_id"], "ats-worker-controller")
         thread.start.assert_called_once_with()
 
     def test_rejects_reconfiguration_while_local_test_is_running(self):
@@ -423,7 +423,7 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         )
 
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=SimpleNamespace(
                 get_worker=MagicMock(return_value={"running_jobs": 1})
             ),
@@ -442,7 +442,7 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         import features.cluster.deployment_api as deployment
 
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=SimpleNamespace(
                 get_worker=MagicMock(return_value={"running_jobs": 0})
             ),

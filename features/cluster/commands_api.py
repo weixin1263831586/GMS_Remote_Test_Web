@@ -27,7 +27,7 @@ def synchronize_command(command: dict[str, Any]) -> None:
     """Apply a durable ACK to its Job and correlated transfer/report state."""
     service().repository.sync_job_from_command(command)
     if command.get("command_type") in {"usbip_attach", "usbip_detach"}:
-        from features.devices.integrations_api import (
+        from features.devices import (
             reconcile_cluster_usbip_command,
         )
 

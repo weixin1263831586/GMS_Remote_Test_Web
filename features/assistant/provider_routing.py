@@ -24,7 +24,9 @@ def call_provider_chain(
     invoke: Callable[[str, dict[str, Any]], dict[str, Any]],
 ) -> dict[str, Any]:
     errors = []
+    attempted = []
     for index, provider_name in enumerate(provider_order):
+        attempted.append(provider_name)
         provider_result = invoke(provider_name, providers.get(provider_name, {}))
         if provider_result.get('success'):
             return {
@@ -32,6 +34,7 @@ def call_provider_chain(
                 'provider': provider_name,
                 'fallback_used': index > 0,
                 'provider_errors': errors,
+                'attempted_providers': attempted,
             }
         errors.append(
             f"{provider_name}: {provider_result.get('error', '分析失败')}"
@@ -40,4 +43,5 @@ def call_provider_chain(
         'success': False,
         'error': '; '.join(errors) or '分析失败',
         'provider_errors': errors,
+        'attempted_providers': attempted,
     }

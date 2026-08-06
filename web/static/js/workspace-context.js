@@ -2,7 +2,7 @@
     'use strict';
 
     const DEFAULT_CONTEXT = Object.freeze({
-        scope_mode: 'single', worker_id: 'worker-local', device_ids: [],
+        scope_mode: 'single', worker_id: 'ats-worker-controller', device_ids: [],
         suite_key: '', suite_path: '', cluster_job_id: '', attempt_id: '',
         automation_run_id: '', report_id: '', report_timestamp: '', artifact_id: '',
         gerrit_change_id: '', gerrit_patchset: '', redmine_issue_id: '', origin_page: 'test'
@@ -15,7 +15,7 @@
     let persistPromise = null;
     let persistQueued = false;
     let revision = 0;
-    let localWorkerId = 'worker-local';
+    let localWorkerId = 'ats-worker-controller';
     let context = {...DEFAULT_CONTEXT};
     let resolveReady;
     const ready = new Promise(resolve => { resolveReady = resolve; });

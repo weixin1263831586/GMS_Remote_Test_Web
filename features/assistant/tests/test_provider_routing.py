@@ -5,6 +5,61 @@ from features.assistant.universal_ai import UniversalAIAnalyzer
 
 
 class ProviderRoutingTests(unittest.TestCase):
+    def test_generate_prefers_local_then_fails_over(self):
+        analyzer = UniversalAIAnalyzer({
+            'enabled': True,
+            'providers': {
+                'glm_local': {'enabled': True},
+                'remote': {'enabled': True},
+            },
+        })
+
+        def call(provider, *_args):
+            if provider == 'glm_local':
+                return {'success': False, 'error': 'quota exceeded'}
+            return {'success': True, 'content': 'fallback response'}
+
+        with patch.object(
+            analyzer,
+            '_generate_with_provider',
+            side_effect=call,
+        ) as request:
+            result = analyzer.generate(
+                'hello',
+                preferred_provider='glm_local',
+            )
+
+        self.assertTrue(result['success'])
+        self.assertEqual(result['provider'], 'remote')
+        self.assertEqual(result['content'], 'fallback response')
+        self.assertTrue(result['fallback_used'])
+        self.assertEqual(result['attempted_providers'], ['glm_local', 'remote'])
+        self.assertIn('quota exceeded', result['provider_errors'][0])
+        self.assertEqual(
+            [item.args[0] for item in request.call_args_list],
+            ['glm_local', 'remote'],
+        )
+
+    def test_generate_does_not_report_untried_backup_provider(self):
+        analyzer = UniversalAIAnalyzer({
+            'enabled': True,
+            'providers': {
+                'glm_local': {'enabled': True},
+                'remote': {'enabled': True},
+            },
+        })
+
+        with patch.object(
+            analyzer,
+            '_generate_with_provider',
+            return_value={'success': True, 'content': 'local response'},
+        ) as request:
+            result = analyzer.generate('hello', preferred_provider='glm_local')
+
+        self.assertTrue(result['success'])
+        self.assertEqual(result['attempted_providers'], ['glm_local'])
+        request.assert_called_once()
+
     def test_failure_analysis_prefers_local_then_fails_over(self):
         analyzer = UniversalAIAnalyzer({
             'enabled': True,

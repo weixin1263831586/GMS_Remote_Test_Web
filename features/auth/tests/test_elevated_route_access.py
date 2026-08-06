@@ -189,13 +189,13 @@ class ElevatedRouteAccessTests(unittest.TestCase):
         )
 
     def test_local_software_reconfigure_uses_temporary_admin_elevation(self):
-        import features.cluster.deployment_api as deployment
+        from features.cluster import deployment_api as deployment
 
         path = "/api/cluster/workers/local/software/reconfigure"
         self._assert_elevation_required(path, {})
         self._elevate()
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=SimpleNamespace(
                 get_worker=MagicMock(return_value={"running_jobs": 0})
             ),

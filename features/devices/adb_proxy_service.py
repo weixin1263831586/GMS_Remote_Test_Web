@@ -249,7 +249,7 @@ class ADBProxyService:
 
     async def logs(self, worker_id: str) -> dict[str, Any]:
         """Fetch bounded, sanitized executor logs from one Worker on demand."""
-        from features.cluster.api import _run_worker_command
+        from features.cluster import run_worker_command as _run_worker_command
 
         worker = self._online_proxy_worker(worker_id)
         capabilities = worker.get("capabilities") or {}
@@ -303,7 +303,8 @@ class ADBProxyService:
         devices: list[str],
     ) -> dict[str, Any]:
         from features.cluster import get_cluster_service
-        from features.cluster.api import _require_cluster_enabled, _run_worker_command
+        from features.cluster import require_cluster_enabled as _require_cluster_enabled
+        from features.cluster import run_worker_command as _run_worker_command
 
         cluster = get_cluster_service()
         local_worker_id = cluster.config.local_worker_id
@@ -602,7 +603,7 @@ class ADBProxyService:
         source_worker_id: str,
         target_worker_id: str,
     ) -> dict[str, Any]:
-        from features.cluster.api import _run_worker_command
+        from features.cluster import run_worker_command as _run_worker_command
 
         key = self._assignment_key(source_worker_id, target_worker_id)
         assignment = self.assignments().get(key)

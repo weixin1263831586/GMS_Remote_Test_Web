@@ -44,7 +44,7 @@ class ClusterRepositoryTests(unittest.TestCase):
             ).fetchall()}
         self.assertTrue(self.repo._REQUIRED_TABLES.issubset(tables))
         acquired, claims = self.repo.claims.acquire(
-            [{"device_key": "worker-local:ABC", "worker_id": "worker-local", "serial": "ABC"}],
+            [{"device_key": "ats-worker-controller:ABC", "worker_id": "ats-worker-controller", "serial": "ABC"}],
             owner_id="alice",
             username="Alice",
             source_type="test",
@@ -52,7 +52,7 @@ class ClusterRepositoryTests(unittest.TestCase):
             ttl_seconds=90,
         )
         self.assertTrue(acquired)
-        self.assertEqual(claims[0]["device_key"], "worker-local:ABC")
+        self.assertEqual(claims[0]["device_key"], "ats-worker-controller:ABC")
 
     def test_heartbeat_persists_namespaced_devices_and_suites(self):
         self.register()
@@ -84,7 +84,7 @@ class ClusterRepositoryTests(unittest.TestCase):
                 "serial": "ABC",
                 "transport": "adb_proxy",
                 "state": "available",
-                "properties": {"adb_proxy_source_worker_id": "worker-local"},
+                "properties": {"adb_proxy_source_worker_id": "ats-worker-controller"},
             }],
         })
 
@@ -136,7 +136,7 @@ class ClusterRepositoryTests(unittest.TestCase):
             app = FastAPI()
             app.include_router(cluster_api.router)
             with patch(
-                "features.users.clients.resolve_client_display_id",
+                "features.users.resolve_client_display_id",
                 return_value="hcq@172.16.14.66",
             ), TestClient(app) as client:
                 response = client.get(
@@ -481,6 +481,34 @@ class ClusterRepositoryTests(unittest.TestCase):
         workers = ClusterService(self.repo, offline_seconds=45).list_workers()
         self.assertEqual(workers[0]["status"], "online")
 
+    def test_service_lists_local_worker_before_remote_workers(self):
+        self.repo.register_worker({
+            "worker_id": "worker-246", "name": "remote 246", "hostname": "ats-246",
+            "address": "172.16.14.246", "agent_version": "1", "max_jobs": 1,
+            "capabilities": {},
+        })
+        self.repo.register_worker({
+            "worker_id": "ats-worker-controller", "name": "local", "hostname": "controller",
+            "address": "127.0.0.1", "agent_version": "1", "max_jobs": 1,
+            "capabilities": {},
+        })
+        self.repo.register_worker({
+            "worker_id": "worker-118", "name": "remote 118", "hostname": "ats-118",
+            "address": "172.16.14.118", "agent_version": "1", "max_jobs": 1,
+            "capabilities": {},
+        })
+        repository_order = [worker["id"] for worker in self.repo.list_workers()]
+        expected = ["ats-worker-controller"] + [
+            worker_id for worker_id in repository_order if worker_id != "ats-worker-controller"
+        ]
+
+        workers = ClusterService(
+            self.repo,
+            config=ClusterConfig(local_worker_id="ats-worker-controller"),
+        ).list_workers()
+
+        self.assertEqual([worker["id"] for worker in workers], expected)
+
     def test_hosts_exposes_worker_connection_metadata(self):
         self.repo.register_worker({
             "worker_id": "worker-246", "name": "remote", "hostname": "ats-246",
@@ -534,12 +562,12 @@ class ClusterRepositoryTests(unittest.TestCase):
 
     def test_runtime_single_host_mode_hides_remote_resources(self):
         self.repo.register_worker({
-            "worker_id": "worker-local", "name": "local", "hostname": "controller",
+            "worker_id": "ats-worker-controller", "name": "local", "hostname": "controller",
             "address": "127.0.0.1", "agent_version": "1", "max_jobs": 1,
             "capabilities": {},
         })
         self.register()
-        self.repo.heartbeat("worker-local", {
+        self.repo.heartbeat("ats-worker-controller", {
             "agent_version": "1", "running_jobs": [],
             "devices": [{"serial": "LOCAL", "state": "available"}], "suites": [],
         })
@@ -557,11 +585,11 @@ class ClusterRepositoryTests(unittest.TestCase):
                 self.assertFalse(client.get("/api/cluster/status").json()["enabled"])
                 self.assertEqual(
                     [item["worker_id"] for item in client.get("/api/cluster/hosts").json()["hosts"]],
-                    ["worker-local"],
+                    ["ats-worker-controller"],
                 )
                 self.assertEqual(
                     [item["id"] for item in client.get("/api/cluster/devices").json()["devices"]],
-                    ["worker-local:LOCAL"],
+                    ["ats-worker-controller:LOCAL"],
                 )
                 self.assertEqual(client.get("/api/cluster/devices?worker_id=worker-246").status_code, 409)
         finally:
@@ -603,7 +631,7 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(devices, ["worker-246:USB"])
 
     def test_scheduler_can_exclude_controller_local_worker(self):
-        for worker_id in ("worker-local", "worker-246"):
+        for worker_id in ("ats-worker-controller", "worker-246"):
             self.repo.register_worker({
                 "worker_id": worker_id,
                 "name": worker_id,

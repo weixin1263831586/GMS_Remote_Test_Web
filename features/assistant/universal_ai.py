@@ -119,7 +119,39 @@ class UniversalAIAnalyzer:
             provider_name = self.get_primary_provider(preferred=preferred_provider)
             if not provider_name:
                 return {'success': False, 'error': '未配置可用的 AI 提供商'}
-            provider_config = self.config.get('providers', {}).get(provider_name, {})
+            providers = self.config.get('providers', {})
+            provider_order = [provider_name] + [
+                name for name, config in providers.items()
+                if name != provider_name and config.get('enabled', False)
+            ]
+            result = call_provider_chain(
+                provider_order,
+                providers,
+                lambda name, config: self._generate_with_provider(
+                    name,
+                    config,
+                    user_prompt,
+                    system_prompt,
+                    max_tokens,
+                ),
+            )
+            return {
+                **result,
+                'preferred_provider': provider_name,
+            }
+        except Exception as e:
+            return {'success': False, 'error': f'AI调用失败: {e!s}'}
+
+    def _generate_with_provider(
+        self,
+        provider_name: str,
+        provider_config: dict,
+        user_prompt: str,
+        system_prompt: str,
+        max_tokens: int | None,
+    ) -> dict:
+        """Generate text with one provider; provider-chain handles fallback."""
+        try:
             base_url = provider_config.get('base_url')
             model = provider_config.get('model')
             if not base_url or not model:
@@ -154,7 +186,7 @@ class UniversalAIAnalyzer:
                 return {'success': False, 'error': f'{provider_name} API错误: {err}', 'provider': provider_name}
 
             content = self._parse_response_raw(response.json(), api_format)
-            return {'success': True, 'content': content.strip(), 'provider': provider_name}
+            return {'success': True, 'content': content.strip()}
         except Exception as e:
             return {'success': False, 'error': f'{provider_name}调用失败: {e!s}'}
 
@@ -195,7 +227,6 @@ class UniversalAIAnalyzer:
             providers = self.config.get('providers', {})
             provider_order = [provider_name] + [name for name, config in providers.items()
                                                    if name != provider_name and config.get('enabled', False)]
-            result['attempted_providers'] = provider_order
             result['preferred_provider'] = provider_name
             provider_result = call_provider_chain(
                 provider_order, providers,

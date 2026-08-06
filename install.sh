@@ -382,7 +382,7 @@ try:
     cluster_config = json.loads(cluster_config_path.read_text(encoding="utf-8"))
 except Exception:
     cluster_config = {}
-worker_id = str(cluster_config.get("local_worker_id") or "worker-local")
+worker_id = str(cluster_config.get("local_worker_id") or "ats-worker-controller")
 default_max_jobs = max(1, min(32, int(cluster_config.get("default_max_jobs", 6))))
 
 values = {}

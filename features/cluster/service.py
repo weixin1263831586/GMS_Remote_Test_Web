@@ -88,6 +88,10 @@ class ClusterService:
                 warnings.append("An external Tradefed process has no identifiable device; new tests are blocked")
             worker["warnings"] = list(dict.fromkeys(warnings))
             worker["admission_blocked"] = worker.get("status") in {"offline", "draining"}
+        # All Worker selectors consume this directory directly or through
+        # /api/cluster/hosts. Promote the Controller/Local Worker while the
+        # stable sort preserves the repository order of every remote Worker.
+        workers.sort(key=lambda worker: worker.get("id") != self.config.local_worker_id)
         return workers
 
     def select_worker(

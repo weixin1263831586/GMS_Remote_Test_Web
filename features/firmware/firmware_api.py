@@ -15,8 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.auth import require_elevated_admin_when_auth_required
-from features.devices import parse_adb_device_states
-from features.devices.utils import DeviceUtils
+from features.devices import DeviceUtils, parse_adb_device_states
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response

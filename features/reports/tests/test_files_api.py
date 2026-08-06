@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from features.auth import CurrentUser
-from features.cluster.report_index import index_cluster_report
+from features.cluster import index_cluster_report
 from features.reports import files_api
 from features.reports.downloads import (
     create_remote_report_bundle,
@@ -95,7 +95,7 @@ class ReportFilesApiTests(unittest.TestCase):
                 "source_timestamp": run_folder,
                 "result_dir": str(result_dir),
                 "suite_path": str(suite_root / "tools"),
-                "worker_id": "worker-local",
+                "worker_id": "ats-worker-controller",
                 "owner_id": CURRENT_USER.id,
             }
             fake_db = SimpleNamespace(
@@ -208,7 +208,7 @@ class ReportFilesApiTests(unittest.TestCase):
                     return None
 
             cluster = SimpleNamespace(
-                config=SimpleNamespace(local_worker_id="worker-local"),
+                config=SimpleNamespace(local_worker_id="ats-worker-controller"),
                 repository=FakeRepository(),
                 has_command_agent=lambda _worker_id: True,
             )
@@ -341,7 +341,7 @@ class ReportFilesApiTests(unittest.TestCase):
                     "timestamp": "cluster-job-941843984fd44e1b9111532981e188c9",
                     "owner_id": "N387pLbIBhpMw5JsWUL9hg",
                     "display_client_id": "N387pLbIBhpMw5JsWUL9hg",
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                     "result_dir": str(result_dir),
                 })
 

@@ -26,7 +26,9 @@ def run_local_shell_command(command: str, timeout: int = 30) -> tuple[str, str, 
     try:
         process = subprocess.Popen(
             command,
-            shell=True,
+            # Callers use this boundary for audited pipelines/redirection and
+            # quote every dynamic token before it reaches the local shell.
+            shell=True,  # nosec B602
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

@@ -244,7 +244,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         devices: ['RK3576GMS6'],
                         cluster_jobs: [{
                             id: 'job-1',
-                            worker_id: 'worker-local',
+                            worker_id: 'ats-worker-controller',
                             attempt_id: 'attempt-1',
                             status: 'running'
                         }]
@@ -272,7 +272,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         display_client_id: 'hcq@172.16.14.233',
                         test_type: 'CTS',
                         suite_version: '17_r1',
-                        worker_id: 'worker-local',
+                        worker_id: 'ats-worker-controller',
                         pass: 1,
                         fail: 0,
                         total: 1
@@ -333,7 +333,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(len(set(result["removeLefts"])), 1)
             self.assertEqual(result["reportClient"], "hcq@172.16.14.233")
             self.assertEqual(result["reportSuite"], "android-cts-17_r1")
-            self.assertEqual(result["reportWorker"], "worker-local")
+            self.assertEqual(result["reportWorker"], "ats-worker-controller")
             self.assertEqual(
                 result["reportName"],
                 "2026.07.30_10.39.50.173_6846",
@@ -571,7 +571,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "job": {
                         "id": "job-immediate",
                         "status": "running",
-                        "assigned_worker_id": "worker-local",
+                        "assigned_worker_id": "ats-worker-controller",
                         "current_attempt_id": "attempt-immediate",
                     },
                 }),
@@ -713,7 +713,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         "id": "job-stopping",
                         "status": status,
                         "error": "",
-                        "assigned_worker_id": "worker-local",
+                        "assigned_worker_id": "ats-worker-controller",
                         "current_attempt_id": "attempt-stopping",
                     },
                 }),
@@ -1194,7 +1194,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 )
                 selection = (
                     ',"cluster_selections":[{"device_host":"tester@192.0.2.10",'
-                    '"source_host":"","worker_id":"worker-local","busids":["1-2"],'
+                    '"source_host":"","worker_id":"ats-worker-controller","busids":["1-2"],'
                     '"device_serials":["D1"],'
                     '"device_serials_by_busid":{"1-2":["D1"]}}]'
                     if connected else ',"cluster_selections":[]'
@@ -1219,15 +1219,27 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     content_type="application/json",
                     body=(
                         '{"success":true,"connected":false,"cluster_enabled":true,'
-                        '"local_worker_id":"worker-local","assignments":[],"hosts":['
+                        '"local_worker_id":"ats-worker-controller","assignments":[],"hosts":['
                         '{"worker_id":"worker-source","name":"Device Host",'
                         '"address":"10.10.10.206","status":"online","adb_proxy":true,'
                         '"devices":[{"serial":"D1","state":"available",'
                         '"transport":"local_usb","model":"RK3572"}]},'
-                        '{"worker_id":"worker-local","name":"Controller",'
+                        '{"worker_id":"ats-worker-controller","name":"Controller",'
                         '"address":"10.10.10.10","status":"online","adb_proxy":true,'
                         '"devices":[]}]}'
                     ),
+                )
+                return
+            if path.startswith("/api/devices/list"):
+                requests.append({
+                    "method": request.method,
+                    "path": path,
+                    "body": None,
+                })
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body='[{"device_id":"D1","status":"online"}]',
                 )
                 return
             requests.append(
@@ -1267,8 +1279,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.evaluate("rebootDevices()")
             page.evaluate("remountDevices()")
             page.evaluate("submitWifiConfig()")
-            page.evaluate("lockSelectedDevices('lock')")
             page.evaluate("showDeviceScreen()")
+            page.evaluate("lockSelectedDevices('lock')")
             page.evaluate("setupUsbipForward()")
             self.assertTrue(page.locator("#usbip-attach-modal").is_visible())
             attach_message = page.locator("#usbip-attach-message").inner_text()
@@ -1306,17 +1318,34 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             page.evaluate("submitAdbProxyConnect()")
 
+            device_refreshes = [
+                item for item in requests
+                if item["path"].startswith("/api/devices/list?")
+            ]
+            self.assertGreaterEqual(len(device_refreshes), 1)
+            self.assertTrue(all(
+                item["method"] == "GET"
+                and "force_refresh=1" in item["path"]
+                for item in device_refreshes
+            ))
+            self.assertTrue(any(
+                "source=auto" in item["path"]
+                for item in device_refreshes
+            ))
             self.assertEqual(
-                [(item["method"], item["path"]) for item in requests],
+                [
+                    (item["method"], item["path"])
+                    for item in requests
+                    if not item["path"].startswith("/api/devices/list?")
+                ],
                 [
                     ("POST", "/api/devices/reboot"),
                     ("POST", "/api/devices/remount"),
                     ("POST", "/api/devices/wifi"),
-                    ("POST", "/api/devices/bootloader-lock"),
                     ("POST", "/api/devices/scrcpy"),
+                    ("POST", "/api/devices/bootloader-lock"),
                     ("GET", "/api/usbip/status"),
                     ("GET", "/api/usbip/status"),
-                    ("GET", "/api/devices/list?force_refresh=1"),
                     ("POST", "/api/usbip/connect"),
                     ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
                     ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
@@ -1325,14 +1354,21 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     ("GET", "/api/adb-forward/status"),
                 ],
             )
-            self.assertEqual(requests[0]["body"], {"devices": ["D1"]})
-            self.assertEqual(requests[1]["body"], {"devices": ["D1"]})
+            def request_body(path):
+                return next(
+                    item["body"] for item in requests if item["path"] == path
+                )
+            self.assertEqual(request_body("/api/devices/reboot"), {"devices": ["D1"]})
+            self.assertEqual(request_body("/api/devices/remount"), {"devices": ["D1"]})
             self.assertEqual(
-                requests[2]["body"],
+                request_body("/api/devices/wifi"),
                 {"devices": ["D1"], "ssid": "LabWifi", "password": "secret"},
             )
-            self.assertEqual(requests[3]["body"], {"devices": ["D1"]})
-            self.assertEqual(requests[4]["body"], {"devices": ["D1"]})
+            self.assertEqual(
+                request_body("/api/devices/bootloader-lock"),
+                {"devices": ["D1"]},
+            )
+            self.assertEqual(request_body("/api/devices/scrcpy"), {"devices": ["D1"]})
             self.assertEqual(
                 next(
                     item["body"] for item in requests
@@ -1340,7 +1376,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 ),
                 {
                     "device_host": "tester@192.0.2.10",
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                     "busids": ["1-2"],
                     "manual_connect": True,
                 },
@@ -1352,7 +1388,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 ),
                 {
                     "source_worker_id": "worker-source",
-                    "target_worker_id": "worker-local",
+                    "target_worker_id": "ats-worker-controller",
                     "devices": ["D1"],
                 },
             )
@@ -1382,9 +1418,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(
                 page.locator("#usbip-attach-modal .modal-content")
             ).to_have_class(re.compile(r"\bdevice-routing-modal-content\b"))
-            page.evaluate(
-                "document.querySelector('#usbip-assignments button').click()"
-            )
+            disconnect_button = page.locator("#usbip-assignments button").first
+            expect(disconnect_button).to_be_enabled()
+            disconnect_button.click()
             for _ in range(20):
                 if any(
                     item["path"] == "/api/usbip/disconnect"
@@ -1404,7 +1440,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             for _ in range(20):
                 if any(
-                    item["path"] == "/api/devices/list?force_refresh=1"
+                    item["path"].startswith("/api/devices/list?force_refresh=1")
                     for item in requests[disconnect_index + 1:]
                 ):
                     break
@@ -1423,14 +1459,15 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             self.assertTrue(page.locator("#usbip-attach-modal").is_visible())
             self.assertTrue(any(
-                item["path"] == "/api/devices/list?force_refresh=1"
+                item["path"].startswith("/api/devices/list?force_refresh=1")
+                and "source=auto" in item["path"]
                 for item in requests[disconnect_index + 1:]
             ))
             self.assertEqual(
                 requests[disconnect_index]["body"],
                 {
                     "device_host": "tester@192.0.2.10",
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                     "busids": ["1-2"],
                     "source_host": "",
                 },
@@ -1549,7 +1586,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         status: 'online',
                         protocol: 'adb',
                         transport: 'adb_proxy',
-                        adb_proxy_source_worker_id: 'worker-local',
+                        adb_proxy_source_worker_id: 'ats-worker-controller',
                         locked: false
                     },
                     {
@@ -1589,7 +1626,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             expect(device.locator(".device-id")).to_have_text("RK3576GMS1")
             expect(device.locator(".device-source")).to_have_text(
-                "ADB · worker-local"
+                "ADB · ats-worker-controller"
             )
             expect(
                 page.locator(
@@ -1674,7 +1711,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     serial_no: 'RK3576GMS1',
                     worker_id: 'ats-worker-246',
                     host_display_name: 'ats-worker-246',
-                    source_host: 'worker-local → ats-worker-246',
+                    source_host: 'ats-worker-controller → ats-worker-246',
                     source_type: 'adb_proxy',
                     transport: 'adb_proxy',
                     status: 'online',
@@ -1691,7 +1728,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             table = page.locator("#devices-table-body")
             expect(table).to_contain_text("ats-worker-246")
             expect(table).to_contain_text("ADB Proxy")
-            expect(table).to_contain_text("worker-local → ats-worker-246")
+            expect(table).to_contain_text("ats-worker-controller → ats-worker-246")
             expect(table).to_contain_text("已分配")
             expect(table.locator("tr.device-group-row")).to_have_count(1)
         finally:
@@ -1792,7 +1829,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         cluster_enabled: false,
                         hosts: [
                             {
-                                worker_id: 'worker-local',
+                                worker_id: 'ats-worker-controller',
                                 name: 'Controller Local Worker',
                                 address: '172.16.14.233',
                                 status: 'online',
@@ -1836,7 +1873,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
 
             self.assertEqual(result["sources"], ["adb-source-246"])
-            self.assertEqual(result["targets"], ["worker-local"])
+            self.assertEqual(result["targets"], ["ats-worker-controller"])
             self.assertTrue(result["hasUbuntuForm"])
             source_box = page.locator("#adb-proxy-source-host").bounding_box()
             target_box = page.locator("#adb-proxy-target-host").bounding_box()
@@ -1892,11 +1929,11 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 state.clusterStatus = {
                     ...(state.clusterStatus || {}),
                     enabled: false,
-                    local_worker_id: 'worker-local'
+                    local_worker_id: 'ats-worker-controller'
                 };
                 window.GmsWorkspace?.update({
                     scope_mode: 'single',
-                    worker_id: 'worker-local',
+                    worker_id: 'ats-worker-controller',
                     device_ids: []
                 }, {source: 'test'});
                 state.devices = [
@@ -1973,7 +2010,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 {
                     "success": True,
                     "enabled": True,
-                    "local_worker_id": "worker-local",
+                    "local_worker_id": "ats-worker-controller",
                 },
             ),
         )
@@ -2076,7 +2113,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(page.locator("#ui-control-modal")).to_have_class(re.compile(r"\bshow\b"))
         finally:
             page.evaluate(
-                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'worker-local'})"
+                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'ats-worker-controller'})"
             )
             page.wait_for_timeout(200)
             page.close()
@@ -2114,7 +2151,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "device_id": "REMOTE-PROXY",
                     "serial_no": "REMOTE-PROXY",
                     "source_type": "adb_proxy",
-                    "source_host": "worker-1 → worker-local",
+                    "source_host": "worker-1 → ats-worker-controller",
                     "transport": "adb_proxy",
                     "adb_proxy_source_worker_id": "worker-1",
                     "adb_proxy_source_serial": "REMOTE-PROXY",
@@ -2128,7 +2165,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             lambda route: json_response(route, {
                 "success": True,
                 "enabled": True,
-                "local_worker_id": "worker-local",
+                "local_worker_id": "ats-worker-controller",
             }),
         )
 
@@ -2203,7 +2240,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.goto_shell(page)
             page.wait_for_function("state.clusterStatus?.enabled === true")
             page.evaluate(
-                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'worker-local'})"
+                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'ats-worker-controller'})"
             )
             page.evaluate("switchPage('devices')")
             expect(page.locator("#devices-table-body")).to_contain_text("LOCAL-1")
@@ -2247,7 +2284,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertGreaterEqual(len(cluster_device_requests), 1)
         finally:
             page.evaluate(
-                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'worker-local'})"
+                "GmsWorkspace.update({scope_mode: 'single', worker_id: 'ats-worker-controller'})"
             )
             page.wait_for_timeout(200)
             page.close()
@@ -2283,7 +2320,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "&file=testcases/CtsKeystore%26Tests/arm64/Cts%23Keystore.apk",
                 link,
             )
-            self.assertIn("&worker_id=worker-local", link)
+            self.assertIn("&worker_id=ats-worker-controller", link)
             self.assertEqual(
                 result["parsed"]["suitePath"],
                 "/home/hcq/GMS Suite/android-cts-17_r1/android-cts/tools",
@@ -2292,7 +2329,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 result["parsed"]["filePath"],
                 "testcases/CtsKeystore&Tests/arm64/Cts#Keystore.apk",
             )
-            self.assertEqual(result["parsed"]["workerId"], "worker-local")
+            self.assertEqual(result["parsed"]["workerId"], "ats-worker-controller")
         finally:
             page.close()
 
@@ -2302,7 +2339,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.goto_shell(page)
             result = page.evaluate(
                 """async () => {
-                    const localWorker = 'worker-local';
+                    const localWorker = 'ats-worker-controller';
                     const remoteWorker = 'ats-worker-246';
                     const suitePath =
                         '/home/hcq/GMS-Suite/android-cts-17_r1/android-cts/tools';
@@ -2362,8 +2399,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 }"""
             )
 
-            self.assertEqual(result["selectedWorker"], "worker-local")
-            self.assertEqual(result["loadedWorkers"], ["worker-local"])
+            self.assertEqual(result["selectedWorker"], "ats-worker-controller")
+            self.assertEqual(result["loadedWorkers"], ["ats-worker-controller"])
             self.assertTrue(result["selected"]["exists"])
             self.assertEqual(
                 result["selected"]["directory"],
@@ -2428,7 +2465,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             lambda route: json_response(route, {
                 "success": True,
                 "enabled": True,
-                "local_worker_id": "worker-local",
+                "local_worker_id": "ats-worker-controller",
             }),
         )
         page.route(
@@ -2436,7 +2473,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             lambda route: json_response(route, {
                 "success": True,
                 "workers": [{
-                    "id": "worker-local",
+                    "id": "ats-worker-controller",
                     "name": "ATS Controller Local Worker",
                     "hostname": "ats-041055-64g",
                     "status": "online",
@@ -2467,7 +2504,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             loading = page.evaluate(
                 """() => {
                     GmsWorkspace.update(
-                        {scope_mode: 'cluster', worker_id: 'worker-local'},
+                        {scope_mode: 'cluster', worker_id: 'ats-worker-controller'},
                         {source: 'timing-test', persist: false}
                     );
                     const select = document.getElementById('cluster-worker');
@@ -2499,7 +2536,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             self.assertFalse(ready["disabled"])
             self.assertEqual(ready["busy"], "false")
-            self.assertEqual(ready["label"], "worker-local")
+            self.assertEqual(ready["label"], "ats-worker-controller")
         finally:
             page.close()
 
@@ -2516,7 +2553,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         workers = {
             "success": True,
             "workers": [{
-                "id": "worker-local",
+                "id": "ats-worker-controller",
                 "name": "ATS Controller Local Worker",
                 "hostname": "ats-041055-64g",
                 "status": "online",
@@ -2527,7 +2564,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             lambda route: json_response(route, {
                 "success": True,
                 "enabled": True,
-                "local_worker_id": "worker-local",
+                "local_worker_id": "ats-worker-controller",
             }),
         )
         page.route(
@@ -2539,8 +2576,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.goto_shell(page)
             page.wait_for_function(
                 """() => document.querySelector(
-                    '#cluster-worker option[value="worker-local"]'
-                )?.textContent === 'worker-local'"""
+                    '#cluster-worker option[value="ats-worker-controller"]'
+                )?.textContent === 'ats-worker-controller'"""
             )
             result = page.evaluate(
                 """async workers => {
@@ -2577,11 +2614,11 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 workers,
             )
 
-            expected_label = "worker-local"
+            expected_label = "ats-worker-controller"
             self.assertEqual(result["during"]["visibility"], "visible")
-            self.assertEqual(result["during"]["value"], "worker-local")
+            self.assertEqual(result["during"]["value"], "ats-worker-controller")
             self.assertEqual(result["during"]["label"], expected_label)
-            self.assertEqual(result["afterValue"], "worker-local")
+            self.assertEqual(result["afterValue"], "ats-worker-controller")
             self.assertEqual(result["afterLabel"], expected_label)
             self.assertTrue(result["sameOptionNode"])
         finally:
@@ -2602,7 +2639,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             lambda route: json_response(route, {
                 "success": True,
                 "enabled": True,
-                "local_worker_id": "worker-local",
+                "local_worker_id": "ats-worker-controller",
             }),
         )
         page.route(
@@ -2610,7 +2647,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             lambda route: json_response(route, {
                 "success": True,
                 "workers": [
-                    {"id": "worker-local", "name": "Local", "status": "online"},
+                    {"id": "ats-worker-controller", "name": "Local", "status": "online"},
                     {"id": "worker-a", "name": "Worker A", "status": "online"},
                     {"id": "worker-b", "name": "Worker B", "status": "online"},
                 ],
@@ -2667,7 +2704,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         return originalFetch(input, options);
                     };
 
-                    state.clusterStatus = {enabled: true, local_worker_id: 'worker-local'};
+                    state.clusterStatus = {enabled: true, local_worker_id: 'ats-worker-controller'};
                     const select = document.getElementById('cluster-worker');
                     select.innerHTML = '<option value="worker-a">A</option><option value="worker-b">B</option>';
 
@@ -2939,6 +2976,105 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_local_desktop_mount_does_not_wait_for_cluster_host_directory(self):
+        page = self.new_page()
+        page.route(
+            "**/api/desktop/vnc/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"running":true}',
+            ),
+        )
+        page.route(
+            "**/api/desktop/novnc/access",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"url":"about:blank"}',
+            ),
+        )
+        page.add_init_script(
+            """
+            window.__desktopHostDirectoryRequested = false;
+            window.__desktopHostDirectoryResolved = false;
+            const nativeFetch = window.fetch.bind(window);
+            window.fetch = (input, options = {}) => {
+              const request = nativeFetch(input, options);
+              if (!String(input).includes('/api/cluster/hosts')) return request;
+              window.__desktopHostDirectoryRequested = true;
+              return new Promise((resolve, reject) => setTimeout(() => {
+                request.then(response => {
+                  window.__desktopHostDirectoryResolved = true;
+                  resolve(response);
+                }, reject);
+              }, 2000));
+            };
+            """
+        )
+        try:
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={"username": "ui-admin", "password": "UiSmokeAdmin-2026!"},
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            self.goto_shell(page)
+            page.evaluate(
+                """() => {
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
+                  switchPage('desktop', null);
+                }"""
+            )
+            page.wait_for_function("window.__desktopHostDirectoryRequested === true")
+            expect(page.locator("#host-workspace-grid iframe")).to_have_count(1)
+            self.assertFalse(page.evaluate("window.__desktopHostDirectoryResolved"))
+            page.wait_for_function("window.__desktopHostDirectoryResolved === true")
+
+            parallel_requests = page.evaluate(
+                """async () => {
+                  const originalApiCall = apiCall;
+                  const originalAccess = requestNovncAccess;
+                  const events = [];
+                  try {
+                    apiCall = async path => {
+                      events.push('status-start');
+                      await new Promise(resolve => setTimeout(resolve, 40));
+                      events.push('status-end');
+                      return {success: true, running: true};
+                    };
+                    requestNovncAccess = async () => {
+                      events.push('access-start');
+                      await new Promise(resolve => setTimeout(resolve, 40));
+                      events.push('access-end');
+                      return 'about:blank';
+                    };
+                    await resolveWorkspaceVncUrl({
+                      id: 'default', worker_id: workspaceLocalWorkerId()
+                    });
+                    return events;
+                  } finally {
+                    apiCall = originalApiCall;
+                    requestNovncAccess = originalAccess;
+                  }
+                }"""
+            )
+            self.assertEqual(parallel_requests[:2], ["status-start", "access-start"])
+
+            page.evaluate(
+                "window.__retainedDesktopFrame = document.querySelector('#host-workspace-grid iframe')"
+            )
+            page.evaluate("switchPage('reports', null)")
+            page.evaluate("switchPage('desktop', null)")
+            expect(page.locator("#host-workspace-grid iframe")).to_have_count(1)
+            self.assertTrue(
+                page.evaluate(
+                    "document.querySelector('#host-workspace-grid iframe') === window.__retainedDesktopFrame"
+                )
+            )
+        finally:
+            page.close()
+
     def test_host_workspace_mode_switch_restores_desktop_and_terminal_layouts(self):
         page = self.new_page()
         try:
@@ -2947,7 +3083,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             result = page.evaluate(
                 """() => {
                   desktopHosts = [
-                    {id:'default',worker_id:'worker-local',name:'Local',connection:'local@127.0.0.1'},
+                    {id:'default',worker_id:'ats-worker-controller',name:'Local',connection:'local@127.0.0.1'},
                     {id:'cluster:a',worker_id:'a',name:'A',connection:'a@192.0.2.10'},
                     {id:'cluster:b',worker_id:'b',name:'B',connection:'b@192.0.2.11'},
                     {id:'cluster:c',worker_id:'c',name:'C',connection:'c@192.0.2.12'},
@@ -3052,21 +3188,27 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         body=json.dumps(payload),
                     )
 
+                def response_handler(payload):
+                    def handle(route):
+                        json_response(route, payload)
+
+                    return handle
+
                 page.route(
                     "**/api/cluster/status",
                     lambda route: json_response(route, {
                         "success": True,
                         "enabled": True,
-                        "local_worker_id": "worker-local",
+                        "local_worker_id": "ats-worker-controller",
                     }),
                 )
                 page.route(
                     "**/api/users/workspace-context",
-                    lambda route: json_response(route, {
+                    response_handler({
                         "success": True,
                         "data": {"context": {
                             "scope_mode": scope_mode,
-                            "worker_id": "worker-a" if scope_mode == "cluster" else "worker-local",
+                            "worker_id": "worker-a" if scope_mode == "cluster" else "ats-worker-controller",
                             "device_ids": [],
                         }},
                     }),
@@ -3383,7 +3525,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                   const terminalMounts = [];
                   try {
                     desktopHosts = [
-                      {id: 'default', worker_id: 'worker-local', name: 'Local', connection: 'local@127.0.0.1'},
+                      {id: 'default', worker_id: 'ats-worker-controller', name: 'Local', connection: 'local@127.0.0.1'},
                       {id: 'cluster:worker-a', worker_id: 'worker-a', name: 'Worker A', connection: 'a@192.0.2.10'},
                       {id: 'cluster:worker-b', worker_id: 'worker-b', name: 'Worker B', connection: 'b@192.0.2.11'},
                     ];
@@ -3495,6 +3637,205 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertTrue(result["desktopDuplicateIgnored"])
             self.assertTrue(result["terminalDuplicateIgnored"])
             self.assertTrue(result["workerUnchanged"])
+        finally:
+            page.close()
+
+    def test_single_host_switch_applies_on_first_change(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("window.GmsWorkspace && typeof renderHostWorkspace === 'function'")
+            result = page.evaluate(
+                """async () => {
+                  const originalDesktopMount = mountHostWorkspacePane;
+                  const originalTerminalMount = mountTerminalWorkspacePane;
+                  try {
+                    desktopHosts = [
+                      {id: 'cluster:worker-a', worker_id: 'worker-a', name: 'Worker A', connection: 'a@192.0.2.10'},
+                      {id: 'cluster:worker-b', worker_id: 'worker-b', name: 'Worker B', connection: 'b@192.0.2.11'},
+                    ];
+                    state.clusterStatus = {enabled: true};
+                    GmsWorkspace.update(
+                      {scope_mode: 'cluster', worker_id: 'worker-a'},
+                      {source: 'test-setup', persist: false}
+                    );
+
+                    hostWorkspaceClusterEnabled = true;
+                    hostWorkspaceScopeModeInitialized = true;
+                    hostWorkspace.layout = 'single';
+                    hostWorkspace.panes = [{type: 'desktop', hostId: 'cluster:worker-a'}];
+                    hostWorkspace.clusterState = snapshotHostClusterState();
+                    hostWorkspace.instances.clear();
+                    hostWorkspace.paneGenerations.clear();
+                    hostWorkspace.renderedSignature = null;
+                    document.getElementById('host-workspace-grid').replaceChildren();
+                    mountHostWorkspacePane = async (index, pane) => {
+                      const body = document.getElementById(`host-workspace-body-${index}`);
+                      const surface = document.createElement('div');
+                      surface.dataset.hostId = pane.hostId;
+                      body.replaceChildren(surface);
+                      hostWorkspace.instances.set(index, {
+                        type: 'desktop', hostId: pane.hostId, disposed: false,
+                      });
+                    };
+                    currentPage = 'desktop';
+                    renderHostWorkspace();
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                    changeHostWorkspacePaneHost(0, 'cluster:worker-b');
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                    const desktopPaneHost = hostWorkspace.panes[0].hostId;
+                    const desktopSurfaceHost = document.querySelector(
+                      '#host-workspace-body-0 [data-host-id]'
+                    )?.dataset.hostId;
+
+                    GmsWorkspace.update(
+                      {worker_id: 'worker-a', origin_page: 'test'},
+                      {source: 'test-reset', persist: false}
+                    );
+                    terminalWorkspace.layout = 'single';
+                    terminalWorkspace.panes = [{hostId: 'cluster:worker-a'}];
+                    terminalWorkspace.clusterState = snapshotTerminalClusterState();
+                    terminalWorkspace.instances.clear();
+                    terminalWorkspace.paneGenerations.clear();
+                    terminalWorkspace.renderedSignature = null;
+                    document.getElementById('terminal-workspace-grid').replaceChildren();
+                    mountTerminalWorkspacePane = async (index, pane) => {
+                      const body = document.getElementById(`terminal-workspace-body-${index}`);
+                      const surface = document.createElement('div');
+                      surface.dataset.hostId = pane.hostId;
+                      body.replaceChildren(surface);
+                      terminalWorkspace.instances.set(index, {
+                        type: 'terminal', hostId: pane.hostId, disposed: false,
+                      });
+                    };
+                    currentPage = 'terminal';
+                    renderTerminalWorkspace();
+                    changeTerminalWorkspaceHost(0, 'cluster:worker-b');
+                    await new Promise(resolve => setTimeout(resolve, 20));
+
+                    return {
+                      desktopPaneHost,
+                      desktopSurfaceHost,
+                      terminalPaneHost: terminalWorkspace.panes[0].hostId,
+                      terminalSurfaceHost: document.querySelector(
+                        '#terminal-workspace-body-0 [data-host-id]'
+                      )?.dataset.hostId,
+                      contextWorker: GmsWorkspace.get().worker_id,
+                    };
+                  } finally {
+                    mountHostWorkspacePane = originalDesktopMount;
+                    mountTerminalWorkspacePane = originalTerminalMount;
+                  }
+                }"""
+            )
+            self.assertEqual(result["desktopPaneHost"], "cluster:worker-b")
+            self.assertEqual(result["desktopSurfaceHost"], "cluster:worker-b")
+            self.assertEqual(result["terminalPaneHost"], "cluster:worker-b")
+            self.assertEqual(result["terminalSurfaceHost"], "cluster:worker-b")
+            self.assertEqual(result["contextWorker"], "worker-b")
+        finally:
+            page.close()
+
+    def test_cluster_worker_card_distinguishes_hidden_external_test(self):
+        page = self.new_page()
+
+        def json_route(payload):
+            return lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+        worker = {
+            "id": "ats-worker-246",
+            "name": "ats-worker-246",
+            "hostname": "ats-043056-64g",
+            "address": "172.16.14.246",
+            "status": "busy",
+            "agent_version": "0.5.1",
+            "last_heartbeat_at": "2026-08-06T00:00:00+00:00",
+            "cpu_percent": 1.2,
+            "memory_percent": 9.8,
+            "memory_available_gb": 56.4,
+            "disk_free_gb": 267.5,
+            "load_1m": 0.1,
+            "running_jobs": 1,
+            "external_jobs": 1,
+            "max_jobs": 6,
+            "capabilities": {"ssh_user": "hcq", "novnc_port": 6080, "tradefed": True},
+            "warnings": [
+                "Tradefed output has been inactive for 17016 seconds; "
+                "the current module may be long-running or stalled"
+            ],
+        }
+        local_worker = {
+            **worker,
+            "id": "ats-worker-controller",
+            "name": "ats-worker-controller",
+            "hostname": "controller",
+            "address": "127.0.0.1",
+            "status": "online",
+            "running_jobs": 0,
+            "external_jobs": 0,
+            "warnings": [],
+        }
+        page.route(
+            "**/api/cluster/workers",
+            json_route({"success": True, "workers": [worker, local_worker]}),
+        )
+        page.route("**/api/cluster/devices", json_route({"success": True, "devices": []}))
+        page.route("**/api/cluster/suites", json_route({"success": True, "suites": []}))
+        page.route("**/api/cluster/jobs", json_route({"success": True, "jobs": []}))
+        page.route("**/api/cluster/worker-tests", json_route({"success": True, "tests": []}))
+        page.route(
+            "**/api/cluster/suite-library",
+            json_route({
+                "success": True,
+                "archives": [{"name": "android-cts.zip", "size": 1024, "modified": 1}],
+            }),
+        )
+        page.route(
+            "**/api/cluster/status",
+            json_route({
+                "success": True,
+                "enabled": True,
+                "remote_dispatch_enabled": True,
+                "local_worker_id": "ats-worker-controller",
+            }),
+        )
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('cluster', null)")
+            frame = self.frame_for(page, "#cluster-frame")
+            card = frame.locator("#workers .card").filter(has_text="ats-worker-246")
+            expect(card.locator(".status.external_busy")).to_have_text("外部占用")
+            expect(card.locator(".host-assessment")).to_contain_text("外部测试中")
+            expect(card.locator(".host-warning")).to_contain_text(
+                "Tradefed 已 4小时43分钟 未产生输出"
+            )
+            expect(card.locator(".host-tests")).to_contain_text(
+                "检测到 1 个外部测试，详情暂不可用"
+            )
+            expect(card.locator(".host-tests")).not_to_contain_text("当前无测试")
+            expect(frame.locator("#job-worker option").first).to_have_attribute(
+                "value", "ats-worker-controller"
+            )
+            expect(frame.locator("#library-worker-0 option").first).to_have_attribute(
+                "value", "ats-worker-controller"
+            )
+            self.assertTrue(
+                card.evaluate(
+                    """card => {
+                      const tests = card.querySelector('.host-tests');
+                      const warning = card.querySelector('.host-warning');
+                      return Boolean(
+                        tests && warning
+                        && (tests.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING)
+                        && getComputedStyle(tests).borderTopWidth === '1px'
+                      );
+                    }"""
+                )
+            )
         finally:
             page.close()
 
@@ -4090,7 +4431,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             elif path.endswith("/api/automation/runs/preflight"):
                 data = {
                     "ready": True,
-                    "worker_id": "worker-local",
+                    "worker_id": "ats-worker-controller",
                     "test_type": "CTS",
                     "test_suite": "",
                     "devices": ["TESTSERIAL001"],
@@ -4135,7 +4476,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             lambda route: route.fulfill(
                 status=200,
                 content_type="application/json",
-                body='{"success":true,"enabled":false,"local_worker_id":"worker-local"}',
+                body='{"success":true,"enabled":false,"local_worker_id":"ats-worker-controller"}',
             ),
         )
         page.route(
@@ -4219,7 +4560,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 body=json.dumps({
                     "success": True,
                     "enabled": False,
-                    "local_worker_id": "worker-local",
+                    "local_worker_id": "ats-worker-controller",
                 }),
             ),
         )
@@ -4358,7 +4699,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             lambda route: route.fulfill(
                 status=200,
                 content_type="application/json",
-                body='{"enabled":false,"local_worker_id":"worker-local","workers":[]}',
+                body='{"enabled":false,"local_worker_id":"ats-worker-controller","workers":[]}',
             ),
         )
         page.route(
@@ -4473,14 +4814,14 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "success": True,
                     "enabled": True,
                     "remote_dispatch_enabled": True,
-                    "local_worker_id": "worker-local",
+                    "local_worker_id": "ats-worker-controller",
                 }
             elif path.endswith("/api/cluster/workers"):
                 payload = {
                     "success": True,
                     "workers": [
                         {
-                            "id": "worker-local",
+                            "id": "ats-worker-controller",
                             "name": "hcq@172.16.14.233",
                             "address": "172.16.14.233",
                             "status": "online",
@@ -4533,7 +4874,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "document.querySelectorAll('#automation-device-list input').length === 12"
             )
 
-            local_option = page.locator('#automation-worker option[value="worker-local"]')
+            local_option = page.locator('#automation-worker option[value="ats-worker-controller"]')
             expect(local_option).to_have_attribute("disabled", "")
             expect(local_option).to_contain_text("172.16.14.233")
             expect(local_option).to_contain_text("未安装 ATS Agent")

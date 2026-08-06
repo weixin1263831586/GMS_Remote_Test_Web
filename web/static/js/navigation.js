@@ -426,7 +426,7 @@ async function continueAppInitialization() {
 
     // 📱 测试页优先加载设备列表，缩短首屏等待时间。
     // 必须先等待 workspace 上下文加载完成，否则 workspaceWorkerId() 会返回
-    // 默认的 worker-local，先加载本机设备再跳到实际主机，造成闪屏。
+    // 默认的 ats-worker-controller，先加载本机设备再跳到实际主机，造成闪屏。
     if (needsTestWorkspace) {
         await (window.GmsWorkspace?.ready || Promise.resolve());
         loadDevices();
@@ -1267,11 +1267,11 @@ function requireControllerHostAction(actionName) {
 function workspaceLocalWorkerId() {
     return window.GmsWorkspace?.localWorkerId?.()
         || state.clusterStatus?.local_worker_id
-        || 'worker-local';
+        || 'ats-worker-controller';
 }
 
 function isLocalWorkspaceWorker(workerId) {
-    return !workerId || workerId === 'worker-local' || workerId === workspaceLocalWorkerId();
+    return !workerId || workerId === 'ats-worker-controller' || workerId === workspaceLocalWorkerId();
 }
 
 function workspaceWorkerId() {
@@ -4256,6 +4256,10 @@ async function lockSelectedDevices(action) {
             throw new Error(result?.error || detail || `设备${actionText}失败`);
         }
         addLogEntry(`设备${actionText}完成`, 'info');
+        // 解锁/锁定后设备会重启并经历 fastboot→正常启动的状态转换，
+        // 轮询刷新直到设备重新上线，避免界面停留在旧状态。
+        loadDevices(true).catch(() => {});
+        startBurnDeviceProtocolRefresh(Array.from(state.selectedDevices));
     } catch (error) {
         addLogEntry(`设备${actionText}失败: ${error.message}`, 'error');
     } finally {
@@ -4493,11 +4497,6 @@ async function browseRemoteFileForFirmwareShare() {
     document.getElementById('file-browser-title').textContent = '选择共享固件';
     ModalManager.open('file-browser-modal');
     await loadFileDirectory(defaults.path);
-}
-
-function browseLocalFileForFirmwareShare() {
-    // Removed: shared firmware only accepts remote server paths (user@host:/path).
-    // Kept as a no-op stub in case legacy callers reference it.
 }
 
 function closeFirmwareShareModal() {
@@ -5635,11 +5634,15 @@ function renderAdbProxyHosts(selection = null) {
     const capable = hosts.filter(host => (
         host.adb_proxy && host.status === 'online'
     ));
+    const localWorkerId = adbProxyStatus.local_worker_id || workspaceLocalWorkerId();
     // Keep an online source selectable while its last device is unplugged, so
     // the open modal can show the device again as soon as a heartbeat reports
     // the hotplug event. Targets that currently aggregate a source remain
     // excluded from becoming sources themselves.
-    const sourceHosts = capable.filter(host => !activeTargets.has(host.worker_id));
+    const sourceHosts = capable.filter(host => (
+        !activeTargets.has(host.worker_id)
+        && host.worker_id !== localWorkerId
+    ));
     sourceSelect.replaceChildren();
     sourceHosts.forEach(host => sourceSelect.append(
         new Option(adbProxyHostLabel(host), host.worker_id)
@@ -6162,22 +6165,6 @@ async function showUsbipDiagnostics(selection) {
         showModalError(modal, error.message);
     }
     ModalManager.onClose(modalId, () => modal.remove());
-}
-
-async function openUsbipDetachModal() {
-    await openUsbipAttachModal();
-}
-
-function closeUsbipDetachModal() {
-    closeUsbipAttachModal();
-}
-
-function toggleUsbipDetachAll() {
-    // Kept as a compatibility no-op for older cached pages.
-}
-
-async function submitUsbipDetach() {
-    showToast('请在“当前接入”中选择对应设备并点击断开', 'warning');
 }
 
 async function performUsbipDisconnect(selections) {
@@ -8143,8 +8130,9 @@ function openFileOrDirectory(name, type) {
             loadFileDirectory(newPath);
         }
     } else {
-        // For files, just select them
+        // 双击文件：先选中再直接确认回填，省去手动点"确认"。
         selectFileForSelection(name, type);
+        confirmFileSelection();
     }
 }
 
@@ -9611,9 +9599,13 @@ async function loadReportWorkers() {
         await (window.GmsWorkspace?.ready || Promise.resolve());
         const workspace = window.GmsWorkspace?.get?.() || {};
         const previous = workspace.worker_id || '';
-        select.innerHTML = '<option value="">全部 Worker</option>' + (payload.workers || []).map(worker =>
+        const localWorkerId = workspaceLocalWorkerId();
+        const workers = [...(payload.workers || [])].sort((left, right) =>
+            Number(right.id === localWorkerId) - Number(left.id === localWorkerId)
+        );
+        select.innerHTML = workers.map(worker =>
             `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.id)}</option>`
-        ).join('');
+        ).join('') + '<option value="">全部 Worker</option>';
         if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
         reportsWorkersLoaded = true;
     } catch (error) {
@@ -13424,9 +13416,6 @@ window.setupUsbipForward = setupUsbipForward;
 window.closeUsbipAttachModal = closeUsbipAttachModal;
 window.submitUsbipAttach = submitUsbipAttach;
 window.loadUsbipSourceDevices = loadUsbipSourceDevices;
-window.closeUsbipDetachModal = closeUsbipDetachModal;
-window.toggleUsbipDetachAll = toggleUsbipDetachAll;
-window.submitUsbipDetach = submitUsbipDetach;
 window.checkSshd = checkSshd;
 window.checkRouting = checkRouting;
 window.connectVpn = connectVpn;

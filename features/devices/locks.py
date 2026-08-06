@@ -25,14 +25,14 @@ class DeviceLockManager:
         self,
         db_path: str | Path | None = None,
         *,
-        local_worker_id: str = "worker-local",
+        local_worker_id: str = "ats-worker-controller",
     ):
         self.db_path = Path(db_path) if db_path is not None else None
         self.local_worker_id = local_worker_id
         self.registry = DeviceClaimRegistry(self.db_path)
 
     def configure_local_worker(self, worker_id: str) -> None:
-        self.local_worker_id = str(worker_id or "worker-local").strip() or "worker-local"
+        self.local_worker_id = str(worker_id or "ats-worker-controller").strip() or "ats-worker-controller"
 
     def _device(self, serial: str) -> dict[str, str]:
         serial = str(serial or "").strip()

@@ -155,7 +155,7 @@ class HttpAutomationExecutorTests(unittest.TestCase):
                 raise AssertionError("ADB Proxy device must not be reserved for flashing")
 
         cluster = SimpleNamespace(
-            config=SimpleNamespace(local_worker_id="worker-local"),
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
             repository=Repository(),
             has_command_agent=lambda _worker_id: True,
         )

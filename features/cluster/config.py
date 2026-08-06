@@ -17,7 +17,7 @@ class ClusterConfig:
     remote_dispatch_enabled: bool = False
     global_device_pool_enabled: bool = False
     lease_enforcement_enabled: bool = False
-    local_worker_id: str = "worker-local"
+    local_worker_id: str = "ats-worker-controller"
     worker_offline_seconds: int = 45
     lease_ttl_seconds: int = 90
     worker_registration_timeout_seconds: int = 45
@@ -42,7 +42,7 @@ class ClusterConfig:
             remote_dispatch_enabled=enabled and bool(raw.get("remote_dispatch_enabled", False)),
             global_device_pool_enabled=enabled and bool(raw.get("global_device_pool_enabled", False)),
             lease_enforcement_enabled=enabled and bool(raw.get("lease_enforcement_enabled", False)),
-            local_worker_id=str(raw.get("local_worker_id") or "worker-local"),
+            local_worker_id=str(raw.get("local_worker_id") or "ats-worker-controller"),
             worker_offline_seconds=max(15, int(raw.get("worker_offline_seconds", 45))),
             lease_ttl_seconds=max(30, int(raw.get("lease_ttl_seconds", 90))),
             worker_registration_timeout_seconds=max(
