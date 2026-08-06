@@ -113,9 +113,11 @@ class TestLogAccessTests(unittest.TestCase):
     def test_router_rejects_anonymous_access_without_global_middleware(self):
         app = FastAPI()
         app.include_router(logs_api.router)
-        with patch("features.auth.access.authentication_required", return_value=True):
-            with TestClient(app) as anonymous:
-                response = anonymous.get("/api/test/logs/list")
+        with (
+            patch("features.auth.access.authentication_required", return_value=True),
+            TestClient(app) as anonymous,
+        ):
+            response = anonymous.get("/api/test/logs/list")
         self.assertEqual(response.status_code, 401)
 
     def test_get_does_not_fall_back_to_unowned_global_latest_log(self):

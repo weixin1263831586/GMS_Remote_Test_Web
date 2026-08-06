@@ -3,7 +3,7 @@
 
 This script starts the cluster service (which includes the local worker bridge),
 waits for the local worker to register, then verifies all API endpoints respond
-correctly for both single-host (worker-local only) and multi-host scenarios.
+correctly for both single-host (ats-worker-controller only) and multi-host scenarios.
 
 Usage:
     python3 scripts/verify_cluster_mode.py
@@ -43,7 +43,7 @@ def main() -> int:
 
     # 手动注册本地 Worker，避免启动桥接线程。
     repo.register_worker({
-        "worker_id": "worker-local",
+        "worker_id": "ats-worker-controller",
         "name": "Controller Local",
         "hostname": "controller",
         "address": "172.16.14.233",
@@ -51,7 +51,7 @@ def main() -> int:
         "max_jobs": 2,
         "capabilities": {"adb": True, "ssh_user": "hcq", "novnc_port": 6080},
     })
-    repo.heartbeat("worker-local", {
+    repo.heartbeat("ats-worker-controller", {
         "agent_version": "verify-1.0",
         "cpu_percent": 5.0,
         "memory_percent": 30.0,
@@ -96,20 +96,20 @@ def main() -> int:
     # Test 1: Status endpoint
     status = svc.config
     workers = svc.list_workers()
-    local_online = any(w["id"] == "worker-local" and w.get("status") in {"online", "busy"} for w in workers)
+    local_online = any(w["id"] == "ats-worker-controller" and w.get("status") in {"online", "busy"} for w in workers)
     enabled = status.enabled or local_online
     assert enabled, "Status should report enabled=True"
-    assert local_online, "worker-local should be online"
+    assert local_online, "ats-worker-controller should be online"
     print(f"  [OK] Status: enabled={enabled}, workers={len(workers)}, local_online={local_online}")
 
     # Test 2: Workers list
     worker_ids = {w["id"] for w in workers}
-    assert "worker-local" in worker_ids, "worker-local must be present"
+    assert "ats-worker-controller" in worker_ids, "ats-worker-controller must be present"
     assert "worker-246" in worker_ids, "worker-246 must be present"
     print(f"  [OK] Workers: {sorted(worker_ids)}")
 
     # Test 3: Devices for each worker
-    local_devices = repo.list_devices("worker-local")
+    local_devices = repo.list_devices("ats-worker-controller")
     remote_devices = repo.list_devices("worker-246")
     all_devices = repo.list_devices()
     assert len(local_devices) == 1, f"Expected 1 local device, got {len(local_devices)}"
@@ -118,7 +118,7 @@ def main() -> int:
     print(f"  [OK] Devices: local={len(local_devices)}, remote={len(remote_devices)}, total={len(all_devices)}")
 
     # Test 4: Suites for each worker
-    local_suites = repo.list_suites("worker-local")
+    local_suites = repo.list_suites("ats-worker-controller")
     remote_suites = repo.list_suites("worker-246")
     assert len(local_suites) == 1, f"Expected 1 local suite, got {len(local_suites)}"
     assert len(remote_suites) == 1, f"Expected 1 remote suite, got {len(remote_suites)}"
@@ -138,13 +138,13 @@ def main() -> int:
             "ssh_connection": f"{ssh_user}@{address}" if ssh_user and address else "",
         })
     connections = {h["worker_id"]: h["ssh_connection"] for h in host_data}
-    assert connections.get("worker-local") == "hcq@172.16.14.233"
+    assert connections.get("ats-worker-controller") == "hcq@172.16.14.233"
     assert connections.get("worker-246") == "wlq@172.16.14.246"
     print(f"  [OK] Hosts: {connections}")
 
     # Test 6: Worker selection
     worker_id, devices = svc.select_worker("CTS:14", 1)
-    assert worker_id == "worker-local", f"Expected worker-local, got {worker_id}"
+    assert worker_id == "ats-worker-controller", f"Expected ats-worker-controller, got {worker_id}"
     assert len(devices) == 1
     print(f"  [OK] Select worker CTS:14 -> {worker_id}, devices={devices}")
 
@@ -157,7 +157,7 @@ def main() -> int:
     disabled_svc = ClusterService(repo, config=disabled_config)
     disabled_workers = [w for w in disabled_svc.list_workers()
                         if w["id"] == disabled_config.local_worker_id]
-    assert len(disabled_workers) == 1, "Single-host should show only worker-local"
+    assert len(disabled_workers) == 1, "Single-host should show only ats-worker-controller"
     print(f"  [OK] Disabled mode: {len(disabled_workers)} worker(s) visible")
 
     print()

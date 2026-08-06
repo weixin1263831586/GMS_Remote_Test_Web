@@ -209,8 +209,14 @@
         .host-workspace-single-bar { display: none; }
         body.workspace-scope-single .host-workspace-single-bar { display: flex; align-items: center; gap: 6px; }
         .host-workspace-mode-pending { display: none; }
-        /* 标题下沿与公共页面外框（40px）共用同一基准，避免顶部双框错位。 */
-        .host-workspace-title-row { position: relative; min-height: 24px; margin-bottom: 1px; }
+        /* 与其他页面标题保持相同的 6px 内容间距。 */
+        .host-workspace-title-row { position: relative; min-height: 24px; margin-bottom: 6px; }
+        .main-container > #page-desktop.page-content,
+        .main-container > #page-terminal.page-content { --page-body-frame-top: 45px; }
+        @media (max-width: 600px) {
+            .main-container > #page-desktop.page-content,
+            .main-container > #page-terminal.page-content { --page-body-frame-top: 38px; }
+        }
         .host-workspace-title-row > .section-title { height: 24px; line-height: 24px; }
         .host-workspace-title-state { height: 24px; align-items: center; }
         .host-workspace-title-state > .host-workspace-pane-status {
@@ -1003,7 +1009,7 @@
                     <span id="terminal-worker-control" style="display:contents">
                         <label for="terminal-host-select" style="font-size:11px;color:var(--text-secondary);">主机</label>
                         <select id="terminal-host-select" onchange="switchTerminalHost()" style="padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;">
-                            <option value="worker-local">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</option>
+                            <option value="ats-worker-controller">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</option>
                         </select>
                     </span>
                     <div style="font-size: 11px; color: var(--text-secondary);">连接: <span id="terminal-connection-label" style="color: var(--text-primary); font-weight: 500;">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span></div>
@@ -3117,8 +3123,8 @@
             return result.url;
         }
 
-        // 初始化主机列表。首次渲染前等待集群目录，避免先显示本机、随后
-        // 又跳成完整主机列表。
+        // 初始化主机列表。单机模式可先使用本机条目挂载桌面，并行刷新
+        // 集群目录；集群模式仍等待完整目录，避免错误主机闪现。
         let desktopHostsLoadPromise = null;
         async function initDesktopHosts() {
             if (desktopHostsLoadPromise) return desktopHostsLoadPromise;
@@ -3211,18 +3217,43 @@
         // 首次初始化或确保 VNC 已加载（桌面页面切换时调用）
         async function ensureDesktopInitialized() {
             if (!window.desktopHostsInitialized) {
-                await initDesktopHosts();
+                const hostsReady = initDesktopHosts();
+                const context = window.GmsWorkspace?.get?.() || {};
+                const canUseLocalBootstrap = context.scope_mode !== 'cluster'
+                    && isLocalWorkspaceWorker(context.worker_id || workspaceLocalWorkerId())
+                    && Boolean(workspaceHostForWorker(context.worker_id));
+                if (canUseLocalBootstrap) {
+                    // initDesktopHosts() synchronously creates the local entry
+                    // before its first await. Mount now so directory latency
+                    // does not delay the first visible desktop.
+                    ensureHostWorkspaceInitialized();
+                    hostsReady.then(() => {
+                        window.desktopHostsInitialized = true;
+                        debugLog('[Desktop] Hosts refreshed in background');
+                        if (currentPage === 'desktop') ensureHostWorkspaceInitialized();
+                    }).catch(error => {
+                        debugLog('[Desktop] Background host refresh failed:', error);
+                    });
+                    return;
+                }
+                await hostsReady;
                 window.desktopHostsInitialized = true;
                 debugLog('[Desktop] Hosts initialized');
-            } else {
-                await mergeClusterDesktopHosts();
+                ensureHostWorkspaceInitialized();
+                return;
             }
+            // The iframe/WebSocket is intentionally retained while hidden.
+            // Restore it before refreshing directory metadata so re-entry is
+            // not gated by a cluster API round trip.
             ensureHostWorkspaceInitialized();
+            mergeClusterDesktopHosts().catch(error =>
+                debugLog('[Desktop] Background host refresh failed:', error));
         }
 
         // ==================== 多主机工作区 ====================
         const HOST_WORKSPACE_COUNTS = {single: 1, horizontal: 2, vertical: 2, quad: 4};
         let hostWorkspaceClusterEnabled = false;
+        let hostWorkspaceScopeModeInitialized = false;
         const hostWorkspace = {layout: 'single', panes: [], instances: new Map(), paneGenerations: new Map(), maximized: null, renderGeneration: 0, clusterState: null};
 
         function setHostWorkspaceSurfaceReady(pageName, ready) {
@@ -3459,10 +3490,18 @@
             }
             if (isLocalWorkspaceWorker(workerId)) {
                 try {
-                    const status = await apiCall('/api/desktop/vnc/status');
+                    // Grant issuance only validates the authorized Worker and
+                    // session; it does not depend on VNC runtime state. Run it
+                    // alongside the status request to remove one round trip
+                    // from the common already-running path.
+                    const [status, url] = await Promise.all([
+                        apiCall('/api/desktop/vnc/status'),
+                        requestNovncAccess(workerId),
+                    ]);
                     if (!status.running) {
                         await apiCall('/api/desktop/vnc/start', 'POST', {worker_id: workerId});
                     }
+                    return url;
                 } catch (error) {
                     debugLog('[Desktop] Local VNC status/start failed:', error);
                     if (error?.status === 401 || /Authentication required/i.test(error?.message || '')) {
@@ -3848,6 +3887,14 @@
         function maximizeTerminalWorkspacePane(i){terminalWorkspace.maximized=terminalWorkspace.maximized===i?null:i;renderTerminalWorkspace();}
         function applyHostWorkspaceScopeMode(clusterEnabled) {
             const nextClusterEnabled = Boolean(clusterEnabled);
+            // Workspace context also changes when a user selects a Worker.
+            // Restoring the saved layout on every context event rolls the
+            // first host selection back to the previous pane; only restore
+            // layouts when the single/cluster scope itself actually changes.
+            if (hostWorkspaceScopeModeInitialized && nextClusterEnabled === hostWorkspaceClusterEnabled) {
+                return;
+            }
+            hostWorkspaceScopeModeInitialized = true;
             setHostWorkspaceSurfaceReady('desktop', false);
             setHostWorkspaceSurfaceReady('terminal', false);
             if (!nextClusterEnabled && hostWorkspaceClusterEnabled) {
@@ -4146,7 +4193,7 @@
                     console.warn('[Devices] Controller device scan failed:', data.warning || data.error || resp.statusText);
                 }
                 const statusData = statusResp && statusResp.ok ? await statusResp.json() : {};
-                const localWorkerId = statusData.local_worker_id || 'worker-local';
+                const localWorkerId = statusData.local_worker_id || 'ats-worker-controller';
                 const clusterMode = Boolean(includeCluster && statusData.enabled);
                 const scopeHint = document.getElementById('devices-scope-hint');
                 // 为本地设备补全 worker_id，使按主机分组时本地和远端设备都能正确归类
@@ -5154,7 +5201,7 @@
 
         // ==================== 设备 config 资源查看（弹框）====================
         let dcfgDeviceSerial = null;
-        let dcfgWorkerId = 'worker-local';
+        let dcfgWorkerId = 'ats-worker-controller';
 
         async function openDeviceConfigExplorer(serialNo, workerId = '') {
             if (!serialNo || serialNo === '-') {
@@ -9808,7 +9855,7 @@
 
         // ==================== 终端功能 ====================
         const terminalConfig = {
-            worker_id: 'worker-local',
+            worker_id: 'ats-worker-controller',
             ssh_host: '{{ config.ubuntu_host }}',
             ssh_user: '{{ config.ubuntu_user }}'
         };

@@ -29,7 +29,7 @@ def test_dynamic_operation_claim_is_atomic_and_fenced():
     with tempfile.TemporaryDirectory() as directory:
         manager = DeviceLockManager(
             Path(directory) / "claims.sqlite3",
-            local_worker_id="worker-local",
+            local_worker_id="ats-worker-controller",
         )
         alice = authenticated_request("user-alice", "alice")
         bob = authenticated_request("user-bob", "bob")
@@ -45,7 +45,7 @@ def test_dynamic_operation_claim_is_atomic_and_fenced():
             assert records[0]["generation"] == 1
             assert alice.state.device_lease_tokens == [{
                 "lease_id": records[0]["id"],
-                "device_id": "worker-local:SERIAL-1",
+                "device_id": "ats-worker-controller:SERIAL-1",
                 "generation": 1,
                 "owner_id": "user-alice",
             }]
@@ -88,7 +88,7 @@ def test_lock_status_resolves_internal_owner_to_user_management_identity():
     with tempfile.TemporaryDirectory() as directory:
         manager = DeviceLockManager(
             Path(directory) / "claims.sqlite3",
-            local_worker_id="worker-local",
+            local_worker_id="ats-worker-controller",
         )
         success, _ = manager.lock_device(
             "SERIAL-1",

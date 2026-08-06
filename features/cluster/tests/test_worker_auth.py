@@ -5,7 +5,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from features.cluster.worker_auth import worker_tokens, write_worker_tokens
+from features.cluster.worker_auth import (
+    persist_worker_token,
+    restore_worker_token,
+    revoke_worker_token,
+    worker_tokens,
+    write_worker_tokens,
+)
 
 
 class WorkerAuthPersistenceTests(unittest.TestCase):
@@ -88,6 +94,40 @@ class WorkerAuthPersistenceTests(unittest.TestCase):
             ):
                 parsed = worker_tokens()
         self.assertEqual(parsed, {})
+
+    def test_single_worker_updates_preserve_peer_tokens(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token_path = Path(directory) / "worker_tokens.json"
+            with patch.dict(
+                "os.environ",
+                {"GMS_WORKER_TOKENS_FILE": str(token_path)},
+            ):
+                write_worker_tokens({"worker-1": "one", "worker-2": "two"})
+                previous = persist_worker_token("worker-1", "replacement")
+                revoked = revoke_worker_token("worker-2")
+
+                self.assertEqual(previous, "one")
+                self.assertTrue(revoked)
+                self.assertEqual(worker_tokens(), {"worker-1": "replacement"})
+
+    def test_deployment_rollback_does_not_overwrite_newer_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token_path = Path(directory) / "worker_tokens.json"
+            with patch.dict(
+                "os.environ",
+                {"GMS_WORKER_TOKENS_FILE": str(token_path)},
+            ):
+                write_worker_tokens({"worker-1": "original", "worker-2": "peer"})
+                previous = persist_worker_token("worker-1", "deploy-a")
+                persist_worker_token("worker-1", "deploy-b")
+
+                restored = restore_worker_token("worker-1", "deploy-a", previous)
+
+                self.assertFalse(restored)
+                self.assertEqual(
+                    worker_tokens(),
+                    {"worker-1": "deploy-b", "worker-2": "peer"},
+                )
 
 
 if __name__ == "__main__":

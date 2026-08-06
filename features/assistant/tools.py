@@ -210,6 +210,7 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/vpn/disconnect": "features.system.integrations:disconnect_vpn",
     "/api/adb-forward/start": "features.devices.integrations_api:start_adb_forward",
     "/api/adb-forward/stop": "features.devices.integrations_api:stop_adb_forward",
+    "/api/adb-forward/status": "features.devices.adb_forward_api:adb_forward_status",
     "/api/usbip/status": "features.devices.integrations_api:get_usbip_status",
     "/api/usbip/connect": "features.devices.integrations_api:start_usbip",
     "/api/usbip/disconnect": "features.devices.integrations_api:stop_usbip",
@@ -255,6 +256,9 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/config/opengrok": "features.users.config_api:get_opengrok_config",
     "/api/config/redmine": "features.reports.api:get_redmine_config",
     "/api/tailscale/status": "features.users.config_api:get_tailscale_status",
+    "/api/cluster/workers/deploy-adb-proxy-source": (
+        "features.cluster.deployment_api:deploy_adb_proxy_source"
+    ),
     # --- 补充：APK（路径参数 task_id 作为函数参数） ---
     "/api/apk/status/{task_id}": "features.firmware.apk_api:get_apk_status",
     "/api/apk/manifest/{task_id}": "features.firmware.apk_api:get_apk_manifest",

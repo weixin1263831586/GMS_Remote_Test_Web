@@ -133,7 +133,7 @@ class TerminalSecurityTests(unittest.TestCase):
             return_value={},
         ), patch(
             "features.system.terminal_service.resolve_authorized_terminal_target",
-            return_value=("worker-local", "localhost", "admin", "", ""),
+            return_value=("ats-worker-controller", "localhost", "admin", "", ""),
         ), patch(
             "features.system.terminal_service.is_local_host",
             return_value=True,
@@ -187,7 +187,7 @@ class TerminalSecurityTests(unittest.TestCase):
             return_value={},
         ), patch(
             "features.system.terminal_service.resolve_authorized_terminal_target",
-            return_value=("worker-local", "localhost", "admin", "", "SERIAL-1"),
+            return_value=("ats-worker-controller", "localhost", "admin", "", "SERIAL-1"),
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster,
         ), patch(
@@ -202,14 +202,14 @@ class TerminalSecurityTests(unittest.TestCase):
             ))
 
         connected = websocket.messages[-1]
-        claim = registry.active_claim("worker-local:SERIAL-1")
+        claim = registry.active_claim("ats-worker-controller:SERIAL-1")
         self.assertEqual(connected["type"], "terminal_connected")
         self.assertEqual(connected["lease_id"], claim["id"])
         self.assertEqual(connected["generation"], claim["generation"])
         self.assertEqual(claim["owner_id"], "admin-user-id")
 
         close_websocket_terminal(websocket)
-        self.assertIsNone(registry.active_claim("worker-local:SERIAL-1"))
+        self.assertIsNone(registry.active_claim("ats-worker-controller:SERIAL-1"))
         self.assertTrue(channel.closed)
 
     def test_adb_terminal_input_closes_after_claim_revocation(self):
@@ -221,7 +221,7 @@ class TerminalSecurityTests(unittest.TestCase):
             "features.system.terminal_service.config_manager.load_config", return_value={}
         ), patch(
             "features.system.terminal_service.resolve_authorized_terminal_target",
-            return_value=("worker-local", "localhost", "admin", "", "SERIAL-1"),
+            return_value=("ats-worker-controller", "localhost", "admin", "", "SERIAL-1"),
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster
         ), patch(
@@ -235,7 +235,7 @@ class TerminalSecurityTests(unittest.TestCase):
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
             ))
 
-        registry.force_release("worker-local:SERIAL-1")
+        registry.force_release("ats-worker-controller:SERIAL-1")
         asyncio.run(handle_terminal_input(
             "admin-user-id", websocket, {"input": "id\n"}
         ))

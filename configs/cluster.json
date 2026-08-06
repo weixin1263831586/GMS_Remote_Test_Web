@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "controller_url": "https://127.0.0.1:5001",
-  "local_worker_id": "worker-local",
+  "local_worker_id": "ats-worker-controller",
   "heartbeat_interval_seconds": 15,
   "worker_offline_seconds": 45,
   "worker_registration_timeout_seconds": 45,

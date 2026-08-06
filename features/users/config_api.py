@@ -13,7 +13,6 @@ from fastapi.responses import JSONResponse
 
 from features.auth import (
     CurrentUser,
-    get_authenticated_user,
     require_authenticated_user_when_auth_required,
     require_elevated_admin,
     require_elevated_admin_when_auth_required,

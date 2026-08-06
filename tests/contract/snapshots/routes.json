@@ -31,6 +31,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/adb-forward/logs"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/adb-forward/start"

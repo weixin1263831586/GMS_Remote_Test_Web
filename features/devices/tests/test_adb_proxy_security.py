@@ -12,12 +12,12 @@ from worker_agent.adb_proxy import pair_code_from_grant
 
 def test_remote_worker_pair_code_matches_assignment_grant_derivation():
     with patch(
-        "features.cluster.worker_auth.worker_tokens",
+        "features.cluster.worker_tokens",
         return_value={"worker-source": "source-token"},
     ):
         code = pair_code_for_worker(
             "worker-source",
-            "worker-local",
+            "ats-worker-controller",
             "signed-grant",
         )
 
@@ -26,23 +26,23 @@ def test_remote_worker_pair_code_matches_assignment_grant_derivation():
 
 def test_pair_grant_is_target_bound_and_rejects_tampering():
     with patch(
-        "features.cluster.worker_auth.worker_tokens",
+        "features.cluster.worker_tokens",
         return_value={"worker-source": "source-token"},
     ):
         grant = create_pair_grant(
-            "worker-source", "worker-target", "worker-local"
+            "worker-source", "worker-target", "ats-worker-controller"
         )
         validate_pair_grant(
-            grant, "worker-source", "worker-target", "worker-local"
+            grant, "worker-source", "worker-target", "ats-worker-controller"
         )
         with pytest.raises(ValueError, match="host mismatch"):
             validate_pair_grant(
-                grant, "worker-source", "other-target", "worker-local"
+                grant, "worker-source", "other-target", "ats-worker-controller"
             )
         with pytest.raises(ValueError, match="invalid"):
             validate_pair_grant(
                 grant + "x",
                 "worker-source",
                 "worker-target",
-                "worker-local",
+                "ats-worker-controller",
             )

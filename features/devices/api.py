@@ -348,7 +348,7 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
     # worker 维度：用集群设备池确定每台设备归属的主机，不需要 SSH 读属性
     if dim == "worker":
         value_to_devices: dict[str, list[str]] = {}
-        local_worker_id = "worker-local"
+        local_worker_id = "ats-worker-controller"
         try:
             from features.cluster import get_cluster_service
             cluster = get_cluster_service()
@@ -370,16 +370,9 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
                 worker_names[worker["id"]] = worker.get("name") or worker["id"]
         except Exception:
             pass
-        # 本地 worker 的友好名称使用 "user@host" 格式，与设备管理页的
-        # source_host 一致，这样 auto_assign_new_devices 才能正确补全新设备。
-        try:
-            config = runtime.config_manager.load_config()
-            ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
-            ubuntu_host = runtime.config_manager.get_ubuntu_host(config)
-            worker_names[local_worker_id] = f"{ubuntu_user}@{ubuntu_host}"
-        except Exception:
-            worker_names.setdefault(local_worker_id, local_worker_id)
-        # 重写本地 Worker 的 key 为友好名；远端项已经使用友好名。
+        # Controller 使用统一 Worker ID，避免设备分组继续显示 user@host 旧名称。
+        worker_names[local_worker_id] = local_worker_id
+        # 重写本地 Worker 的 key；远端项已经使用友好主机名。
         _named = {}
         for wid, devs in value_to_devices.items():
             _named[worker_names.get(wid, wid)] = devs

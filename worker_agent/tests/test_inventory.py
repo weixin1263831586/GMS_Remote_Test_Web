@@ -77,7 +77,7 @@ def test_probe_reports_adb_proxy_import_with_source_metadata():
         "worker_agent.adb_proxy.imported_devices",
         return_value={
             "RK3576GMS1": {
-                "source_worker_id": "worker-local",
+                "source_worker_id": "ats-worker-controller",
                 "source_address": "172.16.14.233",
                 "source_serial": "RK3576GMS1",
             }
@@ -91,7 +91,7 @@ def test_probe_reports_adb_proxy_import_with_source_metadata():
         "state": "available",
         "properties": {
             "model": "Box",
-            "adb_proxy_source_worker_id": "worker-local",
+            "adb_proxy_source_worker_id": "ats-worker-controller",
             "adb_proxy_source_address": "172.16.14.233",
             "adb_proxy_source_serial": "RK3576GMS1",
         },

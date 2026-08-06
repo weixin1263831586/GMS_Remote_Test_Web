@@ -260,5 +260,7 @@ class SshTmuxBuildBackend:
 
 class LocalBuildBackend(SshTmuxBuildBackend):
     def _run(self, server: dict[str, Any], command: str, timeout: int = 30) -> tuple[int, str, str]:
-        proc = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=timeout)
+        # Build templates are operator-controlled shell programs; request
+        # parameters are schema-validated before rendering.
+        proc = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=timeout)  # nosec B602
         return proc.returncode, proc.stdout, proc.stderr

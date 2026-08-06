@@ -1,4 +1,4 @@
-const state={workers:[],devices:[],suites:[],jobs:[],tests:[],library:[],status:{local_worker_id:'worker-local'}};
+const state={workers:[],devices:[],suites:[],jobs:[],tests:[],library:[],status:{local_worker_id:'ats-worker-controller'}};
 const activeDeployments=new Set();
 let clusterWorkspace={scope_mode:'cluster'};
 let selectedClusterJob=null;
@@ -40,7 +40,12 @@ async function confirmAction(title,message){if(typeof window.parent?.showConfirm
 function notifyCompletion(title,message){window.parent.postMessage({type:'cluster-notification',title,message,level:'success'},location.origin)}
 const statusLabels={online:'在线',offline:'离线',busy:'忙碌',draining:'停止派发',available:'可用',allocated:'已分配',reserved:'已预留',external_busy:'外部占用',unauthorized:'未授权',unknown:'未知',fastboot:'Fastboot',created:'已创建',queued:'排队',leasing:'分配设备',assigned:'已分配',dispatching:'派发中',running:'运行中',stopping:'停止中',collecting:'收集报告',worker_lost:'主机失联',completed:'完成',failed:'失败',cancelled:'已取消'};
 function badge(s){return `<span class="status ${esc(s)}" title="${esc(s)}">${esc(statusLabels[s]||s)}</span>`}
-function localWorkerId(){return state.status.local_worker_id||'worker-local'}
+function workerActivity(worker){const reported=Math.max(0,Number(worker.running_jobs||0)),external=Math.max(0,Number(worker.external_jobs||0)),running=Math.max(reported,external);return {running,external:Math.min(running,external),managed:Math.max(0,running-external)}}
+function workerBadge(worker){const activity=workerActivity(worker),status=worker.status==='busy'&&activity.external>0&&!activity.managed?'external_busy':worker.status;return badge(status)}
+function compactDuration(seconds){const value=Math.max(0,Math.floor(Number(seconds)||0)),days=Math.floor(value/86400),hours=Math.floor((value%86400)/3600),minutes=Math.floor((value%3600)/60);if(days)return `${days}天${hours?`${hours}小时`:''}`;if(hours)return `${hours}小时${minutes?`${minutes}分钟`:''}`;if(minutes)return `${minutes}分钟`;return `${value}秒`}
+function workerWarning(value){const text=String(value||''),inactive=text.match(/^Tradefed output has been inactive for (\d+) seconds;/);if(inactive)return `Tradefed 已 ${compactDuration(inactive[1])} 未产生输出，当前模块可能耗时较长或已停滞`;if(text==='Tradefed is running but its device could not be identified')return 'Tradefed 正在运行，但无法识别其占用设备';if(text==='An external Tradefed process has no identifiable device; new tests are blocked')return '外部 Tradefed 无法识别占用设备，已阻止派发新测试';return text}
+function workerTestsMarkup(worker,tests){const activity=workerActivity(worker),visibleExternal=tests.filter(test=>test.source==='external').length,visibleManaged=tests.length-visibleExternal,hiddenExternal=Math.max(0,activity.external-visibleExternal),hiddenManaged=Math.max(0,activity.managed-visibleManaged),hidden=hiddenExternal+hiddenManaged;let rows=tests.map(test=>`<div><strong>${test.source==='external'?'手工/外部':'平台'} ${esc(test.suite_type||'XTS')}</strong> · PID ${esc(test.pid||'-')} · 设备 ${esc((test.devices||[]).join(', ')||'未识别')} · 运行 ${Math.floor((test.elapsed_seconds||0)/3600)}h</div>`).join('');if(hidden){const kind=hiddenExternal&&!hiddenManaged?'外部':hiddenManaged&&!hiddenExternal?'平台':'运行中';rows+=`<div class="muted">检测到 ${hidden} 个${kind}测试，详情暂不可用</div>`}return rows||'<span class="muted">当前无测试</span>'}
+function localWorkerId(){return state.status.local_worker_id||'ats-worker-controller'}
 function terminalJob(status){return ['completed','failed','cancelled'].includes(status)}
 function renderModeStatus(){
  const modeHint=document.querySelector('#cluster-mode-status');if(!modeHint)return;
@@ -53,12 +58,12 @@ function renderModeStatus(){
 function activeDevices(workerId){return state.devices.filter(device=>device.worker_id===workerId&&!['offline','unknown'].includes(device.state))}
 function workerAssessment(worker){
  const devices=activeDevices(worker.id);
- const cpu=Number(worker.cpu_percent||0),memory=Number(worker.memory_percent||0),running=Number(worker.running_jobs||0);
+ const cpu=Number(worker.cpu_percent||0),memory=Number(worker.memory_percent||0),activity=workerActivity(worker);
  let labels=[];
  if(worker.status==='offline'){labels=[{text:'离线',cls:'bad'}]}
  else if(worker.admission_blocked||worker.status==='draining'){labels=[{text:'已阻止派发',cls:'bad'}]}
  else{
-  if(running>0)labels.push({text:'测试中',cls:'warn'});
+  if(activity.running>0)labels.push({text:activity.external&&activity.managed?'平台/外部测试中':activity.external?'外部测试中':'平台测试中',cls:'warn'});
   if(cpu>=75||memory>=85)labels.push({text:'高负载',cls:'bad'});
   else if(cpu>=40||memory>=70)labels.push({text:'中负载',cls:'warn'});
   if(!labels.length)labels=[{text:'空闲',cls:'ok'}];
@@ -76,7 +81,7 @@ function render(){
  const localId=localWorkerId();
  const query=String(document.querySelector('#cluster-search')?.value||'').trim().toLowerCase();
  const matches=value=>!query||String(value||'').toLowerCase().includes(query);
- state.workers.sort((a,b)=>(a.id===localId?-1:b.id===localId?1:String(a.registered_at||'').localeCompare(String(b.registered_at||''))));
+ state.workers.sort((a,b)=>(a.id===localId?-1:b.id===localId?1:String(a.name||a.id||'').localeCompare(String(b.name||b.id||''),undefined,{numeric:true})));
  renderModeStatus();
  document.querySelector('#workers').innerHTML=state.workers.filter(worker=>matches([worker.id,worker.name,worker.hostname,worker.address].join(' '))).map(worker=>{
   const tests=state.tests.filter(test=>test.worker_id===worker.id);
@@ -91,7 +96,7 @@ function render(){
   if(worker.id!==localId)menuItems.push(`<button data-action="redeploy-worker" data-worker-id="${esc(worker.id)}" data-ssh-host="${esc(sshHost)}">重新部署</button>`);
   if(worker.id!==localId)menuItems.push(`<button class="danger" data-action="delete-worker" data-worker-id="${esc(worker.id)}" ${deleteBlocked?'disabled':''}>${deleteBlocked?'删除(请先停测试)':'删除主机'}</button>`);
   const moreMenu=menuItems.length?`<span class="worker-menu-wrap"><button class="worker-menu-toggle" data-action="toggle-worker-menu">⋯</button><div class="worker-menu">${menuItems.join('')}</div></span>`:'';
-  return `<div class="card"><div class="card-title"><span>${esc(worker.name||worker.id)}</span><span>${badge(worker.status)}${configButton}${moreMenu}</span></div><p>${esc(worker.hostname)} · ${esc(worker.id)} · ${esc(worker.address||'')}</p><div class="meta"><div class="meta-row"><span>Agent ${esc(worker.agent_version||'-')}</span><span>心跳 ${relativeTime(worker.last_heartbeat_at)}</span><span>CPU ${oneDecimal(worker.cpu_percent)}%</span><span>内存 ${oneDecimal(worker.memory_percent)}%（可用 ${oneDecimal(worker.memory_available_gb)}G）</span><span>磁盘 ${oneDecimal(worker.disk_free_gb)}G</span><span>系统负载 ${oneDecimal(worker.load_1m)}</span></div><div class="meta-row"><span>设备 ${assessment.devices.length}</span><span>套件 ${state.suites.filter(suite=>suite.worker_id===worker.id&&suite.available).length}</span><span>任务 ${worker.running_jobs}/${worker.max_jobs}（外部 ${worker.external_jobs||0}）</span></div></div><div class="host-assessment">${assessment.labels.map(l=>`<span class="assessment ${l.cls}">${l.text}</span>`).join('')}</div><div class="capabilities"><span class="cap ${worker.capabilities?.ssh_user?'ok':''}">终端 ${worker.capabilities?.ssh_user?'✓':'未配置'}</span><span class="cap ${worker.capabilities?.novnc_port?'ok':''}">noVNC ${worker.capabilities?.novnc_port?'✓':'不可用'}</span><span class="cap ${worker.capabilities?.tradefed?'ok':''}">Tradefed ${worker.capabilities?.tradefed?'✓':'不可用'}</span></div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(value)}</div>`).join('')}<div class="host-tests">${tests.map(test=>`<div><strong>${test.source==='external'?'手工/外部':'平台'} ${esc(test.suite_type||'XTS')}</strong> · PID ${esc(test.pid||'-')} · 设备 ${esc((test.devices||[]).join(', ')||'未识别')} · 运行 ${Math.floor((test.elapsed_seconds||0)/3600)}h</div>`).join('')||'<span class="muted">当前无测试</span>'}</div></div>`;
+  return `<div class="card"><div class="card-title"><span>${esc(worker.name||worker.id)}</span><span>${workerBadge(worker)}${configButton}${moreMenu}</span></div><p>${esc(worker.hostname)} · ${esc(worker.id)} · ${esc(worker.address||'')}</p><div class="meta"><div class="meta-row"><span>Agent ${esc(worker.agent_version||'-')}</span><span>心跳 ${relativeTime(worker.last_heartbeat_at)}</span><span>CPU ${oneDecimal(worker.cpu_percent)}%</span><span>内存 ${oneDecimal(worker.memory_percent)}%（可用 ${oneDecimal(worker.memory_available_gb)}G）</span><span>磁盘 ${oneDecimal(worker.disk_free_gb)}G</span><span>系统负载 ${oneDecimal(worker.load_1m)}</span></div><div class="meta-row"><span>设备 ${assessment.devices.length}</span><span>套件 ${state.suites.filter(suite=>suite.worker_id===worker.id&&suite.available).length}</span><span>任务 ${worker.running_jobs}/${worker.max_jobs}（外部 ${worker.external_jobs||0}）</span></div></div><div class="host-assessment">${assessment.labels.map(l=>`<span class="assessment ${l.cls}">${l.text}</span>`).join('')}</div><div class="capabilities"><span class="cap ${worker.capabilities?.ssh_user?'ok':''}">终端 ${worker.capabilities?.ssh_user?'✓':'未配置'}</span><span class="cap ${worker.capabilities?.novnc_port?'ok':''}">noVNC ${worker.capabilities?.novnc_port?'✓':'不可用'}</span><span class="cap ${worker.capabilities?.tradefed?'ok':''}">Tradefed ${worker.capabilities?.tradefed?'✓':'不可用'}</span></div><div class="host-tests">${workerTestsMarkup(worker,tests)}</div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(workerWarning(value))}</div>`).join('')}</div>`;
  }).join('')||'<div class="empty">暂无 Worker，请点击“添加主机”查看接入命令</div>';
  document.querySelector('#devices').innerHTML=state.devices.filter(device=>!['offline','unknown'].includes(device.state)&&matches([device.worker_id,device.serial,device.properties?.model,device.properties?.product].join(' '))).map(device=>{const t=device.transport||'local_usb';const tInfo={'local_usb':['本地','t-local'],'usbip':['USB/IP','t-usbip'],'adb_proxy':['ADB Proxy','t-proxy']}[t]||[t,'t-local'];const p=device.properties||{};let source='-';if(t==='adb_proxy')source=p.adb_proxy_source_name||p.adb_proxy_source_worker_id||'-';else if(t==='usbip')source=p.usbip_source_host||'-';else if(device.worker_id)source=device.worker_id;return `<tr><td>${esc(device.worker_id)}</td><td>${esc(device.serial)}</td><td><span class="status ${esc(tInfo[1])}">${esc(tInfo[0])}</span></td><td>${esc(source)}</td><td>${badge(device.state)}</td><td>${esc(p.model||p.product||'')}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">暂无匹配的在线设备</td></tr>';
  document.querySelector('#suites').innerHTML=state.suites.filter(suite=>suite.available&&matches([suite.worker_id,suite.suite_type,suite.suite_version,suite.tools_path].join(' '))).map(suite=>`<tr><td>${esc(suite.worker_id)}</td><td>${esc(suite.suite_type)}</td><td>${esc(suite.suite_version)}</td><td title="${esc(suite.tools_path)}">${esc(suite.tools_path)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">暂无匹配的可用套件</td></tr>';
@@ -128,7 +133,8 @@ function clusterDeviceId(workerId,value){const text=String(value||'');return !te
 function renderJobForm(){
  const worker=document.querySelector('#job-worker'),suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(!worker||!suite||!device)return;
  const previousWorker=worker.value||((clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id)||'auto');
- worker.innerHTML='<option value="auto">自动选择</option>'+commandWorkers().map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join('');
+ const workers=commandWorkers(),localIndex=workers.findIndex(item=>item.id===localWorkerId()),workerOptions=workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`);
+ worker.innerHTML=localIndex>=0?workerOptions[localIndex]+'<option value="auto">自动选择</option>'+workerOptions.filter((_,index)=>index!==localIndex).join(''):'<option value="auto">自动选择</option>'+workerOptions.join('');
  worker.value=Array.from(worker.options).some(o=>o.value===previousWorker)?previousWorker:'auto';
  updateJobOptions();
 }

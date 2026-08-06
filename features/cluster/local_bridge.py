@@ -18,8 +18,6 @@ from worker_agent.process_inventory import discover_tradefed_processes
 from worker_agent.suite_detection import suite_details
 
 from .config import ClusterConfig
-
-from .config import ClusterConfig
 from .repository import ClusterRepository
 
 
@@ -105,7 +103,7 @@ def _suite_roots() -> list[Path]:
 
 
 class LocalWorkerBridge:
-    """Registers the Controller host as ``worker-local`` and heartbeats it."""
+    """Registers the Controller host as ``ats-worker-controller`` and heartbeats it."""
 
     def __init__(self, repository: ClusterRepository, config: ClusterConfig):
         self.repository = repository
@@ -132,7 +130,7 @@ class LocalWorkerBridge:
         adb_proxy = capability_status()
         return {
             "worker_id": self.worker_id,
-            "name": f"{ubuntu_user}@{ubuntu_host}",
+            "name": self.worker_id,
             "hostname": socket.gethostname(),
             "address": ubuntu_host,
             "agent_version": AGENT_VERSION,
@@ -171,7 +169,7 @@ class LocalWorkerBridge:
     def _heartbeat(self) -> None:
         if self._real_agent_active():
             return
-        from features.devices.adb_proxy_security import local_proxy_secret
+        from features.devices import local_proxy_secret
         from worker_agent.adb_proxy import execute_adb_proxy_action, recover_managed_state
 
         try:
@@ -216,9 +214,9 @@ class LocalWorkerBridge:
             payload["suites"] = self._suites
         result = self.repository.heartbeat(self.worker_id, payload)
         try:
-            from features.devices.adb_proxy_service import adb_proxy_service
+            from features.devices import get_adb_proxy_service
 
-            adb_proxy_service.observe_worker(
+            get_adb_proxy_service().observe_worker(
                 self.worker_id, payload.get("adb_proxy") or {}
             )
         except Exception:

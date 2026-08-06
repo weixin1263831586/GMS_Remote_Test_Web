@@ -41,8 +41,8 @@ from .api_helpers import (
     test_report_db,
     test_report_manager,
 )
-from .knowledge_ranking import android_version_from_request, rank_kb_hits
 from .display import report_display_name
+from .knowledge_ranking import android_version_from_request, rank_kb_hits
 from .uploads import ReportUploadTooLargeError, stage_report_uploads
 
 

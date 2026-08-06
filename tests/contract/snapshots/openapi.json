@@ -2259,6 +2259,11 @@
       },
       "WorkerHeartbeat": {
         "properties": {
+          "adb_proxy": {
+            "additionalProperties": true,
+            "title": "Adb Proxy",
+            "type": "object"
+          },
           "agent_version": {
             "default": "",
             "title": "Agent Version",
@@ -2374,7 +2379,6 @@
             "type": "string"
           },
           "max_jobs": {
-            "default": 1,
             "maximum": 32.0,
             "minimum": 1.0,
             "title": "Max Jobs",
@@ -2678,6 +2682,44 @@
         },
         "security": [],
         "summary": "Root"
+      }
+    },
+    "/api/adb-forward/logs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Adb Proxy Logs"
       }
     },
     "/api/adb-forward/start": {
@@ -9651,6 +9693,16 @@
               "default": false,
               "title": "Force Refresh",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "auto",
+              "title": "Source",
+              "type": "string"
             }
           }
         ],

@@ -90,7 +90,7 @@ def report_client_display_id(
                 return f"{ssh_user}@{address}"
         except Exception:
             pass
-        if worker_id == "worker-local":
+        if worker_id == "ats-worker-controller":
             try:
                 from foundation.config import config_manager
 

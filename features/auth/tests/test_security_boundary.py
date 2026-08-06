@@ -13,7 +13,7 @@ from bootstrap.application import create_app
 from features.auth import auth_service
 from features.cluster import ClusterRepository, ClusterService
 from features.cluster import api as cluster_api
-from features.devices.adb_proxy_security import create_pair_grant
+from features.devices import create_pair_grant
 from features.system import security_audit_logger
 
 
@@ -38,7 +38,7 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.tokens_path = Path(self.tmp.name) / "worker_tokens.json"
         self.tokens_path.write_text(
             json.dumps(
-                {"worker_tokens": {"worker-local": "worker-token-for-security-tests-000001"}}
+                {"worker_tokens": {"ats-worker-controller": "worker-token-for-security-tests-000001"}}
             ),
             encoding="utf-8",
         )

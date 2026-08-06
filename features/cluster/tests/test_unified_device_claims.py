@@ -16,7 +16,7 @@ def _repository(root: Path) -> ClusterRepository:
     )
     repository.register_worker(
         {
-            "worker_id": "worker-local",
+            "worker_id": "ats-worker-controller",
             "name": "local",
             "hostname": "localhost",
             "address": "127.0.0.1",
@@ -26,7 +26,7 @@ def _repository(root: Path) -> ClusterRepository:
         }
     )
     repository.heartbeat(
-        "worker-local",
+        "ats-worker-controller",
         {
             "running_jobs": [],
             "devices": [{"serial": "ABC", "state": "available"}],
@@ -40,7 +40,7 @@ def test_local_lock_blocks_cluster_lease_and_different_source_for_same_owner(tmp
     repository = _repository(tmp_path)
     locks = DeviceLockManager(
         tmp_path / "device_claims.sqlite3",
-        local_worker_id="worker-local",
+        local_worker_id="ats-worker-controller",
     )
     acquired, _message = locks.lock_device(
         "ABC",
@@ -62,7 +62,7 @@ def test_local_lock_blocks_cluster_lease_and_different_source_for_same_owner(tmp
     with pytest.raises(ValueError, match="already claimed"):
         repository.create_job_with_leases(
             {
-                "worker_id": "worker-local",
+                "worker_id": "ats-worker-controller",
                 "owner_id": "bob",
                 "devices": ["ABC"],
             }
@@ -73,11 +73,11 @@ def test_cluster_lease_is_visible_to_local_ui_and_release_allows_reuse(tmp_path)
     repository = _repository(tmp_path)
     locks = DeviceLockManager(
         tmp_path / "device_claims.sqlite3",
-        local_worker_id="worker-local",
+        local_worker_id="ats-worker-controller",
     )
     job = repository.create_job_with_leases(
         {
-            "worker_id": "worker-local",
+            "worker_id": "ats-worker-controller",
             "owner_id": "alice",
             "devices": ["ABC"],
         }
@@ -92,7 +92,7 @@ def test_cluster_lease_is_visible_to_local_ui_and_release_allows_reuse(tmp_path)
 
     command = repository.create_command(
         {
-            "worker_id": "worker-local",
+            "worker_id": "ats-worker-controller",
             "command_type": "start_test",
             "job_id": job["id"],
             "attempt_id": job["current_attempt_id"],
@@ -100,7 +100,7 @@ def test_cluster_lease_is_visible_to_local_ui_and_release_allows_reuse(tmp_path)
         }
     )
     completed = repository.ack_command(
-        "worker-local",
+        "ats-worker-controller",
         command["id"],
         {"status": "completed", "result": {}, "error": ""},
     )
@@ -115,10 +115,10 @@ def test_cluster_reservation_blocks_local_lock_until_released(tmp_path):
     repository = _repository(tmp_path)
     locks = DeviceLockManager(
         tmp_path / "device_claims.sqlite3",
-        local_worker_id="worker-local",
+        local_worker_id="ats-worker-controller",
     )
     reservation = repository.reserve_devices(
-        "worker-local",
+        "ats-worker-controller",
         ["ABC"],
         owner_id="ats-user",
         source_id="ats-run-1",
@@ -135,10 +135,10 @@ def test_force_release_refuses_to_detach_active_cluster_job(tmp_path):
     repository = _repository(tmp_path)
     locks = DeviceLockManager(
         tmp_path / "device_claims.sqlite3",
-        local_worker_id="worker-local",
+        local_worker_id="ats-worker-controller",
     )
     job = repository.create_job_with_leases(
-        {"worker_id": "worker-local", "owner_id": "alice", "devices": ["ABC"]}
+        {"worker_id": "ats-worker-controller", "owner_id": "alice", "devices": ["ABC"]}
     )
 
     released, message = locks.force_unlock_device("ABC")
@@ -152,14 +152,14 @@ def test_force_release_refuses_to_detach_active_cluster_job(tmp_path):
 def test_reservation_renew_reacquires_missing_unified_claim(tmp_path):
     repository = _repository(tmp_path)
     reservation = repository.reserve_devices(
-        "worker-local", ["ABC"], owner_id="alice", source_id="ats-run-1"
+        "ats-worker-controller", ["ABC"], owner_id="alice", source_id="ats-run-1"
     )
     repository.claims.release(
         f"reservation:{reservation['id']}", status="expired"
     )
 
     assert repository.renew_reservation(reservation["id"], ttl_seconds=300)
-    claim = repository.claims.active_claim("worker-local:ABC")
+    claim = repository.claims.active_claim("ats-worker-controller:ABC")
     assert claim is not None
     assert claim["source_id"] == f"reservation:{reservation['id']}"
 
@@ -168,10 +168,10 @@ def test_reservation_renew_expires_metadata_when_device_was_reclaimed(tmp_path):
     repository = _repository(tmp_path)
     locks = DeviceLockManager(
         tmp_path / "device_claims.sqlite3",
-        local_worker_id="worker-local",
+        local_worker_id="ats-worker-controller",
     )
     reservation = repository.reserve_devices(
-        "worker-local", ["ABC"], owner_id="alice", source_id="ats-run-1"
+        "ats-worker-controller", ["ABC"], owner_id="alice", source_id="ats-run-1"
     )
     repository.claims.release(
         f"reservation:{reservation['id']}", status="expired"
@@ -188,7 +188,7 @@ def test_reservation_renew_expires_metadata_when_device_was_reclaimed(tmp_path):
 def test_cluster_job_fencing_generation_follows_all_unified_claims(tmp_path):
     repository = _repository(tmp_path)
     records = repository.acquire_device_operation_claim(
-        "worker-local",
+        "ats-worker-controller",
         ["ABC"],
         owner_id="admin",
         source_type="cluster-device-action",
@@ -197,7 +197,7 @@ def test_cluster_job_fencing_generation_follows_all_unified_claims(tmp_path):
     repository.claims.release("operation:inspect-1")
 
     job = repository.create_job_with_leases(
-        {"worker_id": "worker-local", "owner_id": "alice", "devices": ["ABC"]}
+        {"worker_id": "ats-worker-controller", "owner_id": "alice", "devices": ["ABC"]}
     )
 
     lease = job["leases"][0]
@@ -207,7 +207,7 @@ def test_cluster_job_fencing_generation_follows_all_unified_claims(tmp_path):
 
 def test_firmware_multi_device_claim_is_atomic_and_not_reentrant(tmp_path):
     locks = DeviceLockManager(
-        tmp_path / "device_claims.sqlite3", local_worker_id="worker-local"
+        tmp_path / "device_claims.sqlite3", local_worker_id="ats-worker-controller"
     )
     acquired, _records = locks.lock_devices(
         ["A", "B"],
@@ -250,7 +250,7 @@ def test_firmware_claim_survives_worker_adb_fastboot_transition(tmp_path):
     repository = _repository(tmp_path)
     locks = DeviceLockManager(
         tmp_path / "device_claims.sqlite3",
-        local_worker_id="worker-local",
+        local_worker_id="ats-worker-controller",
     )
     acquired, _records = locks.lock_devices(
         ["ABC"],
@@ -264,28 +264,28 @@ def test_firmware_claim_survives_worker_adb_fastboot_transition(tmp_path):
     lease_id = locks.get_lock_status("ABC")["lease_id"]
 
     repository.heartbeat(
-        "worker-local",
+        "ats-worker-controller",
         {
             "running_jobs": [],
             "devices": [{"serial": "ABC", "state": "fastboot"}],
             "suites": [],
         },
     )
-    fastboot = repository.list_devices("worker-local")[0]
+    fastboot = repository.list_devices("ats-worker-controller")[0]
     assert fastboot["state"] == "fastboot"
     assert fastboot["claimed"] is True
     assert fastboot["claim_source_type"] == "firmware"
     assert locks.get_lock_status("ABC")["lease_id"] == lease_id
 
     repository.heartbeat(
-        "worker-local",
+        "ats-worker-controller",
         {
             "running_jobs": [],
             "devices": [{"serial": "ABC", "state": "available"}],
             "suites": [],
         },
     )
-    adb = repository.list_devices("worker-local")[0]
+    adb = repository.list_devices("ats-worker-controller")[0]
     assert adb["state"] == "available"
     assert adb["claimed"] is True
     assert locks.get_lock_status("ABC")["lease_id"] == lease_id

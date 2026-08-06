@@ -38,7 +38,7 @@ class WorkspaceLocalWorkerTests(unittest.TestCase):
     def test_cluster_scope_preserves_explicit_worker_id(self):
         path = workspace_context._context_path("alice")
         path.write_text(
-            json.dumps({"scope_mode": "cluster", "worker_id": "worker-local"}),
+            json.dumps({"scope_mode": "cluster", "worker_id": "ats-worker-controller"}),
             encoding="utf-8",
         )
 
@@ -47,7 +47,7 @@ class WorkspaceLocalWorkerTests(unittest.TestCase):
         ):
             context = workspace_context.load_workspace_context("alice")
 
-        self.assertEqual(context["worker_id"], "worker-local")
+        self.assertEqual(context["worker_id"], "ats-worker-controller")
 
 
 if __name__ == "__main__":

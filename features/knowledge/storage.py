@@ -36,7 +36,10 @@ def _id(prefix: str) -> str:
 
 
 def _user_default_space_id(user_id: str, base_id: str) -> str:
-    digest = hashlib.sha1(user_id.encode("utf-8", errors="ignore")).hexdigest()[:10]
+    # This digest is a stable namespace suffix, not a security primitive.
+    digest = hashlib.sha1(
+        user_id.encode("utf-8", errors="ignore"), usedforsecurity=False
+    ).hexdigest()[:10]
     return f"{base_id}_{digest}"
 
 

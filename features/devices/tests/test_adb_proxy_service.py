@@ -97,7 +97,7 @@ async def test_logs_fall_back_to_heartbeat_summary_for_older_worker():
     repository = _Repository()
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
     )
     service = ADBProxyService()
     service.observe_worker("worker-source", {
@@ -122,7 +122,7 @@ async def test_logs_use_worker_action_when_capability_is_advertised():
     repository.workers["worker-source"]["capabilities"]["adb_proxy_logs"] = True
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
     )
     service = ADBProxyService()
     run = AsyncMock(return_value={
@@ -151,7 +151,7 @@ async def test_connect_coordinates_source_then_target_without_pair_code_in_state
     repository = _Repository()
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
         list_workers=lambda: list(repository.workers.values()),
     )
@@ -203,7 +203,7 @@ async def test_connect_refuses_device_that_is_not_available():
     repository.devices["worker-source"][0]["state"] = "allocated"
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
     )
     service = ADBProxyService()
@@ -226,7 +226,7 @@ async def test_connect_refuses_same_serial_already_attached_over_usbip():
     repository = _Repository()
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
     )
     service = ADBProxyService()
@@ -256,7 +256,7 @@ async def test_connect_refuses_same_serial_from_another_proxy_source():
     repository = _Repository()
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
     )
     service = ADBProxyService()
@@ -307,7 +307,7 @@ async def test_multiple_proxy_sources_share_one_target_and_disconnect_independen
     }]
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
         list_workers=lambda: list(repository.workers.values()),
     )
@@ -376,7 +376,7 @@ async def test_connect_adds_remaining_device_to_existing_assignment():
     })
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
         list_workers=lambda: list(repository.workers.values()),
     )
@@ -462,8 +462,8 @@ async def test_source_only_host_can_connect_to_local_target_without_cluster_mode
     repository.workers["worker-source"]["capabilities"][
         "adb_proxy_source_only"
     ] = True
-    repository.workers["worker-local"] = {
-        "id": "worker-local",
+    repository.workers["ats-worker-controller"] = {
+        "id": "ats-worker-controller",
         "name": "Controller Local Worker",
         "hostname": "controller",
         "address": "172.16.14.233",
@@ -473,10 +473,10 @@ async def test_source_only_host_can_connect_to_local_target_without_cluster_mode
             "adb_proxy_version": "adb-proxy 0.4.5",
         },
     }
-    repository.devices["worker-local"] = []
+    repository.devices["ats-worker-controller"] = []
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=False,
         list_workers=lambda: list(repository.workers.values()),
     )
@@ -503,14 +503,14 @@ async def test_source_only_host_can_connect_to_local_target_without_cluster_mode
         status = service.status()
         result = await service.connect(
             "worker-source",
-            "worker-local",
+            "ats-worker-controller",
             ["RK3572GMS1"],
         )
 
     assert result["success"] is True
     assert {
         host["worker_id"] for host in status["hosts"]
-    } == {"worker-source", "worker-local"}
+    } == {"worker-source", "ats-worker-controller"}
     source = next(
         host for host in status["hosts"]
         if host["worker_id"] == "worker-source"
@@ -528,7 +528,7 @@ async def test_connect_refuses_busy_target_before_restarting_adb():
     })
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
     )
     service = ADBProxyService()
@@ -551,7 +551,7 @@ def test_status_does_not_report_failed_or_offline_assignment_as_connected():
     repository.workers["worker-target"]["status"] = "offline"
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
         list_workers=lambda: list(repository.workers.values()),
     )
@@ -582,7 +582,7 @@ def test_status_reconciles_both_worker_processes_and_inventory():
     }]
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
         list_workers=lambda: list(repository.workers.values()),
     )
@@ -695,7 +695,7 @@ async def test_connect_rejects_worker_with_legacy_default_allow_proxy():
     ] = "adb-proxy 0.4.4"
     cluster = SimpleNamespace(
         repository=repository,
-        config=SimpleNamespace(local_worker_id="worker-local"),
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         effective_enabled=True,
         list_workers=lambda: list(repository.workers.values()),
     )

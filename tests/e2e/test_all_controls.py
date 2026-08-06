@@ -197,7 +197,7 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                     {
                         'success': True,
                         'hosts': [{
-                            'worker_id': 'worker-local',
+                            'worker_id': 'ats-worker-controller',
                             'name': 'Controller / Local Worker',
                             'address': '127.0.0.1',
                             'ssh_user': 'ui-admin',

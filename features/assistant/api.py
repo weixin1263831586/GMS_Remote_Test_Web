@@ -95,9 +95,9 @@ def _local_worker_id() -> str:
     try:
         from features.cluster import get_cluster_service
 
-        return str(get_cluster_service().config.local_worker_id or "worker-local")
+        return str(get_cluster_service().config.local_worker_id or "ats-worker-controller")
     except (AttributeError, RuntimeError):
-        return "worker-local"
+        return "ats-worker-controller"
 
 
 def _is_local_worker_id(worker_id: str | None) -> bool:

@@ -85,7 +85,7 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
                     "operation:scrcpy:test",
                     [{
                         "id": "claim-1",
-                        "device_key": "worker-local:ABC-123",
+                        "device_key": "ats-worker-controller:ABC-123",
                         "generation": 1,
                         "owner_id": "user-id",
                     }],

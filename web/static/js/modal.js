@@ -104,6 +104,14 @@ const ModalManager = {
         this._cleanupEscListener();
     },
 
+    closeTopmost() {
+        this._syncModalStack();
+        const modalId = this._activeModals[this._activeModals.length - 1];
+        if (modalId) {
+            this.close(modalId);
+        }
+    },
+
     toggle(modalId) {
         this.isOpen(modalId) ? this.close(modalId) : this.open(modalId);
     },
