@@ -53,10 +53,21 @@ def _is_tradefed(argv: list[str], comm: str = "") -> bool:
     return "tradefed.jar" in joined or "compatibilityconsole" in joined
 
 
+def _looks_like_serial(value: str) -> bool:
+    """Reject values that are clearly not device serial numbers."""
+    value = str(value or "").strip()
+    if not value or value.startswith("-"):
+        return False
+    # Device serials never contain "/" (file paths like frida scripts).
+    if "/" in value:
+        return False
+    return True
+
+
 def _extract_devices(argv: list[str]) -> set[str]:
     devices: set[str] = set()
     for index, item in enumerate(argv[:-1]):
-        if item in _SERIAL_OPTIONS and argv[index + 1] and not argv[index + 1].startswith("-"):
+        if item in _SERIAL_OPTIONS and _looks_like_serial(argv[index + 1]):
             devices.add(argv[index + 1])
     joined = " ".join(argv)
     for match in _RUNTIME_INFO.finditer(joined):
@@ -65,7 +76,10 @@ def _extract_devices(argv: list[str]) -> set[str]:
         except (OSError, ValueError, TypeError):
             continue
         for invocation in payload.get("invocations", []):
-            devices.update(str(item) for item in invocation.get("deviceIds", []) if item)
+            devices.update(
+                str(item) for item in invocation.get("deviceIds", [])
+                if item and _looks_like_serial(item)
+            )
     return devices
 
 

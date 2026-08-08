@@ -185,6 +185,10 @@ class ReportAnalysisAgent:
             archive_path,
         ]
         subprocess.run(args, check=True, capture_output=True, timeout=120)
+        # System rar/7z bypass the zip/tar safety layer; enforce the same
+        # constraints post-extraction (symlinks, path traversal, bombs).
+        from .archive import _enforce_post_extraction_safety
+        _enforce_post_extraction_safety(target_dir)
 
     def _analyze_expanded_files(self, files: list[str]) -> dict[str, Any] | None:
         xml_report = self._parse_first_xml(files)

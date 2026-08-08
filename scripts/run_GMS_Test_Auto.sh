@@ -276,9 +276,15 @@ result_matches_current_run() {
     local xml_file="$1"
     [[ -f "$xml_file" ]] || return 1
 
-    # 仅接受命令参数与当前任务一致的 VTS 结果。
-    if [[ -n "$TEST_COMMAND" ]] && ! grep -Fq "command_line_args=\"$TEST_COMMAND" "$xml_file"; then
-        return 1
+    # 仅接受命令参数与当前任务一致的结果。
+    if [[ -n "$TEST_COMMAND" ]]; then
+        local match_cmd="$TEST_COMMAND"
+        # sts-dynamic-full 在结果 XML 中可能仅记录为 sts-dynamic，
+        # 用更短的前缀匹配避免漏掉有效结果。
+        if [[ "$TEST_COMMAND" == sts-dynamic-* ]]; then
+            match_cmd="sts-dynamic"
+        fi
+        grep -Fq "command_line_args=\"$match_cmd" "$xml_file" || return 1
     fi
     if [[ -n "$Test_Module" ]] && ! grep -Fq -- "-m $Test_Module" "$xml_file"; then
         return 1

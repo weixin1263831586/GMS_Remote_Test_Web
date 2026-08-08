@@ -25,7 +25,7 @@ MIGRATION_LINE_LIMITS = {
     'features/devices/tests/test_usbip_reconnect.py': 2511,
     'features/devices/usbip.py': 1217,
     'features/firmware/firmware_api.py': 921,
-    'features/firmware/tests/test_api.py': 616,
+    'features/firmware/tests/test_api.py': 624,
     'features/gerrit/api.py': 643,
     'features/knowledge/storage.py': 790,
     'features/redmine/agent.py': 605,

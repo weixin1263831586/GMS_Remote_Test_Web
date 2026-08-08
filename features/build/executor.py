@@ -59,10 +59,28 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
             raise BuildExecutionError(f"required parameter missing: {name}")
         value = str(value or "")
         validation = str(spec.get("validation") or "standard")
-        if validation != "none" and value and not _SAFE_PARAM_RE.match(value):
+        if validation == "integer":
+            try:
+                num = int(value)
+            except ValueError as exc:
+                raise BuildExecutionError(f"parameter must be an integer: {name}") from exc
+            spec_min = spec.get("min")
+            spec_max = spec.get("max")
+            if spec_min is not None and num < int(spec_min):
+                raise BuildExecutionError(f"parameter below minimum ({spec_min}): {name}")
+            if spec_max is not None and num > int(spec_max):
+                raise BuildExecutionError(f"parameter above maximum ({spec_max}): {name}")
+            value = str(num)
+        elif validation != "none" and value and not _SAFE_PARAM_RE.match(value):
             raise BuildExecutionError(f"invalid characters in parameter: {name}")
         if spec.get("choices") and value and value not in {str(item) for item in spec.get("choices") or []}:
             raise BuildExecutionError(f"invalid choice for parameter: {name}")
+        spec_pattern = spec.get("pattern")
+        if spec_pattern and value and not re.match(str(spec_pattern), value):
+            raise BuildExecutionError(f"invalid format for parameter: {name}")
+        spec_max_length = int(spec.get("max_length") or 0)
+        if spec_max_length and len(value) > spec_max_length:
+            raise BuildExecutionError(f"parameter too long (max {spec_max_length}): {name}")
         resolved[name] = shlex.quote(value) if validation == "shell" else value
 
     def render(label: str, value: str) -> str:

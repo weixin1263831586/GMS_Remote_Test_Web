@@ -4588,7 +4588,7 @@ function submitFirmwareSharePassword() {
 }
 
 // 带认证重试的固件分享 API 调用：
-// 使用会话密码发送 body；401 时提示输入并重试一次。
+// 使用会话密码发送 body；401 或连接失败时提示输入并重试一次。
 // host 用于缓存密码与弹框展示。返回与 firmwareShareApi 一致的成功数据；失败抛 Error。
 async function firmwareShareApiWithAuth(path, body, host) {
     const buildOptions = (password) => ({
@@ -4619,8 +4619,13 @@ async function firmwareShareApiWithAuth(path, body, host) {
     const initial = await send(cached);
     const response = initial.response;
     const data = initial.data;
-    if (response.status === 401) {
-        const message = data.error || '连接远端固件主机认证失败';
+
+    // 401（认证失败）或 400（连接超时/网络不通）时，都弹框让用户输入密码重试。
+    // 因为 "timed out" 等网络错误可能源于认证环节，给用户输入密码的机会更合理。
+    const isAuthOrConnectionError = response.status === 401
+        || (response.status === 400 && !cached);
+    if (isAuthOrConnectionError) {
+        const message = data.error || '连接远端固件主机失败，请输入 SSH 登录密码重试';
         const password = await promptFirmwareSharePassword(host, message);
         if (!password) {
             throw new Error(message);
@@ -7334,7 +7339,7 @@ async function checkSshd() {
     }
 }
 
-async function checkRouting() {
+async function checkRouting(targetHost) {
     if (!requireControllerHostAction('路由检查')) return;
     // 创建弹框
     const dialog = document.createElement('div');
@@ -7374,6 +7379,11 @@ async function checkRouting() {
         if (config.ubuntu_host) {
             const testHostIp = document.getElementById('test-host-ip');
             testHostIp.value = config.ubuntu_host.split('@').pop(); // 提取IP部分
+        }
+        // 从固件错误页调用时，自动填入目标主机 IP
+        if (targetHost) {
+            const clientIp = document.getElementById('client-ip');
+            clientIp.value = targetHost.split('@').pop();
         }
     } catch (error) {
         console.error('获取配置失败:', error);
@@ -8038,11 +8048,15 @@ async function loadFirmwareShareRemoteDirectory(path) {
 function renderFirmwareShareBrowseError(host, message) {
     const list = document.getElementById('file-browser-list');
     if (!list) return;
+    const routeBtn = host
+        ? `<button class="btn-xxs" style="margin-top: 4px;" onclick="checkRouting('${escapeHtml(host)}')">📡 检查路由</button>`
+        : '';
     list.innerHTML = `
         <div class="file-browser-item" style="cursor: default; flex-direction: column; align-items: flex-start; gap: 6px;">
             <div style="color: var(--danger-color);">⚠️ 无法加载远端固件目录</div>
             <div style="color: var(--text-secondary); font-size: 12px;">主机 ${escapeHtml(host || '')}：${escapeHtml(message || '')}</div>
             <div style="color: var(--text-muted); font-size: 11px;">请确认主机可达且 SSH 凭据正确；若仍失败可关闭后重试。</div>
+            ${routeBtn}
         </div>
     `;
 }
