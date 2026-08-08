@@ -1,4 +1,11 @@
 const state={workers:[],devices:[],suites:[],jobs:[],tests:[],library:[],status:{local_worker_id:'ats-worker-controller'}};
+const dashCharts={gauges:null,pie:null,trend:null};
+let dashTrendWorker='';
+let dashTrendLastFetch=0;
+let dashRefreshTimer=null;
+let dashCountdown=10;
+let localVpnConnected=null;
+let workerVpnCache={};
 const activeDeployments=new Set();
 let clusterWorkspace={scope_mode:'cluster'};
 let selectedClusterJob=null;
@@ -44,7 +51,7 @@ function workerActivity(worker){const reported=Math.max(0,Number(worker.running_
 function workerBadge(worker){const activity=workerActivity(worker),status=worker.status==='busy'&&activity.external>0&&!activity.managed?'external_busy':worker.status;return badge(status)}
 function compactDuration(seconds){const value=Math.max(0,Math.floor(Number(seconds)||0)),days=Math.floor(value/86400),hours=Math.floor((value%86400)/3600),minutes=Math.floor((value%3600)/60);if(days)return `${days}天${hours?`${hours}小时`:''}`;if(hours)return `${hours}小时${minutes?`${minutes}分钟`:''}`;if(minutes)return `${minutes}分钟`;return `${value}秒`}
 function workerWarning(value){const text=String(value||''),inactive=text.match(/^Tradefed output has been inactive for (\d+) seconds;/);if(inactive)return `Tradefed 已 ${compactDuration(inactive[1])} 未产生输出，当前模块可能耗时较长或已停滞`;if(text==='Tradefed is running but its device could not be identified')return 'Tradefed 正在运行，但无法识别其占用设备';if(text==='An external Tradefed process has no identifiable device; new tests are blocked')return '外部 Tradefed 无法识别占用设备，已阻止派发新测试';return text}
-function workerTestsMarkup(worker,tests){const activity=workerActivity(worker),visibleExternal=tests.filter(test=>test.source==='external').length,visibleManaged=tests.length-visibleExternal,hiddenExternal=Math.max(0,activity.external-visibleExternal),hiddenManaged=Math.max(0,activity.managed-visibleManaged),hidden=hiddenExternal+hiddenManaged;let rows=tests.map(test=>`<div><strong>${test.source==='external'?'手工/外部':'平台'} ${esc(test.suite_type||'XTS')}</strong> · PID ${esc(test.pid||'-')} · 设备 ${esc((test.devices||[]).join(', ')||'未识别')} · 运行 ${Math.floor((test.elapsed_seconds||0)/3600)}h</div>`).join('');if(hidden){const kind=hiddenExternal&&!hiddenManaged?'外部':hiddenManaged&&!hiddenExternal?'平台':'运行中';rows+=`<div class="muted">检测到 ${hidden} 个${kind}测试，详情暂不可用</div>`}return rows||'<span class="muted">当前无测试</span>'}
+function workerTestsMarkup(worker,tests){const activity=workerActivity(worker),visibleExternal=tests.filter(test=>test.source==='external').length,visibleManaged=tests.length-visibleExternal,hiddenExternal=Math.max(0,activity.external-visibleExternal),hiddenManaged=Math.max(0,activity.managed-visibleManaged),hidden=hiddenExternal+hiddenManaged;let rows=tests.map(test=>`<div><strong>${test.source==='external'?'手工/外部':'平台'} ${esc(test.suite_type||'XTS')}</strong> · PID ${esc(test.pid||'-')} · 设备 ${esc((test.devices||[]).join(', ')||'未识别')} · 运行 ${compactDuration(test.elapsed_seconds)}</div>`).join('');if(hidden){const kind=hiddenExternal&&!hiddenManaged?'外部':hiddenManaged&&!hiddenExternal?'平台':'运行中';rows+=`<div class="muted">检测到 ${hidden} 个${kind}测试，详情暂不可用</div>`}return rows||'<span class="muted">当前无测试</span>'}
 function localWorkerId(){return state.status.local_worker_id||'ats-worker-controller'}
 function terminalJob(status){return ['completed','failed','cancelled'].includes(status)}
 function renderModeStatus(){
@@ -54,6 +61,227 @@ function renderModeStatus(){
  modeHint.textContent=clusterMode
   ? `集群模式 · 本机 ${localId} · 远端派发${state.status.remote_dispatch_enabled?'已启用':'未启用'}`
   : `单机模式 · 本机 ${localId}`;
+}
+function renderDashboard(){
+ const hasECharts=typeof echarts!=='undefined';
+ const statsEl=document.querySelector('#dashboard-stats');if(!statsEl)return;
+ // 1. Overview stat cards
+ const workersOnline=state.workers.filter(w=>w.status!=='offline').length;
+ const workersOffline=state.workers.filter(w=>w.status==='offline').length;
+ const devCounts=state.devices.reduce((acc,d)=>{acc[d.state]=(acc[d.state]||0)+1;return acc},{});
+ const devAvailable=devCounts.available||0,devBusy=(devCounts.external_busy||0)+(devCounts.allocated||0),devOffline=(devCounts.offline||0)+(devCounts.unknown||0);
+ const allActivity=state.workers.reduce((acc,w)=>{const a=workerActivity(w);acc.external+=a.external;acc.managed+=a.managed;return acc},{external:0,managed:0});
+ const jobsActive=state.jobs.filter(j=>!terminalJob(j.status)).length;
+ const jobsCompleted=state.jobs.filter(j=>j.status==='completed').length;
+ const jobsFailed=state.jobs.filter(j=>j.status==='failed').length;
+ const suitesAvailable=state.suites.filter(s=>s.available).length;
+ statsEl.innerHTML=[
+  {num:workersOnline,label:'主机',sub:workersOffline?`<span class="bad">${workersOffline} 离线</span>`:`${state.workers.length} 总计`},
+  {num:`${devAvailable}/${devAvailable+devBusy+devOffline}`,label:'设备可用/总',sub:`<span class="warn">${devBusy} 占用</span>${devOffline?` · <span class="bad">${devOffline} 离线</span>`:''}`},
+  {num:allActivity.external+allActivity.managed,label:'测试运行',sub:`<span class="warn">${allActivity.external} 外部</span> · ${allActivity.managed} 平台`},
+  {num:jobsActive,label:'任务运行',sub:`${jobsCompleted} 完成${jobsFailed?` · <span class="bad">${jobsFailed} 失败</span>`:''}`},
+  {num:suitesAvailable,label:'可用套件',sub:`${new Set(state.suites.filter(s=>s.available).map(s=>s.suite_type)).size} 种类型`},
+ ].map(c=>`<div class="dash-stat-card"><div class="num-label"><span class="num">${c.num}</span><span class="label">${c.label}</span></div><div class="sub">${c.sub}</div></div>`).join('');
+ // 2-4. ECharts: init DOM once, then only update data
+ if(hasECharts){
+  initDashChartContainers();
+  updateDashGauges();
+  updateDashDevicePie(devCounts);
+  updateDashTrend();
+ }
+ const updateEl=document.querySelector('#dash-last-update');
+ if(updateEl)updateEl.textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});
+ // 5. Active tests across all workers, grouped by host
+ const testsEl=document.querySelector('#dashboard-tests');
+ if(testsEl){
+  const tests=state.tests.filter(t=>t.status==='running');
+  const localId=localWorkerId();
+  const byWorker={};
+  tests.forEach(t=>{const wid=t.worker_id||'-';(byWorker[wid]=byWorker[wid]||[]).push(t)});
+  const sortedWorkers=Object.keys(byWorker).sort((a,b)=>(a===localId?-1:b===localId?1:String(a).localeCompare(String(b),undefined,{numeric:true})));
+  let html=`<div class="dash-panel-title">当前测试执行 (${tests.length})</div><div style="flex:1;min-height:0;overflow:auto">`;
+  if(!tests.length){html+='<div class="dash-empty">当前无运行中的测试</div>'}
+  else{
+   sortedWorkers.forEach(wid=>{
+    const worker=state.workers.find(w=>w.id===wid);
+    html+=`<div class="dash-test-group"><div class="dash-test-group-title">${esc(worker?.name||wid)}</div>`;
+    byWorker[wid].forEach(t=>{const ext=t.source==='external';html+=`<div class="dash-test-row"><span class="badge-mini ${ext?'ext':'mgd'}">${ext?'外部':'平台'}</span><strong>${esc(t.suite_type||'XTS')}</strong><span class="dev">${esc((t.devices||[]).join(', ')||'未识别')}</span><span class="dur">${compactDuration(t.elapsed_seconds)}</span></div>`});
+    html+='</div>';
+   });
+  }
+  html+='</div>';
+  testsEl.innerHTML=html;
+ }
+}
+const dashColor={text:'#9299a8',green:'#48c78e',yellow:'#e5b94f',red:'#ef6572',blue:'#4f8cff',purple:'#a78bfa',muted:'#6b7280'};
+function initDashChartContainers(){
+ const gaugesEl=document.querySelector('#dash-gauges');
+ if(gaugesEl&&!gaugesEl.dataset.init){
+  gaugesEl.innerHTML='<div class="dash-panel-title" style="margin-bottom:2px">CPU / 内存 / 磁盘利用率</div><div class="dash-gauges-host-tabs" id="dash-gauges-host-tabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:0"></div><div id="dash-gauges-chart" style="width:100%;flex:1;min-height:120px"></div><div id="dash-gauges-detail" style="font-size:10px;color:var(--muted);text-align:center;padding-top:2px;border-top:1px solid var(--border);margin-top:0"></div>';
+  gaugesEl.dataset.init='1';
+ }
+ const pieEl=document.querySelector('#dash-device-pie');
+ if(pieEl&&!pieEl.dataset.init){
+  pieEl.innerHTML='<div class="dash-panel-title" id="dash-pie-title">设备状态分布</div><div id="dash-pie-hosts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;flex:1;min-height:0;align-content:stretch"></div>';
+  pieEl.dataset.init='1';
+ }
+ const trendEl=document.querySelector('#dash-trend');
+ if(trendEl&&!trendEl.dataset.init){
+  trendEl.innerHTML='<div class="dash-panel-title">资源趋势 (最近 24 小时)</div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><div class="dash-trend-tabs" id="dash-trend-tabs" style="display:flex;gap:4px;flex-wrap:wrap"></div><span style="font-size:9px;color:'+dashColor.muted+';font-weight:400;white-space:nowrap"><span style="display:inline-block;width:8px;height:3px;border-radius:2px;background:'+dashColor.blue+';vertical-align:middle"></span> CPU% <span style="display:inline-block;width:8px;height:3px;border-radius:2px;background:'+dashColor.green+';vertical-align:middle;margin-left:4px"></span> 内存%</span></div><div id="dash-trend-chart" style="width:100%;flex:1;min-height:120px"></div>';
+  trendEl.dataset.init='1';
+ }
+}
+function getDashChart(key,selector){
+ if(dashCharts[key])return dashCharts[key];
+ const el=document.querySelector(selector);
+ if(!el)return null;
+ const chart=echarts.init(el);
+ dashCharts[key]=chart;
+ return chart;
+}
+let dashGaugesWorker='';
+function updateDashGauges(){
+ const workers=state.workers.filter(w=>w.status!=='offline');
+ const localId=localWorkerId();
+ // Sort with local worker first
+ workers.sort((a,b)=>(a.id===localId?-1:b.id===localId?1:0));
+ const tabsEl=document.querySelector('#dash-gauges-host-tabs');
+ if(tabsEl){
+  tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w.id===dashGaugesWorker?' active':''}" onclick="dashGaugesWorker='${esc(w.id)}';updateDashGauges()">${esc(w.name||w.id)}</button>`).join('');
+ }
+ if(!dashGaugesWorker&&workers.length)dashGaugesWorker=workers[0].id;
+ const worker=workers.find(w=>w.id===dashGaugesWorker)||workers[0];
+ if(!worker)return;
+ const cpu=Number(worker.cpu_percent||0),mem=Number(worker.memory_percent||0);
+ const diskTotal=Number(worker.disk_total_gb||0);
+ const diskFree=Number(worker.disk_free_gb||0);
+ const diskHasData=diskTotal>0;
+ const diskUsed=diskHasData?100*(1-diskFree/diskTotal):0;
+ const memTotal=Number(worker.memory_total_gb||0);
+ const memAvail=Number(worker.memory_available_gb||0);
+ const chart=getDashChart('gauges','#dash-gauges-chart');if(!chart)return;
+ chart.setOption({
+ series:[
+  {name:'CPU',type:'gauge',center:['16%','52%'],radius:'85%',min:0,max:100,startAngle:200,endAngle:-20,splitNumber:4,
+   axisLine:{lineStyle:{width:8,color:[[0.7,dashColor.green],[0.85,dashColor.yellow],[1,dashColor.red]]}},
+   axisTick:{show:false},splitLine:{length:8,lineStyle:{color:'#444'}},axisLabel:{distance:8,color:dashColor.muted,fontSize:8},
+   pointer:{width:3,length:'55%'},itemStyle:{color:cpu>=85?dashColor.red:cpu>=70?dashColor.yellow:dashColor.green},
+   detail:{valueAnimation:true,formatter:'{value}%',color:'#e7eaf0',fontSize:12,offsetCenter:[0,'28%']},title:{show:true,offsetCenter:[0,'52%'],color:dashColor.muted,fontSize:10},
+   data:[{value:Math.round(cpu*10)/10,name:'CPU'}]},
+  {name:'内存',type:'gauge',center:['50%','52%'],radius:'85%',min:0,max:100,startAngle:200,endAngle:-20,splitNumber:4,
+   axisLine:{lineStyle:{width:8,color:[[0.7,dashColor.green],[0.85,dashColor.yellow],[1,dashColor.red]]}},
+   axisTick:{show:false},splitLine:{length:8,lineStyle:{color:'#444'}},axisLabel:{distance:8,color:dashColor.muted,fontSize:8},
+   pointer:{width:3,length:'55%'},itemStyle:{color:mem>=85?dashColor.red:mem>=70?dashColor.yellow:dashColor.green},
+   detail:{valueAnimation:true,formatter:'{value}%',color:'#e7eaf0',fontSize:12,offsetCenter:[0,'28%']},title:{show:true,offsetCenter:[0,'52%'],color:dashColor.muted,fontSize:10},
+   data:[{value:Math.round(mem*10)/10,name:'内存'}]},
+  {name:'磁盘',type:'gauge',center:['84%','52%'],radius:'85%',min:0,max:100,startAngle:200,endAngle:-20,splitNumber:4,
+   axisLine:{lineStyle:{width:8,color:[[0.7,dashColor.green],[0.85,dashColor.yellow],[1,dashColor.red]]}},
+   axisTick:{show:false},splitLine:{length:8,lineStyle:{color:'#444'}},axisLabel:{distance:8,color:dashColor.muted,fontSize:8},
+   pointer:{show:diskHasData,width:3,length:'55%'},itemStyle:{color:diskUsed>=85?dashColor.red:diskUsed>=70?dashColor.yellow:dashColor.green},
+   detail:{valueAnimation:true,formatter:diskHasData?'{value}%':'N/A',color:'#e7eaf0',fontSize:diskHasData?12:10,offsetCenter:[0,'28%']},title:{show:true,offsetCenter:[0,'52%'],color:dashColor.muted,fontSize:10},
+   data:[{value:diskHasData?Math.round(diskUsed*10)/10:0,name:'磁盘'}]},
+ ]
+});
+ const detailEl=document.querySelector('#dash-gauges-detail');
+ if(detailEl){
+  const memUsed=memTotal>0?(memTotal-memAvail):0;
+  const diskStr=diskTotal>0?`${oneDecimal(diskTotal-diskFree)}/${oneDecimal(diskTotal)}G`:(diskFree>0?`${oneDecimal(diskFree)}G 可用`:'未知');
+  detailEl.innerHTML=`CPU ${Math.round(cpu)}% · 内存 ${oneDecimal(memUsed)}/${oneDecimal(memTotal)}G · 磁盘 ${diskStr} · 负载 ${oneDecimal(worker.load_1m)}`;
+ }
+}
+const dashPieNameToState={'可用':'available','外部占用':'external_busy','已分配':'allocated','Fastboot':'fastboot','离线':'offline','未知':'unknown'};
+const dashStateColors={available:'#48c78e',external_busy:'#e5b94f',allocated:'#a78bfa',fastboot:'#4f8cff',offline:'#ef6572',unknown:'#6b7280'};
+const dashStateNames={available:'可用',external_busy:'外部占用',allocated:'已分配',fastboot:'Fastboot',offline:'离线',unknown:'未知'};
+function updateDashDevicePie(devCounts){
+ const titleEl=document.querySelector('#dash-pie-title');
+ const hostsEl=document.querySelector('#dash-pie-hosts');if(!hostsEl)return;
+ const localId=localWorkerId();
+ const workers=state.workers.filter(w=>w.status!=='offline').sort((a,b)=>(a.id===localId?-1:b.id===localId?1:0));
+ const workerIds=new Set(workers.map(w=>w.id));
+ if(titleEl)titleEl.textContent='设备状态分布 ('+state.devices.length+')';
+ // Dispose charts for workers no longer present
+ Object.keys(dashCharts).forEach(k=>{if(k.startsWith('pie_')){const wid=k.slice(4);if(!workerIds.has(wid)){dashCharts[k].dispose();delete dashCharts[k]}}});
+ // Build/repair DOM structure only if worker set changed
+ const currentIds=new Set(Array.from(hostsEl.querySelectorAll('[data-pie-worker]')).map(el=>el.dataset.pieWorker));
+ const needRebuild=[...workerIds].sort().join(',')!==([...currentIds].sort().join(','));
+ if(needRebuild){
+  hostsEl.innerHTML=workers.map(w=>{
+   const wdevs=state.devices.filter(d=>d.worker_id===w.id);
+   return `<div data-pie-worker="${esc(w.id)}" style="display:flex;flex-direction:column;align-items:center;min-height:0"><div class="dash-pie-host-label" style="font-size:10px;color:var(--blue);font-weight:600;margin-bottom:2px">${esc(w.name||w.id)} (<span class="dash-pie-count">${wdevs.length}</span>)</div><div id="dash-pie-${esc(w.id)}" style="width:100%;flex:1;min-height:120px"></div></div>`;
+  }).join('');
+  // Dispose all pie charts to force re-init against new DOM
+  Object.keys(dashCharts).forEach(k=>{if(k.startsWith('pie_')){dashCharts[k].dispose();delete dashCharts[k]}});
+ }
+ workers.forEach(w=>{
+  const wdevs=state.devices.filter(d=>d.worker_id===w.id);
+  const labelEl=hostsEl.querySelector(`[data-pie-worker="${CSS.escape(w.id)}"] .dash-pie-count`);
+  if(labelEl)labelEl.textContent=wdevs.length;
+  const el=document.querySelector('#dash-pie-'+CSS.escape(w.id));
+  if(!el)return;
+  const data=Object.entries(dashStateNames).map(([key,name])=>{
+   const count=wdevs.filter(d=>d.state===key).length;
+   return {name,value:count,itemStyle:{color:dashStateColors[key]},stateKey:key,workerId:w.id};
+  }).filter(d=>d.value>0);
+  let chart=dashCharts['pie_'+w.id];
+  if(!chart){chart=echarts.init(el);dashCharts['pie_'+w.id]=chart;
+   chart.setOption({
+    tooltip:{trigger:'item',
+     formatter:p=>{
+      const devs=wdevs.filter(d=>d.state===p.data.stateKey);
+      if(!devs.length)return p.name+': 0';
+      return `${p.name} (${devs.length})<br/>`+devs.map(d=>'· '+esc(d.serial)).sort().join('<br/>');
+     },
+     backgroundColor:'rgba(29,33,43,.95)',borderColor:'#303642',textStyle:{color:'#e7eaf0',fontSize:11},
+     extraCssText:'max-height:260px;overflow:auto;white-space:nowrap;'
+    },
+    series:[{type:'pie',radius:['30%','62%'],center:['50%','50%'],
+     label:{show:true,color:dashColor.text,fontSize:9,formatter:'{c}'},
+     labelLine:{length:4,length2:4},
+     itemStyle:{borderColor:'#1d212b',borderWidth:1}}]
+   });
+  }
+  chart.setOption({series:[{data:data.length?data:[{value:1,name:'无设备',itemStyle:{color:'#333'}}]}]});
+ });
+}
+function renderDashPieDetail(){/* details now shown in tooltip */}
+async function updateDashTrend(force=false){
+ const el=document.querySelector('#dash-trend');if(!el)return;
+ const tabsEl=document.querySelector('#dash-trend-tabs');
+ const now=Date.now();
+ if(force||now-dashTrendLastFetch>60000){
+  dashTrendLastFetch=now;
+  try{
+   const d=await api('/api/cluster/metrics/history');
+   dashMetricsHistory=d.metrics||[];
+  }catch(e){dashMetricsHistory=[]}
+ }
+ const localId=localWorkerId();
+ const workers=[...new Set((dashMetricsHistory||[]).map(m=>m.worker_id))];
+ workers.sort((a,b)=>(a===localId?-1:b===localId?1:String(a).localeCompare(String(b),undefined,{numeric:true})));
+ if(!dashTrendWorker&&workers.length)dashTrendWorker=workers[0];
+ if(tabsEl)tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w===dashTrendWorker?' active':''}" onclick="dashTrendWorker='${esc(w)}';updateDashTrend()">${esc(w)}</button>`).join('')||'<span class="dash-empty">无数据</span>';
+ const byWorker={};
+ (dashMetricsHistory||[]).forEach(m=>{(byWorker[m.worker_id]=byWorker[m.worker_id]||[]).push(m)});
+ const data=byWorker[dashTrendWorker]||[];
+ if(!data.length)return;
+ // Build x-axis: show hour label only when the hour changes, blank otherwise
+ let lastHour=-1;
+ const times=data.map(m=>{try{const d=new Date(m.recorded_at);const h=d.getHours();if(h!==lastHour){lastHour=h;return(h<10?'0':'')+h+':00'}return ''}catch(e){return''}});
+ // Ensure the first label is always shown
+ if(times.length)times[0]=data[0].recorded_at?(()=>{try{const d=new Date(data[0].recorded_at);return(d.getHours()<10?'0':'')+d.getHours()+':00'}catch(e){return''}})():'';
+ const cpu=data.map(m=>Math.round(Number(m.cpu_percent)*10)/10);
+ const mem=data.map(m=>Math.round(Number(m.memory_percent)*10)/10);
+ const chart=getDashChart('trend','#dash-trend-chart');if(!chart)return;
+ chart.setOption({
+  tooltip:{trigger:'axis',formatter:params=>{const m=data[params[0].dataIndex];const ts=m?(()=>{try{return new Date(m.recorded_at).toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return m.recorded_at}})():'';return ts+'<br/>'+params.map(p=>p.marker+' '+p.seriesName+': '+p.value+'%').join('<br/>')}},
+  grid:{left:35,right:15,top:8,bottom:25},
+  xAxis:{type:'category',data:times,axisLabel:{color:dashColor.muted,fontSize:9,interval:0,formatter:val=>val||' '},axisLine:{lineStyle:{color:'#303642'}},axisTick:{alignWithLabel:false}},
+  yAxis:{type:'value',max:100,axisLabel:{color:dashColor.muted,fontSize:9},splitLine:{lineStyle:{color:'rgba(48,54,66,.5)'}}},
+  series:[
+   {name:'CPU %',type:'line',data:cpu,smooth:true,symbol:'none',lineStyle:{width:2,color:dashColor.blue},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(79,140,255,.25)'},{offset:1,color:'rgba(79,140,255,0)'}]}}},
+   {name:'内存 %',type:'line',data:mem,smooth:true,symbol:'none',lineStyle:{width:2,color:dashColor.green},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(72,199,142,.2)'},{offset:1,color:'rgba(72,199,142,0)'}]}}},
+  ]
+ });
 }
 function activeDevices(workerId){return state.devices.filter(device=>device.worker_id===workerId&&!['offline','unknown'].includes(device.state))}
 function workerAssessment(worker){
@@ -83,6 +311,7 @@ function render(){
  const matches=value=>!query||String(value||'').toLowerCase().includes(query);
  state.workers.sort((a,b)=>(a.id===localId?-1:b.id===localId?1:String(a.name||a.id||'').localeCompare(String(b.name||b.id||''),undefined,{numeric:true})));
  renderModeStatus();
+ renderDashboard();
  document.querySelector('#workers').innerHTML=state.workers.filter(worker=>matches([worker.id,worker.name,worker.hostname,worker.address].join(' '))).map(worker=>{
   const tests=state.tests.filter(test=>test.worker_id===worker.id);
   const hasActiveJob=state.jobs.some(job=>job.assigned_worker_id===worker.id&&!terminalJob(job.status));
@@ -96,9 +325,9 @@ function render(){
   if(worker.id!==localId)menuItems.push(`<button data-action="redeploy-worker" data-worker-id="${esc(worker.id)}" data-ssh-host="${esc(sshHost)}">重新部署</button>`);
   if(worker.id!==localId)menuItems.push(`<button class="danger" data-action="delete-worker" data-worker-id="${esc(worker.id)}" ${deleteBlocked?'disabled':''}>${deleteBlocked?'删除(请先停测试)':'删除主机'}</button>`);
   const moreMenu=menuItems.length?`<span class="worker-menu-wrap"><button class="worker-menu-toggle" data-action="toggle-worker-menu">⋯</button><div class="worker-menu">${menuItems.join('')}</div></span>`:'';
-  return `<div class="card"><div class="card-title"><span>${esc(worker.name||worker.id)}</span><span>${workerBadge(worker)}${configButton}${moreMenu}</span></div><p>${esc(worker.hostname)} · ${esc(worker.id)} · ${esc(worker.address||'')}</p><div class="meta"><div class="meta-row"><span>Agent ${esc(worker.agent_version||'-')}</span><span>心跳 ${relativeTime(worker.last_heartbeat_at)}</span><span>CPU ${oneDecimal(worker.cpu_percent)}%</span><span>内存 ${oneDecimal(worker.memory_percent)}%（可用 ${oneDecimal(worker.memory_available_gb)}G）</span><span>磁盘 ${oneDecimal(worker.disk_free_gb)}G</span><span>系统负载 ${oneDecimal(worker.load_1m)}</span></div><div class="meta-row"><span>设备 ${assessment.devices.length}</span><span>套件 ${state.suites.filter(suite=>suite.worker_id===worker.id&&suite.available).length}</span><span>任务 ${worker.running_jobs}/${worker.max_jobs}（外部 ${worker.external_jobs||0}）</span></div></div><div class="host-assessment">${assessment.labels.map(l=>`<span class="assessment ${l.cls}">${l.text}</span>`).join('')}</div><div class="capabilities"><span class="cap ${worker.capabilities?.ssh_user?'ok':''}">终端 ${worker.capabilities?.ssh_user?'✓':'未配置'}</span><span class="cap ${worker.capabilities?.novnc_port?'ok':''}">noVNC ${worker.capabilities?.novnc_port?'✓':'不可用'}</span><span class="cap ${worker.capabilities?.tradefed?'ok':''}">Tradefed ${worker.capabilities?.tradefed?'✓':'不可用'}</span></div><div class="host-tests">${workerTestsMarkup(worker,tests)}</div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(workerWarning(value))}</div>`).join('')}</div>`;
+  return `<div class="card"><div class="card-title"><span>${esc(worker.name||worker.id)}</span><span>${workerBadge(worker)}${configButton}${moreMenu}</span></div><p>${esc(worker.hostname)} · ${esc(worker.id)} · ${esc(worker.address||'')}</p><div class="meta"><div class="meta-row"><span>Agent ${esc(worker.agent_version||'-')}</span><span>心跳 ${relativeTime(worker.last_heartbeat_at)}</span><span>CPU ${oneDecimal(worker.cpu_percent)}%</span><span>内存 ${oneDecimal(worker.memory_percent)}%（可用 ${oneDecimal(worker.memory_available_gb)}G）</span><span>磁盘 ${oneDecimal(worker.disk_free_gb)}G</span><span>系统负载 ${oneDecimal(worker.load_1m)}</span></div><div class="meta-row"><span>设备 ${assessment.devices.length}</span><span>套件 ${state.suites.filter(suite=>suite.worker_id===worker.id&&suite.available).length}</span><span>任务 ${worker.running_jobs}/${worker.max_jobs}（外部 ${worker.external_jobs||0}）</span></div></div><div class="host-assessment">${assessment.labels.map(l=>`<span class="assessment ${l.cls}">${l.text}</span>`).join('')}</div><div class="capabilities"><span class="cap ${worker.capabilities?.ssh_user?'ok':''}">终端 ${worker.capabilities?.ssh_user?'✓':'未配置'}</span><span class="cap ${worker.capabilities?.novnc_port?'ok':''}">noVNC ${worker.capabilities?.novnc_port?'✓':'不可用'}</span><span class="cap ${worker.capabilities?.tradefed?'ok':''}">Tradefed ${worker.capabilities?.tradefed?'✓':'不可用'}</span>${worker.id===localId?`<span class="cap ${localVpnConnected===true?'ok':localVpnConnected===false?'':''}">VPN ${localVpnConnected===true?'✓':localVpnConnected===false?'✗':'…'}</span>`:`<span class="cap ${(workerVpnCache[worker.id])===true?'ok':(workerVpnCache[worker.id])===false?'':''}">VPN ${(workerVpnCache[worker.id])===true?'✓':(workerVpnCache[worker.id])===false?'✗':'…'}</span>`}</div><div class="host-tests">${workerTestsMarkup(worker,tests)}</div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(workerWarning(value))}</div>`).join('')}</div>`;
  }).join('')||'<div class="empty">暂无 Worker，请点击“添加主机”查看接入命令</div>';
- document.querySelector('#devices').innerHTML=state.devices.filter(device=>!['offline','unknown'].includes(device.state)&&matches([device.worker_id,device.serial,device.properties?.model,device.properties?.product].join(' '))).map(device=>{const t=device.transport||'local_usb';const tInfo={'local_usb':['本地','t-local'],'usbip':['USB/IP','t-usbip'],'adb_proxy':['ADB Proxy','t-proxy']}[t]||[t,'t-local'];const p=device.properties||{};let source='-';if(t==='adb_proxy')source=p.adb_proxy_source_name||p.adb_proxy_source_worker_id||'-';else if(t==='usbip')source=p.usbip_source_host||'-';else if(device.worker_id)source=device.worker_id;return `<tr><td>${esc(device.worker_id)}</td><td>${esc(device.serial)}</td><td><span class="status ${esc(tInfo[1])}">${esc(tInfo[0])}</span></td><td>${esc(source)}</td><td>${badge(device.state)}</td><td>${esc(p.model||p.product||'')}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">暂无匹配的在线设备</td></tr>';
+ document.querySelector('#devices').innerHTML=state.devices.filter(device=>matches([device.worker_id,device.serial,device.properties?.model,device.properties?.product].join(' '))).map(device=>{const t=device.transport||'local_usb';const tInfo={'local_usb':['本地','t-local'],'usbip':['USB/IP','t-usbip'],'adb_proxy':['ADB Proxy','t-proxy']}[t]||[t,'t-local'];const p=device.properties||{};let source='-';if(t==='adb_proxy')source=p.adb_proxy_source_name||p.adb_proxy_source_worker_id||'-';else if(t==='usbip')source=p.usbip_source_host||'-';else if(device.worker_id)source=device.worker_id;return `<tr><td>${esc(device.worker_id)}</td><td>${esc(device.serial)}</td><td><span class="status ${esc(tInfo[1])}">${esc(tInfo[0])}</span></td><td>${esc(source)}</td><td>${badge(device.state)}</td><td>${esc(p.model||p.product||'')}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">暂无匹配的设备</td></tr>';
  document.querySelector('#suites').innerHTML=state.suites.filter(suite=>suite.available&&matches([suite.worker_id,suite.suite_type,suite.suite_version,suite.tools_path].join(' '))).map(suite=>`<tr><td>${esc(suite.worker_id)}</td><td>${esc(suite.suite_type)}</td><td>${esc(suite.suite_version)}</td><td title="${esc(suite.tools_path)}">${esc(suite.tools_path)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">暂无匹配的可用套件</td></tr>';
  const jobFilter=document.querySelector('#job-status-filter')?.value||'';
  document.querySelector('#jobs').innerHTML=state.jobs.filter(job=>(!jobFilter||(jobFilter==='active'?!terminalJob(job.status):job.status===jobFilter))&&matches([job.id,job.assigned_worker_id,job.status,(job.leases||[]).map(item=>item.serial).join(' ')].join(' '))).map(job=>{
@@ -157,7 +386,15 @@ async function applyClusterWorkspace(next,navigate=false){
  clusterWorkspace={...clusterWorkspace,...(next||{})};applyingClusterWorkspace=true;
  try{renderModeStatus();renderJobForm();const worker=document.querySelector('#job-worker');if(clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id&&Array.from(worker.options).some(o=>o.value===clusterWorkspace.worker_id)){worker.value=clusterWorkspace.worker_id;updateJobOptions()}const suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(clusterWorkspace.suite_key&&Array.from(suite.options).some(o=>o.value===clusterWorkspace.suite_key))suite.value=clusterWorkspace.suite_key;const wanted=clusterDeviceId(worker.value,(clusterWorkspace.device_ids||[])[0]);if(wanted&&Array.from(device.options).some(o=>o.value===wanted))device.value=wanted;if(navigate&&clusterWorkspace.cluster_job_id&&state.jobs.some(j=>j.id===clusterWorkspace.cluster_job_id))await showJob(clusterWorkspace.cluster_job_id,false)}finally{applyingClusterWorkspace=false}
 }
-async function refresh(){if(refreshPromise)return refreshPromise;const button=document.querySelector('#refresh'),original=button?.textContent||'↻ 刷新';if(button){button.disabled=true;button.textContent='刷新中…'}refreshPromise=(async()=>{const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]],results=await Promise.allSettled(requests.map(([,path])=>api(path))),errors=[];results.forEach((result,index)=>{const [stateKey,,payloadKey]=requests[index];if(result.status==='fulfilled')state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;else errors.push(`${stateKey}: ${result.reason.message}`)});render();await applyClusterWorkspace(clusterWorkspace);if(errors.length)toast(`部分数据刷新失败：${errors.join('；')}`)})().finally(()=>{refreshPromise=null;if(button){button.disabled=false;button.textContent=original}});return refreshPromise}
+async function checkLocalVpn(){try{const d=await api('/api/vpn/status');localVpnConnected=Boolean(d.connected)}catch(e){localVpnConnected=null}}
+async function checkWorkerVpn(){
+ const localId=localWorkerId();
+ const promises=state.workers.filter(w=>w.status!=='offline').map(async w=>{
+  try{const d=await api(`/api/cluster/workers/${encodeURIComponent(w.id)}/vpn-status`);workerVpnCache[w.id]=d.connected}catch(e){workerVpnCache[w.id]=null}
+ });
+ await Promise.all(promises);
+}
+async function refresh(){if(refreshPromise)return refreshPromise;const button=document.querySelector('#refresh'),original=button?.textContent||'↻ 刷新';if(button){button.disabled=true;button.textContent='刷新中…'}refreshPromise=(async()=>{const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]],results=await Promise.allSettled(requests.map(([,path])=>api(path))),errors=[];results.forEach((result,index)=>{const [stateKey,,payloadKey]=requests[index];if(result.status==='fulfilled')state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;else errors.push(`${stateKey}: ${result.reason.message}`)});checkLocalVpn().catch(()=>{});checkWorkerVpn().then(render).catch(()=>{});render();await applyClusterWorkspace(clusterWorkspace);if(errors.length)toast(`部分数据刷新失败：${errors.join('；')}`)})().finally(()=>{refreshPromise=null;if(button){button.disabled=false;button.textContent=original}});return refreshPromise}
 async function createJob(){try{const device=document.querySelector('#job-device').value;const body={worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1};if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`任务已创建 ${d.job.id}`);syncClusterWorkspace({cluster_job_id:d.job.id,attempt_id:d.job.current_attempt_id||'',worker_id:d.job.assigned_worker_id||body.worker_id,device_ids:(d.job.leases||[]).map(x=>x.device_id),suite_key:d.job.suite_key||body.suite_key});await refresh();showJob(d.job.id)}catch(e){toast(e.message)}}
 function displayJobData(job){
  const client=String(job?.client_display_id||job?.owner_id||'unknown');
@@ -329,4 +566,13 @@ document.addEventListener('click',event=>{
 document.querySelector('#cluster-search')?.addEventListener('input',render);
 document.querySelector('#job-status-filter')?.addEventListener('change',render);
 window.addEventListener('gms:embedded-workspace',event=>applyClusterWorkspace(event.detail?.context||{},event.detail?.type==='workspace-context-navigate').catch(e=>toast(e.message)));
-window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;document.querySelector('#refresh').onclick=refresh;document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-worker').onchange=()=>{updateJobOptions();syncClusterWorkspace()};document.querySelector('#job-suite').onchange=()=>syncClusterWorkspace();document.querySelector('#job-device').onchange=()=>syncClusterWorkspace();document.querySelector('#create-job').onclick=createJob;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>openClusterJobReport();document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.addEventListener('click',e=>{if(!e.target.closest('.worker-menu-wrap'))document.querySelectorAll('.worker-menu.open').forEach(m=>m.classList.remove('open'))});refresh();setInterval(refresh,15000);
+window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;window.updateDashGauges=updateDashGauges;window.updateDashTrend=updateDashTrend;window.renderDashPieDetail=renderDashPieDetail;document.querySelector('#refresh').onclick=refresh;const dashRefreshBtn=document.querySelector('#dash-refresh-charts');if(dashRefreshBtn)dashRefreshBtn.onclick=()=>{dashTrendLastFetch=0;refresh()};document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-worker').onchange=()=>{updateJobOptions();syncClusterWorkspace()};document.querySelector('#job-suite').onchange=()=>syncClusterWorkspace();document.querySelector('#job-device').onchange=()=>syncClusterWorkspace();document.querySelector('#create-job').onclick=createJob;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>openClusterJobReport();document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.addEventListener('click',e=>{if(!e.target.closest('.worker-menu-wrap'))document.querySelectorAll('.worker-menu.open').forEach(m=>m.classList.remove('open'))});
+// Tab switching
+document.querySelectorAll('.dash-tab').forEach(btn=>btn.addEventListener('click',()=>{
+ document.querySelectorAll('.dash-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+ const tab=btn.dataset.dashTab;
+ document.getElementById('tab-dashboard').hidden=tab!=='dashboard';
+ document.getElementById('tab-management').hidden=tab!=='management';
+ if(tab==='dashboard'){setTimeout(()=>{Object.values(dashCharts).forEach(c=>c&&c.resize());if(typeof updateDashTrend==='function')updateDashTrend(true)},50)}
+}));
+refresh();setInterval(refresh,10000);

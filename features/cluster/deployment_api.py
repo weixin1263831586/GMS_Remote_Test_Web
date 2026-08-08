@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -38,6 +39,7 @@ from .worker_auth import persist_worker_token, restore_worker_token
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 _LOCAL_SOFTWARE_LOCK = threading.Lock()
 _LOCAL_SOFTWARE_TASKS: dict[str, dict] = {}
 _LOCAL_SOFTWARE_ACTIVE_TASK = ""
@@ -275,9 +277,13 @@ async def scan_worker_ssh_host_key(
     """Return untrusted fingerprints for explicit administrator verification."""
     connection = str(body.get("ssh_host") or "").strip()
     _username, hostname, port = _deployment_host(connection)
+    logger.info("SSH host-key scan requested for %s (parsed: host=%s port=%s)",
+                connection, hostname, port)
     try:
         keys = await asyncio.to_thread(scan_ssh_host_keys, hostname, port)
     except (RuntimeError, ValueError) as exc:
+        logger.warning("SSH host-key scan failed for %s:%s — %s",
+                       hostname, port, exc)
         raise HTTPException(502, str(exc)) from exc
     return {"success": True, "host": hostname, "port": port, "keys": keys}
 

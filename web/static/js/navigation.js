@@ -389,6 +389,7 @@ async function continueAppInitialization() {
             if (userData.client_id) {
                 state.clientId = userData.client_id;
                 state.clientDisplayId = userData.display_client_id || userData.client_id;
+                if (userData.user) state.currentUser = userData.user;
                 debugLog('[Init] ✅ Set state.clientId from /api/users/current:', state.clientId);
 
                 // 检查是否是 unknown 用户（apiCall 中会统一处理弹框）
@@ -398,8 +399,7 @@ async function continueAppInitialization() {
                     loadNotifications();
                     // 已获取到正确的用户名，延迟检查 USB/IP 和 VPN 状态（避免阻塞关键请求）
                     setTimeout(() => {
-                        const statusChecks = [checkUsbipStatus()];
-                        if (isPlatformAdmin()) statusChecks.push(checkVpnStatus());
+                        const statusChecks = [checkUsbipStatus(), checkVpnStatus()];
                         Promise.all(statusChecks).catch(error => {
                             debugLog('[Init] Background status check failed:', error);
                         });
@@ -9786,10 +9786,10 @@ function displayTestReports(reports) {
             <td style="padding: 4px 6px; text-align: center;">
                 <button class="btn-xxs" data-action="analyze" style="margin: 2px; font-size: 12px;">📈 分析</button>
                 <button class="btn-xxs" data-action="retry" style="background: var(--primary-color); margin: 2px; font-size: 12px;">🔄 retry</button>
-                <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px; font-size: 12px;">⬇️ 下载</button>
-                <button class="btn-xxs" data-action="delete" style="background: var(--danger-color); margin: 2px; font-size: 12px;">🗑️ 删除</button>
                 <button class="btn-xxs" data-action="results" style="background: var(--info-color); margin: 2px; font-size: 12px;">results</button>
                 <button class="btn-xxs" data-action="logs" style="background: var(--warning-color); margin: 2px; font-size: 12px;">logs</button>
+                <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px; font-size: 12px;">⬇️ 下载</button>
+                <button class="btn-xxs" data-action="delete" style="background: var(--danger-color); margin: 2px; font-size: 12px;">🗑️ 删除</button>
             </td>
         `;
 

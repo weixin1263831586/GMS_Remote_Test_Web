@@ -561,6 +561,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/cluster/metrics/history"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/cluster/status"
   },
   {
@@ -778,6 +784,12 @@
       "POST"
     ],
     "path": "/api/cluster/workers/{worker_id}/restart-vnc"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/vpn-status"
   },
   {
     "methods": [

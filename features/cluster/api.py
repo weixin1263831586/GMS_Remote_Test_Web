@@ -193,6 +193,12 @@ def list_worker_tests(
     if user and user.role != "admin":
         visible = []
         for item in tests:
+            # External tests come from host process scanning and have no
+            # owning user; expose their basic info (PID, suite, devices,
+            # uptime) to all authenticated users.
+            if item.get("source") == "external":
+                visible.append(item)
+                continue
             job_id = str(item.get("job_id") or "")
             job = service().repository.get_job(job_id) if job_id else None
             if job and job.get("owner_id") == user.id:
@@ -201,6 +207,15 @@ def list_worker_tests(
     return {"success": True, "tests": tests,
             "retention": {"automatic_cleanup": False,
                           "policy": "artifacts and test history are retained until explicitly deleted"}}
+
+
+@router.get("/metrics/history")
+def get_metrics_history(worker_id: str = Query(default="")):
+    svc = service()
+    if worker_id and not svc.effective_enabled and worker_id != svc.config.local_worker_id:
+        raise HTTPException(409, "cluster mode is disabled")
+    rows = svc.repository.get_worker_metrics_history(worker_id)
+    return {"success": True, "metrics": rows}
 
 
 @router.delete("/workers/{worker_id}")
@@ -481,6 +496,10 @@ def _local_execute(command_type: str, payload: dict) -> dict:
                 str(payload.get("access_token") or ""),
             )
         return execute_adb_proxy_action(action, payload, pair_code=pair_code)
+    if command_type == "check_vpn":
+        from features.system.network import check_local_vpn_connected
+
+        return {"connected": check_local_vpn_connected()}
     raise HTTPException(400, f"local execution not supported for {command_type}")
 
 

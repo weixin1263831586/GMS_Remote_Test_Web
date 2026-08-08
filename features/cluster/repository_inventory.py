@@ -25,6 +25,7 @@ class ClusterInventoryRepositoryMixin:
             "load_1m": "REAL NOT NULL DEFAULT 0",
             "external_jobs": "INTEGER NOT NULL DEFAULT 0",
             "unknown_external_jobs": "INTEGER NOT NULL DEFAULT 0",
+            "disk_total_gb": "REAL NOT NULL DEFAULT 0",
         }
         for name, definition in additions.items():
             if name not in columns:
@@ -99,6 +100,16 @@ class ClusterInventoryRepositoryMixin:
                 "SELECT * FROM cluster_workers ORDER BY id"
             ).fetchall()]
 
+    def get_worker_metrics_history(self, worker_id: str = "") -> list[dict[str, Any]]:
+        sql = "SELECT worker_id,recorded_at,cpu_percent,memory_percent,disk_free_gb,running_jobs,external_jobs FROM cluster_worker_metrics"
+        params: tuple[Any, ...] = ()
+        if worker_id:
+            sql += " WHERE worker_id=?"
+            params = (worker_id,)
+        sql += " ORDER BY recorded_at"
+        with self.connect() as conn:
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
     def delete_worker(self, worker_id: str) -> bool:
         with self._lock, self.connect() as conn:
             active = conn.execute(
@@ -144,14 +155,15 @@ class ClusterInventoryRepositoryMixin:
             cursor = conn.execute("""
                 UPDATE cluster_workers SET status=?,agent_version=?,cpu_percent=?,
                     memory_percent=?,memory_total_gb=?,memory_available_gb=?,load_1m=?,
-                    disk_free_gb=?,running_jobs=?,external_jobs=?,unknown_external_jobs=?,
-                    last_heartbeat_at=?,updated_at=? WHERE id=?
+                    disk_free_gb=?,disk_total_gb=?,running_jobs=?,external_jobs=?,
+                    unknown_external_jobs=?,last_heartbeat_at=?,updated_at=? WHERE id=?
             """, (
                 status,
                 data.get("agent_version", ""), data.get("cpu_percent", 0),
                 data.get("memory_percent", 0), data.get("memory_total_gb", 0),
                 data.get("memory_available_gb", 0), data.get("load_1m", 0),
-                data.get("disk_free_gb", 0), len(running_jobs), len(external_jobs),
+                data.get("disk_free_gb", 0), data.get("disk_total_gb", 0),
+                len(running_jobs), len(external_jobs),
                 len(unknown_external_jobs), now, now, worker_id,
             ))
             if cursor.rowcount == 0:
@@ -245,6 +257,19 @@ class ClusterInventoryRepositoryMixin:
                     WHERE attempt_id=? AND status='active'""", (
                         now, f"+{self.claim_lease_ttl_seconds} seconds", attempt_id,
                     ))
+            conn.execute(
+                """INSERT INTO cluster_worker_metrics
+                   (worker_id,recorded_at,cpu_percent,memory_percent,
+                    disk_free_gb,running_jobs,external_jobs)
+                   VALUES(?,?,?,?,?,?,?)""",
+                (worker_id, now, data.get("cpu_percent", 0),
+                 data.get("memory_percent", 0), data.get("disk_free_gb", 0),
+                 len(running_jobs), len(external_jobs)),
+            )
+            conn.execute(
+                "DELETE FROM cluster_worker_metrics WHERE recorded_at < "
+                "strftime('%Y-%m-%dT%H:%M:%SZ','now','-24 hours')"
+            )
         worker = self.get_worker(worker_id)
         if worker is not None:
             worker["revoked_attempt_ids"] = sorted(revoked_attempt_ids)
@@ -389,6 +414,8 @@ class ClusterInventoryRepositoryMixin:
                 f"AND (serial LIKE 'localhost:%' OR transport='usbip')",
                 [worker_id, *seen],
             )
+            # 本地 USB 设备断开后标记为 offline 而非删除，保留历史设备
+            # 记录供离线设备计数和 UI 回溯。
             conn.execute(
                 f"UPDATE cluster_worker_devices SET state='offline',updated_at=? "
                 f"WHERE worker_id=? AND id NOT IN ({placeholders})",

@@ -42,6 +42,13 @@ body.modal-open{overflow:hidden}
 @media(max-height:560px){.modal-backdrop{align-items:stretch}.onboarding-modal{max-height:calc(100dvh - 16px)}}
 </style>
 <main>
+  <section style="padding:0;overflow:visible">
+    <div class="dash-tabs"><button class="dash-tab active" data-dash-tab="dashboard">📊 Dashboard</button><button class="dash-tab" data-dash-tab="management">🖥 集群管理</button></div>
+  </section>
+  <div id="tab-dashboard" class="dash-tab-pane">
+    <section id="dashboard"><div class="section-head"><div class="section-head-copy"><h2>集群概览</h2><p id="dash-last-update" style="font-size:10px;color:var(--muted)"></p></div><button id="dash-refresh-charts" class="stable-action" style="min-width:auto;font-size:11px;padding:3px 8px">↻ 刷新</button></div><div id="dashboard-stats" class="dash-cards"></div><div class="dash-charts-row dash-row-top"><div id="dash-gauges" class="dash-panel"></div><div id="dash-device-pie" class="dash-panel"></div></div><div class="dash-charts-row dash-row-bottom"><div id="dash-trend" class="dash-panel"></div><div id="dashboard-tests" class="dash-panel"></div></div></section>
+  </div>
+  <div id="tab-management" class="dash-tab-pane" hidden>
   <div id="onboarding" class="modal-backdrop" hidden><section class="onboarding-modal"><div class="section-head"><div><h2>添加测试主机</h2></div><button id="close-onboarding">×</button></div>
     <div class="onboarding-grid"><label>Worker 名称 / ID<input id="new-worker-id" placeholder="ATS Worker 01（自动转为 ats-worker-01）"></label><label>SSH 主机<input id="new-worker-host" placeholder="user@192.168.1.100"></label><label>Controller URL<input id="controller-url"></label><label>套件目录<input id="suite-root" value="~/GMS-Suite"></label><label>Worker Token<span class="input-action"><input id="worker-token" type="text" autocomplete="off"><button type="button" id="generate-token" onclick="document.querySelector('#worker-token').value=Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('')">自动生成</button></span></label><label>SSH 密码<span class="input-action"><input id="worker-password" type="password" autocomplete="new-password" placeholder="也可使用免密 SSH"><label class="inline-checkbox"><input id="save-worker-password" type="checkbox"> 保存密码</label></span></label></div>
     <div class="command-box"><code id="deploy-command"></code><button id="copy-deploy">复制命令</button><button id="auto-deploy" class="primary">自动部署</button></div>
@@ -67,4 +74,5 @@ body.modal-open{overflow:hidden}
     </div>
     <div class="table-wrap"><table><thead><tr><th>任务</th><th>Worker</th><th>状态</th><th>设备</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
   <section id="detail" hidden><div class="section-head"><h2>任务详情</h2><div class="actions"><button id="job-open-test">打开测试页</button><button id="job-open-report">分析报告</button><button id="job-open-ats">打开 GMS ATS</button></div></div><div id="job-summary" class="meta"></div><details open><summary>原始任务数据</summary><pre id="job-detail"></pre></details><h3>远端运行日志</h3><pre id="job-logs"></pre><div id="artifacts" class="job-artifacts"></div></section>
-</main><div id="toast"></div><script src="/static/js/embedded-workspace.js?v=20260713-01"></script><script>{{CLUSTER_JS}}</script></body></html>
+  </div>
+</main><div id="toast"></div><script src="/static/js/embedded-workspace.js?v=20260713-01"></script><script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script><script>{{CLUSTER_JS}}</script></body></html>

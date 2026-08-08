@@ -120,6 +120,25 @@ async def _dispatch_usb_events(app) -> None:
             await asyncio.sleep(1)
 
 
+def _start_local_vnc():
+    """Start local x11vnc + websockify so the noVNC viewer is ready on boot."""
+
+    def _start():
+        try:
+            from features.system.vnc import vnc_manager
+
+            result = vnc_manager._start_local_vnc(force_restart=False)
+            if result.get("success"):
+                logger.info("[VNC] Auto-started local VNC on boot")
+            else:
+                logger.warning("[VNC] Local VNC auto-start skipped: %s",
+                               result.get("error", "unknown"))
+        except Exception:
+            logger.exception("[VNC] Local VNC auto-start failed")
+
+    threading.Thread(target=_start, name="VNC-AutoStart", daemon=True).start()
+
+
 def _start_usb_monitor(app):
     app.state.usb_event_queue = queue.Queue()
     state = {'previous_devices': set()}
@@ -187,6 +206,10 @@ def create_lifespan(services: AppServices):
             app.state.cleanup_task = cleanup_task
             redmine_task = start_redmine_agent_scheduler(services.redmine)
             app.state.redmine_scheduler_task = redmine_task
+            try:
+                _start_local_vnc()
+            except Exception:
+                logger.exception('Failed to auto-start local VNC')
             try:
                 usb_dispatch_task = _start_usb_monitor(app)
             except Exception:
