@@ -1004,7 +1004,6 @@
                     <button class="btn-xs" data-terminal-layout="horizontal" onclick="setTerminalWorkspaceLayout('horizontal')">左右</button>
                     <button class="btn-xs" data-terminal-layout="vertical" onclick="setTerminalWorkspaceLayout('vertical')">上下</button>
                     <button class="btn-xs" data-terminal-layout="quad" onclick="setTerminalWorkspaceLayout('quad')">四屏</button>
-                    <label class="host-workspace-broadcast"><input id="terminal-workspace-broadcast" type="checkbox" onchange="setTerminalWorkspaceBroadcast(this.checked)">输入广播</label>
                     <span style="display:none">
                     <span id="terminal-worker-control" style="display:contents">
                         <label for="terminal-host-select" style="font-size:11px;color:var(--text-secondary);">主机</label>
@@ -1254,9 +1253,9 @@
                     <thead style="position: sticky; top: 0; z-index: 10;">
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 150px;">客户端</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">类型</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 120px;">测试套件</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 120px;">测试主机</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 80px;">测试类型</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 140px;">测试套件</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 160px;">测试主机</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 240px;">报告名称</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">通过</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">失败</th>
@@ -3581,14 +3580,6 @@
             term.writeln(`\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
             term.onData(input => {
                 if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: 'terminal_input', input}));
-                if (hostWorkspace.broadcast) {
-                    hostWorkspace.instances.forEach((target, targetIndex) => {
-                        if (targetIndex !== index && target.type === 'terminal' &&
-                                target.socket?.readyState === WebSocket.OPEN) {
-                            target.socket.send(JSON.stringify({type: 'terminal_input', input}));
-                        }
-                    });
-                }
             });
             socket.onopen = () => socket.send(JSON.stringify({type: 'terminal_connect', mode: 'ssh', worker_id: workerId}));
             socket.onmessage = event => {
@@ -3705,12 +3696,11 @@
         window.maximizeHostWorkspacePane = maximizeHostWorkspacePane;
 
         // ==================== 多主机终端工作区 ====================
-        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), paneGenerations:new Map(), broadcast:false, maximized:null, generation:0, clusterState:null};
+        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), paneGenerations:new Map(), maximized:null, generation:0, clusterState:null};
         function snapshotTerminalClusterState() {
             return {
                 layout: terminalWorkspace.layout,
                 panes: terminalWorkspace.panes.map(pane => ({...pane})),
-                broadcast: terminalWorkspace.broadcast,
                 maximized: terminalWorkspace.maximized,
             };
         }
@@ -3719,7 +3709,6 @@
                 ||desktopHosts.find(host=>host.id==='default')||desktopHosts[0];
             terminalWorkspace.layout='single';
             terminalWorkspace.maximized=null;
-            terminalWorkspace.broadcast=false;
             terminalWorkspace.panes=[{hostId:preferred?.id||'default'}];
         }
         function normalizeTerminalWorkspace() {
@@ -3741,7 +3730,7 @@
         function saveTerminalWorkspace() {
             if(hostWorkspaceClusterEnabled)terminalWorkspace.clusterState=snapshotTerminalClusterState();
             const stateToSave=terminalWorkspace.clusterState||snapshotTerminalClusterState();
-            localStorage.setItem('gms_terminal_workspace',JSON.stringify({layout:stateToSave.layout,panes:stateToSave.panes,broadcast:stateToSave.broadcast}));
+            localStorage.setItem('gms_terminal_workspace',JSON.stringify({layout:stateToSave.layout,panes:stateToSave.panes}));
         }
         async function ensureTerminalWorkspaceInitialized() {
             if (!window.desktopHostsInitialized) {
@@ -3749,7 +3738,7 @@
                 window.desktopHostsInitialized = true;
             }
             if (!window.terminalWorkspaceInitialized) {
-                try { const s=JSON.parse(localStorage.getItem('gms_terminal_workspace')||'{}'); if(HOST_WORKSPACE_COUNTS[s.layout]) terminalWorkspace.layout=s.layout; if(Array.isArray(s.panes)) terminalWorkspace.panes=s.panes; terminalWorkspace.broadcast=false; } catch(_) {}
+                try { const s=JSON.parse(localStorage.getItem('gms_terminal_workspace')||'{}'); if(HOST_WORKSPACE_COUNTS[s.layout]) terminalWorkspace.layout=s.layout; if(Array.isArray(s.panes)) terminalWorkspace.panes=s.panes; } catch(_) {}
                 normalizeTerminalWorkspace();
                 terminalWorkspace.clusterState=snapshotTerminalClusterState();
                 if(!hostWorkspaceClusterEnabled)useSingleTerminalWorkspaceState();
@@ -3795,7 +3784,6 @@
             disposeTerminalWorkspace();
             grid.className=`host-workspace-grid layout-${terminalWorkspace.layout}${terminalWorkspace.maximized!==null?' pane-maximized':''}`;
             document.querySelectorAll('[data-terminal-layout]').forEach(b=>b.classList.toggle('active',b.dataset.terminalLayout===terminalWorkspace.layout));
-            const broadcast=document.getElementById('terminal-workspace-broadcast'); if(broadcast)broadcast.checked=terminalWorkspace.broadcast;
             grid.innerHTML=terminalWorkspace.panes.map((p,i)=>`<section class="host-workspace-pane${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}">
                 <div class="host-workspace-pane-header"><span data-multi-host-control style="font-size:11px;">🐧 终端</span>
                 <select data-multi-host-control aria-label="主机" onchange="changeTerminalWorkspaceHost(${i},this.value)">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
@@ -3831,7 +3819,7 @@
             body.addEventListener('drop',async event=>{event.preventDefault();body.style.outline='';const file=event.dataTransfer?.files?.[0];if(!file)return;if(!await ensureTerminalElevation(false,'上传文件到主机','主机文件上传'))return;term.writeln(`\r\n\x1b[33m📤 正在上传 ${file.name}...\x1b[0m`);const form=new FormData();form.append('file',file);form.append('worker_id',workerId);try{const result=await apiCall('/api/terminal/push','POST',form);term.writeln(`\r\n\x1b[32m✅ 已上传到 ${result.remote_path}\x1b[0m`);}catch(error){term.writeln(`\r\n\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);}finally{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input:'\r'}));term.focus();}});
             const protocol=location.protocol==='https:'?'wss:':'ws:',socket=new WebSocket(`${protocol}//${location.host}/api/system/websocket/terminal_workspace_${index}_${Date.now()}_${Math.random().toString(36).slice(2)}`);instance.socket=socket;
             term.writeln(`\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
-            term.onData(input=>{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input}));const broadcastable=terminalWorkspace.broadcast&&!/[\x00-\x1f\x7f]/.test(input);if(broadcastable)terminalWorkspace.instances.forEach((t,j)=>{if(j!==index&&t.socket?.readyState===WebSocket.OPEN)t.socket.send(JSON.stringify({type:'terminal_input',input}));});});
+            term.onData(input=>{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input}));});
             let suppressPasteUntil=0;
             const sendInput=input=>{if(socket.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify({type:'terminal_input',input}));return true;};
             const pasteText=text=>sendInput(String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n'));
@@ -3852,9 +3840,8 @@
             const lines=plain.split(/\r?\n/),prompt=[...lines].reverse().find(line=>/@[^\s:]+:[^\r\n]*[$#]\s*$/.test(line));
             if(prompt){instance.shellReady=true;instance.initialData='';instance.terminal.write(prompt);}
         }
-        function terminalWorkspaceRenderSignature(){return JSON.stringify({layout:terminalWorkspace.layout,panes:terminalWorkspace.panes,broadcast:terminalWorkspace.broadcast,maximized:terminalWorkspace.maximized});}
+        function terminalWorkspaceRenderSignature(){return JSON.stringify({layout:terminalWorkspace.layout,panes:terminalWorkspace.panes,maximized:terminalWorkspace.maximized});}
         function setTerminalWorkspaceLayout(v){if(HOST_WORKSPACE_COUNTS[v]&&(hostWorkspaceClusterEnabled||v==='single')){terminalWorkspace.layout=v;terminalWorkspace.maximized=null;renderTerminalWorkspace();}}
-        function setTerminalWorkspaceBroadcast(v){terminalWorkspace.broadcast=Boolean(v);saveTerminalWorkspace();showToast(v?'终端输入广播已开启':'终端输入广播已关闭',v?'warning':'success');}
         function changeTerminalWorkspaceHost(i,v){
             const pane=terminalWorkspace.panes[i],host=desktopHosts.find(item=>item.id===v),select=document.querySelector(`[data-terminal-pane="${i}"] select[aria-label="主机"]`);
             if(!pane||!host||host.offline){if(select&&pane)select.value=pane.hostId;return;}
@@ -3911,7 +3898,6 @@
                 if (terminalWorkspace.clusterState) {
                     terminalWorkspace.layout = terminalWorkspace.clusterState.layout;
                     terminalWorkspace.panes = terminalWorkspace.clusterState.panes.map(pane => ({...pane}));
-                    terminalWorkspace.broadcast = terminalWorkspace.clusterState.broadcast;
                     terminalWorkspace.maximized = terminalWorkspace.clusterState.maximized;
                 }
             } else {
@@ -3921,7 +3907,7 @@
             if (window.hostWorkspaceInitialized) renderHostWorkspace();
             if (window.terminalWorkspaceInitialized) renderTerminalWorkspace();
         }
-        Object.assign(window,{setTerminalWorkspaceLayout,setTerminalWorkspaceBroadcast,changeTerminalWorkspaceHost,refreshTerminalWorkspacePane,maximizeTerminalWorkspacePane,applyHostWorkspaceScopeMode});
+        Object.assign(window,{setTerminalWorkspaceLayout,changeTerminalWorkspaceHost,refreshTerminalWorkspacePane,maximizeTerminalWorkspacePane,applyHostWorkspaceScopeMode});
 
         // ==================== 用户管理功能 ====================
         let usersRefreshInterval = null;

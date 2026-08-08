@@ -488,7 +488,6 @@ body {
 .host-workspace-layouts > .btn-xs:first-child { border-radius:4px 0 0 4px; }
 .host-workspace-layouts > .btn-xs:last-child { border-radius:0 4px 4px 0; }
 .host-workspace-layouts > .btn-xs + .btn-xs { margin-left:-1px; }
-.host-workspace-broadcast { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text-secondary); cursor:pointer; user-select:none; }
 .host-workspace-layouts .btn-xs.active { background:var(--primary-color); color:#fff; border-color:var(--primary-color); }
 .host-workspace-grid { flex:1; min-height:0; display:grid; gap:8px; height:auto; }
 .host-workspace-grid.layout-single { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }

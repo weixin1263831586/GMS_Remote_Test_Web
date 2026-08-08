@@ -72,6 +72,7 @@ class WorkerHeartbeat(BaseModel):
     memory_available_gb: float = 0
     load_1m: float = 0
     disk_free_gb: float = 0
+    disk_total_gb: float = 0
     running_jobs: list[RunningWorkerJob] = Field(default_factory=list)
     devices: list[WorkerDevice] = Field(default_factory=list)
     suites: list[WorkerSuite] | None = None

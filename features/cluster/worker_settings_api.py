@@ -74,3 +74,21 @@ async def restart_worker_vnc(
     except Exception as exc:
         raise HTTPException(502, f"restart_vnc failed: {exc}") from exc
     return {"success": result.get("rfb_ok", False), "result": result}
+
+
+@router.get("/workers/{worker_id}/vpn-status")
+async def check_worker_vpn(
+    worker_id: str,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """Check whether a VPN connection is active on the worker host."""
+    worker = service().repository.get_worker(worker_id)
+    if worker is None:
+        raise HTTPException(404, "worker not found")
+    if worker.get("status") not in {"online", "busy"}:
+        return {"connected": None}
+    try:
+        result = await _run_worker_command(worker_id, "check_vpn", {}, timeout=10)
+        return {"connected": result.get("connected")}
+    except HTTPException:
+        return {"connected": None}

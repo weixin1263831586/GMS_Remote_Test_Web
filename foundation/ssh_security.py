@@ -39,10 +39,10 @@ def scan_ssh_host_keys(host: str, port: int = 22) -> list[dict[str, str]]:
         raise ValueError("invalid SSH hostname")
     try:
         completed = subprocess.run(
-            ["ssh-keyscan", "-T", "5", "-p", str(port), host],
+            ["ssh-keyscan", "-T", "10", "-p", str(port), host],
             capture_output=True,
             text=True,
-            timeout=8,
+            timeout=15,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -72,7 +72,13 @@ def scan_ssh_host_keys(host: str, port: int = 22) -> list[dict[str, str]]:
         })
     if not keys:
         detail = completed.stderr.strip()[:300]
-        raise RuntimeError(f"SSH host returned no keys{': ' + detail if detail else ''}")
+        stdout_preview = completed.stdout.strip()[:300]
+        parts = [f"SSH host returned no keys (exit={completed.returncode})"]
+        if detail:
+            parts.append(detail)
+        if stdout_preview:
+            parts.append(f"stdout: {stdout_preview}")
+        raise RuntimeError(" | ".join(parts))
     return keys
 
 

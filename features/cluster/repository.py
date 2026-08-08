@@ -105,6 +105,7 @@ class ClusterRepository(
                     memory_available_gb REAL NOT NULL DEFAULT 0,
                     load_1m REAL NOT NULL DEFAULT 0,
                     disk_free_gb REAL NOT NULL DEFAULT 0,
+                    disk_total_gb REAL NOT NULL DEFAULT 0,
                     max_jobs INTEGER NOT NULL DEFAULT __MAX_JOBS__,
                     running_jobs INTEGER NOT NULL DEFAULT 0,
                     external_jobs INTEGER NOT NULL DEFAULT 0,
@@ -242,6 +243,15 @@ class ClusterRepository(
                     error TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                     completed_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS cluster_worker_metrics (
+                    worker_id TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL,
+                    cpu_percent REAL NOT NULL DEFAULT 0,
+                    memory_percent REAL NOT NULL DEFAULT 0,
+                    disk_free_gb REAL NOT NULL DEFAULT 0,
+                    running_jobs INTEGER NOT NULL DEFAULT 0,
+                    external_jobs INTEGER NOT NULL DEFAULT 0
+                );
             """.replace("__MAX_JOBS__", str(ClusterConfig.load().default_max_jobs))
             conn.executescript(schema)
             self._migrate_worker_metrics(conn)
@@ -253,6 +263,7 @@ class ClusterRepository(
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cluster_commands_operation ON cluster_commands(worker_id,operation_id) WHERE operation_id!=''")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_timeline_job ON cluster_timeline_events(job_id,id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_timeline_trace ON cluster_timeline_events(trace_id,id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_worker_metrics_time ON cluster_worker_metrics(worker_id,recorded_at)")
 
     @staticmethod
     def _migrate_transfers(conn: sqlite3.Connection) -> None:

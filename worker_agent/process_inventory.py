@@ -112,6 +112,28 @@ def _is_active_invocation(argv: list[str]) -> bool:
     return bool(_RUNTIME_INFO.search(joined) or re.search(r"\bCompatibilityConsole\s+run\b", joined))
 
 
+def _collect_adb_descendant_argv(
+    processes: dict[int, dict[str, Any]], group_pids: set[int],
+) -> list[str]:
+    """Return argv tokens from adb processes descended from a Tradefed group.
+
+    When Tradefed runs interactively from its console (e.g. the user typed
+    ``run vts`` at the ``vts >`` prompt), the invocation executes in-process
+    without spawning a child JVM, so neither ``CompatibilityConsole run`` nor
+    ``tf_runtime_info`` appears on the command line.  A live ``adb`` child,
+    however, signals active device interaction.
+    """
+    argv: list[str] = []
+    for pid, item in processes.items():
+        if pid in group_pids:
+            continue
+        if not item.get("comm", "").startswith("adb"):
+            continue
+        if _has_ancestor(processes, pid, group_pids):
+            argv.extend(item["argv"])
+    return argv
+
+
 def discover_tradefed_processes(
     managed_jobs: list[dict[str, Any]] | None = None,
     *,
@@ -185,7 +207,16 @@ def discover_tradefed_processes(
             continue
         argv = [token for member in members for token in member["argv"]]
         if not _is_active_invocation(argv):
-            continue
+            # Fall back: a Tradefed Console invoked interactively (user
+            # typed "run vts" at the prompt) runs the invocation in-process
+            # without spawning a child JVM, so argv lacks both
+            # "CompatibilityConsole run" and "tf_runtime_info".  Detect
+            # active device interaction via adb descendant processes.
+            group_pids = {root_pid} | {item["pid"] for item in members}
+            adb_argv = _collect_adb_descendant_argv(processes, group_pids)
+            if not adb_argv:
+                continue
+            argv.extend(adb_argv)
         devices = sorted(_extract_devices(argv))
         start_ticks = min(item["start_ticks"] for item in members)
         elapsed = max(0.0, uptime - start_ticks / clock_ticks) if uptime else 0.0

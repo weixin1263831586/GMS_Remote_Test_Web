@@ -1004,4 +1004,5 @@ def host_metrics(config: WorkerConfig) -> dict[str, float]:
             "memory_total_gb": round(memory_total_gb, 2),
             "memory_available_gb": round(memory_available_gb, 2),
             "load_1m": round(load if 'load' in locals() else 0.0, 2),
-            "disk_free_gb": round(usage.free / 1024 ** 3, 2)}
+            "disk_free_gb": round(usage.free / 1024 ** 3, 2),
+            "disk_total_gb": round(usage.total / 1024 ** 3, 2)}
