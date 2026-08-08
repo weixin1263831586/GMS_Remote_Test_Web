@@ -1,15 +1,15 @@
 paramiko==3.4.0
-scp>=0.14.5
-lxml>=5.0.0  # 高性能XML解析库,显著提升XML解析速度
-fastapi>=0.110.0
-jinja2>=3.1.0
-uvicorn[standard]>=0.27.0
-pydantic>=2.6.0
-python-multipart>=0.0.9
-aiohttp>=3.9.0
-cryptography>=42.0.0
-requests>=2.31.0
-requests-toolbelt>=1.0.0
+scp==0.15.0
+lxml==6.1.0  # 高性能XML解析库,显著提升XML解析速度
+fastapi==0.129.0
+jinja2==3.1.4
+uvicorn[standard]==0.40.0
+pydantic==2.12.5
+python-multipart==0.0.22
+aiohttp==3.13.3
+cryptography==41.0.7
+requests==2.31.0
+requests-toolbelt==0.9.1
 uiautomator2==3.7.0  # Android 语义 UI 树与可靠操控（禁用 idle wait，规避动态界面卡死）
-python-redmine>=2.5.0
-pyudev>=0.24.0
+python-redmine==2.5.0
+pyudev==0.24.4

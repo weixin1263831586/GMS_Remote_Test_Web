@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import getpass
-import json
-import os
-import re
-import threading
-import time
-import uuid
+import getpass, json, os, re, threading, time, uuid
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
@@ -16,10 +10,12 @@ from urllib.parse import quote
 import paramiko
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from features.auth import require_elevated_admin_when_auth_required
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
+from foundation.secrets import decrypt_secret, encrypt_secret
 from foundation.ssh_security import configure_strict_host_keys
 
 from . import runtime
@@ -30,7 +26,6 @@ router = APIRouter()
 
 class _AuthError(ValueError):
     """远端认证失败：前端可据此弹框让用户输入密码后重试（HTTP 401）。"""
-
 
 
 _DEFAULT_STORE = Path(__file__).resolve().parents[2] / "data" / "firmware_shares.json"
@@ -62,10 +57,7 @@ def _save_records(records: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f'{path.suffix}.{uuid.uuid4().hex}.tmp')
     try:
-        tmp.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        tmp.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
     finally:
         with suppress(OSError):
@@ -290,7 +282,7 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
         "last_downloaded_at",
     }
     public = {key: record.get(key) for key in allowed if key in record}
-    public["has_password"] = bool(record.get("password"))
+    public["has_password"] = bool(record.get("password") or record.get("password_encrypted"))
     return public
 
 
@@ -300,6 +292,17 @@ def _find_record(share_id: str) -> tuple[list[dict[str, Any]], dict[str, Any] | 
         if record.get("id") == share_id:
             return records, record
     return records, None
+
+
+def _record_password(record: dict[str, Any]) -> str | None:
+    """Resolve a share's SSH password (encrypted or legacy plaintext)."""
+    enc = record.get("password_encrypted")
+    if enc:
+        try:
+            return decrypt_secret(enc) or None
+        except RuntimeError:
+            return None
+    return record.get("password") or None
 
 
 def _parse_range(range_header: str | None, size: int) -> tuple[int, int, int] | None:
@@ -325,13 +328,8 @@ def _parse_range(range_header: str | None, size: int) -> tuple[int, int, int] | 
 
 
 def _remote_file_iterator(
-    host: str,
-    user: str | None,
-    path: str,
-    config: dict[str, Any],
-    start: int,
-    length: int,
-    password: str | None = None,
+    host: str, user: str | None, path: str, config: dict[str, Any],
+    start: int, length: int, password: str | None = None,
 ) -> Iterator[bytes]:
     with (
         _sftp_client(host, user, config, password=password) as (sftp, _creds),
@@ -370,13 +368,13 @@ async def create_firmware_share(
         host, user, path = _parse_remote_spec(remote)
         password = payload.get("password") or None
         config = runtime.config_manager.load_config()
-        info = _stat_remote(host, user, path, config, password=password)
+        info = await run_in_threadpool(_stat_remote, host, user, path, config, password=password)
         username = get_client_username_from_request(request)
         record = {
             "id": uuid.uuid4().hex,
             "name": name or info["filename"],
             **info,
-            "password": password,
+            "password_encrypted": encrypt_secret(password) if password else None,
             "created_at": int(time.time()),
             "created_by": username,
             "expires_at": int(time.time()) + expires_days * 86400 if expires_days > 0 else None,
@@ -409,7 +407,7 @@ async def validate_firmware_share(
         host, user, path = _parse_remote_spec(str(payload.get("remote") or "").strip())
         password = payload.get("password") or None
         config = runtime.config_manager.load_config()
-        info = _stat_remote(host, user, path, config, password=password)
+        info = await run_in_threadpool(_stat_remote, host, user, path, config, password=password)
         return success_response(data=info)
     except _AuthError as exc:
         return error_response(str(exc), 401)
@@ -472,7 +470,7 @@ async def browse_firmware_share_remote(
         password = payload.get("password") or None
         if remote:
             config = runtime.config_manager.load_config()
-        info = _list_remote_dir(host, user, path, config, password=password)
+        info = await run_in_threadpool(_list_remote_dir, host, user, path, config, password=password)
         return success_response(data=info)
     except _AuthError as exc:
         return error_response(str(exc), 401)
@@ -509,12 +507,13 @@ async def update_firmware_share_credentials(
         if not password:
             return error_response("SSH 密码不能为空", 400)
         config = runtime.config_manager.load_config()
-        _stat_remote(record["host"], record.get("user"), record["path"], config, password=password)
+        await run_in_threadpool(_stat_remote, record["host"], record.get("user"), record["path"], config, password=password)
         with _records_lock:
             records, current = _find_record(share_id)
             if not current:
                 return error_response("固件分享不存在", 404)
-            current["password"] = password
+            current["password_encrypted"] = encrypt_secret(password) if password else None
+            current.pop("password", None)
             _save_records(records)
         return success_response(message="远端凭据已更新")
     except _AuthError as exc:
@@ -532,7 +531,7 @@ async def check_firmware_share_download(share_id: str):
         return error_response("固件分享已过期", 410)
     try:
         config = runtime.config_manager.load_config()
-        info = _stat_remote(record["host"], record.get("user"), record["path"], config, password=record.get("password"))
+        info = await run_in_threadpool(_stat_remote, record["host"], record.get("user"), record["path"], config, password=_record_password(record))
         return success_response(data=info)
     except _AuthError as exc:
         return error_response(str(exc), 401)
@@ -550,7 +549,7 @@ async def download_firmware_share(share_id: str, request: Request):
 
     config = runtime.config_manager.load_config()
     try:
-        info = _stat_remote(record["host"], record.get("user"), record["path"], config, password=record.get("password"))
+        info = await run_in_threadpool(_stat_remote, record["host"], record.get("user"), record["path"], config, password=_record_password(record))
     except _AuthError as exc:
         return error_response(str(exc), 401)
     except ValueError as exc:
@@ -592,7 +591,7 @@ async def download_firmware_share(share_id: str, request: Request):
             config,
             start,
             length,
-            password=record.get("password"),
+            password=_record_password(record),
         ),
         status_code=status_code,
         media_type="application/octet-stream",

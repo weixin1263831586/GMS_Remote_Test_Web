@@ -432,7 +432,11 @@ class FirmwareApiTests(unittest.TestCase):
                 )
 
             stored = shares_api._load_records()
-            self.assertEqual(stored[0].get("password"), "s3cret")
+            self.assertIsNone(stored[0].get("password"))
+            self.assertTrue(stored[0].get("password_encrypted"))
+            self.assertEqual(
+                shares_api._record_password(stored[0]), "s3cret"
+            )
 
     def test_update_firmware_share_credentials_stores_password(self):
         with TemporaryDirectory() as tmp:
@@ -464,7 +468,11 @@ class FirmwareApiTests(unittest.TestCase):
                 )
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(shares_api._load_records()[0]["password"], "fixed")
+            self.assertIsNone(shares_api._load_records()[0].get("password"))
+            self.assertTrue(shares_api._load_records()[0].get("password_encrypted"))
+            self.assertEqual(
+                shares_api._record_password(shares_api._load_records()[0]), "fixed"
+            )
             self.assertEqual(stat_remote.call_args.kwargs["password"], "fixed")
 
     def test_firmware_share_check_uses_stored_password(self):

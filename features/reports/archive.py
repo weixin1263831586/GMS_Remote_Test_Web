@@ -16,6 +16,8 @@ from typing import Any
 
 from foundation.archives import (
     ARCHIVE_EXTENSIONS,
+    MAX_ARCHIVE_EXPANDED_BYTES,
+    MAX_ARCHIVE_FILES,
     copy_archive_member,
     safe_extract_member_path,
 )
@@ -31,6 +33,41 @@ logger = logging.getLogger(__name__)
 
 def default_report_temp_dir() -> str:
     return os.environ.get('GMS_REPORT_TEMP_DIR') or str(Path(tempfile.gettempdir()) / 'gms_report')
+
+
+def _enforce_post_extraction_safety(base_dir: str) -> None:
+    """Scan a directory extracted by a system tool (rar/7z) and enforce the
+    same constraints applied to zip/tar extraction: reject symlinks, path
+    traversal, file-count bombs, and decompression bombs.
+
+    Without this, ``rar``/``7z`` bypass every safety check that
+    :func:`safe_extract_member_path` and :func:`copy_archive_member`
+    enforce for zip/tar.
+    """
+    base = os.path.abspath(base_dir)
+    file_count = 0
+    total_bytes = 0
+    for root, _dirs, files in os.walk(base):
+        for name in files:
+            full = os.path.join(root, name)
+            # Reject symlinks left by the extractor.
+            if os.path.islink(full):
+                raise ValueError(f'压缩包包含不安全符号链接: {os.path.relpath(full, base)}')
+            # Ensure every file is inside base_dir.
+            resolved = os.path.abspath(full)
+            if resolved != base and not resolved.startswith(base + os.sep):
+                raise ValueError(f'压缩包包含不安全路径: {os.path.relpath(full, base)}')
+            file_count += 1
+            if file_count > MAX_ARCHIVE_FILES:
+                raise ValueError(f'压缩包文件数量超过限制: {MAX_ARCHIVE_FILES}')
+            try:
+                total_bytes += os.path.getsize(full)
+            except OSError:
+                pass
+            if total_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
+                raise ValueError(
+                    f'压缩包展开大小超过限制: {MAX_ARCHIVE_EXPANDED_BYTES} bytes'
+                )
 
 
 def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
@@ -96,7 +133,11 @@ class ReportFileHandler:
                         copy_archive_member(src, dst, budget)
 
     def _extract_7z(self, archive_path: str):
-        """使用系统 7z 解压 RAR/7z 等格式。"""
+        """使用系统 7z 解压 RAR/7z 等格式。
+
+        系统命令本身不做 Zip Slip / 文件数 / 解压炸弹防护，
+        因此在解压完成后立即扫描目标目录，执行与 zip/tar 相同的安全约束。
+        """
         if archive_path.lower().endswith('.rar') and shutil.which('rar'):
             subprocess.run(
                 ['rar', 'x', '-y', archive_path, self.temp_dir + os.sep],
@@ -104,15 +145,16 @@ class ReportFileHandler:
                 capture_output=True,
                 timeout=300,
             )
-            return
-        if not shutil.which('7z'):
+        elif shutil.which('7z'):
+            subprocess.run(
+                ['7z', 'x', '-y', f'-o{self.temp_dir}', archive_path],
+                check=True,
+                capture_output=True,
+                timeout=300,
+            )
+        else:
             raise RuntimeError('7z command not found, cannot extract RAR archive')
-        subprocess.run(
-            ['7z', 'x', '-y', f'-o{self.temp_dir}', archive_path],
-            check=True,
-            capture_output=True,
-            timeout=300,
-        )
+        _enforce_post_extraction_safety(self.temp_dir)
 
     def find_xml_file(self) -> str | None:
         """查找test_result.xml文件"""

@@ -54,7 +54,13 @@
         "build_command": {
           "type": "string",
           "default": "./build.sh -UCKApu -J 8",
-          "validation": "standard"
+          "validation": "standard",
+          "pattern": "^\\./build\\.sh ",
+          "choices": [
+            "./build.sh -UCKApu -J 8",
+            "./build.sh -UCKApu -J 16",
+            "./build.sh -UCKApu -J 32"
+          ]
         }
       },
       "enabled": true
@@ -81,7 +87,13 @@
         "build_command": {
           "type": "string",
           "default": "./build.sh -UACKApu -J 8",
-          "validation": "standard"
+          "validation": "standard",
+          "pattern": "^\\./build\\.sh ",
+          "choices": [
+            "./build.sh -UACKApu -J 8",
+            "./build.sh -UACKApu -J 16",
+            "./build.sh -UACKApu -J 32"
+          ]
         }
       },
       "enabled": true
@@ -108,7 +120,13 @@
         "build_command": {
           "type": "string",
           "default": "./build.sh -UCKA -J 8",
-          "validation": "standard"
+          "validation": "standard",
+          "pattern": "^\\./build\\.sh ",
+          "choices": [
+            "./build.sh -UCKA -J 8",
+            "./build.sh -UCKA -J 16",
+            "./build.sh -UCKA -J 32"
+          ]
         }
       },
       "enabled": true

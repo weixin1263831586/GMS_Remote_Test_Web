@@ -20,7 +20,7 @@ from .schema import initialize_auth_schema
 AUTH_COOKIE_NAME = "gms_session"
 PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
-SESSION_ABSOLUTE_HOURS = int(os.getenv("GMS_SESSION_ABSOLUTE_HOURS", "8"))
+SESSION_ABSOLUTE_HOURS = int(os.getenv("GMS_SESSION_ABSOLUTE_HOURS", "876000"))
 SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "2"))
 # 二次认证状态绑定当前会话，并随会话失效或重新登录清除。
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {

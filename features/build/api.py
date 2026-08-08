@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from features.auth import (
     get_authenticated_user,
@@ -68,7 +69,8 @@ async def list_build_templates(enabled_only: bool = Query(False)):
 @router.post("/discover/workspaces")
 async def discover_build_workspaces(req: dict[str, Any]):
     try:
-        items = build_service.discover_workspaces(
+        items = await run_in_threadpool(
+            build_service.discover_workspaces,
             str(req.get("server_id") or ""),
             server_password=str(req.get("server_password") or ""),
             base_dir=str(req.get("base_dir") or ""),
@@ -81,7 +83,8 @@ async def discover_build_workspaces(req: dict[str, Any]):
 @router.post("/discover/lunch-options")
 async def discover_lunch_options(req: dict[str, Any]):
     try:
-        items = build_service.discover_lunch_options(
+        items = await run_in_threadpool(
+            build_service.discover_lunch_options,
             str(req.get("server_id") or ""),
             str(req.get("workspace") or ""),
             server_password=str(req.get("server_password") or ""),
@@ -101,7 +104,7 @@ async def create_build_job(
     try:
         body = dict(req or {})
         body["owner"] = principal_owner_id(request)
-        job = build_service.create_job(body, start=start)
+        job = await run_in_threadpool(build_service.create_job, body, start=start)
     except (BuildExecutionError, BuildNotFoundError, ValueError) as exc:
         return error_response(str(exc), 400)
     return {"success": True, "data": job}
@@ -128,7 +131,7 @@ async def get_build_job(
 ):
     try:
         _owned_build_job(job_id, request)
-        job = build_service.poll_job(job_id) if poll else build_service.get_job(job_id)
+        job = await run_in_threadpool(build_service.poll_job, job_id) if poll else build_service.get_job(job_id)
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     except BuildExecutionError as exc:
@@ -140,7 +143,7 @@ async def get_build_job(
 async def poll_build_job(job_id: str, request: Request):
     try:
         _owned_build_job(job_id, request)
-        job = build_service.poll_job(job_id)
+        job = await run_in_threadpool(build_service.poll_job, job_id)
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     except BuildExecutionError as exc:
@@ -173,7 +176,7 @@ async def tail_build_log(
 ):
     try:
         _owned_build_job(job_id, request)
-        text = build_service.tail_log(job_id, lines=lines)
+        text = await run_in_threadpool(build_service.tail_log, job_id, lines=lines)
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     except BuildExecutionError as exc:
@@ -185,7 +188,7 @@ async def tail_build_log(
 async def cancel_build_job(job_id: str, request: Request):
     try:
         _owned_build_job(job_id, request)
-        job = build_service.cancel_job(job_id)
+        job = await run_in_threadpool(build_service.cancel_job, job_id)
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     except BuildExecutionError as exc:
