@@ -12,11 +12,6 @@ from features.auth import CurrentUser
 from features.cluster import api as cluster_api
 from features.cluster.repository import ClusterRepository
 from features.cluster.service import ClusterService
-from worker_agent.process_inventory import (
-    _collect_adb_descendant_argv,
-    _extract_devices,
-    _is_tradefed,
-)
 
 
 def _registered_repository(tmp_path: Path) -> ClusterRepository:
@@ -27,71 +22,6 @@ def _registered_repository(tmp_path: Path) -> ClusterRepository:
         "capabilities": {},
     })
     return repository
-
-
-def test_tradefed_detection_extracts_cli_and_runtime_devices(tmp_path):
-    runtime_info = tmp_path / "tf_runtime_info"
-    runtime_info.write_text(
-        '{"invocations":[{"deviceIds":["RUNTIME-SERIAL"]}]}', encoding="utf-8"
-    )
-    argv = [
-        "/suite/tools/cts-tradefed", "run", "cts", "-s", "CLI-SERIAL",
-        f"-javaagent=x={runtime_info}:results",
-    ]
-
-    assert _is_tradefed(argv, "cts-tradefed")
-    assert _extract_devices(argv) == {"CLI-SERIAL", "RUNTIME-SERIAL"}
-
-
-def test_device_extraction_does_not_treat_relative_frida_script_as_serial():
-    argv = [
-        "/suite/tools/cts-tradefed",
-        "run",
-        "cts",
-        "-s",
-        "agent.js",
-        "--serial",
-        "192.0.2.10:5555",
-    ]
-
-    assert _extract_devices(argv) == {"192.0.2.10:5555"}
-
-
-def test_interactive_console_detected_via_adb_descendant():
-    """An interactive Tradefed Console (user typed ``run vts`` at the prompt)
-    runs invocations in-process — no child JVM with ``CompatibilityConsole
-    run`` or ``tf_runtime_info`` on its command line.  A live ``adb`` child
-    must therefore serve as the signal for active device interaction.
-    """
-    processes = {
-        100: {"pid": 100, "ppid": 1, "argv": ["./vts-tradefed"],
-              "comm": "vts-tradefed"},
-        101: {"pid": 101, "ppid": 100,
-              "argv": ["java", "-cp", "tradefed.jar",
-                       "com.android.compatibility.common.tradefed.command.CompatibilityConsole"],
-              "comm": "java"},
-        102: {"pid": 102, "ppid": 101,
-              "argv": ["adb", "-s", "INTERACTIVE-SERIAL", "shell", "some-command"],
-              "comm": "adb"},
-    }
-    group_pids = {100, 101}
-    adb_argv = _collect_adb_descendant_argv(processes, group_pids)
-    assert adb_argv, "adb descendant should be detected"
-    assert "INTERACTIVE-SERIAL" in _extract_devices(adb_argv)
-
-
-def test_idle_console_without_adb_descendant_is_skipped():
-    """An idle Tradefed Console with no adb children must not be reported."""
-    processes = {
-        100: {"pid": 100, "ppid": 1, "argv": ["./vts-tradefed"],
-              "comm": "vts-tradefed"},
-        101: {"pid": 101, "ppid": 100,
-              "argv": ["java", "-cp", "tradefed.jar",
-                       "com.android.compatibility.common.tradefed.command.CompatibilityConsole"],
-              "comm": "java"},
-    }
-    group_pids = {100, 101}
-    assert _collect_adb_descendant_argv(processes, group_pids) == []
 
 
 def test_external_tradefed_marks_device_busy_and_counts_host(tmp_path):

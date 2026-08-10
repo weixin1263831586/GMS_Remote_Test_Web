@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-}" = "devices" ]; then
+    printf '%s\n' \
+        'List of devices attached' \
+        'SERIAL-1 device product:demo model:Demo transport_id:1'
+elif [ "${1:-}" = "-s" ]; then
+    printf '%s\n' \
+        '__MODEL__' 'Demo' \
+        '__ANDROID__' '16' \
+        '__BATTERY__' '  level: 80' \
+        '__SOC__' 'DemoSoC'
+else
+    echo "unexpected fake adb invocation" >&2
+    exit 2
+fi

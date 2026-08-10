@@ -207,6 +207,32 @@ def test_worker_recovers_persisted_usbip_with_proxy_side_adb(tmp_path):
     )
 
 
+def test_worker_recovers_usbip_assignments_with_their_own_generation(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.runtime.remember_usbip_assignments(
+        "192.0.2.10", ["1-1"], "tcp:127.0.0.1:5039", 4
+    )
+    agent.runtime.remember_usbip_assignments(
+        "192.0.2.10", ["1-2"], "tcp:127.0.0.1:5039", 7
+    )
+    agent.runtime.remember_usbip_assignments(
+        "192.0.2.11", ["2-1"], "", 9
+    )
+
+    with patch(
+        "worker_agent.app.execute_usbip_action",
+        return_value={"attached_busids": []},
+    ) as execute:
+        result = agent.recover_usbip_assignments()
+
+    assert result["errors"] == []
+    assert [item.args for item in execute.call_args_list] == [
+        ("attach", "192.0.2.10", ["1-1"], "tcp:127.0.0.1:5039", 4),
+        ("attach", "192.0.2.10", ["1-2"], "tcp:127.0.0.1:5039", 7),
+        ("attach", "192.0.2.11", ["2-1"], None, 9),
+    ]
+
+
 def test_uninstall_agent_acks_before_stopping_services(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()

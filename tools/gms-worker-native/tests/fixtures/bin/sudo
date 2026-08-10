@@ -1,0 +1,71 @@
+#!/bin/sh
+set -eu
+
+action="${3:-}"
+mode="${GMS_TEST_USBIP_MODE:-success}"
+if [ "${mode}" = "port_fail" ] && [ "${action}" = "port" ]; then
+    echo 'vhci driver unavailable' >&2
+    exit 1
+fi
+if [ "${mode}" = "attach_fail" ]; then
+    if [ "${action}" = "port" ]; then
+        exit 0
+    fi
+    if [ "${action}" = "attach" ]; then
+        echo 'source export unavailable' >&2
+        exit 1
+    fi
+fi
+if [ "${mode}" = "busy" ]; then
+    if [ "${action}" = "port" ]; then
+        exit 0
+    fi
+    if [ "${action}" = "attach" ]; then
+        echo 'Device busy (exported)' >&2
+        exit 1
+    fi
+fi
+if [ "${mode}" = "detach_fail" ] && [ "${action}" = "detach" ]; then
+    echo 'detach failed' >&2
+    exit 1
+fi
+if [ "${mode}" = "partial" ] || [ "${mode}" = "rollback_fail" ]; then
+    state_file="${GMS_TEST_USBIP_STATE_FILE:?missing fake USB/IP state file}"
+    if [ "${action}" = "port" ]; then
+        if [ -f "${state_file}" ]; then
+            printf '%s\n' \
+                'Port 00: <Port in Use> at High Speed(480Mbps)' \
+                '       usbip://192.0.2.10:3240/1-2'
+        fi
+        exit 0
+    fi
+    if [ "${action}" = "attach" ] && [ "${5:-}" = "1-2" ]; then
+        : > "${state_file}"
+        exit 0
+    fi
+    if [ "${action}" = "attach" ]; then
+        echo 'second export unavailable' >&2
+        exit 1
+    fi
+    if [ "${action}" = "detach" ]; then
+        if [ "${mode}" = "rollback_fail" ]; then
+            echo 'rollback detach failed' >&2
+            exit 1
+        fi
+        rm -f -- "${state_file}"
+        exit 0
+    fi
+fi
+case "${action}" in
+    port)
+        printf '%s\n' \
+            'Port 00: <Port in Use> at High Speed(480Mbps)' \
+            '       usbip://192.0.2.10:3240/1-2'
+        ;;
+    attach|detach)
+        ;;
+    *)
+        echo "unexpected fake sudo action: ${action}" >&2
+        exit 2
+        ;;
+esac

@@ -158,7 +158,8 @@ sudo chmod 440 /etc/sudoers.d/gms-worker-usbip
 sudo visudo -cf /etc/sudoers.d/gms-worker-usbip >/dev/null
 rsync -a --delete "${PROJECT_ROOT}/worker_agent/" "${INSTALL_ROOT}/worker_agent/"
 rsync -a --delete "${PROJECT_ROOT}/foundation/" "${INSTALL_ROOT}/foundation/"
-mkdir -p "${INSTALL_ROOT}/scripts" "${INSTALL_ROOT}/tools"
+mkdir -p "${INSTALL_ROOT}/bin" "${INSTALL_ROOT}/scripts" "${INSTALL_ROOT}/tools"
+"${PROJECT_ROOT}/scripts/install_gms_worker_native.sh" "${INSTALL_ROOT}/bin"
 install -m 755 "${PROJECT_ROOT}/scripts/run_GSI_Burn.sh" \
     "${INSTALL_ROOT}/scripts/run_GSI_Burn.sh"
 install -m 755 "${PROJECT_ROOT}/scripts/run_GMS_Test_Auto.sh" \
@@ -246,6 +247,8 @@ Environment=JRE_HOME=${SOFTWARE_ROOT}/jdk-11
 Environment=APE_API_KEY=${SOFTWARE_ROOT}/gts-rockchip.json
 Environment=GMS_WORKER_AAPT2_PATH=${SOFTWARE_ROOT}/platform-tools/aapt2
 Environment=GMS_ADB_PROXY_BIN_DIR=${HOME}/.local/bin
+Environment=GMS_PROCESS_INVENTORY_BIN=${INSTALL_ROOT}/bin/gms-process-inventory
+Environment=GMS_USBIP_CONTROL_BIN=${INSTALL_ROOT}/bin/gms-usbip-control
 Environment=PATH=${HOME}/.local/bin:${SOFTWARE_ROOT}/platform-tools:${SOFTWARE_ROOT}/jdk-11/bin:${INSTALL_ROOT}/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/python3 -m worker_agent.app
 Restart=on-failure
