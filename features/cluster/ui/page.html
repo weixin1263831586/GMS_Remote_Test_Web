@@ -49,19 +49,7 @@ body.modal-open{overflow:hidden}
     <section id="dashboard"><div class="section-head"><div class="section-head-copy"><h2>集群概览</h2><p id="dash-last-update" style="font-size:10px;color:var(--muted)"></p></div><button id="dash-refresh-charts" class="stable-action" style="min-width:auto;font-size:11px;padding:3px 8px">↻ 刷新</button></div><div id="dashboard-stats" class="dash-cards"></div><div class="dash-charts-row dash-row-top"><div id="dash-gauges" class="dash-panel"></div><div id="dash-device-pie" class="dash-panel"></div></div><div class="dash-charts-row dash-row-bottom"><div id="dash-trend" class="dash-panel"></div><div id="dashboard-tests" class="dash-panel"></div></div></section>
   </div>
   <div id="tab-management" class="dash-tab-pane" hidden>
-  <div id="onboarding" class="modal-backdrop" hidden><section class="onboarding-modal"><div class="section-head"><div><h2>添加测试主机</h2></div><button id="close-onboarding">×</button></div>
-    <div class="onboarding-grid"><label>Worker 名称 / ID<input id="new-worker-id" placeholder="ATS Worker 01（自动转为 ats-worker-01）"></label><label>SSH 主机<input id="new-worker-host" placeholder="user@192.168.1.100"></label><label>Controller URL<input id="controller-url"></label><label>套件目录<input id="suite-root" value="~/GMS-Suite"></label><label>Worker Token<span class="input-action"><input id="worker-token" type="text" autocomplete="off"><button type="button" id="generate-token" onclick="document.querySelector('#worker-token').value=Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('')">自动生成</button></span></label><label>SSH 密码<span class="input-action"><input id="worker-password" type="password" autocomplete="new-password" placeholder="也可使用免密 SSH"><label class="inline-checkbox"><input id="save-worker-password" type="checkbox"> 保存密码</label></span></label></div>
-    <div class="command-box"><code id="deploy-command"></code><button id="copy-deploy">复制命令</button><button id="auto-deploy" class="primary">自动部署</button></div>
-    <pre id="deploy-error" class="host-warning" hidden style="white-space:pre-wrap;max-height:220px;overflow:auto;"></pre>
-    <p class="hint">自动部署会把 JDK、adb、fastboot、aapt/aapt2 安装到目标账号的 ~/Software，并幂等配置 ~/.bashrc；目标账号需支持免密 sudo（或填写 SSH 密码）。密码默认只用于本次请求，勾选后才保存为主机终端凭据。</p>
-  </section></div>
   <section><div class="section-head"><div class="section-head-copy"><h2>Worker 主机</h2><p id="cluster-mode-status" class="mode-status">正在读取集群模式…</p></div><div class="actions"><input id="cluster-search" class="compact-filter" type="search" placeholder="搜索主机、设备或套件"><button id="show-onboarding" class="stable-action">＋ 添加主机</button><button id="refresh" class="primary stable-action">↻ 刷新</button></div></div><div id="workers" class="cards"><div class="empty">加载中…</div></div></section>
-  <div id="worker-config-modal" class="modal-backdrop" hidden><section class="onboarding-modal compact"><div class="section-head"><div><h2>Worker 配置</h2><p id="config-worker-name">—</p></div><button id="close-config-modal">×</button></div>
-    <div class="onboarding-grid"><label>最大并发任务 (max_jobs)<input id="config-max-jobs" type="number" min="1" max="32" step="1" placeholder="{{DEFAULT_MAX_JOBS}}"></label></div>
-    <p class="hint">配置将在 Agent 内即时生效；有测试运行时不允许修改。</p>
-    <div class="actions"><button id="save-worker-config" class="primary">保存配置</button></div>
-    <pre id="config-error" class="host-warning" hidden style="white-space:pre-wrap;"></pre>
-  </section></div>
   <section class="grid"><div><div class="section-head"><h2>已部署套件</h2></div><div class="table-wrap"><table id="suites-table"><thead><tr><th>Worker</th><th>套件</th><th>版本</th><th>路径</th></tr></thead><tbody id="suites"></tbody></table></div></div>
   <div><div class="section-head"><h2>设备资源池</h2></div><div class="table-wrap"><table><thead><tr><th>Worker</th><th>Serial</th><th>类型</th><th>来源</th><th>状态</th><th>型号</th></tr></thead><tbody id="devices"></tbody></table></div></div></section>
   <section><div class="section-head"><div class="section-head-copy"><h2>测试套件压缩包</h2><p>统一读取 Controller 的 GMS-Suite 根目录，可一键下发并解压到指定 Worker</p></div><button id="reload-library" class="stable-action">↻ 刷新测试套件</button></div><div class="table-wrap"><table><thead><tr><th>压缩包</th><th>大小</th><th>修改时间</th><th>目标 Worker</th><th>解压目录</th><th>操作</th></tr></thead><tbody id="library"></tbody></table></div></section>
@@ -75,4 +63,17 @@ body.modal-open{overflow:hidden}
     <div class="table-wrap"><table><thead><tr><th>任务</th><th>Worker</th><th>状态</th><th>设备</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
   <section id="detail" hidden><div class="section-head"><h2>任务详情</h2><div class="actions"><button id="job-open-test">打开测试页</button><button id="job-open-report">分析报告</button><button id="job-open-ats">打开 GMS ATS</button></div></div><div id="job-summary" class="meta"></div><details open><summary>原始任务数据</summary><pre id="job-detail"></pre></details><h3>远端运行日志</h3><pre id="job-logs"></pre><div id="artifacts" class="job-artifacts"></div></section>
   </div>
-</main><div id="toast"></div><script src="/static/js/embedded-workspace.js?v=20260713-01"></script><script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script><script>{{CLUSTER_JS}}</script></body></html>
+</main>
+<div id="onboarding" class="modal-backdrop" hidden><section class="onboarding-modal"><div class="section-head"><div><h2>添加测试主机</h2></div><button id="close-onboarding">×</button></div>
+  <div class="onboarding-grid"><label>Worker 名称 / ID<input id="new-worker-id" placeholder="ATS Worker 01（自动转为 ats-worker-01）"></label><label>SSH 主机<input id="new-worker-host" placeholder="user@192.168.1.100"></label><label>Controller URL<input id="controller-url"></label><label>套件目录<input id="suite-root" value="~/GMS-Suite"></label><label>Worker Token<span class="input-action"><input id="worker-token" type="text" autocomplete="off"><button type="button" id="generate-token" onclick="document.querySelector('#worker-token').value=Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('')">自动生成</button></span></label><label>SSH 密码<span class="input-action"><input id="worker-password" type="password" autocomplete="new-password" placeholder="也可使用免密 SSH"><label class="inline-checkbox"><input id="save-worker-password" type="checkbox"> 保存密码</label></span></label></div>
+  <div class="command-box"><code id="deploy-command"></code><button id="copy-deploy">复制命令</button><button id="auto-deploy" class="primary">自动部署</button></div>
+  <pre id="deploy-error" class="host-warning" hidden style="white-space:pre-wrap;max-height:220px;overflow:auto;"></pre>
+  <p class="hint">自动部署会把 JDK、adb、fastboot、aapt/aapt2 安装到目标账号的 ~/Software，并幂等配置 ~/.bashrc；目标账号需支持免密 sudo（或填写 SSH 密码）。密码默认只用于本次请求，勾选后才保存为主机终端凭据。</p>
+</section></div>
+<div id="worker-config-modal" class="modal-backdrop" hidden><section class="onboarding-modal compact"><div class="section-head"><div><h2>Worker 配置</h2><p id="config-worker-name">—</p></div><button id="close-config-modal">×</button></div>
+  <div class="onboarding-grid"><label>最大并发任务 (max_jobs)<input id="config-max-jobs" type="number" min="1" max="32" step="1" placeholder="{{DEFAULT_MAX_JOBS}}"></label></div>
+  <p class="hint">配置将在 Agent 内即时生效；有测试运行时不允许修改。</p>
+  <div class="actions"><button id="save-worker-config" class="primary">保存配置</button></div>
+  <pre id="config-error" class="host-warning" hidden style="white-space:pre-wrap;"></pre>
+</section></div>
+<div id="toast"></div><script src="/static/js/embedded-workspace.js?v=20260713-01"></script><script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script><script>{{CLUSTER_JS}}</script></body></html>

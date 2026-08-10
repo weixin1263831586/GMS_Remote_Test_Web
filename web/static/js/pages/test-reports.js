@@ -773,4 +773,3 @@ async function autoInstallSshd() {
     // SSHD 需要手动安装，直接显示提示
     addLogEntry('⚠️ SSHD 需要在 Windows 客户端上手动安装，请按照安装指南操作', 'warning');
 }
-

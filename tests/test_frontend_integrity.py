@@ -163,6 +163,15 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("const reportProvenanceOnly = ['reports', 'report-analysis', 'report-download', 'test-suites', 'automation']", navigation)
         self.assertIn("contextJobId !== state.clusterJobId && !reportProvenanceOnly", navigation)
 
+    def test_opengrok_tool_icon_does_not_probe_the_external_service(self):
+        shell = read_text("web/shell/shell.html")
+
+        self.assertIn(
+            "'OpenGrok': '/static/icons/favicons/rockchip-opengrok.svg'",
+            shell,
+        )
+        self.assertNotIn("/default/img/apple-touch-icon.png", shell)
+
     def test_login_explains_client_ssh_account_and_finishes_identity_prefill(self):
         shell = read_text("web/shell/shell.html")
         api_script = read_text("web/static/js/api.js")

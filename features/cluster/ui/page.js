@@ -2,6 +2,7 @@ const state={workers:[],devices:[],suites:[],jobs:[],tests:[],library:[],status:
 const dashCharts={gauges:null,pie:null,trend:null};
 let dashTrendWorker='';
 let dashTrendLastFetch=0;
+let dashMetricsHistory=[];
 let dashRefreshTimer=null;
 let dashCountdown=10;
 let localVpnConnected=null;

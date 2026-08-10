@@ -210,7 +210,7 @@ run_tradefed() {
     local tradefed_bin="./$SUITE_PREFIX-tradefed"
     [[ -x "$tradefed_bin" ]] || die "未找到 tradefed 可执行文件: $tradefed_bin"
 
-    local command="$tradefed_bin run commandAndExit"
+    local -a command=("$tradefed_bin" run commandAndExit)
     if [[ "$mode" == "retry" ]]; then
         [[ -n "$RESULT_TIMESTAMP" ]] || die "retry 模式缺少 RESULT_TIMESTAMP"
 
@@ -221,7 +221,8 @@ run_tradefed() {
                 local session_id=""
 
                 log "🔍 查找VTS session ID..."
-                local list_output=$("./$SUITE_PREFIX-tradefed" list results 2>/dev/null | grep "$RESULT_TIMESTAMP")
+                local list_output=""
+                list_output=$("./$SUITE_PREFIX-tradefed" list results 2>/dev/null | grep -F "$RESULT_TIMESTAMP") || true
 
                 if [[ -n "$list_output" ]]; then
                     # 提取session ID（第一列）
@@ -232,27 +233,31 @@ run_tradefed() {
                 fi
 
                 # 构建VTS retry命令
-                command="$command retry --retry $session_id"
+                command+=(retry --retry "$session_id")
                 log "🔄 VTS Retry模式, session ID: $session_id, 结果目录: $RESULT_TIMESTAMP"
                 ;;
             *)
                 # CTS/GTS/STS使用 --retry-result-dir 参数
-                command="$command retry --retry-result-dir $RESULT_TIMESTAMP"
+                command+=(retry --retry-result-dir "$RESULT_TIMESTAMP")
                 log "🔄 Retry模式, 结果目录: $RESULT_TIMESTAMP"
                 ;;
         esac
     else
-        command="$command $TEST_COMMAND"
+        command+=("$TEST_COMMAND")
         if [[ -n "$Test_Module" ]]; then
-            command="$command -m $Test_Module"
+            command+=(-m "$Test_Module")
             if [[ -n "$Test_Case" ]]; then
-                command="$command -t $Test_Case"
+                command+=(-t "$Test_Case")
             fi
         fi
     fi
-    command="$command $DEVICE_ARGS --disable-reboot"
+    local -a device_args=()
+    read -r -a device_args <<< "$DEVICE_ARGS"
+    command+=("${device_args[@]}" --disable-reboot)
 
-    log "📋 测试命令: $command"
+    local command_display=""
+    printf -v command_display '%q ' "${command[@]}"
+    log "📋 测试命令: ${command_display% }"
     log "⏱️ 开始时间: $(date)"
     RUN_STARTED_EPOCH=$(date +%s)
 
@@ -264,7 +269,7 @@ run_tradefed() {
 
     # 执行命令并实时输出
     # 同时记录到日志文件（追加模式）
-    eval "$command" 2>&1 | tee -a "$LOG_FILE"
+    "${command[@]}" 2>&1 | tee -a "$LOG_FILE"
     local exit_code=${PIPESTATUS[0]}
 
     log "⏱️ 结束时间: $(date)"

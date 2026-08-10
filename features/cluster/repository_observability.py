@@ -189,10 +189,18 @@ class ClusterObservabilityRepositoryMixin:
         if result:
             from foundation.events import EVENT_JOB_TRANSITION, event_bus
 
-            event_bus.emit(
-                EVENT_JOB_TRANSITION,
-                {"job_id": job_id, "status": to_status, "worker_id": worker_id},
-            )
+            job = self.get_job(job_id) or {}
+            owner_id = str(job.get("owner_id") or "")
+            if owner_id:
+                event_bus.emit(
+                    EVENT_JOB_TRANSITION,
+                    {
+                        "job_id": job_id,
+                        "status": to_status,
+                        "worker_id": worker_id,
+                        "_target_client_id": owner_id,
+                    },
+                )
         return result
 
     def validate_worker_session(

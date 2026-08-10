@@ -384,9 +384,16 @@
             "type": "string"
           },
           "system_file": {
-            "format": "binary",
-            "title": "System File",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System File"
           },
           "vendor_file": {
             "anyOf": [
@@ -407,8 +414,7 @@
         },
         "required": [
           "worker_id",
-          "devices",
-          "system_file"
+          "devices"
         ],
         "title": "Body_stage_worker_gsi_api_cluster_gsi_stage_post",
         "type": "object"
@@ -1510,6 +1516,7 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 32,
             "title": "Devices",
             "type": "array"
           },

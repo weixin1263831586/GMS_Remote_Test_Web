@@ -1,7 +1,10 @@
 import unittest
+from subprocess import CompletedProcess
+from unittest.mock import patch
 
 from features.system.network import (
     _generate_route_commands,
+    check_local_vpn_connected,
     has_active_vpn_connection,
     parse_vpn_connection_names,
 )
@@ -34,6 +37,18 @@ class NetworkTests(unittest.TestCase):
         output = r"corp\:vpn:ethernet:activated"
 
         self.assertFalse(has_active_vpn_connection(output))
+
+    def test_local_vpn_status_does_not_report_disconnected_when_nmcli_fails(self):
+        with (
+            patch(
+                "features.system.network.subprocess.run",
+                return_value=CompletedProcess(
+                    [], 10, stdout="", stderr="permission denied"
+                ),
+            ),
+            self.assertRaisesRegex(RuntimeError, "permission denied"),
+        ):
+            check_local_vpn_connected()
 
     def test_route_gateway_uses_last_octet_one(self):
         commands = _generate_route_commands("192.168.14.0", "192.168.20.0", "192.168.14.9")

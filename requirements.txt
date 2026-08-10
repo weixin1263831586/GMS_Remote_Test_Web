@@ -7,9 +7,9 @@ uvicorn[standard]==0.40.0
 pydantic==2.12.5
 python-multipart==0.0.22
 aiohttp==3.13.3
-cryptography==41.0.7
-requests==2.31.0
-requests-toolbelt==0.9.1
+cryptography==50.0.0
+requests==2.34.2
+requests-toolbelt==1.0.0
 uiautomator2==3.7.0  # Android 语义 UI 树与可靠操控（禁用 idle wait，规避动态界面卡死）
 python-redmine==2.5.0
 pyudev==0.24.4

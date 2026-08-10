@@ -28,6 +28,7 @@ from features.redmine.scheduler import (
     start_redmine_agent_scheduler,
     stop_redmine_agent_scheduler,
 )
+from features.system.notifications import bind_event_bus_loop, unbind_event_bus_loop
 from features.system.state import global_state
 from foundation.config import CLEANUP_INTERVAL_SECONDS
 from foundation.controller_lock import controller_process_lock
@@ -202,6 +203,7 @@ def create_lifespan(services: AppServices):
         with controller_process_lock(services.settings.data_root):
             app.state.services = services
             initialize_runtime_data(services)
+            event_loop = bind_event_bus_loop()
             cleanup_task = asyncio.create_task(_periodic_cleanup())
             app.state.cleanup_task = cleanup_task
             redmine_task = start_redmine_agent_scheduler(services.redmine)
@@ -233,6 +235,7 @@ def create_lifespan(services: AppServices):
             try:
                 yield
             finally:
+                unbind_event_bus_loop(event_loop)
                 background_tasks = list(global_state.background_tasks)
                 for task in background_tasks:
                     task.cancel()

@@ -441,4 +441,3 @@ function updateUsbipButtonStatus(connected) {
         state.usbipConnected = false;
     }
 }
-

@@ -629,4 +629,3 @@ function refreshCurrentDirectory() {
         showToast('没有可刷新的目录', 'warning');
     }
 }
-

@@ -47,27 +47,95 @@ def _enforce_post_extraction_safety(base_dir: str) -> None:
     base = os.path.abspath(base_dir)
     file_count = 0
     total_bytes = 0
-    for root, _dirs, files in os.walk(base):
-        for name in files:
+    for root, dirs, files in os.walk(base, followlinks=False):
+        for name in [*dirs, *files]:
             full = os.path.join(root, name)
-            # Reject symlinks left by the extractor.
-            if os.path.islink(full):
+            try:
+                mode = os.lstat(full).st_mode
+            except OSError as exc:
+                raise ValueError(f'无法检查压缩包成员: {name}') from exc
+            if stat.S_ISLNK(mode):
                 raise ValueError(f'压缩包包含不安全符号链接: {os.path.relpath(full, base)}')
-            # Ensure every file is inside base_dir.
-            resolved = os.path.abspath(full)
-            if resolved != base and not resolved.startswith(base + os.sep):
+            if not stat.S_ISDIR(mode) and not stat.S_ISREG(mode):
+                raise ValueError(f'压缩包包含不安全特殊文件: {os.path.relpath(full, base)}')
+            resolved = os.path.realpath(full)
+            try:
+                confined = os.path.commonpath((base, resolved)) == base
+            except ValueError:
+                confined = False
+            if not confined:
                 raise ValueError(f'压缩包包含不安全路径: {os.path.relpath(full, base)}')
+            if stat.S_ISDIR(mode):
+                continue
             file_count += 1
             if file_count > MAX_ARCHIVE_FILES:
                 raise ValueError(f'压缩包文件数量超过限制: {MAX_ARCHIVE_FILES}')
             try:
-                total_bytes += os.path.getsize(full)
+                total_bytes += os.lstat(full).st_size
             except OSError:
                 pass
             if total_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
                 raise ValueError(
                     f'压缩包展开大小超过限制: {MAX_ARCHIVE_EXPANDED_BYTES} bytes'
                 )
+
+
+def _preflight_system_archive(
+    archive_path: str,
+    target_dir: str,
+    command: str,
+    *,
+    timeout: int = 120,
+) -> None:
+    """Validate RAR/7z member paths before the external tool writes files."""
+    if command == 'rar':
+        completed = subprocess.run(
+            [command, 'lb', archive_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        members = [(line.strip(), 0) for line in completed.stdout.splitlines()]
+    else:
+        completed = subprocess.run(
+            [command, 'l', '-slt', archive_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        details = completed.stdout.partition('----------')[2]
+        members = []
+        member_name = ''
+        member_size = 0
+        for line in [*details.splitlines(), 'Path = ']:
+            if line.startswith('Path = '):
+                if member_name:
+                    members.append((member_name, member_size))
+                member_name = line.removeprefix('Path = ').strip()
+                member_size = 0
+            elif line.startswith('Size = '):
+                try:
+                    member_size = max(0, int(line.removeprefix('Size = ').strip()))
+                except ValueError:
+                    member_size = 0
+
+    file_count = 0
+    total_bytes = 0
+    for member_name, member_size in members:
+        if not member_name:
+            continue
+        normalized = member_name.replace('\\', '/')
+        safe_extract_member_path(target_dir, normalized)
+        file_count += 1
+        total_bytes += member_size
+        if file_count > MAX_ARCHIVE_FILES:
+            raise ValueError(f'压缩包文件数量超过限制: {MAX_ARCHIVE_FILES}')
+        if total_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
+            raise ValueError(
+                f'压缩包展开大小超过限制: {MAX_ARCHIVE_EXPANDED_BYTES} bytes'
+            )
 
 
 def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
@@ -139,6 +207,7 @@ class ReportFileHandler:
         因此在解压完成后立即扫描目标目录，执行与 zip/tar 相同的安全约束。
         """
         if archive_path.lower().endswith('.rar') and shutil.which('rar'):
+            _preflight_system_archive(archive_path, self.temp_dir, 'rar', timeout=300)
             subprocess.run(
                 ['rar', 'x', '-y', archive_path, self.temp_dir + os.sep],
                 check=True,
@@ -146,6 +215,7 @@ class ReportFileHandler:
                 timeout=300,
             )
         elif shutil.which('7z'):
+            _preflight_system_archive(archive_path, self.temp_dir, '7z', timeout=300)
             subprocess.run(
                 ['7z', 'x', '-y', f'-o{self.temp_dir}', archive_path],
                 check=True,

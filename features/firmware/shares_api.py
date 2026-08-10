@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-import getpass, json, os, re, threading, time, uuid
+import getpass
+import json
+import os
+import re
+import threading
+import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
@@ -15,10 +21,12 @@ from starlette.concurrency import run_in_threadpool
 from features.auth import require_elevated_admin_when_auth_required
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
-from foundation.secrets import decrypt_secret, encrypt_secret
+from foundation.secrets import encrypt_secret
 from foundation.ssh_security import configure_strict_host_keys
 
 from . import runtime
+from .share_records import public_record as _public_record
+from .share_records import record_password as _record_password
 
 
 router = APIRouter()
@@ -42,14 +50,29 @@ def _store_path() -> Path:
 
 
 def _load_records() -> list[dict[str, Any]]:
-    path = _store_path()
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    return data if isinstance(data, list) else []
+    with _records_lock:
+        path = _store_path()
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        if not isinstance(data, list):
+            return []
+        records = [dict(record) for record in data if isinstance(record, dict)]
+        migrated = len(records) != len(data)
+        for record in records:
+            plaintext = record.get("password")
+            if plaintext and not record.get("password_encrypted"):
+                record["password_encrypted"] = encrypt_secret(str(plaintext))
+                migrated = True
+            if "password" in record:
+                record.pop("password", None)
+                migrated = True
+        if migrated:
+            _save_records(records)
+        return records
 
 
 def _save_records(records: list[dict[str, Any]]) -> None:
@@ -265,44 +288,12 @@ def _list_remote_dir(host: str, user: str | None, path: str, config: dict[str, A
         raise ValueError(f"SSH连接错误: {exc}") from exc
 
 
-def _public_record(record: dict[str, Any]) -> dict[str, Any]:
-    allowed = {
-        "id",
-        "name",
-        "host",
-        "user",
-        "path",
-        "filename",
-        "size",
-        "mtime",
-        "created_at",
-        "created_by",
-        "expires_at",
-        "downloads",
-        "last_downloaded_at",
-    }
-    public = {key: record.get(key) for key in allowed if key in record}
-    public["has_password"] = bool(record.get("password") or record.get("password_encrypted"))
-    return public
-
-
 def _find_record(share_id: str) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     records = _load_records()
     for record in records:
         if record.get("id") == share_id:
             return records, record
     return records, None
-
-
-def _record_password(record: dict[str, Any]) -> str | None:
-    """Resolve a share's SSH password (encrypted or legacy plaintext)."""
-    enc = record.get("password_encrypted")
-    if enc:
-        try:
-            return decrypt_secret(enc) or None
-        except RuntimeError:
-            return None
-    return record.get("password") or None
 
 
 def _parse_range(range_header: str | None, size: int) -> tuple[int, int, int] | None:

@@ -915,10 +915,12 @@ def flash_firmware(config: WorkerConfig, firmware: Path, device_ids: list[str]) 
             "exit_code": completed.returncode, "output": output[-20000:]}
 
 
-def flash_gsi(config: WorkerConfig, system_img: Path, vendor_img: Path | None,
+def flash_gsi(config: WorkerConfig, system_img: Path | None, vendor_img: Path | None,
               device_ids: list[str]) -> dict[str, Any]:
     if len(device_ids) != 1:
         raise ValueError("GSI flashing requires exactly one device")
+    if system_img is None and vendor_img is None:
+        raise ValueError("GSI flashing requires a system or vendor image")
     serial = str(device_ids[0]).split(":", 1)[-1]
     attached = {item["serial"]: item for item in probe_devices()}
     if serial not in attached:
@@ -940,7 +942,7 @@ def flash_gsi(config: WorkerConfig, system_img: Path, vendor_img: Path | None,
         str(script),
         serial,
         prepared.oem_argument("unlock"),
-        str(system_img),
+        str(system_img) if system_img else "",
         str(misc_img),
     ]
     if vendor_img:

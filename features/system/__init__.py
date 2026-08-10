@@ -9,6 +9,7 @@ from .mainline_issues import (
     query_exemption_match as query_mainline_exemption_match,
 )
 from .models import VNCStartRequest, VPNConnectRequest
+from .network import check_local_vpn_connected
 from .security_audit import security_audit_logger
 from .ssh import ssh_manager
 from .vnc import novnc_url
@@ -18,6 +19,7 @@ __all__ = [
     "API_DOCS_LIST",
     "VNCStartRequest",
     "VPNConnectRequest",
+    "check_local_vpn_connected",
     "health_check",
     "init_mainline_issues_db",
     "novnc_url",

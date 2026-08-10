@@ -21,6 +21,8 @@ _SERIAL_OPTIONS = {"-s", "--serial", "--device-serial"}
 _RUNTIME_INFO = re.compile(r"(?P<path>/[^\s:]+/tf_runtime_info)(?::|$)")
 _RUNTIME_ACTIVITY = re.compile(r"(?P<path>/[^\s:]+/(?:tf_runtime_info|tf_test_module_results))(?::|$)")
 _TEST_ID = re.compile(r"/test_(?P<id>[0-9a-f-]{20,})/")
+_DEVICE_SERIAL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}")
+_SCRIPT_OR_DATA_SUFFIXES = (".jar", ".js", ".json", ".py", ".sh", ".txt")
 
 
 def _read_cmdline(path: Path) -> list[str]:
@@ -58,10 +60,12 @@ def _looks_like_serial(value: str) -> bool:
     value = str(value or "").strip()
     if not value or value.startswith("-"):
         return False
-    # Device serials never contain "/" (file paths like frida scripts).
-    if "/" in value:
+    # Reject relative script/data paths as well as absolute paths.  Frida and
+    # similar tools also use ``-s`` for a script, so option position alone is
+    # not proof that the following value is an Android serial.
+    if value.lower().endswith(_SCRIPT_OR_DATA_SUFFIXES):
         return False
-    return True
+    return _DEVICE_SERIAL.fullmatch(value) is not None
 
 
 def _extract_devices(argv: list[str]) -> set[str]:

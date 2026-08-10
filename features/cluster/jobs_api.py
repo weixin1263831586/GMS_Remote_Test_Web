@@ -19,7 +19,11 @@ from features.users import owner_id_from_request
 
 from .api import _authenticate, _require_cluster_enabled, service
 from .config import configured_max_bytes
-from .execution_spec import build_argv_from_spec
+from .execution_spec import (
+    build_argv_from_spec,
+    build_default_argv,
+    canonicalize_execution_spec,
+)
 from .models import ArtifactUploadComplete, ArtifactUploadInit, ClusterJobCreate, JobEventBatch
 from .report_index import index_cluster_report
 from .repository import utc_now
@@ -97,52 +101,46 @@ def create_job(body: ClusterJobCreate, request: Request):
     if not data["argv"]:
         spec = data.get("execution_spec")
         if spec and spec.get("test_type"):
-            data["argv"] = build_argv_from_spec(spec)
-            if not data.get("suite_path"):
-                data["suite_path"] = spec["suite_path"]
-            if not data.get("suite_key"):
-                suites = [
-                    item
-                    for item in service().repository.list_suites(data["worker_id"])
-                    if item["tools_path"] == spec["suite_path"] and item["available"]
-                ]
-                if suites:
-                    data["suite_key"] = suites[0]["suite_key"]
-        else:
-            suite_path = data["suite_path"]
-        suite_type = ""
-        if not suite_path:
+            requested_path = str(spec.get("suite_path") or "")
+            if data.get("suite_path") and data["suite_path"] != requested_path:
+                raise HTTPException(
+                    409,
+                    "execution_spec suite_path does not match the job suite_path",
+                )
             suites = [
                 item
                 for item in service().repository.list_suites(data["worker_id"])
-                if item["suite_key"] == data["suite_key"] and item["available"]
+                if item["tools_path"] == requested_path and item["available"]
             ]
+            if data.get("suite_key"):
+                suites = [
+                    item for item in suites if item["suite_key"] == data["suite_key"]
+                ]
             if not suites:
                 raise HTTPException(409, "suite is not available on worker")
-            suite_path = suites[0]["tools_path"]
-            suite_type = suites[0]["suite_type"].lower()
-        # A harmless console listing is the safe default; real runs supply the
-        # existing Tradefed arguments selected by the test page.
-        executable = (
-            str(Path(suite_path) / f"{suite_type}-tradefed") if suite_type else ""
-        )
-        if not executable and data["worker_id"] == local_worker_id:
-            executable = next(
-                (
-                    str(Path(suite_path) / name)
-                    for name in (
-                        "cts-tradefed",
-                        "gts-tradefed",
-                        "vts-tradefed",
-                        "sts-tradefed",
-                    )
-                    if (Path(suite_path) / name).exists()
-                ),
-                "",
+            selected_suite = suites[0]
+            data["suite_path"] = selected_suite["tools_path"]
+            data["suite_key"] = selected_suite["suite_key"]
+            data["execution_spec"] = canonicalize_execution_spec(
+                spec,
+                suite_path=data["suite_path"],
+                suite_type=selected_suite["suite_type"],
+                devices=data["devices"],
+                worker_id=data["worker_id"],
             )
-        if not executable:
-            raise HTTPException(409, "suite executable not found")
-        data["argv"] = [executable, "list", "devices"]
+            data["argv"] = build_argv_from_spec(data["execution_spec"])
+        else:
+            (
+                data["argv"],
+                data["suite_path"],
+                data["suite_key"],
+            ) = build_default_argv(
+                suite_path=data["suite_path"],
+                suite_key=data["suite_key"],
+                worker_id=data["worker_id"],
+                local_worker_id=local_worker_id,
+                available_suites=service().repository.list_suites(data["worker_id"]),
+            )
     from features.devices import incompatible_test_devices
 
     inventory = {
@@ -191,6 +189,7 @@ def create_job(body: ClusterJobCreate, request: Request):
             "payload": {
                 "worker_job_id": f"wj-{job['id']}",
                 "argv": data["argv"],
+                "execution_spec": data.get("execution_spec"),
                 "env": data["env"],
                 "devices": data["devices"],
                 "trace_id": job.get("trace_id", ""),

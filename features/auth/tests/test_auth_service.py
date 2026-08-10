@@ -4,10 +4,13 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from features.auth.service import AuthService
+from features.auth.service import DEFAULT_SESSION_ABSOLUTE_HOURS, AuthService
 
 
 class AuthServiceConcurrencyTests(unittest.TestCase):
+    def test_default_absolute_session_lifetime_does_not_interrupt_browser_use(self):
+        self.assertEqual(DEFAULT_SESSION_ABSOLUTE_HOURS, 100 * 365 * 24)
+
     def test_only_one_initial_admin_can_be_created_across_instances(self):
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / 'auth.sqlite3'

@@ -2490,7 +2490,7 @@ UNAUTH001	unauthorized
                 global_state.usbip_states.update(old_states)
 
     def test_frontend_waits_for_backend_autoreconnects_usbip_disconnects(self):
-        text = Path("web/static/js/navigation.js").read_text(encoding="utf-8", errors="ignore")
+        text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in [Path("web/static/js/navigation.js"), *sorted(Path("web/static/js/pages").glob("*.js"))])
 
         self.assertIn("device_host: deviceHost", text)
         self.assertIn("scheduleUsbipReconnect", text)

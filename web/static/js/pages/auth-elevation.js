@@ -445,4 +445,3 @@ async function submitDevicePassword() {
         }
     }
 }
-

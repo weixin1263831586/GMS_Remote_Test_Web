@@ -161,11 +161,13 @@ async def stage_worker_gsi(
     request: Request,
     worker_id: str = Form(...),
     devices: str = Form(...),
-    system_file: UploadFile = File(...),
+    system_file: UploadFile | None = File(default=None),
     vendor_file: UploadFile | None = File(default=None),
 ):
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     _online_worker(worker_id)
+    if system_file is None and vendor_file is None:
+        raise HTTPException(400, "at least one GSI image is required")
     device_id = worker_device(
         worker_id,
         devices,
