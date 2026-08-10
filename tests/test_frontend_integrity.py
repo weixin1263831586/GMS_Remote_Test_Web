@@ -41,6 +41,16 @@ def read_text(path: str) -> str:
     return Path(path).read_text(encoding="utf-8", errors="ignore")
 
 
+def read_all_frontend_js() -> str:
+    """Read navigation.js + all page modules as a single string for content checks."""
+    parts = [read_text("web/static/js/navigation.js")]
+    pages_dir = Path("web/static/js/pages")
+    if pages_dir.is_dir():
+        for js_file in sorted(pages_dir.glob("*.js")):
+            parts.append(read_text(str(js_file)))
+    return "\n".join(parts)
+
+
 def declared_functions(text: str) -> set[str]:
     return (
         set(FUNCTION_RE.findall(text))
@@ -61,7 +71,7 @@ def inline_handler_calls(text: str) -> list[tuple[str, str]]:
 
 class FrontendIntegrityTests(unittest.TestCase):
     def test_server_file_browser_uses_resolved_suite_path(self):
-        navigation_text = read_text("web/static/js/navigation.js")
+        navigation_text = read_all_frontend_js()
 
         self.assertIn("state.config?.effective_ubuntu_user", navigation_text)
         self.assertIn("state.config?.effective_suites_path", navigation_text)
@@ -76,7 +86,9 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_main_app_inline_handlers_resolve_to_global_functions(self):
         main_text = read_text("web/shell/shell.html")
-        script_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in Path("web/static/js").glob("*.js"))
+        script_paths = list(Path("web/static/js").glob("*.js"))
+        script_paths.extend(Path("web/static/js/pages").glob("*.js"))
+        script_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in script_paths)
         combined = main_text + "\n" + script_text
         funcs = declared_functions(combined)
 
@@ -145,7 +157,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertNotIn("job-artifact-card", script)
         self.assertIn("origin_page:terminalJob(job.status)?'reports':'cluster'", script)
 
-        navigation = read_text("web/static/js/navigation.js")
+        navigation = read_all_frontend_js()
         self.assertIn("const filePath = targetFile ? `${targetPath}/${targetFile}` : '';", navigation)
         self.assertIn("setSuiteBrowserHighlightedPath(filePath)", navigation)
         self.assertIn("const reportProvenanceOnly = ['reports', 'report-analysis', 'report-download', 'test-suites', 'automation']", navigation)
@@ -163,13 +175,13 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("此处不使用客户端 SSH 账号", api_script)
 
     def test_firmware_share_copy_explains_public_download(self):
-        navigation = read_text("web/static/js/navigation.js")
+        navigation = read_all_frontend_js()
 
         self.assertIn("分享链接已复制，无需登录即可打开下载", navigation)
         self.assertNotIn("分享链接已复制，已登录客户端可直接打开下载", navigation)
 
     def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
-        navigation = read_text("web/static/js/navigation.js")
+        navigation = read_all_frontend_js()
 
         self.assertIn(
             "stopDeviceProtocolRefresh = startBurnDeviceProtocolRefresh(devices)",
@@ -179,7 +191,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("loadDevices(true, {silent: true})", navigation)
 
     def test_cluster_mode_switch_stays_on_page_and_desktop_elevates_first(self):
-        navigation = read_text("web/static/js/navigation.js")
+        navigation = read_all_frontend_js()
         shell = read_text("web/shell/shell.html")
 
         toggle_start = navigation.index("async function toggleClusterMode()")
@@ -193,7 +205,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_test_host_uses_one_cluster_worker_selector(self):
         main_text = read_text("web/shell/shell.html")
-        navigation = read_text("web/static/js/navigation.js")
+        navigation = read_all_frontend_js()
 
         self.assertEqual(len(re.findall(r'id=["\']cluster-worker["\']', main_text)), 1)
         self.assertNotRegex(main_text, r'id=["\']ubuntu-host["\']')
@@ -213,7 +225,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_skill_toolbar_prefers_installer_and_labels_zip_as_offline_only(self):
         shell = read_text("web/shell/shell.html")
-        navigation = read_text("web/static/js/navigation.js")
+        navigation = read_all_frontend_js()
         api_constants = read_text("web/static/js/api-constants.js")
 
         self.assertIn('onclick="copySkillInstallCommand()"', shell)
@@ -228,7 +240,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("全部独立gms-rt-*命令", api_constants)
 
     def test_suite_share_links_keep_slashes_readable(self):
-        navigation = read_text("web/static/js/navigation.js")
+        navigation = read_all_frontend_js()
         share_start = navigation.index("function buildSuiteBrowserLink(")
         share_end = navigation.index("async function initTestSuiteBrowserPage", share_start)
         share_source = navigation[share_start:share_end]
@@ -240,7 +252,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("params.get('host') || workspaceLocalWorkerId()", navigation)
 
     def test_suite_download_and_inline_urls_keep_path_slashes_readable(self):
-        navigation = read_text("web/static/js/navigation.js")
+        navigation = read_all_frontend_js()
 
         self.assertIn(
             "return params.toString().replace(/%2F/gi, '/')",
@@ -319,7 +331,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_suite_host_selector_and_assistant_url_start_in_stable_layout(self):
         main_text = read_text("web/shell/shell.html")
-        navigation_text = read_text("web/static/js/navigation.js")
+        navigation_text = read_all_frontend_js()
 
         self.assertRegex(
             main_text,
@@ -330,7 +342,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_single_mode_hides_multi_host_controls_and_sidebar_has_descriptions(self):
         main_text = read_text("web/shell/shell.html")
-        navigation_text = read_text("web/static/js/navigation.js")
+        navigation_text = read_all_frontend_js()
 
         self.assertIn("SIDEBAR_PAGE_DESCRIPTIONS", main_text)
         self.assertIn("sidebar-description", main_text)
@@ -356,7 +368,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_device_management_inventory_is_scoped_by_single_cluster_mode(self):
         main_text = read_text("web/shell/shell.html")
-        navigation_text = read_text("web/static/js/navigation.js")
+        navigation_text = read_all_frontend_js()
 
         self.assertIn("requestedDevicesManagementScope", main_text)
         self.assertIn("const includeCluster = requestedScope === 'cluster'", main_text)
@@ -385,7 +397,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         )
 
         self.assertLess(elevation, submit)
-        self.assertIn("if (!state.authRequired)", read_text("web/static/js/navigation.js"))
+        self.assertIn("if (!state.authRequired)", read_all_frontend_js())
 
     def test_user_actions_use_stable_grid_and_safe_event_binding(self):
         main_text = read_text("web/shell/shell.html")
@@ -448,6 +460,7 @@ class FrontendIntegrityTests(unittest.TestCase):
             "features/automation/ui/page.html",
             "features/automation/ui/page.js",
             *[str(path) for path in Path("web/static/js").glob("*.js")],
+            *[str(path) for path in Path("web/static/js/pages").glob("*.js")],
         ]
         for path in checked_paths:
             with self.subTest(path=path):

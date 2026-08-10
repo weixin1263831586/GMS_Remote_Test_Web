@@ -273,6 +273,11 @@ class ClusterInventoryRepositoryMixin:
         worker = self.get_worker(worker_id)
         if worker is not None:
             worker["revoked_attempt_ids"] = sorted(revoked_attempt_ids)
+        # Notify WebSocket clients that worker state has changed so the
+        # frontend can refresh cluster views without polling.
+        from foundation.events import EVENT_WORKER_UPDATED, event_bus
+
+        event_bus.emit(EVENT_WORKER_UPDATED, {"worker_id": worker_id, "status": status})
         return worker
 
     def refresh_worker_devices(

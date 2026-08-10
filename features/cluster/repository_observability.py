@@ -175,7 +175,7 @@ class ClusterObservabilityRepositoryMixin:
         payload: dict[str, Any] | None = None,
     ) -> bool:
         with self._lock, self.connect() as conn:
-            return self._transition_job_conn(
+            result = self._transition_job_conn(
                 conn,
                 job_id,
                 to_status,
@@ -186,6 +186,14 @@ class ClusterObservabilityRepositoryMixin:
                 worker_id=worker_id,
                 payload=payload,
             )
+        if result:
+            from foundation.events import EVENT_JOB_TRANSITION, event_bus
+
+            event_bus.emit(
+                EVENT_JOB_TRANSITION,
+                {"job_id": job_id, "status": to_status, "worker_id": worker_id},
+            )
+        return result
 
     def validate_worker_session(
         self, worker_id: str, session_id: str = "", generation: int = 0

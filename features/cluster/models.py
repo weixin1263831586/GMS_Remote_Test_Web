@@ -99,6 +99,25 @@ class CommandCreate(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class ExecutionSpec(BaseModel):
+    """Structured test execution parameters that replace free-form argv.
+
+    When provided on ClusterJobCreate, the Controller validates the fields and
+    builds the Worker argv internally — the browser never supplies raw command
+    strings.  The spec is persisted on the job for audit and structured retry.
+    """
+
+    test_type: str = Field(min_length=1, max_length=32)
+    suite_path: str = Field(min_length=1, max_length=4096)
+    module: str = Field(default="", max_length=512)
+    test_case: str = Field(default="", max_length=512)
+    retry_dir: str = Field(default="", max_length=512)
+    devices: list[str] = Field(default_factory=list)
+    local_server: str = Field(default="", max_length=256)
+    no_retry: bool = False
+    copy_remote: bool = False
+
+
 class ClusterJobCreate(BaseModel):
     worker_id: str
     suite_key: str = ""
@@ -110,6 +129,7 @@ class ClusterJobCreate(BaseModel):
     source_type: str = "manual"
     priority: int = 100
     device_count: int = Field(default=1, ge=1, le=32)
+    execution_spec: ExecutionSpec | None = None
 
 
 class ClusterDeviceAction(BaseModel):

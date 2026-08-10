@@ -75,6 +75,17 @@ def start_cluster_test(request: Any, client_id: str):
             "exclusive_host": full_suite, "required_memory_gb": required_memory_gb,
             "test_module": request.test_module, "test_case": request.test_case,
             "retry_dir": request.retry_dir}
+    data["execution_spec"] = {
+        "test_type": (request.test_type or selected_suite["suite_type"]).lower(),
+        "suite_path": tools_path,
+        "module": request.test_module,
+        "test_case": request.test_case,
+        "retry_dir": os.path.basename(request.retry_dir.rstrip("/")) if request.retry_dir else "",
+        "devices": serials,
+        "local_server": request.local_server,
+        "no_retry": False,
+        "copy_remote": bool(request.local_server),
+    }
     data.update({
         "automation_run_id": request.automation_run_id,
         "device_reservation_id": request.device_reservation_id,

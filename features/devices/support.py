@@ -299,6 +299,14 @@ async def broadcast_device_lock_update(device_ids: list | None = None):
         # 广播到所有连接的客户端
         lock_msg = {'type': 'device_lock_update', 'devices': device_updates}
 
+        # Also emit via EventBus so event-bus listeners are notified.
+        from foundation.events import EVENT_DEVICE_LOCK_CHANGED, event_bus
+
+        event_bus.emit(
+            EVENT_DEVICE_LOCK_CHANGED,
+            {"devices": [item["device_id"] for item in device_updates]},
+        )
+
         async def _send_lock_update(cid, ws):
             with contextlib.suppress(Exception):
                 await ws.send_json(lock_msg)
