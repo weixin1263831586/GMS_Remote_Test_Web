@@ -113,7 +113,13 @@ class RuntimeUiHarness(unittest.TestCase):
             runtime_dir.cleanup()
 
     def new_page(self):
-        page = self.browser.new_page(viewport={"width": 1440, "height": 960})
+        # Runtime smoke tests intentionally execute helper expressions in the
+        # page context.  Keep the production CSP strict while allowing that
+        # Playwright-only instrumentation in this isolated browser context.
+        page = self.browser.new_page(
+            viewport={"width": 1440, "height": 960},
+            bypass_csp=True,
+        )
         page.set_default_timeout(8000)
         page.set_default_navigation_timeout(15000)
         status = page.request.get(f"{self.base_url}/api/auth/status")
@@ -856,6 +862,32 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
         self.assertNotIn("fonts.font.im", html)
         self.assertNotIn("fonts.googleapis.com", html)
+
+    def test_cluster_device_pool_hides_offline_inventory(self):
+        page = self.new_page()
+        try:
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function("typeof render === 'function'")
+            rows = page.evaluate(
+                """() => {
+                    state.workers = [];
+                    state.devices = [
+                        {worker_id: 'worker-1', serial: 'ONLINE-1', state: 'available', properties: {}},
+                        {worker_id: 'worker-1', serial: 'OFFLINE-1', state: 'offline', properties: {}},
+                    ];
+                    state.suites = [];
+                    state.jobs = [];
+                    state.tests = [];
+                    state.library = [];
+                    render();
+                    return Array.from(document.querySelectorAll('#devices tr')).map(row => row.textContent);
+                }"""
+            )
+
+            self.assertTrue(any("ONLINE-1" in row for row in rows))
+            self.assertFalse(any("OFFLINE-1" in row for row in rows))
+        finally:
+            page.close()
 
     def test_arrow_key_navigation_persists_page_for_reload(self):
         page = self.new_page()

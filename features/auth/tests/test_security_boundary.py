@@ -177,6 +177,8 @@ class SecurityBoundaryTests(unittest.TestCase):
             self.assertEqual(response.headers["x-content-type-options"], "nosniff")
             self.assertEqual(response.headers["x-frame-options"], "SAMEORIGIN")
             self.assertEqual(response.headers["referrer-policy"], "same-origin")
+            self.assertIn("object-src 'none'", response.headers["content-security-policy"])
+            self.assertIn("base-uri 'self'", response.headers["content-security-policy"])
             self.assertTrue(response.headers.get("x-request-id"))
 
     def test_openapi_declares_default_session_and_service_security(self):

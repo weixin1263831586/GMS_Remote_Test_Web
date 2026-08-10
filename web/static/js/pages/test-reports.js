@@ -2,29 +2,67 @@
 let reportsRefreshInterval = null;
 let currentUserFilter = false;  // 当前是否只显示本用户报告
 let reportsWorkersLoaded = false;
+let reportsWorkersPromise = null;
+let reportsNextCursor = '';
+let reportsLoadedItems = [];
+let reportsLoadedPages = 1;
+let reportsRequestGeneration = 0;
+let reportsHasLoaded = false;
+let reportsLastLoadedAt = 0;
+let reportsLastQueryKey = '';
+const REPORTS_REENTRY_CACHE_MS = 10000;
+const reportsRequests = new Map();
 
 async function loadReportWorkers() {
     if (reportsWorkersLoaded) return;
+    if (reportsWorkersPromise) return reportsWorkersPromise;
+    reportsWorkersPromise = loadReportWorkersOnce().finally(() => {
+        reportsWorkersPromise = null;
+    });
+    return reportsWorkersPromise;
+}
+
+async function loadReportWorkersOnce() {
     const select = document.getElementById('reports-worker-filter');
     if (!select) return;
     try {
-        const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
-        const payload = await response.json();
+        const snapshot = window.clusterWorkersSnapshot;
+        let workers = snapshot
+            && Date.now() - Number(snapshot.loadedAt || 0) < REPORTS_REENTRY_CACHE_MS
+            ? snapshot.workers
+            : null;
+        if (!Array.isArray(workers)) {
+            const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
+            const payload = await response.json();
+            workers = Array.isArray(payload.workers) ? payload.workers : [];
+            window.clusterWorkersSnapshot = {workers, loadedAt: Date.now()};
+        }
         await (window.GmsWorkspace?.ready || Promise.resolve());
         const workspace = window.GmsWorkspace?.get?.() || {};
         const previous = workspace.worker_id || '';
         const localWorkerId = workspaceLocalWorkerId();
-        const workers = [...(payload.workers || [])].sort((left, right) =>
+        workers = [...workers].sort((left, right) =>
             Number(right.id === localWorkerId) - Number(left.id === localWorkerId)
         );
         select.innerHTML = workers.map(worker =>
             `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.id)}</option>`
         ).join('') + '<option value="">全部 Worker</option>';
         if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+        select.dataset.workersLoaded = 'true';
         reportsWorkersLoaded = true;
     } catch (error) {
         debugLog('[Reports] Worker filter unavailable:', error);
     }
+}
+
+function requestReportsData(url) {
+    if (reportsRequests.has(url)) return reportsRequests.get(url);
+    const request = fetch(url, {cache: 'no-store'}).then(async response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+    }).finally(() => reportsRequests.delete(url));
+    reportsRequests.set(url, request);
+    return request;
 }
 
 async function switchReportsWorker() {
@@ -37,16 +75,20 @@ async function switchReportsWorker() {
         }, {source: 'reports'});
         syncWorkspaceWorkerSelectors(workerId);
     }
-    await loadTestReports(currentUserFilter);
+    await loadTestReports(currentUserFilter, false, true);
 }
 
 window.switchReportsWorker = switchReportsWorker;
 
-function reportsListUrl(userOnly) {
+function reportsListUrl(userOnly, cursor = '') {
     const params = new URLSearchParams();
     if (userOnly) params.set('user_only', 'true');
-    const workerId = document.getElementById('reports-worker-filter')?.value || '';
+    const workerSelect = document.getElementById('reports-worker-filter');
+    const workerId = workerSelect?.dataset.workersLoaded === 'true'
+        ? workerSelect.value
+        : (window.GmsWorkspace?.get?.().worker_id || '');
     if (workerId) params.set('worker_id', workerId);
+    if (cursor) params.set('cursor', cursor);
     const query = params.toString();
     return `/api/reports/list${query ? `?${query}` : ''}`;
 }
@@ -59,16 +101,70 @@ function cleanupReportsPolling() {
     }
 }
 
-async function loadTestReports(userOnly = false) {
-    try {
-        await loadReportWorkers();
-        const url = reportsListUrl(userOnly);
-        const resp = await fetch(url);
-        const data = await resp.json();
+function renderReportsPagination() {
+    const wrapper = document.getElementById('reports-load-more-wrapper');
+    if (!wrapper) return;
+    wrapper.innerHTML = '';
+    if (reportsNextCursor) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-xs';
+        button.textContent = `加载更多（已显示 ${reportsLoadedItems.length} 条）`;
+        button.addEventListener('click', () => loadTestReports(currentUserFilter, true));
+        wrapper.appendChild(button);
+    } else if (reportsLoadedItems.length) {
+        wrapper.textContent = `已显示全部 ${reportsLoadedItems.length} 条报告`;
+        wrapper.style.color = 'var(--text-secondary)';
+        wrapper.style.fontSize = '12px';
+    }
+}
 
-        if (data.reports) {
-            displayTestReports(data.reports);
+async function loadTestReports(userOnly = false, append = false, force = false) {
+    const requestGeneration = ++reportsRequestGeneration;
+    try {
+        await (window.GmsWorkspace?.ready || Promise.resolve());
+        const workersPromise = loadReportWorkers();
+        const url = reportsListUrl(userOnly, append ? reportsNextCursor : '');
+        const queryKey = reportsListUrl(userOnly);
+        if (!append && !force && reportsHasLoaded
+                && reportsLastQueryKey === queryKey
+                && Date.now() - reportsLastLoadedAt < REPORTS_REENTRY_CACHE_MS) {
+            await workersPromise;
+            displayTestReports(reportsLoadedItems);
+            renderReportsPagination();
+            return;
         }
+        const tbody = document.getElementById('reports-table-body');
+        if (!append) {
+            reportsNextCursor = '';
+            reportsLoadedPages = 1;
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text-secondary);">正在加载报告...</td></tr>';
+            }
+        }
+        const [data] = await Promise.all([
+            requestReportsData(url),
+            workersPromise,
+        ]);
+        if (requestGeneration !== reportsRequestGeneration) return;
+
+        const page = Array.isArray(data.reports) ? data.reports : [];
+        if (append) {
+            const seen = new Set(reportsLoadedItems.map(report => report.report_id || report.timestamp));
+            reportsLoadedItems = reportsLoadedItems.concat(
+                page.filter(report => !seen.has(report.report_id || report.timestamp)),
+            );
+            reportsLoadedPages += 1;
+        } else {
+            reportsLoadedItems = page;
+        }
+        reportsNextCursor = data.next_cursor || '';
+        reportsHasLoaded = true;
+        reportsLastLoadedAt = Date.now();
+        reportsLastQueryKey = queryKey;
+        displayTestReports(reportsLoadedItems);
+        if (tbody) tbody.setAttribute('aria-busy', 'false');
+        renderReportsPagination();
 
         // 启动自动刷新（每15秒）带变更检测
         if (!reportsRefreshInterval) {
@@ -77,9 +173,9 @@ async function loadTestReports(userOnly = false) {
             reportsRefreshInterval = setInterval(async () => {
                 if (currentPage === 'reports') {
                     try {
+                        if (reportsLoadedPages > 1) return;
                         const url = reportsListUrl(currentUserFilter);
-                        const response = await fetch(url);
-                        const data = await response.json();
+                        const data = await requestReportsData(url);
 
                         // 计算报告列表的哈希值以检测变更
                         const reportsHash = JSON.stringify(data.reports);
@@ -87,7 +183,13 @@ async function loadTestReports(userOnly = false) {
                         // 只有在报告列表发生变化时才更新DOM
                         if (reportsHash !== lastReportsHash) {
                             lastReportsHash = reportsHash;
-                            displayTestReports(data.reports);
+                            reportsLoadedItems = Array.isArray(data.reports) ? data.reports : [];
+                            reportsNextCursor = data.next_cursor || '';
+                            reportsHasLoaded = true;
+                            reportsLastLoadedAt = Date.now();
+                            reportsLastQueryKey = url;
+                            displayTestReports(reportsLoadedItems);
+                            renderReportsPagination();
                         }
                     } catch (error) {
                         console.error('[Reports] Error refreshing reports:', error);
@@ -99,6 +201,7 @@ async function loadTestReports(userOnly = false) {
         console.error('[Reports] Error loading reports:', e);
         const tbody = document.getElementById('reports-table-body');
         if (tbody) {
+            tbody.setAttribute('aria-busy', 'false');
             tbody.innerHTML = `
                 <tr>
                     <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
@@ -110,12 +213,14 @@ async function loadTestReports(userOnly = false) {
     }
 }
 
+window.loadMoreTestReports = () => loadTestReports(currentUserFilter, true);
+
 function toggleUserReports() {
     const checkbox = document.getElementById('filter-user-checkbox');
     currentUserFilter = checkbox.checked;
 
     // 重新加载报告列表
-    loadTestReports(currentUserFilter);
+    loadTestReports(currentUserFilter, false, true);
 }
 
 function displayTestReports(reports) {
@@ -160,11 +265,11 @@ function displayTestReports(reports) {
     };
 
     reports.forEach(report => {
-        const testType = report.test_type || '-';
+        const testType = String(report.test_type || '-');
         const displayClient = report.display_client_id || report.client_name || report.user || report.client_id || '-';
-        const passCount = report.pass !== undefined ? report.pass : '-';
-        const failCount = report.fail !== undefined ? report.fail : '-';
-        const totalCount = report.total !== undefined ? report.total : '-';
+        const passCount = report.pass !== undefined ? String(report.pass) : '-';
+        const failCount = report.fail !== undefined ? String(report.fail) : '-';
+        const totalCount = report.total !== undefined ? String(report.total) : '-';
         const passRate = report.total > 0 ? ((report.pass / report.total) * 100).toFixed(1) + '%' : '-';
         const suiteName = getReportSuiteDisplayName(report);
         const workerId = report.worker_id || workspaceLocalWorkerId() || '-';
@@ -189,14 +294,14 @@ function displayTestReports(reports) {
 
         tr.innerHTML = `
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(displayClient)}</td>
-            <td style="padding: 4px 6px; text-align: center; font-weight: 700; font-size: 13px; color: ${typeColor};">${testType}</td>
+            <td style="padding: 4px 6px; text-align: center; font-weight: 700; font-size: 13px; color: ${typeColor};">${escapeHtml(testType)}</td>
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px; color: var(--text-primary);">${escapeHtml(suiteName)}</td>
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(workerId)}</td>
             <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;" title="${escapeIconAttr(report.timestamp || '')}">${escapeHtml(report.report_name || report.timestamp || '-')}</td>
-            <td style="padding: 4px 6px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 13px;">${passCount}</td>
-            <td style="padding: 4px 6px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 13px;">${failCount}</td>
-            <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px;">${totalCount}</td>
-            <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px; ${passRateStyle}">${passRate}</td>
+            <td style="padding: 4px 6px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 13px;">${escapeHtml(passCount)}</td>
+            <td style="padding: 4px 6px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 13px;">${escapeHtml(failCount)}</td>
+            <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px;">${escapeHtml(totalCount)}</td>
+            <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px; ${passRateStyle}">${escapeHtml(passRate)}</td>
             <td style="padding: 4px 6px; text-align: center;">
                 <button class="btn-xxs" data-action="analyze" style="margin: 2px; font-size: 12px;">📈 分析</button>
                 <button class="btn-xxs" data-action="retry" style="background: var(--primary-color); margin: 2px; font-size: 12px;">🔄 retry</button>
@@ -336,7 +441,7 @@ async function deleteReport(timestamp, reportId = '', reportName = '') {
         if (result.success) {
             showToast('报告已删除', 'success');
             // 刷新报告列表
-            await loadTestReports();
+            await loadTestReports(currentUserFilter, false, true);
         } else {
             showToast('删除失败: ' + (result.error || '未知错误'), 'error');
         }

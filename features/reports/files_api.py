@@ -1,4 +1,8 @@
 import asyncio
+import base64
+import binascii
+import json
+from typing import Annotated
 
 from features.auth import (
     authentication_required,
@@ -38,6 +42,33 @@ from .downloads import (
 
 router = APIRouter()
 REPORT_FILE_VIEW_MAX_BYTES = 1024 * 1024
+
+
+def _encode_report_cursor(report: dict) -> str:
+    raw = json.dumps(
+        [str(report.get("created_at") or ""), str(report.get("report_id") or "")],
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_report_cursor(cursor: str) -> tuple[str, str]:
+    if not cursor or len(cursor) > 4096:
+        raise ValueError("Invalid report cursor")
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        value = json.loads(
+            base64.urlsafe_b64decode(cursor + padding).decode("utf-8")
+        )
+    except (binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid report cursor") from exc
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise ValueError("Invalid report cursor")
+    return value[0], value[1]
 
 
 def _is_path_under(path: str, root: str) -> bool:
@@ -113,6 +144,8 @@ async def list_reports(
     attempt_id: str = "",
     automation_run_id: str = "",
     report_timestamp: str = "",
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    cursor: str = "",
 ):
     """Get test report list from database."""
     import time
@@ -132,7 +165,12 @@ async def list_reports(
         )
 
         db_start = time.time()
-        exact_filter = any((cluster_job_id, attempt_id, automation_run_id, report_timestamp))
+        try:
+            before_created_at, before_report_id = (
+                _decode_report_cursor(cursor) if cursor else ("", "")
+            )
+        except ValueError as exc:
+            return error_response(str(exc), 400)
         owner_filter = (
             None
             if principal is None or (principal.role == "admin" and not user_only)
@@ -143,42 +181,39 @@ async def list_reports(
                 test_report_db, request, report_timestamp
             )
             candidate_reports = [exact] if exact else []
-        elif exact_filter:
-            candidate_reports = test_report_db.get_reports(
-                limit=500,
-                owner_id=owner_filter,
-                include_all=owner_filter is None,
-            )
         else:
-            candidate_reports = []
-        if not exact_filter:
             candidate_reports = test_report_db.get_reports(
-                limit=500,
+                limit=limit + 1,
                 owner_id=owner_filter,
                 include_all=owner_filter is None,
+                worker_id=worker_id or None,
+                cluster_job_id=cluster_job_id or None,
+                attempt_id=attempt_id or None,
+                automation_run_id=automation_run_id or None,
+                before_created_at=before_created_at or None,
+                before_report_id=before_report_id or None,
             )
         accessible = (
             candidate_reports
             if principal is None
             else filter_accessible_reports(request, candidate_reports)
         )
-        if principal and principal.role == "admin" and user_only:
-            accessible = [
-                report for report in accessible
-                if str(report.get("owner_id") or "") == principal.id
-            ]
+        # Timestamp lookup is a separate compatibility path, so retain exact
+        # provenance checks for that single record. List queries apply these
+        # filters directly in SQLite.
         all_reports = [
             report for report in accessible
             if (not cluster_job_id or report.get("cluster_job_id") == cluster_job_id)
             and (not attempt_id or report.get("attempt_id") == attempt_id)
             and (not automation_run_id or report.get("automation_run_id") == automation_run_id)
         ]
-        if worker_id:
-            all_reports = [
-                report for report in all_reports
-                if str(report.get("worker_id") or "") == worker_id
-            ]
-        all_reports = [
+        all_reports = [report for report in all_reports if (
+            not worker_id or str(report.get("worker_id") or "") == worker_id
+        )]
+        has_more = not report_timestamp and len(all_reports) > limit
+        page = all_reports[:limit]
+        next_cursor = _encode_report_cursor(page[-1]) if has_more and page else ""
+        decorated_reports = [
             _decorate_report_for_client(
                 report,
                 display_id
@@ -186,14 +221,19 @@ async def list_reports(
                 and str(report.get("owner_id") or "") == principal.id
                 else "",
             )
-            for report in all_reports[:30]
+            for report in page
         ]
         db_time = (time.time() - db_start) * 1000
 
         total_time = (time.time() - start_time) * 1000
-        logger.info(f"[API] /api/reports/list completed: {len(all_reports)} reports, DB: {db_time:.2f}ms, Total: {total_time:.2f}ms")
+        logger.info(f"[API] /api/reports/list completed: {len(decorated_reports)} reports, DB: {db_time:.2f}ms, Total: {total_time:.2f}ms")
 
-        return JSONResponse(content={"reports": all_reports, "worker_id": worker_id})
+        return JSONResponse(content={
+            "reports": decorated_reports,
+            "worker_id": worker_id,
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+        })
     except Exception as e:
         logger.error(f"Failed to get report list: {e}")
         return error_response("Failed to load reports", 500)

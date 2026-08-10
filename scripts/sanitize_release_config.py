@@ -53,23 +53,87 @@ def sanitize_product_config(config: dict[str, Any]) -> dict[str, Any]:
             "client_hosts": {},
             "client_ssh_credentials": [],
             "device_groups": [],
+            "product_branding": {
+                "company_name": "Organization",
+                "company_url": "",
+                "company_icon": "🏢",
+                "company_keywords": [],
+                "tool_icon_overrides": {},
+                "browser_icon_candidates": {},
+            },
         }
     )
+    for section_name in ("external_services", "opengrok", "redmine"):
+        section = result.get(section_name)
+        if isinstance(section, dict):
+            result[section_name] = {
+                section_key: _empty_like(section_value)
+                for section_key, section_value in section.items()
+            }
     redmine_auth = result.get("redmine_auth")
     if isinstance(redmine_auth, dict):
         redmine_auth.update({key: "" for key in redmine_auth})
     gerrit = result.get("gerrit_dashboard")
     if isinstance(gerrit, dict):
-        for key in ("rest_username", "ssh_user", "ssh_identity_file", "default_owner"):
+        for key in (
+            "base_url",
+            "rest_username",
+            "ssh_host",
+            "ssh_user",
+            "ssh_identity_file",
+            "default_owner",
+        ):
             if key in gerrit:
                 gerrit[key] = ""
+        for key in (
+            "department_defaults",
+            "dashboard_profiles",
+            "personal_profiles",
+            "department_profiles",
+        ):
+            if key in gerrit:
+                gerrit[key] = _empty_like(gerrit[key])
+    ai_models = result.get("ai_models")
+    if isinstance(ai_models, dict) and isinstance(ai_models.get("providers"), dict):
+        for provider in ai_models["providers"].values():
+            if isinstance(provider, dict):
+                for key in ("base_url", "endpoint"):
+                    if key in provider:
+                        provider[key] = ""
     return result
+
+
+def sanitize_cluster_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Keep capacity defaults while removing the source deployment identity."""
+    result = sanitize_value(config)
+    result.update(
+        {
+            "enabled": False,
+            "controller_url": "",
+            "local_worker_id": "ats-worker-controller",
+            "remote_dispatch_enabled": False,
+            "global_device_pool_enabled": False,
+            "lease_enforcement_enabled": False,
+        }
+    )
+    return result
+
+
+def sanitize_named_config(path: Path, raw: Any) -> Any:
+    if path.name == "config.json" and path.parent.name == "configs":
+        return sanitize_product_config(raw if isinstance(raw, dict) else {})
+    if path.name == "automation_profiles.json":
+        return {"profiles": []}
+    if path.name == "build_servers.json":
+        return {"servers": [], "templates": []}
+    if path.name == "cluster.json":
+        return sanitize_cluster_config(raw if isinstance(raw, dict) else {})
+    return sanitize_value(raw)
 
 
 def sanitize_file(path: Path) -> None:
     raw = json.loads(path.read_text(encoding="utf-8") or "{}")
-    is_product_config = path.name == "config.json" and path.parent.name == "configs"
-    sanitized = sanitize_product_config(raw) if is_product_config else sanitize_value(raw)
+    sanitized = sanitize_named_config(path, raw)
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
         json.dumps(sanitized, ensure_ascii=False, indent=4) + "\n",

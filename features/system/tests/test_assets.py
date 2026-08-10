@@ -7,6 +7,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from features.system import assets
+from features.system.favicon_security import FaviconResolver
+from features.system.icon_fetcher import IconFetcher
+from foundation.outbound import ResolvedOutboundTarget
 
 
 class FileListingTests(unittest.TestCase):
@@ -74,6 +77,74 @@ class FileListingTests(unittest.TestCase):
             ssh,
             "ls -la -- /home/tester/GMS-Suite 2>/dev/null",
         )
+
+
+class FaviconSecurityTests(unittest.TestCase):
+    def test_static_url_to_path_rejects_path_traversal(self):
+        path = IconFetcher.static_url_to_path(
+            "/static/icons/favicons/../../../../configs/config.json"
+        )
+
+        self.assertEqual(path, "")
+
+    def test_private_favicon_target_is_rejected_without_allowlist(self):
+        fetcher = IconFetcher(timeout=1)
+        try:
+            result = asyncio.run(
+                fetcher.localize_icon_url("http://127.0.0.1/favicon.ico")
+            )
+        finally:
+            asyncio.run(fetcher.close())
+
+        self.assertFalse(result.success)
+        self.assertIn("Private or reserved", result.error)
+
+    def test_svg_is_active_content_not_a_safe_image(self):
+        payload = b'<?xml version="1.0"?><svg><script>alert(1)</script></svg>'
+
+        self.assertTrue(IconFetcher._is_svg_content(payload))
+        self.assertFalse(IconFetcher._is_image_content(payload))
+
+    def test_favicon_resolver_pins_validated_address(self):
+        target = ResolvedOutboundTarget(
+            url="https://example.com/favicon.ico",
+            hostname="example.com",
+            port=443,
+            addresses=("93.184.216.34",),
+        )
+        with patch(
+            "features.system.favicon_security.resolve_outbound_target",
+            return_value=target,
+        ):
+            resolved = asyncio.run(FaviconResolver().resolve("example.com", 443))
+
+        self.assertEqual(resolved[0]["host"], "93.184.216.34")
+        self.assertEqual(resolved[0]["hostname"], "example.com")
+
+
+class WebsiteToolsValidationTests(unittest.TestCase):
+    def test_accepts_https_relative_and_legacy_bare_host_urls(self):
+        tools = {
+            "Development": [
+                {"title": "Docs", "url": "https://example.com/docs", "icon": "📘"},
+                {"title": "Reports", "url": "/reports", "icon": "📊"},
+                {"title": "Legacy", "url": "example.org", "icon": ""},
+            ]
+        }
+
+        assets._validate_tools_data(tools)
+
+    def test_rejects_script_protocol(self):
+        tools = {"Bad": [{"title": "Unsafe", "url": "javascript:alert(1)", "icon": ""}]}
+
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            assets._validate_tools_data(tools)
+
+    def test_rejects_protocol_relative_url(self):
+        tools = {"Bad": [{"title": "Unsafe", "url": "//example.com", "icon": ""}]}
+
+        with self.assertRaisesRegex(ValueError, "Invalid"):
+            assets._validate_tools_data(tools)
 
 
 if __name__ == "__main__":

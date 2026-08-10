@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +19,11 @@ class ReleasePackagingTests(unittest.TestCase):
             "--exclude 'configs/env.production'",
             "--exclude 'configs/certs/'",
             "--exclude 'configs/runtime.json'",
+            "--exclude 'configs/user_tools_data.json'",
+            "--exclude 'configs/redmine_user_map.json'",
             "--exclude 'data/'",
+            "--exclude '/dist/'",
+            "--exclude '/tools/gms-worker-native/target/'",
             "--exclude 'configs/config_runtime.json'",
             "--exclude 'tools/GMS-Host-Tools/gts-rockchip.json'",
             "Environment=GMS_ENV=production",
@@ -28,6 +34,38 @@ class ReleasePackagingTests(unittest.TestCase):
         # EnvironmentFile was removed: the runtime environment JSON is loaded in-process
         # by bootstrap.env_loader, so systemd no longer needs it.
         self.assertNotIn("EnvironmentFile", source)
+        self.assertNotIn("--exclude 'dist/'", source)
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync is required")
+    def test_release_excludes_root_dist_but_keeps_prebuilt_native_dist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            destination = root / "destination"
+            (source / "dist").mkdir(parents=True)
+            (source / "dist/archive.tar.gz").write_text("release", encoding="utf-8")
+            native_dist = source / "tools/gms-worker-native/dist/x86_64"
+            native_dist.mkdir(parents=True)
+            (native_dist / "gms-process-inventory").write_text("binary", encoding="utf-8")
+            native_target = source / "tools/gms-worker-native/target/release"
+            native_target.mkdir(parents=True)
+            (native_target / "build-object").write_text("object", encoding="utf-8")
+
+            subprocess.run(
+                [
+                    "rsync", "-a",
+                    "--exclude", "/dist/",
+                    "--exclude", "/tools/gms-worker-native/target/",
+                    f"{source}/", f"{destination}/",
+                ],
+                check=True,
+            )
+
+            self.assertFalse((destination / "dist/archive.tar.gz").exists())
+            self.assertTrue(
+                (destination / "tools/gms-worker-native/dist/x86_64/gms-process-inventory").is_file()
+            )
+            self.assertFalse((destination / "tools/gms-worker-native/target").exists())
 
     def test_installer_adds_limited_networkmanager_policy_for_service_user(self):
         installer = Path("install.sh").read_text(encoding="utf-8")
@@ -87,10 +125,11 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertEqual(result["client_ssh_credentials"], [])
         self.assertEqual(result["device_groups"], [])
         self.assertEqual(result["ai_models"]["providers"]["local"]["api_key"], "")
-        self.assertEqual(result["ai_models"]["providers"]["local"]["base_url"], "https://ai.example")
+        self.assertEqual(result["ai_models"]["providers"]["local"]["base_url"], "")
         self.assertEqual(result["redmine_auth"]["username"], "")
-        self.assertEqual(result["gerrit_dashboard"]["ssh_host"], "gerrit.example")
+        self.assertEqual(result["gerrit_dashboard"]["ssh_host"], "")
         self.assertEqual(result["gerrit_dashboard"]["ssh_user"], "")
+        self.assertEqual(result["product_branding"]["company_name"], "Organization")
 
     def test_skill_config_keeps_search_settings_but_removes_token(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -107,11 +146,41 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertEqual(result["token"], "")
         self.assertEqual(result["default_limit"], 10)
 
+    def test_customer_operational_configs_are_reset_to_safe_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            automation = root / "automation_profiles.json"
+            build = root / "build_servers.json"
+            cluster = root / "cluster.json"
+            automation.write_text('{"profiles":[{"id":"internal"}]}', encoding="utf-8")
+            build.write_text(
+                '{"servers":[{"host":"10.0.0.8"}],"templates":[{"command":"private"}]}',
+                encoding="utf-8",
+            )
+            cluster.write_text(
+                '{"enabled":true,"controller_url":"https://internal",'
+                '"local_worker_id":"private-worker","default_max_jobs":8}',
+                encoding="utf-8",
+            )
+
+            for path in (automation, build, cluster):
+                sanitize_file(path)
+
+            self.assertEqual(json.loads(automation.read_text())["profiles"], [])
+            sanitized_build = json.loads(build.read_text())
+            self.assertEqual(sanitized_build, {"servers": [], "templates": []})
+            sanitized_cluster = json.loads(cluster.read_text())
+            self.assertFalse(sanitized_cluster["enabled"])
+            self.assertEqual(sanitized_cluster["controller_url"], "")
+            self.assertEqual(sanitized_cluster["local_worker_id"], "ats-worker-controller")
+            self.assertEqual(sanitized_cluster["default_max_jobs"], 8)
+
     def test_release_verifier_rejects_runtime_files_and_nested_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "configs").mkdir()
             (root / "configs/config_runtime.json").write_text("{}", encoding="utf-8")
+            (root / "configs/user_tools_data.json").write_text("{}", encoding="utf-8")
             (root / "config.json").write_text(
                 json.dumps({"provider": {"api_key": "leaked"}}),
                 encoding="utf-8",
@@ -121,6 +190,7 @@ class ReleasePackagingTests(unittest.TestCase):
 
         self.assertTrue(any("runtime file" in item for item in findings))
         self.assertTrue(any("api_key" in item for item in findings))
+        self.assertTrue(any("user_tools_data.json" in item for item in findings))
 
     def test_release_verifier_accepts_sanitized_tree(self):
         with tempfile.TemporaryDirectory() as directory:

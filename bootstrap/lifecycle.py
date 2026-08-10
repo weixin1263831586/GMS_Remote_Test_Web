@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 from bootstrap.dependencies import AppServices
-from features.cluster import stop_local_bridge
+from features.cluster import get_cluster_service, start_local_bridge, stop_local_bridge
 from features.devices.manager import device_manager
 from features.devices.monitor import (
     init_usb_monitor,
@@ -203,6 +203,8 @@ def create_lifespan(services: AppServices):
         with controller_process_lock(services.settings.data_root):
             app.state.services = services
             initialize_runtime_data(services)
+            cluster = get_cluster_service()
+            start_local_bridge(cluster.repository, cluster.config)
             event_loop = bind_event_bus_loop()
             cleanup_task = asyncio.create_task(_periodic_cleanup())
             app.state.cleanup_task = cleanup_task

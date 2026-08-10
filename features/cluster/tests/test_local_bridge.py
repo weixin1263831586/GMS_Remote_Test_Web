@@ -66,6 +66,45 @@ class LocalBridgeTests(unittest.TestCase):
         bridge._register()
         self.assertEqual(self.repo.get_worker("ats-worker-controller")["status"], "online")
 
+    def test_bridge_start_is_idempotent_and_stop_joins_thread(self):
+        from features.cluster.local_bridge import LocalWorkerBridge
+
+        bridge = LocalWorkerBridge(
+            self.repo,
+            ClusterConfig(enabled=False, local_worker_id="ats-worker-controller"),
+        )
+        bridge._heartbeat_interval = 0.01
+        with patch.object(bridge, "_register"), patch.object(bridge, "_heartbeat"):
+            bridge.start()
+            first_thread = bridge._thread
+            bridge.start()
+            self.assertIs(bridge._thread, first_thread)
+            self.assertTrue(bridge.stop(timeout=1))
+
+        self.assertFalse(bridge.is_running)
+
+    def test_start_local_bridge_replaces_bridge_for_new_repository(self):
+        from features.cluster import local_bridge
+
+        second_repo = ClusterRepository(Path(self.temp.name) / "second.sqlite3")
+        config = ClusterConfig(enabled=False, local_worker_id="ats-worker-controller")
+        original = local_bridge._bridge
+        local_bridge._bridge = None
+        try:
+            with patch.object(local_bridge.LocalWorkerBridge, "start"), patch.object(
+                local_bridge.LocalWorkerBridge,
+                "stop",
+                return_value=True,
+            ) as stop:
+                first = local_bridge.start_local_bridge(self.repo, config)
+                second = local_bridge.start_local_bridge(second_repo, config)
+
+            self.assertIsNot(first, second)
+            stop.assert_called_once()
+            self.assertIs(second.repository, second_repo)
+        finally:
+            local_bridge._bridge = original
+
 
 if __name__ == "__main__":
     unittest.main()

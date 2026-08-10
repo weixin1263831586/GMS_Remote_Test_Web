@@ -92,6 +92,14 @@ class TestReportDB:
                     ON reports(cluster_job_id, attempt_id);
                 CREATE INDEX IF NOT EXISTS idx_reports_automation_run
                     ON reports(automation_run_id);
+                CREATE INDEX IF NOT EXISTS idx_reports_worker_created
+                    ON reports(worker_id, created_at DESC, report_id DESC);
+                CREATE INDEX IF NOT EXISTS idx_reports_cluster_created
+                    ON reports(cluster_job_id, attempt_id, created_at DESC, report_id DESC);
+                CREATE INDEX IF NOT EXISTS idx_reports_attempt_created
+                    ON reports(attempt_id, created_at DESC, report_id DESC);
+                CREATE INDEX IF NOT EXISTS idx_reports_automation_created
+                    ON reports(automation_run_id, created_at DESC, report_id DESC);
                 """
             )
             conn.commit()
@@ -199,6 +207,12 @@ class TestReportDB:
         status: str | None = None,
         owner_id: str | None = None,
         include_all: bool = False,
+        worker_id: str | None = None,
+        cluster_job_id: str | None = None,
+        attempt_id: str | None = None,
+        automation_run_id: str | None = None,
+        before_created_at: str | None = None,
+        before_report_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if not owner_id and not include_all:
             raise ValueError("owner_id is required unless include_all is explicit")
@@ -213,11 +227,32 @@ class TestReportDB:
         if status:
             filters.append("status=?")
             values.append(status)
+        for column, value in (
+            ("worker_id", worker_id),
+            ("cluster_job_id", cluster_job_id),
+            ("attempt_id", attempt_id),
+            ("automation_run_id", automation_run_id),
+        ):
+            if value:
+                filters.append(f"{column}=?")
+                values.append(value)
+        if before_created_at:
+            if before_report_id:
+                filters.append(
+                    "(created_at < ? OR (created_at = ? AND report_id < ?))"
+                )
+                values.extend(
+                    [before_created_at, before_created_at, before_report_id]
+                )
+            else:
+                filters.append("created_at < ?")
+                values.append(before_created_at)
         where = f"WHERE {' AND '.join(filters)}" if filters else ""
         values.append(max(1, min(int(limit), 5000)))
         with self._connect() as conn:
             rows = conn.execute(
-                f"SELECT * FROM reports {where} ORDER BY created_at DESC LIMIT ?",
+                f"SELECT * FROM reports {where} "
+                "ORDER BY created_at DESC, report_id DESC LIMIT ?",
                 values,
             ).fetchall()
         return [item for row in rows if (item := self._decode(row)) is not None]

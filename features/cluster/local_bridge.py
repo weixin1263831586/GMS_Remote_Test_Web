@@ -113,8 +113,12 @@ class LocalWorkerBridge:
         self._suite_scan_interval = 300.0
         self._device_interval = 10.0
         self._heartbeat_interval = 15.0
+        self._initial_heartbeat_delay = 1.0
         self._registered = False
         self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lifecycle_lock = threading.Lock()
+        self._start_pending = False
 
     @property
     def worker_id(self) -> str:
@@ -225,6 +229,8 @@ class LocalWorkerBridge:
             self._registered = False
 
     def _loop(self) -> None:
+        if self._stop.wait(self._initial_heartbeat_delay):
+            return
         while not self._stop.is_set():
             try:
                 if self._real_agent_active():
@@ -239,28 +245,93 @@ class LocalWorkerBridge:
             self._stop.wait(self._heartbeat_interval)
 
     def start(self) -> None:
-        thread = threading.Thread(target=self._loop, name="LocalWorkerBridge",
-                                  daemon=True)
-        thread.start()
+        with self._lifecycle_lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._stop.clear()
+            self._thread = threading.Thread(
+                target=self._loop,
+                name=f"LocalWorkerBridge:{self.worker_id}",
+                daemon=True,
+            )
+            self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 20.0) -> bool:
         self._stop.set()
+        with self._lifecycle_lock:
+            thread = self._thread
+        if thread is None:
+            return True
+        if thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, timeout))
+        stopped = not thread.is_alive()
+        if stopped:
+            with self._lifecycle_lock:
+                if self._thread is thread:
+                    self._thread = None
+        else:
+            logger.warning("Local worker bridge did not stop within %.1fs", timeout)
+        return stopped
+
+    @property
+    def is_running(self) -> bool:
+        with self._lifecycle_lock:
+            return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def is_start_pending(self) -> bool:
+        with self._lifecycle_lock:
+            return self._start_pending
 
 
 _bridge: LocalWorkerBridge | None = None
+_bridge_lock = threading.Lock()
+
+
+def _finish_bridge_replacement(
+    previous: LocalWorkerBridge,
+    current: LocalWorkerBridge,
+) -> None:
+    while not previous.stop(timeout=20.0):
+        pass
+    with _bridge_lock:
+        with current._lifecycle_lock:
+            current._start_pending = False
+        if _bridge is current and not current._stop.is_set():
+            current.start()
 
 
 def start_local_bridge(repository: ClusterRepository, config: ClusterConfig) -> LocalWorkerBridge:
     global _bridge
-    if _bridge is not None:
-        return _bridge
-    _bridge = LocalWorkerBridge(repository, config)
-    _bridge.start()
-    return _bridge
+    with _bridge_lock:
+        if (
+            _bridge is not None
+            and _bridge.repository is repository
+            and _bridge.config == config
+            and not _bridge._stop.is_set()
+            and (_bridge.is_running or _bridge.is_start_pending)
+        ):
+            return _bridge
+        previous = _bridge
+        current = LocalWorkerBridge(repository, config)
+        _bridge = current
+        if previous is not None and not previous.stop(timeout=0.25):
+            with current._lifecycle_lock:
+                current._start_pending = True
+            threading.Thread(
+                target=_finish_bridge_replacement,
+                args=(previous, current),
+                name="LocalWorkerBridgeHandoff",
+                daemon=True,
+            ).start()
+            return current
+        current.start()
+        return current
 
 
 def stop_local_bridge() -> None:
     global _bridge
-    if _bridge is not None:
-        _bridge.stop()
-        _bridge = None
+    with _bridge_lock:
+        if _bridge is not None:
+            if _bridge.stop(timeout=5.0):
+                _bridge = None

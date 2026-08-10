@@ -69,8 +69,9 @@ function renderDashboard(){
  // 1. Overview stat cards
  const workersOnline=state.workers.filter(w=>w.status!=='offline').length;
  const workersOffline=state.workers.filter(w=>w.status==='offline').length;
- const devCounts=state.devices.reduce((acc,d)=>{acc[d.state]=(acc[d.state]||0)+1;return acc},{});
- const devAvailable=devCounts.available||0,devBusy=(devCounts.external_busy||0)+(devCounts.allocated||0),devOffline=(devCounts.offline||0)+(devCounts.unknown||0);
+ const dashboardDevices=state.devices.filter(d=>d.state!=='offline');
+ const devCounts=dashboardDevices.reduce((acc,d)=>{acc[d.state]=(acc[d.state]||0)+1;return acc},{});
+ const devAvailable=devCounts.available||0,devBusy=(devCounts.external_busy||0)+(devCounts.allocated||0);
  const allActivity=state.workers.reduce((acc,w)=>{const a=workerActivity(w);acc.external+=a.external;acc.managed+=a.managed;return acc},{external:0,managed:0});
  const jobsActive=state.jobs.filter(j=>!terminalJob(j.status)).length;
  const jobsCompleted=state.jobs.filter(j=>j.status==='completed').length;
@@ -78,7 +79,7 @@ function renderDashboard(){
  const suitesAvailable=state.suites.filter(s=>s.available).length;
  statsEl.innerHTML=[
   {num:workersOnline,label:'主机',sub:workersOffline?`<span class="bad">${workersOffline} 离线</span>`:`${state.workers.length} 总计`},
-  {num:`${devAvailable}/${devAvailable+devBusy+devOffline}`,label:'设备可用/总',sub:`<span class="warn">${devBusy} 占用</span>${devOffline?` · <span class="bad">${devOffline} 离线</span>`:''}`},
+  {num:`${devAvailable}/${dashboardDevices.length}`,label:'设备可用/总',sub:`<span class="warn">${devBusy} 占用</span>`},
   {num:allActivity.external+allActivity.managed,label:'测试运行',sub:`<span class="warn">${allActivity.external} 外部</span> · ${allActivity.managed} 平台`},
   {num:jobsActive,label:'任务运行',sub:`${jobsCompleted} 完成${jobsFailed?` · <span class="bad">${jobsFailed} 失败</span>`:''}`},
   {num:suitesAvailable,label:'可用套件',sub:`${new Set(state.suites.filter(s=>s.available).map(s=>s.suite_type)).size} 种类型`},
@@ -87,8 +88,10 @@ function renderDashboard(){
  if(hasECharts){
   initDashChartContainers();
   updateDashGauges();
-  updateDashDevicePie(devCounts);
+  updateDashDevicePie();
   updateDashTrend();
+ }else{
+  renderDashboardFallback();
  }
  const updateEl=document.querySelector('#dash-last-update');
  if(updateEl)updateEl.textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});
@@ -113,6 +116,16 @@ function renderDashboard(){
   html+='</div>';
   testsEl.innerHTML=html;
  }
+}
+function renderDashboardFallback(){
+ const workers=state.workers.filter(w=>w.status!=='offline');
+ const metric=(label,value)=>{const numeric=Math.max(0,Math.min(100,Number(value)||0));return `<div style="display:grid;grid-template-columns:42px 1fr 42px;gap:6px;align-items:center;margin:7px 0"><span>${label}</span><span style="height:7px;background:#303642;border-radius:5px;overflow:hidden"><span style="display:block;width:${numeric}%;height:100%;background:${numeric>=85?dashColor.red:numeric>=70?dashColor.yellow:dashColor.green}"></span></span><strong>${Math.round(numeric)}%</strong></div>`};
+ const gauges=document.querySelector('#dash-gauges');
+ if(gauges){gauges.innerHTML='<div class="dash-panel-title">CPU / 内存实时利用率</div>'+(workers.map(w=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${esc(w.name||w.id)}</strong>${metric('CPU',w.cpu_percent)}${metric('内存',w.memory_percent)}</div>`).join('')||'<div class="dash-empty">暂无在线 Worker</div>')}
+ const devices=document.querySelector('#dash-device-pie');
+ if(devices){const activeDevices=state.devices.filter(d=>d.state!=='offline');devices.innerHTML=`<div class="dash-panel-title">设备状态分布 (${activeDevices.length})</div>`+Object.entries(dashStateNames).map(([key,name])=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)"><span>${esc(name)}</span><strong style="color:${dashStateColors[key]}">${activeDevices.filter(d=>d.state===key).length}</strong></div>`).join('')}
+ const trend=document.querySelector('#dash-trend');
+ if(trend){trend.innerHTML='<div class="dash-panel-title">资源趋势</div><div class="dash-empty">图表组件未加载；当前资源数据已在上方按 Worker 展示。</div>'}
 }
 const dashColor={text:'#9299a8',green:'#48c78e',yellow:'#e5b94f',red:'#ef6572',blue:'#4f8cff',purple:'#a78bfa',muted:'#6b7280'};
 function initDashChartContainers(){
@@ -190,16 +203,17 @@ function updateDashGauges(){
   detailEl.innerHTML=`CPU ${Math.round(cpu)}% · 内存 ${oneDecimal(memUsed)}/${oneDecimal(memTotal)}G · 磁盘 ${diskStr} · 负载 ${oneDecimal(worker.load_1m)}`;
  }
 }
-const dashPieNameToState={'可用':'available','外部占用':'external_busy','已分配':'allocated','Fastboot':'fastboot','离线':'offline','未知':'unknown'};
+const dashPieNameToState={'可用':'available','外部占用':'external_busy','已分配':'allocated','Fastboot':'fastboot','未知':'unknown'};
 const dashStateColors={available:'#48c78e',external_busy:'#e5b94f',allocated:'#a78bfa',fastboot:'#4f8cff',offline:'#ef6572',unknown:'#6b7280'};
-const dashStateNames={available:'可用',external_busy:'外部占用',allocated:'已分配',fastboot:'Fastboot',offline:'离线',unknown:'未知'};
-function updateDashDevicePie(devCounts){
+const dashStateNames={available:'可用',external_busy:'外部占用',allocated:'已分配',fastboot:'Fastboot',unknown:'未知'};
+function updateDashDevicePie(){
  const titleEl=document.querySelector('#dash-pie-title');
  const hostsEl=document.querySelector('#dash-pie-hosts');if(!hostsEl)return;
  const localId=localWorkerId();
  const workers=state.workers.filter(w=>w.status!=='offline').sort((a,b)=>(a.id===localId?-1:b.id===localId?1:0));
  const workerIds=new Set(workers.map(w=>w.id));
- if(titleEl)titleEl.textContent='设备状态分布 ('+state.devices.length+')';
+ const dashboardDevices=state.devices.filter(d=>d.state!=='offline');
+ if(titleEl)titleEl.textContent='设备状态分布 ('+dashboardDevices.length+')';
  // Dispose charts for workers no longer present
  Object.keys(dashCharts).forEach(k=>{if(k.startsWith('pie_')){const wid=k.slice(4);if(!workerIds.has(wid)){dashCharts[k].dispose();delete dashCharts[k]}}});
  // Build/repair DOM structure only if worker set changed
@@ -207,14 +221,14 @@ function updateDashDevicePie(devCounts){
  const needRebuild=[...workerIds].sort().join(',')!==([...currentIds].sort().join(','));
  if(needRebuild){
   hostsEl.innerHTML=workers.map(w=>{
-   const wdevs=state.devices.filter(d=>d.worker_id===w.id);
+   const wdevs=dashboardDevices.filter(d=>d.worker_id===w.id);
    return `<div data-pie-worker="${esc(w.id)}" style="display:flex;flex-direction:column;align-items:center;min-height:0"><div class="dash-pie-host-label" style="font-size:10px;color:var(--blue);font-weight:600;margin-bottom:2px">${esc(w.name||w.id)} (<span class="dash-pie-count">${wdevs.length}</span>)</div><div id="dash-pie-${esc(w.id)}" style="width:100%;flex:1;min-height:120px"></div></div>`;
   }).join('');
   // Dispose all pie charts to force re-init against new DOM
   Object.keys(dashCharts).forEach(k=>{if(k.startsWith('pie_')){dashCharts[k].dispose();delete dashCharts[k]}});
  }
  workers.forEach(w=>{
-  const wdevs=state.devices.filter(d=>d.worker_id===w.id);
+  const wdevs=dashboardDevices.filter(d=>d.worker_id===w.id);
   const labelEl=hostsEl.querySelector(`[data-pie-worker="${CSS.escape(w.id)}"] .dash-pie-count`);
   if(labelEl)labelEl.textContent=wdevs.length;
   const el=document.querySelector('#dash-pie-'+CSS.escape(w.id));
@@ -328,7 +342,7 @@ function render(){
   const moreMenu=menuItems.length?`<span class="worker-menu-wrap"><button class="worker-menu-toggle" data-action="toggle-worker-menu">⋯</button><div class="worker-menu">${menuItems.join('')}</div></span>`:'';
   return `<div class="card"><div class="card-title"><span>${esc(worker.name||worker.id)}</span><span>${workerBadge(worker)}${configButton}${moreMenu}</span></div><p>${esc(worker.hostname)} · ${esc(worker.id)} · ${esc(worker.address||'')}</p><div class="meta"><div class="meta-row"><span>Agent ${esc(worker.agent_version||'-')}</span><span>心跳 ${relativeTime(worker.last_heartbeat_at)}</span><span>CPU ${oneDecimal(worker.cpu_percent)}%</span><span>内存 ${oneDecimal(worker.memory_percent)}%（可用 ${oneDecimal(worker.memory_available_gb)}G）</span><span>磁盘 ${oneDecimal(worker.disk_free_gb)}G</span><span>系统负载 ${oneDecimal(worker.load_1m)}</span></div><div class="meta-row"><span>设备 ${assessment.devices.length}</span><span>套件 ${state.suites.filter(suite=>suite.worker_id===worker.id&&suite.available).length}</span><span>任务 ${worker.running_jobs}/${worker.max_jobs}（外部 ${worker.external_jobs||0}）</span></div></div><div class="host-assessment">${assessment.labels.map(l=>`<span class="assessment ${l.cls}">${l.text}</span>`).join('')}</div><div class="capabilities"><span class="cap ${worker.capabilities?.ssh_user?'ok':''}">终端 ${worker.capabilities?.ssh_user?'✓':'未配置'}</span><span class="cap ${worker.capabilities?.novnc_port?'ok':''}">noVNC ${worker.capabilities?.novnc_port?'✓':'不可用'}</span><span class="cap ${worker.capabilities?.tradefed?'ok':''}">Tradefed ${worker.capabilities?.tradefed?'✓':'不可用'}</span>${worker.id===localId?`<span class="cap ${localVpnConnected===true?'ok':localVpnConnected===false?'':''}">VPN ${localVpnConnected===true?'✓':localVpnConnected===false?'✗':'…'}</span>`:`<span class="cap ${(workerVpnCache[worker.id])===true?'ok':(workerVpnCache[worker.id])===false?'':''}">VPN ${(workerVpnCache[worker.id])===true?'✓':(workerVpnCache[worker.id])===false?'✗':'…'}</span>`}</div><div class="host-tests">${workerTestsMarkup(worker,tests)}</div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(workerWarning(value))}</div>`).join('')}</div>`;
  }).join('')||'<div class="empty">暂无 Worker，请点击“添加主机”查看接入命令</div>';
- document.querySelector('#devices').innerHTML=state.devices.filter(device=>matches([device.worker_id,device.serial,device.properties?.model,device.properties?.product].join(' '))).map(device=>{const t=device.transport||'local_usb';const tInfo={'local_usb':['本地','t-local'],'usbip':['USB/IP','t-usbip'],'adb_proxy':['ADB Proxy','t-proxy']}[t]||[t,'t-local'];const p=device.properties||{};let source='-';if(t==='adb_proxy')source=p.adb_proxy_source_name||p.adb_proxy_source_worker_id||'-';else if(t==='usbip')source=p.usbip_source_host||'-';else if(device.worker_id)source=device.worker_id;return `<tr><td>${esc(device.worker_id)}</td><td>${esc(device.serial)}</td><td><span class="status ${esc(tInfo[1])}">${esc(tInfo[0])}</span></td><td>${esc(source)}</td><td>${badge(device.state)}</td><td>${esc(p.model||p.product||'')}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">暂无匹配的设备</td></tr>';
+ document.querySelector('#devices').innerHTML=state.devices.filter(device=>String(device.state||'').toLowerCase()!=='offline'&&matches([device.worker_id,device.serial,device.properties?.model,device.properties?.product].join(' '))).map(device=>{const t=device.transport||'local_usb';const tInfo={'local_usb':['本地','t-local'],'usbip':['USB/IP','t-usbip'],'adb_proxy':['ADB Proxy','t-proxy']}[t]||[t,'t-local'];const p=device.properties||{};let source='-';if(t==='adb_proxy')source=p.adb_proxy_source_name||p.adb_proxy_source_worker_id||'-';else if(t==='usbip')source=p.usbip_source_host||'-';else if(device.worker_id)source=device.worker_id;return `<tr><td>${esc(device.worker_id)}</td><td>${esc(device.serial)}</td><td><span class="status ${esc(tInfo[1])}">${esc(tInfo[0])}</span></td><td>${esc(source)}</td><td>${badge(device.state)}</td><td>${esc(p.model||p.product||'')}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">暂无匹配的在线设备</td></tr>';
  document.querySelector('#suites').innerHTML=state.suites.filter(suite=>suite.available&&matches([suite.worker_id,suite.suite_type,suite.suite_version,suite.tools_path].join(' '))).map(suite=>`<tr><td>${esc(suite.worker_id)}</td><td>${esc(suite.suite_type)}</td><td>${esc(suite.suite_version)}</td><td title="${esc(suite.tools_path)}">${esc(suite.tools_path)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">暂无匹配的可用套件</td></tr>';
  const jobFilter=document.querySelector('#job-status-filter')?.value||'';
  document.querySelector('#jobs').innerHTML=state.jobs.filter(job=>(!jobFilter||(jobFilter==='active'?!terminalJob(job.status):job.status===jobFilter))&&matches([job.id,job.assigned_worker_id,job.status,(job.leases||[]).map(item=>item.serial).join(' ')].join(' '))).map(job=>{

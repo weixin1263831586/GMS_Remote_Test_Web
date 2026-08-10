@@ -15,12 +15,16 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
 from foundation.config import PROJECT_ROOT
+from foundation.outbound import UnsafeOutboundURL
+
+from .favicon_security import FaviconResolver, validated_favicon_url
 
 
 logger = logging.getLogger(__name__)
@@ -77,6 +81,7 @@ class IconFetcher:
     MAX_ICON_CANDIDATES = 5  # 最大图标候选数量
     IMAGE_CHUNK_SIZE = 1024  # 图片内容检查大小（字节）
     MAX_ICON_DOWNLOAD_BYTES = 512 * 1024  # 最大图标下载大小，避免误缓存大图
+    MAX_HTML_DOWNLOAD_BYTES = 1024 * 1024
 
     # 预定义的常见网站图标映射
     PREDEFINED_ICONS = {
@@ -141,7 +146,15 @@ class IconFetcher:
                 'Accept-Encoding': 'gzip, deflate',
                 'Connection': 'keep-alive',
             }
-            self.session = aiohttp.ClientSession(timeout=timeout, headers=headers)
+            connector = aiohttp.TCPConnector(
+                resolver=FaviconResolver(),
+                use_dns_cache=False,
+            )
+            self.session = aiohttp.ClientSession(
+                timeout=timeout,
+                headers=headers,
+                connector=connector,
+            )
         return self.session
 
     async def close(self):
@@ -263,7 +276,11 @@ class IconFetcher:
         if not isinstance(url, str) or not url.startswith('/static/'):
             return ""
         rel = url[len('/static/'):]
-        return os.path.join(cls.WEB_STATIC_DIR, rel.replace('/', os.sep))
+        static_root = Path(cls.WEB_STATIC_DIR).resolve()
+        candidate = (static_root / rel).resolve()
+        if not candidate.is_relative_to(static_root):
+            return ""
+        return str(candidate)
 
     @classmethod
     def default_icon_path(cls) -> str:
@@ -292,7 +309,6 @@ class IconFetcher:
         """根据响应和文件头推断图标扩展名"""
         content_type = (content_type or '').split(';', 1)[0].strip().lower()
         content_type_map = {
-            'image/svg+xml': '.svg',
             'image/png': '.png',
             'image/jpeg': '.jpg',
             'image/jpg': '.jpg',
@@ -305,11 +321,11 @@ class IconFetcher:
             return content_type_map[content_type]
 
         guessed = mimetypes.guess_extension(content_type) if content_type else None
-        if guessed in {'.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}:
+        if guessed in {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}:
             return '.jpg' if guessed == '.jpeg' else guessed
 
         path_ext = os.path.splitext(urlparse(icon_url).path)[1].lower()
-        if path_ext in {'.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}:
+        if path_ext in {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}:
             return '.jpg' if path_ext == '.jpeg' else path_ext
 
         if data[:4] == b'\x89PNG':
@@ -318,8 +334,6 @@ class IconFetcher:
             return '.jpg'
         if data[:4] == b'GIF8':
             return '.gif'
-        if data[:4].lower().startswith(b'<svg') or b'<svg' in data[:200].lower():
-            return '.svg'
         if data[:4] == b'\x00\x00\x01\x00':
             return '.ico'
 
@@ -332,6 +346,11 @@ class IconFetcher:
         """下载远程图标到本地静态目录"""
         if not self.is_remote_url(icon_url):
             return IconResult(success=False, error="不是远程图标URL")
+
+        try:
+            icon_url = validated_favicon_url(icon_url)
+        except UnsafeOutboundURL as exc:
+            return IconResult(success=False, error=str(exc))
 
         existing_url = self._find_existing_local_icon(icon_url)
         if existing_url:
@@ -347,7 +366,7 @@ class IconFetcher:
             session = await self.get_session()
             async with session.get(
                 icon_url,
-                allow_redirects=True,
+                allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(total=min(self.timeout, self.ICON_VALIDATION_TIMEOUT))
             ) as response:
                 if response.status != 200:
@@ -373,9 +392,11 @@ class IconFetcher:
                 data = b''.join(chunks)
                 if not data:
                     return IconResult(success=False, error="图标内容为空")
+                if self._is_svg_content(data) or 'svg' in content_type.lower():
+                    return IconResult(success=False, error="SVG 图标不允许写入同源静态目录")
 
                 content_type_lower = content_type.lower()
-                is_image_type = any(marker in content_type_lower for marker in ['image/', 'svg'])
+                is_image_type = content_type_lower.startswith("image/")
                 if not is_image_type and not self._is_image_content(data):
                     return IconResult(success=False, error="响应不是图片")
 
@@ -494,6 +515,9 @@ class IconFetcher:
             if not parsed_url.scheme:
                 url = 'https://' + url
                 parsed_url = urlparse(url)
+
+            url = validated_favicon_url(url)
+            parsed_url = urlparse(url)
 
             domain = parsed_url.netloc
             cache_key = f"favicon:{domain}"
@@ -644,11 +668,15 @@ class IconFetcher:
         try:
             session = await self.get_session()
 
-            async with session.get(url) as response:
+            url = validated_favicon_url(url)
+            async with session.get(url, allow_redirects=False) as response:
                 if response.status != 200:
                     return IconResult(success=False, error=f"HTTP {response.status}")
 
-                html_text = await response.text()
+                raw_html = await response.content.read(self.MAX_HTML_DOWNLOAD_BYTES + 1)
+                if len(raw_html) > self.MAX_HTML_DOWNLOAD_BYTES:
+                    return IconResult(success=False, error="HTML 页面过大")
+                html_text = raw_html.decode(response.charset or "utf-8", errors="replace")
 
                 # 使用正则表达式查找图标链接（比BeautifulSoup更快）
                 icon_candidates = []
@@ -695,15 +723,10 @@ class IconFetcher:
         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
         common_paths = [
-            ('/favicon.svg', 'svg'),
             ('/favicon.ico', 'ico'),
             ('/favicon.png', 'png'),
-            ('/icon.svg', 'svg'),
             ('/icon.png', 'png'),
             ('/apple-touch-icon.png', 'png'),
-            ('/assets/favicon.svg', 'svg'),
-            ('/static/favicon.svg', 'svg'),
-            ('/img/favicon.svg', 'svg'),
         ]
 
         # 并发验证所有路径
@@ -749,27 +772,39 @@ class IconFetcher:
         try:
             session = await self.get_session()
             validation_timeout = aiohttp.ClientTimeout(total=self.ICON_VALIDATION_TIMEOUT)
+            url = validated_favicon_url(url)
 
             # 先尝试HEAD请求
             try:
-                async with session.head(url, allow_redirects=True, timeout=validation_timeout) as response:
+                async with session.head(url, allow_redirects=False, timeout=validation_timeout) as response:
                     if response.status == 200:
                         content_type = response.headers.get('Content-Type', '').lower()
-                        if any(ct in content_type for ct in ['image/', 'svg', 'octet-stream']):
+                        if 'svg' not in content_type and any(
+                            ct in content_type for ct in ['image/', 'octet-stream']
+                        ):
                             return True
             except Exception:
                 pass
 
             # HEAD失败，尝试GET请求
             try:
-                async with session.get(url, timeout=validation_timeout) as response:
+                async with session.get(
+                    url,
+                    allow_redirects=False,
+                    timeout=validation_timeout,
+                ) as response:
                     if response.status == 200:
                         content_type = response.headers.get('Content-Type', '').lower()
-                        if any(ct in content_type for ct in ['image/', 'svg']):
-                            return True
                         # 检查文件头
                         chunk = await response.content.read(self.IMAGE_CHUNK_SIZE)
-                        if self._is_image_content(chunk):
+                        if (
+                            'svg' not in content_type
+                            and not self._is_svg_content(chunk)
+                            and (
+                                content_type.startswith('image/')
+                                or self._is_image_content(chunk)
+                            )
+                        ):
                             return True
             except Exception:
                 pass
@@ -777,6 +812,13 @@ class IconFetcher:
             return False
         except Exception:
             return False
+
+    @staticmethod
+    def _is_svg_content(data: bytes) -> bool:
+        prefix = data[:512].lstrip().lower()
+        return prefix.startswith(b"<svg") or (
+            prefix.startswith(b"<?xml") and b"<svg" in prefix
+        )
 
     @staticmethod
     def _is_image_content(data: bytes) -> bool:
@@ -792,7 +834,9 @@ class IconFetcher:
             return True
         if data[:2] == b'BM':  # BMP
             return True
-        if b'<svg' in data[:100].lower():  # SVG
+        if data[:4] == b'\x00\x00\x01\x00':  # ICO
+            return True
+        if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
             return True
 
         return False

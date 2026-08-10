@@ -259,7 +259,9 @@ async def list_tradefed_results(
         suite_path = req.suite_path
         tradefed_bin = req.tradefed_bin
         logger.info(f"Querying test suite results for {suite_path}")
-        result = await collect_tradefed_results(config, suite_path, tradefed_bin)
+        result = await collect_tradefed_results(
+            config, suite_path, tradefed_bin, force_refresh=force_refresh,
+        )
         if not result.get("success"):
             return error_response(
                 result.get("error", "Failed to list Tradefed results"),

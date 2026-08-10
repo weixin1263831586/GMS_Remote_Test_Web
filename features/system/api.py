@@ -78,6 +78,11 @@ SHELL_PAGE_TITLES = {
     "notes": "个人知识库 - GMS 远程测试",
 }
 
+_EXTERNAL_GOOGLE_FONT_LINK_RE = re.compile(
+    r"<link\b(?=[^>]*\bhref\s*=\s*['\"]https://fonts\.(?:googleapis|gstatic)\.com(?:/[^'\"]*)?['\"])[^>]*>\s*",
+    re.IGNORECASE,
+)
+
 
 def init_templates(templates):
     """Initialize Jinja2 templates reference from the main app."""
@@ -140,6 +145,10 @@ def _rewrite_gms_assistant_content(
     upstream: str = "",
 ) -> str:
     """Rewrite upstream absolute URLs to this HTTPS origin."""
+    # The shell deliberately keeps style-src restricted to same-origin CSS.
+    # Remove the assistant's optional Google Fonts link so the iframe uses its
+    # local/system fallback fonts without producing CSP violations.
+    text = _EXTERNAL_GOOGLE_FONT_LINK_RE.sub("", text)
     upstream = upstream or _gms_assistant_upstream()
     if not upstream:
         return text

@@ -51,6 +51,8 @@ class ReportRepositoryTests(unittest.TestCase):
                 }
             self.assertIn("idx_reports_owner_created", indexes)
             self.assertIn("idx_reports_cluster_job", indexes)
+            self.assertIn("idx_reports_worker_created", indexes)
+            self.assertIn("idx_reports_cluster_created", indexes)
 
     def test_report_owner_is_required(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -121,6 +123,43 @@ class ReportRepositoryTests(unittest.TestCase):
                 repository.get_report_by_timestamp("same-time")
             with self.assertRaisesRegex(ValueError, "owner_id is required"):
                 repository.get_report("report-alice")
+
+    def test_filters_and_cursor_are_applied_by_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repository = ReportRepository(str(Path(tmp) / "reports.sqlite3"))
+            for index, worker_id in enumerate(("worker-a", "worker-a", "worker-b")):
+                repository.add_report(
+                    {
+                        "report_id": f"report-{index}",
+                        "timestamp": f"run-{index}",
+                        "owner_id": "alice",
+                        "worker_id": worker_id,
+                        "cluster_job_id": "job-a" if index < 2 else "job-b",
+                        "attempt_id": f"attempt-{index}",
+                        "automation_run_id": "automation-a",
+                        "created_at": f"2026-08-10T10:00:0{index}+00:00",
+                    }
+                )
+
+            first_page = repository.get_reports(
+                owner_id="alice",
+                worker_id="worker-a",
+                cluster_job_id="job-a",
+                automation_run_id="automation-a",
+                limit=1,
+            )
+            second_page = repository.get_reports(
+                owner_id="alice",
+                worker_id="worker-a",
+                cluster_job_id="job-a",
+                automation_run_id="automation-a",
+                before_created_at=first_page[0]["created_at"],
+                before_report_id=first_page[0]["report_id"],
+                limit=1,
+            )
+
+            self.assertEqual([item["report_id"] for item in first_page], ["report-1"])
+            self.assertEqual([item["report_id"] for item in second_page], ["report-0"])
 
 
 if __name__ == "__main__":

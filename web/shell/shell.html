@@ -1278,7 +1278,7 @@
 
                         </tr>
                     </thead>
-                    <tbody id="reports-table-body">
+                    <tbody id="reports-table-body" aria-live="polite" aria-busy="true">
                         <tr>
                             <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
@@ -1286,6 +1286,7 @@
                         </tr>
                     </tbody>
                 </table>
+                <div id="reports-load-more-wrapper" style="padding: 12px; text-align: center;"></div>
             </div>
         </div>
 
@@ -3053,7 +3054,10 @@
         // ==================== 主机管理功能 ====================
         let desktopHosts = [];
         let currentHost = null;
+        const CLUSTER_HOST_DIRECTORY_TTL_MS = 10000;
+        let clusterHostDirectory = {hosts: [], loadedAt: 0, promise: null};
         const EXTERNAL_SERVICES = {{ config.get('external_services', {}) | tojson }};
+        const PRODUCT_BRANDING = {{ config.get('product_branding', {}) | tojson }};
         const OPENGROK_BASE_URL = {{ config.get('opengrok', {}).get('base_url', '') | tojson }};
 
         function workspaceHostForWorker(workerId = '') {
@@ -3062,6 +3066,27 @@
                 ? desktopHosts.find(host => host.id === 'default')
                 : desktopHosts.find(host => host.worker_id === requested);
         }
+
+        async function loadClusterHostDirectory(force = false) {
+            const fresh = clusterHostDirectory.loadedAt
+                && Date.now() - clusterHostDirectory.loadedAt < CLUSTER_HOST_DIRECTORY_TTL_MS;
+            if (!force && fresh) return clusterHostDirectory.hosts;
+            if (clusterHostDirectory.promise) return clusterHostDirectory.promise;
+            clusterHostDirectory.promise = (async () => {
+                const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
+                const payload = await response.json();
+                if (!response.ok || !payload.success || !Array.isArray(payload.hosts)) {
+                    throw new Error(payload.error || '主机目录加载失败');
+                }
+                clusterHostDirectory.hosts = payload.hosts;
+                clusterHostDirectory.loadedAt = Date.now();
+                return clusterHostDirectory.hosts;
+            })().finally(() => {
+                clusterHostDirectory.promise = null;
+            });
+            return clusterHostDirectory.promise;
+        }
+        window.loadClusterHostDirectory = loadClusterHostDirectory;
 
         let terminalElevationPromise = null;
         async function ensureTerminalElevation(
@@ -3184,11 +3209,9 @@
 
         async function mergeClusterDesktopHosts() {
             try {
-                const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
-                const payload = await response.json();
-                if (!response.ok || !payload.success || !Array.isArray(payload.hosts)) return;
+                const hosts = await loadClusterHostDirectory();
                 const selectedId = currentHost && currentHost.id;
-                const clusterHosts = payload.hosts
+                const clusterHosts = hosts
                     .filter(host => host.address && host.ssh_user)
                     .map(host => ({
                         id: `cluster:${host.worker_id}`,
@@ -7006,7 +7029,7 @@
             return `<img src="${src}" alt="${alt}" style="width: ${size}; height: ${size}; object-fit: contain;" onerror="this.parentElement.textContent='🌐'">`;
         }
 
-        const ROCKCHIP_TOOL_ICON_OVERRIDES = {
+        const LEGACY_TOOL_ICON_OVERRIDES = {
             'Rockchip OA': '/static/icons/favicons/3a57911f43fd8a9ccfaa8e3ed6cf6cb3461308d7a37e13775ab6414b785725c9.ico',
             'Redmine': '/static/icons/favicons/1a43fcd157ab39c1746959e9ea5f993614b296573069cd78b5163c22dcbfa00c.png',
             'Gerrit': '/static/icons/favicons/rockchip-gerrit.svg',
@@ -7016,12 +7039,31 @@
             '路由器端口转发': '/static/icons/favicons/rockchip-router.svg'
         };
 
-        const ROCKCHIP_BROWSER_ICON_CANDIDATES = {
+        const LEGACY_BROWSER_ICON_CANDIDATES = {
             'Gerrit': '/static/icons/favicons/rockchip-gerrit.svg',
             'OpenGrok': '/static/icons/favicons/rockchip-opengrok.svg',
             'CRM': EXTERNAL_SERVICES.crm_icon_url || '',
             '路由器端口转发': EXTERNAL_SERVICES.router_icon_url || ''
         };
+        const hasConfiguredBranding = Object.prototype.hasOwnProperty.call(PRODUCT_BRANDING, 'company_name');
+        const COMPANY_CATEGORY = String(
+            PRODUCT_BRANDING.company_name || (hasConfiguredBranding ? 'Organization' : 'Rockchip'),
+        );
+        const COMPANY_HOME_URL = String(
+            PRODUCT_BRANDING.company_url || (hasConfiguredBranding ? '' : 'https://www.rock-chips.com'),
+        );
+        const COMPANY_ICON = String(PRODUCT_BRANDING.company_icon || '🏢');
+        const COMPANY_KEYWORDS = Array.isArray(PRODUCT_BRANDING.company_keywords)
+            ? PRODUCT_BRANDING.company_keywords.map(value => String(value).toLowerCase()).filter(Boolean)
+            : (hasConfiguredBranding ? [] : ['rockchip', 'rock-chips.com']);
+        const PRODUCT_TOOL_ICON_OVERRIDES = PRODUCT_BRANDING.tool_icon_overrides
+            && typeof PRODUCT_BRANDING.tool_icon_overrides === 'object'
+            ? PRODUCT_BRANDING.tool_icon_overrides
+            : (hasConfiguredBranding ? {} : LEGACY_TOOL_ICON_OVERRIDES);
+        const PRODUCT_BROWSER_ICON_CANDIDATES = PRODUCT_BRANDING.browser_icon_candidates
+            && typeof PRODUCT_BRANDING.browser_icon_candidates === 'object'
+            ? PRODUCT_BRANDING.browser_icon_candidates
+            : (hasConfiguredBranding ? {} : LEGACY_BROWSER_ICON_CANDIDATES);
 
         function renderIconImageWithFallback(primaryIcon, fallbackIcon, altText = '图标', size = '100%') {
             const primarySrc = escapeIconAttr(unwrapIconValue(primaryIcon));
@@ -7031,7 +7073,7 @@
         }
 
         function getDisplayToolIcon(icon, tool) {
-            const overrideIcon = tool?.title ? ROCKCHIP_TOOL_ICON_OVERRIDES[tool.title] : '';
+            const overrideIcon = tool?.title ? PRODUCT_TOOL_ICON_OVERRIDES[tool.title] : '';
             const rawIcon = icon || '';
             const unwrappedIcon = unwrapIconValue(rawIcon);
             if (overrideIcon && (
@@ -7110,7 +7152,7 @@
             } else {
                 // Emoji
                 previewImage.style.display = 'none';
-                previewContainer.innerHTML = `<span style="font-size: 32px;">${iconValue || '🌐'}</span>`;
+                previewContainer.innerHTML = `<span style="font-size: 32px;">${escapeHtml(iconValue || '🌐')}</span>`;
             }
         }
 
@@ -7122,7 +7164,7 @@
 
         // 默认分类
         const DEFAULT_CATEGORIES = {
-            'Rockchip': { icon: '🏢', color: '#ff6b6b' },
+            [COMPANY_CATEGORY]: { icon: COMPANY_ICON, color: '#ff6b6b' },
             'Google': { icon: '🔍', color: '#4285f4' },
             '开发工具': { icon: '🛠️', color: '#00d26a' },
             '社交媒体': { icon: '💬', color: '#ff9500' }
@@ -7160,11 +7202,11 @@
 
                     // 清理"其他"分类
                     if (localTools['其他']) {
-                        // 将"其他"分类下的工具移动到 Rockchip
-                        if (localTools['Rockchip']) {
-                            localTools['Rockchip'] = localTools['Rockchip'].concat(localTools['其他']);
+                        // 将旧的"其他"分类归入当前公司分类。
+                        if (localTools[COMPANY_CATEGORY]) {
+                            localTools[COMPANY_CATEGORY] = localTools[COMPANY_CATEGORY].concat(localTools['其他']);
                         } else {
-                            localTools['Rockchip'] = localTools['其他'];
+                            localTools[COMPANY_CATEGORY] = localTools['其他'];
                         }
                         delete localTools['其他'];
                         saveCategories();
@@ -7194,9 +7236,9 @@
 
             // 使用默认数据
             categorizedTools = {
-                'Rockchip': [
-                    { icon: '🏢', title: 'Rockchip 官网', url: 'https://www.rock-chips.com' }
-                ],
+                [COMPANY_CATEGORY]: COMPANY_HOME_URL
+                    ? [{ icon: COMPANY_ICON, title: `${COMPANY_CATEGORY} 官网`, url: COMPANY_HOME_URL }]
+                    : [],
                 'Google': [
                     { icon: '🔍', title: 'Google', url: 'https://www.google.com' },
                     { icon: '📧', title: 'Gmail', url: 'https://gmail.com' }
@@ -7238,9 +7280,9 @@
             const url = tool.url.toLowerCase();
             const title = tool.title.toLowerCase();
 
-            // Rockchip 相关
-            if (url.includes('rockchip') || title.includes('rockchip')) {
-                return 'Rockchip';
+            // 归类到配置的公司分类。
+            if (COMPANY_KEYWORDS.some(keyword => url.includes(keyword) || title.includes(keyword))) {
+                return COMPANY_CATEGORY;
             }
 
             // Google 相关
@@ -7254,8 +7296,8 @@
             }
 
 
-            // 默认归到 Rockchip 分类
-            return 'Rockchip';
+            // 默认归到当前公司分类。
+            return COMPANY_CATEGORY;
         }
 
         function saveCategories() {
@@ -7336,6 +7378,7 @@
         function renderToolsGrid() {
             const grid = document.getElementById('tools-grid');
             if (!grid) return;
+            bindToolsGridActions(grid);
 
             // 如果选择"全部"，按分类显示所有工具
             if (currentCategory === 'all') {
@@ -7344,6 +7387,32 @@
                 // 显示特定分类的工具
                 renderSingleCategory(grid, currentCategory);
             }
+        }
+
+        function bindToolsGridActions(grid) {
+            if (grid.dataset.toolsActionsBound === 'true') return;
+            grid.dataset.toolsActionsBound = 'true';
+            grid.addEventListener('click', event => {
+                const actionEl = event.target.closest('[data-tools-action]');
+                if (!actionEl || !grid.contains(actionEl)) return;
+
+                const action = actionEl.dataset.toolsAction;
+                const category = actionEl.dataset.category || '';
+                const index = Number.parseInt(actionEl.dataset.index || '', 10);
+
+                if (action === 'open-tool') {
+                    openToolLink(actionEl.dataset.url || '');
+                    return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+                if (action === 'edit-category') editCategory(category, event);
+                if (action === 'add-tool') addNewToolToCategory(category);
+                if (action === 'delete-category') deleteCategory(category);
+                if (action === 'edit-tool' && Number.isInteger(index)) editTool(category, index);
+                if (action === 'delete-tool' && Number.isInteger(index)) deleteTool(category, index);
+            });
         }
 
         function renderAllCategories(grid) {
@@ -7368,20 +7437,20 @@
                 const categoryInfo = DEFAULT_CATEGORIES[category] || { icon: '📁', color: '#8e8e93' };
 
                 html += `
-                    <div class="category-section" data-category="${category}" data-category-index="${catIndex}" draggable="true" style="margin-bottom: 4px;">
+                    <div class="category-section" data-category="${escapeIconAttr(category)}" data-category-index="${catIndex}" draggable="true" style="margin-bottom: 4px;">
 							<div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;">
                             <div style="display: flex; align-items: center;">
-                                <span style="font-size: 16px; margin-right: 6px; cursor: grab;">${categoryInfo.icon}</span>
-                                <span style="font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="editCategory('${category}', event)"><span class="category-name">${category}</span>
+                                <span style="font-size: 16px; margin-right: 6px; cursor: grab;">${escapeHtml(categoryInfo.icon)}</span>
+                                <button type="button" data-tools-action="edit-category" data-category="${escapeIconAttr(category)}" style="padding: 0; border: 0; background: transparent; font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;"><span class="category-name">${escapeHtml(category)}</span></button>
                                 <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);">${tools.length}</span>
                             </div>
                             <div style="display: flex; gap: 6px;">
-                                <button onclick="addNewToolToCategory('${category}')" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                                <button type="button" data-tools-action="add-tool" data-category="${escapeIconAttr(category)}" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
                                     onmouseover="this.style.opacity='0.85';"
                                     onmouseout="this.style.opacity='1';">
                                     添加工具
                                 </button>
-                                <button onclick="deleteCategory('${category}')" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                                <button type="button" data-tools-action="delete-category" data-category="${escapeIconAttr(category)}" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
                                     onmouseover="this.style.opacity='0.85';"
                                     onmouseout="this.style.opacity='1';"
                                     title="删除分类">
@@ -7416,8 +7485,8 @@
             if (tools.length === 0) {
                 grid.innerHTML = `
                     <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
-                        <div style="font-size: 48px; margin-bottom: 16px;">${categoryInfo.icon}</div>
-                        <div style="font-size: 14px; margin-bottom: 6px;">"${category}"分类下还没有工具</div>
+                        <div style="font-size: 48px; margin-bottom: 16px;">${escapeHtml(categoryInfo.icon)}</div>
+                        <div style="font-size: 14px; margin-bottom: 6px;">"${escapeHtml(category)}"分类下还没有工具</div>
                         <div style="font-size: 12px;">点击右侧按钮添加工具到该分类</div>
                     </div>
                 `;
@@ -7425,20 +7494,20 @@
             }
 
             let html = `
-                <div class="category-section" data-category="${category}" data-category-index="0" draggable="true">
+                <div class="category-section" data-category="${escapeIconAttr(category)}" data-category-index="0" draggable="true">
                     <div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;">
                         <div style="display: flex; align-items: center;">
-                            <span style="font-size: 16px; margin-right: 6px; cursor: grab;">${categoryInfo.icon}</span>
-                            <span style="font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="editCategory('${category}', event)"><span class="category-name">${category}</span>
+                            <span style="font-size: 16px; margin-right: 6px; cursor: grab;">${escapeHtml(categoryInfo.icon)}</span>
+                            <button type="button" data-tools-action="edit-category" data-category="${escapeIconAttr(category)}" style="padding: 0; border: 0; background: transparent; font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;"><span class="category-name">${escapeHtml(category)}</span></button>
                             <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);">${tools.length}</span>
                         </div>
                         <div style="display: flex; gap: 6px;">
-                            <button onclick="addNewToolToCategory('${category}')" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                            <button type="button" data-tools-action="add-tool" data-category="${escapeIconAttr(category)}" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
                                 onmouseover="this.style.opacity='0.85';"
                                 onmouseout="this.style.opacity='1';">
                                 添加工具
                             </button>
-                            <button onclick="deleteCategory('${category}')" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                            <button type="button" data-tools-action="delete-category" data-category="${escapeIconAttr(category)}" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
                                 onmouseover="this.style.opacity='0.85';"
                                 onmouseout="this.style.opacity='1';"
                                 title="删除分类">
@@ -7466,16 +7535,17 @@
         }
 
         function renderToolCard(tool, category, index, cardColor) {
+            const safeCategory = escapeIconAttr(category);
+            const safeUrl = escapeIconAttr(tool?.url || '');
             return `
-                <div class="tool-card" data-tool-category="${category}" data-tool-index="${index}" draggable="true"
+                <div class="tool-card" data-tool-category="${safeCategory}" data-tool-index="${index}" data-tools-action="open-tool" data-url="${safeUrl}" draggable="true"
                      style="background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;"
                      onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-md)'; this.style.borderColor='${cardColor}';"
                      onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'; this.style.borderColor='var(--border-color)';"
                      ondragstart="handleToolDragStart(event)"
                      ondragend="handleToolDragEnd(event)"
                      ondragover="handleToolDragOver(event)"
-                     ondrop="handleToolDrop(event)"
-                     onclick="openToolLink('${tool.url}')">
+                     ondrop="handleToolDrop(event)">
 
                     <div class="tool-icon" style="width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: 24px; pointer-events: none;">
                         ${renderToolIcon(tool.icon, tool)}
@@ -7483,18 +7553,18 @@
 
                     <div class="tool-info" style="text-align: center; width: 100%; pointer-events: none;">
                         <div class="tool-title" style="font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;">
-                            ${tool.title}
+                            ${escapeHtml(tool?.title || '')}
                         </div>
                     </div>
 
                     <div class="tool-actions" style="display: flex; gap: 3px; width: 100%;">
-                        <button class="btn-edit" onclick="event.stopPropagation(); editTool('${category}', ${index})"
+                        <button type="button" class="btn-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${safeCategory}" data-index="${index}"
                                 style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;"
                                 onmouseover="this.style.background='var(--primary-color)'; this.style.color='white'; this.style.borderColor='var(--primary-color)';"
                                 onmouseout="this.style.background='transparent'; this.style.color='var(--text-secondary)'; this.style.borderColor='var(--border-color)';">
                             ✏️
                         </button>
-                        <button class="btn-delete" onclick="event.stopPropagation(); deleteTool('${category}', ${index})"
+                        <button type="button" class="btn-delete" aria-label="删除工具" data-tools-action="delete-tool" data-category="${safeCategory}" data-index="${index}"
                                 style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;"
                                 onmouseover="this.style.background='var(--danger-color)'; this.style.color='white'; this.style.borderColor='var(--danger-color)';"
                                 onmouseout="this.style.background='transparent'; this.style.color='var(--text-muted)'; this.style.borderColor='var(--border-color)';">
@@ -7506,8 +7576,8 @@
         }
 
         function renderToolIcon(icon, tool = null) {
-            const browserIcon = tool?.title ? ROCKCHIP_BROWSER_ICON_CANDIDATES[tool.title] : '';
-            const fallbackIcon = tool?.title ? ROCKCHIP_TOOL_ICON_OVERRIDES[tool.title] : '';
+            const browserIcon = tool?.title ? PRODUCT_BROWSER_ICON_CANDIDATES[tool.title] : '';
+            const fallbackIcon = tool?.title ? PRODUCT_TOOL_ICON_OVERRIDES[tool.title] : '';
             if (browserIcon && fallbackIcon) {
                 return renderIconImageWithFallback(browserIcon, fallbackIcon);
             }
@@ -7531,7 +7601,7 @@
             }
 
             // 否则返回原始的 Emoji
-            return icon;
+            return escapeHtml(icon);
         }
 
         // 通用工具管理函数（websites 与 tools 共用）。
@@ -7583,9 +7653,16 @@
 
         function openToolLink(url) {
             if (!url) return;
-            // 站内相对路径（以 / 开头）直接跳转，外部 URL 自动补 https://
-            const finalUrl = url.startsWith('/') || url.match(/^https?:\/\//) ? url : 'https://' + url;
-            window.open(finalUrl, '_blank');
+            try {
+                const rawUrl = String(url).trim();
+                if (!rawUrl || rawUrl.startsWith('//') || rawUrl.includes('\\')) throw new Error('invalid URL');
+                const finalUrl = rawUrl.startsWith('/') ? rawUrl : (/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
+                const parsed = new URL(finalUrl, window.location.origin);
+                if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported protocol');
+                window.open(parsed.href, '_blank', 'noopener,noreferrer');
+            } catch (_error) {
+                showToast('无法打开：网址格式或协议不受支持', 'error');
+            }
         }
 
         // ==================== 拖拽排序功能 ====================
@@ -9871,10 +9948,9 @@
             };
             let hosts = [fallback];
             try {
-                const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
-                const payload = await response.json();
-                if (response.ok && payload.success && Array.isArray(payload.hosts) && payload.hosts.length) {
-                    hosts = payload.hosts;
+                const directoryHosts = await loadClusterHostDirectory();
+                if (directoryHosts.length) {
+                    hosts = [...directoryHosts];
                     if (!hosts.some(host => host.worker_id === localWorkerId)) hosts.unshift(fallback);
                 }
             } catch (error) {
