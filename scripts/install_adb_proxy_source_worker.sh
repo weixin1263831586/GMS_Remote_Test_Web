@@ -24,6 +24,7 @@ fi
 "${PROJECT_ROOT}/scripts/install_adbproxy_rs.sh"
 mkdir -p \
     "${INSTALL_ROOT}" \
+    "${INSTALL_ROOT}/bin" \
     "${CONFIG_ROOT}" \
     "${UNIT_ROOT}" \
     "${HOME}/.cache/gms-worker/pycache" \
@@ -31,6 +32,7 @@ mkdir -p \
 rm -rf "${INSTALL_ROOT}/worker_agent" "${INSTALL_ROOT}/foundation"
 cp -a "${PROJECT_ROOT}/worker_agent" "${INSTALL_ROOT}/worker_agent"
 cp -a "${PROJECT_ROOT}/foundation" "${INSTALL_ROOT}/foundation"
+"${PROJECT_ROOT}/scripts/install_gms_worker_native.sh" "${INSTALL_ROOT}/bin"
 
 [[ -f "${TOKEN_FILE}" ]] || {
     echo "Worker token file does not exist: ${TOKEN_FILE}" >&2
@@ -93,6 +95,8 @@ Environment=GMS_WORKER_CONFIG=${CONFIG_ROOT}/config.json
 Environment=GMS_ENV=production
 Environment=PYTHONPYCACHEPREFIX=${HOME}/.cache/gms-worker/pycache
 Environment=GMS_ADB_PROXY_BIN_DIR=${HOME}/.local/bin
+Environment=GMS_PROCESS_INVENTORY_BIN=${INSTALL_ROOT}/bin/gms-process-inventory
+Environment=GMS_USBIP_CONTROL_BIN=${INSTALL_ROOT}/bin/gms-usbip-control
 Environment=PATH=${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/python3 -m worker_agent.app
 Restart=on-failure

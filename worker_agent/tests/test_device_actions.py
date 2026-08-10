@@ -15,7 +15,6 @@ from worker_agent.inventory import (
     flash_firmware,
     prepare_suite_export,
 )
-from worker_agent.process_inventory import _is_active_invocation
 
 
 def test_aapt2_path_accepts_configured_worker_binary(tmp_path):
@@ -24,16 +23,6 @@ def test_aapt2_path_accepts_configured_worker_binary(tmp_path):
     binary.chmod(0o755)
     with patch.dict("os.environ", {"GMS_WORKER_AAPT2_PATH": str(binary)}):
         assert _aapt2_path() == str(binary)
-
-
-def test_idle_ats_console_is_not_reported_as_running_test():
-    assert not _is_active_invocation([
-        "/bin/bash", "./cts-tradefed", "com.google.devtools.mobileharness.infra.ats.console.AtsConsole"
-    ])
-    assert _is_active_invocation([
-        "java", "com.android.compatibility.common.tradefed.command.CompatibilityConsole",
-        "run", "commandAndExit", "cts", "-s", "SERIAL",
-    ])
 
 
 def test_device_action_strips_worker_namespace_and_uses_argv():
@@ -58,211 +47,43 @@ def test_device_action_rejects_device_not_attached_to_worker():
             raise AssertionError("expected unattached device rejection")
 
 
-def test_usbip_attach_uses_root_owned_helper_and_validated_argv():
-    completed = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-    with patch("worker_agent.inventory.subprocess.run", return_value=completed) as run, patch(
-        "worker_agent.inventory.time.sleep"
-    ), patch("worker_agent.inventory.probe_devices", return_value=[]):
-        result = execute_usbip_action("attach", "192.0.2.10", ["1-2"])
-    assert result["attached_busids"] == ["1-2"]
-    assert run.call_args.args[0] == [
-        "sudo", "-n", "/usr/local/libexec/gms-worker-usbip",
-        "attach", "192.0.2.10", "1-2",
-    ]
-    assert run.call_args.kwargs["check"] is False
-
-
-def test_usbip_attach_probes_side_adb_when_proxy_is_active():
-    completed = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-    probes = []
-
-    def probe(*args, **kwargs):
-        probes.append(kwargs.get("adb_server_socket"))
-        return []
-
+def test_usbip_action_uses_required_native_executor():
+    expected = {"attached_busids": ["1-2"]}
     with patch(
-        "worker_agent.inventory.subprocess.run",
-        return_value=completed,
+        "worker_agent.inventory.resolve_native_tool",
+        return_value="/opt/gms/gms-usbip-control",
     ), patch(
-        "worker_agent.inventory.time.sleep"
-    ), patch(
-        "worker_agent.inventory.probe_devices",
-        side_effect=probe,
-    ):
-        execute_usbip_action(
-            "attach",
-            "192.0.2.10",
-            ["1-2"],
-            "tcp:127.0.0.1:5039",
+        "worker_agent.inventory.execute_external_transport",
+        return_value=expected,
+    ) as execute:
+        result = execute_usbip_action(
+            "attach", "192.0.2.10", ["1-2"], "tcp:127.0.0.1:5039", 7
         )
 
-    assert probes
-    assert set(probes) == {"tcp:127.0.0.1:5039"}
-
-
-def test_usbip_attach_retries_transient_export_busy_error():
-    busy = subprocess.CompletedProcess(
-        [], 1, stdout="",
-        stderr="usbip: error: Attach Request for 1-2 failed - Device busy (exported)",
+    assert result == expected
+    execute.assert_called_once_with(
+        "/opt/gms/gms-usbip-control",
+        transport="usbip",
+        action="attach",
+        payload={
+            "source_host": "192.0.2.10",
+            "busids": ["1-2"],
+            "adb_server_socket": "tcp:127.0.0.1:5039",
+            "generation": 7,
+        },
+        timeout=180,
     )
-    completed = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-    with patch(
-        "worker_agent.inventory.subprocess.run",
-        side_effect=[completed, busy, completed],
-    ) as run, patch("worker_agent.inventory.time.sleep") as sleep, patch(
-        "worker_agent.inventory.probe_devices", return_value=[]
-    ):
-        result = execute_usbip_action("attach", "192.0.2.10", ["1-2"])
-    assert result["attached_busids"] == ["1-2"]
-    assert run.call_count == 3
-    sleep.assert_any_call(2)
 
 
-def test_usbip_attach_reuses_matching_existing_worker_port():
-    port_output = """Port 00: <Port in Use> at High Speed(480Mbps)
-       usbip://192.0.2.10:3240/1-2
-"""
-    completed = subprocess.CompletedProcess([], 0, stdout=port_output, stderr="")
-    with patch("worker_agent.inventory.subprocess.run", return_value=completed) as run, patch(
-        "worker_agent.inventory.time.sleep"
-    ), patch("worker_agent.inventory.probe_devices", return_value=[]):
-        result = execute_usbip_action("attach", "192.0.2.10", ["1-2"])
-    assert result["attached_busids"] == ["1-2"]
-    assert result["already_attached_busids"] == ["1-2"]
-    assert result["enumeration_pending"] is False
-    assert run.call_count == 1
-    assert run.call_args.args[0][-1] == "port"
-
-
-def test_usbip_attach_rollback_preserves_preexisting_ports():
-    existing_ports = """Port 00: <Port in Use>
-       usbip://192.0.2.10:3240/1-1
-"""
-    ports_after_partial_attach = """Port 00: <Port in Use>
-       usbip://192.0.2.10:3240/1-1
-Port 01: <Port in Use>
-       usbip://192.0.2.10:3240/1-2
-"""
-    completed = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-    failed = subprocess.CompletedProcess(
-        [], 1, stdout="", stderr="permanent attach failure"
-    )
-    with patch(
-        "worker_agent.inventory.subprocess.run",
-        side_effect=[
-            subprocess.CompletedProcess([], 0, stdout=existing_ports, stderr=""),
-            completed,
-            failed,
-            subprocess.CompletedProcess(
-                [], 0, stdout=ports_after_partial_attach, stderr=""
-            ),
-            completed,
-        ],
-    ) as run, patch("worker_agent.inventory.probe_devices", return_value=[]):
+def test_usbip_action_rejects_shell_metacharacters_before_native_execution():
+    with patch("worker_agent.inventory.execute_external_transport") as execute:
         try:
-            execute_usbip_action(
-                "attach", "192.0.2.10", ["1-1", "1-2", "1-3"]
-            )
-        except RuntimeError as exc:
-            assert "已回滚" in str(exc)
+            execute_usbip_action("attach", "192.0.2.10;touch", ["1-2"])
+        except ValueError as exc:
+            assert "source host" in str(exc)
         else:
-            raise AssertionError("expected atomic attach failure")
-
-    detach_calls = [
-        call.args[0]
-        for call in run.call_args_list
-        if call.args[0][-2:-1] == ["detach"]
-    ]
-    assert detach_calls == [[
-        "sudo", "-n", "/usr/local/libexec/gms-worker-usbip",
-        "detach", "01",
-    ]]
-
-
-def test_usbip_action_rejects_shell_metacharacters():
-    try:
-        execute_usbip_action("attach", "192.0.2.10;touch", ["1-2"])
-    except ValueError as exc:
-        assert "source host" in str(exc)
-    else:
-        raise AssertionError("expected invalid host rejection")
-
-
-def test_usbip_detach_matches_source_and_busid_before_detaching_port():
-    port_output = """Port 00: <Port in Use> at High Speed(480Mbps)
-       usbip://192.0.2.10:3240/1-2
-       remote bus/dev 001/002
-"""
-    completed_port = subprocess.CompletedProcess([], 0, stdout=port_output, stderr="")
-    completed_detach = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-    with patch(
-        "worker_agent.inventory.subprocess.run",
-        side_effect=[completed_port, completed_detach],
-    ) as run, patch("worker_agent.inventory.probe_devices", return_value=[]):
-        result = execute_usbip_action("detach", "192.0.2.10", ["1-2"])
-    assert result["detached_ports"] == ["00"]
-    assert run.call_args_list[0].args[0][-1] == "port"
-    assert run.call_args_list[1].args[0][-2:] == ["detach", "00"]
-
-
-def test_usbip_detach_does_not_match_busid_prefix():
-    port_output = """Port 00: <Port in Use> at High Speed(480Mbps)
-       usbip://192.0.2.10:3240/1-10
-       remote bus/dev 001/010
-"""
-    completed_port = subprocess.CompletedProcess(
-        [], 0, stdout=port_output, stderr=""
-    )
-    with patch(
-        "worker_agent.inventory.subprocess.run",
-        return_value=completed_port,
-    ), patch("worker_agent.inventory.probe_devices", return_value=[]):
-        result = execute_usbip_action("detach", "192.0.2.10", ["1-1"])
-    assert result["detached_ports"] == []
-    assert result["already_detached"] is True
-
-
-def test_usbip_detach_settles_stale_offline_entries():
-    # Right after detach, ADB briefly keeps reporting the removed serial as
-    # offline. The detach result must wait for those stale entries to clear
-    # instead of returning a list that still looks "online".
-    port_output = """Port 00: <Port in Use> at High Speed(480Mbps)
-       usbip://192.0.2.10:3240/1-2
-       remote bus/dev 001/002
-"""
-    completed_port = subprocess.CompletedProcess([], 0, stdout=port_output, stderr="")
-    completed_detach = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-    offline_once = [{"serial": "1-2-serial", "state": "offline", "transport": "local_usb"}]
-    with patch(
-        "worker_agent.inventory.subprocess.run",
-        side_effect=[completed_port, completed_detach],
-    ), patch(
-        "worker_agent.inventory.probe_devices",
-        side_effect=[offline_once, offline_once, []],
-    ) as probe, patch("worker_agent.inventory.time.sleep"):
-        result = execute_usbip_action("detach", "192.0.2.10", ["1-2"])
-    assert result["detached_ports"] == ["00"]
-    assert result["devices"] == []
-    # Settle loop kept probing until the offline entry cleared.
-    assert probe.call_count >= 2
-
-
-def test_usbip_detach_is_idempotent_when_selected_device_is_not_attached():
-    # Detaching an export that is no longer attached (already gone, or never
-    # attached) must succeed idempotently so the controller can clear stale
-    # assignment records instead of looping on 502.
-    completed = subprocess.CompletedProcess(
-        [], 0,
-        stdout="Port 00: <Port in Use>\n       usbip://192.0.2.11:3240/2-1\n",
-        stderr="",
-    )
-    with patch("worker_agent.inventory.subprocess.run", return_value=completed), patch(
-        "worker_agent.inventory.probe_devices", return_value=[]
-    ):
-        result = execute_usbip_action("detach", "192.0.2.10", ["1-2"])
-    assert result["detached_ports"] == []
-    assert result["already_detached"] is True
-
+            raise AssertionError("expected invalid host rejection")
+    execute.assert_not_called()
 
 def test_wifi_action_passes_credentials_as_argv_without_shell_interpolation():
     probe = [{"serial": "ABC", "state": "available"}]

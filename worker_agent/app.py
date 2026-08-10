@@ -40,7 +40,10 @@ from .inventory import (
     probe_devices,
     scan_suites,
 )
-from .process_inventory import discover_tradefed_processes
+from .process_inventory import (
+    discover_tradefed_processes,
+    process_inventory_capability_status,
+)
 from .runtime import WorkerRuntime
 
 
@@ -153,6 +156,7 @@ class WorkerAgent:
         except RuntimeError:
             has_aapt2 = False
         adb_proxy = adb_proxy_capability_status()
+        process_inventory = process_inventory_capability_status()
         capabilities = {"adb": shutil.which("adb") is not None,
                         "fastboot": shutil.which("fastboot") is not None,
                         "tradefed": True,
@@ -167,6 +171,10 @@ class WorkerAgent:
                         "adb_proxy": bool(adb_proxy.get("installed")),
                         "adb_proxy_version": str(adb_proxy.get("version") or ""),
                         "adb_proxy_logs": True,
+                        "process_inventory_backend": process_inventory["backend"],
+                        "process_inventory_contract_version": process_inventory[
+                            "contract_version"
+                        ],
                         "adb_proxy_source_only": self.config.source_only,
                         "ssh_user": self.config.ssh_user or getpass.getuser()}
         if self.config.source_only:
@@ -604,21 +612,25 @@ class WorkerAgent:
                 "errors": ["USB/IP operation is already in progress"],
             }
         try:
-            grouped: dict[tuple[str, str], list[str]] = {}
+            grouped: dict[tuple[str, str, int], list[str]] = {}
             for assignment in self.runtime.usbip_assignments():
                 key = (
                     str(assignment.get("source_host") or ""),
                     str(assignment.get("adb_server_socket") or ""),
+                    int(assignment.get("generation") or 0),
                 )
                 grouped.setdefault(key, []).append(
                     str(assignment.get("busid") or "")
                 )
-            for (source_host, adb_server_socket), busids in grouped.items():
+            for (
+                source_host,
+                adb_server_socket,
+                generation,
+            ), busids in grouped.items():
                 selected = [busid for busid in busids if busid]
                 if not source_host or not selected:
                     continue
                 try:
-                    generation = int(assignment.get("generation") or 0)
                     execute_args = [
                         "attach", source_host, selected, adb_server_socket or None
                     ]

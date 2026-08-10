@@ -59,16 +59,10 @@ def execute_request(request: dict[str, Any]) -> dict[str, Any]:
         )
         return _response(result)
     if transport == "usbip":
-        from .inventory import _execute_usbip_action_builtin
-
-        result = _execute_usbip_action_builtin(
-            action,
-            str(payload.get("source_host") or ""),
-            [str(item) for item in payload.get("busids") or []],
-            str(payload.get("adb_server_socket") or "") or None,
-            int(payload.get("generation") or 0),
+        raise TransportOperationError(
+            "TRANSPORT_EXECUTOR_INVALID_REQUEST",
+            "USB/IP is Rust-only; invoke gms-usbip-control directly",
         )
-        return _response(result)
     raise TransportOperationError(
         "TRANSPORT_EXECUTOR_INVALID_REQUEST",
         f"unsupported transport: {transport}",

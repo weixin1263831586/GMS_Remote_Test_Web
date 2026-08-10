@@ -239,6 +239,55 @@ class WorkerDeploymentTests(unittest.TestCase):
             installer,
         )
 
+    def test_worker_bundle_contains_valid_native_runtime(self):
+        from features.cluster.deployment_bundle import add_worker_runtime
+
+        project_root = Path(__file__).resolve().parents[3]
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
+            with tarfile.open(archive.name, "w:gz") as bundle:
+                add_worker_runtime(bundle, project_root)
+            with tarfile.open(archive.name, "r:gz") as bundle:
+                names = set(bundle.getnames())
+
+        self.assertIn("scripts/install_gms_worker_native.sh", names)
+        self.assertIn("worker_agent/app.py", names)
+        self.assertIn("foundation/native_tools.py", names)
+        for name in (
+            "SHA256SUMS",
+            "gms-process-inventory",
+            "gms-usbip-control",
+        ):
+            self.assertIn(f"tools/gms-worker-native/dist/x86_64/{name}", names)
+
+    def test_worker_native_bundle_rejects_a_tampered_binary(self):
+        from features.cluster.deployment_bundle import add_worker_native_runtime
+
+        with tempfile.TemporaryDirectory() as directory:
+            project_root = Path(directory)
+            scripts = project_root / "scripts"
+            scripts.mkdir()
+            installer = scripts / "install_gms_worker_native.sh"
+            installer.write_text(
+                "#!/bin/bash\n",
+                encoding="utf-8",
+            )
+            installer.chmod(0o755)
+            dist = project_root / "tools/gms-worker-native/dist/x86_64"
+            dist.mkdir(parents=True)
+            for name in ("gms-process-inventory", "gms-usbip-control"):
+                binary = dist / name
+                binary.write_bytes(b"tampered")
+                binary.chmod(0o755)
+            (dist / "SHA256SUMS").write_text(
+                f"{'0' * 64}  gms-process-inventory\n"
+                f"{'0' * 64}  gms-usbip-control\n",
+                encoding="utf-8",
+            )
+            with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive, \
+                    tarfile.open(archive.name, "w:gz") as bundle, \
+                    self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                add_worker_native_runtime(bundle, project_root)
+
     def test_adbproxy_installer_uses_the_offline_package(self):
         project_root = Path(__file__).resolve().parents[3]
         installer = project_root / "scripts/install_adbproxy_rs.sh"
@@ -272,6 +321,8 @@ class WorkerDeploymentTests(unittest.TestCase):
 
         self.assertIn("scripts/install_adbproxy_rs.sh", page_js)
         self.assertIn("tools/adbproxy-rs/dist", page_js)
+        self.assertIn("scripts/install_gms_worker_native.sh", page_js)
+        self.assertIn("tools/gms-worker-native/dist", page_js)
         self.assertIn("worker_agent foundation", page_js)
 
     def test_source_only_deployment_waits_for_adb_proxy_capability(self):
@@ -342,6 +393,8 @@ class WorkerDeploymentTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("install_adbproxy_rs.sh", script)
+        self.assertIn("install_gms_worker_native.sh", script)
+        self.assertIn("GMS_PROCESS_INVENTORY_BIN", script)
         self.assertIn('"${PROJECT_ROOT}/foundation"', script)
         self.assertIn('"source_only": True', script)
         self.assertNotIn("GTS_CREDENTIAL", script)
