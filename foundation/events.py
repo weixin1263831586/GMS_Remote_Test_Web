@@ -55,9 +55,10 @@ class EventBus:
         with self._lock:
             listeners = list(self._listeners.get(event_type, []))
             listeners.extend(self._listeners.get("*", []))
+        event_payload = dict(payload or {})
         for listener in listeners:
             try:
-                listener(event_type, payload or {})
+                listener(event_type, dict(event_payload))
             except Exception:
                 logger.debug(
                     "event listener for %s raised", event_type, exc_info=True

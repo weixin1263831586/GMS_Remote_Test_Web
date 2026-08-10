@@ -101,11 +101,22 @@ class ClusterInventoryRepositoryMixin:
             ).fetchall()]
 
     def get_worker_metrics_history(self, worker_id: str = "") -> list[dict[str, Any]]:
-        sql = "SELECT worker_id,recorded_at,cpu_percent,memory_percent,disk_free_gb,running_jobs,external_jobs FROM cluster_worker_metrics"
-        params: tuple[Any, ...] = ()
+        # Heartbeats arrive every few seconds, while the dashboard spans 24
+        # hours.  Aggregate into five-minute buckets to keep the response and
+        # browser chart bounded as Worker count grows.
+        sql = """SELECT worker_id,MAX(recorded_at) AS recorded_at,
+                        ROUND(AVG(cpu_percent),2) AS cpu_percent,
+                        ROUND(AVG(memory_percent),2) AS memory_percent,
+                        MIN(disk_free_gb) AS disk_free_gb,
+                        MAX(running_jobs) AS running_jobs,
+                        MAX(external_jobs) AS external_jobs
+                 FROM cluster_worker_metrics
+                 WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-24 hours')"""
+        params: list[Any] = []
         if worker_id:
-            sql += " WHERE worker_id=?"
-            params = (worker_id,)
+            sql += " AND worker_id=?"
+            params.append(worker_id)
+        sql += " GROUP BY worker_id,CAST(strftime('%s',recorded_at)/300 AS INTEGER)"
         sql += " ORDER BY recorded_at"
         with self.connect() as conn:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]
@@ -123,6 +134,7 @@ class ClusterInventoryRepositoryMixin:
             conn.execute("DELETE FROM cluster_worker_devices WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_worker_suites WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_worker_tests WHERE worker_id=?", (worker_id,))
+            conn.execute("DELETE FROM cluster_worker_metrics WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_transfers WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_workers WHERE id=?", (worker_id,))
             return conn.total_changes > 0

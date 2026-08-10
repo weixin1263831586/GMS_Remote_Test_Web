@@ -2436,4 +2436,3 @@ async function collectDeviceInfo() {
         }
     }
 }
-

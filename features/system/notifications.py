@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -19,9 +20,11 @@ from foundation.config import (
     VALID_NOTIFICATION_LEVELS,
     settings,
 )
+from foundation.events import event_bus
 
 
 logger = logging.getLogger(__name__)
+_event_loop: asyncio.AbstractEventLoop | None = None
 
 
 class NotificationStore:
@@ -206,32 +209,75 @@ async def safe_websocket_send(client_id: str, message: dict):
 
 
 async def broadcast_event(event_type: str, payload: dict[str, Any] | None = None):
-    """Broadcast a resource event to every connected WebSocket client."""
-    message = {"type": "event", "event": event_type, "payload": payload or {}}
+    """Send a resource event to its owner, or globally when it is public."""
+    public_payload = dict(payload or {})
+    target_client_id = str(public_payload.pop("_target_client_id", "") or "")
+    message = {"type": "event", "event": event_type, "payload": public_payload}
     with global_state.websocket_connections_lock:
-        client_ids = list(global_state.websocket_connections.keys())
-    for client_id in client_ids:
-        await safe_websocket_send(client_id, message)
+        if target_client_id:
+            client_ids = (
+                [target_client_id]
+                if target_client_id in global_state.websocket_connections
+                else []
+            )
+        else:
+            client_ids = list(global_state.websocket_connections.keys())
+    await asyncio.gather(
+        *(safe_websocket_send(client_id, message) for client_id in client_ids),
+        return_exceptions=True,
+    )
+
+
+def bind_event_bus_loop(
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> asyncio.AbstractEventLoop:
+    """Bind the EventBus bridge to the ASGI loop used by this process."""
+    global _event_loop
+
+    _event_loop = loop or asyncio.get_running_loop()
+    return _event_loop
+
+
+def unbind_event_bus_loop(loop: asyncio.AbstractEventLoop | None = None) -> None:
+    """Detach a previously bound ASGI loop during application shutdown."""
+    global _event_loop
+
+    if loop is None or _event_loop is loop:
+        _event_loop = None
+
+
+def _schedule_event_broadcast(event_type: str, payload: dict[str, Any]) -> None:
+    loop = _event_loop
+    if loop is None or loop.is_closed():
+        return
+
+    def create_task() -> None:
+        task = loop.create_task(broadcast_event(event_type, payload))
+        global_state.background_tasks.add(task)
+        task.add_done_callback(global_state.background_tasks.discard)
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    try:
+        if running_loop is loop:
+            create_task()
+        else:
+            loop.call_soon_threadsafe(create_task)
+    except RuntimeError:
+        logger.debug("EventBus loop stopped before %s could be sent", event_type)
 
 
 def _event_bus_listener(event_type: str, payload: dict[str, Any]) -> None:
-    """Forward EventBus emissions to all WebSocket clients via asyncio.
+    """Forward EventBus emissions to WebSocket clients via the ASGI loop.
 
-    Called synchronously by the EventBus; schedules the async broadcast on
-    the running event loop (if any) so the emitter is never blocked.
+    FastAPI runs synchronous endpoints in worker threads, so their current
+    thread has no event loop.  The bridge therefore schedules onto the loop
+    captured by the application lifespan.
     """
-    import asyncio
+    _schedule_event_broadcast(event_type, dict(payload))
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # No event loop running (e.g. during startup) — skip silently.
-        return
-    loop.create_task(broadcast_event(event_type, payload))
-
-
-# Register the bridge once at import time.
-from foundation.events import event_bus  # noqa: E402
 
 event_bus.subscribe("*", _event_bus_listener)
 

@@ -60,11 +60,14 @@ def check_local_vpn_connected() -> bool:
             ['nmcli', '-t', '-f', 'NAME,TYPE,STATE', 'connection', 'show', '--active'],
             capture_output=True, text=True, timeout=3
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                (result.stderr or result.stdout or "nmcli status check failed").strip()
+            )
         return has_active_vpn_connection(result.stdout)
-    except Exception as e:
-        logger.debug(f"[VPN Status] Local nmcli check failed: {e}")
-
-    return False
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("[VPN Status] Local nmcli check failed: %s", exc)
+        raise RuntimeError("nmcli status check failed") from exc
 
 
 def get_configured_vpn_connection_name(config: dict[str, Any]) -> str:

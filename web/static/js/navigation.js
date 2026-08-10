@@ -145,14 +145,12 @@ const BADGE_PADDINGS = { xs: '1px 4px', sm: '2px 6px', md: '3px 8px', lg: '4px 1
 // ==================== 轮询间隔配置 ====================
 // GSI 固件烧写进度轮询间隔（毫秒）
 const GSI_PROGRESS_POLL_INTERVAL = 2000; // 2 秒
-// 状态轮询间隔（毫秒）— 作为 WebSocket Event Bus 的兜底，仅在 WS 停滞时生效
-const STATUS_POLL_INTERVAL = 5000; // 5 秒（原 2 秒；Event Bus 已接管实时推送）
+// APK 分析任务状态轮询间隔（毫秒）
+const STATUS_POLL_INTERVAL = 5000;
 // 报告列表刷新间隔（毫秒）
 const REPORTS_REFRESH_INTERVAL = 15000; // 15 秒
 // 最大进度轮询错误次数
 const MAX_PROGRESS_ERRORS = 3;
-// Event Bus 兜底轮询间隔（毫秒）— 如果超过此时间未收到 WS 事件，主动刷新
-const EVENT_BUS_FALLBACK_INTERVAL_MS = 30000; // 30 秒
 let wakeTestStatusPolling = () => {};
 let stopTestStatusPolling = () => {};
 
@@ -872,10 +870,7 @@ function initWebSocket() {
 // Dispatches resource events pushed by the backend EventBus through WebSocket.
 // Each handler refreshes the relevant UI state without a full polling cycle.
 
-let _lastServerEventTime = 0;
-
 function handleServerEvent(eventType, payload) {
-    _lastServerEventTime = Date.now();
     debugLog('[EventBus] Received:', eventType, payload);
     switch (eventType) {
         case 'worker.updated':
@@ -889,7 +884,7 @@ function handleServerEvent(eventType, payload) {
             // Wake the test status poller so it picks up the new job state
             // immediately rather than waiting for the next interval.
             if (payload && payload.job_id && state.clusterJobId === payload.job_id) {
-                pollRequested = true;
+                wakeTestStatusPolling();
             }
             // Refresh devices to reflect allocation changes.
             if (typeof loadDevices === 'function') {
@@ -2679,4 +2674,3 @@ window.openAgentApkAnalysis = openAgentApkAnalysis;
 window.showTailscaleInfoModal = showTailscaleInfoModal;
 window.copyDeployCommand = copyDeployCommand;
 window.copyTailscaleAccessUrl = copyTailscaleAccessUrl;
-

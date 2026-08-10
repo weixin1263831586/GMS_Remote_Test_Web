@@ -1,7 +1,11 @@
+import asyncio
 import shutil
+import threading
 
 from features.system import notifications
 from features.system.notifications import NotificationStore
+from features.system.state import global_state
+from foundation.events import EventBus
 
 
 def test_store_notification_does_not_mutate_callers_payload(tmp_path, monkeypatch):
@@ -48,3 +52,75 @@ def test_notification_store_recovers_after_runtime_data_directory_deletion(tmp_p
     shutil.rmtree(data_dir)
 
     assert store.list("alice", 100) == {"records": [], "unread_count": 0}
+
+
+def test_event_bus_gives_each_listener_an_independent_payload_copy():
+    bus = EventBus()
+    received = []
+
+    def mutate(_event_type, payload):
+        payload["private"] = "changed"
+
+    bus.subscribe("job.transition", mutate)
+    bus.subscribe("job.transition", lambda _event_type, payload: received.append(payload))
+    original = {"job_id": "job-1"}
+
+    bus.emit("job.transition", original)
+
+    assert received == [{"job_id": "job-1"}]
+    assert original == {"job_id": "job-1"}
+
+
+def test_broadcast_event_targets_owner_and_strips_routing_metadata(monkeypatch):
+    sent = []
+
+    async def capture(client_id, message):
+        sent.append((client_id, message))
+
+    monkeypatch.setattr(notifications, "safe_websocket_send", capture)
+    with global_state.websocket_connections_lock:
+        previous = dict(global_state.websocket_connections)
+        global_state.websocket_connections.clear()
+        global_state.websocket_connections.update({"alice": object(), "bob": object()})
+    try:
+        asyncio.run(notifications.broadcast_event(
+            "job.transition",
+            {"job_id": "job-1", "_target_client_id": "alice"},
+        ))
+    finally:
+        with global_state.websocket_connections_lock:
+            global_state.websocket_connections.clear()
+            global_state.websocket_connections.update(previous)
+
+    assert sent == [("alice", {
+        "type": "event",
+        "event": "job.transition",
+        "payload": {"job_id": "job-1"},
+    })]
+
+
+def test_event_bus_listener_from_worker_thread_uses_bound_asgi_loop(monkeypatch):
+    async def scenario():
+        received = asyncio.Event()
+        payloads = []
+
+        async def capture(event_type, payload):
+            payloads.append((event_type, payload))
+            received.set()
+
+        monkeypatch.setattr(notifications, "broadcast_event", capture)
+        loop = notifications.bind_event_bus_loop()
+        try:
+            thread = threading.Thread(
+                target=notifications._event_bus_listener,
+                args=("worker.updated", {"worker_id": "worker-1"}),
+            )
+            thread.start()
+            thread.join()
+            await asyncio.wait_for(received.wait(), timeout=1)
+            await asyncio.sleep(0)
+        finally:
+            notifications.unbind_event_bus_loop(loop)
+        assert payloads == [("worker.updated", {"worker_id": "worker-1"})]
+
+    asyncio.run(scenario())

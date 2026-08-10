@@ -66,3 +66,46 @@ def test_vts_result_fallback_matches_current_invocation(tmp_path):
     assert f"resolved={matching} pass=0 fail=1" in completed.stdout
     assert str(unrelated) not in completed.stdout
 
+
+def test_tradefed_arguments_are_not_evaluated_as_shell_code(tmp_path):
+    suite_path = tmp_path / "tools"
+    suite_path.mkdir()
+    capture_path = tmp_path / "argv.bin"
+    marker_path = tmp_path / "injected"
+    tradefed = suite_path / "cts-tradefed"
+    tradefed.write_text(
+        '#!/bin/bash\nprintf "%s\\0" "$@" > "$CAPTURE_PATH"\n',
+        encoding="utf-8",
+    )
+    tradefed.chmod(0o755)
+    log_path = tmp_path / "tradefed.log"
+
+    assignments = {
+        "LOG_FILE": str(log_path),
+        "CAPTURE_PATH": str(capture_path),
+        "SUITE_PATH": str(suite_path),
+        "SUITE_PREFIX": "cts",
+        "TEST_COMMAND": "cts",
+        "Test_Type": "cts",
+        "Test_Module": f"CtsSecurityTestCases; touch {marker_path}",
+        "Test_Case": "SecurityTest#testArgumentBoundary",
+        "DEVICE_ARGS": "-s SAFE-SERIAL",
+        "PROCESS_GROUP_ID": "",
+    }
+    shell = [f"source {shlex.quote(str(SCRIPT))}"]
+    shell.extend(f"{name}={shlex.quote(value)}" for name, value in assignments.items())
+    shell.append("export CAPTURE_PATH")
+    shell.append("run_tradefed run")
+
+    subprocess.run(
+        ["bash", "-c", "\n".join(shell)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert not marker_path.exists()
+    argv = capture_path.read_bytes().split(b"\0")
+    assert f"CtsSecurityTestCases; touch {marker_path}".encode() in argv
+    assert b"SecurityTest#testArgumentBoundary" in argv
+    assert b"SAFE-SERIAL" in argv

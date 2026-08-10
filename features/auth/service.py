@@ -20,7 +20,15 @@ from .schema import initialize_auth_schema
 AUTH_COOKIE_NAME = "gms_session"
 PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
-SESSION_ABSOLUTE_HOURS = int(os.getenv("GMS_SESSION_ABSOLUTE_HOURS", "876000"))
+# The browser cookie is intentionally a session cookie and is discarded when
+# the browser closes. Keep the server-side absolute ceiling effectively
+# non-expiring so a long-running GMS test or terminal session is not interrupted
+# at an arbitrary wall-clock boundary; idle expiry, logout, password changes,
+# account disabling, and administrator revocation still invalidate the session.
+DEFAULT_SESSION_ABSOLUTE_HOURS = 100 * 365 * 24
+SESSION_ABSOLUTE_HOURS = int(
+    os.getenv("GMS_SESSION_ABSOLUTE_HOURS", str(DEFAULT_SESSION_ABSOLUTE_HOURS))
+)
 SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "2"))
 # 二次认证状态绑定当前会话，并随会话失效或重新登录清除。
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {

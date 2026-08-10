@@ -84,7 +84,7 @@ def start_cluster_test(request: Any, client_id: str):
         "devices": serials,
         "local_server": request.local_server,
         "no_retry": False,
-        "copy_remote": bool(request.local_server),
+        "copy_remote": False,
     }
     data.update({
         "automation_run_id": request.automation_run_id,
@@ -102,6 +102,7 @@ def start_cluster_test(request: Any, client_id: str):
             "job_id": job["id"], "attempt_id": job["current_attempt_id"],
             "operation_id": f"{job['current_attempt_id']}:start_test",
             "payload": {"worker_job_id": f"wj-{job['id']}", "argv": cmd_parts,
+                        "execution_spec": data["execution_spec"],
                         "env": {}, "devices": request.devices,
                         "trace_id": job.get("trace_id", ""),
                         "lease_tokens": [{

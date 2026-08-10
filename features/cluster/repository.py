@@ -381,8 +381,7 @@ class ClusterRepository(
         if worker.get("status") not in {"online", "busy"}:
             raise ValueError("worker is not online")
         devices = self._claim_devices(worker_id, data.get("devices", []))
-        owner_id = str(data.get("owner_id") or "").strip()
-        if not owner_id:
+        if not (owner_id := str(data.get("owner_id") or "").strip()):
             raise ValueError("authenticated owner_id is required")
         owner_username = str(data.get("owner_username") or "").strip()
         reservation_id = str(data.get("device_reservation_id") or "")

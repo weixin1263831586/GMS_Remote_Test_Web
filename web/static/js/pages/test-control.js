@@ -543,4 +543,3 @@ async function saveConfig() {
         showToast('保存失败: ' + error.message, 'error');
     }
 }
-

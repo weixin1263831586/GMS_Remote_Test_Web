@@ -12,7 +12,11 @@ from features.auth import CurrentUser
 from features.cluster import api as cluster_api
 from features.cluster.repository import ClusterRepository
 from features.cluster.service import ClusterService
-from worker_agent.process_inventory import _extract_devices, _is_tradefed, _collect_adb_descendant_argv
+from worker_agent.process_inventory import (
+    _collect_adb_descendant_argv,
+    _extract_devices,
+    _is_tradefed,
+)
 
 
 def _registered_repository(tmp_path: Path) -> ClusterRepository:
@@ -37,6 +41,20 @@ def test_tradefed_detection_extracts_cli_and_runtime_devices(tmp_path):
 
     assert _is_tradefed(argv, "cts-tradefed")
     assert _extract_devices(argv) == {"CLI-SERIAL", "RUNTIME-SERIAL"}
+
+
+def test_device_extraction_does_not_treat_relative_frida_script_as_serial():
+    argv = [
+        "/suite/tools/cts-tradefed",
+        "run",
+        "cts",
+        "-s",
+        "agent.js",
+        "--serial",
+        "192.0.2.10:5555",
+    ]
+
+    assert _extract_devices(argv) == {"192.0.2.10:5555"}
 
 
 def test_interactive_console_detected_via_adb_descendant():

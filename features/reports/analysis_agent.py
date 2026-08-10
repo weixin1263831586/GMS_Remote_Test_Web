@@ -177,6 +177,9 @@ class ReportAnalysisAgent:
         command = "rar" if archive_path.lower().endswith(".rar") and shutil.which("rar") else "7z"
         if not shutil.which(command):
             raise RuntimeError(f"{command} command not found")
+        from .archive import _preflight_system_archive
+
+        _preflight_system_archive(archive_path, target_dir, command)
         args = [command, "x", "-y", archive_path, target_dir + os.sep] if command == "rar" else [
             command,
             "x",

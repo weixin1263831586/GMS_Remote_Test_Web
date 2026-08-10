@@ -9,18 +9,19 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import os
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
 import pytest
 
-from features.build.executor import BuildExecutionError, build_command_from_template
-from foundation.archives import MAX_ARCHIVE_EXPANDED_BYTES, MAX_ARCHIVE_FILES
+from features.build.executor import (
+    BuildExecutionError,
+    build_command_from_template,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ class TestBuildCommandInjectionPrevention(unittest.TestCase):
 
     def test_arbitrary_executable_rejected_by_pattern(self):
         """Even a choice-adjacent value not matching the pattern is rejected."""
-        with pytest.raises(BuildExecutionError, match="invalid (choice|format)"):
+        with pytest.raises(BuildExecutionError, match=r"invalid (choice|format)"):
             build_command_from_template(
                 self._template(),
                 {"workspace_root": "/srv"},
@@ -150,33 +151,48 @@ class TestArchivePostExtractionSafety(unittest.TestCase):
             with pytest.raises(ValueError, match="符号链接"):
                 _enforce_post_extraction_safety(tmp)
 
-    def test_path_traversal_rejected(self):
+    def test_unrelated_file_outside_directory_is_not_scanned(self):
         from features.reports.archive import _enforce_post_extraction_safety
 
         with tempfile.TemporaryDirectory() as tmp:
-            # Create a file that simulates an escaped path
             outside = Path(tmp).parent / f"escape_{os.getpid()}.txt"
             try:
                 outside.write_text("escaped")
-                # Simulate by pointing at parent dir — _enforce only scans
-                # inside base_dir, but we verify no false positives for
-                # files within base_dir
                 (Path(tmp) / "safe.txt").write_text("ok")
-                _enforce_post_extraction_safety(tmp)  # should pass
+                _enforce_post_extraction_safety(tmp)
             finally:
                 outside.unlink(missing_ok=True)
 
     def test_file_count_limit_enforced(self):
         from features.reports.archive import _enforce_post_extraction_safety
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch("features.reports.archive.MAX_ARCHIVE_FILES", 5),
+        ):
             # Create more files than MAX_ARCHIVE_FILES (capped at a small
             # number for test speed)
-            with patch("features.reports.archive.MAX_ARCHIVE_FILES", 5):
-                for i in range(6):
-                    (Path(tmp) / f"f{i}.txt").write_text("x")
-                with pytest.raises(ValueError, match="文件数量"):
-                    _enforce_post_extraction_safety(tmp)
+            for i in range(6):
+                (Path(tmp) / f"f{i}.txt").write_text("x")
+            with pytest.raises(ValueError, match="文件数量"):
+                _enforce_post_extraction_safety(tmp)
+
+    def test_symlink_directory_rejected_after_extraction(self):
+        from features.reports.archive import _enforce_post_extraction_safety
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.symlink("/etc", Path(tmp) / "linked-directory")
+            with pytest.raises(ValueError, match="符号链接"):
+                _enforce_post_extraction_safety(tmp)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO files are not supported")
+    def test_fifo_rejected_after_extraction(self):
+        from features.reports.archive import _enforce_post_extraction_safety
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.mkfifo(Path(tmp) / "pipe")
+            with pytest.raises(ValueError, match="特殊文件"):
+                _enforce_post_extraction_safety(tmp)
 
     def test_clean_directory_passes(self):
         from features.reports.archive import _enforce_post_extraction_safety
@@ -186,6 +202,36 @@ class TestArchivePostExtractionSafety(unittest.TestCase):
             (Path(tmp) / "log.txt").write_text("hello")
             # Should not raise
             _enforce_post_extraction_safety(tmp)
+
+    def test_7z_path_traversal_is_rejected_before_extraction(self):
+        from features.reports.archive import _preflight_system_archive
+
+        listing = "7-Zip\n----------\nPath = ../escaped.txt\nSize = 1\n"
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch(
+                "features.reports.archive.subprocess.run",
+                return_value=CompletedProcess([], 0, stdout=listing, stderr=""),
+            ) as run,
+            pytest.raises(ValueError, match="不安全路径"),
+        ):
+            _preflight_system_archive("report.7z", tmp, "7z")
+        self.assertEqual(run.call_count, 1)
+
+    def test_7z_declared_expansion_size_is_bounded_before_extraction(self):
+        from features.reports.archive import _preflight_system_archive
+
+        listing = "7-Zip\n----------\nPath = result.xml\nSize = 6\n"
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch("features.reports.archive.MAX_ARCHIVE_EXPANDED_BYTES", 5),
+            patch(
+                "features.reports.archive.subprocess.run",
+                return_value=CompletedProcess([], 0, stdout=listing, stderr=""),
+            ),
+            pytest.raises(ValueError, match="展开大小"),
+        ):
+            _preflight_system_archive("report.7z", tmp, "7z")
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +291,6 @@ class TestWorkerSqliteHardening(unittest.TestCase):
         from worker_agent.runtime import WorkerRuntime
 
         with tempfile.TemporaryDirectory() as tmp:
-            config = type("FakeConfig", (), {"data_root": Path(tmp)})()
             runtime = object.__new__(WorkerRuntime)
             runtime.db_path = Path(tmp) / "test.sqlite3"
             runtime.db_path.parent.mkdir(parents=True, exist_ok=True)

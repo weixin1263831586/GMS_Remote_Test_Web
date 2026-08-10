@@ -1180,4 +1180,3 @@ window.copyToClipboard = function(text, element) {
         element: element
     });
 };
-

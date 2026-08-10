@@ -217,12 +217,12 @@ class WorkerDeploymentTests(unittest.TestCase):
         )
 
     def test_worker_bundle_contains_all_python_runtime_packages(self):
-        from features.cluster.deployment_api import _add_worker_python_runtime
+        from features.cluster.deployment_bundle import add_worker_python_runtime
 
         project_root = Path(__file__).resolve().parents[3]
         with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
             with tarfile.open(archive.name, "w:gz") as bundle:
-                _add_worker_python_runtime(bundle, project_root)
+                add_worker_python_runtime(bundle, project_root)
             with tarfile.open(archive.name, "r:gz") as bundle:
                 names = set(bundle.getnames())
 

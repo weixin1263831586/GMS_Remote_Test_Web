@@ -1748,7 +1748,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                                 worker_id: 'worker-source',
                                 name: 'Device Host',
                                 address: '172.16.14.233',
-                                status: 'online',
+                                status: 'busy',
                                 adb_proxy: true,
                                 devices: [
                                     {serial: 'RK-A', state: 'available', transport: 'local_usb'},
@@ -1885,6 +1885,89 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(
                 page.locator("#adb-proxy-modal .modal-content")
             ).to_have_class(re.compile(r"\bdevice-routing-modal-content\b"))
+        finally:
+            page.close()
+
+    def test_adb_proxy_modal_keeps_busy_targets_visible_but_disabled(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """
+                () => {
+                    adbProxyStatus = {
+                        cluster_enabled: true,
+                        local_worker_id: 'ats-worker-controller',
+                        hosts: [
+                            {
+                                worker_id: 'ats-worker-244',
+                                status: 'online',
+                                adb_proxy: true,
+                                devices: [{
+                                    serial: 'ATS244001',
+                                    state: 'available',
+                                    transport: 'local_usb'
+                                }]
+                            },
+                            {
+                                worker_id: 'ats-worker-246',
+                                status: 'busy',
+                                adb_proxy: true,
+                                devices: []
+                            },
+                            {
+                                worker_id: 'ats-worker-controller',
+                                status: 'busy',
+                                adb_proxy: true,
+                                devices: []
+                            }
+                        ],
+                        assignments: []
+                    };
+                    adbProxyOperationRunning = false;
+                    renderAdbProxyHosts();
+                    return {
+                        target: document.getElementById('adb-proxy-target-host').value,
+                        options: Array.from(
+                            document.getElementById('adb-proxy-target-host').options
+                        ).map(option => ({
+                            value: option.value,
+                            label: option.textContent,
+                            disabled: option.disabled
+                        })),
+                        message: document.getElementById('adb-proxy-message').textContent,
+                        submitDisabled: document.getElementById(
+                            'adb-proxy-connect-submit'
+                        ).disabled
+                    };
+                }
+                """
+            )
+
+            self.assertEqual(result["target"], "")
+            self.assertEqual(
+                result["options"],
+                [
+                    {
+                        "value": "",
+                        "label": "没有可用的ADB接入主机",
+                        "disabled": True,
+                    },
+                    {
+                        "value": "ats-worker-246",
+                        "label": "ats-worker-246（测试中，不可用）",
+                        "disabled": True,
+                    },
+                    {
+                        "value": "ats-worker-controller",
+                        "label": "ats-worker-controller（测试中，不可用）",
+                        "disabled": True,
+                    },
+                ],
+            )
+            self.assertIn("ats-worker-246", result["message"])
+            self.assertIn("正在执行测试", result["message"])
+            self.assertTrue(result["submitDisabled"])
         finally:
             page.close()
 

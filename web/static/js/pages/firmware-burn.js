@@ -1302,15 +1302,15 @@ function renderAdbProxyHosts(selection = null) {
     const activeTargets = new Set(
         activeAssignments.map(item => item.target_worker_id)
     );
-    const capable = hosts.filter(host => (
-        host.adb_proxy && host.status === 'online'
+    const sourceCapable = hosts.filter(host => (
+        host.adb_proxy && ['online', 'busy'].includes(host.status)
     ));
     const localWorkerId = adbProxyStatus.local_worker_id || workspaceLocalWorkerId();
     // Keep an online source selectable while its last device is unplugged, so
     // the open modal can show the device again as soon as a heartbeat reports
     // the hotplug event. Targets that currently aggregate a source remain
     // excluded from becoming sources themselves.
-    const sourceHosts = capable.filter(host => (
+    const sourceHosts = sourceCapable.filter(host => (
         !activeTargets.has(host.worker_id)
         && host.worker_id !== localWorkerId
     ));
@@ -1325,12 +1325,21 @@ function renderAdbProxyHosts(selection = null) {
     }
 
     renderAdbProxySourceDevices(selection);
-    if (!adbProxyStatus.cluster_enabled && capable.length < 2) {
+    if (!adbProxyStatus.cluster_enabled && sourceCapable.length < 2) {
         message.textContent = (
             '单机模式下本机ADB设备已直接可用，无需再次接入。若设备连接在另一台Ubuntu主机，'
             + '请部署Worker并启用集群模式。'
         );
     }
+}
+
+function adbProxyTargetUnavailableReason(host, activeSources) {
+    if (!host.adb_proxy) return 'ADB Proxy未安装或版本不兼容';
+    if (host.adb_proxy_source_only) return '仅可作为设备来源';
+    if (activeSources.has(host.worker_id)) return '正在作为设备来源';
+    if (['busy', 'draining'].includes(host.status)) return '测试中，不可用';
+    if (host.status !== 'online') return '离线，不可用';
+    return '';
 }
 
 function renderAdbProxySourceDevices(selection = null) {
@@ -1347,27 +1356,26 @@ function renderAdbProxySourceDevices(selection = null) {
     const activeSources = new Set(
         assignments.map(item => item.source_worker_id)
     );
-    const host = (adbProxyStatus?.hosts || []).find(item => item.worker_id === sourceId);
-    const capable = (adbProxyStatus?.hosts || []).filter(item => (
-        item.adb_proxy && item.status === 'online'
-    ));
+    const hosts = adbProxyStatus?.hosts || [];
+    const host = hosts.find(item => item.worker_id === sourceId);
     const previousTarget = selection?.targetWorkerId || targetSelect.value;
-    const targetHosts = existingAssignment
-        ? capable.filter(item => (
-            item.worker_id === existingAssignment.target_worker_id
-            && !item.adb_proxy_source_only
-        ))
-        : capable.filter(item => (
-            item.worker_id !== sourceId
-            && !activeSources.has(item.worker_id)
-            && !item.adb_proxy_source_only
-        ));
+    const targetCandidates = existingAssignment
+        ? hosts.filter(item => item.worker_id === existingAssignment.target_worker_id)
+        : hosts.filter(item => item.worker_id !== sourceId);
+    const targetOptions = targetCandidates.map(item => ({
+        host: item,
+        reason: adbProxyTargetUnavailableReason(item, activeSources)
+    }));
+    const targetHosts = targetOptions.filter(item => !item.reason).map(item => item.host);
+    const unavailableTargets = targetOptions.filter(item => item.reason);
     targetSelect.replaceChildren();
     targetHosts.forEach(item => targetSelect.append(
         new Option(adbProxyHostLabel(item), item.worker_id)
     ));
     if (!targetHosts.length) {
-        targetSelect.append(new Option('没有可用的ADB接入主机', ''));
+        const placeholder = new Option('没有可用的ADB接入主机', '', true, true);
+        placeholder.disabled = true;
+        targetSelect.append(placeholder);
     } else {
         const preferred = existingAssignment?.target_worker_id
             || (targetHosts.some(item => item.worker_id === previousTarget)
@@ -1377,6 +1385,15 @@ function renderAdbProxySourceDevices(selection = null) {
             targetSelect.value = preferred;
         }
     }
+    unavailableTargets.forEach(({host: item, reason}) => {
+        const option = new Option(
+            `${adbProxyHostLabel(item)}（${reason}）`,
+            item.worker_id
+        );
+        option.disabled = true;
+        option.title = reason;
+        targetSelect.append(option);
+    });
     deviceSelect.replaceChildren();
     const assigned = new Set(existingAssignment?.devices || []);
     const devices = (host?.devices || []).filter(device => (
@@ -1404,17 +1421,26 @@ function renderAdbProxySourceDevices(selection = null) {
     );
     if (adbProxyOperationRunning) {
         message.textContent = '正在更新ADB接入，请稍候...';
-    } else if (sourceId && existingAssignment && devices.length) {
+    } else if (sourceId && existingAssignment && devices.length && targetHosts.length) {
         message.textContent = (
             `该来源还有 ${devices.length} 台ADB设备可追加接入 `
             + `${existingAssignment.target_worker_id}。`
         );
     } else if (sourceId && devices.length && targetHosts.length) {
         message.textContent = `请选择要接入的ADB设备，共 ${devices.length} 台可用。`;
+    } else if (
+        sourceId && devices.length
+        && unavailableTargets.some(item => item.reason === '测试中，不可用')
+    ) {
+        const busyHosts = unavailableTargets
+            .filter(item => item.reason === '测试中，不可用')
+            .map(item => adbProxyHostLabel(item.host))
+            .join('、');
+        message.textContent = `${busyHosts} 正在执行测试，暂不能作为ADB接入主机。`;
+    } else if (sourceId && devices.length && unavailableTargets.length) {
+        message.textContent = '接入主机当前不可用，请在下拉框中查看原因。';
     } else if (assignments.length) {
         message.textContent = '当前没有剩余可接入的ADB设备；已有接入可在上方查看或断开。';
-    } else if (!capable.length) {
-        message.textContent = '没有在线且已安装adbproxy-rs的主机。';
     } else if (!sourceId) {
         message.textContent = '没有可用的ADB设备来源。';
     } else if (!targetHosts.length) {
@@ -2512,4 +2538,3 @@ async function attemptUsbipReconnect() {
         showToast('USB/IP 自动重连失败', 'error');
     }
 }
-

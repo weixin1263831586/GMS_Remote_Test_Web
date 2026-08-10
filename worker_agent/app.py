@@ -373,6 +373,10 @@ class WorkerAgent:
                         ['nmcli', '-t', '-f', 'NAME,TYPE,STATE', 'connection', 'show', '--active'],
                         capture_output=True, text=True, timeout=3,
                     )
+                    if proc.returncode != 0:
+                        raise RuntimeError(
+                            (proc.stderr or proc.stdout or "nmcli status check failed").strip()
+                        )
                     connected = False
                     for line in proc.stdout.splitlines():
                         parts = line.split(':')
@@ -380,8 +384,8 @@ class WorkerAgent:
                             connected = True
                             break
                     result = {"connected": connected}
-                except Exception:
-                    result = {"connected": False}
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    raise RuntimeError("nmcli status check failed") from exc
             elif kind == "uninstall_agent":
                 # 先确认回执，再停止服务，确保 Controller 能移除注册记录。
                 result = {"stopping": True, "removed_data": False}
@@ -706,7 +710,7 @@ class WorkerAgent:
                 if target.stat().st_size != int(spec["size_bytes"]) or digest.hexdigest() != spec["sha256"]:
                     raise ValueError("staged image checksum mismatch")
                 downloaded[spec["kind"]] = target
-            result = (flash_gsi(self.config, downloaded["system"], downloaded.get("vendor"), payload.get("devices", []))
+            result = (flash_gsi(self.config, downloaded.get("system"), downloaded.get("vendor"), payload.get("devices", []))
                       if command["command_type"] == "flash_gsi" else
                       flash_firmware(self.config, downloaded["firmware"], payload.get("devices", [])))
             status = "completed" if result.get("success") else "failed"

@@ -555,5 +555,3 @@ function initAgentPage() {
         renderAgentSession({ status: 'idle', messages: [], steps: [] });
     }
 }
-
-

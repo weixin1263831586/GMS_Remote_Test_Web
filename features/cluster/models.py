@@ -41,7 +41,7 @@ class RunningWorkerJob(BaseModel):
     attempt_id: str
     status: str
     pid: int | None = None
-    devices: list[str] = Field(default_factory=list)
+    devices: list[str] = Field(default_factory=list, max_length=32)
     source: Literal["managed", "external"] = "managed"
     suite_type: str = ""
     command: str = ""

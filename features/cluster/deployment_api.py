@@ -34,6 +34,7 @@ from foundation.ssh_security import (
 
 from .api import service
 from .config import ClusterConfig
+from .deployment_bundle import add_worker_python_runtime
 from .repository import utc_now
 from .worker_auth import persist_worker_token, restore_worker_token
 
@@ -198,15 +199,6 @@ def _add_adbproxy_package(bundle: tarfile.TarFile, project_root: Path) -> None:
         checksum,
         arcname=f"{_ADBPROXY_PACKAGE_RELATIVE}.sha256",
     )
-
-
-def _add_worker_python_runtime(
-    bundle: tarfile.TarFile,
-    project_root: Path,
-) -> None:
-    """Bundle every in-repository Python package imported by the Worker."""
-    bundle.add(project_root / "worker_agent", arcname="worker_agent")
-    bundle.add(project_root / "foundation", arcname="foundation")
 
 
 def _validate_gts_credential(path: Path) -> Path:
@@ -410,7 +402,7 @@ async def deploy_adb_proxy_source(
             ) as temporary:
                 archive_path = Path(temporary.name)
             with tarfile.open(archive_path, "w:gz") as bundle:
-                _add_worker_python_runtime(bundle, project_root)
+                add_worker_python_runtime(bundle, project_root)
                 bundle.add(
                     project_root / "scripts/install_adb_proxy_source_worker.sh",
                     arcname="scripts/install_adb_proxy_source_worker.sh",
@@ -597,7 +589,7 @@ async def deploy_worker(
             ) as temporary:
                 archive_path = Path(temporary.name)
             with tarfile.open(archive_path, "w:gz") as bundle:
-                _add_worker_python_runtime(bundle, project_root)
+                add_worker_python_runtime(bundle, project_root)
                 bundle.add(
                     project_root / "scripts/install_cluster_worker.sh",
                     arcname="scripts/install_cluster_worker.sh",

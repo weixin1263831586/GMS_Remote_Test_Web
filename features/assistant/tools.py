@@ -855,7 +855,7 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             is_readonly=True,
             is_dangerous=False,
             requires_confirm=False,
-            executor_ref="features.cluster.api:list_devices",
+            executor_ref="features.cluster.devices_api:list_devices",
             response_type="list",
         ),
         AgentTool(

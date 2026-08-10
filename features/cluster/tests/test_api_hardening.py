@@ -112,6 +112,20 @@ class ClusterApiHardeningTests(unittest.TestCase):
         firmware_root = self.repo.db_path.parent / "firmware"
         self.assertEqual(list(firmware_root.iterdir()), [])
 
+    def test_vendor_only_gsi_stages_without_a_system_image(self):
+        response = self.client.post(
+            "/api/cluster/gsi/stage",
+            data={"worker_id": "worker-246", "devices": "ABC"},
+            files={"vendor_file": ("vendor_boot.img", b"vendor")},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        command = self.repo.get_command(response.json()["command_id"])
+        self.assertEqual(
+            [item["kind"] for item in command["payload"]["files"]],
+            ["vendor"],
+        )
+
     def test_terminal_flash_ack_removes_controller_staging(self):
         stage_id = "fw-" + "a" * 32
         stage_dir = self.repo.db_path.parent / "firmware" / stage_id
@@ -350,6 +364,74 @@ class ClusterApiHardeningTests(unittest.TestCase):
             headers={"X-Test-User": "alice", "X-Test-Role": "user"},
         )
         self.assertEqual(own.status_code, 200)
+
+    def test_structured_job_uses_inventory_suite_and_leased_devices(self):
+        tools_path = "/srv/GMS-Suite/android-cts/tools"
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+            "suites": [{
+                "suite_type": "CTS",
+                "suite_version": "17_r1",
+                "suite_key": "CTS:17_r1",
+                "tools_path": tools_path,
+                "available": True,
+            }],
+        })
+
+        response = self.client.post(
+            "/api/cluster/jobs",
+            json={
+                "worker_id": "worker-246",
+                "suite_key": "CTS:17_r1",
+                "devices": ["worker-246:ABC"],
+                "execution_spec": {
+                    "test_type": "cts",
+                    "suite_path": tools_path,
+                    "module": "CtsSecurityTestCases",
+                    "devices": ["ABC"],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()["command"]["payload"]
+        self.assertEqual(payload["execution_spec"]["devices"], ["ABC"])
+        self.assertEqual(payload["execution_spec"]["suite_path"], tools_path)
+        self.assertIn("CtsSecurityTestCases", payload["argv"])
+        self.assertIn("-s ABC", payload["argv"])
+
+    def test_structured_job_rejects_devices_outside_lease_request(self):
+        tools_path = "/srv/GMS-Suite/android-cts/tools"
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+            "suites": [{
+                "suite_type": "CTS",
+                "suite_version": "17_r1",
+                "suite_key": "CTS:17_r1",
+                "tools_path": tools_path,
+                "available": True,
+            }],
+        })
+
+        response = self.client.post(
+            "/api/cluster/jobs",
+            json={
+                "worker_id": "worker-246",
+                "suite_key": "CTS:17_r1",
+                "devices": ["ABC"],
+                "execution_spec": {
+                    "test_type": "cts",
+                    "suite_path": tools_path,
+                    "devices": ["OTHER"],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 409, response.text)
 
     def test_job_response_exposes_resolved_client_display_id(self):
         job = self.repo.create_job_with_leases({
