@@ -70,6 +70,46 @@ def inline_handler_calls(text: str) -> list[tuple[str, str]]:
 
 
 class FrontendIntegrityTests(unittest.TestCase):
+    def test_cluster_dashboard_excludes_offline_devices_from_distribution(self):
+        cluster_page = read_text("features/cluster/ui/page.js")
+        names_start = cluster_page.index("const dashStateNames=")
+        names_end = cluster_page.index(";", names_start)
+
+        self.assertIn(
+            "const dashboardDevices=state.devices.filter(d=>d.state!=='offline')",
+            cluster_page,
+        )
+        self.assertNotIn("offline:'离线'", cluster_page[names_start:names_end])
+        self.assertIn(
+            "设备状态分布 ('+dashboardDevices.length+')",
+            cluster_page,
+        )
+        self.assertIn(
+            "String(device.state||'').toLowerCase()!=='offline'&&matches",
+            cluster_page,
+        )
+        self.assertIn("暂无匹配的在线设备", cluster_page)
+
+    def test_host_pages_share_short_lived_cluster_directory(self):
+        shell = read_text("web/shell/shell.html")
+        navigation = read_text("web/static/js/navigation.js")
+        terminal_start = shell.index("async function loadTerminalClusterHosts()")
+        terminal_end = shell.index("function applyTerminalHost", terminal_start)
+
+        self.assertIn("async function loadClusterHostDirectory(force = false)", shell)
+        self.assertIn("const directoryHosts = await loadClusterHostDirectory()", shell)
+        self.assertNotIn("fetch('/api/cluster/hosts'", shell[terminal_start:terminal_end])
+        self.assertIn("hosts = await window.loadClusterHostDirectory()", navigation)
+
+    def test_report_page_reuses_recent_data_and_parallelizes_initial_requests(self):
+        reports = read_text("web/static/js/pages/test-reports.js")
+
+        self.assertIn("const REPORTS_REENTRY_CACHE_MS = 10000", reports)
+        self.assertIn("const [data] = await Promise.all([", reports)
+        self.assertIn("reportsLastQueryKey === queryKey", reports)
+        self.assertIn("window.clusterWorkersSnapshot", reports)
+        self.assertIn("if (reportsRequests.has(url))", reports)
+
     def test_server_file_browser_uses_resolved_suite_path(self):
         navigation_text = read_all_frontend_js()
 

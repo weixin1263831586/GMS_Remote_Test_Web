@@ -18,6 +18,9 @@ DENIED_NAMES = {
     "config_runtime.json",
     "client_ssh_credentials.local.json",
     "redmine_auth.json",
+    "redmine_user_map.json",
+    "user_tools_data.json",
+    "worker_tokens.json",
 }
 DENIED_COMPONENTS = {".git", ".certs", "certs", "__pycache__"}
 SENSITIVE_KEYS = {

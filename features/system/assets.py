@@ -392,6 +392,53 @@ def save_tools_data(tools_data):
         return False
 
 
+def _validate_tools_data(tools_data: dict) -> None:
+    """Validate persisted website shortcuts without changing the legacy schema."""
+    if len(tools_data) > 50:
+        raise ValueError('Too many website categories (maximum 50)')
+    if len(json.dumps(tools_data, ensure_ascii=False).encode('utf-8')) > 256 * 1024:
+        raise ValueError('Website tools data is too large')
+
+    total_tools = 0
+    for category, tools in tools_data.items():
+        if not isinstance(category, str) or not category.strip() or len(category) > 80:
+            raise ValueError('Invalid website category name')
+        if not isinstance(tools, list) or len(tools) > 100:
+            raise ValueError('Invalid website tools list')
+        total_tools += len(tools)
+
+        for tool in tools:
+            if not isinstance(tool, dict):
+                raise ValueError('Invalid website tool entry')
+            title = tool.get('title')
+            url = tool.get('url')
+            icon = tool.get('icon', '')
+            if not isinstance(title, str) or not title.strip() or len(title) > 200:
+                raise ValueError('Invalid website tool title')
+            if not isinstance(url, str) or not url.strip() or len(url) > 2048:
+                raise ValueError('Invalid website tool URL')
+            if not isinstance(icon, str) or len(icon) > 2048:
+                raise ValueError('Invalid website tool icon')
+
+            value = url.strip()
+            if value.startswith('//') or '\\' in value:
+                raise ValueError('Invalid website tool URL')
+            parsed = urllib.parse.urlparse(value)
+            if parsed.scheme and parsed.scheme.lower() not in {'http', 'https'}:
+                raise ValueError('Unsupported website tool URL protocol')
+            if value.startswith('/'):
+                continue
+            candidate = value if parsed.scheme else f'https://{value}'
+            try:
+                if not urllib.parse.urlparse(candidate).hostname:
+                    raise ValueError('Invalid website tool URL')
+            except ValueError as exc:
+                raise ValueError('Invalid website tool URL') from exc
+
+    if total_tools > 250:
+        raise ValueError('Too many website tools (maximum 250)')
+
+
 def _save_user_tools_entry(all_tools_data, client_id, tools, request):
     """Update and save a single user's tools entry."""
     all_tools_data[client_id] = {
@@ -433,6 +480,10 @@ async def save_user_tools(request: Request):
         tools_data = data.get('tools')
         if not isinstance(tools_data, dict):
             return error_response('Invalid tools data format', status_code=400)
+        try:
+            _validate_tools_data(tools_data)
+        except ValueError as exc:
+            return error_response(str(exc), status_code=400)
 
         all_tools_data = load_tools_data()
 
@@ -496,6 +547,10 @@ async def sync_user_tools(request: Request):
 
         if not isinstance(local_tools, dict):
             return error_response('Invalid local tools data', status_code=400)
+        try:
+            _validate_tools_data(local_tools)
+        except ValueError as exc:
+            return error_response(str(exc), status_code=400)
 
         all_tools_data = load_tools_data()
         server_user_data = {}

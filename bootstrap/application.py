@@ -321,6 +321,14 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         response.headers['Permissions-Policy'] = (
             'camera=(), microphone=(), geolocation=(), payment=(), usb=(self)'
         )
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; base-uri 'self'; object-src 'none'; "
+            "frame-ancestors 'self'; frame-src 'self'; form-action 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+            "font-src 'self' data:; connect-src 'self' https: ws: wss:; "
+            "media-src 'self' blob:; worker-src 'self' blob:"
+        )
         if request.url.scheme == 'https':
             response.headers['Strict-Transport-Security'] = (
                 'max-age=31536000; includeSubDomains'

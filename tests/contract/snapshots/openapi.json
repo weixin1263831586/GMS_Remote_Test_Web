@@ -15219,6 +15219,28 @@
               "title": "Report Timestamp",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Cursor",
+              "type": "string"
+            }
           }
         ],
         "responses": {

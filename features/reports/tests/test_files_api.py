@@ -284,7 +284,7 @@ class ReportFilesApiTests(unittest.TestCase):
             "FakeDb",
             (),
             {
-                "get_reports": lambda self, limit=50, owner_id=None, include_all=False: [
+                "get_reports": lambda self, limit=50, owner_id=None, include_all=False, **_filters: [
                     {"timestamp": "1", "owner_id": "NqWo58sh1jr5c6ZiyxxPtQ"},
                     {"timestamp": "2", "owner_id": "other-user"},
                 ][:limit] if owner_id is None else [
@@ -435,7 +435,7 @@ class ReportFilesApiTests(unittest.TestCase):
             "FakeDb",
             (),
             {
-                "get_reports": lambda self, limit=500, owner_id=None, include_all=False: [
+                "get_reports": lambda self, limit=500, owner_id=None, include_all=False, **_filters: [
                     item for item in reports
                     if owner_id is None or item["owner_id"] == owner_id
                 ][:limit],

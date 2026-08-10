@@ -178,6 +178,8 @@ package_web_app() {
             --exclude 'configs/certs/' \
             --exclude 'configs/runtime.json' \
             --exclude 'configs/worker_tokens.json' \
+            --exclude 'configs/user_tools_data.json' \
+            --exclude 'configs/redmine_user_map.json' \
             --exclude '.venv/' \
             --exclude '.pytest_cache/' \
             --exclude '.ruff_cache/' \
@@ -187,7 +189,9 @@ package_web_app() {
             --exclude '*.pyc' \
             --exclude '*.pyo' \
             --exclude 'data/' \
-            --exclude 'dist/' \
+            --exclude '/dist/' \
+            --exclude '/tools/gms-worker-native/target/' \
+            --exclude '/tools/adbproxy-rs/target/' \
             --exclude 'logs/' \
             --exclude '*.log' \
             --exclude '*.log.backup.*' \
@@ -205,6 +209,9 @@ package_web_app() {
         mkdir -p "${package_root}/data"
         python3 "${PROJECT_DIR}/scripts/sanitize_release_config.py" \
             "${package_root}/configs/config.json" \
+            "${package_root}/configs/automation_profiles.json" \
+            "${package_root}/configs/build_servers.json" \
+            "${package_root}/configs/cluster.json" \
             "${package_root}/skills/rk_codesearch/config/config.json"
         python3 "${PROJECT_DIR}/scripts/verify_release_tree.py" "${package_root}"
         tar -czf "${archive}" -C "${stage}" "${root_name}"
@@ -274,6 +281,8 @@ copy_project() {
             --exclude 'configs/certs/' \
             --exclude 'configs/runtime.json' \
             --exclude 'configs/worker_tokens.json' \
+            --exclude 'configs/user_tools_data.json' \
+            --exclude 'configs/redmine_user_map.json' \
             --exclude '.venv/' \
             --exclude '__pycache__/' \
             --exclude '*.pyc' \
@@ -286,7 +295,9 @@ copy_project() {
             --exclude '*.log' \
             --exclude '*.log.backup.*' \
             --exclude 'local.diff' \
-            --exclude 'dist/' \
+            --exclude '/dist/' \
+            --exclude '/tools/gms-worker-native/target/' \
+            --exclude '/tools/adbproxy-rs/target/' \
             --exclude 'scripts_local/' \
             --exclude 'tests/' \
             --exclude '*/tests/' \

@@ -417,12 +417,16 @@ async function continueAppInitialization() {
     initWebSocket();
 
     await initializeClusterMode();
-    await loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
 
     // 刷新非测试页面时不要启动 ADB、套件和用户列表等全局扫描。各页面会由
     // runPageInitializers() 按需加载自己的数据，避免多个慢请求争抢后端资源。
     const initialPage = window.__targetPage || 'test';
     const needsTestWorkspace = initialPage === 'test';
+
+    if (needsTestWorkspace) {
+        await loadClusterWorkers().catch(error =>
+            debugLog('[Cluster] Worker list unavailable:', error));
+    }
 
     // 📱 测试页优先加载设备列表，缩短首屏等待时间。
     // 必须先等待 workspace 上下文加载完成，否则 workspaceWorkerId() 会返回
@@ -1194,6 +1198,10 @@ async function loadClusterWorkers() {
             const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
             if (!response.ok) return;
             const data = await response.json();
+            window.clusterWorkersSnapshot = {
+                workers: Array.isArray(data.workers) ? data.workers : [],
+                loadedAt: Date.now(),
+            };
             await (window.GmsWorkspace?.ready || Promise.resolve());
             const localWorkerId = workspaceLocalWorkerId();
             const workers = (data.workers || []).filter(worker =>
@@ -1255,12 +1263,18 @@ async function loadClusterWorkers() {
 }
 
 async function resolveClusterHost(workerId) {
-    const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.success === false) {
-        throw new Error(payload.error || `Worker ${workerId} 主机信息加载失败`);
+    let hosts;
+    if (typeof window.loadClusterHostDirectory === 'function') {
+        hosts = await window.loadClusterHostDirectory();
+    } else {
+        const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.error || `Worker ${workerId} 主机信息加载失败`);
+        }
+        hosts = payload.hosts || [];
     }
-    const host = (payload.hosts || []).find(item => item.worker_id === workerId);
+    const host = hosts.find(item => item.worker_id === workerId);
     if (!host || !host.address || !host.ssh_user) {
         throw new Error(`Worker ${workerId} 缺少 SSH 主机信息`);
     }
@@ -1416,7 +1430,7 @@ async function toggleClusterMode() {
         await Promise.all([loadDevices(true), loadTestSuites(true)]);
         // 模式切换时同步刷新报告列表的 Worker 过滤器
         if (typeof loadTestReports === 'function') {
-            loadTestReports(currentUserFilter).catch(() => {});
+            loadTestReports(currentUserFilter, false, true).catch(() => {});
         }
 
     } catch (error) {

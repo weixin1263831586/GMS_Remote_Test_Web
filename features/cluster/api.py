@@ -58,8 +58,6 @@ def configure_cluster(data_root: str | Path) -> ClusterService:
     device_lock_manager.configure_local_worker(config.local_worker_id)
     cluster_service = ClusterService(repository, config=config)
     cluster_service.start_watchdog()
-    from .local_bridge import start_local_bridge
-    start_local_bridge(repository, config)
     return cluster_service
 
 
@@ -496,17 +494,27 @@ async def cluster_suite_results(
     suite_path: str = Query(...),
     _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
 ):
-    from features.test_execution import parse_tradefed_list_results
+    from features.test_execution import (
+        extract_project_from_result_fields,
+        parse_tradefed_list_results,
+    )
 
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     result = await _run_worker_command(worker_id, "suite_action", {
         "action": "list_results", "suite_path": suite_path,
     }, timeout=100)
     parsed = parse_tradefed_list_results(result.get("raw_output") or "")
+    results = parsed.get("results", [])
+    # Enrich project from device_serial/product (no XML access on remote worker).
+    for item in results:
+        if not item.get("project"):
+            project = extract_project_from_result_fields(item)
+            if project:
+                item["project"] = project
     return {
         "success": True,
         "columns": parsed.get("columns", []),
-        "results": parsed.get("results", []),
+        "results": results,
         "count": len(parsed.get("results", [])),
         "worker_id": worker_id,
         "launcher": result.get("launcher", ""),

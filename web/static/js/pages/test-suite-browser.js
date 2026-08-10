@@ -1107,6 +1107,17 @@ async function loadSuiteBrowserDirectory(path = '') {
 }
 
 // Tradefed 测试结果。
+// 客户端缓存：Worker + suitePath → { results, columns }，避免不同主机的同路径串数据。
+const _testResultsCache = new Map();
+
+function testResultsCacheKey(suitePath, suite = null) {
+    const workerId = suite?.worker_id
+        || testSuitesWorkerId
+        || $('suite-worker-select')?.value
+        || workspaceLocalWorkerId();
+    return `${workerId}\u0000${suitePath || ''}`;
+}
+
 window.openTestResultsModal = function openTestResultsModal() {
     if (!state.suiteBrowser.selectedSuitePath) {
         showToast('请先选择一个测试套件', 'warning');
@@ -1115,7 +1126,18 @@ window.openTestResultsModal = function openTestResultsModal() {
     ModalManager.open('test-results-modal');
     const minimized = document.getElementById('test-results-minimized');
     if (minimized) minimized.style.display = 'none';
-    loadTestResults(true);
+    // 若已有缓存则立即渲染，再后台静默刷新（后端缓存命中时几乎无延迟）。
+    const suitePath = state.suiteBrowser.selectedSuitePath;
+    const suite = testSuitesCache.find(item => item.tools_path === suitePath);
+    const cached = _testResultsCache.get(testResultsCacheKey(suitePath, suite));
+    if (cached) {
+        renderTestResults(cached.results, cached.columns);
+        const statusEl = $('test-results-modal-status');
+        if (statusEl) statusEl.textContent = `共 ${cached.results.length} 条结果 · 点击行跳转目录 · 缓存`;
+        loadTestResults(false, false);
+    } else {
+        loadTestResults(false);
+    }
 };
 
 window.closeTestResultsModal = function closeTestResultsModal() {
@@ -1141,9 +1163,11 @@ window.restoreTestResultsModal = function restoreTestResultsModal() {
     ModalManager.open('test-results-modal');
 };
 
-async function loadTestResults(force = false) {
+async function loadTestResults(force = false, showSpinner = true) {
     const suitePath = state.suiteBrowser.selectedSuitePath;
     const suite = testSuitesCache.find(s => s.tools_path === suitePath);
+    const cacheKey = testResultsCacheKey(suitePath, suite);
+    const requestWorkerId = cacheKey.split('\u0000', 1)[0];
     const listEl = $('test-results-list');
     const statusEl = $('test-results-modal-status');
     const suiteLabelEl = $('test-results-modal-suite');
@@ -1159,26 +1183,36 @@ async function loadTestResults(force = false) {
         return;
     }
 
-    if (listEl) listEl.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); text-align: center;">查询 tradefed list results 中...</div>';
-    if (statusEl) statusEl.textContent = '正在执行 tradefed list results，可能需要数秒...';
+    if (showSpinner) {
+        if (listEl) listEl.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); text-align: center;">查询 tradefed list results 中...</div>';
+        if (statusEl) statusEl.textContent = '正在执行 tradefed list results，可能需要数秒...';
+    }
 
     try {
         // 不传 tradefed_bin：让后端 find_tradefed_binary 解析绝对路径。
         // suite.binary 只是裸文件名（如 vts-tradefed），cd 到 tools 后不在
         // PATH 中无法直接执行，会触发系统 "command not found" 建议而失败。
+        const forceParam = force ? '?force_refresh=true' : '';
         const payload = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
             ? await apiCall(`/api/cluster/suites/results?${new URLSearchParams({
                 worker_id: suite.worker_id, suite_path: suitePath
             })}`, 'POST')
-            : await apiCall('/api/test/suites/result', 'POST', {suite_path: suitePath});
+            : await apiCall(`/api/test/suites/result${forceParam}`, 'POST', {suite_path: suitePath});
         if (!payload || !payload.success) {
             const msg = (payload && (payload.error || payload.message)) || '查询失败';
             if (listEl) listEl.innerHTML = `<div style="padding: 20px; color: var(--danger-color, #e53935); text-align: center;">查询失败: ${escapeHtml(msg)}</div>`;
             if (statusEl) statusEl.textContent = '查询失败';
             return;
         }
+        const currentSuite = testSuitesCache.find(item => item.tools_path === suitePath);
+        if (state.suiteBrowser.selectedSuitePath !== suitePath
+                || testResultsCacheKey(suitePath, currentSuite).split('\u0000', 1)[0] !== requestWorkerId) {
+            return;
+        }
         renderTestResults(payload.results || [], payload.columns || []);
-        if (statusEl) statusEl.textContent = `共 ${payload.count || 0} 条结果 · 点击行可跳转到对应目录`;
+        _testResultsCache.set(cacheKey, { results: payload.results || [], columns: payload.columns || [] });
+        const cacheTag = payload.cached ? ' · 缓存' : '';
+        if (statusEl) statusEl.textContent = `共 ${payload.count || 0} 条结果 · 点击行跳转目录${cacheTag}`;
     } catch (error) {
         if (listEl) listEl.innerHTML = `<div style="padding: 20px; color: var(--danger-color, #e53935); text-align: center;">加载失败: ${escapeHtml(error.message || String(error))}</div>`;
         if (statusEl) statusEl.textContent = '加载失败';
@@ -1204,9 +1238,34 @@ const RESULT_COLUMN_RENDERERS = {
         text: r.result_directory ? `📁 ${escapeHtml(String(r.result_directory))}` : '<span style="color: var(--text-secondary);">-</span>',
     }),
     'test plan': r => ({ text: escapeHtml(String(r.test_plan ?? '-')) }),
-    'device serial(s)': r => ({ text: escapeHtml(String(r.device_serial ?? '-')) }),
-    'build id': r => ({ text: escapeHtml(String(r.build_id ?? '-')) }),
+    'device serial(s)': r => {
+        const v = String(r.device_serial ?? '-');
+        return {
+            text: `<span title="${escapeHtml(v)}" style="display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;">${escapeHtml(v)}</span>`,
+            style: 'padding: 4px 6px;',
+        };
+    },
+    'build id': r => {
+        const v = String(r.build_id ?? '-');
+        return {
+            text: `<span title="${escapeHtml(v)}" style="display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;">${escapeHtml(v)}</span>`,
+            style: 'padding: 4px 6px;',
+        };
+    },
     'product': r => ({ text: escapeHtml(String(r.product ?? '-')) }),
+    'project': r => {
+        const project = String(r.project ?? '');
+        if (!project) return { text: '<span style="color: var(--text-secondary);">-</span>' };
+        const palette = ['#1e88e5', '#43a047', '#e53935', '#8e24aa', '#00897b', '#f4511e'];
+        const hash = Array.from(project).reduce(
+            (value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0,
+            0,
+        );
+        const color = palette[hash % palette.length];
+        return {
+            text: `<span style="background: ${color}22; color: ${color}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">${escapeHtml(project)}</span>`,
+        };
+    },
 };
 
 function renderTestResults(results, columns) {
@@ -1219,9 +1278,20 @@ function renderTestResults(results, columns) {
     }
 
     // 若后端未返回表头，回退到默认列集（不含 Warning）。
-    const cols = (columns && columns.length)
-        ? columns
-        : ['Session', 'Pass', 'Fail', 'Modules Complete', 'Result Directory', 'Test Plan', 'Device serial(s)', 'Build ID', 'Product'];
+    // 始终在 Product 后插入"项目"列以区分不同芯片平台。
+    const _DEFAULT_COLS = ['Session', 'Pass', 'Fail', 'Modules Complete', 'Result Directory', 'Test Plan', 'Device serial(s)', 'Build ID', 'Product', 'Project'];
+    let cols = (columns && columns.length)
+        ? [...columns]
+        : _DEFAULT_COLS;
+    // 若后端列已有 Product 但没有 Project，在 Product 后插入。
+    if (!cols.map(c => c.toLowerCase()).includes('project')) {
+        const productIdx = cols.findIndex(c => c.toLowerCase() === 'product');
+        if (productIdx >= 0) {
+            cols.splice(productIdx + 1, 0, 'Project');
+        } else {
+            cols.push('Project');
+        }
+    }
 
     // 数值列（Pass/Fail/Warning）表头右对齐，与数据 text-align:right 保持一致，
     // 否则宽列里表头左对齐、数字右对齐会错位。
@@ -1251,8 +1321,9 @@ function renderTestResults(results, columns) {
         const cells = cols.map(name => {
             const renderer = RESULT_COLUMN_RENDERERS[name.toLowerCase()];
             const cell = renderer ? renderer(r) : { text: '' };
+            const titleAttr = cell.title ? ` title="${escapeHtml(cell.title)}"` : '';
             // nowrap：每列单行显示，避免内容换行造成视觉错位。
-            return `<td style="padding: 8px; white-space: nowrap; ${cell.style || ''}">${cell.text}</td>`;
+            return `<td style="padding: 8px; white-space: nowrap; ${cell.style || ''}"${titleAttr}>${cell.text}</td>`;
         }).join('');
         tr.innerHTML = cells;
 

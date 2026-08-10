@@ -20,6 +20,25 @@ class SystemApiConfigTests(unittest.TestCase):
         ):
             self.assertEqual(api._gms_assistant_upstream(), "https://assistant.example")
 
+    def test_gms_assistant_proxy_removes_external_google_font_stylesheet(self):
+        source = """<html><head>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap"
+              rel="stylesheet">
+        </head><body>chat</body></html>"""
+
+        rewritten = api._rewrite_gms_assistant_content(
+            source,
+            None,
+            proxy_base="/gms-assistant",
+            upstream="http://assistant.internal",
+        )
+
+        self.assertNotIn("fonts.googleapis.com", rewritten)
+        self.assertNotIn("fonts.gstatic.com", rewritten)
+        self.assertIn("<body>chat</body>", rewritten)
+
     def test_architecture_replaces_configured_build_server_safely(self):
         source = "<text>{{BUILD_SERVER_LABEL}} • 编译服务器</text>"
         config = {"ui_defaults": {"architecture_build_server": "build<primary>"}}
