@@ -961,6 +961,16 @@
             "title": "Env",
             "type": "object"
           },
+          "execution_spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "owner_id": {
             "default": "",
             "title": "Owner Id",
@@ -1211,6 +1221,70 @@
           "serial_no"
         ],
         "title": "DeviceShellRequest",
+        "type": "object"
+      },
+      "ExecutionSpec": {
+        "description": "Structured test execution parameters that replace free-form argv.\n\nWhen provided on ClusterJobCreate, the Controller validates the fields and\nbuilds the Worker argv internally — the browser never supplies raw command\nstrings.  The spec is persisted on the job for audit and structured retry.",
+        "properties": {
+          "copy_remote": {
+            "default": false,
+            "title": "Copy Remote",
+            "type": "boolean"
+          },
+          "devices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "local_server": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Local Server",
+            "type": "string"
+          },
+          "module": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Module",
+            "type": "string"
+          },
+          "no_retry": {
+            "default": false,
+            "title": "No Retry",
+            "type": "boolean"
+          },
+          "retry_dir": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Retry Dir",
+            "type": "string"
+          },
+          "suite_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Suite Path",
+            "type": "string"
+          },
+          "test_case": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Test Case",
+            "type": "string"
+          },
+          "test_type": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Test Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "test_type",
+          "suite_path"
+        ],
+        "title": "ExecutionSpec",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -2298,6 +2372,11 @@
           "disk_free_gb": {
             "default": 0,
             "title": "Disk Free Gb",
+            "type": "number"
+          },
+          "disk_total_gb": {
+            "default": 0,
+            "title": "Disk Total Gb",
             "type": "number"
           },
           "load_1m": {
@@ -6250,6 +6329,46 @@
         ]
       }
     },
+    "/api/cluster/metrics/history": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Metrics History",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/status": {
       "get": {
         "responses": {
@@ -8094,6 +8213,46 @@
           }
         },
         "summary": "Restart Worker Vnc",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/vpn-status": {
+      "get": {
+        "description": "Check whether a VPN connection is active on the worker host.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Worker Vpn",
         "tags": [
           "cluster"
         ]

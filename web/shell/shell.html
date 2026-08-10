@@ -23,8 +23,21 @@
     <script src="/static/js/api.js?v=20260727-auth-account-hint" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
+    <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
+    <script src="/static/js/pages/test-suite-browser.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/firmware-burn.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/auth-elevation.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/vpn-control.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/file-browser.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/test-control.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/test-reports.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/report-analysis.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/conversational-agent.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/api-docs.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/apk-analysis.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/security-audit.js?v=20260810-modular-split" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260803-report-provenance" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260810-modular-split" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）

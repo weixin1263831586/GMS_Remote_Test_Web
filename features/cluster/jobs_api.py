@@ -19,6 +19,7 @@ from features.users import owner_id_from_request
 
 from .api import _authenticate, _require_cluster_enabled, service
 from .config import configured_max_bytes
+from .execution_spec import build_argv_from_spec
 from .models import ArtifactUploadComplete, ArtifactUploadInit, ClusterJobCreate, JobEventBatch
 from .report_index import index_cluster_report
 from .repository import utc_now
@@ -94,7 +95,21 @@ def create_job(body: ClusterJobCreate, request: Request):
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
     if not data["argv"]:
-        suite_path = data["suite_path"]
+        spec = data.get("execution_spec")
+        if spec and spec.get("test_type"):
+            data["argv"] = build_argv_from_spec(spec)
+            if not data.get("suite_path"):
+                data["suite_path"] = spec["suite_path"]
+            if not data.get("suite_key"):
+                suites = [
+                    item
+                    for item in service().repository.list_suites(data["worker_id"])
+                    if item["tools_path"] == spec["suite_path"] and item["available"]
+                ]
+                if suites:
+                    data["suite_key"] = suites[0]["suite_key"]
+        else:
+            suite_path = data["suite_path"]
         suite_type = ""
         if not suite_path:
             suites = [

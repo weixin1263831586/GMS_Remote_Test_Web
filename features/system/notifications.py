@@ -205,6 +205,37 @@ async def safe_websocket_send(client_id: str, message: dict):
             logger.debug(f"Failed to send WebSocket message to {client_id}")
 
 
+async def broadcast_event(event_type: str, payload: dict[str, Any] | None = None):
+    """Broadcast a resource event to every connected WebSocket client."""
+    message = {"type": "event", "event": event_type, "payload": payload or {}}
+    with global_state.websocket_connections_lock:
+        client_ids = list(global_state.websocket_connections.keys())
+    for client_id in client_ids:
+        await safe_websocket_send(client_id, message)
+
+
+def _event_bus_listener(event_type: str, payload: dict[str, Any]) -> None:
+    """Forward EventBus emissions to all WebSocket clients via asyncio.
+
+    Called synchronously by the EventBus; schedules the async broadcast on
+    the running event loop (if any) so the emitter is never blocked.
+    """
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No event loop running (e.g. during startup) — skip silently.
+        return
+    loop.create_task(broadcast_event(event_type, payload))
+
+
+# Register the bridge once at import time.
+from foundation.events import event_bus  # noqa: E402
+
+event_bus.subscribe("*", _event_bus_listener)
+
+
 def store_notification(
     client_id: str,
     title: str,

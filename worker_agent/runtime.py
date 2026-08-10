@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import signal
@@ -12,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import WorkerConfig
+
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerRuntime:
@@ -419,6 +423,15 @@ class WorkerRuntime:
             raise ValueError(
                 f"test executable not found: {executable}. "
                 f"Ensure run_GMS_Test_Auto.sh is deployed to a suite root ({configured})."
+            )
+        spec = payload.get("execution_spec")
+        if spec:
+            logger.info(
+                "[Worker] start_test execution_spec: type=%s module=%s case=%s retry=%s",
+                spec.get("test_type", ""),
+                spec.get("module", ""),
+                spec.get("test_case", ""),
+                spec.get("retry_dir", ""),
             )
         worker_job_id = payload.get("worker_job_id") or f"wj-{command['id']}"
         work_dir = self.config.data_root / "jobs" / (command.get("job_id") or command["id"]) / (command.get("attempt_id") or "1")
