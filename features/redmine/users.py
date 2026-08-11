@@ -114,12 +114,12 @@ def _time_key(value: Any, granularity: str = "day") -> str:
     return ""
 
 
-def _norm_name(value: Any) -> str:
+def norm_name(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().replace("@rock-chips.com", "").split())
 
 
-def _name_keys(value: Any) -> set:
-    normalized = _norm_name(value)
+def name_keys(value: Any) -> set:
+    normalized = norm_name(value)
     if not normalized:
         return set()
     compact = normalized.replace(" ", "")
@@ -136,7 +136,7 @@ def _name_keys(value: Any) -> set:
 
 
 def _identity_compacts(value: Any) -> set:
-    normalized = _norm_name(value)
+    normalized = norm_name(value)
     if not normalized:
         return set()
     values = {normalized}
@@ -149,7 +149,7 @@ def _identity_compacts(value: Any) -> set:
 def _name_matches_keys(value: Any, owner_keys: set) -> bool:
     if not owner_keys:
         return True
-    value_keys = _name_keys(value)
+    value_keys = name_keys(value)
     if value_keys and value_keys.intersection(owner_keys):
         return True
     compacts = _identity_compacts(value)
@@ -253,10 +253,10 @@ def find_user_mapping_for_names(user_map: list[dict[str, Any]], names: list[str]
     """Match any of ``names`` against ``user_map``; returns the first hit."""
     keys: set[str] = set()
     for value in names:
-        keys.update(_name_keys(value))
+        keys.update(name_keys(value))
     for item in user_map:
         for value in display_names_from_mapping(item):
-            if keys.intersection(_name_keys(value)):
+            if keys.intersection(name_keys(value)):
                 return item
     return None
 
@@ -309,10 +309,10 @@ def _looks_like_rk_actor(
         return True
     if "fae" in lowered or "瑞芯" in text:
         return True
-    actor_keys = _name_keys(text)
+    actor_keys = name_keys(text)
     for item in user_map or []:
         for value in display_names_from_mapping(item):
-            value_keys = _name_keys(value)
+            value_keys = name_keys(value)
             if actor_keys.intersection(value_keys) or _name_matches_keys(text, value_keys):
                 return True
     return False

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # ==================== Suite helpers ====================
 
-def _get_available_test_suites(config: dict[str, Any], base_path: str | None = None) -> list[dict[str, str]]:
+def get_available_test_suites(config: dict[str, Any], base_path: str | None = None) -> list[dict[str, str]]:
     """Return all test suites visible to the current host/config."""
     base_path = base_path or config.get("suites_path") or get_default_suites_path(config)
     if is_config_host_local(config):
@@ -238,7 +238,7 @@ def _canonical_suite_types(test_type: str) -> set:
     return {test_type}
 
 
-def _make_empty_suite_target(test_type: str = "", suite_version: str = "", suite_path: str = "", suite_root: str = "", suite_name: str = "", test_name: str = "", class_names: list[str] | None = None, match_notes: list[str] | None = None) -> dict[str, Any]:
+def make_empty_suite_target(test_type: str = "", suite_version: str = "", suite_path: str = "", suite_root: str = "", suite_name: str = "", test_name: str = "", class_names: list[str] | None = None, match_notes: list[str] | None = None) -> dict[str, Any]:
     return {
         "test_type": test_type, "suite_version": suite_version, "suite_path": suite_path,
         "suite_root": suite_root, "suite_name": suite_name, "suite_candidates": [],
@@ -278,8 +278,8 @@ def _extract_suite_artifact_terms(source_path: str = "", module: str = "", test_
     return terms
 
 
-def _resolve_suite_diagnosis_target(config: dict[str, Any], *, test_type: str = "", suite_version: str = "", module: str = "", test_name: str = "", class_names: list[str] | None = None, suite_path: str = "", source_path: str = "") -> dict[str, Any]:
-    available_suites = _get_available_test_suites(config)
+def resolve_suite_diagnosis_target(config: dict[str, Any], *, test_type: str = "", suite_version: str = "", module: str = "", test_name: str = "", class_names: list[str] | None = None, suite_path: str = "", source_path: str = "") -> dict[str, Any]:
+    available_suites = get_available_test_suites(config)
     class_names = [c for c in (class_names or []) if c]
     source_path = (source_path or "").strip() or _build_apk_source_path_guess(test_name, class_names).get("source_path", "")
     search_terms = _extract_suite_artifact_terms(source_path, module, test_name, class_names)
@@ -331,7 +331,7 @@ def _resolve_suite_diagnosis_target(config: dict[str, Any], *, test_type: str = 
     if best_tools_path:
         best_suite_root = best_tools_path[:-len("/tools")] if best_tools_path.endswith("/tools") else best_tools_path
 
-    target = _make_empty_suite_target(
+    target = make_empty_suite_target(
         test_type=normalized_type, suite_version=normalized_version,
         suite_path=best_tools_path, suite_root=best_suite_root,
         suite_name=(best_suite.get("version") or best_suite.get("binary") or best_tools_path) if best_suite else "",

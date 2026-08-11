@@ -50,6 +50,12 @@ def build_session(args: argparse.Namespace) -> requests.Session:
 
 def fetch_source(session: requests.Session, source: SourceConfig, timeout: float) -> FetchedDocument:
     response = session.get(source.url, timeout=timeout, allow_redirects=True)
+    if source.auth_required and response.status_code in {401, 403, 404}:
+        raise RuntimeError(
+            f'{source.name} 访问失败 (HTTP {response.status_code})：'
+            'Android Partner 登录可能已失效、当前账号无权限或页面地址已调整；'
+            f'请先在本机 Firefox 登录并确认可打开 {source.url}，然后重试'
+        )
     response.raise_for_status()
     doc = html.fromstring(response.content)
     return FetchedDocument(

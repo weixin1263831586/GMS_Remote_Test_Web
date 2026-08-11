@@ -1,18 +1,18 @@
 from .agent import RESOLVED_STATUSES
 from .api import (
-    _resolve_owner_names,
     get_redmine_config_for_request,
     get_redmine_service_for_owner,
     get_redmine_service_for_request,
     redmine_service,
+    resolve_owner_names,
 )
 from .client import RedmineClient
 from .config import config_manager
 from .repository import (
-    _name_keys,
-    _norm_name,
     display_names_from_mapping,
     find_user_mapping,
+    name_keys,
+    norm_name,
 )
 from .service import RedmineService
 from .users import load_redmine_user_map_for_owner
@@ -28,9 +28,6 @@ __all__ = [
     "RESOLVED_STATUSES",
     "RedmineClient",
     "RedmineService",
-    "_name_keys",
-    "_norm_name",
-    "_resolve_owner_names",
     "config_manager",
     "display_names_from_mapping",
     "find_user_mapping",
@@ -39,5 +36,8 @@ __all__ = [
     "get_redmine_service_for_request",
     "get_workload_statistics",
     "load_redmine_user_map_for_owner",
+    "name_keys",
+    "norm_name",
     "redmine_service",
+    "resolve_owner_names",
 ]

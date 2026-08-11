@@ -8,13 +8,13 @@ from .users import (
     RESOLVED_STATUS_NAMES,
     _looks_like_report_attachment,
     _looks_like_rk_actor,
-    _name_keys,
     _name_matches_keys,
-    _norm_name,
     _now,
     _parse_dt,
     _sorted_slice,
     _time_key,
+    name_keys,
+    norm_name,
 )
 
 
@@ -100,14 +100,14 @@ class RepositoryQueryMixin:
         """Full decoded issues closed in ``[start_iso, end_iso)`` (string compare).
 
         ``owner_names`` is matched loosely against ``assigned_to_name`` via
-        ``_name_keys`` (handles spacing/aliasing variants); ``None``/empty means
+        ``name_keys`` (handles spacing/aliasing variants); ``None``/empty means
         no owner filter. ``closed_on`` may be a bare date or full ISO timestamp,
         hence the string-range compare ``>= start AND < end``. Used by the weekly
         report's "resolved this period" list and the AI representative-issue gather.
         """
         owner_keys: set = set()
         for n in owner_names or []:
-            owner_keys.update(_name_keys(n))
+            owner_keys.update(name_keys(n))
         base = (
             "FROM redmine_agent_issues "
             "WHERE is_resolved = 1 AND closed_on IS NOT NULL AND closed_on != '' "
@@ -214,7 +214,7 @@ class RepositoryQueryMixin:
         """
         owner_keys = set()
         for name in owner_names or []:
-            owner_keys.update(_name_keys(name))
+            owner_keys.update(name_keys(name))
         stale_after = datetime.now() - timedelta(days=max(1, int(stale_days or 1)))
         list_limit = max(1, min(int(list_limit or 30), 100))
         now = datetime.now()
@@ -236,7 +236,7 @@ class RepositoryQueryMixin:
             owner_keys = {
                 key
                 for item in issues
-                for key in _name_keys(item.get("assigned_to_name"))
+                for key in name_keys(item.get("assigned_to_name"))
             }
 
         owned_issues = [
@@ -355,7 +355,7 @@ class RepositoryQueryMixin:
     def resolve_assignee_names(self, query_names: list[str]) -> dict[str, list[str]]:
         assignees = self.list_assignee_names()
         assignee_keys = {
-            name: _name_keys(name)
+            name: name_keys(name)
             for name in assignees
         }
         resolved: dict[str, list[str]] = {}
@@ -363,11 +363,11 @@ class RepositoryQueryMixin:
             name = str(raw_name or "").strip()
             if not name:
                 continue
-            query_keys = _name_keys(name)
-            compact_query = _norm_name(name).replace(" ", "")
+            query_keys = name_keys(name)
+            compact_query = norm_name(name).replace(" ", "")
             matches = []
             for assignee, keys in assignee_keys.items():
-                compact_assignee = _norm_name(assignee).replace(" ", "")
+                compact_assignee = norm_name(assignee).replace(" ", "")
                 if query_keys.intersection(keys) or (compact_query and compact_query in compact_assignee):
                     matches.append(assignee)
             resolved[name] = list(dict.fromkeys(matches)) or [name]

@@ -32,7 +32,7 @@ JAVA_CONTROL_WORDS = {'if', 'for', 'while', 'switch', 'catch', 'return', 'throw'
 APK_SYMBOL_INDEX_MAX_FILE_SIZE = 2 * 1024 * 1024
 
 
-def _create_apk_task(task_id, apk_path, filename, owner_id: str):
+def create_apk_task(task_id, apk_path, filename, owner_id: str):
     """创建APK分析任务并限制总数"""
     os.makedirs(runtime.apk_upload_dir, exist_ok=True)
     with runtime.global_state.apk_analysis_tasks_lock:
@@ -45,7 +45,7 @@ def _create_apk_task(task_id, apk_path, filename, owner_id: str):
             if not removable:
                 raise ValueError('APK analysis capacity is full; retry later')
             oldest = min(removable, key=lambda t: t[1].get('timestamp', 0))
-            old_dir = _safe_join(runtime.apk_upload_dir, oldest[0])
+            old_dir = safe_join(runtime.apk_upload_dir, oldest[0])
             shutil.rmtree(old_dir, ignore_errors=True)
             del runtime.global_state.apk_analysis_tasks[oldest[0]]
             if runtime.apk_task_store is not None:
@@ -77,12 +77,12 @@ def _get_apk_upload_lock(task_id: str) -> asyncio.Lock:
         return runtime.global_state.apk_upload_locks.setdefault(task_id, asyncio.Lock())
 
 
-def _safe_join(base_dir: str, *parts: str) -> str:
+def safe_join(base_dir: str, *parts: str) -> str:
     """Join paths and ensure the result stays under base_dir."""
     return safe_upload_target_path(base_dir, os.path.join(*parts) if parts else '.', allow_nested=True)
 
 
-def _normalize_apk_filename(filename: str | None) -> str:
+def normalize_apk_filename(filename: str | None) -> str:
     """Normalize upload filenames to a safe APK/JAR basename."""
     raw_name = (filename or '').replace('\\', '/')
     basename = os.path.basename(raw_name).strip()
@@ -106,7 +106,7 @@ def _normalize_apk_task_id(upload_id: str | None) -> str:
         raise ValueError("非法上传ID") from exc
 
 
-def _cleanup_files(paths: list[str]):
+def cleanup_files(paths: list[str]):
     for path in paths:
         try:
             os.remove(path)
@@ -152,7 +152,7 @@ def _read_manifest_xml(task):
 
 
 def _get_apk_sources_dir(task) -> str:
-    return _safe_join(task.get('output_dir', ''), 'sources')
+    return safe_join(task.get('output_dir', ''), 'sources')
 
 
 def _add_apk_symbol(symbols: dict[str, list[dict[str, Any]]], name: str, kind: str, path: str, line: int, column: int):
@@ -326,10 +326,10 @@ def recover_apk_analysis_tasks() -> list[asyncio.Task]:
         output_dir = str(task.get('output_dir') or '')
         try:
             task_root = os.path.realpath(
-                _safe_join(runtime.apk_upload_dir, _normalize_apk_task_id(task_id))
+                safe_join(runtime.apk_upload_dir, _normalize_apk_task_id(task_id))
             )
             resolved_apk = os.path.realpath(apk_path)
-            safe_output = _safe_join(
+            safe_output = safe_join(
                 runtime.apk_upload_dir,
                 task_id,
                 'jadx_output',

@@ -25,13 +25,13 @@ from .status_api import get_status as get_status
 from .status_api import router as status_router
 from .status_api import stream_test_logs as stream_test_logs
 from .suite_helpers import (
-    _get_available_test_suites as _get_available_test_suites,
+    get_available_test_suites as get_available_test_suites,
 )
 from .suite_helpers import (
-    _make_empty_suite_target as _make_empty_suite_target,
+    make_empty_suite_target as make_empty_suite_target,
 )
 from .suite_helpers import (
-    _resolve_suite_diagnosis_target as _resolve_suite_diagnosis_target,
+    resolve_suite_diagnosis_target as resolve_suite_diagnosis_target,
 )
 from .suites_api import (
     create_suite_apk_analysis_task as create_suite_apk_analysis_task,

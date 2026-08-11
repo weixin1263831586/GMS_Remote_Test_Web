@@ -28,8 +28,8 @@ from features.gerrit.service import (
     _effective_history_limit,
     _extract_query_limit,
     _owners_for_department_profile,
-    _query_gerrit_dual_mode,
     _select_profile,
+    query_gerrit_dual_mode,
 )
 from features.gerrit.settings import config_manager
 from features.redmine import load_redmine_user_map_for_owner
@@ -281,7 +281,7 @@ async def get_review_queue(
     query = f"reviewer:{owner_text} status:open"
     if not cfg.get("base_url") and not cfg.get("ssh_host"):
         return {"success": True, "data": {"count": 0, "items": [], "configured": False, "query": query}}
-    result = await _query_gerrit_dual_mode(cfg, query, max_changes=cfg["query_limit"])
+    result = await query_gerrit_dual_mode(cfg, query, max_changes=cfg["query_limit"])
     raw_items = result.get("items") or []
     items = sorted(
         (normalize_gerrit_change(raw) for raw in raw_items),
@@ -410,7 +410,7 @@ async def list_gerrit_changes(request: Request, profile_id: str = Query(""), que
                 "message": "Gerrit 看板不需要服务端插件；配置 gerrit_dashboard.base_url 可走 REST，或配置 ssh_host/ssh_user 走 SSH。",
             },
         }
-    result = await _query_gerrit_dual_mode(cfg, effective_query, max_changes=_extract_query_limit(effective_query) or cfg["query_limit"])
+    result = await query_gerrit_dual_mode(cfg, effective_query, max_changes=_extract_query_limit(effective_query) or cfg["query_limit"])
     return {"success": True, "data": {**result, "configured": True, "config": _public_config(cfg, manager=_config_for_request(request)), "profile": profile, "query": effective_query}}
 
 
@@ -453,7 +453,7 @@ async def list_gerrit_changes_by_date(
     rest_errors: list[str] = []
     for owner_text in owner_list:
         query = f"owner:{owner_text} status:any"
-        result = await _query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
+        result = await query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
         raw_items.extend(result.get("items") or [])
         if result.get("source"):
             sources.append(str(result.get("source")))
@@ -499,7 +499,7 @@ async def get_gerrit_personal_statistics(
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
     query = f"owner:{owner_text} status:any"
-    result = await _query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
+    result = await query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
     stats = summarize_gerrit_changes(result.get("items") or [], list_limit=list_limit)
     data = {
         **stats,
@@ -553,11 +553,11 @@ async def get_gerrit_department_statistics(
     async def _owner_stats(owner_text: str) -> dict[str, Any]:
         async with semaphore:
             query = f"owner:{owner_text} status:any"
-            result = await _query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
+            result = await query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
             stats = summarize_gerrit_changes(result.get("items") or [], list_limit=list_limit)
             # 「待成员评审」：该成员作为 reviewer 仍待处理的开放变更计数。
             review_query = f"reviewer:{owner_text} status:open"
-            review_result = await _query_gerrit_dual_mode(cfg, review_query, max_changes=cfg["query_limit"])
+            review_result = await query_gerrit_dual_mode(cfg, review_query, max_changes=cfg["query_limit"])
             pending_review_of_me = len(review_result.get("items") or [])
             return {
                 "owner": owner_text,

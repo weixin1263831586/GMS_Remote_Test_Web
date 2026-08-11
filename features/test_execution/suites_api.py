@@ -24,8 +24,8 @@ from . import runtime
 from .api_support import ApiResponse
 from .models import SuiteApkAnalyzeRequest, SuiteDiagnosisTargetRequest
 from .suite_helpers import (
-    _get_available_test_suites,
-    _resolve_suite_diagnosis_target,
+    get_available_test_suites,
+    resolve_suite_diagnosis_target,
 )
 from .suite_local_files import (
     list_suite_files_local,
@@ -77,7 +77,7 @@ async def list_suites(base_path: str = None, force_refresh: bool = Query(False))
         return JSONResponse(content={**cached, "cached": True})
 
     try:
-        suites = _get_available_test_suites(config, base_path)
+        suites = get_available_test_suites(config, base_path)
     except RuntimeError as exc:
         if "SSH connection failed" in str(exc):
             logger.warning("[TestSuites] SSH unavailable while listing suites: %s", exc)
@@ -131,7 +131,7 @@ async def diagnose_suite_target(req: SuiteDiagnosisTargetRequest):
     """Locate the most likely suite artifact and source path for a report failure."""
     try:
         target = await asyncio.to_thread(
-            _resolve_suite_diagnosis_target,
+            resolve_suite_diagnosis_target,
             runtime.config_manager.load_config(),
             test_type=req.test_type, suite_version=req.suite_version,
             module=req.module, test_name=req.test_name,

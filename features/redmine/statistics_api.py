@@ -18,10 +18,10 @@ from .api import (
     _check_ttl_cache,
     _empty_user_stats,
     _get_redmine_stats_config,
-    _resolve_owner_names,
     _update_ttl_cache,
     get_redmine_config_for_request,
     get_redmine_service_for_request,
+    resolve_owner_names,
 )
 from .dashboard import (
     filter_users_for_profile,
@@ -195,7 +195,7 @@ async def get_workload_statistics(
     snapshot_user_id: int | None = None
     candidate_names = [name] if name else []
     if not candidate_names:
-        candidate_names = await _resolve_owner_names(request, service)
+        candidate_names = await resolve_owner_names(request, service)
     mapped = find_user_mapping_for_names(user_map, candidate_names) if candidate_names else None
     if mapped:
         snapshot_user_id = int(mapped["id"])

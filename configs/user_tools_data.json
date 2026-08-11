@@ -14,7 +14,7 @@
                 },
                 {
                     "icon": "https://android-review.googlesource.com/favicon.ico",
-                    "title": "Gerrit",
+                    "title": "Rockchip Gerrit",
                     "url": "https://10.10.10.29/q/owner:chaoqun.huang@rock-chips.com"
                 },
                 {
@@ -128,7 +128,7 @@
                 }
             ]
         },
-        "last_updated": "2026-07-30T19:35:59.452635",
+        "last_updated": "2026-08-11T16:03:17.120967",
         "client_ip": "172.16.14.66"
     }
 }

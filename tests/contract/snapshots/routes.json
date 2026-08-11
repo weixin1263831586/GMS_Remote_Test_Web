@@ -633,6 +633,18 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/cluster/suites/report-copies"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/suites/report-copies/{transfer_id}/import"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/cluster/suites/results"
   },
   {
@@ -778,6 +790,12 @@
       "POST"
     ],
     "path": "/api/cluster/workers/{worker_id}/heartbeat"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/report-copies/{transfer_id}"
   },
   {
     "methods": [

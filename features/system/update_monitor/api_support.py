@@ -155,6 +155,15 @@ def _run_sync_job(mode: str, source: list[str]):
             check=False,
         )
         with _sync_lock:
+            error = None
+            if result.returncode != 0:
+                stderr_lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+                detail = stderr_lines[-1] if stderr_lines else ''
+                if detail.lower().startswith('error:'):
+                    detail = detail.split(':', 1)[1].strip()
+                error = f'sync exited with {result.returncode}'
+                if detail:
+                    error += f': {detail}'
             _sync_status.update(
                 {
                     'running': False,
@@ -162,7 +171,7 @@ def _run_sync_job(mode: str, source: list[str]):
                     'returncode': result.returncode,
                     'stdout': result.stdout[-6000:],
                     'stderr': result.stderr[-6000:],
-                    'error': None if result.returncode == 0 else f'sync exited with {result.returncode}',
+                    'error': error,
                 }
             )
     except Exception as exc:

@@ -1684,6 +1684,26 @@ select option {
 .modal-content.modal-m  { width: min(620px, 96vw); max-width: min(620px, 96vw); min-height: 280px; max-height: min(620px, 85vh, calc(100dvh - 16px)); }
 .modal-content.modal-l  { width: min(760px, 96vw); max-width: min(760px, 96vw); max-height: min(85vh, calc(100dvh - 16px)); }
 
+/* 跨主机报告拷贝：异步加载和状态提示不改变弹框外框尺寸。 */
+#report-copy-modal .report-copy-modal-content {
+    width: 760px;
+    max-width: calc(100vw - 40px);
+    height: 500px;
+    max-height: calc(100dvh - 40px);
+}
+
+#report-copy-modal select.combo-box {
+    display: block;
+    height: 36px;
+    padding: 6px 10px;
+    line-height: 20px;
+}
+
+#report-copy-modal input[type="text"] {
+    height: 36px;
+    box-sizing: border-box;
+}
+
 /* ADB Proxy 与 USB/IP 接入/断开共用同一弹框骨架。 */
 .device-routing-modal-content {
     width: min(620px, 100%);
