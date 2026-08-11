@@ -20,9 +20,13 @@ class DeviceConfigExplorerMigrationTests(unittest.TestCase):
         combined = shell + "\n" + navigation
 
         self.assertIn('id="device-config-modal"', shell)
-        self.assertIn('const serialAttr = escapeIconAttr(serialNo)', combined)
+        self.assertIn('const actionDeviceId = String(device.device_id || serialNo)', combined)
+        self.assertIn('const serialAttr = escapeIconAttr(actionDeviceId)', combined)
         self.assertIn('data-serial="${serialAttr}"', combined)
-        self.assertIn('openDeviceConfigExplorer(this.dataset.serial)', combined)
+        self.assertIn(
+            'openDeviceConfigExplorer(this.dataset.serial,this.dataset.worker)',
+            combined,
+        )
         for field in (
             'serial_no',
             'source_host',

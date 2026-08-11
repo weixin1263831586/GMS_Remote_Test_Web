@@ -65,6 +65,25 @@ function requestReportsData(url) {
     return request;
 }
 
+async function preloadTestReports(userOnly = false) {
+    if (reportsHasLoaded) return;
+    await (window.GmsWorkspace?.ready || Promise.resolve());
+    const workersPromise = loadReportWorkers();
+    const url = reportsListUrl(userOnly);
+    const [data] = await Promise.all([
+        requestReportsData(url),
+        workersPromise,
+    ]);
+    if (reportsHasLoaded) return;
+    reportsLoadedItems = Array.isArray(data.reports) ? data.reports : [];
+    reportsNextCursor = data.next_cursor || '';
+    reportsLoadedPages = 1;
+    reportsHasLoaded = true;
+    reportsLastLoadedAt = Date.now();
+    reportsLastQueryKey = url;
+}
+window.preloadTestReports = preloadTestReports;
+
 async function switchReportsWorker() {
     const workerId = document.getElementById('reports-worker-filter')?.value || '';
     if (workerId) {
@@ -126,19 +145,19 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
         const workersPromise = loadReportWorkers();
         const url = reportsListUrl(userOnly, append ? reportsNextCursor : '');
         const queryKey = reportsListUrl(userOnly);
-        if (!append && !force && reportsHasLoaded
-                && reportsLastQueryKey === queryKey
-                && Date.now() - reportsLastLoadedAt < REPORTS_REENTRY_CACHE_MS) {
+        const hasCachedQuery = !append && !force && reportsHasLoaded
+            && reportsLastQueryKey === queryKey;
+        if (hasCachedQuery) {
             await workersPromise;
             displayTestReports(reportsLoadedItems);
             renderReportsPagination();
-            return;
+            if (Date.now() - reportsLastLoadedAt < REPORTS_REENTRY_CACHE_MS) return;
         }
         const tbody = document.getElementById('reports-table-body');
         if (!append) {
             reportsNextCursor = '';
             reportsLoadedPages = 1;
-            if (tbody) {
+            if (tbody && !hasCachedQuery) {
                 tbody.innerHTML = '<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text-secondary);">正在加载报告...</td></tr>';
             }
         }

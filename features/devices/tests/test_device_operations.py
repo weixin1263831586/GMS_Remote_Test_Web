@@ -121,6 +121,27 @@ class DeviceOperationsTests(unittest.TestCase):
         self.assertEqual(protocols["SWITCHING"], "fastboot")
         self.assertEqual(protocols["FB001"], "fastboot")
 
+    def test_management_property_markers_preserve_empty_fields(self):
+        parsed = management_api._parse_management_device_props(
+            "===DEVICE:ADB001===\n"
+            "serial_no=\n"
+            "model=Pixel Lab\n"
+            "android_version=16\n"
+            "battery_level=\n"
+            "soc_model=Tensor\n"
+        )
+
+        self.assertEqual(
+            parsed["ADB001"],
+            {
+                "serial_no": "",
+                "model": "Pixel Lab",
+                "android_version": "16",
+                "battery_level": "",
+                "soc_model": "Tensor",
+            },
+        )
+
     def test_management_endpoint_merges_adb_and_fastboot_inventory(self):
         def run_local(command, _timeout):
             if command == "adb devices":

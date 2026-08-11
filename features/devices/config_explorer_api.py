@@ -6,6 +6,7 @@ value. The UI is embedded in the device-config modal; these /api endpoints are
 consumed by that modal (no standalone page or sidebar entry).
 """
 
+import asyncio
 import logging
 import os
 import uuid
@@ -110,7 +111,7 @@ async def api_list_devices(request: Request, help: bool = Query(False)):
     resp = _help_or_continue(help, "GET", "/api/config-explorer/devices")
     if resp:
         return resp
-    devices = list_devices()
+    devices = await asyncio.to_thread(list_devices)
     return success_response(data={"devices": devices}, message="Success")
 
 
@@ -125,7 +126,9 @@ async def api_list_packages(
     resp = _help_or_continue(help, "GET", "/api/config-explorer/packages")
     if resp:
         return resp
-    packages = list_packages(_readable_device(request, device_id))
+    packages = await asyncio.to_thread(
+        lambda: list_packages(_readable_device(request, device_id))
+    )
     return success_response(data={"packages": packages}, message="Success")
 
 
@@ -140,7 +143,9 @@ async def api_list_all_packages(
     resp = _help_or_continue(help, "GET", "/api/config-explorer/packages/all")
     if resp:
         return resp
-    packages = list_all_packages(_readable_device(request, device_id))
+    packages = await asyncio.to_thread(
+        lambda: list_all_packages(_readable_device(request, device_id))
+    )
     return success_response(
         data={"packages": packages, "count": len(packages)}, message="Success"
     )
@@ -159,7 +164,9 @@ async def api_list_packages_with_path(
     )
     if resp:
         return resp
-    rows = list_packages_with_path(_readable_device(request, device_id))
+    rows = await asyncio.to_thread(
+        lambda: list_packages_with_path(_readable_device(request, device_id))
+    )
     return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
 
 
@@ -174,7 +181,9 @@ async def api_list_features(
     resp = _help_or_continue(help, "GET", "/api/config-explorer/features")
     if resp:
         return resp
-    rows = list_features(_readable_device(request, device_id))
+    rows = await asyncio.to_thread(
+        lambda: list_features(_readable_device(request, device_id))
+    )
     return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
 
 
@@ -189,7 +198,9 @@ async def api_list_props(
     resp = _help_or_continue(help, "GET", "/api/config-explorer/props")
     if resp:
         return resp
-    rows = list_props(_readable_device(request, device_id))
+    rows = await asyncio.to_thread(
+        lambda: list_props(_readable_device(request, device_id))
+    )
     return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
 
 
@@ -216,14 +227,16 @@ async def api_explore(
         return resp
 
     try:
-        result = explore(
-            package=package or "android",
-            device_id=_readable_device(request, device_id),
-            name_filter=name or None,
-            type_filter=type or None,
-            config_only=config_only,
-            with_effective=with_effective,
-            effective_limit=effective_limit,
+        result = await asyncio.to_thread(
+            lambda: explore(
+                package=package or "android",
+                device_id=_readable_device(request, device_id),
+                name_filter=name or None,
+                type_filter=type or None,
+                config_only=config_only,
+                with_effective=with_effective,
+                effective_limit=effective_limit,
+            )
         )
     except Exception as e:
         logger.error(f"config-explorer explore failed: {e}")
@@ -256,8 +269,6 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
     ``filename`` / ``size``; the frontend then switches to the APK-analysis
     page and starts the analysis (same flow as suite→APK).
     """
-    import asyncio
-
     if not _decompile_dependencies_ready():
         return error_response("APK 分析依赖未初始化", status_code=500)
     if not req.path.strip():
@@ -281,10 +292,11 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
     try:
         # Pull on a worker thread (blocking adb transfer).
         await asyncio.to_thread(
-            pull_device_file,
-            _readable_device(request, req.device_id),
-            on_device_path,
-            apk_path,
+            lambda: pull_device_file(
+                _readable_device(request, req.device_id),
+                on_device_path,
+                apk_path,
+            )
         )
     except Exception as e:
         _cleanup_files([apk_path])

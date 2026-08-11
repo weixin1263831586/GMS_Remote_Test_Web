@@ -110,6 +110,15 @@
     .field input, .field select, .field textarea { width:100%; min-width:0; max-width:100%; }
     .field.full { grid-column:1 / -1; }
     .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; padding:0 16px 16px; }
+    /* 路由检查弹框：复用测试界面 route-check 风格 */
+    #routeCheckModal { backdrop-filter:blur(4px); }
+    #routeCheckModal .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:6px; width:min(500px,96vw); max-width:min(500px,96vw); min-height:200px; max-height:min(80vh,calc(100dvh - 16px)); box-shadow:0 18px 48px rgba(0,0,0,.42); }
+    #routeCheckModal .modal-header { background:var(--panel); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:10; }
+    #routeCheckModal .modal-header h3 { color:var(--text); margin:0; font-size:16px; font-weight:600; }
+    #routeCheckModal .modal-close { background:transparent; border:none; font-size:28px; color:var(--muted); cursor:pointer; width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:4px; transition:all .2s ease; line-height:1; padding:0; flex-shrink:0; }
+    #routeCheckModal .modal-close:hover { background:rgba(239,68,68,.15); color:var(--bad); }
+    #routeCheckModal .modal-close:active { transform:scale(.95); }
+    #routeCheckModal .modal-body { display:block; padding:20px; overflow-y:auto; }
     html.modal-open, body.modal-open { overflow:hidden; }
     @media (max-width:800px) { header { grid-template-columns:1fr; align-items:flex-start; row-gap:8px; } input { min-width:180px; width:100%; } .toolbar { align-items:stretch; } }
     @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; } }
@@ -230,6 +239,12 @@
   <div class="modal-content" style="width:min(900px,100%)">
     <div class="modal-header"><h2 id="trendDetailTitle">提交明细</h2><button class="secondary" onclick="hideModal('trendDetailModal')">关闭</button></div>
     <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
+  </div>
+</div>
+<div id="routeCheckModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header"><h3>📡 检查路由连通性</h3><button class="modal-close" onclick="hideModal('routeCheckModal')">&times;</button></div>
+    <div class="modal-body" id="routeCheckBody"><div class="muted">正在探测 Gerrit 服务器可达性…</div></div>
   </div>
 </div>
 <script src="/static/js/embedded-workspace.js?v=20260713-01"></script>
@@ -663,25 +678,52 @@ async function refreshConnBanner(data) {
   }
   detail.textContent = errorText;
 }
-// 打开「检查路由」弹框：探测 Gerrit 服务器 ICMP/SSH端口/HTTPS 三路可达性。
+// 嵌入主界面时复用测试界面的路由检查，保证弹框、校验、结果和
+// 终端跳转都只有一份实现。独立打开 Gerrit 页时保留原有连通性探测。
 async function checkGerritRoute() {
+  try {
+    if (window.parent !== window && typeof window.parent.checkRouting === 'function') {
+      await window.parent.checkRouting();
+      return;
+    }
+  } catch (e) {
+    // Cross-origin embedding cannot access the parent implementation; use the
+    // standalone Gerrit connectivity view below.
+  }
+  const body = document.getElementById('routeCheckBody');
   const banner = document.getElementById('connBanner');
   const msg = document.getElementById('connMsg');
   const detail = document.getElementById('connDetail');
-  if (msg) msg.textContent = '📡 正在探测 Gerrit 服务器可达性...';
-  if (detail) detail.textContent = '';
+  if (body) body.innerHTML = '<div class="muted">📡 正在探测 Gerrit 服务器可达性…</div>';
+  showModal('routeCheckModal');
   try {
     const data = await api('/api/gerrit-dashboard/connectivity');
-    if (!data.configured) { if (msg) msg.textContent = 'Gerrit 未配置 ssh_host/base_url，请先在设置里填写。'; return; }
-    const verdict = data.verdict || '';
+    if (body) {
+      if (!data.configured) {
+        body.innerHTML = '<div class="muted">Gerrit 未配置 ssh_host/base_url，请先在设置里填写。</div>';
+        return;
+      }
+      const okLabel = function(ok, extra) { return ok ? '<span style="color:var(--ok)">✅ ' + (extra || '通') + '</span>' : '<span style="color:var(--bad)">❌ 不通</span>'; };
+      var rows = [];
+      rows.push('<div style="display:grid;gap:10px">');
+      rows.push('<div style="font-size:15px;font-weight:600">' + (data.level === 'ok' ? '✅ ' : '⚠️ ') + esc(data.verdict || '') + '</div>');
+      rows.push('<div style="border-top:1px solid var(--border);padding-top:10px;display:grid;gap:8px">');
+      rows.push('<div>ICMP Ping：' + okLabel(data.ping_ok, data.ping_ok && data.latency ? '通 (' + esc(data.latency) + ')' : '通') + '</div>');
+      rows.push('<div>SSH 端口 ' + esc(data.ssh_port || '?') + '：' + okLabel(data.ssh_port_ok, '开放') + '</div>');
+      rows.push('<div>HTTPS：' + okLabel(data.https_ok, data.https_ok ? (/^\d{3}$/.test(data.https_code) ? esc(data.https_code) : '通') : '不通') + '</div>');
+      rows.push('</div></div>');
+      body.innerHTML = rows.join('');
+    }
+    // 同步更新顶部 banner
+    if (msg) msg.textContent = (data.level === 'ok' ? '✅ ' : '⚠️ ') + (data.verdict || '');
     if (data.level === 'ok') { banner.classList.add('ok'); }
-    if (msg) msg.textContent = (data.level === 'ok' ? '✅ ' : '⚠️ ') + verdict;
     const parts = [];
     parts.push('ICMP: ' + (data.ping_ok ? '通' + (data.latency ? ' (' + data.latency + ')' : '') : '不通'));
     parts.push('SSH端口 ' + (data.ssh_port || '?') + ': ' + (data.ssh_port_ok ? '开放' : '不通'));
     parts.push('HTTPS: ' + (data.https_ok ? data.https_code : '不通'));
     if (detail) detail.textContent = parts.join('  |  ');
   } catch (e) {
+    if (body) body.innerHTML = '<div style="color:var(--bad)">⚠️ 探测失败: ' + esc(e.message) + '</div>';
     if (msg) msg.textContent = '⚠️ 探测失败: ' + e.message;
   }
 }

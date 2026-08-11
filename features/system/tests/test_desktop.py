@@ -1,9 +1,12 @@
 import unittest
+from types import SimpleNamespace
 
 from features.system.desktop import (
     build_novnc_upstream_url,
+    create_novnc_client_session,
     default_novnc_upstream_http,
     novnc_asset_override,
+    novnc_client_session,
     novnc_locale_override,
 )
 
@@ -48,6 +51,26 @@ class DesktopProxyTests(unittest.TestCase):
         self.assertIn(b"gms_asset=20260718-clipboard-focus", ui)
         self.assertIn(b"gms_asset=20260718-clipboard-focus", rfb)
         self.assertIn(b"!document.hasFocus()", clipboard)
+
+
+class DesktopProxyPoolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lifespan_session_is_reused_without_being_closed_by_request(self):
+        session = create_novnc_client_session()
+        connection = SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(novnc_client_session=session)
+            )
+        )
+        try:
+            async with (
+                novnc_client_session(connection) as first,
+                novnc_client_session(connection) as second,
+            ):
+                self.assertIs(first, session)
+                self.assertIs(second, session)
+            self.assertFalse(session.closed)
+        finally:
+            await session.close()
 
 
 if __name__ == "__main__":

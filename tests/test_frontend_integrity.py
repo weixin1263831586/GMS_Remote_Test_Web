@@ -103,12 +103,19 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_report_page_reuses_recent_data_and_parallelizes_initial_requests(self):
         reports = read_text("web/static/js/pages/test-reports.js")
+        navigation = read_text("web/static/js/navigation.js")
+        shell = read_text("web/shell/shell.html")
 
         self.assertIn("const REPORTS_REENTRY_CACHE_MS = 10000", reports)
         self.assertIn("const [data] = await Promise.all([", reports)
         self.assertIn("reportsLastQueryKey === queryKey", reports)
         self.assertIn("window.clusterWorkersSnapshot", reports)
         self.assertIn("if (reportsRequests.has(url))", reports)
+        self.assertIn("window.preloadTestReports = preloadTestReports", reports)
+        self.assertIn("scheduleDeferredPagePreload(initialPage)", navigation)
+        self.assertIn("await Promise.all([initializeClusterMode(), configReady])", navigation)
+        self.assertIn("test-reports.js?v=20260810-page-load-2", shell)
+        self.assertIn("navigation.js?v=20260810-refresh-feedback", shell)
 
     def test_server_file_browser_uses_resolved_suite_path(self):
         navigation_text = read_all_frontend_js()
@@ -174,16 +181,22 @@ class FrontendIntegrityTests(unittest.TestCase):
         html = read_text("features/cluster/ui/page.html")
         script = read_text("features/cluster/ui/page.js")
 
-        self.assertIn('class="primary stable-action"', html)
-        self.assertIn('id="reload-library" class="stable-action"', html)
+        for control_id in ("dash-refresh-charts", "refresh", "reload-library"):
+            self.assertRegex(
+                html,
+                rf'id="{control_id}" class="[^"]*refresh-action[^"]*"',
+            )
         self.assertIn('class="section-head-copy"', html)
         self.assertIn('id="cluster-search"', html)
         self.assertIn('id="job-status-filter"', html)
-        self.assertIn("if(refreshPromise)return refreshPromise", script)
+        self.assertIn("if(refreshPromise)return await refreshPromise", script)
         self.assertIn("Promise.allSettled", script)
         self.assertIn('data-action="redeploy-worker"', script)
         self.assertNotIn('onclick="redeployWorker(', script)
-        self.assertIn("button.disabled=true;button.textContent='刷新中…'", script)
+        self.assertIn("function setClusterRefreshBusy(busy)", script)
+        self.assertIn("button.textContent=busy?'刷新中…':button.dataset.idleLabel", script)
+        self.assertIn("document.querySelector('#refresh').onclick=()=>refresh(true)", script)
+        self.assertIn("scheduleDashboardChartsResize", script)
         self.assertIn("state.status.enabled&&clusterWorkspace.scope_mode==='cluster'", script)
         self.assertIn("renderModeStatus();renderJobForm()", script)
         self.assertNotIn('集群模式已启用 · 本机', script)
@@ -271,6 +284,10 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("select.value !== selectedWorkerId", load_source)
         self.assertIn("select.dataset.workersLoaded = 'true'", load_source)
         self.assertIn("testHostSelect.disabled = !enabled || !workersLoaded", navigation)
+        self.assertIn(
+            "currentPage === 'test' && typeof loadClusterWorkers === 'function'",
+            navigation,
+        )
 
     def test_skill_toolbar_prefers_installer_and_labels_zip_as_offline_only(self):
         shell = read_text("web/shell/shell.html")
@@ -331,12 +348,10 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_desktop_async_mount_cannot_replace_another_worker(self):
         main_text = read_text("web/shell/shell.html")
 
+        self.assertIn("function hostWorkspaceMountIsCurrent", main_text)
+        self.assertIn("generation === hostWorkspace.renderGeneration", main_text)
         self.assertIn(
-            "generation !== hostWorkspace.renderGeneration",
-            main_text,
-        )
-        self.assertIn(
-            "currentPane?.hostId !== expectedHostId",
+            "hostWorkspace.panes[index]?.hostId === expectedHostId",
             main_text,
         )
         self.assertIn(
@@ -362,11 +377,24 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("mountTerminalWorkspacePane(i,pane", body)
         self.assertNotIn("renderTerminalWorkspace()", body)
 
+    def test_device_shell_uses_visible_adb_workspace_without_timer_injection(self):
+        main_text = read_text("web/shell/shell.html")
+
+        self.assertIn("mode: 'adb'", main_text)
+        self.assertIn("serialNo: rawSerial", main_text)
+        self.assertIn("workerId", main_text)
+        self.assertIn("mode:terminalMode", main_text)
+        self.assertIn("serial_no:serialNo", main_text)
+        self.assertIn("shellReady:terminalMode==='adb'", main_text)
+        self.assertNotIn("setTimeout(sendShell", main_text)
+        self.assertNotIn("input: `adb -s ${rawSerial} shell", main_text)
+
     def test_host_workspaces_wait_for_directory_and_recover_expired_elevation(self):
         main_text = read_text("web/shell/shell.html")
 
         self.assertIn("await mergeClusterDesktopHosts()", main_text)
-        self.assertIn("await initDesktopHosts()", main_text)
+        self.assertIn("const hostsReady = initDesktopHosts()", main_text)
+        self.assertIn("canUseLocalBootstrap", main_text)
         self.assertIn("message.elevation_required", main_text)
         self.assertIn("m.elevation_required", main_text)
         self.assertIn("message.credential_required", main_text)
@@ -389,6 +417,16 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("_suiteWorkerSelectorPromise", navigation_text)
         self.assertIn('id="gms-assistant-url" style="width:100%;box-sizing:border-box;"', main_text)
 
+    def test_manual_suite_refresh_forces_reload_and_has_busy_feedback(self):
+        main_text = read_text("web/shell/shell.html")
+        navigation_text = read_all_frontend_js()
+
+        self.assertIn('id="refresh-suites-btn" class="btn-xxs ui-refresh-action"', main_text)
+        self.assertIn('onclick="refreshTestSuites()"', main_text)
+        self.assertIn("await loadTestSuites(true)", navigation_text)
+        self.assertIn("button.textContent = '刷新中…'", navigation_text)
+        self.assertIn("if (forceRefresh) return loadTestSuites(true)", navigation_text)
+
     def test_single_mode_hides_multi_host_controls_and_sidebar_has_descriptions(self):
         main_text = read_text("web/shell/shell.html")
         navigation_text = read_all_frontend_js()
@@ -400,6 +438,14 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn('class="sidebar-text">${text}</span>', main_text)
         self.assertIn("data-multi-host-control", main_text)
         self.assertIn("workspace-scope-single", main_text)
+        self.assertIn(
+            "includeCluster\n                        ? fetch('/api/cluster/status'",
+            main_text,
+        )
+        self.assertIn(
+            "await mgmtLoadGroups();\n                // Group loading is another asynchronous boundary.",
+            main_text,
+        )
         self.assertIn("workspace-scope-pending", main_text)
         self.assertIn("host-workspace-ready", main_text)
         self.assertIn("terminal-workspace-status-single", main_text)

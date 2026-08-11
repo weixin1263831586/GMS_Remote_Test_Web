@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import time
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode
 
@@ -16,6 +16,7 @@ from features.auth import (
     AUTH_COOKIE_NAME,
     CurrentUser,
     auth_service,
+    require_authenticated_user,
     require_elevated_admin,
     validate_websocket_request,
 )
@@ -35,6 +36,40 @@ _VNC_STATUS_TTL = 10.0
 _vnc_status_cache: dict[str, float] = {"ts": 0.0, "value": None}
 _NOVNC_ZH_CN_LOCALE = Path(__file__).with_name("novnc_zh_cn.json")
 _NOVNC_ASSET_VERSION = "20260718-clipboard-focus"
+_NOVNC_HTTP_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
+
+
+def create_novnc_client_session() -> aiohttp.ClientSession:
+    """Create the application-wide noVNC upstream connection pool."""
+
+    connector = aiohttp.TCPConnector(
+        limit=128,
+        limit_per_host=32,
+        ttl_dns_cache=300,
+    )
+    return aiohttp.ClientSession(
+        connector=connector,
+        # WebSocket relays are long-lived. Individual HTTP asset requests use
+        # the bounded timeout above while sharing this keep-alive pool.
+        timeout=aiohttp.ClientTimeout(
+            total=None,
+            connect=10,
+            sock_connect=10,
+            sock_read=None,
+        ),
+    )
+
+
+@asynccontextmanager
+async def novnc_client_session(connection: Request | WebSocket):
+    """Yield the lifespan-owned pool, with a safe fallback for isolated tests."""
+
+    session = getattr(connection.app.state, "novnc_client_session", None)
+    if session is not None and not session.closed:
+        yield session
+        return
+    async with create_novnc_client_session() as fallback:
+        yield fallback
 
 
 def novnc_locale_override(path: str) -> bytes | None:
@@ -149,12 +184,12 @@ def build_novnc_upstream_url(path: str, query_string: bytes = b"") -> str:
     return url
 
 
-def _novnc_worker_scope(worker_id: str = "") -> str:
+def _novnc_worker_scope(worker_id: str = "", *, validate_remote: bool = True) -> str:
     from features.cluster import get_cluster_service
 
     cluster = get_cluster_service()
     normalized = str(worker_id or "").strip() or cluster.config.local_worker_id
-    if normalized != cluster.config.local_worker_id:
+    if validate_remote and normalized != cluster.config.local_worker_id:
         _cluster_novnc_upstream(normalized)
     return normalized
 
@@ -362,9 +397,10 @@ async def novnc_websockify_proxy(websocket: WebSocket):
 
     try:
         protocols = (subprotocol,) if subprotocol else ()
-        async with aiohttp.ClientSession() as session, session.ws_connect(
-            upstream_url, protocols=protocols
-        ) as upstream:
+        async with (
+            novnc_client_session(websocket) as session,
+            session.ws_connect(upstream_url, protocols=protocols) as upstream,
+        ):
             await _relay_novnc_websockets(websocket, upstream)
     except Exception as e:
         logger.error(f"[noVNC] WebSocket proxy error: {e}")
@@ -382,7 +418,8 @@ async def cluster_novnc_websockify_proxy(websocket: WebSocket, worker_id: str):
         await websocket.close(code=close_code)
         return
     try:
-        worker_id = _novnc_worker_scope(worker_id)
+        worker_id = _novnc_worker_scope(worker_id, validate_remote=False)
+        upstream_http = _cluster_novnc_upstream(worker_id)
     except ValueError:
         await websocket.close(code=4404)
         return
@@ -392,7 +429,6 @@ async def cluster_novnc_websockify_proxy(websocket: WebSocket, worker_id: str):
     subprotocol = _requested_novnc_subprotocol(websocket)
     await websocket.accept(subprotocol=subprotocol)
     try:
-        upstream_http = _cluster_novnc_upstream(worker_id)
         from features.cluster import worker_tokens
 
         worker_token = worker_tokens().get(worker_id, "")
@@ -404,9 +440,10 @@ async def cluster_novnc_websockify_proxy(websocket: WebSocket, worker_id: str):
             + quote(worker_token, safe="")
         )
         protocols = (subprotocol,) if subprotocol else ()
-        async with aiohttp.ClientSession() as session, session.ws_connect(
-            upstream_url, protocols=protocols
-        ) as upstream:
+        async with (
+            novnc_client_session(websocket) as session,
+            session.ws_connect(upstream_url, protocols=protocols) as upstream,
+        ):
             await _relay_novnc_websockets(websocket, upstream)
     except Exception as exc:
         logger.error("[noVNC] Worker %s WebSocket proxy error: %s", worker_id, exc)
@@ -423,19 +460,24 @@ async def cluster_novnc_websockify_proxy(websocket: WebSocket, worker_id: str):
 async def novnc_http_proxy(
     request: Request,
     path: str = "vnc.html",
-    _admin: CurrentUser = Depends(require_elevated_admin),
+    user: CurrentUser = Depends(require_authenticated_user),
 ):
     """Proxy noVNC static files through the 5001 origin."""
     worker_id = _novnc_worker_scope()
-    if _novnc_entry_path(path) and not _valid_novnc_access(request, _admin, worker_id):
+    if _novnc_entry_path(path) and not _valid_novnc_access(request, user, worker_id):
         raise HTTPException(status_code=403, detail="noVNC access grant required")
     locale = novnc_locale_override(path)
     if locale is not None:
         return Response(content=locale, media_type="application/json", headers={"Cache-Control": "no-cache"})
     upstream_url = build_novnc_upstream_url(path, request.scope.get("query_string", b""))
     try:
-        timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(upstream_url) as upstream:
+        async with (
+            novnc_client_session(request) as session,
+            session.get(
+                upstream_url,
+                timeout=_NOVNC_HTTP_REQUEST_TIMEOUT,
+            ) as upstream,
+        ):
             body = await upstream.read()
             body = novnc_asset_override(path, body)
             # 静态资源缓存一天；入口 HTML/JSON 每次请求重新验证。
@@ -463,27 +505,29 @@ async def cluster_novnc_http_proxy(
     request: Request,
     worker_id: str,
     path: str = "vnc.html",
-    _admin: CurrentUser = Depends(require_elevated_admin),
+    user: CurrentUser = Depends(require_authenticated_user),
 ):
     """Serve Worker noVNC assets without mixed-content or browser routing issues."""
     try:
-        worker_id = _novnc_worker_scope(worker_id)
+        worker_id = _novnc_worker_scope(worker_id, validate_remote=False)
+        upstream = _cluster_novnc_upstream(worker_id)
     except ValueError as exc:
         return error_response(str(exc), status_code=409)
-    if _novnc_entry_path(path) and not _valid_novnc_access(request, _admin, worker_id):
+    if _novnc_entry_path(path) and not _valid_novnc_access(request, user, worker_id):
         raise HTTPException(status_code=403, detail="noVNC access grant required")
     locale = novnc_locale_override(path)
     if locale is not None:
         return Response(content=locale, media_type="application/json", headers={"Cache-Control": "no-cache"})
     try:
-        upstream = _cluster_novnc_upstream(worker_id)
         upstream_path = path.lstrip("/") or "vnc.html"
         url = f"{upstream}/{upstream_path}"
         upstream_query = _upstream_query_string(request.scope.get("query_string", b""))
         if upstream_query:
             url += "?" + upstream_query
-        timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(url) as response:
+        async with (
+            novnc_client_session(request) as session,
+            session.get(url, timeout=_NOVNC_HTTP_REQUEST_TIMEOUT) as response,
+        ):
             body = await response.read()
             body = novnc_asset_override(upstream_path, body)
             cache = "no-cache" if upstream_path.endswith((".html", ".json")) else "public, max-age=86400"

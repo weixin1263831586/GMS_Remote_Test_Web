@@ -2227,9 +2227,27 @@ function toggleDevice(deviceId) {
 }
 
 async function refreshDevices() {
-    // 手动刷新时强制绕过缓存，并标记来源为手动
-    await loadDevices(true, {source: 'manual'});
+    const button = document.getElementById('refresh-devices-btn');
+    if (button?.disabled) return;
+    if (button) {
+        button.disabled = true;
+        button.textContent = '刷新中…';
+        button.setAttribute('aria-busy', 'true');
+    }
     showToast('正在刷新设备列表...', 'info');
+    try {
+        // 手动刷新时强制绕过缓存，并标记来源为手动。
+        await loadDevices(true, {source: 'manual'});
+        showToast('设备列表已刷新', 'success');
+    } catch (error) {
+        showToast(`刷新设备失败: ${error.message}`, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = '↻ 刷新设备';
+            button.removeAttribute('aria-busy');
+        }
+    }
 }
 
 function selectAllDevices() {

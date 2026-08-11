@@ -160,10 +160,11 @@ def _build_management_props_command(device_ids: list[str]) -> str:
     for device_id in device_ids:
         device_shell = (
             f'echo "===DEVICE:{device_id}===" && '
-            "getprop ro.serialno && getprop ro.product.model && "
-            "getprop ro.build.version.release && "
-            'dumpsys battery | grep "^  level:" | cut -d: -f2 | tr -d " " && '
-            "getprop ro.soc.model"
+            'echo "serial_no=$(getprop ro.serialno)" && '
+            'echo "model=$(getprop ro.product.model)" && '
+            'echo "android_version=$(getprop ro.build.version.release)" && '
+            'echo "battery_level=$(dumpsys battery | grep "^  level:" | cut -d: -f2 | tr -d " ")" && '
+            'echo "soc_model=$(getprop ro.soc.model)"'
         )
         commands.append(
             f"adb -s {shlex.quote(device_id)} shell {shlex.quote(device_shell)}"
@@ -182,6 +183,11 @@ def _parse_management_device_props(props_output: str) -> dict[str, dict[str, str
             device_data[current_device] = dict.fromkeys(prop_keys, "")
         elif current_device and line:
             props = device_data[current_device]
+            marked_key, separator, marked_value = line.partition("=")
+            if separator and marked_key in prop_keys:
+                props[marked_key] = marked_value
+                continue
+            # Compatibility with cached/legacy unlabelled probe output.
             for key in prop_keys:
                 if not props[key]:
                     props[key] = line
@@ -298,7 +304,7 @@ def _build_devices_management_payload(
         devices_info.append(
             {
                 "device_id": device_id,
-                "serial_no": props.get("serial_no", device_id),
+                "serial_no": props.get("serial_no") or device_id,
                 "model": props.get("model", ""),
                 "android_version": props.get("android_version", ""),
                 "battery_level": props.get("battery_level", ""),
@@ -454,7 +460,7 @@ async def devices_management(request: Request):
         config = runtime.config_manager.load_config()
         client_id = runtime.get_client_id_from_request(request)
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
-            adb_blocked = has_blocked_adb_process()
+            adb_blocked = await asyncio.to_thread(has_blocked_adb_process)
             output = error = ""
             code = 0
             if not adb_blocked:
@@ -490,15 +496,19 @@ async def devices_management(request: Request):
                 )
             if props_code != 0:
                 logger.warning("[Device Management] property query failed: %s", props_error)
-            payload = _build_devices_management_payload(
-                device_ids, _parse_management_device_props(props_output), config,
-                client_id, _mgmt_username(request),
+            payload = await asyncio.to_thread(
+                _build_devices_management_payload,
+                device_ids,
+                _parse_management_device_props(props_output),
+                config,
+                client_id,
+                _mgmt_username(request),
                 device_protocols,
             )
             payload.update({"success": True, "source": "local"})
             return response(payload)
 
-        ssh = runtime.ssh_manager.get_connection(config)
+        ssh = await asyncio.to_thread(runtime.ssh_manager.get_connection, config)
         if not ssh:
             cached = _cached_management_payload(client_id)
             if cached:
@@ -510,7 +520,12 @@ async def devices_management(request: Request):
                 "warning": "设备主机 SSH 连接失败，请检查主机、账号、密码或密钥配置。",
             })
         try:
-            output, _, _ = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=5)
+            output, _, _ = await asyncio.to_thread(
+                runtime.ssh_manager.execute_command,
+                ssh,
+                "adb devices",
+                timeout=5,
+            )
             adb_devices = DeviceUtils.parse_adb_devices(output)
             fastboot_devices = await asyncio.to_thread(
                 device_manager.get_fastboot_devices,
@@ -524,16 +539,24 @@ async def devices_management(request: Request):
                 return response(_cached_management_payload(client_id) or {"devices": []})
             props_output = ""
             if adb_devices:
-                props_output, _, _ = runtime.ssh_manager.execute_command(
-                    ssh, _build_management_props_command(adb_devices), timeout=15
+                props_output, _, _ = await asyncio.to_thread(
+                    runtime.ssh_manager.execute_command,
+                    ssh,
+                    _build_management_props_command(adb_devices),
+                    timeout=15,
                 )
-            return response(_build_devices_management_payload(
-                device_ids, _parse_management_device_props(props_output), config,
-                client_id, _mgmt_username(request),
+            payload = await asyncio.to_thread(
+                _build_devices_management_payload,
+                device_ids,
+                _parse_management_device_props(props_output),
+                config,
+                client_id,
+                _mgmt_username(request),
                 device_protocols,
-            ))
+            )
+            return response(payload)
         finally:
-            runtime.ssh_manager.return_connection(ssh)
+            await asyncio.to_thread(runtime.ssh_manager.return_connection, ssh)
     except Exception as exc:
         logger.error("Error getting devices management: %s", exc, exc_info=True)
         return response({"success": False, "error": str(exc)}, status_code=500)

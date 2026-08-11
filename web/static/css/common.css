@@ -1134,8 +1134,16 @@ body {
 .vnc-button-frame {
     display: flex;
     flex-wrap: wrap;
-    gap: 2px;
+    gap: 3px;
     margin-top: 10px;
+}
+
+.adb-button-frame .btn-xxs,
+.vnc-button-frame .btn-xxs {
+    flex: 0 0 auto;
+    width: 75px;
+    min-width: 75px;
+    box-sizing: border-box;
 }
 
 /* ==================== Control Frame ==================== */
@@ -2126,6 +2134,13 @@ body.modal-open {
 #device-config-modal .dcfg-toolbar .btn-xxs {
     flex-shrink: 0;
     min-width: auto;
+}
+
+#device-config-modal .dcfg-toolbar .dcfg-refresh-action {
+    min-width: 72px;
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
 }
 
 #device-config-modal .dcfg-toolbar .dcfg-label {

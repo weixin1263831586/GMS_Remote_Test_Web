@@ -103,7 +103,12 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         try:
             from worker_agent.inventory import execute_device_action
 
-            result = execute_device_action(body.action, requested, action_payload)
+            # ADB/aapt2/screenshot actions are blocking subprocess work. Keep
+            # them off the FastAPI event loop so unrelated UI controls and
+            # WebSockets remain responsive while Device Info is loading.
+            result = await asyncio.to_thread(
+                execute_device_action, body.action, requested, action_payload
+            )
             return {"success": True, **result}
         finally:
             repository.claims.release(claim_source)

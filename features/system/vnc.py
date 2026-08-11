@@ -544,6 +544,21 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
         try:
             config = self.config_manager.load_config()
             host = config.get('ubuntu_host', '')
+            if is_local_host(host):
+                # The Controller commonly points ubuntu_host at one of its own
+                # LAN addresses. Avoid an SSH round trip back into the same
+                # machine on every cold desktop mount.
+                x11vnc_running = self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                websockify_running = self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                return {
+                    'running': x11vnc_running and websockify_running,
+                    'vnc_count': int(x11vnc_running),
+                    'port_listening': websockify_running,
+                    'host': host,
+                    'url': novnc_url(host, autoconnect=False),
+                    'local': True,
+                }
+
             ssh = self.ssh_manager.get_connection(config)
             if not ssh:
                 return {'running': False, 'error': 'SSH连接失败'}
