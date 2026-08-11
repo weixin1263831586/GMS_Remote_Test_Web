@@ -19,10 +19,10 @@ from features.assistant.tools import AgentTool, registry
 from features.auth import require_authenticated_user
 from features.devices import device_lock_manager, device_manager, get_or_create_user_state
 from features.redmine import (
-    _name_keys,
-    _norm_name,
     display_names_from_mapping,
     find_user_mapping,
+    name_keys,
+    norm_name,
 )
 from foundation.config import config_manager
 
@@ -511,11 +511,11 @@ class ActionExecutor:
         )
 
     async def _query_suites(self, session, request, params) -> ToolResult:
-        from features.test_execution import _get_available_test_suites, get_default_suites_path
+        from features.test_execution import get_available_test_suites, get_default_suites_path
 
         config = config_manager.load_config()
         base_path = config.get("suites_path") or get_default_suites_path(config)
-        suites = await asyncio.to_thread(_get_available_test_suites, config, base_path)
+        suites = await asyncio.to_thread(get_available_test_suites, config, base_path)
 
         counts = {}
         for s in suites:
@@ -1006,10 +1006,10 @@ class ActionExecutor:
     async def _query_redmine_workload_stats(self, session, request, params) -> ToolResult:
         """统计一个或多个人员的 Redmine 工作量。"""
         from features.redmine import (
-            _resolve_owner_names,
             get_redmine_config_for_request,
             get_redmine_service_for_request,
             load_redmine_user_map_for_owner,
+            resolve_owner_names,
         )
         from features.users import owner_id_from_request
 
@@ -1027,7 +1027,7 @@ class ActionExecutor:
 
         if not names:
             try:
-                names = await _resolve_owner_names(request, redmine_service)
+                names = await resolve_owner_names(request, redmine_service)
             except Exception:
                 names = []
         if not names:
@@ -1183,7 +1183,7 @@ class ActionExecutor:
             return display_names_from_mapping(mapped_user)
 
         # Single search with the compact name — good enough for most cases
-        compact = _norm_name(requested_name).replace(" ", "")
+        compact = norm_name(requested_name).replace(" ", "")
         try:
             candidates = await client.search_users(compact or requested_name, limit=10)
         except Exception as exc:
@@ -1192,7 +1192,7 @@ class ActionExecutor:
         if not candidates:
             return []
 
-        query_keys = _name_keys(requested_name)
+        query_keys = name_keys(requested_name)
         for candidate in candidates:
             if not candidate.get("id"):
                 continue
@@ -1201,7 +1201,7 @@ class ActionExecutor:
                 f"{candidate.get('lastname', '')} {candidate.get('firstname', '')}".strip(),
                 candidate.get("mail") or "",
             ]
-            if any(query_keys.intersection(_name_keys(v)) for v in values):
+            if any(query_keys.intersection(name_keys(v)) for v in values):
                 best_names = list(dict.fromkeys([
                     candidate.get("name") or "",
                     f"{candidate.get('lastname', '')} {candidate.get('firstname', '')}".strip(),

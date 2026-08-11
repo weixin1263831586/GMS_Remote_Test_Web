@@ -17,17 +17,17 @@ from features.firmware.apk import (
     ANDROID_NS,
     JAVA_IDENTIFIER_RE,
     _build_apk_symbol_index,
-    _cleanup_files,
-    _create_apk_task,
     _get_apk_task,
     _get_apk_upload_lock,
-    _normalize_apk_filename,
     _normalize_apk_task_id,
     _persist_apk_task_locked,
     _read_manifest_xml,
     _run_jadx_analysis,
-    _safe_join,
     _score_apk_symbol_candidate,
+    cleanup_files,
+    create_apk_task,
+    normalize_apk_filename,
+    safe_join,
 )
 from foundation.errors import handle_api_errors
 from foundation.uploads import merge_files_to_path, save_upload_to_path
@@ -66,10 +66,10 @@ async def upload_apk(
         return ApiResponse.error("No file provided", status_code=400)
 
     try:
-        filename = _normalize_apk_filename(file_name or file.filename)
+        filename = normalize_apk_filename(file_name or file.filename)
         task_id = _normalize_apk_task_id(upload_id)
-        task_dir = _safe_join(runtime.apk_upload_dir, task_id)
-        apk_path = _safe_join(task_dir, filename)
+        task_dir = safe_join(runtime.apk_upload_dir, task_id)
+        apk_path = safe_join(task_dir, filename)
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
 
@@ -90,12 +90,12 @@ async def upload_apk(
         ):
             return ApiResponse.error("Invalid chunk parameters", status_code=400)
 
-        chunk_path = _safe_join(task_dir, f"{filename}.part{chunk_index}")
+        chunk_path = safe_join(task_dir, f"{filename}.part{chunk_index}")
         upload_lock = _get_apk_upload_lock(task_id)
         async with upload_lock:
             if _task_id_in_use(task_id):
                 return ApiResponse.error('Task ID already exists', status_code=409)
-            metadata_path = _safe_join(task_dir, 'upload_metadata.json')
+            metadata_path = safe_join(task_dir, 'upload_metadata.json')
             metadata = {'filename': filename, 'total_chunks': total_chunks}
             if os.path.exists(metadata_path):
                 try:
@@ -121,17 +121,17 @@ async def upload_apk(
                     runtime.apk_max_file_size,
                 )
             except ValueError as e:
-                _cleanup_files([chunk_path])
+                cleanup_files([chunk_path])
                 return ApiResponse.error(str(e), status_code=413)
 
             chunk_paths = [
-                _safe_join(task_dir, f"{filename}.part{i}")
+                safe_join(task_dir, f"{filename}.part{i}")
                 for i in range(total_chunks)
             ]
             present = [path for path in chunk_paths if os.path.exists(path)]
             total_size = sum(os.path.getsize(path) for path in present)
             if total_size > runtime.apk_max_file_size:
-                _cleanup_files([*chunk_paths, apk_path, metadata_path])
+                cleanup_files([*chunk_paths, apk_path, metadata_path])
                 return ApiResponse.error(
                     f"File too large, max {runtime.apk_max_file_size // (1024 * 1024)}MB",
                     status_code=413,
@@ -149,17 +149,17 @@ async def upload_apk(
                 })
 
             await asyncio.to_thread(merge_files_to_path, chunk_paths, apk_path)
-            _cleanup_files([*chunk_paths, metadata_path])
+            cleanup_files([*chunk_paths, metadata_path])
 
             file_size = os.path.getsize(apk_path)
             if file_size > runtime.apk_max_file_size:
-                _cleanup_files([apk_path])
+                cleanup_files([apk_path])
                 return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
 
             try:
-                _create_apk_task(task_id, apk_path, filename, _owner_id(request))
+                create_apk_task(task_id, apk_path, filename, _owner_id(request))
             except ValueError as exc:
-                _cleanup_files([apk_path])
+                cleanup_files([apk_path])
                 return ApiResponse.error(str(exc), status_code=429)
             return ApiResponse.success({"task_id": task_id, "filename": filename, "size": file_size, "uploaded": True})
     else:
@@ -172,12 +172,12 @@ async def upload_apk(
                     file, apk_path, runtime.apk_max_file_size
                 )
             except ValueError as e:
-                _cleanup_files([apk_path])
+                cleanup_files([apk_path])
                 return ApiResponse.error(str(e), status_code=413)
             try:
-                _create_apk_task(task_id, apk_path, filename, _owner_id(request))
+                create_apk_task(task_id, apk_path, filename, _owner_id(request))
             except ValueError as exc:
-                _cleanup_files([apk_path])
+                cleanup_files([apk_path])
                 return ApiResponse.error(str(exc), status_code=429)
         return ApiResponse.success({"task_id": task_id, "filename": filename, "size": file_size})
 
@@ -205,7 +205,7 @@ async def analyze_apk(task_id: str, request: Request):
     if not os.path.exists(apk_path):
         return ApiResponse.error("APK file not found, please re-upload", status_code=404)
 
-    output_dir = _safe_join(runtime.apk_upload_dir, _normalize_apk_task_id(task_id), "jadx_output")
+    output_dir = safe_join(runtime.apk_upload_dir, _normalize_apk_task_id(task_id), "jadx_output")
 
     with runtime.global_state.apk_analysis_tasks_lock:
         t = runtime.global_state.apk_analysis_tasks[task_id]
@@ -314,13 +314,13 @@ async def get_apk_source(
     if err:
         return err
 
-    sources_dir = _safe_join(task.get("output_dir", ""), "sources")
+    sources_dir = safe_join(task.get("output_dir", ""), "sources")
     if not os.path.exists(sources_dir):
         return ApiResponse.error("Source directory not found", status_code=404)
 
     if view:
         try:
-            file_path = _safe_join(sources_dir, path)
+            file_path = safe_join(sources_dir, path)
         except ValueError:
             return ApiResponse.error("Illegal path", status_code=400)
         if not os.path.isfile(file_path):
@@ -337,7 +337,7 @@ async def get_apk_source(
             return ApiResponse.error(f"Failed to read file: {e}", status_code=500)
     else:
         try:
-            target_dir = _safe_join(sources_dir, path) if path else sources_dir
+            target_dir = safe_join(sources_dir, path) if path else sources_dir
         except ValueError:
             return ApiResponse.error("Illegal path", status_code=400)
         if not os.path.isdir(target_dir):
@@ -376,7 +376,7 @@ async def search_apk_source_files(
         return ApiResponse.success({"items": [], "total": 0})
 
     limit = max(1, min(limit, 50))
-    sources_dir = _safe_join(task.get("output_dir", ""), "sources")
+    sources_dir = safe_join(task.get("output_dir", ""), "sources")
     if not os.path.exists(sources_dir):
         return ApiResponse.error("Source directory not found", status_code=404)
 
@@ -438,9 +438,9 @@ async def download_apk_source(task_id: str, request: Request):
     if not os.path.exists(output_dir):
         return ApiResponse.error("Output directory not found", status_code=404)
 
-    filename = _normalize_apk_filename(task.get("filename", "app.apk")).replace(".apk", "_decompiled").replace(".jar", "_decompiled")
+    filename = normalize_apk_filename(task.get("filename", "app.apk")).replace(".apk", "_decompiled").replace(".jar", "_decompiled")
     zip_path = shutil.make_archive(
-        _safe_join(runtime.apk_upload_dir, task_id, filename),
+        safe_join(runtime.apk_upload_dir, task_id, filename),
         "zip",
         output_dir,
     )
@@ -502,7 +502,7 @@ async def delete_apk_task(task_id: str, request: Request):
         if runtime.apk_task_store is not None:
             runtime.apk_task_store.delete(safe_task_id)
 
-    task_dir = _safe_join(runtime.apk_upload_dir, safe_task_id)
+    task_dir = safe_join(runtime.apk_upload_dir, safe_task_id)
     await asyncio.to_thread(shutil.rmtree, task_dir, ignore_errors=True)
     with runtime.global_state.apk_upload_locks_lock:
         runtime.global_state.apk_upload_locks.pop(safe_task_id, None)

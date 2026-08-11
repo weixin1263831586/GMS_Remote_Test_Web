@@ -6,8 +6,8 @@ import sqlite3
 from typing import Any
 
 from .users import (
-    _name_keys,
     _now,
+    name_keys,
 )
 
 
@@ -71,7 +71,7 @@ class RepositoryStorageMixin:
         """
         owner_keys = set()
         for name in owner_names or []:
-            owner_keys.update(_name_keys(name))
+            owner_keys.update(name_keys(name))
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -84,7 +84,7 @@ class RepositoryStorageMixin:
         result: list[dict[str, Any]] = []
         max_items = max(1, min(int(limit or 500), 2000))
         for issue in issues:
-            if owner_keys and not owner_keys.intersection(_name_keys(issue.get("assigned_to_name"))):
+            if owner_keys and not owner_keys.intersection(name_keys(issue.get("assigned_to_name"))):
                 continue
             resolved_on = issue.get("closed_on") or self._resolved_at_from_journals(issue)
             if start and resolved_on < start:

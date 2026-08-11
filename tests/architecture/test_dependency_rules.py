@@ -19,6 +19,17 @@ def imports(path: Path) -> set[str]:
     return result
 
 
+def imported_symbols(path: Path) -> list[tuple[str, str]]:
+    """Return ``(module, symbol_name)`` pairs for every ``from X import Y``."""
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    result: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                result.append((node.module, alias.name))
+    return result
+
+
 class DependencyRuleTests(unittest.TestCase):
     def test_foundation_never_imports_features(self):
         offenders = []
@@ -65,4 +76,33 @@ class DependencyRuleTests(unittest.TestCase):
                 )
                 if bad:
                     offenders.append((relative, bad))
+        self.assertEqual(offenders, [])
+
+    def test_never_import_private_symbols_across_features(self):
+        """``_``-prefixed names must not leak across feature boundaries.
+
+        Symbols like ``_helper`` are package-private.  Importing them from
+        another feature (or from ``bootstrap``) couples consumers to internal
+        implementation details.  If a name is needed externally, drop the
+        underscore and re-export it from the feature package.
+        """
+        offenders = []
+        for base in ('features', 'bootstrap', 'workflows'):
+            for path in (ROOT / base).rglob('*.py'):
+                relative = str(path.relative_to(ROOT))
+                if '/tests/' in relative or '__pycache__' in relative:
+                    continue
+                current_feature = None
+                parts_path = path.relative_to(ROOT).parts
+                if parts_path[0] == 'features' and len(parts_path) > 1:
+                    current_feature = parts_path[1]
+                for module, symbol in imported_symbols(path):
+                    if not module.startswith('features.'):
+                        continue
+                    mod_parts = module.split('.')
+                    target_feature = mod_parts[1] if len(mod_parts) >= 2 else None
+                    if target_feature == current_feature:
+                        continue
+                    if symbol.startswith('_'):
+                        offenders.append((relative, f'from {module} import {symbol}'))
         self.assertEqual(offenders, [])

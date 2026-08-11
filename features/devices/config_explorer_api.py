@@ -39,10 +39,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _generate_help_or_continue: Callable[[bool, str, str], Any] | None = None
-_create_apk_task: Callable[[str, str, str, str], Any] | None = None
-_normalize_apk_filename: Callable[[str], str] | None = None
-_safe_join: Callable[[str, str], str] | None = None
-_cleanup_files: Callable[[list[str]], Any] | None = None
+_create_apk_task_fn: Callable[[str, str, str, str], Any] | None = None
+_normalize_apk_filename_fn: Callable[[str], str] | None = None
+_safe_join_fn: Callable[[str, str], str] | None = None
+_cleanup_files_fn: Callable[[list[str]], Any] | None = None
 
 
 def configure_config_explorer_dependencies(
@@ -54,16 +54,16 @@ def configure_config_explorer_dependencies(
     cleanup_files: Callable[[list[str]], Any],
 ) -> None:
     global _generate_help_or_continue
-    global _create_apk_task
-    global _normalize_apk_filename
-    global _safe_join
-    global _cleanup_files
+    global _create_apk_task_fn
+    global _normalize_apk_filename_fn
+    global _safe_join_fn
+    global _cleanup_files_fn
 
     _generate_help_or_continue = generate_help_or_continue
-    _create_apk_task = create_apk_task
-    _normalize_apk_filename = normalize_apk_filename
-    _safe_join = safe_join
-    _cleanup_files = cleanup_files
+    _create_apk_task_fn = create_apk_task
+    _normalize_apk_filename_fn = normalize_apk_filename
+    _safe_join_fn = safe_join
+    _cleanup_files_fn = cleanup_files
 
 
 def _help_or_continue(help: bool, method: str, path: str):
@@ -76,10 +76,10 @@ def _decompile_dependencies_ready() -> bool:
     return all(
         dep is not None
         for dep in (
-            _create_apk_task,
-            _normalize_apk_filename,
-            _safe_join,
-            _cleanup_files,
+            _create_apk_task_fn,
+            _normalize_apk_filename_fn,
+            _safe_join_fn,
+            _cleanup_files_fn,
         )
     )
 
@@ -279,15 +279,16 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
     base = os.path.basename(on_device_path.rstrip("/")) or "app.apk"
     if "." not in base:
         base += ".apk"
-    assert _normalize_apk_filename is not None
-    assert _safe_join is not None
-    assert _cleanup_files is not None
-    assert _create_apk_task is not None
-    filename = _normalize_apk_filename(base)
+    # _decompile_dependencies_ready() 已确保依赖非 None；断言用于类型收窄。
+    assert _normalize_apk_filename_fn is not None
+    assert _safe_join_fn is not None
+    assert _cleanup_files_fn is not None
+    assert _create_apk_task_fn is not None
+    filename = _normalize_apk_filename_fn(base)
     task_id = str(uuid.uuid4())
-    task_dir = _safe_join(APK_UPLOAD_DIR, task_id)
+    task_dir = _safe_join_fn(APK_UPLOAD_DIR, task_id)
     os.makedirs(task_dir, exist_ok=True)
-    apk_path = _safe_join(task_dir, filename)
+    apk_path = _safe_join_fn(task_dir, filename)
 
     try:
         # Pull on a worker thread (blocking adb transfer).
@@ -299,25 +300,25 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
             )
         )
     except Exception as e:
-        _cleanup_files([apk_path])
+        _cleanup_files_fn([apk_path])
         logger.error(f"decompile pull failed: {e}")
         return error_response(f"拉取 APK 失败: {e}", status_code=400)
 
     if os.path.getsize(apk_path) > APK_MAX_FILE_SIZE:
-        _cleanup_files([apk_path])
+        _cleanup_files_fn([apk_path])
         return error_response(
             f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400
         )
 
     try:
-        _create_apk_task(
+        _create_apk_task_fn(
             task_id,
             apk_path,
             filename,
             get_client_id_from_request(request),
         )
     except ValueError as exc:
-        _cleanup_files([apk_path])
+        _cleanup_files_fn([apk_path])
         return error_response(str(exc), status_code=429)
     return success_response(
         data={

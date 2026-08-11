@@ -243,7 +243,7 @@ async def _query_gerrit_via_ssh_once(cfg: dict[str, Any], query: str) -> dict[st
     return {"items": items, "stats": stats, "error": error, "source": "ssh"}
 
 
-async def _query_gerrit_dual_mode(
+async def query_gerrit_dual_mode(
     cfg: dict[str, Any],
     query: str,
     max_changes: int | None = None,

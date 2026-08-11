@@ -3900,6 +3900,229 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 finally:
                     page.close()
 
+    def test_test_suite_cluster_controls_wait_for_scope_before_becoming_visible(self):
+        for scope_mode in ("single", "cluster"):
+            with self.subTest(scope_mode=scope_mode):
+                page = self.new_page()
+
+                def json_response(route, payload):
+                    route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps(payload),
+                    )
+
+                page.route(
+                    "**/api/cluster/status",
+                    lambda route: json_response(route, {
+                        "success": True,
+                        "enabled": True,
+                        "local_worker_id": "ats-worker-controller",
+                    }),
+                )
+                page.route(
+                    "**/api/users/workspace-context",
+                    lambda route: json_response(route, {
+                        "success": True,
+                        "data": {"context": {
+                            "scope_mode": scope_mode,
+                            "worker_id": (
+                                "worker-a"
+                                if scope_mode == "cluster"
+                                else "ats-worker-controller"
+                            ),
+                            "device_ids": [],
+                        }},
+                    }),
+                )
+                page.add_init_script(
+                    """
+                    localStorage.setItem('gms_current_page','test-suites');
+                    const nativeFetch=window.fetch.bind(window);
+                    window.fetch=(input,options={})=>{
+                      const request=nativeFetch(input,options);
+                      const url=String(input);
+                      if(url.includes('/api/cluster/status')||url.includes('/api/users/workspace-context')){
+                        return new Promise((resolve,reject)=>setTimeout(()=>request.then(resolve,reject),1000));
+                      }
+                      return request;
+                    };
+                    """
+                )
+                try:
+                    elevated = page.request.post(
+                        f"{self.base_url}/api/auth/elevate",
+                        data={"username": "ui-admin", "password": "UiSmokeAdmin-2026!"},
+                    )
+                    self.assertTrue(elevated.ok, elevated.text())
+                    page.goto(self.base_url, wait_until="domcontentloaded")
+
+                    expect(page.locator("#page-test-suites")).to_have_class(
+                        re.compile(r"\bactive\b")
+                    )
+                    expect(page.locator("body")).to_have_class(
+                        re.compile(r"workspace-scope-pending")
+                    )
+                    expect(page.locator("#btn-copy-test-report")).to_be_hidden()
+                    expect(page.locator("#suite-worker-select")).to_be_hidden()
+
+                    expect(page.locator("body")).to_have_class(
+                        re.compile(rf"workspace-scope-{scope_mode}")
+                    )
+                    if scope_mode == "cluster":
+                        expect(page.locator("#btn-copy-test-report")).to_be_visible()
+                        expect(page.locator("#suite-worker-select")).to_be_visible()
+                    else:
+                        expect(page.locator("#btn-copy-test-report")).to_be_hidden()
+                        expect(page.locator("#suite-worker-select")).to_be_hidden()
+                finally:
+                    page.close()
+
+    def test_report_copy_modal_has_stable_layout_and_actual_suite_names(self):
+        page = self.new_page()
+
+        def json_response(route, payload):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+        source_suite = {
+            "available": True,
+            "suite_type": "GTS",
+            "test_type": "gts",
+            "suite_version": "14",
+            "version": "android-gts-14",
+            "suite_key": "GTS:14",
+            "tools_path": (
+                "/home/source/GMS-Suite/android-gts-14-R1-15492250/android-gts/tools"
+            ),
+        }
+        target_suites = [
+            {
+                **source_suite,
+                "tools_path": "/home/target/GMS-Suite/android-gts-14/android-gts/tools",
+            },
+            {
+                **source_suite,
+                "tools_path": (
+                    "/home/target/GMS-Suite/"
+                    "android-gts-14-R1-15492250/android-gts/tools"
+                ),
+            },
+        ]
+
+        def fulfill_cluster(route):
+            url = route.request.url
+            path = url.split("?", 1)[0]
+            if path.endswith("/api/cluster/status"):
+                payload = {
+                    "success": True,
+                    "enabled": True,
+                    "local_worker_id": "ats-worker-controller",
+                }
+            elif path.endswith("/api/cluster/workers"):
+                payload = {
+                    "success": True,
+                    "workers": [
+                        {
+                            "id": "ats-worker-controller",
+                            "address": "192.0.2.10",
+                            "status": "online",
+                        },
+                        {
+                            "id": "worker-a",
+                            "address": "192.0.2.11",
+                            "status": "online",
+                        },
+                    ],
+                }
+            elif path.endswith("/api/cluster/suites/files"):
+                payload = {
+                    "success": True,
+                    "data": {"items": [
+                        {
+                            "name": "2026.08.07_15.56.09.558_3101",
+                            "type": "directory",
+                        },
+                        {
+                            "name": "2026.07.30_10.39.50.173_6846",
+                            "type": "directory",
+                        },
+                    ]},
+                }
+            elif path.endswith("/api/cluster/suites"):
+                payload = {
+                    "success": True,
+                    "suites": target_suites if "worker_id=worker-a" in url else [source_suite],
+                }
+            else:
+                payload = {"success": True}
+            json_response(route, payload)
+
+        page.route("**/api/cluster/**", fulfill_cluster)
+        page.add_init_script("localStorage.setItem('gms_current_page','test-suites');")
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof openReportCopyModal === 'function'")
+            page.evaluate("void openReportCopyModal()")
+
+            modal = page.locator("#report-copy-modal .report-copy-modal-content")
+            expect(modal).to_be_visible()
+            expect(page.locator("#report-copy-target-suite option")).to_have_count(2)
+            expect(page.locator("#report-copy-source-report option")).to_have_count(2)
+
+            self.assertEqual(
+                page.locator("#report-copy-source-report option").all_text_contents(),
+                [
+                    "2026.07.30_10.39.50.173_6846",
+                    "2026.08.07_15.56.09.558_3101",
+                ],
+            )
+            self.assertEqual(
+                page.locator("#report-copy-target-suite option").all_text_contents(),
+                ["android-gts-14", "android-gts-14-R1-15492250"],
+            )
+            expect(page.locator("#report-copy-target-suite")).to_have_value(
+                "/home/target/GMS-Suite/"
+                "android-gts-14-R1-15492250/android-gts/tools"
+            )
+
+            initial_box = modal.bounding_box()
+            self.assertIsNotNone(initial_box)
+            self.assertAlmostEqual(initial_box["width"], 760, delta=0.5)
+            self.assertAlmostEqual(initial_box["height"], 500, delta=0.5)
+            page.evaluate(
+                "setReportCopyStatus('状态内容出现后，弹框外框尺寸仍然保持固定。', 'info')"
+            )
+            status_box = modal.bounding_box()
+            self.assertIsNotNone(status_box)
+            self.assertAlmostEqual(status_box["width"], initial_box["width"], delta=0.5)
+            self.assertAlmostEqual(status_box["height"], initial_box["height"], delta=0.5)
+
+            select_metrics = page.locator("#report-copy-target-suite").evaluate(
+                """select => {
+                    const style = getComputedStyle(select);
+                    return {
+                        height: select.getBoundingClientRect().height,
+                        fontSize: parseFloat(style.fontSize),
+                        paddingTop: parseFloat(style.paddingTop),
+                        paddingBottom: parseFloat(style.paddingBottom),
+                        clientHeight: select.clientHeight,
+                    };
+                }"""
+            )
+            self.assertAlmostEqual(select_metrics["height"], 36, delta=0.5)
+            self.assertLessEqual(
+                select_metrics["fontSize"]
+                + select_metrics["paddingTop"]
+                + select_metrics["paddingBottom"],
+                select_metrics["clientHeight"],
+            )
+        finally:
+            page.close()
+
     def test_terminal_page_switch_reuses_websocket_and_buffer(self):
         page = self.new_page()
         terminal_websockets = []

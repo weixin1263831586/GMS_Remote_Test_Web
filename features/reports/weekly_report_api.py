@@ -17,8 +17,8 @@ import aiohttp
 from fastapi import APIRouter, Query, Request
 
 from features.test_execution import (
-    _get_available_test_suites,
     execute_tradefed_command,
+    get_available_test_suites,
     get_default_suites_path,
     parse_tradefed_list_results,
 )
@@ -387,7 +387,7 @@ async def _collect_gms_test(start: date, end: date) -> dict[str, Any]:
     """
     config = te_runtime.config_manager.load_config()
     base_path = config.get("suites_path") or get_default_suites_path(config)
-    suites = _get_available_test_suites(config, base_path)
+    suites = get_available_test_suites(config, base_path)
     if not suites:
         return {"available": False, "error": f"GMS 套件目录为空或不存在: {base_path}"}
 

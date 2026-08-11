@@ -5,11 +5,13 @@ import mimetypes
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 import time
 import urllib.parse
 import urllib.request
+import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable
@@ -619,6 +621,116 @@ def prepare_suite_export(config: WorkerConfig, payload: dict[str, Any]) -> tuple
     archive_base = export_root / f"{payload.get('transfer_id')}-{target.name}"
     archive = Path(shutil.make_archive(str(archive_base), "zip", target.parent, target.name))
     return archive, True
+
+
+_REPORT_DIRECTORY_RE = re.compile(
+    r"^\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}(?:\.\d+)?(?:_\d+)?$"
+)
+
+
+def import_suite_report(
+    config: WorkerConfig,
+    archive_path: Path,
+    target_suite_path: str,
+    report_name: str,
+) -> dict[str, Any]:
+    """Safely import one Tradefed result directory into a configured suite."""
+    if not _REPORT_DIRECTORY_RE.fullmatch(report_name):
+        raise ValueError("invalid Tradefed report directory name")
+
+    suite_path = Path(target_suite_path).expanduser().resolve()
+    suite_root = suite_path.parent if suite_path.name == "tools" else suite_path
+    roots = [
+        root.expanduser().resolve()
+        for root in config.suite_roots
+        if root.expanduser().exists()
+    ]
+    if not suite_root.is_dir() or not any(suite_root.is_relative_to(root) for root in roots):
+        raise ValueError("target suite path is outside configured roots")
+
+    archive = Path(archive_path).resolve()
+    allowed_archive_root = (config.data_root / "report-copies").resolve()
+    if not archive.is_file() or not archive.is_relative_to(allowed_archive_root):
+        raise ValueError("report archive is outside Worker staging")
+    if not zipfile.is_zipfile(archive):
+        raise ValueError("report archive is not a ZIP file")
+
+    results_dir = suite_root / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    destination = results_dir / report_name
+    if destination.exists():
+        raise ValueError(f"target report already exists: {report_name}")
+
+    max_files = max(1, int(os.getenv("GMS_WORKER_REPORT_COPY_MAX_FILES", "200000")))
+    max_bytes = max(
+        1,
+        int(os.getenv("GMS_WORKER_REPORT_COPY_MAX_BYTES", str(20 * 1024 ** 3))),
+    )
+    staging = results_dir / f".gms-report-copy-{uuid.uuid4().hex}"
+    staging.mkdir(mode=0o700)
+    extracted_bytes = 0
+    extracted_files = 0
+    seen_paths: set[str] = set()
+    try:
+        with zipfile.ZipFile(archive) as bundle:
+            members = bundle.infolist()
+            if not members or len(members) > max_files:
+                raise ValueError("report archive contains an invalid number of entries")
+            declared_bytes = sum(max(0, member.file_size) for member in members)
+            if declared_bytes > max_bytes:
+                raise ValueError("report archive exceeds Worker extraction limit")
+
+            for member in members:
+                normalized_name = member.filename.replace("\\", "/").rstrip("/")
+                parts = [part for part in normalized_name.split("/") if part]
+                if (
+                    not parts
+                    or parts[0] != report_name
+                    or normalized_name.startswith("/")
+                    or any(part in {".", ".."} for part in parts)
+                ):
+                    raise ValueError("report archive contains an unsafe path")
+                relative_name = "/".join(parts)
+                if relative_name in seen_paths:
+                    raise ValueError("report archive contains duplicate paths")
+                seen_paths.add(relative_name)
+
+                unix_mode = (member.external_attr >> 16) & 0xFFFF
+                file_type = stat.S_IFMT(unix_mode)
+                if file_type not in {0, stat.S_IFREG, stat.S_IFDIR}:
+                    raise ValueError("report archive contains an unsupported entry")
+
+                target = (staging / relative_name).resolve()
+                if not target.is_relative_to(staging.resolve()):
+                    raise ValueError("report archive contains an unsafe path")
+                if member.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with bundle.open(member) as source, target.open("xb") as output:
+                    while block := source.read(1024 * 1024):
+                        extracted_bytes += len(block)
+                        if extracted_bytes > max_bytes:
+                            raise ValueError("report archive exceeds Worker extraction limit")
+                        output.write(block)
+                extracted_files += 1
+
+        staged_report = staging / report_name
+        if not staged_report.is_dir() or extracted_files == 0:
+            raise ValueError("report archive does not contain a result directory")
+        if destination.exists():
+            raise ValueError(f"target report already exists: {report_name}")
+        staged_report.rename(destination)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    return {
+        "report_name": report_name,
+        "destination": str(destination),
+        "file_count": extracted_files,
+        "size_bytes": extracted_bytes,
+    }
 
 
 def flash_firmware(config: WorkerConfig, firmware: Path, device_ids: list[str]) -> dict[str, Any]:

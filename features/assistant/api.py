@@ -351,11 +351,11 @@ def _list_suites(workspace_context: dict[str, Any] | None = None) -> list[dict[s
             item for item in get_cluster_service().repository.list_suites(worker_id)
             if item.get("available")
         ]
-    from features.test_execution import _get_available_test_suites
+    from features.test_execution import get_available_test_suites
 
     config = config_manager.load_config()
     base_path = config.get("suites_path") or get_default_suites_path(config)
-    return _get_available_test_suites(config, base_path)
+    return get_available_test_suites(config, base_path)
 
 
 def _select_suite(

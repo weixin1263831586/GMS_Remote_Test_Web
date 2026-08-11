@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260811-uniform-buttons">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260811-report-copy-layout">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
@@ -24,7 +24,7 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
-    <script src="/static/js/pages/test-suite-browser.js?v=20260810-refresh-feedback" defer></script>
+    <script src="/static/js/pages/test-suite-browser.js?v=20260811-report-copy-layout" defer></script>
     <script src="/static/js/pages/firmware-burn.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/vpn-control.js?v=20260810-modular-split" defer></script>
@@ -216,6 +216,7 @@
         body.workspace-scope-single #page-desktop .host-workspace-layouts,
         body.workspace-scope-single #page-terminal .host-workspace-layouts,
         body.workspace-scope-single [data-multi-host-control],
+        body.workspace-scope-pending [data-multi-host-control],
         body.workspace-scope-single #page-devices [data-cluster-mode-only] { display: none !important; }
         body.workspace-scope-single #page-desktop .host-workspace-pane-header,
         body.workspace-scope-single #page-terminal .host-workspace-pane-header { display: none !important; }
@@ -1357,7 +1358,7 @@
         <div class="container page-content" id="page-test-suites">
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <div class="section-title">📚 测试套件</div>
-                <label style="font-size:12px;color:var(--text-secondary);">主机
+                <label data-multi-host-control style="font-size:12px;color:var(--text-secondary);">主机
                     <select id="suite-worker-select" onchange="switchSuiteWorker()" disabled style="width:130px;padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;box-sizing:border-box;"><option value="">正在加载主机...</option></select>
                 </label>
             </div>
@@ -1407,6 +1408,9 @@
                             <div id="suite-browser-path" class="suite-browser-path"></div>
                         </div>
                         <div style="display: flex; gap: 6px; align-items: center;">
+                            <button id="btn-copy-test-report" class="btn-xs" data-multi-host-control onclick="openReportCopyModal()" style="white-space: nowrap; height: 28px;" title="在不同 Worker 的测试套件之间复制 Tradefed results 报告">
+                                🔁 跨主机拷贝报告
+                            </button>
                             <button id="btn-test-results" class="btn-xs" onclick="openTestResultsModal()" style="white-space: nowrap; height: 28px;" title="执行 tradefed list results 查看该套件的测试结果">
                                 📋 测试结果列表
                             </button>
@@ -2489,6 +2493,59 @@
         <button type="button" class="btn-xs btn-primary" onclick="restoreTestResultsModal()">📋 测试结果列表</button>
         <div id="test-results-minimized-title" class="dcfg-minimized-title"></div>
         <button type="button" class="btn-xxs" onclick="closeTestResultsModal()">关闭</button>
+    </div>
+
+    <!-- 跨主机测试报告拷贝弹框 -->
+    <div id="report-copy-modal" class="modal" style="z-index: 10100;">
+        <div class="modal-content report-copy-modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🔁 跨主机拷贝测试报告</span>
+                <span class="modal-close" onclick="closeReportCopyModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="margin-bottom: 12px;">
+                    选择来源 Worker 的一个 Tradefed results 报告，并复制到目标 Worker 所选套件的 results 目录。目标中已存在同名报告时不会覆盖。
+                </div>
+                <div style="display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr);gap:12px;align-items:start;">
+                    <div style="min-width:0;">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">报告来源</div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-source-worker" style="display:block;margin-bottom:4px;">来源主机</label>
+                            <select id="report-copy-source-worker" class="combo-box" onchange="onReportCopySourceWorkerChange()" style="width:100%;"></select>
+                        </div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-source-suite" style="display:block;margin-bottom:4px;">来源套件</label>
+                            <select id="report-copy-source-suite" class="combo-box" onchange="onReportCopySourceSuiteChange()" style="width:100%;"></select>
+                        </div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-source-report" style="display:block;margin-bottom:4px;">来源报告</label>
+                            <select id="report-copy-source-report" class="combo-box" style="width:100%;"></select>
+                        </div>
+                    </div>
+                    <div aria-hidden="true" style="padding-top:96px;text-align:center;color:var(--primary-color);font-size:22px;">→</div>
+                    <div style="min-width:0;">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">拷贝目标</div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-target-worker" style="display:block;margin-bottom:4px;">目标主机</label>
+                            <select id="report-copy-target-worker" class="combo-box" onchange="onReportCopyTargetWorkerChange()" style="width:100%;"></select>
+                        </div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-target-suite" style="display:block;margin-bottom:4px;">目标套件</label>
+                            <select id="report-copy-target-suite" class="combo-box" onchange="updateReportCopyTargetPath()" style="width:100%;"></select>
+                        </div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-target-path" style="display:block;margin-bottom:4px;">目标目录</label>
+                            <input id="report-copy-target-path" type="text" readonly style="width:100%;box-sizing:border-box;" />
+                        </div>
+                    </div>
+                </div>
+                <div id="report-copy-status" class="modal-info-text" style="display:none;margin-top:12px;white-space:pre-wrap;"></div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn-xxs" onclick="closeReportCopyModal()">关闭</button>
+                    <button type="button" id="report-copy-submit" class="btn-xxs btn-primary" onclick="submitReportCopy()">开始拷贝</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 烧写固件弹框 -->

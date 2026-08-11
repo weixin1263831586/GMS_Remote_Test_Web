@@ -540,7 +540,7 @@ async def list_issues(
 ):
     service = get_redmine_service_for_request(request)
     # 个人工单列表仅返回当前登录用户的数据。
-    owner_names = await _resolve_owner_names(request)
+    owner_names = await resolve_owner_names(request)
     raw_issues = service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order, assignee_names=owner_names)
     # 批量读取案例事实用于界面补充。
     facts_by_id = service.knowledge.get_case_facts_for_issue_ids(
@@ -564,7 +564,7 @@ async def get_statistics(request: Request):
     return {"success": True, "data": service.repository.get_issue_statistics()}
 
 
-async def _resolve_owner_names(request: Request | None = None, service: RedmineService | None = None) -> list[str]:
+async def resolve_owner_names(request: Request | None = None, service: RedmineService | None = None) -> list[str]:
     if request is None:
         raise ValueError("authenticated request is required")
     selected_service = service or get_redmine_service_for_request(request)
@@ -640,7 +640,7 @@ async def list_stat_users(request: Request):
         }
         for item in _load_user_map_for_request(request)
     ]
-    current_names = await _resolve_owner_names(request)
+    current_names = await resolve_owner_names(request)
     current_name = ""
     if current_names:
         # 使用用户映射中的准确姓名作为默认选项。

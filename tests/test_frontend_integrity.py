@@ -412,10 +412,34 @@ class FrontendIntegrityTests(unittest.TestCase):
 
         self.assertRegex(
             main_text,
-            r'id="suite-worker-select"[^>]+disabled[^>]*>\s*<option value="">正在加载主机',
+            r'<label data-multi-host-control[^>]*>主机\s*<select id="suite-worker-select"[^>]+disabled[^>]*>\s*<option value="">正在加载主机',
         )
         self.assertIn("_suiteWorkerSelectorPromise", navigation_text)
         self.assertIn('id="gms-assistant-url" style="width:100%;box-sizing:border-box;"', main_text)
+
+    def test_suite_report_copy_modal_uses_worker_and_suite_choices(self):
+        main_text = read_text("web/shell/shell.html")
+        common_text = read_text("web/static/css/common.css")
+        navigation_text = read_all_frontend_js()
+
+        self.assertIn('id="btn-copy-test-report"', main_text)
+        self.assertIn('id="report-copy-modal"', main_text)
+        self.assertIn('class="modal-content report-copy-modal-content"', main_text)
+        self.assertIn('id="report-copy-source-worker"', main_text)
+        self.assertIn('id="report-copy-source-report"', main_text)
+        self.assertIn('id="report-copy-target-worker"', main_text)
+        self.assertIn('id="report-copy-target-suite"', main_text)
+        self.assertIn("#report-copy-modal .report-copy-modal-content", common_text)
+        self.assertIn("height: 500px", common_text)
+        self.assertIn("#report-copy-modal select.combo-box", common_text)
+        self.assertIn("function reportCopySuiteLabel(suite)", navigation_text)
+        self.assertIn(
+            ".sort((left, right) => left.name.localeCompare(right.name))",
+            navigation_text,
+        )
+        self.assertIn("/api/cluster/suites/report-copies", navigation_text)
+        self.assertIn("source_worker_id: sourceWorkerId", navigation_text)
+        self.assertIn("target_worker_id: targetWorkerId", navigation_text)
 
     def test_manual_suite_refresh_forces_reload_and_has_busy_feedback(self):
         main_text = read_text("web/shell/shell.html")
@@ -438,6 +462,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn('class="sidebar-text">${text}</span>', main_text)
         self.assertIn("data-multi-host-control", main_text)
         self.assertIn("workspace-scope-single", main_text)
+        self.assertIn("body.workspace-scope-pending [data-multi-host-control]", main_text)
         self.assertIn(
             "includeCluster\n                        ? fetch('/api/cluster/status'",
             main_text,

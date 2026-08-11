@@ -13,6 +13,7 @@ from worker_agent.inventory import (
     execute_suite_action,
     execute_usbip_action,
     flash_firmware,
+    import_suite_report,
     prepare_suite_export,
 )
 
@@ -338,6 +339,72 @@ def test_prepare_suite_directory_export_creates_zip(tmp_path):
     assert temporary is True
     with zipfile.ZipFile(archive) as bundle:
         assert bundle.read("run-1/test_result.xml") == b"result"
+
+
+def test_import_suite_report_extracts_one_timestamp_directory(tmp_path):
+    report_name = "2026.08.07_15.56.09.558_3101"
+    root = tmp_path / "suites"
+    tools = root / "android-cts" / "tools"
+    tools.mkdir(parents=True)
+    data_root = tmp_path / "data"
+    archive = data_root / "report-copies" / "transfer-1" / "report.zip"
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr(f"{report_name}/test_result.xml", "result")
+        bundle.writestr(f"{report_name}/module/test.txt", "passed")
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://controller",
+        token="t",
+        suite_roots=[root],
+        data_root=data_root,
+    )
+
+    result = import_suite_report(config, archive, str(tools), report_name)
+
+    destination = root / "android-cts" / "results" / report_name
+    assert result["destination"] == str(destination)
+    assert result["file_count"] == 2
+    assert (destination / "test_result.xml").read_text(encoding="utf-8") == "result"
+    assert (destination / "module" / "test.txt").read_text(encoding="utf-8") == "passed"
+
+
+def test_import_suite_report_rejects_unsafe_or_existing_destination(tmp_path):
+    report_name = "2026.08.07_15.56.09.558_3101"
+    root = tmp_path / "suites"
+    tools = root / "android-cts" / "tools"
+    tools.mkdir(parents=True)
+    data_root = tmp_path / "data"
+    archive = data_root / "report-copies" / "transfer-1" / "report.zip"
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr(f"{report_name}/../outside.txt", "unsafe")
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://controller",
+        token="t",
+        suite_roots=[root],
+        data_root=data_root,
+    )
+
+    try:
+        import_suite_report(config, archive, str(tools), report_name)
+    except ValueError as exc:
+        assert "unsafe path" in str(exc)
+    else:
+        raise AssertionError("expected unsafe report archive rejection")
+    assert not (root / "android-cts" / "results" / "outside.txt").exists()
+
+    destination = root / "android-cts" / "results" / report_name
+    destination.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr(f"{report_name}/test_result.xml", "result")
+    try:
+        import_suite_report(config, archive, str(tools), report_name)
+    except ValueError as exc:
+        assert "already exists" in str(exc)
+    else:
+        raise AssertionError("expected existing report rejection")
 
 
 def test_firmware_flash_requires_worker_staging_and_exactly_one_loader(tmp_path):

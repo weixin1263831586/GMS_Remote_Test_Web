@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import getpass
+import hashlib
 import logging
 import os
 import re
@@ -36,6 +37,7 @@ from .inventory import (
     flash_firmware,
     flash_gsi,
     host_metrics,
+    import_suite_report,
     prepare_suite_export,
     probe_devices,
     scan_suites,
@@ -348,6 +350,12 @@ class WorkerAgent:
                 self._ack_command(command["id"], "running", {})
                 threading.Thread(target=self.run_suite_export,
                                  args=(command,), name=f"SuiteExport-{command['id']}", daemon=True).start()
+                return
+            elif kind == "report_import":
+                self.runtime.save_command(command["id"], "running", {})
+                self._ack_command(command["id"], "running", {})
+                threading.Thread(target=self.run_report_import,
+                                 args=(command,), name=f"ReportImport-{command['id']}", daemon=True).start()
                 return
             elif kind == "device_export":
                 self.runtime.save_command(command["id"], "running", {})
@@ -670,6 +678,49 @@ class WorkerAgent:
         finally:
             if temporary and path is not None:
                 path.unlink(missing_ok=True)
+
+    def run_report_import(self, command: dict):
+        directory = None
+        try:
+            payload = command.get("payload", {})
+            transfer_id = str(payload.get("transfer_id") or "")
+            if not re.fullmatch(r"transfer-[a-f0-9]{32}", transfer_id):
+                raise ValueError("invalid report copy transfer")
+            directory = self.config.data_root / "report-copies" / transfer_id
+            directory.mkdir(parents=True, exist_ok=False)
+            archive = directory / "report.zip"
+            self.client.download(
+                f"/api/cluster/workers/{self.config.worker_id}/report-copies/{transfer_id}",
+                archive,
+            )
+            digest = hashlib.sha256()
+            with archive.open("rb") as source:
+                while block := source.read(4 * 1024 * 1024):
+                    digest.update(block)
+            if (
+                archive.stat().st_size != int(payload.get("size_bytes") or 0)
+                or digest.hexdigest() != str(payload.get("sha256") or "")
+            ):
+                raise ValueError("report archive checksum mismatch")
+            result = import_suite_report(
+                self.config,
+                archive,
+                str(payload.get("target_suite_path") or ""),
+                str(payload.get("report_name") or ""),
+            )
+            self.runtime.save_command(command["id"], "completed", result)
+            self._retry(lambda: self._ack_command(command["id"], "completed", result))
+        except Exception as exc:
+            logger.exception("report import %s failed", command.get("id"))
+            error = str(exc)
+            self.runtime.save_command(command["id"], "failed", error=error)
+            try:
+                self._ack_command(command["id"], "failed", error=error)
+            except Exception:
+                logger.exception("failed to acknowledge report import failure")
+        finally:
+            if directory is not None:
+                shutil.rmtree(directory, ignore_errors=True)
 
     def run_device_export(self, command: dict):
         path = None

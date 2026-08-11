@@ -7,7 +7,7 @@ import shlex
 from typing import Any
 
 from . import runtime
-from .suite_helpers import _get_available_test_suites
+from .suite_helpers import get_available_test_suites
 from .suites import get_default_suites_path, is_config_host_local, list_local_test_suites
 
 
@@ -198,7 +198,7 @@ def search_latest_suite_modules(
     ]
     base_path = config.get("suites_path") or get_default_suites_path(config)
     local = os.path.isdir(base_path) or is_config_host_local(config)
-    suites = list_local_test_suites(base_path) if os.path.isdir(base_path) else _get_available_test_suites(config, base_path)
+    suites = list_local_test_suites(base_path) if os.path.isdir(base_path) else get_available_test_suites(config, base_path)
     latest_suites = _select_latest_suites(suites, requested_types)
 
     results = []

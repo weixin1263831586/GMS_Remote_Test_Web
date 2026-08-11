@@ -1430,6 +1430,50 @@
         "title": "NotificationReadRequest",
         "type": "object"
       },
+      "ReportCopyCreate": {
+        "properties": {
+          "report_name": {
+            "maxLength": 128,
+            "minLength": 19,
+            "pattern": "^\\d{4}\\.\\d{2}\\.\\d{2}_\\d{2}\\.\\d{2}\\.\\d{2}(?:\\.\\d+)?(?:_\\d+)?$",
+            "title": "Report Name",
+            "type": "string"
+          },
+          "source_suite_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Source Suite Path",
+            "type": "string"
+          },
+          "source_worker_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Source Worker Id",
+            "type": "string"
+          },
+          "target_suite_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Target Suite Path",
+            "type": "string"
+          },
+          "target_worker_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Target Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_worker_id",
+          "source_suite_path",
+          "report_name",
+          "target_worker_id",
+          "target_suite_path"
+        ],
+        "title": "ReportCopyCreate",
+        "type": "object"
+      },
       "ReportDiagnosisRequest": {
         "properties": {
           "class_names": {
@@ -6874,6 +6918,85 @@
         ]
       }
     },
+    "/api/cluster/suites/report-copies": {
+      "post": {
+        "description": "Export one results/<timestamp> directory for a cross-Worker copy.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCopyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Report Copy",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suites/report-copies/{transfer_id}/import": {
+      "post": {
+        "description": "Import a completed report-copy transfer into its locked target suite.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "transfer_id",
+            "required": true,
+            "schema": {
+              "title": "Transfer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Report Copy",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/suites/results": {
       "post": {
         "parameters": [
@@ -8180,6 +8303,71 @@
           }
         ],
         "summary": "Heartbeat",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/report-copies/{transfer_id}": {
+      "get": {
+        "description": "Allow only the locked target Worker to fetch a completed report archive.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "transfer_id",
+            "required": true,
+            "schema": {
+              "title": "Transfer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Report Copy For Worker",
         "tags": [
           "cluster"
         ]

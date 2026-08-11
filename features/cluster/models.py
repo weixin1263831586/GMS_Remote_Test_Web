@@ -175,6 +175,18 @@ class TransferComplete(BaseModel):
     chunk_count: int = Field(ge=1, le=100000)
 
 
+class ReportCopyCreate(BaseModel):
+    source_worker_id: str = Field(min_length=1, max_length=128)
+    source_suite_path: str = Field(min_length=1, max_length=4096)
+    report_name: str = Field(
+        pattern=r"^\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}(?:\.\d+)?(?:_\d+)?$",
+        min_length=19,
+        max_length=128,
+    )
+    target_worker_id: str = Field(min_length=1, max_length=128)
+    target_suite_path: str = Field(min_length=1, max_length=4096)
+
+
 class ArtifactUploadInit(BaseModel):
     attempt_id: str
     filename: str

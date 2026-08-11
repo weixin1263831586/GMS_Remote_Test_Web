@@ -27,10 +27,10 @@ from features.devices.support import get_or_create_user_state
 from features.email import api as email
 from features.firmware import api as firmware
 from features.firmware.apk import (
-    _cleanup_files,
-    _create_apk_task,
-    _normalize_apk_filename,
-    _safe_join,
+    cleanup_files,
+    create_apk_task,
+    normalize_apk_filename,
+    safe_join,
 )
 from features.firmware.dependencies import configure_firmware_dependencies
 from features.gerrit import api as gerrit_dashboard
@@ -38,7 +38,7 @@ from features.gerrit.config import (
     denormalize_gerrit_dashboard_config,
     normalize_gerrit_dashboard_config,
 )
-from features.gerrit.service import _query_gerrit_dual_mode
+from features.gerrit.service import query_gerrit_dual_mode
 from features.gerrit.settings import config_manager as gerrit_config_manager
 from features.redmine import api as redmine
 from features.redmine import reply_api as redmine_reply
@@ -64,8 +64,8 @@ from features.system.state import global_state
 from features.system.update_monitor import api as gms_update_monitor
 from features.test_execution import api as tests
 from features.test_execution.api import (
-    _make_empty_suite_target,
-    _resolve_suite_diagnosis_target,
+    make_empty_suite_target,
+    resolve_suite_diagnosis_target,
 )
 from features.test_execution.dependencies import (
     configure_test_execution_dependencies,
@@ -226,17 +226,17 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
         )
         device_config_explorer.configure_config_explorer_dependencies(
             generate_help_or_continue=generate_help_or_continue,
-            create_apk_task=_create_apk_task,
-            normalize_apk_filename=_normalize_apk_filename,
-            safe_join=_safe_join,
-            cleanup_files=_cleanup_files,
+            create_apk_task=create_apk_task,
+            normalize_apk_filename=normalize_apk_filename,
+            safe_join=safe_join,
+            cleanup_files=cleanup_files,
         )
         configure_report_dependencies(
             ssh_manager=ssh_manager,
             file_utils=FileUtils,
             universal_analyzer_factory=get_universal_analyzer,
-            resolve_suite_target=_resolve_suite_diagnosis_target,
-            make_empty_suite_target=_make_empty_suite_target,
+            resolve_suite_target=resolve_suite_diagnosis_target,
+            make_empty_suite_target=make_empty_suite_target,
         )
         configure_test_execution_dependencies(
             config_manager=config_manager,
@@ -249,10 +249,10 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             apk_max_file_size=APK_MAX_FILE_SIZE,
             apk_upload_dir=APK_UPLOAD_DIR,
             max_log_entries=MAX_LOG_ENTRIES,
-            create_apk_task=_create_apk_task,
-            normalize_apk_filename=_normalize_apk_filename,
-            safe_join=_safe_join,
-            cleanup_files=_cleanup_files,
+            create_apk_task=create_apk_task,
+            normalize_apk_filename=normalize_apk_filename,
+            safe_join=safe_join,
+            cleanup_files=cleanup_files,
             start_cluster_test=start_cluster_test,
             suite_task_store=SuiteTaskStore(
                 services.settings.data_root
@@ -271,7 +271,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             effective_query = query.strip() or 'status:open'
             if 'limit:' not in effective_query:
                 effective_query = f'{effective_query} limit:{limit}'
-            result = await _query_gerrit_dual_mode(
+            result = await query_gerrit_dual_mode(
                 config,
                 effective_query,
                 max_changes=limit,

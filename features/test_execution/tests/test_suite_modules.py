@@ -85,7 +85,7 @@ class SuiteModuleSearchTests(unittest.TestCase):
         }
         config = {"suites_path": "/remote", "ubuntu_host": "172.16.14.66"}
         with patch("features.test_execution.suite_modules.is_config_host_local", return_value=False), \
-                patch("features.test_execution.suite_modules._get_available_test_suites", return_value=[suite]), \
+                patch("features.test_execution.suite_modules.get_available_test_suites", return_value=[suite]), \
                 patch("features.test_execution.suite_modules.runtime.ssh_manager", ssh_manager):
             payload = search_latest_suite_modules(config, "Camera", ["cts"], per_suite_limit=10)
 

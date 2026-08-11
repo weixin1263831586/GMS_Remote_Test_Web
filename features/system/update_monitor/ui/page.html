@@ -169,7 +169,11 @@
       }
       document.querySelectorAll('header button').forEach(b => b.disabled = false);
       if (status.error) {
-        notifyUser('GMS更新扫描失败', status.error, 'error');
+        let message = status.error;
+        const stderrLines = String(status.stderr || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        const stderrDetail = (stderrLines[stderrLines.length - 1] || '').replace(/^error:\s*/i, '');
+        if (stderrDetail && !message.includes(stderrDetail)) message += ': ' + stderrDetail;
+        notifyUser('GMS更新扫描失败', message, 'error');
       } else {
         notifyUser('GMS更新扫描完成', status.finished_at ? ('完成时间: ' + status.finished_at) : '扫描已完成', 'success');
       }
