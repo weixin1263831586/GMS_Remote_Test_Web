@@ -8,12 +8,15 @@ effect on the device after vendor overlays are applied (looked up via
 This powers the "配置资源查看器" tool card on the 常用工具 page.
 """
 
+import hashlib
 import logging
 import re
 import shlex
 import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 from foundation.config import settings
 
@@ -101,31 +104,74 @@ def _resolve_package_apk(device_id: str | None, package: str) -> str:
 def _pull_apk(device_id: str | None, on_device_path: str, package: str) -> str:
     """Pull the APK into a cache dir keyed by package; returns local path.
 
-    The file is cached so repeated lookups against the same package don't
-    re-transfer ~37MB each time. Staleness is acceptable here — the APK on a
-    given device rarely changes between reboots.
+    The file is cached so repeated lookups against the same device build and
+    package don't re-transfer ~37MB each time. The cache identity includes the
+    device, build fingerprint and remote APK metadata; package-only caching can
+    return another device's framework resources in mixed-build labs.
     """
     import os
 
     os.makedirs(_APK_CACHE_DIR, exist_ok=True)
-    local_path = os.path.join(_APK_CACHE_DIR, f"{package}.apk")
-    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-        return local_path
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stdout, stderr, code = run_local_shell_command(
-        f"{adb} {serial}pull {shlex.quote(on_device_path)} {shlex.quote(local_path)}",
-        timeout=120,
+    fingerprint, _, fingerprint_code = run_local_shell_command(
+        f"{adb} {serial}shell getprop ro.build.fingerprint", timeout=10
     )
-    if code != 0 or not os.path.exists(local_path):
-        raise RuntimeError(f"拉取 {on_device_path} 失败: {(stderr or stdout).strip()}")
+    metadata, _, metadata_code = run_local_shell_command(
+        f"{adb} {serial}shell stat -c %s:%Y {shlex.quote(on_device_path)}",
+        timeout=10,
+    )
+    identity = "\0".join(
+        (
+            device_id or "default",
+            package,
+            on_device_path,
+            fingerprint.strip() if fingerprint_code == 0 else "",
+            metadata.strip() if metadata_code == 0 else "",
+        )
+    )
+    cache_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    local_path = os.path.join(_APK_CACHE_DIR, f"{cache_key}.apk")
+    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+        return local_path
+    # Pull to a unique temporary file and publish atomically. An interrupted
+    # adb transfer may leave a non-empty partial file; treating that as a cache
+    # hit on the next request would make Device Info parse the wrong contents.
+    temp_path = os.path.join(
+        _APK_CACHE_DIR, f".{cache_key}.{uuid.uuid4().hex}.part"
+    )
+    try:
+        stdout, stderr, code = run_local_shell_command(
+            f"{adb} {serial}pull {shlex.quote(on_device_path)} {shlex.quote(temp_path)}",
+            timeout=120,
+        )
+        if (
+            code != 0
+            or not os.path.exists(temp_path)
+            or os.path.getsize(temp_path) <= 0
+        ):
+            raise RuntimeError(
+                f"拉取 {on_device_path} 失败: {(stderr or stdout).strip()}"
+            )
+        os.replace(temp_path, local_path)
+    finally:
+        try:
+            os.remove(temp_path)
+        except FileNotFoundError:
+            pass
     return local_path
 
 
-def parse_apk_resources(apk_path: str) -> list[ResourceEntry]:
-    """Parse ``aapt2 dump resources`` into ResourceEntry list with default values.
+@lru_cache(maxsize=32)
+def _parse_apk_resource_records(
+    apk_path: str,
+) -> tuple[tuple[str, str, str, str | None], ...]:
+    """Parse one content-addressed APK into immutable resource records.
 
-    Returns ALL resources (not just config_*); callers filter as needed.
+    The APK cache path already includes device/build/file identity. Keeping the
+    expensive aapt2 result in a small process cache makes subsequent filters
+    instant while immutable records prevent overlay lookups mutating another
+    request's result.
     """
     aapt2 = _aapt2_path()
     # 直接执行子进程，避免 Shell 路径转义问题。
@@ -170,7 +216,24 @@ def parse_apk_resources(apk_path: str) -> list[ResourceEntry]:
                     current.default_value = value
     if current is not None:
         entries.append(current)
-    return entries
+    return tuple(
+        (entry.name, entry.type, entry.resname, entry.default_value)
+        for entry in entries
+    )
+
+
+def parse_apk_resources(apk_path: str) -> list[ResourceEntry]:
+    """Return fresh mutable entries for all resources in ``apk_path``."""
+    return [
+        ResourceEntry(
+            name=name,
+            type=resource_type,
+            resname=resname,
+            default_value=default_value,
+        )
+        for name, resource_type, resname, default_value
+        in _parse_apk_resource_records(apk_path)
+    ]
 
 
 def _filter_entries(

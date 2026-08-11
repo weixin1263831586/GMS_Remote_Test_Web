@@ -210,6 +210,10 @@ def create_lifespan(services: AppServices):
             app.state.cleanup_task = cleanup_task
             redmine_task = start_redmine_agent_scheduler(services.redmine)
             app.state.redmine_scheduler_task = redmine_task
+            from features.system.desktop import create_novnc_client_session
+
+            novnc_session = create_novnc_client_session()
+            app.state.novnc_client_session = novnc_session
             try:
                 _start_local_vnc()
             except Exception:
@@ -266,5 +270,7 @@ def create_lifespan(services: AppServices):
                     pass
                 stop_usbip_reconnect_tasks()
                 stop_usb_monitor()
+                await novnc_session.close()
+                app.state.novnc_client_session = None
 
     return lifespan

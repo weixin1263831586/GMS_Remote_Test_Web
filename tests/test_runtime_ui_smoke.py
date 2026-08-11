@@ -2233,6 +2233,340 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.wait_for_timeout(200)
             page.close()
 
+    def test_device_info_discards_stale_device_responses_and_uses_fast_default(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """
+                () => {
+                    window.__dcfgOriginalFetch = window.fetch.bind(window);
+                    window.__dcfgPendingProps = {};
+                    window.__dcfgConfigUrls = [];
+                    window.fetch = (input, init) => {
+                        const url = String(input);
+                        const parsed = new URL(url, location.origin);
+                        const jsonResponse = payload => Promise.resolve(new Response(
+                            JSON.stringify(payload),
+                            {status: 200, headers: {'Content-Type': 'application/json'}}
+                        ));
+                        if (parsed.pathname === '/api/config-explorer/props') {
+                            const serial = parsed.searchParams.get('device_id');
+                            return new Promise(resolve => {
+                                window.__dcfgPendingProps[serial] = rows => resolve(new Response(
+                                    JSON.stringify({success: true, data: {rows}}),
+                                    {status: 200, headers: {'Content-Type': 'application/json'}}
+                                ));
+                            });
+                        }
+                        if (parsed.pathname === '/api/config-explorer/packages/all') {
+                            return jsonResponse({success: true, data: {packages: ['android']}});
+                        }
+                        if (parsed.pathname === '/api/config-explorer') {
+                            window.__dcfgConfigUrls.push(parsed.href);
+                            return jsonResponse({
+                                success: true,
+                                data: {
+                                    package: 'android', total: 1, overlayed_count: 0,
+                                    resources: [{
+                                        name: 'bool/config_test', type: 'bool',
+                                        default_value: 'false', effective_value: null,
+                                        overlay_changed: null, overlay_source: null,
+                                        lookup_error: null
+                                    }]
+                                }
+                            });
+                        }
+                        return window.__dcfgOriginalFetch(input, init);
+                    };
+                    allDevices = [
+                        {device_id: 'DEVICE-A', serial_no: 'DEVICE-A', worker_id: 'ats-worker-controller'},
+                        {device_id: 'DEVICE-B', serial_no: 'DEVICE-B', worker_id: 'ats-worker-controller'}
+                    ];
+                    openDeviceConfigExplorer('DEVICE-A', 'ats-worker-controller');
+                    dcfgSwitchTab('props');
+                }
+                """
+            )
+            page.wait_for_function("Boolean(window.__dcfgPendingProps['DEVICE-A'])")
+            page.evaluate(
+                """
+                () => {
+                    openDeviceConfigExplorer('DEVICE-B', 'ats-worker-controller');
+                    dcfgSwitchTab('props');
+                }
+                """
+            )
+            page.wait_for_function("Boolean(window.__dcfgPendingProps['DEVICE-B'])")
+            page.evaluate(
+                "window.__dcfgPendingProps['DEVICE-B']([{name:'ro.product.model',value:'MODEL-B'}])"
+            )
+            expect(page.locator("#dcfg-prop-results")).to_contain_text("MODEL-B")
+            page.evaluate(
+                "window.__dcfgPendingProps['DEVICE-A']([{name:'ro.product.model',value:'MODEL-A'}])"
+            )
+            page.wait_for_timeout(150)
+
+            expect(page.locator("#device-config-serial")).to_have_text("DEVICE-B")
+            expect(page.locator("#dcfg-prop-results")).to_contain_text("MODEL-B")
+            expect(page.locator("#dcfg-prop-results")).not_to_contain_text("MODEL-A")
+            expect(page.locator("#dcfg-effective")).not_to_be_checked()
+            self.assertTrue(
+                page.evaluate(
+                    """
+                    window.__dcfgConfigUrls.length >= 2
+                    && window.__dcfgConfigUrls.every(url =>
+                        new URL(url).searchParams.get('with_effective') === 'false')
+                    """
+                )
+            )
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.evaluate(
+                """
+                () => {
+                    if (typeof closeDeviceConfigExplorer === 'function') closeDeviceConfigExplorer();
+                    if (window.__dcfgOriginalFetch) window.fetch = window.__dcfgOriginalFetch;
+                }
+                """
+            )
+            page.close()
+
+    def test_device_actions_use_adb_transport_id_not_display_serial(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """
+                () => {
+                    allDevices = [{
+                        device_id: '192.0.2.50:5555',
+                        serial_no: 'HARDWARE-SERIAL',
+                        worker_id: 'ats-worker-controller',
+                        source_type: 'local',
+                        source_host: 'controller',
+                        status: 'online',
+                        protocol: 'adb',
+                    }];
+                    devicesManagementClusterMode = false;
+                    state.deviceGroups = [];
+                    displayDevicesManagement(allDevices);
+                    const row = document.querySelector('#devices-table-body tr');
+                    const buttons = [...row.querySelectorAll('button[data-serial]')];
+                    return {
+                        display: row.cells[0].textContent.trim(),
+                        actionSerials: buttons.map(button => button.dataset.serial),
+                    };
+                }
+                """
+            )
+
+            self.assertEqual(result["display"], "HARDWARE-SERIAL")
+            self.assertEqual(
+                result["actionSerials"],
+                ["192.0.2.50:5555", "192.0.2.50:5555", "192.0.2.50:5555"],
+            )
+        finally:
+            page.close()
+
+    def test_device_action_buttons_reflect_local_claim_ownership(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """
+                () => {
+                    const base = {
+                        worker_id: 'ats-worker-controller', source_type: 'local',
+                        source_host: 'controller', status: 'online', protocol: 'adb'
+                    };
+                    allDevices = [
+                        {...base, device_id: 'OWNED', serial_no: 'OWNED',
+                            locked_by: 'ui-admin', locked_by_self: true},
+                        {...base, device_id: 'OTHER', serial_no: 'OTHER',
+                            locked_by: 'occupied', locked_by_self: false},
+                    ];
+                    devicesManagementClusterMode = false;
+                    state.deviceGroups = [];
+                    displayDevicesManagement(allDevices);
+                    return Object.fromEntries(
+                        [...document.querySelectorAll('#devices-table-body tr')].map(row => {
+                            const serial = row.cells[0]?.textContent.trim();
+                            const controls = [...row.querySelectorAll('button[data-serial]')]
+                                .filter(button => !button.textContent.includes('释放'));
+                            return [serial, controls.map(button => button.disabled)];
+                        }).filter(([serial]) => serial)
+                    );
+                }
+                """
+            )
+
+            # ADB Shell always needs an exclusive claim. Read-only Device Info
+            # and UI inspection remain available to the current claim owner.
+            self.assertEqual(result["OWNED"], [True, False, False])
+            self.assertEqual(result["OTHER"], [True, True, True])
+        finally:
+            page.close()
+
+    def test_manual_device_refresh_reports_busy_then_restores_control(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """
+                () => {
+                    window.__originalLoadDevicesForRefresh = loadDevices;
+                    loadDevices = () => new Promise(resolve => {
+                        window.__resolveManualDeviceRefresh = resolve;
+                    });
+                    document.getElementById('refresh-devices-btn').click();
+                }
+                """
+            )
+            button = page.locator("#refresh-devices-btn")
+            expect(button).to_be_disabled()
+            expect(button).to_have_text("刷新中…")
+            self.assertEqual(button.get_attribute("aria-busy"), "true")
+
+            page.evaluate("window.__resolveManualDeviceRefresh([])")
+            expect(button).to_be_enabled()
+            expect(button).to_have_text("↻ 刷新设备")
+            self.assertIsNone(button.get_attribute("aria-busy"))
+        finally:
+            page.evaluate(
+                """
+                () => {
+                    if (window.__originalLoadDevicesForRefresh) {
+                        loadDevices = window.__originalLoadDevicesForRefresh;
+                    }
+                }
+                """
+            )
+            page.close()
+
+    def test_manual_suite_refresh_forces_reload_and_restores_control(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """
+                () => {
+                    window.__originalLoadTestSuitesForRefresh = loadTestSuites;
+                    window.__suiteRefreshForce = null;
+                    loadTestSuites = force => new Promise(resolve => {
+                        window.__suiteRefreshForce = force;
+                        window.__resolveManualSuiteRefresh = resolve;
+                    });
+                    document.getElementById('refresh-suites-btn').click();
+                }
+                """
+            )
+            button = page.locator("#refresh-suites-btn")
+            expect(button).to_be_disabled()
+            expect(button).to_have_text("刷新中…")
+            self.assertEqual(button.get_attribute("aria-busy"), "true")
+            self.assertTrue(page.evaluate("window.__suiteRefreshForce"))
+
+            page.evaluate("window.__resolveManualSuiteRefresh([])")
+            expect(button).to_be_enabled()
+            expect(button).to_have_text("↻ 刷新套件")
+            self.assertIsNone(button.get_attribute("aria-busy"))
+        finally:
+            page.evaluate(
+                """
+                () => {
+                    if (window.__originalLoadTestSuitesForRefresh) {
+                        loadTestSuites = window.__originalLoadTestSuitesForRefresh;
+                    }
+                }
+                """
+            )
+            page.close()
+
+    def test_device_management_scope_switch_does_not_publish_stale_inventory(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """
+                async () => {
+                    const originalFetch = window.fetch.bind(window);
+                    let resolveManagement;
+                    const jsonResponse = payload => new Response(JSON.stringify(payload), {
+                        status: 200,
+                        headers: {'Content-Type': 'application/json'}
+                    });
+                    window.fetch = (input, options) => {
+                        const path = new URL(String(input), location.origin).pathname;
+                        if (path === '/api/devices/management') {
+                            return new Promise(resolve => { resolveManagement = resolve; });
+                        }
+                        if (path === '/api/cluster/devices') {
+                            return Promise.resolve(jsonResponse({
+                                success: true,
+                                devices: [{
+                                    id: 'worker-a:STALE-REMOTE', serial: 'STALE-REMOTE',
+                                    worker_id: 'worker-a', state: 'available', properties: {}
+                                }]
+                            }));
+                        }
+                        if (path === '/api/cluster/hosts') {
+                            return Promise.resolve(jsonResponse({success: true, hosts: [{
+                                worker_id: 'worker-a', status: 'online',
+                                address: '192.0.2.10', ssh_user: 'tester',
+                                capabilities: {device_inspection: true}
+                            }]}));
+                        }
+                        if (path === '/api/cluster/status') {
+                            return Promise.resolve(jsonResponse({
+                                success: true, enabled: true,
+                                local_worker_id: 'ats-worker-controller'
+                            }));
+                        }
+                        return originalFetch(input, options);
+                    };
+                    state.clusterStatus = {
+                        enabled: true, local_worker_id: 'ats-worker-controller'
+                    };
+                    GmsWorkspace.update({scope_mode: 'cluster', worker_id: 'worker-a'});
+                    allDevices = [{
+                        device_id: 'CURRENT-SINGLE', serial_no: 'CURRENT-SINGLE',
+                        worker_id: 'ats-worker-controller', status: 'online'
+                    }];
+                    devicesManagementClusterMode = false;
+                    const staleLoad = loadDevicesManagementOnce('cluster');
+                    while (!resolveManagement) {
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+                    GmsWorkspace.update({
+                        scope_mode: 'single', worker_id: 'ats-worker-controller'
+                    });
+                    resolveManagement(jsonResponse({
+                        success: true,
+                        devices: [{
+                            device_id: 'STALE-LOCAL', serial_no: 'STALE-LOCAL',
+                            status: 'online', source_type: 'local'
+                        }]
+                    }));
+                    await staleLoad;
+                    window.fetch = originalFetch;
+                    return {
+                        ids: allDevices.map(device => device.device_id),
+                        clusterMode: devicesManagementClusterMode,
+                        scope: GmsWorkspace.get().scope_mode,
+                    };
+                }
+                """
+            )
+
+            self.assertEqual(result["scope"], "single")
+            self.assertEqual(result["ids"], ["CURRENT-SINGLE"])
+            self.assertFalse(result["clusterMode"])
+        finally:
+            page.close()
+
     def test_device_management_inventory_follows_single_and_cluster_mode(self):
         page = self.new_page()
         cluster_device_requests = []
@@ -3286,6 +3620,63 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_host_workspace_stale_connection_cannot_overwrite_another_host_status(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """
+                async () => {
+                    const originalElevation = ensureTerminalElevation;
+                    const originalResolver = resolveWorkspaceVncUrl;
+                    const grid = document.getElementById('host-workspace-grid');
+                    grid.innerHTML = `
+                        <section class="host-workspace-pane" data-workspace-pane="0">
+                            <div class="host-workspace-pane-header">
+                                <span id="host-workspace-status-0">准备中</span>
+                            </div>
+                            <div class="host-workspace-pane-body" id="host-workspace-body-0"></div>
+                        </section>`;
+                    const body = document.getElementById('host-workspace-body-0');
+                    desktopHosts = [
+                        {id: 'cluster:a', worker_id: 'a', connection: 'a@192.0.2.10'},
+                        {id: 'cluster:b', worker_id: 'b', connection: 'b@192.0.2.11'}
+                    ];
+                    hostWorkspace.renderGeneration = 41;
+                    hostWorkspace.panes = [{type: 'desktop', hostId: 'cluster:a'}];
+                    hostWorkspace.paneGenerations.set(0, 1);
+                    let rejectOldAccess;
+                    ensureTerminalElevation = async () => true;
+                    resolveWorkspaceVncUrl = () => new Promise((resolve, reject) => {
+                        rejectOldAccess = reject;
+                    });
+                    const oldMount = mountHostWorkspaceDesktop(
+                        0, desktopHosts[0], body, 41, 'cluster:a', 1
+                    );
+                    while (!rejectOldAccess) {
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+                    hostWorkspace.panes[0] = {type: 'desktop', hostId: 'cluster:b'};
+                    hostWorkspace.paneGenerations.set(0, 2);
+                    body.textContent = 'Worker B desktop';
+                    setHostWorkspaceStatus(0, 'Worker B 已连接', true);
+                    rejectOldAccess(new Error('Worker A connection failed'));
+                    await oldMount;
+                    ensureTerminalElevation = originalElevation;
+                    resolveWorkspaceVncUrl = originalResolver;
+                    return {
+                        status: document.getElementById('host-workspace-status-0').textContent,
+                        body: body.textContent,
+                    };
+                }
+                """
+            )
+
+            self.assertEqual(result["status"], "Worker B 已连接")
+            self.assertEqual(result["body"], "Worker B desktop")
+        finally:
+            page.close()
+
     def test_host_workspace_initial_scope_never_paints_the_wrong_mode(self):
         for scope_mode, page_name in (
             ("single", "desktop"),
@@ -3567,6 +3958,117 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_device_shell_button_opens_visible_adb_workspace_session(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                },
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            page.evaluate(
+                """async () => {
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
+                  window.__terminalFrames = [];
+                  const nativeSend = WebSocket.prototype.send;
+                  WebSocket.prototype.send = function(payload) {
+                    if (this.url.includes('/api/system/websocket/terminal_workspace_')) {
+                      window.__terminalFrames.push(payload);
+                    }
+                    return nativeSend.call(this, payload);
+                  };
+                  const localWorkerId = workspaceLocalWorkerId();
+                  allDevices = [{
+                    device_id: 'LOCAL-ADB-1',
+                    serial_no: 'LOCAL-ADB-1',
+                    worker_id: localWorkerId,
+                    status: 'online',
+                  }];
+                  await openDeviceShell('LOCAL-ADB-1');
+                }"""
+            )
+            page.wait_for_function(
+                """() => {
+                  const instance = terminalWorkspace.instances.get(0);
+                  return currentPage === 'terminal'
+                    && instance?.mode === 'adb'
+                    && instance?.serialNo === 'LOCAL-ADB-1';
+                }"""
+            )
+            expect(page.locator("#page-terminal")).to_be_visible()
+            expect(page.locator("#terminal-workspace-grid .host-workspace-terminal")).to_have_count(1)
+            expect(
+                page.locator("[data-terminal-pane='0'] [data-terminal-pane-mode-label]")
+            ).to_have_text("🐧 终端")
+
+            deadline = time.time() + 5
+            connect_messages = []
+            terminal_frames = []
+            while time.time() < deadline:
+                terminal_frames = page.evaluate("window.__terminalFrames || []")
+                connect_messages = [
+                    json.loads(frame)
+                    for frame in terminal_frames
+                    if isinstance(frame, str) and '"type":"terminal_connect"' in frame
+                ]
+                if connect_messages:
+                    break
+                page.wait_for_timeout(100)
+
+            socket_state = page.evaluate(
+                """() => {
+                  const instance = terminalWorkspace.instances.get(0);
+                  return {
+                    frames: window.__terminalFrames || [],
+                    readyState: instance?.socket?.readyState,
+                    url: instance?.socket?.url,
+                    status: document.getElementById('terminal-workspace-status-0')?.textContent,
+                  };
+                }"""
+            )
+            self.assertEqual(len(connect_messages), 1, socket_state)
+            self.assertEqual(connect_messages[0]["mode"], "adb")
+            self.assertEqual(connect_messages[0]["serial_no"], "LOCAL-ADB-1")
+            self.assertEqual(
+                connect_messages[0]["worker_id"],
+                page.evaluate("workspaceLocalWorkerId()"),
+            )
+            self.assertFalse(
+                any(
+                    isinstance(frame, str) and "adb -s LOCAL-ADB-1 shell" in frame
+                    for frame in terminal_frames
+                )
+            )
+            persisted = page.evaluate(
+                "JSON.parse(localStorage.getItem('gms_terminal_workspace'))"
+            )
+            self.assertEqual(persisted["panes"], [{"hostId": "default"}])
+
+            return_button = page.locator(
+                "#terminal-workspace-host-mode-btn:visible, "
+                "[data-terminal-pane-host-mode]:visible"
+            )
+            expect(return_button).to_be_visible()
+            return_button.click()
+            page.wait_for_function(
+                "() => terminalWorkspace.instances.get(0)?.mode === 'ssh'"
+            )
+            expect(return_button).to_be_hidden()
+            expect(
+                page.locator("[data-terminal-pane='0'] [data-terminal-pane-mode-label]")
+            ).to_have_text("🐧 终端")
+            self.assertEqual(
+                page.evaluate("terminalWorkspace.panes[0]"),
+                {"hostId": "default"},
+            )
+        finally:
+            page.close()
+
     def test_hidden_host_workspaces_resume_automatically_on_page_entry(self):
         page = self.new_page()
         page.route(
@@ -3731,7 +4233,6 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 result["desktopMounts"],
                 [
                     {"index": 0, "hostId": "default"},
-                    {"index": 1, "hostId": "cluster:worker-a"},
                     {"index": 1, "hostId": "cluster:worker-b"},
                 ],
             )
@@ -3739,7 +4240,6 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 result["terminalMounts"],
                 [
                     {"index": 0, "hostId": "default"},
-                    {"index": 1, "hostId": "cluster:worker-a"},
                     {"index": 1, "hostId": "cluster:worker-b"},
                 ],
             )
@@ -4376,6 +4876,139 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         self.assertEqual(report["leaks"], [], report)
                         self.assertEqual(report["clippedButtons"], [], report)
             self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_cluster_dashboard_half_screen_panels_do_not_overlap(self):
+        page = self.new_page()
+        try:
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function(
+                "document.querySelectorAll('#dashboard-stats .dash-stat-card').length === 5"
+            )
+
+            for viewport in [
+                {"width": 960, "height": 720},
+                {"width": 760, "height": 720},
+            ]:
+                with self.subTest(viewport=viewport):
+                    page.set_viewport_size(viewport)
+                    page.wait_for_timeout(150)
+                    report = page.evaluate(
+                        """() => {
+                          const visible = element => {
+                            const style = getComputedStyle(element);
+                            return style.display !== 'none'
+                              && style.visibility !== 'hidden'
+                              && element.getClientRects().length > 0;
+                          };
+                          const rect = element => {
+                            const value = element.getBoundingClientRect();
+                            return {
+                              id: element.id || String(element.className || ''),
+                              left: value.left, right: value.right,
+                              top: value.top, bottom: value.bottom,
+                              width: value.width, height: value.height,
+                            };
+                          };
+                          const intersections = selector => {
+                            const items = Array.from(document.querySelectorAll(selector))
+                              .filter(visible).map(rect);
+                            const overlaps = [];
+                            for (let left = 0; left < items.length; left += 1) {
+                              for (let right = left + 1; right < items.length; right += 1) {
+                                const a = items[left], b = items[right];
+                                const width = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+                                const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+                                if (width > 1 && height > 1) overlaps.push([a, b]);
+                              }
+                            }
+                            return overlaps;
+                          };
+                          const panels = Array.from(document.querySelectorAll('.dash-panel'))
+                            .filter(visible).map(rect);
+                          const pane = document.querySelector('#tab-dashboard');
+                          return {
+                            cardOverlaps: intersections('.dash-stat-card'),
+                            panelOverlaps: intersections('.dash-panel'),
+                            panels,
+                            paneOverflowY: getComputedStyle(pane).overflowY,
+                            documentWidth: document.documentElement.scrollWidth,
+                            viewportWidth: innerWidth,
+                          };
+                        }"""
+                    )
+                    self.assertEqual(report["cardOverlaps"], [], report)
+                    self.assertEqual(report["panelOverlaps"], [], report)
+                    self.assertEqual(len(report["panels"]), 4, report)
+                    self.assertTrue(
+                        all(panel["height"] >= 239 for panel in report["panels"]),
+                        report,
+                    )
+                    self.assertEqual(report["paneOverflowY"], "auto", report)
+                    self.assertLessEqual(
+                        report["documentWidth"], report["viewportWidth"] + 1, report
+                    )
+
+            resize_count = page.evaluate(
+                """async () => {
+                  window.__dashResizeCount = 0;
+                  dashCharts.__test = {
+                    isDisposed: () => false,
+                    resize: () => { window.__dashResizeCount += 1; },
+                  };
+                  scheduleDashboardChartsResize();
+                  await new Promise(resolve => requestAnimationFrame(() => resolve()));
+                  return window.__dashResizeCount;
+                }"""
+            )
+            self.assertGreaterEqual(resize_count, 1)
+            page.set_viewport_size({"width": 820, "height": 720})
+            page.wait_for_function("window.__dashResizeCount >= 2")
+            page.evaluate("delete dashCharts.__test")
+        finally:
+            page.close()
+
+    def test_cluster_manual_refresh_controls_share_busy_and_idle_state(self):
+        page = self.new_page()
+        try:
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function("refreshPromise === null")
+            page.evaluate(
+                """() => {
+                  window.__clusterOriginalApi = api;
+                  window.__clusterRefreshResolvers = [];
+                  api = path => new Promise(resolve => {
+                    window.__clusterRefreshResolvers.push(() => resolve(
+                      path === '/api/cluster/status'
+                        ? {enabled: true, local_worker_id: 'ats-worker-controller'}
+                        : {}
+                    ));
+                  });
+                  document.querySelector('#dash-refresh-charts').click();
+                }"""
+            )
+            for selector in ["#dash-refresh-charts", "#refresh"]:
+                button = page.locator(selector)
+                expect(button).to_be_disabled()
+                expect(button).to_have_text("刷新中…")
+                expect(button).to_have_attribute("aria-busy", "true")
+
+            page.evaluate(
+                "window.__clusterRefreshResolvers.splice(0).forEach(resolve => resolve())"
+            )
+            page.wait_for_function("refreshPromise === null")
+            page.evaluate(
+                """() => {
+                  window.__clusterRefreshResolvers.splice(0).forEach(resolve => resolve());
+                  api = window.__clusterOriginalApi;
+                }"""
+            )
+            for selector in ["#dash-refresh-charts", "#refresh"]:
+                button = page.locator(selector)
+                expect(button).to_be_enabled()
+                expect(button).to_have_text("↻ 刷新")
+                expect(button).not_to_have_attribute("aria-busy", "true")
         finally:
             page.close()
 
@@ -5177,6 +5810,101 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(gerrit.locator("#trendStartModal")).not_to_have_class(re.compile(r"show"))
 
             gerrit.evaluate("refreshCurrentTab()")
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_gerrit_route_check_reuses_test_page_dialog(self):
+        page = self.new_page()
+        page_errors = []
+        ping_requests = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        page.route(
+            "**/api/config/read",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"ubuntu_host":"hcq@172.16.14.233"}',
+            ),
+        )
+        page.route(
+            "**/api/ssh/ping",
+            lambda route: (
+                ping_requests.append(route.request.post_data_json),
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=(
+                        '{"success":true,"reachable":true,"same_network":true,'
+                        '"test_host_ip":"172.16.14.233","client_ip":"172.16.14.88",'
+                        '"test_network":"172.16.14.0","client_network":"172.16.14.0",'
+                        '"latency":"1ms"}'
+                    ),
+                ),
+            )[-1],
+        )
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """() => {
+                    state.clusterMode = false;
+                    state.clusterEnabled = false;
+                    requireControllerHostAction = () => true;
+                }"""
+            )
+
+            page.locator("#check-routing-btn").click()
+            expect(page.locator("#route-check-dialog")).to_be_visible()
+            test_dialog = page.locator("#route-check-dialog").evaluate(
+                """dialog => ({
+                    className: dialog.className,
+                    contentClass: dialog.firstElementChild.className,
+                    title: dialog.querySelector('h3').textContent.trim(),
+                    labels: [...dialog.querySelectorAll('label')].map(node => node.textContent.trim()),
+                    actions: [...dialog.querySelectorAll('.route-check-actions button')]
+                        .map(node => node.textContent.trim())
+                })"""
+            )
+            page.locator("#route-check-dialog .route-check-close").click()
+            expect(page.locator("#route-check-dialog")).to_have_count(0)
+
+            page.locator('.sidebar-item[data-page="gerrit-dashboard"]').click()
+            gerrit = self.frame_for(page, "#gerrit-dashboard-frame")
+            gerrit.wait_for_function("typeof checkGerritRoute === 'function'")
+            gerrit.evaluate(
+                """() => {
+                    const banner = document.getElementById('connBanner');
+                    banner.classList.add('show');
+                    banner.querySelector('button').click();
+                }"""
+            )
+
+            expect(page.locator("#route-check-dialog")).to_be_visible()
+            gerrit_dialog = page.locator("#route-check-dialog").evaluate(
+                """dialog => ({
+                    className: dialog.className,
+                    contentClass: dialog.firstElementChild.className,
+                    title: dialog.querySelector('h3').textContent.trim(),
+                    labels: [...dialog.querySelectorAll('label')].map(node => node.textContent.trim()),
+                    actions: [...dialog.querySelectorAll('.route-check-actions button')]
+                        .map(node => node.textContent.trim())
+                })"""
+            )
+            self.assertEqual(gerrit_dialog, test_dialog)
+            expect(gerrit.locator("#routeCheckModal")).not_to_have_class(
+                re.compile(r"\bshow\b")
+            )
+            expect(page.locator("#test-host-ip")).to_have_value("172.16.14.233")
+            page.locator("#client-ip").fill("172.16.14.88")
+            page.locator("#ping-test-btn").click()
+            expect(page.locator("#ping-result")).to_contain_text("连通性测试通过")
+            self.assertEqual(
+                ping_requests,
+                [{
+                    "test_host_ip": "172.16.14.233",
+                    "client_ip": "172.16.14.88",
+                }],
+            )
             self.assert_no_page_errors(page_errors)
         finally:
             page.close()

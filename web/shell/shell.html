@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260805-analysis-fill-font">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260811-uniform-buttons">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
@@ -24,20 +24,20 @@
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260601-01" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
-    <script src="/static/js/pages/test-suite-browser.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser.js?v=20260810-refresh-feedback" defer></script>
     <script src="/static/js/pages/firmware-burn.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/vpn-control.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/test-control.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/test-reports.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/test-reports.js?v=20260810-page-load-2" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260810-modular-split" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260810-modular-split" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260810-refresh-feedback" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -240,6 +240,9 @@
             margin-left: 0;
             line-height: 24px;
             text-align: right;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .host-workspace-title-state > .btn-xs {
             flex: 0 0 auto;
@@ -848,7 +851,7 @@
                                     <select id="test-suite" class="combo-box">
                                         <option value="" disabled selected></option>
                                     </select>
-                                    <button class="btn-small" onclick="loadTestSuites()">🔄 刷新套件</button>
+                                    <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" onclick="refreshTestSuites()">↻ 刷新套件</button>
                                 </div>
                                 <div class="form-row">
                                     <label>测试报告:</label>
@@ -902,7 +905,7 @@
                     </div>
                     <!-- ADB 控制按钮 -->
                     <div class="adb-button-frame" data-operation-log-tab="system">
-                        <button class="btn-xxs" onclick="refreshDevices()">🔄 刷新设备</button>
+                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" onclick="refreshDevices()">↻ 刷新设备</button>
                         <button class="btn-xxs" onclick="selectAllDevices()">✅ 全选设备</button>
                         <button class="btn-xxs" onclick="rebootDevices()">⏻ 重启设备</button>
                         <button id="btn-remount-devices" class="btn-xxs" onclick="remountDevices()">⏻ Remount</button>
@@ -1032,6 +1035,7 @@
                 </div>
                 <div class="host-workspace-single-bar host-workspace-title-state page-title-actions">
                     <span class="host-workspace-pane-status" id="terminal-workspace-status-single">准备中</span>
+                    <button id="terminal-workspace-host-mode-btn" class="btn-xs" onclick="restoreHostTerminalWorkspacePane(0)" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="display:none">↩ 主机终端</button>
                     <button class="btn-xs host-workspace-refresh-btn" onclick="refreshTerminalWorkspacePane(0)" title="重新连接" aria-label="刷新主机终端">🔄</button>
                 </div>
                 <div class="host-workspace-mode-pending host-workspace-title-state page-title-actions">
@@ -2679,9 +2683,9 @@
                             <option value="array">array</option>
                         </select>
                         <label class="dcfg-label" title="计算 overlay 生效值：每个资源调用一次 adb，后端并发执行（8路）。全量查询约1-2分钟，请耐心等待">
-                            <input type="checkbox" id="dcfg-effective" checked> 对比 overlay 生效值
+                            <input type="checkbox" id="dcfg-effective"> 对比 overlay 生效值
                         </label>
-                        <button class="btn-xxs btn-primary" onclick="runDeviceConfigQuery()">查询</button>
+                        <button id="dcfg-query" class="btn-xxs btn-primary" onclick="runDeviceConfigQuery()">查询</button>
                     </div>
                     <div id="dcfg-stat" class="dcfg-stat"></div>
                     <div id="dcfg-results" class="dcfg-empty">点击「查询」开始</div>
@@ -2690,7 +2694,7 @@
                 <div class="dcfg-tab" id="dcfg-tab-packages">
                     <div class="dcfg-toolbar">
                         <input type="text" id="dcfg-pkg-filter" placeholder="过滤包名或路径…" oninput="dcfgScheduleFilterPkg()">
-                        <button class="btn-xxs btn-primary" onclick="loadDevicePackagesF()">刷新</button>
+                        <button id="dcfg-pkg-refresh" class="btn-xxs dcfg-refresh-action" onclick="loadDevicePackagesF()">↻ 刷新</button>
                         <span id="dcfg-pkg-stat"></span>
                     </div>
                     <div id="dcfg-pkg-results" class="dcfg-empty">点击「刷新」加载</div>
@@ -2699,7 +2703,7 @@
                 <div class="dcfg-tab" id="dcfg-tab-features">
                     <div class="dcfg-toolbar">
                         <input type="text" id="dcfg-feat-filter" placeholder="过滤特性名…" oninput="dcfgScheduleFilterFeat()">
-                        <button class="btn-xxs btn-primary" onclick="loadDeviceFeatures()">刷新</button>
+                        <button id="dcfg-feat-refresh" class="btn-xxs dcfg-refresh-action" onclick="loadDeviceFeatures()">↻ 刷新</button>
                         <span id="dcfg-feat-stat"></span>
                     </div>
                     <div id="dcfg-feat-results" class="dcfg-empty">点击「刷新」加载</div>
@@ -2708,7 +2712,7 @@
                 <div class="dcfg-tab" id="dcfg-tab-props">
                     <div class="dcfg-toolbar">
                         <input type="text" id="dcfg-prop-filter" placeholder="过滤属性名或值…" oninput="dcfgScheduleFilterProp()" class="dcfg-filter-input">
-                        <button class="btn-xxs btn-primary" onclick="loadDeviceProps()">刷新</button>
+                        <button id="dcfg-prop-refresh" class="btn-xxs dcfg-refresh-action" onclick="loadDeviceProps()">↻ 刷新</button>
                         <span id="dcfg-prop-stat"></span>
                     </div>
                     <div id="dcfg-prop-results" class="dcfg-empty">点击「刷新」加载</div>
@@ -2716,7 +2720,7 @@
                 <!-- ===== Tab: overrides (RRO config override) ===== -->
                 <div class="dcfg-tab" id="dcfg-tab-overrides">
                     <div class="dcfg-toolbar dcfg-ovr-toolbar">
-                        <button class="btn-xxs" onclick="loadDeviceOverrides()">🔄 刷新</button>
+                        <button id="dcfg-ovr-refresh" class="btn-xxs dcfg-refresh-action" onclick="loadDeviceOverrides()">↻ 刷新</button>
                         <button class="btn-xxs btn-primary" onclick="dcfgApplyOverrides()">⚡ 应用(编译+推送+重启)</button>
                         <button class="btn-xxs" onclick="dcfgRevertAll()">↩ 全部撤销(删除+重启)</button>
                         <button class="btn-xxs" id="dcfg-ovr-disable-verity" onclick="dcfgToggleVerity('disable')" title="关闭 dm-verity（apply 前的一次性步骤，需重启）">🔓 关闭verity</button>
@@ -3240,7 +3244,12 @@
                     hostWorkspace.panes[0] = {type: 'desktop', hostId: contextHost.id};
                 }
                 if (contextHost && window.terminalWorkspaceInitialized && terminalWorkspace.layout === 'single' && terminalWorkspace.panes.length) {
-                    terminalWorkspace.panes[0] = {hostId: contextHost.id};
+                    const currentPane = terminalWorkspace.panes[0];
+                    const contextWorkerId = contextHost.worker_id || workspaceLocalWorkerId();
+                    terminalWorkspace.panes[0] = currentPane?.mode === 'adb'
+                        && currentPane.workerId === contextWorkerId
+                        ? {...currentPane, hostId: contextHost.id}
+                        : {hostId: contextHost.id};
                 }
                 if (window.hostWorkspaceInitialized && currentPage === 'desktop') renderHostWorkspace();
                 if (window.terminalWorkspaceInitialized && currentPage === 'terminal') renderTerminalWorkspace();
@@ -3475,8 +3484,18 @@
             // Give remote single-session VNC servers time to release the old
             // iframe socket. The generation guard also cancels mounts from a
             // superseded render, preventing duplicate connections.
+            const autoMountIndex = hostWorkspace.maximized ?? 0;
             hostWorkspace.panes.forEach((pane, index) => {
                 const paneGeneration = hostWorkspace.paneGenerations.get(index) || 0;
+                const host = desktopHosts.find(item => item.id === pane.hostId);
+                if (index !== autoMountIndex && pane.type !== 'empty' && host && !host.offline) {
+                    const body = document.getElementById(`host-workspace-body-${index}`);
+                    if (body) {
+                        body.innerHTML = `<div class="host-workspace-empty"><button class="btn-xs" onclick="refreshHostWorkspacePane(${index})">连接此桌面</button></div>`;
+                    }
+                    setHostWorkspaceStatus(index, '按需连接');
+                    return;
+                }
                 setTimeout(() => {
                     if (generation === hostWorkspace.renderGeneration && currentPage === 'desktop') {
                         mountHostWorkspacePane(index, pane, generation, paneGeneration);
@@ -3518,6 +3537,16 @@
             await mountHostWorkspaceDesktop(index, host, body, generation, pane.hostId, paneGeneration);
         }
 
+        function hostWorkspaceMountIsCurrent(index, body, generation, expectedHostId, paneGeneration) {
+            return Boolean(
+                body?.isConnected
+                && document.getElementById(`host-workspace-body-${index}`) === body
+                && generation === hostWorkspace.renderGeneration
+                && paneGeneration === (hostWorkspace.paneGenerations.get(index) || 0)
+                && hostWorkspace.panes[index]?.hostId === expectedHostId
+            );
+        }
+
         async function resolveWorkspaceVncUrl(host) {
             const workerId = host.worker_id || (host.id === 'default' ? workspaceLocalWorkerId() : '');
             if (!workerId) {
@@ -3552,28 +3581,39 @@
             setHostWorkspaceStatus(index, '正在连接桌面…');
             try {
                 const granted = await ensureTerminalElevation(false, '打开主机桌面', '主机桌面');
+                if (!hostWorkspaceMountIsCurrent(
+                    index, body, generation, expectedHostId, paneGeneration
+                )) return;
                 if (!granted) {
                     body.innerHTML = '<div class="host-workspace-empty">需要管理员认证后才能打开主机桌面</div>';
                     setHostWorkspaceStatus(index, '等待管理员认证');
                     return;
                 }
                 const url = await resolveWorkspaceVncUrl(host);
-                const currentBody = document.getElementById(`host-workspace-body-${index}`);
-                const currentPane = hostWorkspace.panes[index];
-                if (!currentBody || currentBody !== body ||
-                    generation !== hostWorkspace.renderGeneration ||
-                    paneGeneration !== (hostWorkspace.paneGenerations.get(index) || 0) ||
-                    currentPane?.hostId !== expectedHostId) return;
+                if (!hostWorkspaceMountIsCurrent(
+                    index, body, generation, expectedHostId, paneGeneration
+                )) return;
                 const frame = document.createElement('iframe');
                 frame.allowFullscreen = true;
                 frame.allow = 'clipboard-read; clipboard-write';
                 frame.src = url;
-                frame.onload = () => setHostWorkspaceStatus(index, '桌面已连接', true);
+                frame.onload = () => {
+                    const instance = hostWorkspace.instances.get(index);
+                    if (instance?.frame === frame && !instance.disposed
+                        && hostWorkspaceMountIsCurrent(
+                            index, body, generation, expectedHostId, paneGeneration
+                        )) {
+                        setHostWorkspaceStatus(index, '桌面已连接', true);
+                    }
+                };
                 body.replaceChildren(frame);
                 hostWorkspace.instances.set(index, {
                     type: 'desktop', hostId: expectedHostId, frame, disposed: false
                 });
             } catch (error) {
+                if (!hostWorkspaceMountIsCurrent(
+                    index, body, generation, expectedHostId, paneGeneration
+                )) return;
                 if (error?.status === 401 || /Authentication required/i.test(error?.message || '')) {
                     showAuthGate(false);
                 }
@@ -3617,7 +3657,11 @@
             term.onData(input => {
                 if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: 'terminal_input', input}));
             });
-            socket.onopen = () => socket.send(JSON.stringify({type: 'terminal_connect', mode: 'ssh', worker_id: workerId}));
+            socket.onopen = () => {
+                if (!instance.disposed) {
+                    socket.send(JSON.stringify({type: 'terminal_connect', mode: 'ssh', worker_id: workerId}));
+                }
+            };
             socket.onmessage = event => {
                 if (instance.disposed) return;
                 try {
@@ -3646,7 +3690,9 @@
                     setHostWorkspaceStatus(index, '已断开');
                 }
             };
-            socket.onerror = () => setHostWorkspaceStatus(index, '连接错误');
+            socket.onerror = () => {
+                if (!instance.disposed) setHostWorkspaceStatus(index, '连接错误');
+            };
             instance.resizeObserver = new ResizeObserver(() => resizeHostWorkspaceTerminal(instance));
             instance.resizeObserver.observe(body);
         }
@@ -3736,7 +3782,10 @@
         function snapshotTerminalClusterState() {
             return {
                 layout: terminalWorkspace.layout,
-                panes: terminalWorkspace.panes.map(pane => ({...pane})),
+                // ADB Shell targets are one-shot sessions. Persist only host
+                // selections so a mode change or reload cannot reopen/claim a
+                // previously selected device automatically.
+                panes: terminalWorkspace.panes.map(pane => ({hostId: pane.hostId})),
                 maximized: terminalWorkspace.maximized,
             };
         }
@@ -3754,6 +3803,12 @@
             const assigned = new Set();
             terminalWorkspace.panes = terminalWorkspace.panes.slice(0, count).map(p => {
                 let hostId = p?.hostId;
+                const adbSerial = String(p?.serialNo || '').trim();
+                const adbWorkerId = String(p?.workerId || '').trim();
+                if (p?.mode === 'adb' && adbSerial && adbWorkerId) {
+                    if (hostId) assigned.add(hostId);
+                    return {hostId, mode:'adb', serialNo:adbSerial, workerId:adbWorkerId};
+                }
                 if (!desktopHosts.some(h => h.id === hostId) || assigned.has(hostId)) {
                     hostId = (!assigned.has(fallback) && desktopHosts.some(h => h.id === fallback && !h.offline)
                         ? fallback
@@ -3768,19 +3823,40 @@
             const stateToSave=terminalWorkspace.clusterState||snapshotTerminalClusterState();
             localStorage.setItem('gms_terminal_workspace',JSON.stringify({layout:stateToSave.layout,panes:stateToSave.panes}));
         }
+        function initializeTerminalWorkspaceState() {
+            if (window.terminalWorkspaceInitialized) return;
+            try {
+                const saved=JSON.parse(localStorage.getItem('gms_terminal_workspace')||'{}');
+                if(HOST_WORKSPACE_COUNTS[saved.layout])terminalWorkspace.layout=saved.layout;
+                if(Array.isArray(saved.panes))terminalWorkspace.panes=saved.panes;
+            } catch(_) {}
+            normalizeTerminalWorkspace();
+            terminalWorkspace.clusterState=snapshotTerminalClusterState();
+            if(!hostWorkspaceClusterEnabled)useSingleTerminalWorkspaceState();
+            window.terminalWorkspaceInitialized=true;
+        }
         async function ensureTerminalWorkspaceInitialized() {
             if (!window.desktopHostsInitialized) {
-                await initDesktopHosts();
+                const hostsReady = initDesktopHosts();
+                const context = window.GmsWorkspace?.get?.() || {};
+                const canUseLocalBootstrap = context.scope_mode !== 'cluster'
+                    && isLocalWorkspaceWorker(context.worker_id || workspaceLocalWorkerId())
+                    && Boolean(workspaceHostForWorker(context.worker_id));
+                if (!canUseLocalBootstrap) {
+                    await hostsReady;
+                } else {
+                    hostsReady.catch(error =>
+                        debugLog('[Terminal] Background host refresh failed:', error));
+                }
                 window.desktopHostsInitialized = true;
             }
-            if (!window.terminalWorkspaceInitialized) {
-                try { const s=JSON.parse(localStorage.getItem('gms_terminal_workspace')||'{}'); if(HOST_WORKSPACE_COUNTS[s.layout]) terminalWorkspace.layout=s.layout; if(Array.isArray(s.panes)) terminalWorkspace.panes=s.panes; } catch(_) {}
-                normalizeTerminalWorkspace();
-                terminalWorkspace.clusterState=snapshotTerminalClusterState();
-                if(!hostWorkspaceClusterEnabled)useSingleTerminalWorkspaceState();
-                window.terminalWorkspaceInitialized=true;
+            initializeTerminalWorkspaceState();
+            const preferred=workspaceHostForWorker();
+            if(preferred&&terminalWorkspace.layout==='single'&&terminalWorkspace.panes.length){
+                const currentPane=terminalWorkspace.panes[0],preferredWorkerId=preferred.worker_id||workspaceLocalWorkerId();
+                terminalWorkspace.panes[0]=currentPane?.mode==='adb'&&currentPane.workerId===preferredWorkerId
+                    ? {...currentPane,hostId:preferred.id}:{hostId:preferred.id};
             }
-            const preferred=workspaceHostForWorker();if(preferred&&terminalWorkspace.layout==='single'&&terminalWorkspace.panes.length){terminalWorkspace.panes[0]={hostId:preferred.id};}
             renderTerminalWorkspace();
         }
         function disposeTerminalWorkspaceInstance(index) {
@@ -3821,14 +3897,27 @@
             grid.className=`host-workspace-grid layout-${terminalWorkspace.layout}${terminalWorkspace.maximized!==null?' pane-maximized':''}`;
             document.querySelectorAll('[data-terminal-layout]').forEach(b=>b.classList.toggle('active',b.dataset.terminalLayout===terminalWorkspace.layout));
             grid.innerHTML=terminalWorkspace.panes.map((p,i)=>`<section class="host-workspace-pane${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}">
-                <div class="host-workspace-pane-header"><span data-multi-host-control style="font-size:11px;">🐧 终端</span>
+                <div class="host-workspace-pane-header"><span data-multi-host-control data-terminal-pane-mode-label style="font-size:11px;">🐧 终端</span>
                 <select data-multi-host-control aria-label="主机" onchange="changeTerminalWorkspaceHost(${i},this.value)">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
                 <span class="host-workspace-pane-status" id="terminal-workspace-status-${i}">准备中</span>
+                <button data-multi-host-control data-terminal-pane-host-mode class="btn-xs" onclick="restoreHostTerminalWorkspacePane(${i})" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="${p.mode==='adb'?'':'display:none'}">↩ 主机终端</button>
                 <button class="btn-xs host-workspace-refresh-btn" onclick="refreshTerminalWorkspacePane(${i})" title="重新连接" aria-label="刷新主机终端">🔄</button>
                 <button data-multi-host-control class="btn-xs" onclick="maximizeTerminalWorkspacePane(${i})">${terminalWorkspace.maximized===i?'▦':'⛶'}</button></div>
                 <div class="host-workspace-pane-body" id="terminal-workspace-body-${i}"></div></section>`).join('');
+            const singleHostModeButton=document.getElementById('terminal-workspace-host-mode-btn');
+            if(singleHostModeButton)singleHostModeButton.style.display=terminalWorkspace.panes[0]?.mode==='adb'?'':'none';
             const generation=terminalWorkspace.generation;
-            terminalWorkspace.panes.forEach((p,i)=>mountTerminalWorkspacePane(i,p,generation));
+            const autoMountIndex=terminalWorkspace.maximized??0;
+            terminalWorkspace.panes.forEach((p,i)=>{
+                const host=desktopHosts.find(item=>item.id===p.hostId);
+                if(i!==autoMountIndex&&host&&!host.offline){
+                    const body=document.getElementById(`terminal-workspace-body-${i}`);
+                    if(body)body.innerHTML=`<div class="host-workspace-empty"><button class="btn-xs" onclick="refreshTerminalWorkspacePane(${i})">连接此终端</button></div>`;
+                    terminalWorkspaceStatus(i,'按需连接');
+                    return;
+                }
+                mountTerminalWorkspacePane(i,p,generation);
+            });
             setHostWorkspaceSurfaceReady('terminal',true);
         }
         function terminalWorkspaceStatus(i,text,ok=false){
@@ -3842,19 +3931,24 @@
             const body=document.getElementById(`terminal-workspace-body-${index}`),host=desktopHosts.find(h=>h.id===pane.hostId); if(!body)return;
             if(!host){body.innerHTML='<div class="host-workspace-empty">暂无更多可用主机</div>';terminalWorkspaceStatus(index,'空闲');return;}
             if(host.offline){body.innerHTML='<div class="host-workspace-empty">主机已离线</div>';terminalWorkspaceStatus(index,'离线');return;}
-            terminalWorkspaceStatus(index,'正在加载终端…');
-            try{await loadXTermScripts();}catch(error){console.error('[Terminal workspace] xterm.js load failed:',error);body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';terminalWorkspaceStatus(index,'加载失败');return;}
+            const terminalMode=pane.mode==='adb'?'adb':'ssh',serialNo=String(pane.serialNo||'').trim();
+            if(terminalMode==='adb'&&!serialNo){body.innerHTML='<div class="host-workspace-empty">设备序列号无效</div>';terminalWorkspaceStatus(index,'连接失败');return;}
+            terminalWorkspaceStatus(index,terminalMode==='adb'?'正在打开 ADB Shell…':'正在加载终端…');
+            try{await loadXTermScripts();}catch(error){console.error('[Terminal workspace] xterm.js load failed:',error);if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';terminalWorkspaceStatus(index,'加载失败');return;}
             if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;
             const el=document.createElement('div');el.className='host-workspace-terminal';body.replaceChildren(el);
             const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:{background:'#000',foreground:'#fff'},scrollback:2000,termName:'xterm-256color'});
             const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(el);fit.fit();
-            const instance={type:'terminal',hostId:host.id,terminal:term,fit,socket:null,resizeObserver:null,disposed:false,initialData:'',shellReady:false,lastResizeCols:0,lastResizeRows:0};terminalWorkspace.instances.set(index,instance);
-            const parts=String(host.connection||'').split('@'),user=parts.shift()||'',address=parts.join('@'),workerId=host.worker_id||(host.id==='default'?workspaceLocalWorkerId():'');
+            const workerId=pane.workerId||host.worker_id||(host.id==='default'?workspaceLocalWorkerId():'');
+            const instance={type:'terminal',mode:terminalMode,hostId:host.id,workerId,serialNo,terminal:term,fit,socket:null,resizeObserver:null,disposed:false,initialData:'',shellReady:terminalMode==='adb',lastResizeCols:0,lastResizeRows:0};terminalWorkspace.instances.set(index,instance);
+            const parts=String(host.connection||'').split('@'),user=parts.shift()||'',address=parts.join('@');
             body.addEventListener('dragover',event=>{event.preventDefault();body.style.outline='2px dashed var(--primary-color)';});
             body.addEventListener('dragleave',()=>{body.style.outline='';});
             body.addEventListener('drop',async event=>{event.preventDefault();body.style.outline='';const file=event.dataTransfer?.files?.[0];if(!file)return;if(!await ensureTerminalElevation(false,'上传文件到主机','主机文件上传'))return;term.writeln(`\r\n\x1b[33m📤 正在上传 ${file.name}...\x1b[0m`);const form=new FormData();form.append('file',file);form.append('worker_id',workerId);try{const result=await apiCall('/api/terminal/push','POST',form);term.writeln(`\r\n\x1b[32m✅ 已上传到 ${result.remote_path}\x1b[0m`);}catch(error){term.writeln(`\r\n\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);}finally{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input:'\r'}));term.focus();}});
             const protocol=location.protocol==='https:'?'wss:':'ws:',socket=new WebSocket(`${protocol}//${location.host}/api/system/websocket/terminal_workspace_${index}_${Date.now()}_${Math.random().toString(36).slice(2)}`);instance.socket=socket;
-            term.writeln(`\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
+            term.writeln(terminalMode==='adb'
+                ? `\x1b[33m⏳ 正在打开 ${serialNo} 的 ADB Shell...\x1b[0m`
+                : `\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
             term.onData(input=>{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input}));});
             let suppressPasteUntil=0;
             const sendInput=input=>{if(socket.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify({type:'terminal_input',input}));return true;};
@@ -3864,10 +3958,10 @@
             el.addEventListener('click',()=>term.focus());
             el.addEventListener('paste',event=>{if(Date.now()<suppressPasteUntil){event.preventDefault();event.stopPropagation();return;}const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();event.stopPropagation();pasteText(text);term.focus();}},true);
             el.addEventListener('contextmenu',event=>{if(navigator.clipboard?.readText){event.preventDefault();event.stopPropagation();pasteClipboard();}});
-            socket.onopen=()=>socket.send(JSON.stringify({type:'terminal_connect',mode:'ssh',worker_id:workerId}));
-            socket.onmessage=e=>{if(instance.disposed)return;try{const m=JSON.parse(e.data);if(m.type==='terminal_data')writeTerminalWorkspaceData(instance,m.data||'');else if(m.type==='terminal_connected'){terminalWorkspaceStatus(index,`${user}@${address}`,true);setTimeout(()=>resizeHostWorkspaceTerminal(instance),0);}else if(m.type==='terminal_error'||m.type==='error'){term.writeln(`\r\n\x1b[31m${m.error||m.message||'连接失败'}\x1b[0m`);if(m.elevation_required){terminalWorkspaceStatus(index,'等待管理员认证');recoverTerminalElevation(instance,'重新连接主机终端',()=>refreshTerminalWorkspacePane(index));}else if(m.credential_required&&m.device_host&&typeof showDevicePasswordModal==='function'){terminalWorkspaceStatus(index,'等待 SSH 凭据');showDevicePasswordModal(m.device_host,'terminal',()=>refreshTerminalWorkspacePane(index));}else{terminalWorkspaceStatus(index,'连接失败');}}}catch(_){}};
+            socket.onopen=()=>{if(!instance.disposed)socket.send(JSON.stringify({type:'terminal_connect',mode:terminalMode,worker_id:workerId,...(terminalMode==='adb'?{serial_no:serialNo}:{})}));};
+            socket.onmessage=e=>{if(instance.disposed)return;try{const m=JSON.parse(e.data);if(m.type==='terminal_data')writeTerminalWorkspaceData(instance,m.data||'');else if(m.type==='terminal_connected'){if(terminalMode==='adb'){term.clear();term.writeln(`\x1b[32m✅ ADB Shell · ${serialNo}\x1b[0m\r\n`);terminalWorkspaceStatus(index,`ADB · ${serialNo}`,true);}else{terminalWorkspaceStatus(index,`${user}@${address}`,true);}setTimeout(()=>resizeHostWorkspaceTerminal(instance),0);}else if(m.type==='terminal_error'||m.type==='error'){term.writeln(`\r\n\x1b[31m${m.error||m.message||'连接失败'}\x1b[0m`);if(m.elevation_required){terminalWorkspaceStatus(index,'等待管理员认证');recoverTerminalElevation(instance,'重新连接主机终端',()=>refreshTerminalWorkspacePane(index));}else if(m.credential_required&&m.device_host&&typeof showDevicePasswordModal==='function'){terminalWorkspaceStatus(index,'等待 SSH 凭据');showDevicePasswordModal(m.device_host,'terminal',()=>refreshTerminalWorkspacePane(index));}else{terminalWorkspaceStatus(index,'连接失败');}}}catch(_){}};
             socket.onclose=()=>{if(!instance.disposed){term.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m');terminalWorkspaceStatus(index,'已断开');}};
-            socket.onerror=()=>terminalWorkspaceStatus(index,'连接错误');instance.resizeObserver=new ResizeObserver(()=>resizeHostWorkspaceTerminal(instance));instance.resizeObserver.observe(body);
+            socket.onerror=()=>{if(!instance.disposed)terminalWorkspaceStatus(index,'连接错误');};instance.resizeObserver=new ResizeObserver(()=>resizeHostWorkspaceTerminal(instance));instance.resizeObserver.observe(body);
         }
         function writeTerminalWorkspaceData(instance,data){
             if(instance.shellReady){instance.terminal.write(data);return;}
@@ -3887,7 +3981,7 @@
                 return;
             }
             if(pane.hostId===v)return;
-            pane.hostId=v;
+            terminalWorkspace.panes[i]={hostId:v};
             if(terminalWorkspace.layout==='single'){
                 currentHost=host;
                 updateWorkspaceForHost(host,'terminal');
@@ -3906,6 +4000,20 @@
             const paneGeneration=(terminalWorkspace.paneGenerations.get(i)||0)+1;terminalWorkspace.paneGenerations.set(i,paneGeneration);
             body.replaceChildren();terminalWorkspaceStatus(i,'正在刷新…');
             mountTerminalWorkspacePane(i,pane,terminalWorkspace.generation,paneGeneration);
+        }
+        function restoreHostTerminalWorkspacePane(i){
+            const pane=terminalWorkspace.panes[i];if(!pane||pane.mode!=='adb')return;
+            terminalWorkspace.panes[i]={hostId:pane.hostId};
+            saveTerminalWorkspace();
+            // Only reconnect the selected pane. Other terminals in a multi-pane
+            // layout must keep their PTY/WebSocket sessions alive.
+            terminalWorkspace.renderedSignature=terminalWorkspaceRenderSignature();
+            const paneRoot=document.querySelector(`[data-terminal-pane="${i}"]`);
+            const hostModeButton=paneRoot?.querySelector('[data-terminal-pane-host-mode]');
+            if(hostModeButton)hostModeButton.style.display='none';
+            const singleHostModeButton=document.getElementById('terminal-workspace-host-mode-btn');
+            if(singleHostModeButton&&i===0)singleHostModeButton.style.display='none';
+            refreshTerminalWorkspacePane(i);
         }
         function maximizeTerminalWorkspacePane(i){terminalWorkspace.maximized=terminalWorkspace.maximized===i?null:i;renderTerminalWorkspace();}
         function applyHostWorkspaceScopeMode(clusterEnabled) {
@@ -3943,7 +4051,7 @@
             if (window.hostWorkspaceInitialized) renderHostWorkspace();
             if (window.terminalWorkspaceInitialized) renderTerminalWorkspace();
         }
-        Object.assign(window,{setTerminalWorkspaceLayout,changeTerminalWorkspaceHost,refreshTerminalWorkspacePane,maximizeTerminalWorkspacePane,applyHostWorkspaceScopeMode});
+        Object.assign(window,{setTerminalWorkspaceLayout,changeTerminalWorkspaceHost,refreshTerminalWorkspacePane,restoreHostTerminalWorkspacePane,maximizeTerminalWorkspacePane,applyHostWorkspaceScopeMode});
 
         // ==================== 用户管理功能 ====================
         let usersRefreshInterval = null;
@@ -4205,29 +4313,38 @@
                     includeCluster
                         ? fetch('/api/cluster/hosts', { cache: 'no-store' }).catch(() => null)
                         : Promise.resolve(null),
-                    fetch('/api/cluster/status', { cache: 'no-store' }).catch(() => null)
+                    includeCluster
+                        ? fetch('/api/cluster/status', { cache: 'no-store' }).catch(() => null)
+                        : Promise.resolve(null)
                 ]);
                 const data = resp.ok ? await resp.json() : {};
-                allDevices = Array.isArray(data.devices)
+                let loadedDevices = Array.isArray(data.devices)
                     ? data.devices
                     : Array.isArray(data.data) ? data.data : [];
                 if (!resp.ok || data.success === false) {
                     console.warn('[Devices] Controller device scan failed:', data.warning || data.error || resp.statusText);
                 }
                 const statusData = statusResp && statusResp.ok ? await statusResp.json() : {};
-                const localWorkerId = statusData.local_worker_id || 'ats-worker-controller';
+                const localWorkerId = statusData.local_worker_id || workspaceLocalWorkerId();
                 const clusterMode = Boolean(includeCluster && statusData.enabled);
                 const scopeHint = document.getElementById('devices-scope-hint');
                 // 为本地设备补全 worker_id，使按主机分组时本地和远端设备都能正确归类
-                allDevices.forEach(d => {
+                loadedDevices.forEach(d => {
                     if (!d.worker_id) d.worker_id = localWorkerId;
                 });
-                allDevices = allDevices.filter(device =>
+                loadedDevices = loadedDevices.filter(device =>
                     !['offline', 'unknown'].includes(
                         String(device.status || '').toLowerCase()
                     )
                 );
                 const hostsData = hostsResp && hostsResp.ok ? await hostsResp.json() : {};
+                if (includeCluster && Array.isArray(hostsData.hosts)) {
+                    // Reuse the directory fetched for device rendering when an
+                    // action immediately opens a desktop/terminal. This avoids
+                    // another /api/cluster/hosts round trip on the button path.
+                    clusterHostDirectory.hosts = hostsData.hosts;
+                    clusterHostDirectory.loadedAt = Date.now();
+                }
                 const hostDirectory = new Map((hostsData.hosts || []).map(host => [
                     host.worker_id,
                     host
@@ -4236,7 +4353,7 @@
                     host.worker_id,
                     host.worker_id
                 ]));
-                allDevices.forEach(device => {
+                loadedDevices.forEach(device => {
                     device.host_display_name = hostNames.get(device.worker_id)
                         || device.source_host
                         || device.worker_id;
@@ -4311,18 +4428,21 @@
                                 cluster_readonly: true
                             };
                         });
-                    allDevices = allDevices.concat(remoteDevices);
+                    loadedDevices = loadedDevices.concat(remoteDevices);
                 }
 
                 // Do not apply a response after the user changed mode while it
                 // was in flight. The scoped loader will immediately issue the
                 // replacement request for the new mode.
-                if (requestedDevicesManagementScope() !== requestedScope) return;
-                devicesManagementClusterMode = clusterMode;
-
                 // 每次刷新都同步最新分组定义（后端持续自动补全会改动 auto 分组，
                 // 不同步会导致新接入设备虽在 allDevices 中却不进组/不显示）
                 await mgmtLoadGroups();
+                // Group loading is another asynchronous boundary. Publish the
+                // inventory only after re-checking scope so a completed cluster
+                // request can never flash remote devices in single mode.
+                if (requestedDevicesManagementScope() !== requestedScope) return;
+                allDevices = loadedDevices;
+                devicesManagementClusterMode = clusterMode;
                 state.deviceGroupsLoaded = true;
                 displayDevicesManagement(filteredDevicesForView());
                 if (clusterMode || state.deviceGroups.length > 0) {
@@ -4422,8 +4542,13 @@
 
             // 渲染设备列表
             const renderDeviceRow = (device) => {
-                const serialNo = device.serial_no || device.device_id || '';
-                const serialAttr = escapeIconAttr(serialNo);
+                const isClusterRemote = Boolean(device.cluster_readonly);
+                const serialNo = String(device.serial_no || device.device_id || '');
+                // serial_no is presentation metadata (ro.serialno). ADB actions
+                // must use the inventory transport id, which can be IP:port or
+                // another value that differs from ro.serialno.
+                const actionDeviceId = String(device.device_id || serialNo);
+                const serialAttr = escapeIconAttr(actionDeviceId);
                 const workerAttr = escapeIconAttr(device.worker_id || workspaceLocalWorkerId());
                 const actionButtonStyle = 'width: 92px; min-width: 92px; font-size: 12px; padding: 4px 8px;';
                 const releaseButton = device.cluster_readonly
@@ -4486,41 +4611,60 @@
                     ? `<span style="background: rgba(33, 150, 243, 0.15); color: #42a5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600; font-family: monospace;">${escapeHtml(String(device.soc_model))}</span>`
                     : '-';
 
-                const isClusterRemote = Boolean(device.cluster_readonly);
                 const isFastboot = device.protocol === 'fastboot'
                     || device.status === 'fastboot'
                     || device.cluster_state === 'fastboot';
                 const clusterWorkerAttr = escapeIconAttr(device.worker_id || '');
-                const clusterFullIdAttr = escapeIconAttr(`${device.worker_id || ''}:${serialNo}`);
-                const clusterInspectable = !['offline', 'unknown', 'unauthorized', 'fastboot'].includes(device.cluster_state);
+                const clusterFullId = actionDeviceId.startsWith(`${device.worker_id || ''}:`)
+                    ? actionDeviceId
+                    : `${device.worker_id || ''}:${actionDeviceId}`;
+                const clusterFullIdAttr = escapeIconAttr(clusterFullId);
+                const clusterInspectable = !device.claimed
+                    && !['offline', 'unknown', 'unauthorized', 'fastboot'].includes(device.cluster_state);
                 const clusterMutable = device.cluster_state === 'available';
+                const localClaimed = !isClusterRemote && Boolean(device.locked_by);
+                const localClaimedByOther = localClaimed && !device.locked_by_self;
                 const shellDisabled = isClusterRemote && !(clusterMutable && device.cluster_shell_available)
                     ? ' disabled' : '';
                 const remoteInspectionDisabled = isClusterRemote
                     && !(clusterInspectable && device.cluster_device_inspection) ? ' disabled' : '';
                 const remoteControlDisabled = isClusterRemote
                     && !(clusterMutable && device.cluster_device_inspection) ? ' disabled' : '';
-                const adbShellDisabled = Boolean(shellDisabled || (!isClusterRemote && isFastboot));
-                const adbInspectionDisabled = Boolean(remoteInspectionDisabled || (!isClusterRemote && isFastboot));
-                const adbControlDisabled = Boolean(remoteControlDisabled || (!isClusterRemote && isFastboot));
+                const adbShellDisabled = Boolean(shellDisabled || (!isClusterRemote && (isFastboot || localClaimed)));
+                const adbInspectionDisabled = Boolean(remoteInspectionDisabled || (!isClusterRemote && (isFastboot || localClaimedByOther)));
+                const adbControlDisabled = Boolean(remoteControlDisabled || (!isClusterRemote && (isFastboot || localClaimedByOther)));
                 const shellStyle = adbShellDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
                 const remoteInspectionStyle = adbInspectionDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
                 const remoteControlStyle = adbControlDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
-                const inspectionTitle = device.cluster_device_inspection
-                    ? '查看远程设备信息：packages / features / props'
+                const inspectionTitle = device.claimed
+                    ? '设备已被测试或平台操作占用，Device Info 会在释放后可用'
+                    : device.cluster_device_inspection
+                    ? '查看远程设备信息：configs / packages / features / props'
                     : 'Worker Agent 版本过旧或未上报 device_inspection 能力';
                 const controlTitle = device.cluster_device_inspection
                     ? '仅可操控当前可用的集群设备'
                     : 'Worker Agent 版本过旧或未上报 device_inspection 能力';
+                const localShellTitle = isFastboot
+                    ? 'Fastboot 状态下不可使用 adb shell'
+                    : localClaimed ? '设备已被测试或平台操作占用，释放后可打开 ADB Shell'
+                    : '打开 adb shell';
+                const localInspectionTitle = isFastboot
+                    ? 'Fastboot 状态下不可读取 ADB 设备信息'
+                    : localClaimedByOther ? '设备已被其他用户或任务占用'
+                    : '查看设备信息：configs 配置资源 / packages 已装包 / features 特性 / 系统属性';
+                const localControlTitle = isFastboot
+                    ? 'Fastboot 状态下不可使用 UI 操控'
+                    : localClaimedByOther ? '设备已被其他用户或任务占用'
+                    : '智能 UI 操控：截图 + 布局元素 + 点按';
                 const shellButton = isClusterRemote
                     ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceShell(this.dataset.serial,this.dataset.worker)" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${shellDisabled}>🐧 adb shell</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceShell(this.dataset.serial)" title="${isFastboot ? 'Fastboot 状态下不可使用 adb shell' : '打开 adb shell'}" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>🐧 adb shell</button>`;
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openDeviceShell(this.dataset.serial)" title="${localShellTitle}" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>🐧 adb shell</button>`;
                 const deviceInfoButton = isClusterRemote
                     ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceInfo(this.dataset.serial,this.dataset.worker)" title="${inspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>ℹ️ device info</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" onclick="openDeviceConfigExplorer(this.dataset.serial)" title="${isFastboot ? 'Fastboot 状态下不可读取 ADB 设备信息' : '查看设备信息：configs 配置资源 / packages 已装包 / features 特性'}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>ℹ️ device info</button>`;
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" onclick="openDeviceConfigExplorer(this.dataset.serial,this.dataset.worker)" title="${localInspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>ℹ️ device info</button>`;
                 const uiControlButton = isClusterRemote
                     ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" onclick="openClusterDeviceUiControl(this.dataset.serial,this.dataset.worker)" title="${controlTitle}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>🎯 UI 操控</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openUiControl(this.dataset.serial)" title="${isFastboot ? 'Fastboot 状态下不可使用 UI 操控' : '智能 UI 操控：截图 + 布局元素 + 点按'}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>🎯 UI 操控</button>`;
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" onclick="openUiControl(this.dataset.serial)" title="${localControlTitle}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>🎯 UI 操控</button>`;
 
                 return `
                     <tr style="border-bottom: 1px solid var(--border-color);">
@@ -4940,7 +5084,7 @@
         // 打开设备ADB Shell
         let pendingAdbDevice = null; // 保存待连接的设备序列号
 
-        async function openDeviceShell(serialNo) {
+        async function openDeviceShell(serialNo, requestedWorkerId = '') {
             try {
                 if (!await ensureTerminalElevation()) return;
                 if (!serialNo || serialNo === '-') {
@@ -4950,63 +5094,50 @@
 
                 const device = allDevices.find(item =>
                     item.device_id === serialNo || item.serial_no === serialNo);
-                const workerId = device?.worker_id || (serialNo.includes(':') ? serialNo.split(':', 1)[0] : workspaceLocalWorkerId());
+                const compositeWorkerId = serialNo.includes(':') ? serialNo.split(':', 1)[0] : '';
+                const workerId = requestedWorkerId || device?.worker_id
+                    || (desktopHosts.some(host => host.worker_id === compositeWorkerId)
+                        ? compositeWorkerId : workspaceLocalWorkerId());
                 const rawSerial = serialNo.startsWith(`${workerId}:`) ? serialNo.slice(workerId.length + 1) : serialNo;
 
-                // Switch workspace to the correct host, then open terminal page
-                // and send "adb shell" command into the first workspace pane.
-                // Ensure cluster hosts are merged so remote workers are available.
-                if (typeof mergeClusterDesktopHosts === 'function') {
+                // Build the host list once, reusing the device page's cached
+                // cluster directory. The visible terminal pane connects in ADB
+                // mode directly; no timer or shell-command injection is needed.
+                if (!desktopHosts.some(host => host.id === 'default')) {
+                    const hostsReady = initDesktopHosts();
+                    if (!isLocalWorkspaceWorker(workerId)) {
+                        await hostsReady;
+                    } else {
+                        hostsReady.catch(error =>
+                            debugLog('[Device shell] Background host refresh failed:', error));
+                    }
+                    window.desktopHostsInitialized = true;
+                } else if (typeof mergeClusterDesktopHosts === 'function') {
                     await mergeClusterDesktopHosts();
                 }
-                let targetHost = isLocalWorkspaceWorker(workerId)
+                const targetHost = isLocalWorkspaceWorker(workerId)
                     ? desktopHosts.find(h => h.id === 'default')
                     : desktopHosts.find(h => h.worker_id === workerId);
-                if (!isLocalWorkspaceWorker(workerId) && (!targetHost || targetHost.offline)) {
+                if (!targetHost || targetHost.offline) {
                     throw new Error(`Worker ${workerId} 缺少可用的 SSH 主机信息`);
                 }
-                if (targetHost) {
-                    window.GmsWorkspace?.update({
-                        worker_id: workerId,
-                        origin_page: 'terminal'
-                    }, {source: 'device-shell'});
-                }
+                window.GmsWorkspace?.update({
+                    worker_id: workerId,
+                    origin_page: 'terminal'
+                }, {source: 'device-shell'});
                 showToast(`正在打开设备 ${rawSerial} 的 Shell...`, 'info');
                 // ADB Shell 跳转仅打开目标设备的单窗格。
+                initializeTerminalWorkspaceState();
                 terminalWorkspace.layout = 'single';
                 terminalWorkspace.maximized = null;
-                terminalWorkspace.panes = [{hostId: targetHost?.id || ''}];
+                terminalWorkspace.panes = [{
+                    hostId: targetHost.id,
+                    mode: 'adb',
+                    serialNo: rawSerial,
+                    workerId
+                }];
+                terminalWorkspace.renderedSignature = null;
                 switchPage('terminal');
-
-                // Wait for the workspace pane to mount, then switch to target host
-                // and inject adb shell command.
-                setTimeout(async () => {
-                    if (!window.terminalWorkspaceInitialized) {
-                        await ensureTerminalWorkspaceInitialized();
-                    }
-                    // Only re-render if the first pane is on a different host.
-                    const currentPaneHost = terminalWorkspace.panes[0]?.hostId;
-                    if (targetHost && currentPaneHost !== targetHost.id) {
-                        terminalWorkspace.panes[0] = {hostId: targetHost.id};
-                        renderTerminalWorkspace();
-                    }
-                    const sendShell = () => {
-                        const instance = terminalWorkspace.instances.get(0);
-                        if (instance?.socket?.readyState === WebSocket.OPEN) {
-                            instance.socket.send(JSON.stringify({
-                                type: 'terminal_input',
-                                input: `adb -s ${rawSerial} shell\r`
-                            }));
-                            instance.terminal.focus();
-                            return true;
-                        }
-                        return false;
-                    };
-                    if (!sendShell()) {
-                        // Workspace pane just rendered — wait for WebSocket to connect.
-                        setTimeout(sendShell, 2000);
-                    }
-                }, 600);
             } catch (error) {
                 console.error('打开 Shell 失败:', error);
                 showToast(`打开 Shell 失败: ${error.message}`, 'error');
@@ -5018,10 +5149,29 @@
         let uiControlElements = [];
         let uiControlRefreshId = 0;
 
+        function clusterManagedDevice(fullSerial, workerId) {
+            const rawSerial = String(fullSerial || '').startsWith(`${workerId}:`)
+                ? String(fullSerial).slice(workerId.length + 1)
+                : String(fullSerial || '');
+            return allDevices.find(item =>
+                item.cluster_readonly
+                && item.worker_id === workerId
+                && (item.serial_no === rawSerial
+                    || item.device_id === `${workerId}:${rawSerial}`)
+            );
+        }
+
         async function openClusterDeviceShell(fullSerial, workerId) {
-            // Delegate to the existing openDeviceShell which already handles
-            // worker_id:serial format and terminal host switching.
-            await openDeviceShell(fullSerial);
+            if (requestedDevicesManagementScope() !== 'cluster') {
+                showToast('当前为单机模式，请切换到集群模式后再打开远程 ADB Shell', 'warning');
+                return;
+            }
+            const managed = clusterManagedDevice(fullSerial, workerId);
+            if (!managed || managed.cluster_state !== 'available' || !managed.cluster_shell_available) {
+                showToast('该远程设备或 Worker 当前不可用于 ADB Shell，请刷新设备列表', 'warning');
+                return;
+            }
+            await openDeviceShell(fullSerial, workerId);
         }
         window.openClusterDeviceShell = openClusterDeviceShell;
 
@@ -5030,28 +5180,37 @@
                 showToast('远程设备信息需要有效的 Worker', 'error');
                 return;
             }
-            try {
-                const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
-                const payload = await response.json();
-                const worker = (payload.workers || []).find(item => item.id === workerId);
-                if (!response.ok || !worker?.capabilities?.device_inspection) {
-                    showToast(`${workerId} 的 Worker Agent 版本过旧，请在主机集群页重新部署后再查看 device info`, 'warning');
-                    return;
-                }
-            } catch (error) {
-                showToast(`无法确认 ${workerId} 的 device info 能力: ${error.message}`, 'error');
+            if (requestedDevicesManagementScope() !== 'cluster') {
+                showToast('当前为单机模式，请切换到集群模式后再查看远程 Device Info', 'warning');
                 return;
             }
+            const managed = clusterManagedDevice(fullSerial, workerId);
+            if (!managed) {
+                showToast('远程设备已不在当前 Worker 清单中，请刷新设备列表', 'warning');
+                return;
+            }
+            if (!managed.cluster_device_inspection) {
+                showToast(`${workerId} 的 Worker Agent 版本过旧，请在主机集群页重新部署后再查看 Device Info`, 'warning');
+                return;
+            }
+            if (managed.claimed) {
+                showToast('设备正被测试或平台操作占用，请释放后再查看 Device Info', 'warning');
+                return;
+            }
+            const rawSerial = String(fullSerial).startsWith(`${workerId}:`)
+                ? String(fullSerial).slice(workerId.length + 1)
+                : String(fullSerial);
+            const storageId = `${workerId}:${rawSerial}`;
             // 设备信息以浮层展示，不切换或初始化其他页面。
             window.GmsWorkspace?.update({
                 scope_mode: 'cluster',
                 worker_id: workerId,
-                device_ids: [fullSerial],
+                device_ids: [storageId],
                 origin_page: 'devices'
             }, {source: 'device-info'});
             state.selectedDevices.clear();
-            state.selectedDevices.add(fullSerial);
-            await openDeviceConfigExplorer(fullSerial, workerId);
+            state.selectedDevices.add(storageId);
+            await openDeviceConfigExplorer(storageId, workerId);
         }
         window.openClusterDeviceInfo = openClusterDeviceInfo;
 
@@ -5060,16 +5219,17 @@
                 showToast('远程设备操控需要有效的 Worker 信息', 'error');
                 return;
             }
-            try {
-                const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
-                const payload = await response.json();
-                const worker = (payload.workers || []).find(item => item.id === workerId);
-                if (!response.ok || !worker?.capabilities?.device_inspection) {
-                    showToast(`${workerId} 的 Worker Agent 版本过旧，请在主机集群页重新部署后再使用 UI 操控`, 'warning');
-                    return;
-                }
-            } catch (error) {
-                showToast(`无法确认 ${workerId} 的 UI 操控能力: ${error.message}`, 'error');
+            if (requestedDevicesManagementScope() !== 'cluster') {
+                showToast('当前为单机模式，请切换到集群模式后再操控远程设备', 'warning');
+                return;
+            }
+            const managed = clusterManagedDevice(serial, workerId);
+            if (!managed || managed.cluster_state !== 'available') {
+                showToast('远程设备当前不可操控，请刷新设备列表', 'warning');
+                return;
+            }
+            if (!managed.cluster_device_inspection) {
+                showToast(`${workerId} 的 Worker Agent 版本过旧，请在主机集群页重新部署后再使用 UI 操控`, 'warning');
                 return;
             }
             const fullSerial = serial.startsWith(`${workerId}:`)
@@ -5224,11 +5384,54 @@
         // ==================== 设备 config 资源查看（弹框）====================
         let dcfgDeviceSerial = null;
         let dcfgWorkerId = 'ats-worker-controller';
+        let dcfgRequestGeneration = 0;
+        let dcfgQueryRequestId = 0;
+        let dcfgOverrideLoadId = 0;
+
+        function dcfgCaptureContext() {
+            const workerId = dcfgWorkerId || workspaceLocalWorkerId();
+            const serial = dcfgDeviceSerial || '';
+            const remote = Boolean(workerId && !isLocalWorkspaceWorker(workerId));
+            return Object.freeze({
+                generation: dcfgRequestGeneration,
+                workerId,
+                serial,
+                remote,
+                storageId: remote ? `${workerId}:${serial}` : serial
+            });
+        }
+
+        function dcfgContextIsCurrent(context) {
+            return Boolean(
+                context
+                && context.generation === dcfgRequestGeneration
+                && context.workerId === dcfgWorkerId
+                && context.serial === dcfgDeviceSerial
+            );
+        }
+
+        function dcfgContextLabel(context = dcfgCaptureContext()) {
+            return context.remote ? `${context.workerId} · ${context.serial}` : context.serial;
+        }
+
+        function dcfgSetButtonBusy(buttonId, busy, idleLabel, busyLabel = '刷新中…') {
+            const button = document.getElementById(buttonId);
+            if (!button) return;
+            button.disabled = busy;
+            button.textContent = busy ? busyLabel : idleLabel;
+            if (busy) button.setAttribute('aria-busy', 'true');
+            else button.removeAttribute('aria-busy');
+        }
 
         async function openDeviceConfigExplorer(serialNo, workerId = '') {
             if (!serialNo || serialNo === '-') {
                 showToast('设备序列号无效', 'error');
                 return;
+            }
+            dcfgRequestGeneration += 1;
+            if (dcfgOvrPollTimer) {
+                clearTimeout(dcfgOvrPollTimer);
+                dcfgOvrPollTimer = null;
             }
             dcfgDeviceSerial = serialNo;
             const managed = allDevices.find(item =>
@@ -5238,42 +5441,87 @@
             if (!isLocalWorkspaceWorker(dcfgWorkerId) && serialNo.startsWith(`${dcfgWorkerId}:`)) {
                 dcfgDeviceSerial = serialNo.slice(dcfgWorkerId.length + 1);
             }
-            document.getElementById('device-config-serial').textContent =
-                isLocalWorkspaceWorker(dcfgWorkerId) ? dcfgDeviceSerial : `${dcfgWorkerId} · ${dcfgDeviceSerial}`;
+            const context = dcfgCaptureContext();
+            document.getElementById('device-config-serial').textContent = dcfgContextLabel(context);
             window.GmsWorkspace?.update({
                 worker_id: dcfgWorkerId,
-                device_ids: [dcfgStorageDeviceId()],
+                device_ids: [context.storageId],
                 origin_page: 'devices'
             }, {source: 'device-info'});
             // 重置为安全默认值
+            document.getElementById('dcfg-package').value = 'android';
+            document.getElementById('dcfg-package-list').replaceChildren();
             document.getElementById('dcfg-name').value = '';
             document.getElementById('dcfg-type').value = '';
-            document.getElementById('dcfg-effective').checked = true;
+            document.getElementById('dcfg-effective').checked = false;
+            document.getElementById('dcfg-pkg-filter').value = '';
+            document.getElementById('dcfg-feat-filter').value = '';
+            document.getElementById('dcfg-prop-filter').value = '';
+            document.getElementById('dcfg-ovr-name').value = '';
+            document.getElementById('dcfg-ovr-type').value = 'string';
+            document.getElementById('dcfg-ovr-value').value = '';
+            document.getElementById('dcfg-ovr-value-arr').value = '';
+            dcfgOvrTypeChanged();
             // 重置 tab 状态，默认进 configs，packages/features/props/overrides 懒加载
             dcfgPkgLoaded = false; dcfgFeatLoaded = false; dcfgPropLoaded = false; dcfgOvrLoaded = false;
+            dcfgPkgRows = []; dcfgFeatRows = []; dcfgPropRows = [];
+            dcfgPkgLoading = 0; dcfgFeatLoading = 0; dcfgPropLoading = 0;
+            dcfgOvrStatus = null; dcfgOvrEntries = []; dcfgOvrBusyUntil = 0;
+            dcfgQueryRequestId += 1;
+            dcfgOverrideLoadId += 1;
+            dcfgSetButtonBusy('dcfg-query', false, '查询');
+            for (const refreshId of [
+                'dcfg-pkg-refresh', 'dcfg-feat-refresh',
+                'dcfg-prop-refresh', 'dcfg-ovr-refresh'
+            ]) dcfgSetButtonBusy(refreshId, false, '↻ 刷新');
+            for (const [resultId, emptyText] of [
+                ['dcfg-pkg-results', '点击「刷新」加载'],
+                ['dcfg-feat-results', '点击「刷新」加载'],
+                ['dcfg-prop-results', '点击「刷新」加载'],
+                ['dcfg-ovr-results', '点击「刷新」加载当前覆盖项']
+            ]) {
+                const result = document.getElementById(resultId);
+                if (result) {
+                    result.classList.add('dcfg-empty');
+                    result.textContent = emptyText;
+                }
+            }
+            for (const statId of ['dcfg-pkg-stat', 'dcfg-feat-stat', 'dcfg-prop-stat']) {
+                const stat = document.getElementById(statId);
+                if (stat) stat.textContent = '';
+            }
+            const overrideStatus = document.getElementById('dcfg-ovr-status');
+            if (overrideStatus) overrideStatus.textContent = '';
+            const overrideSummary = document.getElementById('dcfg-ovr-status-summary');
+            if (overrideSummary) overrideSummary.textContent = '';
+            const overridePreview = document.getElementById('dcfg-ovr-preview-xml');
+            if (overridePreview) overridePreview.textContent = '（未加载）';
             dcfgSwitchTab('configs');
             const minimized = document.getElementById('device-config-minimized');
             if (minimized) minimized.style.display = 'none';
             ModalManager.open('device-config-modal');
             // 加载该设备可用的包列表（configs tab 的 datalist）
-            loadDeviceConfigPackages();
-            // 默认查询一次（仅默认值，快）
-            runDeviceConfigQuery();
+            loadDeviceConfigPackages(context);
+            // 默认只查询 APK 默认值；overlay 生效值由用户按需开启。
+            runDeviceConfigQuery(context);
         }
 
-        function dcfgIsRemote() {
-            return Boolean(dcfgWorkerId && !isLocalWorkspaceWorker(dcfgWorkerId));
+        function dcfgIsRemote(context = null) {
+            const selectedWorker = context?.workerId || dcfgWorkerId;
+            return Boolean(selectedWorker && !isLocalWorkspaceWorker(selectedWorker));
         }
 
-        function dcfgStorageDeviceId() {
+        function dcfgStorageDeviceId(context = null) {
+            if (context) return context.storageId;
             return dcfgIsRemote() ? `${dcfgWorkerId}:${dcfgDeviceSerial}` : (dcfgDeviceSerial || '');
         }
 
-        async function dcfgInspect(action, values = {}) {
-            if (!dcfgIsRemote()) throw new Error('dcfgInspect 仅用于远端 Worker');
+        async function dcfgInspect(action, values = {}, context = dcfgCaptureContext()) {
+            if (!context.remote) throw new Error('dcfgInspect 仅用于远端 Worker');
+            if (!dcfgContextIsCurrent(context)) throw new Error('Device Info 已切换到其他设备');
             return apiCall('/api/cluster/devices/actions', 'POST', {
-                worker_id: dcfgWorkerId,
-                devices: [dcfgDeviceSerial],
+                worker_id: context.workerId,
+                devices: [context.serial],
                 action,
                 ...values,
             });
@@ -5283,6 +5531,12 @@
             ModalManager.close('device-config-modal');
             const minimized = document.getElementById('device-config-minimized');
             if (minimized) minimized.style.display = 'none';
+            dcfgRequestGeneration += 1;
+            dcfgDeviceSerial = null;
+            if (dcfgOvrPollTimer) {
+                clearTimeout(dcfgOvrPollTimer);
+                dcfgOvrPollTimer = null;
+            }
         }
 
         function minimizeDeviceConfigExplorer() {
@@ -5290,7 +5544,7 @@
             ModalManager.close('device-config-modal');
             const minimized = document.getElementById('device-config-minimized');
             const title = document.getElementById('device-config-minimized-title');
-            if (title) title.textContent = `${dcfgDeviceSerial} · ${dcfgCurrentTab}`;
+            if (title) title.textContent = `${dcfgContextLabel()} · ${dcfgCurrentTab}`;
             if (minimized) minimized.style.display = 'flex';
         }
 
@@ -5314,12 +5568,13 @@
                 btn.classList.toggle('active', btn.dataset.tab === tab);
             });
             const title = document.getElementById('device-config-minimized-title');
-            if (title && dcfgDeviceSerial) title.textContent = `${dcfgDeviceSerial} · ${tab}`;
+            if (title && dcfgDeviceSerial) title.textContent = `${dcfgContextLabel()} · ${tab}`;
             // 懒加载：先完成 tab 切换，再在下一帧拉取/渲染大表，避免切换点击卡顿
-            if (tab === 'packages' && !dcfgPkgLoaded) { dcfgPkgLoaded = true; setTimeout(loadDevicePackagesF, 0); }
-            if (tab === 'features' && !dcfgFeatLoaded) { dcfgFeatLoaded = true; setTimeout(loadDeviceFeatures, 0); }
-            if (tab === 'props' && !dcfgPropLoaded) { dcfgPropLoaded = true; setTimeout(loadDeviceProps, 0); }
-            if (tab === 'overrides' && !dcfgOvrLoaded) { dcfgOvrLoaded = true; setTimeout(loadDeviceOverrides, 0); }
+            const context = dcfgCaptureContext();
+            if (tab === 'packages' && !dcfgPkgLoaded) { dcfgPkgLoaded = true; setTimeout(() => loadDevicePackagesF(context), 0); }
+            if (tab === 'features' && !dcfgFeatLoaded) { dcfgFeatLoaded = true; setTimeout(() => loadDeviceFeatures(context), 0); }
+            if (tab === 'props' && !dcfgPropLoaded) { dcfgPropLoaded = true; setTimeout(() => loadDeviceProps(context), 0); }
+            if (tab === 'overrides' && !dcfgOvrLoaded) { dcfgOvrLoaded = true; setTimeout(() => loadDeviceOverrides(context), 0); }
         }
 
         // ==================== override（RRO config 覆盖）====================
@@ -5327,8 +5582,9 @@
         let dcfgOvrBusyUntil = 0;     // apply/revert 后禁用按钮的时间戳(ms)
         let dcfgOvrEntries = [];
 
-        async function dcfgOvrApi(path, init) {
-            if (dcfgIsRemote() && [
+        async function dcfgOvrApi(path, init, context = dcfgCaptureContext()) {
+            if (!dcfgContextIsCurrent(context)) throw new Error('Device Info 已切换到其他设备');
+            if (context.remote && [
                 '/api/config-override/status', '/api/config-override/apply',
                 '/api/config-override/revert', '/api/config-override/disable-verity',
                 '/api/config-override/enable-verity', '/api/config-override/reboot'
@@ -5345,13 +5601,13 @@
                     const result = await dcfgInspect(actions[path], {
                         entries: dcfgOvrEntries,
                         target_package: 'android'
-                    });
+                    }, context);
                     return {success: true, data: result};
                 } catch (error) {
                     return {success: false, error: error.message || String(error)};
                 }
             }
-            const qs = `device_id=${encodeURIComponent(dcfgStorageDeviceId())}`;
+            const qs = `device_id=${encodeURIComponent(context.storageId)}`;
             const sep = path.includes('?') ? '&' : '?';
             return apiCall(path + sep + qs, init?.method || 'GET');
         }
@@ -5442,27 +5698,36 @@
                 s.overlay_installed ? `已应用 ${s.applied_entry_count ?? '?'} 项` : '';
         }
 
-        async function loadDeviceOverrides() {
-            if (!dcfgDeviceSerial) { showToast('设备序列号无效', 'error'); return; }
+        async function loadDeviceOverrides(context = dcfgCaptureContext()) {
+            if (!dcfgContextIsCurrent(context) || !context.serial) return;
+            const loadId = ++dcfgOverrideLoadId;
+            dcfgSetButtonBusy('dcfg-ovr-refresh', true, '↻ 刷新');
             const box = document.getElementById('dcfg-ovr-results');
             box.classList.add('dcfg-empty');
             box.innerHTML = '加载中…';
-            // 并发拉 status + entries + preview；任一接口失败不阻断其它结果显示
-            const [stR, enR, pvR] = await Promise.all([
-                dcfgOvrApi('/api/config-override/status').catch(e => ({success:false, error:e.message})),
-                dcfgOvrApi('/api/config-override/entries').catch(e => ({success:false, error:e.message})),
-                dcfgOvrApi('/api/config-override/preview-xml').catch(e => ({success:false, error:e.message})),
-            ]);
-            dcfgRenderOvrStatus(stR.success ? stR.data : null);
-            if (pvR.success) {
-                document.getElementById('dcfg-ovr-preview-xml').textContent =
-                    (pvR.data.manifest || '') + '\n\n' + (pvR.data.config_xml || '（无覆盖项）');
+            try {
+                // 并发拉 status + entries + preview；任一接口失败不阻断其它结果显示
+                const [stR, enR, pvR] = await Promise.all([
+                    dcfgOvrApi('/api/config-override/status', undefined, context).catch(e => ({success:false, error:e.message})),
+                    dcfgOvrApi('/api/config-override/entries', undefined, context).catch(e => ({success:false, error:e.message})),
+                    dcfgOvrApi('/api/config-override/preview-xml', undefined, context).catch(e => ({success:false, error:e.message})),
+                ]);
+                if (!dcfgContextIsCurrent(context) || loadId !== dcfgOverrideLoadId) return;
+                dcfgRenderOvrStatus(stR.success ? stR.data : null);
+                if (pvR.success) {
+                    document.getElementById('dcfg-ovr-preview-xml').textContent =
+                        (pvR.data.manifest || '') + '\n\n' + (pvR.data.config_xml || '（无覆盖项）');
+                }
+                if (!enR.success) {
+                    box.innerHTML = '❌ ' + dcfgEscapeHtml(enR.error || '加载失败');
+                    return;
+                }
+                dcfgRenderOvrEntries(enR.data.entries || []);
+            } finally {
+                if (dcfgContextIsCurrent(context) && loadId === dcfgOverrideLoadId) {
+                    dcfgSetButtonBusy('dcfg-ovr-refresh', false, '↻ 刷新');
+                }
             }
-            if (!enR.success) {
-                box.innerHTML = '❌ ' + dcfgEscapeHtml(enR.error || '加载失败');
-                return;
-            }
-            dcfgRenderOvrEntries(enR.data.entries || []);
         }
 
         function dcfgRenderOvrEntries(entries) {
@@ -5495,18 +5760,21 @@
         }
 
         async function dcfgAddOverride() {
+            const context = dcfgCaptureContext();
+            if (!dcfgContextIsCurrent(context) || !context.serial) return;
             const name = document.getElementById('dcfg-ovr-name').value.trim();
             const type = document.getElementById('dcfg-ovr-type').value;
             const value = dcfgOvrValueInput();
             if (!name) { showToast('请填写资源名', 'warning'); return; }
             const body = {
-                device_id: dcfgStorageDeviceId(),
+                device_id: context.storageId,
                 target_package: 'android',
                 resource_name: name,
                 resource_type: type,
                 value,
             };
             const r = await apiCall('/api/config-override/entries', 'POST', body);
+            if (!dcfgContextIsCurrent(context)) return;
             if (!r.success) {
                 showToast('添加失败：' + (r.error || ''), 'error');
                 return;
@@ -5515,16 +5783,19 @@
             document.getElementById('dcfg-ovr-name').value = '';
             document.getElementById('dcfg-ovr-value').value = '';
             document.getElementById('dcfg-ovr-value-arr').value = '';
-            await loadDeviceOverrides();
+            await loadDeviceOverrides(context);
         }
 
         async function dcfgRemoveOverride(name) {
+            const context = dcfgCaptureContext();
+            if (!dcfgContextIsCurrent(context) || !context.serial) return;
             const ok = await showConfirmDialog('删除覆盖项', `确定从列表删除 ${name}？删除后仍需点「应用」才在设备上生效。`);
-            if (!ok) return;
-            const r = await dcfgOvrApi(`/api/config-override/entries?resource_name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+            if (!ok || !dcfgContextIsCurrent(context)) return;
+            const r = await dcfgOvrApi(`/api/config-override/entries?resource_name=${encodeURIComponent(name)}`, { method: 'DELETE' }, context);
+            if (!dcfgContextIsCurrent(context)) return;
             if (!r.success) { showToast('删除失败：' + (r.error || ''), 'error'); return; }
             showToast(r.data.removed ? '已删除' : '该项不存在', r.data.removed ? 'success' : 'info');
-            await loadDeviceOverrides();
+            await loadDeviceOverrides(context);
         }
 
         function dcfgOvrGate() {
@@ -5542,19 +5813,24 @@
         // apply/revert 后设备会重启。等待 busy 窗口结束，轮询 status 直到设备可达，
         // 操作完成后刷新 overlay 状态。
         let dcfgOvrPollTimer = null;
-        function dcfgOvrPollUntilReachable(timeoutMs = 180000) {
+        function dcfgOvrPollUntilReachable(context = dcfgCaptureContext(), timeoutMs = 180000) {
             if (dcfgOvrPollTimer) { clearTimeout(dcfgOvrPollTimer); dcfgOvrPollTimer = null; }
             const startedAt = Date.now();
             const tick = async () => {
+                if (!dcfgContextIsCurrent(context)) {
+                    dcfgOvrPollTimer = null;
+                    return;
+                }
                 // 仍在 busy 窗口（重启中）→ 直接排下一轮
                 if (Date.now() < dcfgOvrBusyUntil) {
                     dcfgOvrPollTimer = setTimeout(tick, 3000);
                     return;
                 }
-                const r = await dcfgOvrApi('/api/config-override/status').catch(e => ({success:false, error:e.message}));
+                const r = await dcfgOvrApi('/api/config-override/status', undefined, context).catch(e => ({success:false, error:e.message}));
+                if (!dcfgContextIsCurrent(context)) return;
                 if (r.success && r.data && r.data.reachable) {
                     dcfgOvrPollTimer = null;
-                    await loadDeviceOverrides();      // 设备已恢复，刷新 status + entries + preview
+                    await loadDeviceOverrides(context);      // 设备已恢复，刷新 status + entries + preview
                     showToast('设备已重启完成，状态已更新', 'success');
                     return;
                 }
@@ -5569,38 +5845,48 @@
         }
 
         async function dcfgApplyOverrides() {
+            const context = dcfgCaptureContext();
+            if (!dcfgContextIsCurrent(context) || !context.serial) return;
             if (!dcfgOvrGate()) return;
             const ok = await showConfirmDialog(
                 '应用并重启设备',
                 '将编译 RRO 覆盖包，推送到 /product/overlay 并重启设备（约 40 秒后恢复连接）。期间设备的其他操作会中断。继续？'
             );
-            if (!ok) return;
+            if (!ok || !dcfgContextIsCurrent(context)) return;
             if (!await dcfgRequireElevation('应用设备 RRO 配置覆盖')) return;
+            if (!dcfgContextIsCurrent(context)) return;
             showToast('正在编译并推送 overlay…', 'info');
-            const r = await dcfgOvrApi('/api/config-override/apply', { method: 'POST' });
+            const r = await dcfgOvrApi('/api/config-override/apply', { method: 'POST' }, context);
+            if (!dcfgContextIsCurrent(context)) return;
             if (!r.success) { showToast('应用失败：' + (r.error || ''), 'error'); return; }
             dcfgOvrSetBusy(45);
             showToast('已推送并重启，设备恢复后状态将自动更新', 'success');
-            dcfgOvrPollUntilReachable();
+            dcfgOvrPollUntilReachable(context);
         }
 
         async function dcfgRevertAll() {
+            const context = dcfgCaptureContext();
+            if (!dcfgContextIsCurrent(context) || !context.serial) return;
             if (!dcfgOvrGate()) return;
             const ok = await showConfirmDialog(
                 '撤销全部覆盖',
                 '将删除设备上的 overlay 包并重启（host 覆盖列表保留，可重新应用）。继续？'
             );
-            if (!ok) return;
+            if (!ok || !dcfgContextIsCurrent(context)) return;
             if (!await dcfgRequireElevation('撤销设备 RRO 配置覆盖')) return;
-            const r = await dcfgOvrApi('/api/config-override/revert', { method: 'POST' });
+            if (!dcfgContextIsCurrent(context)) return;
+            const r = await dcfgOvrApi('/api/config-override/revert', { method: 'POST' }, context);
+            if (!dcfgContextIsCurrent(context)) return;
             if (!r.success) { showToast('撤销失败：' + (r.error || ''), 'error'); return; }
             dcfgOvrSetBusy(45);
             showToast('已删除 overlay 并重启，设备恢复后状态将自动更新', 'success');
-            dcfgOvrPollUntilReachable();
+            dcfgOvrPollUntilReachable(context);
         }
 
         // 关闭/恢复 dm-verity。disable 是 apply 前的一次性步骤；两者都可能需要重启。
         async function dcfgToggleVerity(action) {
+            const context = dcfgCaptureContext();
+            if (!dcfgContextIsCurrent(context) || !context.serial) return;
             if (!dcfgOvrStatus || !dcfgOvrStatus.reachable) { showToast('设备不可达', 'error'); return; }
             if (!dcfgOvrStatus.is_userdebug) { showToast('需要 userdebug/eng 构建', 'error'); return; }
             if (Date.now() < dcfgOvrBusyUntil) { showToast('设备正在重启中，请稍候', 'warning'); return; }
@@ -5613,45 +5899,62 @@
                 ? '关闭验证启动，使 /product 可写（apply 覆盖前的一次性步骤）。需要重启设备生效。继续？'
                 : '恢复验证启动（dm-verity）。需要重启设备生效。继续？';
             const ok = await showConfirmDialog(title, desc);
-            if (!ok) return;
+            if (!ok || !dcfgContextIsCurrent(context)) return;
             if (!await dcfgRequireElevation(`${title}并重启设备`)) return;
+            if (!dcfgContextIsCurrent(context)) return;
             const path = isDisable ? '/api/config-override/disable-verity' : '/api/config-override/enable-verity';
-            const r = await dcfgOvrApi(path, { method: 'POST' });
+            const r = await dcfgOvrApi(path, { method: 'POST' }, context);
+            if (!dcfgContextIsCurrent(context)) return;
             if (!r.success) { showToast((isDisable ? '关闭' : '恢复') + '失败：' + (r.error || ''), 'error'); return; }
             if (r.data && r.data.needs_reboot) {
                 // 链式调用专用 reboot（同 adb 路径，device_id 一致）
                 showToast(r.data.message + ' 正在重启…', 'info');
-                await dcfgOvrApi('/api/config-override/reboot', { method: 'POST' });
+                await dcfgOvrApi('/api/config-override/reboot', { method: 'POST' }, context);
+                if (!dcfgContextIsCurrent(context)) return;
                 dcfgOvrSetBusy(45);
                 showToast('设备重启中，设备恢复后状态将自动更新', 'success');
-                dcfgOvrPollUntilReachable();
+                dcfgOvrPollUntilReachable(context);
             } else {
                 showToast(r.data.message, 'success');
-                await loadDeviceOverrides();
+                await loadDeviceOverrides(context);
             }
         }
 
         // ===== packages (pm list packages -f) =====
         let dcfgPkgRows = [];
-        let dcfgPkgLoading = false;
+        let dcfgPkgLoading = 0;
         const dcfgScheduleFilterPkgImpl = dcfgDebounce(() => dcfgFilterPkg());
         function dcfgScheduleFilterPkg() { dcfgScheduleFilterPkgImpl(); }
-        async function loadDevicePackagesF() {
-            if (dcfgPkgLoading) return;
-            dcfgPkgLoading = true;
+        async function loadDevicePackagesF(context = dcfgCaptureContext()) {
+            if (!dcfgContextIsCurrent(context)) return;
+            if (dcfgPkgLoading === context.generation) return;
+            dcfgPkgLoading = context.generation;
+            dcfgSetButtonBusy('dcfg-pkg-refresh', true, '↻ 刷新');
             const box = document.getElementById('dcfg-pkg-results');
             box.classList.add('dcfg-empty');
             box.innerHTML = '加载中…';
             try {
-                const j = dcfgIsRemote()
-                    ? await dcfgInspect('packages_with_path')
-                    : await fetch('/api/config-explorer/packages-with-path?device_id=' + encodeURIComponent(dcfgDeviceSerial)).then(r => r.json());
+                const j = context.remote
+                    ? await dcfgInspect('packages_with_path', {}, context)
+                    : await fetch('/api/config-explorer/packages-with-path?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
+                if (!dcfgContextIsCurrent(context)) return;
                 if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
-                dcfgPkgRows = (dcfgIsRemote() ? j.rows : j.data?.rows) || [];
+                dcfgPkgRows = (context.remote ? j.rows : j.data?.rows) || [];
                 document.getElementById('dcfg-pkg-stat').textContent = `共 ${dcfgPkgRows.length} 个`;
                 dcfgFilterPkg();
-            } catch (e) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
-            finally { dcfgPkgLoading = false; }
+            } catch (e) {
+                if (dcfgContextIsCurrent(context)) {
+                    box.classList.add('dcfg-empty');
+                    box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message);
+                }
+            } finally {
+                if (dcfgPkgLoading === context.generation) {
+                    dcfgPkgLoading = 0;
+                    if (dcfgContextIsCurrent(context)) {
+                        dcfgSetButtonBusy('dcfg-pkg-refresh', false, '↻ 刷新');
+                    }
+                }
+            }
         }
         function dcfgFilterPkg() {
             const q = document.getElementById('dcfg-pkg-filter').value.trim().toLowerCase();
@@ -5679,25 +5982,28 @@
 
         // 拉取设备 APK 并送入 APK 分析（反编译）流程
         async function dcfgDecompileApk(path, pkgName) {
-            if (!dcfgDeviceSerial || !path) return;
+            const context = dcfgCaptureContext();
+            if (!dcfgContextIsCurrent(context) || !context.serial || !path) return;
             const btn = event && event.target ? event.target : null;
             if (btn) { btn.disabled = true; btn.textContent = '准备中…'; }
             showToast(`正在拉取 ${pkgName || path} 进行反编译…`, 'info');
             try {
                 let j;
-                if (dcfgIsRemote()) {
+                if (context.remote) {
                     const params = new URLSearchParams({
-                        worker_id: dcfgWorkerId,
-                        device_id: dcfgDeviceSerial,
+                        worker_id: context.workerId,
+                        device_id: context.serial,
                         path
                     });
                     const started = await apiCall(`/api/cluster/devices/export?${params}`, 'POST');
+                    if (!dcfgContextIsCurrent(context)) return;
                     const transferId = started.transfer?.id;
                     if (!transferId || !started.command_id) throw new Error('Worker 未返回文件传输任务');
                     window.GmsWorkspace?.update({artifact_id: transferId}, {source: 'device-apk-export'});
                     const deadline = Date.now() + 6 * 60 * 1000;
                     while (Date.now() < deadline) {
                         await new Promise(resolve => setTimeout(resolve, 1000));
+                        if (!dcfgContextIsCurrent(context)) return;
                         const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(started.command_id)}`);
                         const command = status.command || {};
                         if (command.status === 'completed') break;
@@ -5714,9 +6020,10 @@
                     j = await fetch('/api/config-explorer/decompile', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ device_id: dcfgDeviceSerial, path: path })
+                        body: JSON.stringify({ device_id: context.serial, path: path })
                     }).then(r => r.json());
                 }
+                if (!dcfgContextIsCurrent(context)) return;
                 if (!j.success) { showToast('反编译失败: ' + (j.error || j.message || '未知错误'), 'error'); if (btn) { btn.disabled = false; btn.textContent = '🔍 反编译'; } return; }
                 const task = j.data || {};
                 if (!task.task_id) { showToast('创建反编译任务失败', 'error'); if (btn) { btn.disabled = false; btn.textContent = '🔍 反编译'; } return; }
@@ -5728,8 +6035,8 @@
                 window.apkNotifiedTaskId = null;
                 window.apkCurrentTaskId = task.task_id;
                 window.GmsWorkspace?.update({
-                    worker_id: dcfgWorkerId,
-                    device_ids: [dcfgStorageDeviceId()],
+                    worker_id: context.workerId,
+                    device_ids: [context.storageId],
                     artifact_id: task.transfer_id || '',
                     origin_page: 'apk-analysis'
                 }, {source: 'device-apk-analysis'});
@@ -5755,6 +6062,7 @@
                 if (typeof switchApkTab === 'function') switchApkTab('manifest');
                 if (typeof startApkAnalysis === 'function') await startApkAnalysis();
             } catch (e) {
+                if (!dcfgContextIsCurrent(context)) return;
                 showToast('反编译请求失败: ' + (e && e.message ? e.message : e), 'error');
                 if (btn) { btn.disabled = false; btn.textContent = '🔍 反编译'; }
             }
@@ -5762,25 +6070,39 @@
 
         // ===== features (pm list features) =====
         let dcfgFeatRows = [];
-        let dcfgFeatLoading = false;
+        let dcfgFeatLoading = 0;
         const dcfgScheduleFilterFeatImpl = dcfgDebounce(() => dcfgFilterFeat());
         function dcfgScheduleFilterFeat() { dcfgScheduleFilterFeatImpl(); }
-        async function loadDeviceFeatures() {
-            if (dcfgFeatLoading) return;
-            dcfgFeatLoading = true;
+        async function loadDeviceFeatures(context = dcfgCaptureContext()) {
+            if (!dcfgContextIsCurrent(context)) return;
+            if (dcfgFeatLoading === context.generation) return;
+            dcfgFeatLoading = context.generation;
+            dcfgSetButtonBusy('dcfg-feat-refresh', true, '↻ 刷新');
             const box = document.getElementById('dcfg-feat-results');
             box.classList.add('dcfg-empty');
             box.innerHTML = '加载中…';
             try {
-                const j = dcfgIsRemote()
-                    ? await dcfgInspect('features')
-                    : await fetch('/api/config-explorer/features?device_id=' + encodeURIComponent(dcfgDeviceSerial)).then(r => r.json());
+                const j = context.remote
+                    ? await dcfgInspect('features', {}, context)
+                    : await fetch('/api/config-explorer/features?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
+                if (!dcfgContextIsCurrent(context)) return;
                 if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
-                dcfgFeatRows = (dcfgIsRemote() ? j.rows : j.data?.rows) || [];
+                dcfgFeatRows = (context.remote ? j.rows : j.data?.rows) || [];
                 document.getElementById('dcfg-feat-stat').textContent = `共 ${dcfgFeatRows.length} 个`;
                 dcfgFilterFeat();
-            } catch (e) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
-            finally { dcfgFeatLoading = false; }
+            } catch (e) {
+                if (dcfgContextIsCurrent(context)) {
+                    box.classList.add('dcfg-empty');
+                    box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message);
+                }
+            } finally {
+                if (dcfgFeatLoading === context.generation) {
+                    dcfgFeatLoading = 0;
+                    if (dcfgContextIsCurrent(context)) {
+                        dcfgSetButtonBusy('dcfg-feat-refresh', false, '↻ 刷新');
+                    }
+                }
+            }
         }
         function dcfgFilterFeat() {
             const q = document.getElementById('dcfg-feat-filter').value.trim().toLowerCase();
@@ -5801,25 +6123,39 @@
 
         // ===== props (getprop) =====
         let dcfgPropRows = [];
-        let dcfgPropLoading = false;
+        let dcfgPropLoading = 0;
         const dcfgScheduleFilterPropImpl = dcfgDebounce(() => dcfgFilterProp());
         function dcfgScheduleFilterProp() { dcfgScheduleFilterPropImpl(); }
-        async function loadDeviceProps() {
-            if (dcfgPropLoading) return;
-            dcfgPropLoading = true;
+        async function loadDeviceProps(context = dcfgCaptureContext()) {
+            if (!dcfgContextIsCurrent(context)) return;
+            if (dcfgPropLoading === context.generation) return;
+            dcfgPropLoading = context.generation;
+            dcfgSetButtonBusy('dcfg-prop-refresh', true, '↻ 刷新');
             const box = document.getElementById('dcfg-prop-results');
             box.classList.add('dcfg-empty');
             box.innerHTML = '加载中…';
             try {
-                const j = dcfgIsRemote()
-                    ? await dcfgInspect('props')
-                    : await fetch('/api/config-explorer/props?device_id=' + encodeURIComponent(dcfgDeviceSerial)).then(r => r.json());
+                const j = context.remote
+                    ? await dcfgInspect('props', {}, context)
+                    : await fetch('/api/config-explorer/props?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
+                if (!dcfgContextIsCurrent(context)) return;
                 if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
-                dcfgPropRows = (dcfgIsRemote() ? j.rows : j.data?.rows) || [];
+                dcfgPropRows = (context.remote ? j.rows : j.data?.rows) || [];
                 document.getElementById('dcfg-prop-stat').textContent = `共 ${dcfgPropRows.length} 项`;
                 dcfgFilterProp();
-            } catch (e) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
-            finally { dcfgPropLoading = false; }
+            } catch (e) {
+                if (dcfgContextIsCurrent(context)) {
+                    box.classList.add('dcfg-empty');
+                    box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message);
+                }
+            } finally {
+                if (dcfgPropLoading === context.generation) {
+                    dcfgPropLoading = 0;
+                    if (dcfgContextIsCurrent(context)) {
+                        dcfgSetButtonBusy('dcfg-prop-refresh', false, '↻ 刷新');
+                    }
+                }
+            }
         }
         function dcfgFilterProp() {
             const q = document.getElementById('dcfg-prop-filter').value.trim().toLowerCase();
@@ -5838,21 +6174,24 @@
             );
         }
 
-        async function loadDeviceConfigPackages() {
+        async function loadDeviceConfigPackages(context = dcfgCaptureContext()) {
+            if (!dcfgContextIsCurrent(context)) return;
             const dl = document.getElementById('dcfg-package-list');
             try {
-                const j = dcfgIsRemote()
-                    ? await dcfgInspect('packages_all')
-                    : await fetch('/api/config-explorer/packages/all?device_id=' + encodeURIComponent(dcfgDeviceSerial)).then(r => r.json());
-                const pkgs = (dcfgIsRemote() ? j.packages : j.data?.packages) || [];
+                const j = context.remote
+                    ? await dcfgInspect('packages_all', {}, context)
+                    : await fetch('/api/config-explorer/packages/all?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
+                if (!dcfgContextIsCurrent(context)) return;
+                const pkgs = (context.remote ? j.packages : j.data?.packages) || [];
                 // 常带 config 的包置顶，方便快速选择
                 const pinned = ['android', 'com.android.systemui', 'com.android.providers.settings', 'com.android.settings', 'com.android.phone', 'com.android.wifi'];
                 const rest = pkgs.filter(p => !pinned.includes(p));
                 const ordered = [...pinned.filter(p => pkgs.includes(p)), ...rest];
                 dl.innerHTML = ordered.map(p => `<option value="${dcfgEscapeHtml(p)}">`).join('');
             } catch (e) {
+                if (!dcfgContextIsCurrent(context)) return;
                 console.error('加载包列表失败', e);
-                showToast(`加载远程设备包列表失败: ${e.message}`, 'error');
+                showToast(`加载设备包列表失败: ${e.message}`, 'error');
             }
         }
 
@@ -5861,8 +6200,9 @@
             return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
 
-        async function runDeviceConfigQuery() {
-            if (!dcfgDeviceSerial) return;
+        async function runDeviceConfigQuery(context = dcfgCaptureContext()) {
+            if (!dcfgContextIsCurrent(context) || !context.serial) return;
+            const queryId = ++dcfgQueryRequestId;
             const pkg = document.getElementById('dcfg-package').value || 'android';
             const name = document.getElementById('dcfg-name').value.trim();
             const type = document.getElementById('dcfg-type').value;
@@ -5870,7 +6210,7 @@
 
             const params = new URLSearchParams({
                 package: pkg,
-                device_id: dcfgDeviceSerial,
+                device_id: context.serial,
                 config_only: 'true',
                 with_effective: withEffective ? 'true' : 'false'
             });
@@ -5882,26 +6222,34 @@
             stat.classList.remove('active');
             results.classList.add('dcfg-empty');
             results.innerHTML = withEffective ? '正在查询 overlay 生效值（逐个 adb 调用，请稍候）…' : '查询中…';
+            dcfgSetButtonBusy('dcfg-query', true, '查询', '查询中…');
 
             try {
-                const j = dcfgIsRemote()
+                const j = context.remote
                     ? await dcfgInspect('config_explore', {
                         package: pkg,
                         name_filter: name,
                         type_filter: type,
                         with_effective: withEffective,
                         effective_limit: 0
-                    })
+                    }, context)
                     : await fetch('/api/config-explorer?' + params).then(r => r.json());
+                if (!dcfgContextIsCurrent(context) || queryId !== dcfgQueryRequestId) return;
                 if (!j.success) {
                     results.classList.add('dcfg-empty');
                     results.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || j.message || '查询失败');
                     return;
                 }
-                renderDeviceConfigResults(dcfgIsRemote() ? j : j.data, withEffective);
+                renderDeviceConfigResults(context.remote ? j : j.data, withEffective);
             } catch (e) {
-                results.classList.add('dcfg-empty');
-                results.innerHTML = '❌ 请求失败: ' + dcfgEscapeHtml(e.message);
+                if (dcfgContextIsCurrent(context) && queryId === dcfgQueryRequestId) {
+                    results.classList.add('dcfg-empty');
+                    results.innerHTML = '❌ 请求失败: ' + dcfgEscapeHtml(e.message);
+                }
+            } finally {
+                if (dcfgContextIsCurrent(context) && queryId === dcfgQueryRequestId) {
+                    dcfgSetButtonBusy('dcfg-query', false, '查询', '查询中…');
+                }
             }
         }
 
@@ -6416,13 +6764,26 @@
             if (pageName === 'terminal') {
                 if (!await ensureTerminalElevation()) return;
                 // Load local xterm assets while fetching the host directory so
-                // the first terminal pane can open immediately afterwards.
-                await Promise.all([
-                    loadTerminalClusterHosts().catch(error =>
-                        debugLog('[Terminal] Worker host directory unavailable:', error)),
-                    loadXTermScripts().catch(error =>
-                        debugLog('[Terminal] xterm assets unavailable:', error)),
-                ]);
+                // the first terminal pane can open immediately afterwards. A
+                // local target does not depend on the cluster round trip, so
+                // let that directory refresh finish behind the visible mount.
+                const terminalContext = window.GmsWorkspace?.get?.() || {};
+                const needsRemoteHost = terminalContext.scope_mode === 'cluster'
+                    && !isLocalWorkspaceWorker(
+                        terminalContext.worker_id || workspaceLocalWorkerId()
+                    );
+                const terminalHostsReady = loadTerminalClusterHosts().catch(error =>
+                    debugLog('[Terminal] Worker host directory unavailable:', error));
+                const terminalAssetsReady = loadXTermScripts().catch(error => {
+                    debugLog('[Terminal] xterm assets unavailable:', error);
+                    throw error;
+                });
+                if (needsRemoteHost) {
+                    await Promise.all([terminalHostsReady, terminalAssetsReady]);
+                } else {
+                    await terminalAssetsReady;
+                    terminalHostsReady.catch(() => {});
+                }
                 const pendingCommand = sessionStorage.getItem('pending_terminal_command');
                 const commandSource = sessionStorage.getItem('command_source');
                 pendingAdbDevice = pendingAdbDevice || sessionStorage.getItem('pending_adb_device');

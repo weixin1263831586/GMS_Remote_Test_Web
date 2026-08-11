@@ -5,6 +5,8 @@ let dashTrendLastFetch=0;
 let dashMetricsHistory=[];
 let dashRefreshTimer=null;
 let dashCountdown=10;
+let dashResizeFrame=0;
+let dashResizeObserver=null;
 let localVpnConnected=null;
 let workerVpnCache={};
 const activeDeployments=new Set();
@@ -116,6 +118,7 @@ function renderDashboard(){
   html+='</div>';
   testsEl.innerHTML=html;
  }
+ scheduleDashboardChartsResize();
 }
 function renderDashboardFallback(){
  const workers=state.workers.filter(w=>w.status!=='offline');
@@ -128,6 +131,13 @@ function renderDashboardFallback(){
  if(trend){trend.innerHTML='<div class="dash-panel-title">资源趋势</div><div class="dash-empty">图表组件未加载；当前资源数据已在上方按 Worker 展示。</div>'}
 }
 const dashColor={text:'#9299a8',green:'#48c78e',yellow:'#e5b94f',red:'#ef6572',blue:'#4f8cff',purple:'#a78bfa',muted:'#6b7280'};
+function scheduleDashboardChartsResize(){
+ if(dashResizeFrame)return;
+ dashResizeFrame=requestAnimationFrame(()=>{
+  dashResizeFrame=0;
+  Object.values(dashCharts).forEach(chart=>{if(chart&&!chart.isDisposed?.())chart.resize()});
+ });
+}
 function initDashChartContainers(){
  const gaugesEl=document.querySelector('#dash-gauges');
  if(gaugesEl&&!gaugesEl.dataset.init){
@@ -281,7 +291,7 @@ async function updateDashTrend(force=false){
  if(!data.length)return;
  // Build x-axis: show hour label only when the hour changes, blank otherwise
  let lastHour=-1;
- const times=data.map(m=>{try{const d=new Date(m.recorded_at);const h=d.getHours();if(h!==lastHour){lastHour=h;return(h<10?'0':'')+h+':00'}return ''}catch(e){return''}});
+ const times=data.map(m=>{try{const d=new Date(m.recorded_at);const h=d.getHours();if(h!==lastHour){lastHour=h;if(h%2===0)return(h<10?'0':'')+h+':00'}return ''}catch(e){return''}});
  // Ensure the first label is always shown
  if(times.length)times[0]=data[0].recorded_at?(()=>{try{const d=new Date(data[0].recorded_at);return(d.getHours()<10?'0':'')+d.getHours()+':00'}catch(e){return''}})():'';
  const cpu=data.map(m=>Math.round(Number(m.cpu_percent)*10)/10);
@@ -358,7 +368,7 @@ function render(){
 function formatBytes(v){const n=Number(v)||0;if(n>=1073741824)return `${(n/1073741824).toFixed(2)} GB`;if(n>=1048576)return `${(n/1048576).toFixed(1)} MB`;return `${n} B`}
 function archiveFolder(name){return String(name).replace(/\.(tar\.gz|tar\.bz2|zip|tgz|tar)$/i,'').replace(/[^A-Za-z0-9._+-]+/g,'_')}
 function renderLibrary(){const body=document.querySelector('#library');if(!body)return;const workers=commandWorkers();body.innerHTML=state.library.map((a,i)=>`<tr><td title="${esc(a.name)}">${esc(a.name)}</td><td>${formatBytes(a.size)}</td><td>${new Date(a.modified*1000).toLocaleString()}</td><td><select id="library-worker-${i}">${workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join('')}</select></td><td><input id="library-folder-${i}" value="${esc(archiveFolder(a.name))}"></td><td><button class="primary" data-action="deploy-archive" data-index="${i}" ${workers.length?'':'disabled title="没有可接收命令的在线 Worker"'}>下发并解压</button> <span class="progress-wrap"><span class="progress-track"><span class="progress-bar" id="library-bar-${i}"></span></span><span class="deploy-progress" id="library-progress-${i}"></span></span></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Controller 套件目录中没有压缩包</td></tr>'}
-async function loadLibrary(){const button=document.querySelector('#reload-library'),original=button?.textContent||'↻ 刷新测试套件';if(button){button.disabled=true;button.textContent='刷新中…'}try{const d=await api('/api/cluster/suite-library');state.library=d.archives||[];renderLibrary();toast('测试套件已更新')}catch(e){toast(e.message)}finally{if(button){button.disabled=false;button.textContent=original}}}
+async function loadLibrary(){const button=document.querySelector('#reload-library'),original=button?.textContent||'↻ 刷新测试套件';if(button){button.disabled=true;button.textContent='刷新中…';button.setAttribute('aria-busy','true')}try{const d=await api('/api/cluster/suite-library');state.library=d.archives||[];renderLibrary();toast('测试套件已更新')}catch(e){toast(e.message)}finally{if(button){button.disabled=false;button.textContent=original;button.removeAttribute('aria-busy')}}}
 async function waitCommand(id,progress,onProgress){for(let i=0;i<7200;i++){const d=await api(`/api/cluster/commands/${encodeURIComponent(id)}`),c=d.command;if(c.status==='completed')return c.result||{};if(['failed','cancelled'].includes(c.status))throw new Error(c.error||`${c.command_type}失败`);if(onProgress&&c.result?.downloaded_bytes)onProgress(c.result);else if(i%10===0)progress.textContent=`处理中 ${Math.floor(i/10)}s`;await new Promise(r=>setTimeout(r,1000))}throw new Error('操作超时')}
 async function deployArchive(index){
  const archive=state.library[index],worker=document.querySelector(`#library-worker-${index}`).value,folder=document.querySelector(`#library-folder-${index}`).value.trim(),progress=document.querySelector(`#library-progress-${index}`),bar=document.querySelector(`#library-bar-${index}`);if(!worker||!folder)return;activeDeployments.add(index);
@@ -409,7 +419,32 @@ async function checkWorkerVpn(){
  });
  await Promise.all(promises);
 }
-async function refresh(){if(refreshPromise)return refreshPromise;const button=document.querySelector('#refresh'),original=button?.textContent||'↻ 刷新';if(button){button.disabled=true;button.textContent='刷新中…'}refreshPromise=(async()=>{const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]],results=await Promise.allSettled(requests.map(([,path])=>api(path))),errors=[];results.forEach((result,index)=>{const [stateKey,,payloadKey]=requests[index];if(result.status==='fulfilled')state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;else errors.push(`${stateKey}: ${result.reason.message}`)});checkLocalVpn().catch(()=>{});checkWorkerVpn().then(render).catch(()=>{});render();await applyClusterWorkspace(clusterWorkspace);if(errors.length)toast(`部分数据刷新失败：${errors.join('；')}`)})().finally(()=>{refreshPromise=null;if(button){button.disabled=false;button.textContent=original}});return refreshPromise}
+function setClusterRefreshBusy(busy){
+ ['#refresh','#dash-refresh-charts'].forEach(selector=>{
+  const button=document.querySelector(selector);if(!button)return;
+  if(!button.dataset.idleLabel)button.dataset.idleLabel=button.textContent||'↻ 刷新';
+  button.disabled=busy;
+  button.textContent=busy?'刷新中…':button.dataset.idleLabel;
+  if(busy)button.setAttribute('aria-busy','true');else button.removeAttribute('aria-busy');
+ });
+}
+async function refresh(showBusy=false){
+ if(showBusy)setClusterRefreshBusy(true);
+ try{
+  if(refreshPromise)return await refreshPromise;
+  refreshPromise=(async()=>{
+   const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]];
+   const results=await Promise.allSettled(requests.map(([,path])=>api(path))),errors=[];
+   results.forEach((result,index)=>{const [stateKey,,payloadKey]=requests[index];if(result.status==='fulfilled')state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;else errors.push(`${stateKey}: ${result.reason.message}`)});
+   checkLocalVpn().catch(()=>{});checkWorkerVpn().then(render).catch(()=>{});render();
+   await applyClusterWorkspace(clusterWorkspace);
+   if(errors.length)toast(`部分数据刷新失败：${errors.join('；')}`);
+  })().finally(()=>{refreshPromise=null});
+  return await refreshPromise;
+ }finally{
+  if(showBusy)setClusterRefreshBusy(false);
+ }
+}
 async function createJob(){try{const device=document.querySelector('#job-device').value;const body={worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1};if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`任务已创建 ${d.job.id}`);syncClusterWorkspace({cluster_job_id:d.job.id,attempt_id:d.job.current_attempt_id||'',worker_id:d.job.assigned_worker_id||body.worker_id,device_ids:(d.job.leases||[]).map(x=>x.device_id),suite_key:d.job.suite_key||body.suite_key});await refresh();showJob(d.job.id)}catch(e){toast(e.message)}}
 function displayJobData(job){
  const client=String(job?.client_display_id||job?.owner_id||'unknown');
@@ -581,13 +616,18 @@ document.addEventListener('click',event=>{
 document.querySelector('#cluster-search')?.addEventListener('input',render);
 document.querySelector('#job-status-filter')?.addEventListener('change',render);
 window.addEventListener('gms:embedded-workspace',event=>applyClusterWorkspace(event.detail?.context||{},event.detail?.type==='workspace-context-navigate').catch(e=>toast(e.message)));
-window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;window.updateDashGauges=updateDashGauges;window.updateDashTrend=updateDashTrend;window.renderDashPieDetail=renderDashPieDetail;document.querySelector('#refresh').onclick=refresh;const dashRefreshBtn=document.querySelector('#dash-refresh-charts');if(dashRefreshBtn)dashRefreshBtn.onclick=()=>{dashTrendLastFetch=0;refresh()};document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-worker').onchange=()=>{updateJobOptions();syncClusterWorkspace()};document.querySelector('#job-suite').onchange=()=>syncClusterWorkspace();document.querySelector('#job-device').onchange=()=>syncClusterWorkspace();document.querySelector('#create-job').onclick=createJob;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>openClusterJobReport();document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.addEventListener('click',e=>{if(!e.target.closest('.worker-menu-wrap'))document.querySelectorAll('.worker-menu.open').forEach(m=>m.classList.remove('open'))});
+window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;window.updateDashGauges=updateDashGauges;window.updateDashTrend=updateDashTrend;window.renderDashPieDetail=renderDashPieDetail;document.querySelector('#refresh').onclick=()=>refresh(true);const dashRefreshBtn=document.querySelector('#dash-refresh-charts');if(dashRefreshBtn)dashRefreshBtn.onclick=()=>{dashTrendLastFetch=0;refresh(true)};document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-worker').onchange=()=>{updateJobOptions();syncClusterWorkspace()};document.querySelector('#job-suite').onchange=()=>syncClusterWorkspace();document.querySelector('#job-device').onchange=()=>syncClusterWorkspace();document.querySelector('#create-job').onclick=createJob;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>openClusterJobReport();document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.addEventListener('click',e=>{if(!e.target.closest('.worker-menu-wrap'))document.querySelectorAll('.worker-menu.open').forEach(m=>m.classList.remove('open'))});
 // Tab switching
 document.querySelectorAll('.dash-tab').forEach(btn=>btn.addEventListener('click',()=>{
  document.querySelectorAll('.dash-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
  const tab=btn.dataset.dashTab;
  document.getElementById('tab-dashboard').hidden=tab!=='dashboard';
  document.getElementById('tab-management').hidden=tab!=='management';
- if(tab==='dashboard'){setTimeout(()=>{Object.values(dashCharts).forEach(c=>c&&c.resize());if(typeof updateDashTrend==='function')updateDashTrend(true)},50)}
+ if(tab==='dashboard'){setTimeout(()=>{scheduleDashboardChartsResize();if(typeof updateDashTrend==='function')updateDashTrend(true)},50)}
 }));
-refresh();setInterval(refresh,10000);
+window.addEventListener('resize',scheduleDashboardChartsResize,{passive:true});
+if(typeof ResizeObserver!=='undefined'){
+ dashResizeObserver=new ResizeObserver(scheduleDashboardChartsResize);
+ const dashboard=document.querySelector('#dashboard');if(dashboard)dashResizeObserver.observe(dashboard);
+}
+refresh();setInterval(()=>refresh(),10000);

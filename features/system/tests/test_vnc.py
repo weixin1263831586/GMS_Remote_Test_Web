@@ -92,6 +92,34 @@ class VNCManagerTests(unittest.TestCase):
         self.assertEqual(remote_config["username"], "wlq")
         self.assertEqual(remote_config["password"], "secret")
 
+    def test_local_vnc_status_does_not_open_an_ssh_connection(self):
+        manager = VNCManager()
+        with patch.object(
+            manager.config_manager,
+            "load_config",
+            return_value={"ubuntu_host": "172.16.14.233"},
+        ), patch(
+            "features.system.vnc.is_local_host",
+            return_value=True,
+        ), patch.object(
+            manager,
+            "_is_local_process_running",
+            side_effect=lambda pattern: pattern in {
+                "x11vnc.*:0",
+                "websockify.*6080",
+            },
+        ), patch.object(
+            manager.ssh_manager,
+            "get_connection",
+        ) as get_connection:
+            result = manager.get_vnc_status()
+
+        self.assertTrue(result["running"])
+        self.assertTrue(result["local"])
+        self.assertEqual(result["vnc_count"], 1)
+        self.assertTrue(result["port_listening"])
+        get_connection.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

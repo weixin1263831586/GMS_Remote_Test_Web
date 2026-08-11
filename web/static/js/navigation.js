@@ -366,11 +366,40 @@ function selectedClusterWorker() {
 // ==================== Initialization ====================
 // 认证完成或匿名进入后执行一次应用初始化。
 let _appInitStarted = false;
+
+function scheduleDeferredPagePreload(initialPage) {
+    const preload = () => {
+        if (initialPage !== 'terminal' && typeof loadXTermScripts === 'function') {
+            loadXTermScripts().catch(error =>
+                debugLog('[Preload] xterm assets unavailable:', error));
+        }
+        if (typeof window.loadClusterHostDirectory === 'function') {
+            window.loadClusterHostDirectory().catch(error =>
+                debugLog('[Preload] host directory unavailable:', error));
+        }
+        if (initialPage !== 'reports' && typeof window.preloadTestReports === 'function') {
+            window.preloadTestReports(false).catch(error =>
+                debugLog('[Preload] reports unavailable:', error));
+        }
+    };
+    setTimeout(() => {
+        if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(preload, {timeout: 3000});
+        } else {
+            preload();
+        }
+    }, 1000);
+}
+
 async function continueAppInitialization() {
     if (_appInitStarted) return;
     _appInitStarted = true;
+    const initialPage = window.__targetPage || 'test';
+    const latencySensitivePage = ['desktop', 'terminal', 'reports'].includes(initialPage);
     // 文件浏览和传输功能依赖服务端路径配置。
-    await loadConfig();
+    const configReady = loadConfig();
+    // 这三个页面只依赖模板中的主机配置，可与完整配置读取并行初始化。
+    if (!latencySensitivePage) await configReady;
     // 通知页面恢复逻辑认证状态已就绪。
     window.dispatchEvent(new CustomEvent('gms:auth-ready'));
 
@@ -416,11 +445,10 @@ async function continueAppInitialization() {
     // 🔌 现在初始化WebSocket（需要clientId）
     initWebSocket();
 
-    await initializeClusterMode();
+    await Promise.all([initializeClusterMode(), configReady]);
 
     // 刷新非测试页面时不要启动 ADB、套件和用户列表等全局扫描。各页面会由
     // runPageInitializers() 按需加载自己的数据，避免多个慢请求争抢后端资源。
-    const initialPage = window.__targetPage || 'test';
     const needsTestWorkspace = initialPage === 'test';
 
     if (needsTestWorkspace) {
@@ -447,6 +475,7 @@ async function continueAppInitialization() {
     }, 1000);
 
     startStatusPolling();
+    scheduleDeferredPagePreload(initialPage);
 
     // 检查是否有未完成的固件上传
     checkPendingFirmwareUpload();
@@ -878,9 +907,11 @@ function handleServerEvent(eventType, payload) {
     debugLog('[EventBus] Received:', eventType, payload);
     switch (eventType) {
         case 'worker.updated':
-            // Refresh the cluster worker list instead of polling.
-            // loadClusterWorkers already has in-flight de-duplication.
-            if (typeof loadClusterWorkers === 'function') {
+            // Heartbeats from every Worker emit this event. The selector
+            // belongs to the test page, so refreshing it while the user is
+            // on desktop/terminal/reports turns every heartbeat into an
+            // unnecessary /api/cluster/workers request.
+            if (currentPage === 'test' && typeof loadClusterWorkers === 'function') {
                 loadClusterWorkers().catch(() => {});
             }
             break;
@@ -1837,6 +1868,7 @@ async function loadTestSuites(forceRefresh = false) {
     if (_loadSuitesPromise) {
         await _loadSuitesPromise;
         if (testSuitesWorkerId !== requestedWorker) return loadTestSuites(forceRefresh);
+        if (forceRefresh) return loadTestSuites(true);
         return testSuitesCache;
     }
 
@@ -1897,6 +1929,26 @@ async function loadTestSuites(forceRefresh = false) {
     })();
 
     return _loadSuitesPromise;
+}
+
+async function refreshTestSuites() {
+    const button = document.getElementById('refresh-suites-btn');
+    if (button?.disabled) return;
+    if (button) {
+        button.disabled = true;
+        button.textContent = '刷新中…';
+        button.setAttribute('aria-busy', 'true');
+    }
+    showToast('正在刷新测试套件...', 'info');
+    try {
+        await loadTestSuites(true);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = '↻ 刷新套件';
+            button.removeAttribute('aria-busy');
+        }
+    }
 }
 
 function renderTestSuitesDropdown() {
@@ -2631,6 +2683,7 @@ document.addEventListener('click', function(event) {
 // ==================== 全局函数暴露 ====================
 // 将 HTML onclick 需要的函数暴露到 window 对象
 window.refreshDevices = refreshDevices;
+window.refreshTestSuites = refreshTestSuites;
 window.selectAllDevices = selectAllDevices;
 window.rebootDevices = rebootDevices;
 window.remountDevices = remountDevices;
