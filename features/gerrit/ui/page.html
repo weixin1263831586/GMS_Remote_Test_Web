@@ -95,7 +95,7 @@
     .conn-banner .conn-detail { color:var(--muted); font-size:12px; margin-top:2px; white-space:pre-line; }
     .conn-banner button { flex-shrink:0; }
     .review-badge { display:inline-block; min-width:22px; padding:1px 7px; margin-left:6px; border-radius:999px; background:var(--warn); color:#1a1206; font-size:12px; font-weight:700; line-height:1.5; }
-    .modal { display:none; position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.68); align-items:center; justify-content:center; padding:clamp(8px,2.5vw,20px); overflow:hidden; overscroll-behavior:contain; }
+    .modal { display:none; position:fixed; inset:0; width:100vw; z-index:10000; background:rgba(0,0,0,.68); align-items:center; justify-content:center; padding:clamp(8px,2.5vw,20px); overflow:hidden; overscroll-behavior:contain; }
     .modal.show { display:flex; }
     .modal-content { width:min(760px, 96vw); max-height:min(85vh,calc(100dvh - 16px)); min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; box-shadow:0 18px 40px rgba(0,0,0,.4); }
     .modal-header { display:flex; justify-content:space-between; align-items:center; gap:10px; min-width:0; padding:15px 20px; background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); }
@@ -247,7 +247,7 @@
     <div class="modal-body" id="routeCheckBody"><div class="muted">正在探测 Gerrit 服务器可达性…</div></div>
   </div>
 </div>
-<script src="/static/js/embedded-workspace.js?v=20260713-01"></script>
+<script src="/static/js/embedded-workspace.js?v=20260812-stable-surfaces"></script>
 <script>
 let config = {dashboard_profiles: [], personal_profiles: [], department_profiles: [], default_owner: ''};
 let currentTab = 'personal';
@@ -263,6 +263,7 @@ let pendingDepartmentTargetSelect = 'departmentProfile';
 let pendingTrendChartKey = '';
 let gerritWorkspaceContext = {};
 let pendingWorkspaceChangeId = '';
+const gerritDashboardRequestGeneration = {personal: 0, department: 0};
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function api(url, options) {
   const r = await fetch(url, {credentials: 'same-origin', cache: 'no-store', ...(options || {})});
@@ -585,6 +586,10 @@ function onPersonalProfileChange() {
 }
 async function loadPersonal(refresh) {
   if (currentTab !== 'personal') return;
+  const content = document.getElementById('personalContent');
+  const requestGeneration = ++gerritDashboardRequestGeneration.personal;
+  const hadRenderedDashboard = content.dataset.loaded === 'true';
+  content.setAttribute('aria-busy', 'true');
   const ownerInput = document.getElementById('owner');
   const profileSelect = document.getElementById('personalProfile');
   // 点击成员行跳转时走 requestedOwner：此时不要沿用看板上残留的 profile 下拉值，
@@ -596,14 +601,17 @@ async function loadPersonal(refresh) {
   currentPersonalProfileId = profileId;
   saveGerritProfileState();
   document.getElementById('personalStatus').textContent = '';
-  document.getElementById('personalContent').innerHTML = placeholderHtml('⏳ 正在统计个人 Gerrit 提交...');
+  if (!hadRenderedDashboard) content.innerHTML = placeholderHtml('⏳ 正在统计个人 Gerrit 提交...');
   try {
     const data = await api('/api/gerrit-dashboard/statistics/personal?profile_id=' + encodeURIComponent(profileId) + '&owner=' + encodeURIComponent(owner) + '&refresh=' + (refresh ? 'true' : 'false'));
+    if (requestGeneration !== gerritDashboardRequestGeneration.personal) return;
     // owner 跳转后按返回的 profile 回填下拉选项。
     const resolvedProfile = (data.profile || {}).id || '';
-    if (requestedOwner && resolvedProfile) currentPersonalProfileId = resolvedProfile;
     const reviewQueue = await loadPendingReviewQueue(owner, refresh);
-    document.getElementById('personalContent').innerHTML = renderDashboard(data, reviewQueue);
+    if (requestGeneration !== gerritDashboardRequestGeneration.personal) return;
+    if (requestedOwner && resolvedProfile) currentPersonalProfileId = resolvedProfile;
+    content.innerHTML = renderDashboard(data, reviewQueue);
+    content.dataset.loaded = 'true';
     // 数据全空且查询报错时，提示用户检查 Gerrit 路由可达性。
     refreshConnBanner(data);
     trendOwner = owner;
@@ -612,30 +620,42 @@ async function loadPersonal(refresh) {
     trendProfileId = resolvedProfile || profileId;
     requestedOwner = '';
   } catch (e) {
+    if (requestGeneration !== gerritDashboardRequestGeneration.personal) return;
     requestedOwner = '';
-    document.getElementById('personalContent').innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
+    if (!hadRenderedDashboard) content.innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
     notifyUser('Gerrit 个人统计失败', e.message, 'error');
     refreshConnBanner({error: e.message, source: ''});
+  } finally {
+    if (requestGeneration === gerritDashboardRequestGeneration.personal) content.setAttribute('aria-busy', 'false');
   }
 }
 async function loadDepartment(refresh) {
   if (currentTab !== 'department') return;
+  const content = document.getElementById('departmentContent');
+  const requestGeneration = ++gerritDashboardRequestGeneration.department;
+  const hadRenderedDashboard = content.dataset.loaded === 'true';
+  content.setAttribute('aria-busy', 'true');
   const profileSelect = document.getElementById('departmentProfile');
   const profileId = (profileSelect ? profileSelect.value : '') || currentDepartmentProfileId || '';
   currentDepartmentProfileId = profileId;
   saveGerritProfileState();
   document.getElementById('departmentStatus').textContent = '';
-  document.getElementById('departmentContent').innerHTML = placeholderHtml('⏳ 正在统计部门 Gerrit 提交...');
+  if (!hadRenderedDashboard) content.innerHTML = placeholderHtml('⏳ 正在统计部门 Gerrit 提交...');
   try {
     const data = await api('/api/gerrit-dashboard/statistics/department?profile_id=' + encodeURIComponent(profileId) + '&refresh=' + (refresh ? 'true' : 'false'));
-    document.getElementById('departmentContent').innerHTML = renderDepartmentDashboard(data);
+    if (requestGeneration !== gerritDashboardRequestGeneration.department) return;
+    content.innerHTML = renderDepartmentDashboard(data);
+    content.dataset.loaded = 'true';
     trendOwners = (data.users || []).map(function(u) { return u.owner; }).filter(Boolean);
     trendOwner = '';
     trendScope = 'department';
     trendProfileId = profileId;
   } catch (e) {
-    document.getElementById('departmentContent').innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
+    if (requestGeneration !== gerritDashboardRequestGeneration.department) return;
+    if (!hadRenderedDashboard) content.innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
     notifyUser('Gerrit 部门统计失败', e.message, 'error');
+  } finally {
+    if (requestGeneration === gerritDashboardRequestGeneration.department) content.setAttribute('aria-busy', 'false');
   }
 }
 async function loadChanges() {
@@ -1165,7 +1185,9 @@ window.addEventListener('gms:embedded-workspace', function(event) {
     event.detail && event.detail.type === 'workspace-context-navigate'
   ).catch(function(error) { notifyUser('打开 Gerrit Change 失败', error.message, 'error'); });
 });
-const gerritInitPromise = init();
+const gerritInitPromise = init().finally(function() {
+  window.GmsEmbeddedWorkspace && window.GmsEmbeddedWorkspace.markReady();
+});
 async function saveChangeToWiki(changeId) {
   const item = (window.__changeCache || {})[String(changeId)];
   if (!item) {

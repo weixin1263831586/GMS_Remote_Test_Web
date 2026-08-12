@@ -2506,14 +2506,29 @@ async function checkInitialTestStatus() {
 
         // 页面刷新时加载历史日志（限制最近100条，避免卡顿）
         if (status.logs && status.logs.length > 0) {
-            const systemOut = getLogContainer('system');
-            const moduleOut = getLogContainer('module');
-            if (systemOut) systemOut.innerHTML = '';
-            if (moduleOut) moduleOut.innerHTML = '';
-
-            // 只显示最近100条历史日志，避免卡顿（按 source 路由到对应 Tab）
             const recentLogs = status.logs.slice(-getLogDisplayLimit());
-            recentLogs.forEach(addNormalizedLogEntry);
+
+            // 用 DocumentFragment 同步构建再一次性替换，避免先 innerHTML=''
+            // 清空再 rAF 异步回填造成的一帧空白。
+            const buckets = { system: [], module: [] };
+            recentLogs.forEach(rawLog => {
+                const entry = normalizeLogEntry(rawLog);
+                (buckets[entry.source === 'module' ? 'module' : 'system']).push(entry);
+            });
+
+            for (const src of ['system', 'module']) {
+                const container = getLogContainer(src);
+                if (!container) continue;
+                const fragment = document.createDocumentFragment();
+                buckets[src].forEach(({ message, type, source }) => {
+                    const div = document.createElement('div');
+                    div.className = `log-entry log-${type}`;
+                    div.textContent = `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}] ${message}`;
+                    fragment.appendChild(div);
+                });
+                container.innerHTML = '';
+                container.appendChild(fragment);
+            }
 
             const activeOut = getLogContainer(state.currentLogTab || 'system');
             if (activeOut) activeOut.scrollTop = activeOut.scrollHeight;
@@ -2590,8 +2605,13 @@ function showConfirmDialog(title, message, onConfirm, onCancel) {
     });
 }
 
+let _toastToken = 0;
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
+    if (!toast) return;
+    // 版本号守卫：只有最新一次调用的定时器才能隐藏 Toast，
+    // 避免连续调用时旧定时器提前关掉新 Toast。
+    const token = ++_toastToken;
     toast.textContent = message;
     toast.className = `toast ${type} show`;
 
@@ -2606,7 +2626,9 @@ function showToast(message, type = 'info') {
     const duration = durationMap[type] || 3000;
 
     setTimeout(() => {
-        toast.className = `toast ${type}`;
+        if (token === _toastToken) {
+            toast.className = `toast ${type}`;
+        }
     }, duration);
 }
 

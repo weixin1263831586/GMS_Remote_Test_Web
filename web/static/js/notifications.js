@@ -163,6 +163,7 @@ function toggleNotificationPanel() {
         return;
     }
     panel.classList.add('show');
+    $('notification-dismiss-layer')?.classList.add('show');
     loadNotifications();
     if (notificationPanelEscHandler) {
         document.removeEventListener('keydown', notificationPanelEscHandler);
@@ -178,11 +179,26 @@ function toggleNotificationPanel() {
 function closeNotificationPanel() {
     const panel = $('notification-panel');
     if (panel) panel.classList.remove('show');
+    $('notification-dismiss-layer')?.classList.remove('show');
     if (notificationPanelEscHandler) {
         document.removeEventListener('keydown', notificationPanelEscHandler);
         notificationPanelEscHandler = null;
     }
 }
+
+function dismissNotificationPanelFromPointer(event) {
+    const panel = $('notification-panel');
+    if (!panel?.classList.contains('show')) return;
+    // The bell owns explicit toggling, while every interaction inside the
+    // notification surface must remain usable without dismissing the panel.
+    // Only pointer events outside both regions close it.
+    if (event.target?.closest?.('#notification-toggle, #notification-panel')) return;
+    closeNotificationPanel();
+}
+
+document.addEventListener('click', dismissNotificationPanelFromPointer);
+document.addEventListener('auxclick', dismissNotificationPanelFromPointer);
+document.addEventListener('contextmenu', dismissNotificationPanelFromPointer);
 
 async function requestBrowserNotificationPermission() {
     if (!('Notification' in window)) {

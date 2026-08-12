@@ -339,12 +339,17 @@ function firmwareShareDate(ts) {
 async function loadFirmwareShares() {
     const tbody = document.getElementById('firmware-share-list');
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">加载中...</td></tr>';
+    const hadRenderedShares = tbody.dataset.loaded === 'true';
+    tbody.setAttribute('aria-busy', 'true');
+    if (!hadRenderedShares) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">加载中...</td></tr>';
+    }
     try {
         const result = await firmwareShareApi('/api/firmware-shares');
         const records = result.data?.records || [];
         if (!records.length) {
             tbody.innerHTML = '<tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">暂无共享固件</td></tr>';
+            tbody.dataset.loaded = 'true';
             return;
         }
         tbody.innerHTML = records.map(record => {
@@ -366,8 +371,12 @@ async function loadFirmwareShares() {
                 </tr>
             `;
         }).join('');
+        tbody.dataset.loaded = 'true';
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="5" style="padding: 14px; color: var(--danger-color); text-align: center;">${escapeHtml(error.message)}</td></tr>`;
+        if (hadRenderedShares) showToast(`共享固件列表刷新失败: ${error.message}`, 'error');
+        else tbody.innerHTML = `<tr><td colspan="5" style="padding: 14px; color: var(--danger-color); text-align: center;">${escapeHtml(error.message)}</td></tr>`;
+    } finally {
+        tbody.setAttribute('aria-busy', 'false');
     }
 }
 
@@ -490,15 +499,16 @@ async function submitFirmwareBurn() {
     const selectedFirmwareFile = fileInput?.files?.[0] || null;
 
     const devices = Array.from(state.selectedDevices);
+    if (!devices.length) {
+        showToast('请重新选择要烧写的设备', 'warning');
+        return;
+    }
     try {
         const granted = await requestElevatedAccess('烧写设备固件');
         if (!granted) return;
         closeFirmwareModal();
         showToast('正在烧写固件...', 'info');
         addLogEntry(`开始烧写固件: ${firmwarePath}`, 'info');
-
-        // 立即在UI上标记设备为锁定状态
-        lockDevicesInUI(devices);
 
         const warnBeforeRefresh = (e) => {
             e.preventDefault();
@@ -520,6 +530,7 @@ async function submitFirmwareBurn() {
             if (devices.length !== 1) {
                 throw new Error('集群固件烧写一次只允许选择一台设备');
             }
+            lockDevicesInUI(devices);
             const form = new FormData();
             form.append('worker_id', workerId);
             form.append('devices', devices.join(','));
@@ -567,7 +578,7 @@ async function submitFirmwareBurn() {
         if (selectedFirmwareFile) {
             const uploadId = getReusableFirmwareUploadId(selectedFirmwareFile);
             const startedAt = parseInt(sessionStorage.getItem('firmwareUploadStartTime') || Date.now());
-            notifyOperationResult('固件烧写已启动', '固件上传任务已开始', 'info', 'firmware-burn');
+            notifyOperationResult('固件上传已启动', '固件分片上传任务已开始', 'info', 'firmware-burn');
             addLogEntry(`固件上传任务已启动，设备: ${devices.join(', ')}`, 'success');
 
             uploadResult = await uploadFileInChunks(
@@ -580,7 +591,7 @@ async function submitFirmwareBurn() {
                     checkExisting: true,
                     uploadId,
                     extraFormData: {
-                        firmware_path: firmwarePath,
+                        stage_only: '1',
                     },
                     onResume: (status) => {
                         const progress = status.progress || 0;
@@ -608,9 +619,29 @@ async function submitFirmwareBurn() {
                 }
             );
             cleanupUploadState();
+            if (uploadResult.staged) {
+                updateUploadProgress(
+                    100,
+                    selectedFirmwareFile.name,
+                    selectedFirmwareFile.size,
+                    selectedFirmwareFile.size
+                );
+                addLogEntry('固件已完成可续传暂存，正在启动烧写', 'success');
+                lockDevicesInUI(devices);
+                const finalizeForm = new FormData();
+                finalizeForm.append('finalize_upload', '1');
+                finalizeForm.append('upload_id', uploadId);
+                notifyOperationResult('固件烧写已启动', '固件暂存完成，烧写任务已开始', 'info', 'firmware-burn');
+                uploadResult = await apiCall(
+                    `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`,
+                    'POST',
+                    finalizeForm
+                );
+            }
         } else {
             const formData = new FormData();
             formData.append('firmware_path', firmwarePath);
+            lockDevicesInUI(devices);
             // 使用XMLHttpRequest提交服务器路径烧写请求
             uploadResult = await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
@@ -654,6 +685,9 @@ async function submitFirmwareBurn() {
     } catch (error) {
         notifyOperationResult('固件烧写失败', error.message, 'error', 'firmware-burn');
         addLogEntry(`固件烧写异常: ${error.message}`, 'error');
+        loadDevices(true).catch(refreshError => {
+            console.error('[Firmware Burn] Failed to refresh devices after error:', refreshError);
+        });
     }
 }
 
@@ -1113,7 +1147,9 @@ async function openAdbProxyModal() {
     const message = document.getElementById('adb-proxy-message');
     const submit = document.getElementById('adb-proxy-connect-submit');
     if (!assignments || !message || !submit) return;
-    assignments.textContent = '正在读取接入状态...';
+    const hadRenderedAssignments = assignments.dataset.loaded === 'true';
+    assignments.setAttribute('aria-busy', 'true');
+    if (!hadRenderedAssignments) assignments.textContent = '正在读取接入状态...';
     message.textContent = '正在读取设备来源和接入主机...';
     submit.disabled = true;
     ModalManager.open('adb-proxy-modal');
@@ -1125,9 +1161,11 @@ async function openAdbProxyModal() {
         renderAdbProxyHosts();
         updateAdbProxyButton();
     } catch (error) {
-        assignments.textContent = '接入状态读取失败';
+        if (!hadRenderedAssignments) assignments.textContent = '接入状态读取失败';
         message.textContent = `加载ADB接入信息失败：${error.message}`;
         addLogEntry('加载ADB接入信息失败: ' + error.message, 'error');
+    } finally {
+        assignments.setAttribute('aria-busy', 'false');
     }
 }
 
@@ -1452,14 +1490,21 @@ function renderAdbProxySourceDevices(selection = null) {
 
 async function refreshAdbProxyAssignments() {
     const container = document.getElementById('adb-proxy-assignments');
-    if (container) container.textContent = '正在刷新接入状态...';
+    const hadRenderedAssignments = container?.dataset.loaded === 'true';
+    if (container) {
+        container.setAttribute('aria-busy', 'true');
+        if (!hadRenderedAssignments) container.textContent = '正在刷新接入状态...';
+    }
     try {
         const selection = adbProxySelectionSnapshot();
         adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
         renderAdbProxyAssignments();
         renderAdbProxyHosts(selection);
     } catch (error) {
-        if (container) container.textContent = `刷新失败: ${error.message}`;
+        if (container && !hadRenderedAssignments) container.textContent = `刷新失败: ${error.message}`;
+        else showToast(`ADB接入状态刷新失败: ${error.message}`, 'error');
+    } finally {
+        if (container) container.setAttribute('aria-busy', 'false');
     }
 }
 
@@ -1470,6 +1515,7 @@ function renderAdbProxyAssignments() {
     const assignments = adbProxyStatus?.assignments || [];
     if (!assignments.length) {
         container.textContent = '当前没有通过adbproxy-rs接入的设备。';
+        container.dataset.loaded = 'true';
         return;
     }
     assignments.forEach(assignment => {
@@ -1529,6 +1575,7 @@ function renderAdbProxyAssignments() {
         row.append(info, actions);
         container.append(row);
     });
+    container.dataset.loaded = 'true';
 }
 
 async function showAdbProxyDiagnostics(assignment) {
@@ -1723,7 +1770,9 @@ async function refreshUsbipAssignments() {
 async function loadUsbipAssignments() {
     const container = document.getElementById('usbip-assignments');
     if (!container) return;
-    container.textContent = '正在读取接入状态...';
+    const hadRenderedAssignments = container.dataset.loaded === 'true';
+    container.setAttribute('aria-busy', 'true');
+    if (!hadRenderedAssignments) container.textContent = '正在读取接入状态...';
     try {
         const statusPath = pendingUsbipDeviceHost
             ? '/api/usbip/status?device_host=' + encodeURIComponent(pendingUsbipDeviceHost)
@@ -1818,11 +1867,15 @@ async function loadUsbipAssignments() {
         if (!container.children.length) {
             container.textContent = '当前没有通过USB/IP接入的设备。';
         }
+        container.dataset.loaded = 'true';
         state.usbipConnected = Boolean(rows.length || status.connected);
         updateUsbipButtonStatus(state.usbipConnected);
         updateUsbipAssignmentOperationButtons();
     } catch (error) {
-        container.textContent = `读取USB/IP接入状态失败：${error.message}`;
+        if (hadRenderedAssignments) showToast(`USB/IP接入状态刷新失败: ${error.message}`, 'error');
+        else container.textContent = `读取USB/IP接入状态失败：${error.message}`;
+    } finally {
+        container.setAttribute('aria-busy', 'false');
     }
 }
 

@@ -67,6 +67,9 @@ async function uploadFileInChunks(file, url, options = {}) {
     }
 
     function applyHeaders(xhr) {
+        if (typeof applyClientIdentityHeadersToXhr === 'function') {
+            applyClientIdentityHeadersToXhr(xhr);
+        }
         if (!headers) return;
         Object.entries(headers).forEach(([key, value]) => {
             if (value !== undefined && value !== null) {
@@ -82,18 +85,20 @@ async function uploadFileInChunks(file, url, options = {}) {
         formData.append('upload_id', uploadId);
         formData.append('file_name', file.name);
         formData.append('file_size', fileSize);
+        formData.append('chunk_size', chunkSize);
         appendExtraFields(formData);
 
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.addEventListener('load', () => {
-                if (xhr.status !== 200) {
-                    resolve({ uploaded_chunks: [] });
-                    return;
-                }
                 try {
                     const result = JSON.parse(xhr.responseText);
+                    if (xhr.status < 200 || xhr.status >= 300 || result.success === false) {
+                        reject(new Error(result.error || result.detail || `HTTP ${xhr.status}`));
+                        return;
+                    }
                     resolve({
+                        ...result,
                         uploaded_chunks: Array.isArray(result.uploaded_chunks) ? result.uploaded_chunks : [],
                         chunks_uploaded: result.chunks_uploaded || 0,
                         total_chunks: result.total_chunks || totalChunks,
@@ -102,10 +107,10 @@ async function uploadFileInChunks(file, url, options = {}) {
                         total_size: result.total_size || fileSize,
                     });
                 } catch (_e) {
-                    resolve({ uploaded_chunks: [] });
+                    reject(new Error(xhr.status >= 400 ? `HTTP ${xhr.status}` : 'Invalid response'));
                 }
             });
-            xhr.addEventListener('error', () => resolve({ uploaded_chunks: [] }));
+            xhr.addEventListener('error', () => reject(new Error('Network error while checking upload status')));
             xhr.open('POST', url);
             applyHeaders(xhr);
             xhr.send(formData);
@@ -128,13 +133,14 @@ async function uploadFileInChunks(file, url, options = {}) {
         formData.append('upload_id', uploadId);
         formData.append('file_name', file.name);
         formData.append('file_size', fileSize);
+        formData.append('chunk_size', chunkSize);
         formData.append('resume', resume ? '1' : '0');
         appendExtraFields(formData);
 
         try {
             const xhr = new XMLHttpRequest();
 
-            return new Promise((resolve, reject) => {
+            return await new Promise((resolve, reject) => {
                 // 上传进度
                 if (onChunkProgress) {
                     xhr.upload.addEventListener('progress', (e) => {
@@ -167,7 +173,14 @@ async function uploadFileInChunks(file, url, options = {}) {
                             reject(new Error('Invalid response'));
                         }
                     } else {
-                        reject(new Error(`HTTP ${xhr.status}`));
+                        let message = `HTTP ${xhr.status}`;
+                        try {
+                            const errorResult = JSON.parse(xhr.responseText || '{}');
+                            message = errorResult.error || errorResult.detail || message;
+                        } catch (_error) {
+                            // Keep the HTTP status when the error body is not JSON.
+                        }
+                        reject(new Error(message));
                     }
                 });
 
@@ -203,6 +216,11 @@ async function uploadFileInChunks(file, url, options = {}) {
     try {
         if (resume && checkExisting) {
             const existingStatus = await checkUploadedChunks();
+            if (existingStatus.upload_complete && existingStatus.staged) {
+                if (onProgress) onProgress(100, totalChunks, totalChunks);
+                if (options.onResume) options.onResume(existingStatus);
+                return existingStatus;
+            }
             const existing = existingStatus.uploaded_chunks || [];
             uploadedChunks = new Set(existing.map(Number).filter(idx => idx >= 0 && idx < totalChunks));
             if (uploadedChunks.size === totalChunks && totalChunks > 0) {
@@ -248,12 +266,11 @@ async function uploadFileInChunks(file, url, options = {}) {
         };
     } catch (error) {
         console.error('[ChunkUpload] Failed:', error);
-        throw {
-            error: error.message,
-            upload_id: uploadId,
-            uploaded_chunks: Array.from(uploadedChunks),
-            failed_chunks: failedChunks
-        };
+        const uploadError = error instanceof Error ? error : new Error(error?.error || String(error));
+        uploadError.upload_id = uploadId;
+        uploadError.uploaded_chunks = Array.from(uploadedChunks);
+        uploadError.failed_chunks = failedChunks;
+        throw uploadError;
     }
 }
 

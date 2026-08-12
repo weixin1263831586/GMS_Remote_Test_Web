@@ -10,6 +10,28 @@ from scripts.verify_release_tree import verify_release_tree
 
 
 class ReleasePackagingTests(unittest.TestCase):
+    def test_tracked_product_config_uses_runtime_secret_placeholders(self):
+        config = json.loads(Path("configs/config.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(config["ubuntu_pswd"], "${GMS_UBUNTU_PASSWORD:}")
+        self.assertEqual(config["vnc_password"], "${GMS_VNC_PASSWORD:}")
+        self.assertEqual(config["wifi"]["password"], "${GMS_WIFI_PASSWORD:}")
+        self.assertEqual(
+            config["ai_models"]["providers"]["glm_local"]["api_key"],
+            "${GMS_LOCAL_AI_API_KEY:}",
+        )
+        self.assertEqual(
+            config["ai_models"]["providers"]["zhipu"]["api_key"],
+            "${GMS_ZHIPU_API_KEY:}",
+        )
+
+        runtime_example = json.loads(
+            Path("configs/runtime.example.json").read_text(encoding="utf-8")
+        )
+        for key, value in runtime_example.items():
+            if any(marker in key for marker in ("PASSWORD", "KEY", "TOKEN")):
+                self.assertEqual(value, "", key)
+
     def test_install_script_declares_product_runtime_and_sensitive_exclusions(self):
         source = Path("install.sh").read_text(encoding="utf-8")
 
@@ -25,11 +47,23 @@ class ReleasePackagingTests(unittest.TestCase):
             "--exclude '/dist/'",
             "--exclude '/tools/gms-worker-native/target/'",
             "--exclude 'configs/config_runtime.json'",
+            "--exclude 'docs/android-cli-ui-control-integration.md'",
+            "--exclude 'docs/build-server-integration-assessment.md'",
+            "--exclude 'docs/multi-host-cluster-implementation-plan.md'",
+            "--exclude 'docs/refactor-parity-audit.md'",
             "--exclude 'tools/GMS-Host-Tools/gts-rockchip.json'",
             "Environment=GMS_ENV=production",
             'verify_release_tree.py" "${package_root}',
         ):
             self.assertIn(expected, source)
+
+        for internal_document in (
+            "docs/android-cli-ui-control-integration.md",
+            "docs/build-server-integration-assessment.md",
+            "docs/multi-host-cluster-implementation-plan.md",
+            "docs/refactor-parity-audit.md",
+        ):
+            self.assertEqual(source.count(f"--exclude '{internal_document}'"), 2)
 
         # EnvironmentFile was removed: the runtime environment JSON is loaded in-process
         # by bootstrap.env_loader, so systemd no longer needs it.

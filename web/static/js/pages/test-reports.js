@@ -140,11 +140,20 @@ function renderReportsPagination() {
 
 async function loadTestReports(userOnly = false, append = false, force = false) {
     const requestGeneration = ++reportsRequestGeneration;
+    const tbody = document.getElementById('reports-table-body');
+    const hadRenderedReports = Boolean(reportsHasLoaded && tbody?.children.length);
+    if (tbody) tbody.setAttribute('aria-busy', 'true');
     try {
         await (window.GmsWorkspace?.ready || Promise.resolve());
         const workersPromise = loadReportWorkers();
-        const url = reportsListUrl(userOnly, append ? reportsNextCursor : '');
         const queryKey = reportsListUrl(userOnly);
+        // 筛选或 Worker 已改变时，旧游标不再属于当前查询。刷新失败后
+        // 仍可保留旧表格，但下一次“加载更多”必须退化为新查询的第一页。
+        if (append && reportsLastQueryKey !== queryKey) {
+            append = false;
+            force = true;
+        }
+        const url = reportsListUrl(userOnly, append ? reportsNextCursor : '');
         const hasCachedQuery = !append && !force && reportsHasLoaded
             && reportsLastQueryKey === queryKey;
         if (hasCachedQuery) {
@@ -153,11 +162,8 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
             renderReportsPagination();
             if (Date.now() - reportsLastLoadedAt < REPORTS_REENTRY_CACHE_MS) return;
         }
-        const tbody = document.getElementById('reports-table-body');
         if (!append) {
-            reportsNextCursor = '';
-            reportsLoadedPages = 1;
-            if (tbody && !hasCachedQuery) {
+            if (tbody && !hasCachedQuery && !hadRenderedReports) {
                 tbody.innerHTML = '<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text-secondary);">正在加载报告...</td></tr>';
             }
         }
@@ -176,6 +182,7 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
             reportsLoadedPages += 1;
         } else {
             reportsLoadedItems = page;
+            reportsLoadedPages = 1;
         }
         reportsNextCursor = data.next_cursor || '';
         reportsHasLoaded = true;
@@ -217,10 +224,11 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
             }, REPORTS_REFRESH_INTERVAL);
         }
     } catch (e) {
+        if (requestGeneration !== reportsRequestGeneration) return;
         console.error('[Reports] Error loading reports:', e);
-        const tbody = document.getElementById('reports-table-body');
-        if (tbody) {
-            tbody.setAttribute('aria-busy', 'false');
+        if (hadRenderedReports) {
+            showToast('报告列表刷新失败: ' + e.message, 'error');
+        } else if (tbody) {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
@@ -228,6 +236,10 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
                     </td>
                 </tr>
             `;
+        }
+    } finally {
+        if (requestGeneration === reportsRequestGeneration && tbody) {
+            tbody.setAttribute('aria-busy', 'false');
         }
     }
 }
@@ -247,13 +259,6 @@ function displayTestReports(reports) {
     if (!tbody) return;
 
     if (reports.length === 0) {
-        // 调整容器高度
-        const container = document.querySelector('#page-reports > div:last-child');
-        if (container) {
-            container.style.height = 'auto';
-            container.style.minHeight = '100px';
-        }
-
         tbody.innerHTML = `
             <tr>
                 <td colspan="10" style="padding: 60px 40px; text-align: center; color: var(--text-secondary);">
@@ -262,13 +267,6 @@ function displayTestReports(reports) {
             </tr>
         `;
         return;
-    }
-
-    // 恢复容器高度
-    const container = document.querySelector('#page-reports > div:last-child');
-    if (container) {
-        container.style.height = 'calc(100vh - 85px)';
-        container.style.minHeight = '';
     }
 
     // 使用 DocumentFragment 提高渲染性能

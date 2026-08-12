@@ -86,6 +86,7 @@ function renderDashboard(){
   {num:jobsActive,label:'任务运行',sub:`${jobsCompleted} 完成${jobsFailed?` · <span class="bad">${jobsFailed} 失败</span>`:''}`},
   {num:suitesAvailable,label:'可用套件',sub:`${new Set(state.suites.filter(s=>s.available).map(s=>s.suite_type)).size} 种类型`},
  ].map(c=>`<div class="dash-stat-card"><div class="num-label"><span class="num">${c.num}</span><span class="label">${c.label}</span></div><div class="sub">${c.sub}</div></div>`).join('');
+ statsEl.setAttribute('aria-busy','false');
  // 2-4. ECharts: init DOM once, then only update data
  if(hasECharts){
   initDashChartContainers();
@@ -630,4 +631,8 @@ if(typeof ResizeObserver!=='undefined'){
  dashResizeObserver=new ResizeObserver(scheduleDashboardChartsResize);
  const dashboard=document.querySelector('#dashboard');if(dashboard)dashResizeObserver.observe(dashboard);
 }
+// DOM 中的固定骨架已经完整解析，立即通知父页面；父页面会再等待两个
+// animation frame 后揭示，因此即使 iframe 当前 visibility:hidden 也不会
+// 因浏览器暂停其 rAF 而卡在“正在加载主机集群”。
+window.GmsEmbeddedWorkspace?.markReady();
 refresh();setInterval(()=>refresh(),10000);

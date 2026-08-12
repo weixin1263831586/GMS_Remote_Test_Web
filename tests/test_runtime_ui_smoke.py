@@ -364,6 +364,194 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_report_upload_keeps_latest_selection_and_renders_suite_version(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof handleReportFile === 'function'")
+            result = page.evaluate(
+                """
+                async () => {
+                    const OriginalXHR = window.XMLHttpRequest;
+                    const requests = [];
+                    class FakeXHR {
+                        constructor() {
+                            this.readyState = 0;
+                            this.status = 200;
+                            this.responseText = '';
+                            this.listeners = {};
+                            this.uploadListeners = {};
+                            this.upload = {
+                                addEventListener: (name, callback) => {
+                                    this.uploadListeners[name] = callback;
+                                }
+                            };
+                            requests.push(this);
+                        }
+                        addEventListener(name, callback) {
+                            this.listeners[name] = callback;
+                        }
+                        open() { this.readyState = 1; }
+                        setRequestHeader() {}
+                        send() { this.sent = true; }
+                        abort() { this.aborted = true; }
+                        complete(payload) {
+                            this.readyState = 4;
+                            this.responseText = JSON.stringify(payload);
+                            this.listeners.load?.();
+                        }
+                    }
+
+                    window.XMLHttpRequest = FakeXHR;
+                    try {
+                        const older = handleReportFile(new File(['old'], 'old.zip'));
+                        const newer = handleReportFile(new File(['new'], 'new.zip'));
+                        requests[1].complete({
+                            success: true,
+                            data: {
+                                report_name: 'new-report',
+                                summary: {total: 2, pass: 2, fail: 0, pass_rate: '100%'},
+                                details: {suite_version: 'android-cts-17_r1'},
+                                failures: []
+                            }
+                        });
+                        await newer;
+                        await new Promise(resolve => setTimeout(resolve, 350));
+
+                        requests[0].complete({
+                            success: true,
+                            data: {
+                                report_name: 'old-report',
+                                summary: {total: 1, pass: 0, fail: 1, pass_rate: '0%'},
+                                details: {suite_version: 'stale-suite'},
+                                failures: []
+                            }
+                        });
+                        await older;
+                        await new Promise(resolve => setTimeout(resolve, 350));
+                        return {
+                            requestCount: requests.length,
+                            olderAborted: requests[0].aborted === true,
+                            reportName: window.currentReportName,
+                            summary: document.querySelector('#report-summary').textContent
+                        };
+                    } finally {
+                        window.XMLHttpRequest = OriginalXHR;
+                    }
+                }
+                """
+            )
+
+            self.assertEqual(result["requestCount"], 2)
+            self.assertTrue(result["olderAborted"])
+            self.assertEqual(result["reportName"], "new-report")
+            self.assertIn("android-cts-17_r1", result["summary"])
+            self.assertNotIn("stale-suite", result["summary"])
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_chunk_upload_retries_and_preserves_actionable_errors(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof uploadFileInChunks === 'function'")
+            result = page.evaluate(
+                """
+                async () => {
+                    const OriginalXHR = window.XMLHttpRequest;
+                    const requests = [];
+                    class FakeXHR {
+                        constructor() {
+                            this.status = 0;
+                            this.responseText = '';
+                            this.listeners = {};
+                            this.upload = {addEventListener: () => {}};
+                            requests.push(this);
+                        }
+                        addEventListener(name, callback) { this.listeners[name] = callback; }
+                        open() {}
+                        setRequestHeader() {}
+                        send(form) { this.form = form; }
+                        respond(status, payload) {
+                            this.status = status;
+                            this.responseText = JSON.stringify(payload);
+                            this.listeners.load?.();
+                        }
+                    }
+                    const waitForRequests = async count => {
+                        const deadline = Date.now() + 2500;
+                        while (requests.length < count && Date.now() < deadline) {
+                            await new Promise(resolve => setTimeout(resolve, 20));
+                        }
+                        if (requests.length < count) throw new Error(`missing request ${count}`);
+                    };
+
+                    window.XMLHttpRequest = FakeXHR;
+                    try {
+                        const upload = uploadFileInChunks(
+                            new File(['abcd'], 'firmware.img'),
+                            '/fake-upload',
+                            {chunkSize: 2, concurrent: 1, maxRetries: 1}
+                        );
+                        await waitForRequests(1);
+                        requests[0].respond(503, {success: false, error: 'temporary failure'});
+                        await waitForRequests(2);
+                        requests[1].respond(200, {success: true, upload_complete: false});
+                        await waitForRequests(3);
+                        requests[2].respond(200, {
+                            success: true,
+                            upload_complete: true,
+                            staged: true,
+                            upload_id: 'upload-1'
+                        });
+                        const uploadResult = await upload;
+
+                        const failedCheck = uploadFileInChunks(
+                            new File(['xy'], 'other.img'),
+                            '/fake-upload',
+                            {chunkSize: 2, resume: true, checkExisting: true}
+                        );
+                        await waitForRequests(4);
+                        requests[3].respond(409, {
+                            success: false,
+                            error: 'Chunk metadata does not match the existing upload session'
+                        });
+                        let checkError = null;
+                        try {
+                            await failedCheck;
+                        } catch (error) {
+                            checkError = {
+                                isError: error instanceof Error,
+                                message: error.message,
+                                uploadId: error.upload_id
+                            };
+                        }
+                        return {
+                            requestCount: requests.length,
+                            staged: uploadResult.staged,
+                            checkError
+                        };
+                    } finally {
+                        window.XMLHttpRequest = OriginalXHR;
+                    }
+                }
+                """
+            )
+
+            self.assertEqual(result["requestCount"], 4)
+            self.assertTrue(result["staged"])
+            self.assertTrue(result["checkError"]["isError"])
+            self.assertIn("metadata", result["checkError"]["message"])
+            self.assertTrue(result["checkError"]["uploadId"])
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_auth_status_failure_does_not_stack_terminal_elevation_dialog(self):
         page = self.new_page()
         page.route(
@@ -501,6 +689,690 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 page.evaluate('(name) => window.switchPage(name, null)', page_name)
                 expect(page.locator(f"#page-{page_name}")).to_have_class(re.compile(r"active"))
             self.assertEqual(page_errors, [])
+        finally:
+            page.close()
+
+    def test_notification_panel_only_closes_on_outside_mouse_click(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_timeout(500)
+            self.close_initial_modals(page)
+            toggle = page.locator("#notification-toggle")
+            panel = page.locator("#notification-panel")
+
+            toggle.click()
+            expect(panel).to_have_class(re.compile(r"\bshow\b"))
+
+            # All mouse interactions inside the panel keep it open so its
+            # notification items and action buttons remain usable.
+            header = page.locator("#notification-panel .notification-panel-header")
+            header.click()
+            expect(panel).to_have_class(re.compile(r"\bshow\b"))
+            header.click(button="right")
+            expect(panel).to_have_class(re.compile(r"\bshow\b"))
+            page.get_by_role("button", name="全部已读").click()
+            expect(panel).to_have_class(re.compile(r"\bshow\b"))
+
+            expect(page.locator("#notification-dismiss-layer")).to_be_visible()
+            page.mouse.click(800, 160)
+            expect(panel).not_to_have_class(re.compile(r"\bshow\b"))
+
+            toggle.click()
+            expect(panel).to_have_class(re.compile(r"\bshow\b"))
+            page.mouse.click(800, 160, button="right")
+            expect(panel).not_to_have_class(re.compile(r"\bshow\b"))
+
+            # The parent-layer also covers embedded iframe surfaces, whose
+            # document events cannot bubble into the shell document.
+            page.evaluate("switchPage('architecture', null)")
+            frame_box = page.locator("#architecture-iframe").bounding_box()
+            self.assertIsNotNone(frame_box)
+            toggle.click()
+            expect(panel).to_have_class(re.compile(r"\bshow\b"))
+            page.mouse.click(
+                frame_box["x"] + frame_box["width"] * 0.75,
+                frame_box["y"] + frame_box["height"] * 0.25,
+            )
+            expect(panel).not_to_have_class(re.compile(r"\bshow\b"))
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_sidebar_page_transitions_do_not_create_large_layout_shifts(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """() => {
+                  window.__navigationLayoutShifts = [];
+                  window.__navigationLayoutShiftObserver = new PerformanceObserver(list => {
+                    list.getEntries().forEach(entry => {
+                      if (!entry.hadRecentInput) {
+                        window.__navigationLayoutShifts.push({
+                          value: entry.value,
+                          sources: entry.sources.map(source =>
+                            source.node && (source.node.id || source.node.className || source.node.tagName)
+                          ),
+                        });
+                      }
+                    });
+                  });
+                  window.__navigationLayoutShiftObserver.observe({type: 'layout-shift'});
+                }"""
+            )
+            for page_name in self.visible_sidebar_pages(page):
+                with self.subTest(page=page_name):
+                    self.show_all_sidebar_pages(page)
+                    page.evaluate(
+                        """name => {
+                          window.__navigationLayoutShifts.length = 0;
+                          switchPage(name, null);
+                        }""",
+                        page_name,
+                    )
+                    page.wait_for_timeout(450)
+                    shifts = page.evaluate(
+                        """() => ({
+                          score: window.__navigationLayoutShifts.reduce(
+                            (sum, entry) => sum + entry.value, 0
+                          ),
+                          entries: window.__navigationLayoutShifts,
+                        })"""
+                    )
+                    self.assertLess(shifts["score"], 0.05, shifts)
+        finally:
+            page.close()
+
+    def test_lazy_frames_use_stable_loading_surface_and_do_not_reload_on_revisit(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            frames = [
+                ("gms-assistant", "#gms-assistant-frame"),
+                ("automation", "#automation-frame"),
+                ("cluster", "#cluster-frame"),
+                ("redmine-agent", "#redmine-agent-frame"),
+                ("gerrit-dashboard", "#gerrit-dashboard-frame"),
+                ("architecture", "#architecture-iframe"),
+            ]
+            for page_name, selector in frames:
+                with self.subTest(page=page_name):
+                    loading = page.evaluate(
+                        """([pageName, selector]) => {
+                          switchPage(pageName, null);
+                          const frame = document.querySelector(selector);
+                          const shell = frame.closest('.embedded-frame-shell');
+                          const rect = shell.getBoundingClientRect();
+                          return {
+                            state: shell.dataset.frameState,
+                            frameVisibility: getComputedStyle(frame).visibility,
+                            loaderDisplay: getComputedStyle(
+                              shell.querySelector('.embedded-frame-loading')
+                            ).display,
+                            rect: {width: rect.width, height: rect.height},
+                          };
+                        }""",
+                        [page_name, selector],
+                    )
+                    self.assertEqual(loading["state"], "loading", loading)
+                    self.assertEqual(loading["frameVisibility"], "hidden", loading)
+                    self.assertEqual(loading["loaderDisplay"], "flex", loading)
+                    self.assertGreater(loading["rect"]["height"], 100, loading)
+
+                    page.wait_for_function(
+                        "selector => document.querySelector(selector).closest("
+                        "'.embedded-frame-shell').dataset.frameState === 'ready'",
+                        arg=selector,
+                    )
+                    ready = page.evaluate(
+                        """selector => {
+                          const frame = document.querySelector(selector);
+                          const shell = frame.closest('.embedded-frame-shell');
+                          const rect = shell.getBoundingClientRect();
+                          window.__lazyFrameReloads = 0;
+                          frame.addEventListener('load', () => {
+                            window.__lazyFrameReloads += 1;
+                          });
+                          return {
+                            frameVisibility: getComputedStyle(frame).visibility,
+                            loaderDisplay: getComputedStyle(
+                              shell.querySelector('.embedded-frame-loading')
+                            ).display,
+                            rect: {width: rect.width, height: rect.height},
+                          };
+                        }""",
+                        selector,
+                    )
+                    self.assertEqual(ready["frameVisibility"], "visible", ready)
+                    self.assertEqual(ready["loaderDisplay"], "none", ready)
+                    self.assertAlmostEqual(
+                        loading["rect"]["width"], ready["rect"]["width"], delta=1
+                    )
+                    self.assertAlmostEqual(
+                        loading["rect"]["height"], ready["rect"]["height"], delta=1
+                    )
+
+                    page.evaluate("switchPage('test', null)")
+                    page.evaluate("name => switchPage(name, null)", page_name)
+                    page.wait_for_timeout(150)
+                    self.assertEqual(page.evaluate("window.__lazyFrameReloads"), 0)
+                    self.assertEqual(
+                        page.locator(selector).evaluate(
+                            "frame => frame.closest('.embedded-frame-shell').dataset.frameState"
+                        ),
+                        "ready",
+                    )
+        finally:
+            page.close()
+
+    def test_cluster_reveals_stable_shell_before_slow_data_refresh_finishes(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        page.add_init_script(
+            """
+            const originalFetchForSlowCluster = window.fetch.bind(window);
+            window.fetch = (input, init) => {
+              const url = String(input && input.url ? input.url : input);
+              if (location.pathname === '/cluster' && url.includes('/api/cluster/')) {
+                window.__clusterFetchHeld = true;
+                return new Promise(() => {});
+              }
+              return originalFetchForSlowCluster(input, init);
+            };
+            """
+        )
+        try:
+            self.goto_shell(page)
+            started = time.monotonic()
+            page.evaluate("switchPage('cluster', null)")
+            try:
+                page.wait_for_function(
+                    "document.querySelector('#cluster-frame').closest("
+                    "'.embedded-frame-shell').dataset.frameState === 'ready'",
+                    timeout=4000,
+                    polling=50,
+                )
+            except PlaywrightError as error:
+                frame = self.frame_for(page, "#cluster-frame")
+                diagnostics = {
+                    "parent": page.locator("#cluster-frame").evaluate(
+                        "frame => ({frame: {...frame.dataset}, shell: {...frame.closest('.embedded-frame-shell').dataset}})"
+                    ),
+                    "child": frame.evaluate(
+                        "() => ({path: location.pathname, held: window.__clusterFetchHeld, ready: typeof GmsEmbeddedWorkspace, refresh: typeof refresh, body: document.body?.innerText?.slice(0, 200)})"
+                    ),
+                    "errors": page_errors,
+                }
+                self.fail(f"cluster stable shell did not become ready: {diagnostics}; {error}")
+            self.assertLess(time.monotonic() - started, 4.0)
+
+            cluster = self.frame_for(page, "#cluster-frame")
+            expect(cluster.locator("#dashboard-stats")).to_have_attribute(
+                "aria-busy", "true"
+            )
+            expect(cluster.locator("#dash-gauges")).to_contain_text(
+                "等待首批资源数据"
+            )
+            expect(cluster.locator("#dashboard-tests")).to_contain_text(
+                "等待测试状态"
+            )
+            expect(
+                page.locator(
+                    ".embedded-frame-shell:has(#cluster-frame) > .embedded-frame-loading"
+                )
+            ).to_be_hidden()
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_async_refreshes_keep_rendered_content_until_atomic_replacement(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function(
+                "typeof loadTestReports === 'function' "
+                "&& typeof loadSecurityAudit === 'function' "
+                "&& typeof loadSuiteBrowserDirectory === 'function'"
+            )
+
+            page.evaluate(
+                """() => {
+                  const tbody = document.querySelector('#reports-table-body');
+                  tbody.innerHTML = '<tr><td colspan="10">old-report-surface</td></tr>';
+                  reportsWorkersLoaded = true;
+                  reportsHasLoaded = true;
+                  reportsLoadedItems = [{timestamp: 'old-report-surface'}];
+                  reportsLastQueryKey = reportsListUrl(false);
+                  window.__originalRequestReportsData = requestReportsData;
+                  requestReportsData = () => new Promise(resolve => {
+                    window.__resolveStableReports = resolve;
+                  });
+                  window.__stableReportsPending = loadTestReports(false, false, true);
+                }"""
+            )
+            expect(page.locator("#reports-table-body")).to_contain_text(
+                "old-report-surface"
+            )
+            expect(page.locator("#reports-table-body")).to_have_attribute(
+                "aria-busy", "true"
+            )
+            expect(page.locator("#reports-table-body")).not_to_contain_text(
+                "正在加载报告"
+            )
+            page.evaluate(
+                """() => window.__resolveStableReports({
+                  reports: [{
+                    timestamp: 'new-report-surface', report_name: 'new-report-surface',
+                    test_type: 'CTS', suite_path: '/tmp/android-cts-16_r1/tools',
+                    pass: 1, fail: 0, total: 1, worker_id: 'ats-worker-controller'
+                  }],
+                  next_cursor: ''
+                })"""
+            )
+            page.wait_for_function(
+                "window.__stableReportsPending",
+            )
+            page.evaluate(
+                """async () => {
+                  await window.__stableReportsPending;
+                  requestReportsData = window.__originalRequestReportsData;
+                }"""
+            )
+            expect(page.locator("#reports-table-body")).to_contain_text(
+                "new-report-surface"
+            )
+            expect(page.locator("#reports-table-body")).not_to_contain_text(
+                "old-report-surface"
+            )
+            expect(page.locator("#reports-table-body")).to_have_attribute(
+                "aria-busy", "false"
+            )
+
+            page.evaluate(
+                """() => {
+                  const tbody = document.querySelector('#security-audit-table-body');
+                  tbody.innerHTML = '<tr><td colspan="6">old-audit-surface</td></tr>';
+                  securityAuditState.loaded = true;
+                  securityAuditState.loading = false;
+                  securityAuditState.recordsCache = [{id: 'old-audit-surface'}];
+                  window.__originalApiCallForStableRefresh = apiCall;
+                  apiCall = (...args) => String(args[0]).startsWith('/api/security-audit/logs')
+                    ? new Promise(resolve => { window.__resolveStableAudit = resolve; })
+                    : window.__originalApiCallForStableRefresh(...args);
+                  window.__stableAuditPending = loadSecurityAudit(true);
+                }"""
+            )
+            expect(page.locator("#security-audit-table-body")).to_contain_text(
+                "old-audit-surface"
+            )
+            expect(page.locator("#security-audit-table-body")).to_have_attribute(
+                "aria-busy", "true"
+            )
+            page.evaluate(
+                """() => window.__resolveStableAudit({data: {
+                  records: [{
+                    id: 'new-audit-surface', timestamp: '2026-08-12T12:00:00Z',
+                    source: 'web', status_code: 200, username: 'new-audit-surface',
+                    client_ip: '127.0.0.1', operation: 'page_view', duration_ms: 1
+                  }],
+                  has_more: false,
+                  stats: {total: 1, web: 1, cli: 0, errors: 0}
+                }})"""
+            )
+            page.evaluate(
+                """async () => {
+                  await window.__stableAuditPending;
+                  apiCall = window.__originalApiCallForStableRefresh;
+                }"""
+            )
+            expect(page.locator("#security-audit-table-body")).to_contain_text(
+                "new-audit-surface"
+            )
+            expect(page.locator("#security-audit-table-body")).not_to_contain_text(
+                "old-audit-surface"
+            )
+
+            page.evaluate(
+                """() => {
+                  const list = document.querySelector('#suite-file-list');
+                  list.innerHTML = '<div class="suite-file-row">old-suite-surface</div>';
+                  state.suiteBrowser.selectedSuitePath = '/tmp/android-cts-16_r1/tools';
+                  state.suiteBrowser.currentPath = 'old';
+                  state.suiteBrowser.suiteRoot = '/tmp/android-cts-16_r1';
+                  testSuitesCache = [{
+                    tools_path: '/tmp/android-cts-16_r1/tools',
+                    test_type: 'cts', version: '16_r1'
+                  }];
+                  window.__originalApiCallForSuiteRefresh = apiCall;
+                  apiCall = (...args) => String(args[0]).includes('/api/test/suites/files')
+                    ? new Promise(resolve => { window.__resolveStableSuite = resolve; })
+                    : window.__originalApiCallForSuiteRefresh(...args);
+                  window.__stableSuitePending = loadSuiteBrowserDirectory('next');
+                }"""
+            )
+            expect(page.locator("#suite-file-list")).to_contain_text(
+                "old-suite-surface"
+            )
+            expect(page.locator("#suite-file-list")).to_have_attribute(
+                "aria-busy", "true"
+            )
+            page.evaluate(
+                """() => window.__resolveStableSuite({data: {
+                  path: 'next', suite_root: '/tmp/android-cts-16_r1',
+                  items: [{name: 'new-suite-surface.txt', path: 'next/new-suite-surface.txt',
+                    type: 'file', size: 12}]
+                }})"""
+            )
+            page.evaluate(
+                """async () => {
+                  await window.__stableSuitePending;
+                  apiCall = window.__originalApiCallForSuiteRefresh;
+                }"""
+            )
+            expect(page.locator("#suite-file-list")).to_contain_text(
+                "new-suite-surface.txt"
+            )
+            expect(page.locator("#suite-file-list")).not_to_contain_text(
+                "old-suite-surface"
+            )
+
+            atomic_table = page.evaluate(
+                """async () => {
+                  const box = document.createElement('div');
+                  box.dataset.loaded = 'true';
+                  box.textContent = 'old-device-table-surface';
+                  document.body.appendChild(box);
+                  let blankSeen = false;
+                  let mutations = 0;
+                  const observer = new MutationObserver(() => {
+                    mutations += 1;
+                    if (!box.textContent.trim()) blankSeen = true;
+                  });
+                  observer.observe(box, {childList: true, subtree: false});
+                  const rows = Array.from({length: 600}, (_, index) => index);
+                  dcfgSetTable(
+                    box,
+                    '<colgroup><col></colgroup>',
+                    '<th>value</th>',
+                    rows,
+                    value => `<tr><td>device-row-${value}</td></tr>`,
+                    100
+                  );
+                  const immediate = box.textContent;
+                  for (let index = 0; index < 8; index += 1) {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                  }
+                  await Promise.resolve();
+                  observer.disconnect();
+                  const result = {
+                    immediate,
+                    finalText: box.textContent,
+                    blankSeen,
+                    mutations,
+                  };
+                  box.remove();
+                  return result;
+                }"""
+            )
+            self.assertEqual(atomic_table["immediate"], "old-device-table-surface")
+            self.assertIn("device-row-599", atomic_table["finalText"])
+            self.assertFalse(atomic_table["blankSeen"], atomic_table)
+            self.assertEqual(atomic_table["mutations"], 1, atomic_table)
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_stable_refreshes_do_not_reuse_stale_pagination_state(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function(
+                "typeof loadTestReports === 'function' "
+                "&& typeof loadSecurityAudit === 'function'"
+            )
+
+            reports_url = page.evaluate(
+                """async () => {
+                  const worker = document.querySelector('#reports-worker-filter');
+                  reportsWorkersLoaded = true;
+                  if (worker) worker.dataset.workersLoaded = 'true';
+                  reportsHasLoaded = true;
+                  reportsLoadedItems = [{timestamp: 'old-report'}];
+                  reportsNextCursor = 'stale-cursor';
+                  reportsLastQueryKey = reportsListUrl(false);
+                  document.querySelector('#reports-table-body').innerHTML =
+                    '<tr><td colspan="10">old-report</td></tr>';
+                  const original = requestReportsData;
+                  requestReportsData = url => {
+                    window.__stablePaginationReportsUrl = url;
+                    return Promise.resolve({reports: [], next_cursor: ''});
+                  };
+                  try {
+                    await loadTestReports(true, true, true);
+                    return window.__stablePaginationReportsUrl;
+                  } finally {
+                    requestReportsData = original;
+                  }
+                }"""
+            )
+            self.assertIn("user_only=true", reports_url)
+            self.assertNotIn("cursor=", reports_url)
+
+            audit_state = page.evaluate(
+                """async () => {
+                  const tbody = document.querySelector('#security-audit-table-body');
+                  tbody.innerHTML = '<tr><td colspan="6">old-audit</td></tr>';
+                  securityAuditState.loaded = true;
+                  securityAuditState.loading = false;
+                  securityAuditState.offset = 100;
+                  securityAuditState.hasMore = true;
+                  securityAuditState.currentFilterParams = getSecurityAuditFilterKey();
+                  const original = apiCall;
+                  apiCall = (...args) => String(args[0]).startsWith('/api/security-audit/logs')
+                    ? Promise.reject(new Error('simulated audit failure'))
+                    : original(...args);
+                  const failed = await loadSecurityAudit(true);
+                  const afterFailure = {
+                    loaded: failed,
+                    offset: securityAuditState.offset,
+                    text: tbody.textContent,
+                  };
+
+                  document.querySelector('#audit-search-input').value = 'new-filter';
+                  apiCall = (...args) => {
+                    if (!String(args[0]).startsWith('/api/security-audit/logs')) {
+                      return original(...args);
+                    }
+                    window.__stablePaginationAuditUrl = String(args[0]);
+                    return Promise.resolve({data: {
+                      records: [], has_more: false,
+                      stats: {total: 0, web: 0, cli: 0, errors: 0},
+                    }});
+                  };
+                  try {
+                    await loadMoreSecurityAudit();
+                    return {
+                      afterFailure,
+                      resetUrl: window.__stablePaginationAuditUrl,
+                      finalOffset: securityAuditState.offset,
+                    };
+                  } finally {
+                    apiCall = original;
+                  }
+                }"""
+            )
+            self.assertFalse(audit_state["afterFailure"]["loaded"])
+            self.assertEqual(audit_state["afterFailure"]["offset"], 100)
+            self.assertIn("old-audit", audit_state["afterFailure"]["text"])
+            self.assertIn("offset=0", audit_state["resetUrl"])
+            self.assertEqual(audit_state["finalOffset"], 0)
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_embedded_dashboards_avoid_initial_shift_and_horizontal_leaks(self):
+        page = self.new_page()
+        try:
+            page.add_init_script(
+                """
+                window.__initialLayoutShifts = [];
+                try {
+                  new PerformanceObserver(list => {
+                    for (const entry of list.getEntries()) {
+                      if (!entry.hadRecentInput) {
+                        window.__initialLayoutShifts.push(entry.value);
+                      }
+                    }
+                  }).observe({type: 'layout-shift', buffered: true});
+                } catch (_error) {}
+                """
+            )
+            self.goto_shell(page)
+            page.evaluate("switchPage('cluster', null)")
+            page.wait_for_function(
+                "document.querySelector('#cluster-frame').closest("
+                "'.embedded-frame-shell').dataset.frameState === 'ready'"
+            )
+            cluster = self.frame_for(page, "#cluster-frame")
+            cluster.wait_for_timeout(1200)
+            cluster_layout = cluster.evaluate(
+                """() => ({
+                  score: (window.__initialLayoutShifts || [])
+                    .reduce((sum, value) => sum + value, 0),
+                  cardCount: document.querySelectorAll(
+                    '#dashboard-stats .dash-stat-card'
+                  ).length,
+                  busy: document.querySelector('#dashboard-stats')
+                    .getAttribute('aria-busy'),
+                })"""
+            )
+            self.assertLess(cluster_layout["score"], 0.001, cluster_layout)
+            self.assertEqual(cluster_layout["cardCount"], 5, cluster_layout)
+            self.assertEqual(cluster_layout["busy"], "false", cluster_layout)
+
+            page.evaluate("switchPage('redmine-agent', null)")
+            page.wait_for_function(
+                "document.querySelector('#redmine-agent-frame').closest("
+                "'.embedded-frame-shell').dataset.frameState === 'ready'"
+            )
+            redmine = self.frame_for(page, "#redmine-agent-frame")
+            redmine.wait_for_timeout(600)
+            for viewport in [
+                {"width": 1440, "height": 960},
+                {"width": 960, "height": 720},
+            ]:
+                with self.subTest(viewport=viewport):
+                    page.set_viewport_size(viewport)
+                    page.wait_for_timeout(120)
+                    widths = redmine.evaluate(
+                        """() => ({
+                          viewport: innerWidth,
+                          body: document.body.scrollWidth,
+                          html: document.documentElement.scrollWidth,
+                          header: document.querySelector('header').scrollWidth,
+                        })"""
+                    )
+                    self.assertLessEqual(widths["body"], widths["viewport"] + 1, widths)
+                    self.assertLessEqual(widths["html"], widths["viewport"] + 1, widths)
+                    self.assertLessEqual(widths["header"], widths["viewport"] + 1, widths)
+        finally:
+            page.close()
+
+    def test_redmine_and_gerrit_refresh_failures_preserve_current_dashboards(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.wait_for_function("typeof loadStatistics === 'function'")
+            page.evaluate(
+                """() => {
+                  const content = document.querySelector('#statsContent');
+                  content.innerHTML = '<section>old-redmine-dashboard</section>';
+                  content.dataset.loaded = 'true';
+                  _statsConfigCacheTs = Date.now();
+                  statsConfig.stale_days = 3;
+                  window.__originalRedmineApiForStableRefresh = api;
+                  api = url => String(url).includes('/statistics/workload')
+                    ? new Promise((resolve, reject) => {
+                        window.__rejectStableRedmine = reject;
+                      })
+                    : String(url).endsWith('/statistics')
+                      ? Promise.resolve({})
+                      : window.__originalRedmineApiForStableRefresh(url);
+                  window.__stableRedminePending = loadStatistics(true);
+                }"""
+            )
+            expect(page.locator("#statsContent")).to_contain_text(
+                "old-redmine-dashboard"
+            )
+            expect(page.locator("#statsContent")).to_have_attribute(
+                "aria-busy", "true"
+            )
+            page.evaluate(
+                "window.__rejectStableRedmine(new Error('simulated refresh failure'))"
+            )
+            page.evaluate(
+                """async () => {
+                  await window.__stableRedminePending;
+                  api = window.__originalRedmineApiForStableRefresh;
+                }"""
+            )
+            expect(page.locator("#statsContent")).to_contain_text(
+                "old-redmine-dashboard"
+            )
+            expect(page.locator("#statsContent")).to_have_attribute(
+                "aria-busy", "false"
+            )
+
+            page.goto(f"{self.base_url}/gerrit-dashboard", wait_until="domcontentloaded")
+            page.wait_for_function("typeof loadPersonal === 'function'")
+            page.evaluate(
+                """() => {
+                  const content = document.querySelector('#personalContent');
+                  content.innerHTML = '<section>old-gerrit-dashboard</section>';
+                  content.dataset.loaded = 'true';
+                  currentTab = 'personal';
+                  config.default_owner = 'ui-admin@example.com';
+                  window.__originalGerritApiForStableRefresh = api;
+                  api = url => String(url).includes('/statistics/personal')
+                    ? new Promise((resolve, reject) => {
+                        window.__rejectStableGerrit = reject;
+                      })
+                    : window.__originalGerritApiForStableRefresh(url);
+                  window.__stableGerritPending = loadPersonal(true);
+                }"""
+            )
+            expect(page.locator("#personalContent")).to_contain_text(
+                "old-gerrit-dashboard"
+            )
+            expect(page.locator("#personalContent")).to_have_attribute(
+                "aria-busy", "true"
+            )
+            page.evaluate(
+                "window.__rejectStableGerrit(new Error('simulated refresh failure'))"
+            )
+            page.evaluate(
+                """async () => {
+                  await window.__stableGerritPending;
+                  api = window.__originalGerritApiForStableRefresh;
+                }"""
+            )
+            expect(page.locator("#personalContent")).to_contain_text(
+                "old-gerrit-dashboard"
+            )
+            expect(page.locator("#personalContent")).to_have_attribute(
+                "aria-busy", "false"
+            )
+            self.assert_no_page_errors(page_errors)
         finally:
             page.close()
 
@@ -1046,7 +1918,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                                     const rect = zone.getBoundingClientRect();
                                     const pageRect = zone.closest('.page-content').getBoundingClientRect();
                                     const pageTitleStyle = getComputedStyle(
-                                        zone.closest('.page-content').querySelector(':scope > .section-title')
+                                        zone.closest('.page-content').querySelector('.section-title')
                                     );
                                     const title = zone.querySelector('.analysis-upload-title');
                                     const instructions = zone.querySelector('.upload-instructions');
@@ -1192,6 +2064,57 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(gerrit_src, "/gerrit-dashboard")
 
             self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_agent_distinguishes_rule_router_from_analysis_model_availability(self):
+        page = self.new_page()
+        probe_requests = []
+
+        def ai_status(route):
+            is_probe = "probe=true" in route.request.url
+            probe_requests.append(is_probe)
+            provider = {
+                "provider": "glm_local",
+                "name": "Local GLM",
+                "model": "glm-local",
+                "enabled": True,
+                "local": True,
+                "configured": True,
+                "credential_configured": is_probe,
+                "state": "available" if is_probe else "credential_missing",
+                "available": True if is_probe else None,
+                "checked": is_probe,
+            }
+            if is_probe:
+                provider["latency_ms"] = 42
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "data": {
+                        "status": {
+                            "local_provider": "glm_local",
+                            "primary_provider": "remote",
+                            "providers": [provider],
+                        }
+                    },
+                }),
+            )
+
+        page.route("**/api/config/ai*", ai_status)
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            status = page.locator("#agent-model-status")
+            expect(status).to_have_text("本地模型：缺少密钥")
+            self.assertIn("Agent 指令路由使用确定性规则", status.get_attribute("title"))
+
+            page.locator("#agent-model-check").click()
+            expect(status).to_have_text("本地模型：可用 · 42ms")
+            expect(status).to_have_attribute("data-state", "available")
+            self.assertEqual(probe_requests, [False, True])
         finally:
             page.close()
 
@@ -3328,6 +4251,75 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_apk_page_restores_owner_scoped_running_task_and_exposes_retry(self):
+        page = self.new_page()
+        active_id = "00000000-0000-0000-0000-000000000101"
+        error_id = "00000000-0000-0000-0000-000000000102"
+        tasks = [
+            {
+                "task_id": active_id,
+                "filename": "running.apk",
+                "status": "analyzing",
+                "progress": 37,
+                "timestamp": 2,
+                "error": None,
+            },
+            {
+                "task_id": error_id,
+                "filename": "retry.jar",
+                "status": "error",
+                "progress": 10,
+                "timestamp": 1,
+                "error": "jadx failed",
+            },
+        ]
+        page.route(
+            "**/api/apk/tasks",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": {"tasks": tasks}}),
+            ),
+        )
+
+        def task_status(route):
+            task_id = route.request.url.rsplit("/", 1)[-1]
+            task = next(item for item in tasks if item["task_id"] == task_id)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": task}),
+            )
+
+        page.route("**/api/apk/status/*", task_status)
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('apk-analysis', null)")
+            page.wait_for_function(
+                "taskId => window.apkCurrentTaskId === taskId",
+                arg=active_id,
+            )
+            expect(page.locator("#apk-task-history option")).to_have_count(3)
+            expect(page.locator("#apk-task-history")).to_have_value(active_id)
+            expect(page.locator("#apk-analysis-state")).to_have_text(
+                "正在反编译... (37%)"
+            )
+            expect(page.locator("#apk-btn-analyze")).to_be_visible()
+            expect(page.locator("#apk-btn-analyze")).to_be_disabled()
+
+            page.locator("#apk-task-history").select_option(error_id)
+            page.wait_for_function(
+                "taskId => window.apkCurrentTaskId === taskId",
+                arg=error_id,
+            )
+            expect(page.locator("#apk-analysis-state")).to_have_text(
+                "错误: jadx failed"
+            )
+            expect(page.locator("#apk-btn-analyze")).to_be_enabled()
+            expect(page.locator("#apk-btn-analyze")).to_have_text("🔬 重新分析")
+        finally:
+            page.close()
+
     def test_sidebar_visibility_modal_closes_with_escape(self):
         page = self.new_page()
         try:
@@ -3848,7 +4840,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                             f"{page_selector} .host-workspace-title-row > .section-title"
                         ).bounding_box()
                         refresh_box = page.locator(
-                            f"{page_selector} .host-workspace-single-bar button"
+                            f"{page_selector} .host-workspace-single-bar "
+                            ".host-workspace-refresh-btn"
                         ).bounding_box()
                         self.assertIsNotNone(final_status_box)
                         self.assertIsNotNone(title_box)
@@ -3867,6 +4860,18 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         refresh_button = page.locator(
                             f"{page_selector} .host-workspace-pane-header .host-workspace-refresh-btn"
                         ).first
+                        cluster_header = page.locator(
+                            f"{page_selector} .host-workspace-pane-header"
+                        ).first
+                        header_box = cluster_header.bounding_box()
+                        select_box = cluster_header.locator("select").bounding_box()
+                        maximize_box = cluster_header.locator("button").last.bounding_box()
+                        self.assertIsNotNone(header_box)
+                        self.assertIsNotNone(select_box)
+                        self.assertIsNotNone(maximize_box)
+                        self.assertLessEqual(header_box["height"], 27.5)
+                        self.assertAlmostEqual(select_box["height"], 22, delta=0.5)
+                        self.assertAlmostEqual(maximize_box["height"], 22, delta=0.5)
                     refresh_style = refresh_button.evaluate(
                         "button=>({border:button.style.border||getComputedStyle(button).border,"
                         "background:getComputedStyle(button).backgroundColor,"
@@ -3901,6 +4906,23 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     page.close()
 
     def test_test_suite_cluster_controls_wait_for_scope_before_becoming_visible(self):
+        def workspace_context_handler(selected_scope, json_response):
+            def handler(route):
+                json_response(route, {
+                    "success": True,
+                    "data": {"context": {
+                        "scope_mode": selected_scope,
+                        "worker_id": (
+                            "worker-a"
+                            if selected_scope == "cluster"
+                            else "ats-worker-controller"
+                        ),
+                        "device_ids": [],
+                    }},
+                })
+
+            return handler
+
         for scope_mode in ("single", "cluster"):
             with self.subTest(scope_mode=scope_mode):
                 page = self.new_page()
@@ -3922,18 +4944,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 )
                 page.route(
                     "**/api/users/workspace-context",
-                    lambda route: json_response(route, {
-                        "success": True,
-                        "data": {"context": {
-                            "scope_mode": scope_mode,
-                            "worker_id": (
-                                "worker-a"
-                                if scope_mode == "cluster"
-                                else "ats-worker-controller"
-                            ),
-                            "device_ids": [],
-                        }},
-                    }),
+                    workspace_context_handler(scope_mode, json_response),
                 )
                 page.add_init_script(
                     """
@@ -4120,6 +5131,104 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 + select_metrics["paddingBottom"],
                 select_metrics["clientHeight"],
             )
+        finally:
+            page.close()
+
+    def test_adb_terminal_startup_output_is_revealed_once(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """() => {
+                  const writes = [];
+                  const instance = {
+                    mode: 'adb',
+                    serialNo: 'DEVICE-1',
+                    shellReady: false,
+                    initialData: '',
+                    terminal: {write: data => writes.push(data)},
+                  };
+                  writeTerminalWorkspaceData(
+                    instance,
+                    'Welcome to host\\r\\nhost@controller:~$ clear\\r\\n'
+                      + '\\x1b[H\\x1b[2Jhost@controller:~$ adb -s DEVICE-1 shell\\r\\n'
+                  );
+                  const writesBeforeDevicePrompt = writes.length;
+                  writeTerminalWorkspaceData(instance, 'device_name:/ $ ');
+                  writeTerminalWorkspaceData(instance, 'id\\r\\nuid=2000(shell)\\r\\ndevice_name:/ $ ');
+                  return {
+                    writes,
+                    writesBeforeDevicePrompt,
+                    shellReady: instance.shellReady,
+                    initialData: instance.initialData,
+                  };
+                }"""
+            )
+
+            self.assertEqual(result["writesBeforeDevicePrompt"], 0)
+            self.assertTrue(result["shellReady"])
+            self.assertEqual(result["initialData"], "")
+            self.assertEqual(len(result["writes"]), 2)
+            startup_output = result["writes"][0]
+            self.assertIn("ADB Shell · DEVICE-1", startup_output)
+            self.assertIn("device_name:/ $", startup_output)
+            self.assertNotIn("Welcome to host", startup_output)
+            self.assertNotIn("adb -s", startup_output)
+            self.assertEqual(
+                result["writes"][1],
+                "id\r\nuid=2000(shell)\r\ndevice_name:/ $ ",
+            )
+        finally:
+            page.close()
+
+    def test_adb_terminal_startup_failure_is_visible_and_closes_host_shell(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """() => {
+                  const writes = [];
+                  let closeCount = 0;
+                  const instance = {
+                    mode: 'adb',
+                    paneIndex: 0,
+                    serialNo: 'DEVICE-1',
+                    shellReady: false,
+                    startupFailed: false,
+                    initialData: '',
+                    socket: {
+                      readyState: WebSocket.OPEN,
+                      close: () => { closeCount += 1; },
+                    },
+                    terminal: {write: data => writes.push(data)},
+                  };
+                  writeTerminalWorkspaceData(
+                    instance,
+                    'Welcome to host\\r\\nhost@controller:~$ '
+                      + 'adb -s DEVICE-1 shell\\r\\n'
+                      + 'error: device unauthorized\\r\\nhost@controller:~$ '
+                  );
+                  writeTerminalWorkspaceData(instance, 'host-only-output');
+                  return {
+                    writes,
+                    closeCount,
+                    startupFailed: instance.startupFailed,
+                    shellReady: instance.shellReady,
+                    initialData: instance.initialData,
+                  };
+                }"""
+            )
+
+            self.assertTrue(result["startupFailed"])
+            self.assertFalse(result["shellReady"])
+            self.assertEqual(result["initialData"], "")
+            self.assertEqual(result["closeCount"], 1)
+            self.assertEqual(len(result["writes"]), 1)
+            self.assertIn("ADB Shell 启动失败", result["writes"][0])
+            self.assertIn("device unauthorized", result["writes"][0])
+            self.assertNotIn("Welcome to host", result["writes"][0])
+            self.assertNotIn("host@controller", result["writes"][0])
+            self.assertNotIn("host-only-output", result["writes"][0])
         finally:
             page.close()
 
@@ -4733,7 +5842,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 f"{self.base_url}/"
             )
             guide_images = page.locator("#sidebar-settings-panel-guide .project-guide-image-button img")
-            expect(guide_images).to_have_count(9)
+            expect(guide_images).to_have_count(11)
             for image_index in range(guide_images.count()):
                 guide_images.nth(image_index).scroll_into_view_if_needed()
                 expect(guide_images.nth(image_index)).to_have_js_property("naturalWidth", 1600)
@@ -4852,6 +5961,19 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         self.assertLessEqual(rect["right"], report["viewport"]["width"] + 1, report)
                         self.assertLessEqual(rect["bottom"], report["viewport"]["height"] + 1, report)
                         self.assertEqual(report["overflowControls"], [], report)
+                        if viewport["width"] >= 768 and viewport["height"] >= 560:
+                            self.assertAlmostEqual(
+                                (rect["left"] + rect["right"]) / 2,
+                                report["viewport"]["width"] / 2,
+                                delta=2,
+                                msg=report,
+                            )
+                            self.assertAlmostEqual(
+                                (rect["top"] + rect["bottom"]) / 2,
+                                report["viewport"]["height"] / 2,
+                                delta=2,
+                                msg=report,
+                            )
                         page.evaluate("id => ModalManager.close(id)", modal_id)
 
             first_id, second_id = modal_ids[:2]
@@ -4883,12 +6005,12 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_standalone_pages_keep_overlays_inside_mobile_viewport(self):
+    def test_standalone_pages_keep_overlays_centered_and_inside_viewport(self):
         page = self.new_page()
         page_errors = []
         page.on("pageerror", lambda exc: page_errors.append(str(exc)))
 
-        def assert_overlay_fits(selector):
+        def assert_overlay_fits(selector, centered=False):
             report = page.locator(selector).evaluate(
                 """overlay => {
                   const rect = overlay.getBoundingClientRect();
@@ -4907,6 +6029,19 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertGreaterEqual(report["top"], -1, report)
             self.assertLessEqual(report["right"], report["viewportWidth"] + 1, report)
             self.assertLessEqual(report["bottom"], report["viewportHeight"] + 1, report)
+            if centered:
+                self.assertAlmostEqual(
+                    (report["left"] + report["right"]) / 2,
+                    report["viewportWidth"] / 2,
+                    delta=2,
+                    msg=report,
+                )
+                self.assertAlmostEqual(
+                    (report["top"] + report["bottom"]) / 2,
+                    report["viewportHeight"] / 2,
+                    delta=2,
+                    msg=report,
+                )
 
         try:
             page.set_viewport_size({"width": 390, "height": 720})
@@ -4963,6 +6098,37 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             assert_overlay_fits(".password-dialog")
             page.keyboard.press("Escape")
             expect(page.locator(".password-backdrop")).to_have_count(0)
+
+            # Desktop dialogs from each standalone workspace use the same
+            # viewport-centered contract as the main shell modal manager.
+            page.set_viewport_size({"width": 1440, "height": 960})
+            for path, modal_ids in [
+                ("/redmine-agent", redmine_ids),
+                ("/gerrit-dashboard", gerrit_ids),
+            ]:
+                page.goto(f"{self.base_url}{path}", wait_until="domcontentloaded")
+                page.wait_for_function("typeof showModal === 'function'")
+                for modal_id in modal_ids:
+                    with self.subTest(path=path, modal=modal_id):
+                        page.evaluate("id => showModal(id)", modal_id)
+                        assert_overlay_fits(f"#{modal_id} .modal-content", centered=True)
+                        page.evaluate("id => hideModal(id)", modal_id)
+
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function("typeof syncClusterModalState === 'function'")
+            for modal_id in ["onboarding", "worker-config-modal"]:
+                with self.subTest(path="/cluster", modal=modal_id):
+                    page.evaluate(
+                        "id => { document.getElementById(id).hidden = false; syncClusterModalState(); }",
+                        modal_id,
+                    )
+                    assert_overlay_fits(
+                        f"#{modal_id} .onboarding-modal", centered=True
+                    )
+                    page.evaluate(
+                        "id => { document.getElementById(id).hidden = true; syncClusterModalState(); }",
+                        modal_id,
+                    )
 
             self.assert_no_page_errors(page_errors)
         finally:
@@ -5235,15 +6401,18 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_shell_pages_keep_visible_controls_inside_narrow_viewport(self):
+    def test_shell_pages_keep_visible_controls_accessible_and_inside_viewport(self):
         page = self.new_page()
         page_errors = []
         page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         try:
             self.goto_shell(page)
-            page.set_viewport_size({"width": 390, "height": 720})
-            for page_name in self.visible_sidebar_pages(page):
-                with self.subTest(page=page_name):
+            for viewport in [
+                {"width": 1440, "height": 960},
+                {"width": 390, "height": 720},
+            ]:
+                page.set_viewport_size(viewport)
+                for page_name in self.visible_sidebar_pages(page):
                     self.show_all_sidebar_pages(page)
                     page.evaluate("name => switchPage(name, null)", page_name)
                     report = page.locator(f"#page-{page_name}").evaluate(
@@ -5291,7 +6460,24 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                               (node.tagName === 'BUTTON' || node.getAttribute('role') === 'button')
                               && node.clientWidth > 0
                               && node.scrollWidth > node.clientWidth + 2
-                            ).map(node => node.id || node.textContent).slice(0, 12)
+                            ).map(node => node.id || node.textContent).slice(0, 12),
+                            undersizedPointerTargets: Array.from(container.querySelectorAll(
+                              'button, [role="button"], select, input[type="button"], '
+                                + 'input[type="submit"], input[type="reset"], input[type="file"]'
+                            )).filter(isVisible).filter(node => {
+                              const rect = node.getBoundingClientRect();
+                              return rect.width < 24 || rect.height < 24;
+                            }).map(node => {
+                              const rect = node.getBoundingClientRect();
+                              return {
+                                tag: node.tagName,
+                                id: node.id,
+                                className: node.className,
+                                text: String(node.textContent || node.value || '').trim().slice(0, 80),
+                                width: rect.width,
+                                height: rect.height
+                              };
+                            }).slice(0, 20)
                           };
                         }"""
                     )
@@ -5304,6 +6490,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     )
                     self.assertEqual(report["leaks"], [], report)
                     self.assertEqual(report["clippedButtons"], [], report)
+                    self.assertEqual(report["undersizedPointerTargets"], [], report)
             self.assert_no_page_errors(page_errors)
         finally:
             page.close()

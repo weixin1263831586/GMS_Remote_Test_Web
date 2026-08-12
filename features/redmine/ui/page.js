@@ -14,6 +14,7 @@ let statsUserInitialized = false;
 let statsConfig = {stale_days: 20, window_days: 60, cache_ttl: 600, freshness_days: 180, redmine: {base_url: ''}, dashboard: {profiles: [], defaults: {list_limit: 50, issue_limit: 500}}};
 let departmentProfileId = '';
 let projectProfileId = '';
+const redmineDashboardRequestGeneration = {department: 0, stats: 0, project: 0};
 // 趋势明细点击上下文：当前看板作用的指派人姓名列表（个人=[name]，部门=全员）
 let redmineTrendNames = [];
 function updateRedmineTrendNames(selectedName, meta) {
@@ -489,12 +490,13 @@ function switchTab(tab) {
   try { window.sessionStorage.setItem('redmineLastTab', tab); } catch(_) {}
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + tab));
-  if (tab === 'issues') loadIssues();
-  else if (tab === 'cases') loadCases();
-  else if (tab === 'runs') loadRuns();
-  else if (tab === 'department') loadDepartmentOverdue(false);
-  else if (tab === 'project') loadProjectDashboard(false);
-  else if (tab === 'stats') loadStatistics();
+  if (tab === 'issues') return loadIssues();
+  if (tab === 'cases') return loadCases();
+  if (tab === 'runs') return loadRuns();
+  if (tab === 'department') return loadDepartmentOverdue(false);
+  if (tab === 'project') return loadProjectDashboard(false);
+  if (tab === 'stats') return loadStatistics();
+  return Promise.resolve();
 }
 
 async function refreshCurrentTab() {
@@ -557,7 +559,6 @@ async function onStatsUserChange() {
   url.searchParams.set('tab', 'stats');
   window.history.replaceState({}, '', url.toString());
   if (select) select.disabled = true;
-  document.getElementById('statsContent').innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在加载 ' + esc(name || '当前用户') + ' 的统计数据...</div>';
   try {
     await loadStatistics();
   } finally {
@@ -1004,7 +1005,7 @@ async function saveSettings() {
 // ---- Smart search: detect issue ID and fetch from Redmine ----
 async function smartSearch() {
   var q = document.getElementById('searchInput').value.trim();
-  if (!q) { loadIssues(); return; }
+  if (!q) return loadIssues();
   // Detect issue ID pattern: #634227, 634227, or pure number
   var idMatch = q.match(/^#?(\d{4,})$/);
   if (idMatch) {
@@ -1013,15 +1014,14 @@ async function smartSearch() {
     try {
       var local = await api('/api/redmine-agent/issues/' + issueId);
       if (local && local.issue_id) {
-        loadIssues();
-        return;
+        return loadIssues();
       }
     } catch (_) {
       // Not found locally — fetch from Redmine
     }
     await fetchIssueFromRedmine(issueId);
   } else {
-    loadIssues();
+    return loadIssues();
   }
 }
 
@@ -1034,14 +1034,13 @@ async function fetchIssueFromRedmine(issueId) {
     var result = await api('/api/redmine-agent/issues/' + issueId + '/fetch', {method: 'POST'});
     if (result.action === 'exists') {
       document.getElementById('searchInput').value = '';
-      loadIssues();
-      return;
+      return loadIssues();
     }
     // Wait for analysis to complete
     btn.textContent = '⏳ 分析 #' + issueId + '...';
     await waitForRun(result.run_id, '拉取');
     document.getElementById('searchInput').value = '';
-    loadIssues();
+    return loadIssues();
   } catch (e) {
     notifyUser('拉取工单失败', e.message, 'error');
   } finally {
@@ -1836,15 +1835,19 @@ function renderDepartmentOverdue(data) {
     ${table}
     ${details || '<div class="muted" style="padding:12px">当前配置用户暂无超过 ' + sd + ' 天未回复的问题。</div>'}
   `;
+  document.getElementById('departmentContent').dataset.loaded = 'true';
 }
 
 async function loadDepartmentOverdue(force) {
   const box = document.getElementById('departmentContent');
   if (!box) return;
-  await loadStatsConfig();
-  var sd = statsConfig.stale_days || 20;
-  box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计部门Redmine数据...</div>';
+  const requestGeneration = ++redmineDashboardRequestGeneration.department;
+  const hadRenderedDashboard = box.dataset.loaded === 'true';
+  box.setAttribute('aria-busy', 'true');
+  if (!hadRenderedDashboard) box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计部门Redmine数据...</div>';
   try {
+    await loadStatsConfig();
+    var sd = statsConfig.stale_days || 20;
     var defaults = (statsConfig.dashboard || {}).defaults || {};
     var url = '/api/redmine-agent/statistics/department-overdue?stale_days=' + sd
       + '&list_limit=' + (defaults.list_limit || 50)
@@ -1852,17 +1855,29 @@ async function loadDepartmentOverdue(force) {
       + '&profile_id=' + encodeURIComponent(departmentProfileId || '');
     if (force) url += '&refresh=true';
     const data = await api(url);
+    if (requestGeneration !== redmineDashboardRequestGeneration.department) return;
     if (data && data.configured === false) {
       box.innerHTML = renderRedmineNotConfigured();
+      box.dataset.loaded = 'true';
       return;
     }
     renderDepartmentOverdue(data);
   } catch (e) {
-    box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+    if (requestGeneration !== redmineDashboardRequestGeneration.department) return;
+    if (hadRenderedDashboard) notifyUser('部门看板刷新失败', e.message, 'error');
+    else box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+  } finally {
+    if (requestGeneration === redmineDashboardRequestGeneration.department) box.setAttribute('aria-busy', 'false');
   }
 }
 
 async function loadStatistics(force) {
+  const box = document.getElementById('statsContent');
+  if (!box) return;
+  const requestGeneration = ++redmineDashboardRequestGeneration.stats;
+  const hadRenderedDashboard = box.dataset.loaded === 'true';
+  box.setAttribute('aria-busy', 'true');
+  if (!hadRenderedDashboard) box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在加载个人看板数据...</div>';
   var savedName = '';
   try {
     var oldSel = document.getElementById('statsUserSelect');
@@ -1881,8 +1896,10 @@ async function loadStatistics(force) {
       api('/api/redmine-agent/statistics'),
       api(workloadUrl)
     ]);
+    if (requestGeneration !== redmineDashboardRequestGeneration.stats) return;
     if (workload && workload.configured === false) {
-      document.getElementById('statsContent').innerHTML = renderRedmineNotConfigured();
+      box.innerHTML = renderRedmineNotConfigured();
+      box.dataset.loaded = 'true';
       return;
     }
     if (force && workload.refresh_warning) {
@@ -1899,7 +1916,7 @@ async function loadStatistics(force) {
       + '<button class="select-add-btn" onclick="showAddUserModal()" title="添加用户">＋</button>'
       + '</div>';
 
-    document.getElementById('statsContent').innerHTML = `
+    box.innerHTML = `
       <section class="stats-section">
         ${renderSummaryHeader('Redmine概览', '<div class="filter-bar">' + userSelectHtml + '</div>', '统计身份: ' + ((meta.owner_names || []).map(esc).join(' / ') || '未识别') + ' | 统计口径: ' + (meta.count_source === 'redmine_live' ? 'Redmine实时全历史' : '本地同步快照') + ' | 更新时间: ' + esc((meta.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '')))}
         ${renderStatsCards([
@@ -1925,6 +1942,7 @@ async function loadStatistics(force) {
       ${renderMiniIssueList('客户 ' + sd + '天未回复RK的问题 (' + (lists.customer_no_reply_3_days || []).length + ')', lists.customer_no_reply_3_days || [], '暂无客户超过阈值未回复RK问题', 'sec-customer-no-reply')}
       ${renderMiniIssueList('缺失测试报告的问题 (' + (lists.missing_test_report || []).length + ')', lists.missing_test_report || [], '暂无缺失测试报告问题', 'sec-missing-report')}
     `;
+    box.dataset.loaded = 'true';
     statsUserInitialized = false;
     await initStatsUserSelect();
     if (selectedName) {
@@ -1932,7 +1950,11 @@ async function loadStatistics(force) {
       if (sel) sel.value = selectedName;
     }
   } catch (e) {
-    document.getElementById('statsContent').innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+    if (requestGeneration !== redmineDashboardRequestGeneration.stats) return;
+    if (hadRenderedDashboard) notifyUser('个人看板刷新失败', e.message, 'error');
+    else box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+  } finally {
+    if (requestGeneration === redmineDashboardRequestGeneration.stats) box.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -2009,25 +2031,35 @@ function renderProjectDashboard(data) {
     ${table}
     ${details || '<div class="muted" style="padding:12px">当前项目暂无未关闭问题。</div>'}
   `;
+  document.getElementById('projectContent').dataset.loaded = 'true';
 }
 
 async function loadProjectDashboard(force) {
   const box = document.getElementById('projectContent');
   if (!box) return;
-  await loadStatsConfig();
-  if (!projectProfiles().length) {
-    box.innerHTML = '<div class="muted" style="padding:20px">暂无项目看板配置。<button style="margin-left:10px" onclick="showAddProjectModal()">＋ 添加项目</button></div>';
-    return;
-  }
-  box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计项目 Redmine 当前情况...</div>';
+  const requestGeneration = ++redmineDashboardRequestGeneration.project;
+  const hadRenderedDashboard = box.dataset.loaded === 'true';
+  box.setAttribute('aria-busy', 'true');
+  if (!hadRenderedDashboard) box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计项目 Redmine 当前情况...</div>';
   try {
+    await loadStatsConfig();
+    if (!projectProfiles().length) {
+      box.innerHTML = '<div class="muted" style="padding:20px">暂无项目看板配置。<button style="margin-left:10px" onclick="showAddProjectModal()">＋ 添加项目</button></div>';
+      box.dataset.loaded = 'true';
+      return;
+    }
     var selected = projectProfileId || (projectProfiles()[0] || {}).id || '';
     var url = '/api/redmine-agent/statistics/project?profile_id=' + encodeURIComponent(selected);
     if (force) url += '&refresh=true';
     const data = await api(url);
+    if (requestGeneration !== redmineDashboardRequestGeneration.project) return;
     renderProjectDashboard(data);
   } catch (e) {
-    box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+    if (requestGeneration !== redmineDashboardRequestGeneration.project) return;
+    if (hadRenderedDashboard) notifyUser('项目看板刷新失败', e.message, 'error');
+    else box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+  } finally {
+    if (requestGeneration === redmineDashboardRequestGeneration.project) box.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -2553,16 +2585,20 @@ window.addEventListener('gms:embedded-workspace', function(event) {
 restoreRedmineProfileState();
 var initialTab = new URLSearchParams(window.location.search).get('tab') || (window.sessionStorage.getItem('redmineLastTab') || 'stats');
 if (!document.getElementById('tab-' + initialTab)) initialTab = 'stats';
-switchTab(initialTab);
+var redmineInitialLoad = Promise.resolve(switchTab(initialTab));
 try {
   var initialQuery = new URLSearchParams(window.location.search).get('issue') || new URLSearchParams(window.location.search).get('q') || '';
   if (initialQuery) {
     var searchInput = document.getElementById('searchInput');
     if (searchInput) searchInput.value = String(initialQuery).replace(/^#/, '');
-    switchTab('issues');
-    setTimeout(function() { smartSearch(); }, 50);
+    redmineInitialLoad = Promise.resolve(switchTab('issues')).then(function() {
+      return smartSearch();
+    });
   }
 } catch (_) {}
+redmineInitialLoad.catch(function() {}).finally(function() {
+  window.GmsEmbeddedWorkspace && window.GmsEmbeddedWorkspace.markReady();
+});
 
 // 页面加载时恢复正在运行任务的按钮状态。
 (async function() {

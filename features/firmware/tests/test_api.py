@@ -252,11 +252,11 @@ class FirmwareApiTests(unittest.TestCase):
             TemporaryDirectory() as tmp,
             patch('features.firmware.firmware_api._FIRMWARE_CHUNK_ROOT', tmp),
             patch(
-                'features.firmware.firmware_api.save_upload_to_path',
+                'features.firmware.chunk_uploads.save_upload_to_path',
                 side_effect=save_chunk,
             ),
             patch(
-                'features.firmware.firmware_api.merge_files_to_path',
+                'features.firmware.chunk_uploads.merge_files_to_path',
                 side_effect=OSError('disk full'),
             ),
         ):

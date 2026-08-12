@@ -4,13 +4,23 @@
 
 import json
 import logging
-import os
 import re
 import time
-from urllib.parse import urlparse
 
 import requests
 
+from .provider_health import (
+    auth_headers as _auth_headers,
+)
+from .provider_health import (
+    is_local_provider as _is_local_provider,
+)
+from .provider_health import (
+    probe_provider as probe_provider_health,
+)
+from .provider_health import (
+    provider_statuses,
+)
 from .provider_routing import call_provider_chain, first_local_provider
 
 
@@ -19,35 +29,6 @@ logger = logging.getLogger(__name__)
 EMOJI_TARGET = "🎯"
 EMOJI_CHART = "📊"
 EMOJI_CHECK = "✅"
-
-
-def _is_local_provider(provider_name: str, config: dict) -> bool:
-    base_url = str(config.get('base_url') or '')
-    host = (urlparse(base_url).hostname or '').lower()
-    return (
-        'local' in str(provider_name or '').lower()
-        or host in {'localhost', '127.0.0.1', '0.0.0.0'}
-        or host.startswith('10.')
-        or host.startswith('172.16.')
-        or host.startswith('192.168.')
-    )
-
-
-def _auth_headers(provider_name: str, config: dict, header_name: str = 'Authorization') -> dict:
-    api_key = str(config.get('api_key') or '').strip()
-    if not api_key and _is_local_provider(provider_name, config):
-        api_key = os.getenv('GMS_LOCAL_AI_API_KEY', '').strip()
-    if not api_key:
-        # 没有可用 token 就明确报错，避免静默发出无鉴权请求被反代以
-        # "Invalid token" 拒绝（看起来像是网络/模型问题）。本地 provider 的
-        # token 可在 config 的 api_key 或环境变量 GMS_LOCAL_AI_API_KEY 提供。
-        raise ValueError(
-            f'{provider_name} API密钥未配置（请在 ai_models.providers.{provider_name}'
-            f'.api_key 或环境变量 GMS_LOCAL_AI_API_KEY 中设置）'
-        )
-    if header_name == 'x-api-key':
-        return {'x-api-key': api_key}
-    return {'Authorization': f'Bearer {api_key}'}
 
 
 class UniversalAIAnalyzer:
@@ -111,6 +92,16 @@ class UniversalAIAnalyzer:
         return None
 
     def get_local_provider(self) -> str | None: return first_local_provider(self.config, _is_local_provider)
+
+    def get_provider_statuses(self) -> list[dict]:
+        return provider_statuses(self.config)
+
+    def probe_provider(self, provider_name: str) -> dict:
+        return probe_provider_health(
+            self.config,
+            provider_name,
+            self._generate_with_provider,
+        )
 
     def generate(self, user_prompt: str, system_prompt: str = '', max_tokens: int | None = None,
                  preferred_provider: str | None = None) -> dict:

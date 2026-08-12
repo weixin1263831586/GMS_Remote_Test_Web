@@ -339,7 +339,7 @@ class ADBProxyService:
             raise HTTPException(
                 409, f"{source_worker_id} 没有可供其他主机连接的内网/VPN地址"
             )
-        selected = list(dict.fromkeys(str(item or "").strip() for item in devices))
+        selected = list(dict.fromkeys(filter(None, (str(item or "").strip() for item in devices))))
         if not selected:
             raise HTTPException(400, "请至少选择一个ADB设备")
         key = self._assignment_key(source_worker_id, target_worker_id)
@@ -771,8 +771,8 @@ class ADBProxyService:
                 if item.get("state") in {"allocated", "reserved", "external_busy"}
                 and str(item.get("serial") or "") in proxy_devices
             ]
-        except (AttributeError, RuntimeError, TypeError):
-            return
+        except (AttributeError, RuntimeError, TypeError) as exc:
+            raise HTTPException(503, f"无法核对 {worker_id} 的设备占用状态，已拒绝断开ADB接入") from exc
         if claimed:
             raise HTTPException(
                 409,

@@ -40,6 +40,13 @@
         send('workspace-navigate', {page, context: patch});
     }
 
+    let surfaceReadySent = false;
+    function markReady() {
+        if (surfaceReadySent) return;
+        surfaceReadySent = true;
+        send('embedded-surface-ready');
+    }
+
     window.addEventListener('message', event => {
         if (
             event.origin !== window.location.origin
@@ -52,7 +59,7 @@
         }
     });
 
-    window.GmsEmbeddedWorkspace = Object.freeze({ready, get: snapshot, update, navigate});
+    window.GmsEmbeddedWorkspace = Object.freeze({ready, get: snapshot, update, navigate, markReady});
     send('workspace-context-request');
     window.addEventListener('DOMContentLoaded', () => send('workspace-context-request'), {once: true});
 })();

@@ -501,9 +501,11 @@ function filterApiDocs() {
  */
 async function loadApiDocs(forceRefresh = false) {
     debugLog('[API Docs] ===== loadApiDocs called =====');
+    const tbody = $('api-docs-table-body');
+    const hadRenderedDocs = Boolean(apiDocsCache && tbody?.children.length);
+    if (tbody) tbody.setAttribute('aria-busy', 'true');
     try {
         // 检查DOM元素是否存在
-        const tbody = $('api-docs-table-body');
         if (!tbody) {
             return;
         }
@@ -550,8 +552,7 @@ async function loadApiDocs(forceRefresh = false) {
         showToast('加载API文档失败: ' + e.message, 'error');
 
         // 显示错误状态
-        const tbody = $('api-docs-table-body');
-        if (tbody) {
+        if (tbody && !hadRenderedDocs) {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="4" style="padding: 40px; text-align: center; color: var(--danger-color);">
@@ -560,6 +561,8 @@ async function loadApiDocs(forceRefresh = false) {
                 </tr>
             `;
         }
+    } finally {
+        if (tbody) tbody.setAttribute('aria-busy', 'false');
     }
 }
 

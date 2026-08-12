@@ -140,7 +140,7 @@ class TerminalSecurityTests(unittest.TestCase):
         ), patch(
             "features.system.terminal_service.create_local_terminal_channel",
             side_effect=channels,
-        ), patch("features.system.terminal_service.threading.Thread.start"):
+        ), patch("features.system.terminal_output.threading.Thread.start"):
             asyncio.run(handle_terminal_connect("same-client", websocket, {"mode": "ssh"}))
             first = websocket.messages[-1]["connection_id"]
             asyncio.run(handle_terminal_connect("same-client", websocket, {"mode": "ssh"}))
@@ -196,7 +196,7 @@ class TerminalSecurityTests(unittest.TestCase):
         ), patch(
             "features.system.terminal_service.create_local_terminal_channel",
             return_value=channel,
-        ), patch("features.system.terminal_service.threading.Thread.start"):
+        ), patch("features.system.terminal_output.threading.Thread.start"):
             asyncio.run(handle_terminal_connect(
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
             ))
@@ -230,7 +230,7 @@ class TerminalSecurityTests(unittest.TestCase):
         ), patch(
             "features.system.terminal_service.create_local_terminal_channel",
             return_value=channel,
-        ), patch("features.system.terminal_service.threading.Thread.start"):
+        ), patch("features.system.terminal_output.threading.Thread.start"):
             asyncio.run(handle_terminal_connect(
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
             ))

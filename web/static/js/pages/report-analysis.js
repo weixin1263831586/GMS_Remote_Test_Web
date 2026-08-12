@@ -194,6 +194,8 @@ function initReportAnalysis() {
 
 // 用于取消正在进行的请求
 let currentRedmineRequest = null;
+let currentReportUploadRequest = null;
+let reportUploadGeneration = 0;
 
 function extractRedmineDropContext(dataTransfer, url) {
     const candidates = [
@@ -575,14 +577,16 @@ async function handleReportFile(file) {
     try {
         const formData = createFormData(AnalysisMode.UPLOAD, { file: file });
 
-        const result = await postFormDataWithProgress('/api/reports/analyze', formData, (percent) => {
+        const upload = await postFormDataWithProgress('/api/reports/analyze', formData, (percent) => {
             progressFill.style.width = `${Math.min(95, Math.max(5, percent * 0.95))}%`;
         });
+        const result = upload.result;
 
         progressFill.style.width = '100%';
 
         if (result.success) {
             setTimeout(() => {
+                if (upload.generation !== reportUploadGeneration) return;
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
                 displayReportAnalysis(result.data);
@@ -604,6 +608,7 @@ async function handleReportFile(file) {
             }, 1000);
         }
     } catch (error) {
+        if (error?.name === 'AbortError') return;
         console.error('Report analysis error:', error);
         notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { filename: fileName });
         if (progress) progress.style.opacity = '0';
@@ -613,33 +618,65 @@ async function handleReportFile(file) {
 
 function postFormDataWithProgress(url, formData, onProgress) {
     return new Promise((resolve, reject) => {
+        const generation = ++reportUploadGeneration;
+        if (currentReportUploadRequest && currentReportUploadRequest.readyState !== 4) {
+            currentReportUploadRequest.abort();
+        }
+
         const xhr = new XMLHttpRequest();
+        currentReportUploadRequest = xhr;
+        let settled = false;
+
+        const isCurrent = () => (
+            generation === reportUploadGeneration && currentReportUploadRequest === xhr
+        );
+        const cleanup = () => {
+            if (currentReportUploadRequest === xhr) currentReportUploadRequest = null;
+        };
+        const abortError = () => {
+            const error = new Error('上传已取消');
+            error.name = 'AbortError';
+            return error;
+        };
+        const settle = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            callback(value);
+        };
 
         xhr.upload.addEventListener('progress', (event) => {
-            if (event.lengthComputable && onProgress) {
+            if (isCurrent() && event.lengthComputable && onProgress) {
                 onProgress((event.loaded / event.total) * 100, event.loaded, event.total);
             }
         });
 
         xhr.addEventListener('load', () => {
+            if (!isCurrent()) {
+                settle(reject, abortError());
+                return;
+            }
+
             let result = null;
             try {
                 result = JSON.parse(xhr.responseText || '{}');
             } catch (error) {
-                reject(new Error('服务器返回无效JSON'));
+                settle(reject, new Error('服务器返回无效JSON'));
                 return;
             }
 
             if (xhr.status >= 200 && xhr.status < 300) {
-                resolve(result);
+                settle(resolve, { result, generation });
                 return;
             }
 
-            reject(new Error(result.message || result.error || result.detail || `HTTP ${xhr.status}`));
+            settle(reject, new Error(result.message || result.error || result.detail || `HTTP ${xhr.status}`));
         });
 
-        xhr.addEventListener('error', () => reject(new Error('网络错误')));
-        xhr.addEventListener('abort', () => reject(new Error('上传已取消')));
+        xhr.addEventListener('error', () => {
+            settle(reject, isCurrent() ? new Error('网络错误') : abortError());
+        });
+        xhr.addEventListener('abort', () => settle(reject, abortError()));
 
         xhr.open('POST', url);
         applyClientIdentityHeadersToXhr(xhr);
@@ -660,12 +697,12 @@ async function handleReportFolder(files) {
     progress.style.opacity = '1';
     progressFill.style.width = '0%';
 
+    let fileCount = 0;
     try {
         const formData = new FormData();
         formData.append('mode', 'upload');
 
         // 添加所有文件到 FormData，保持文件夹结构
-        let fileCount = 0;
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
 
@@ -677,14 +714,16 @@ async function handleReportFolder(files) {
         }
 
         debugLog(`Uploading ${fileCount} files...`);
-        const result = await postFormDataWithProgress('/api/reports/analyze', formData, (percent) => {
+        const upload = await postFormDataWithProgress('/api/reports/analyze', formData, (percent) => {
             progressFill.style.width = `${Math.min(95, Math.max(5, percent * 0.95))}%`;
         });
+        const result = upload.result;
 
         progressFill.style.width = '100%';
 
         if (result.success) {
             setTimeout(() => {
+                if (upload.generation !== reportUploadGeneration) return;
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
                 displayReportAnalysis(result.data);
@@ -709,6 +748,7 @@ async function handleReportFolder(files) {
             }, 1000);
         }
     } catch (error) {
+        if (error?.name === 'AbortError') return;
         console.error('Report folder analysis error:', error);
         notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { file_count: fileCount });
         if (progress) progress.style.opacity = '0';
@@ -811,7 +851,7 @@ function displayReportAnalysis(data) {
                     <span class="summary-value">${data.details.test_type}</span>
                 </div>
             ` : ''}
-            ${data.details && data.details.android_version ? `
+            ${data.details && data.details.suite_version ? `
                 <div>
                     <span class="summary-label">套件版本：</span>
                     <span class="summary-value">${data.details.suite_version}</span>
@@ -959,7 +999,7 @@ function openReportAnalysisRedmineAgent(issueId = '') {
     const query = new URLSearchParams();
     query.set('tab', 'issues');
     if (issueId) query.set('issue', issueId);
-    if (frame) frame.src = '/redmine-agent?' + query.toString();
+    if (frame) window.setLazyFrameSource?.(frame, '/redmine-agent?' + query.toString());
     minimizeReportDiagnosisWorkbench();
     if (typeof switchPage === 'function') switchPage('redmine-agent', null);
 }

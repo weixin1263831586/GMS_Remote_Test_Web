@@ -1824,5 +1824,5 @@ setInterval(async () => {
 
 document.addEventListener('DOMContentLoaded', () => {
     document.body.dataset.automationReady = 'true';
-    loadAll(true);
+    loadAll(true).finally(() => window.GmsEmbeddedWorkspace?.markReady());
 });

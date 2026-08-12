@@ -8,7 +8,7 @@ import subprocess
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.auth import (
@@ -274,14 +274,47 @@ async def get_opengrok_config(request: Request):
 
 
 @router.get("/api/config/ai")
-async def get_ai_config(request: Request):
-    """获取 AI 配置 - 供前端 AI 分析功能使用"""
+async def get_ai_config(
+    request: Request,
+    probe: bool = Query(False),
+    provider: str = Query(''),
+):
+    """获取脱敏 AI 配置和可用性状态；真实模型探测必须显式请求。"""
     ai_config = config_manager.get_ai_config()
 
     if not ai_config:
         return error_response('AI 未配置或未启用，请在 configs/config.json 中配置 ai_models 段并设置 enabled: true', status_code=404)
 
-    return success_response(hide_sensitive_info(ai_config.copy()))
+    # Consume the Assistant feature through its public package boundary.  The
+    # import stays lazy because the Assistant API also consumes user identity
+    # helpers during application startup.
+    from features.assistant import UniversalAIAnalyzer
+
+    analyzer = UniversalAIAnalyzer(ai_config)
+    statuses = analyzer.get_provider_statuses()
+    local_provider = analyzer.get_local_provider() or ''
+    primary_provider = analyzer.get_primary_provider() or ''
+    target_provider = (provider or local_provider or primary_provider).strip()
+
+    if probe:
+        known = {item['provider'] for item in statuses}
+        if target_provider not in known:
+            return error_response('要检测的 AI provider 不存在', status_code=404)
+        probed = await asyncio.to_thread(analyzer.probe_provider, target_provider)
+        statuses = [
+            probed if item['provider'] == target_provider else item
+            for item in statuses
+        ]
+
+    safe_config = hide_sensitive_info(ai_config.copy())
+    safe_config['status'] = {
+        'local_provider': local_provider,
+        'primary_provider': primary_provider,
+        'probe_target': target_provider,
+        'probed': bool(probe),
+        'providers': statuses,
+    }
+    return success_response(safe_config)
 
 
 @router.get("/api/tailscale/status")

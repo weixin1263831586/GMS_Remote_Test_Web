@@ -7,6 +7,8 @@ window.apkNotifiedTaskId = null;
 window.apkPendingOpenTarget = null;
 window.apkOpenFiles = new Map();
 window.apkActiveFilePath = null;
+window.apkTaskHistory = [];
+window.apkTaskHistoryPromise = null;
 
 function stopApkPolling() {
     clearInterval(window.apkPollInterval);
@@ -29,6 +31,7 @@ function initApkAnalysisPage() {
 
     setApkUploadEmpty(!window.apkCurrentTaskId);
     initApkSourceResizer();
+    void loadApkTaskHistory(false);
 
     if (uploadZone.dataset.initialized === 'true') return;
     uploadZone.dataset.initialized = 'true';
@@ -55,6 +58,110 @@ function initApkAnalysisPage() {
             handleApkFile(e.target.files[0]);
         }
     });
+}
+
+const APK_TASK_STATUS_LABELS = {
+    uploaded: '待分析',
+    analyzing: '分析中',
+    completed: '已完成',
+    error: '失败'
+};
+
+async function loadApkTaskHistory(force = false) {
+    const select = $('apk-task-history');
+    const refresh = $('apk-task-history-refresh');
+    if (!select) return [];
+    if (window.apkTaskHistoryPromise) return window.apkTaskHistoryPromise;
+
+    const previous = window.apkCurrentTaskId || select.value;
+    select.setAttribute('aria-busy', 'true');
+    if (refresh) {
+        refresh.disabled = true;
+        refresh.textContent = '刷新中…';
+    }
+    window.apkTaskHistoryPromise = (async () => {
+        try {
+            const result = await apiCall('/api/apk/tasks');
+            if (!result.success) throw new Error(result.error || '任务列表读取失败');
+            const tasks = Array.isArray(result.data?.tasks) ? result.data.tasks : [];
+            window.apkTaskHistory = tasks;
+            select.replaceChildren();
+            select.add(new Option(tasks.length ? '选择最近任务…' : '暂无历史任务', ''));
+            tasks.forEach(task => {
+                const state = APK_TASK_STATUS_LABELS[task.status] || task.status || '未知';
+                select.add(new Option(`${task.filename || task.task_id} · ${state}`, task.task_id));
+            });
+            if (previous && tasks.some(task => task.task_id === previous)) {
+                select.value = previous;
+            }
+
+            // A running decompilation is authoritative and should survive a
+            // browser refresh. Completed/error tasks stay opt-in via selector.
+            const active = tasks.find(task => task.status === 'analyzing');
+            if (!window.apkCurrentTaskId && active) {
+                await restoreApkTask(active.task_id, {fromHistoryLoad: true});
+            }
+            return tasks;
+        } catch (error) {
+            select.replaceChildren(new Option('任务列表读取失败', ''));
+            if (force) showToast(`APK任务刷新失败: ${error.message}`, 'error');
+            return [];
+        } finally {
+            select.setAttribute('aria-busy', 'false');
+            if (refresh) {
+                refresh.disabled = false;
+                refresh.textContent = '↻ 刷新';
+            }
+            window.apkTaskHistoryPromise = null;
+        }
+    })();
+    return window.apkTaskHistoryPromise;
+}
+
+function resetApkTaskPanels() {
+    const sourceTree = $('apk-source-tree');
+    if (sourceTree) {
+        sourceTree.dataset.loaded = '';
+        sourceTree.innerHTML = '';
+    }
+    const permList = $('apk-permissions-list');
+    if (permList) {
+        permList.dataset.loaded = '';
+        permList.innerHTML = '';
+    }
+    const manifestInfo = $('apk-manifest-info');
+    if (manifestInfo) manifestInfo.innerHTML = '';
+    const rawXml = $('apk-raw-xml');
+    if (rawXml) rawXml.textContent = '';
+    closeApkFileViewer();
+    switchApkTab('manifest');
+}
+
+async function restoreApkTask(taskId, options = {}) {
+    if (!taskId || taskId === window.apkCurrentTaskId) return;
+    const task = window.apkTaskHistory.find(item => item.task_id === taskId) || {};
+    stopApkPolling();
+    window.apkCurrentTaskId = taskId;
+    window.apkNotifiedTaskId = task.status === 'completed' ? taskId : null;
+    setApkUploadEmpty(false);
+    resetApkTaskPanels();
+
+    if ($('apk-analysis-status')) $('apk-analysis-status').style.display = 'block';
+    if ($('apk-analysis-result')) $('apk-analysis-result').style.display = 'none';
+    if ($('apk-file-name')) $('apk-file-name').textContent = task.filename || taskId;
+    if ($('apk-analysis-state')) $('apk-analysis-state').textContent = '正在恢复任务状态…';
+    if ($('apk-analysis-progress-container')) $('apk-analysis-progress-container').style.display = 'block';
+    if ($('apk-analysis-progress-bar')) $('apk-analysis-progress-bar').style.width = `${task.progress || 0}%`;
+    const select = $('apk-task-history');
+    if (select) select.value = taskId;
+
+    const status = await pollApkStatus();
+    if (status?.status === 'analyzing' && !window.apkPollInterval) {
+        window.apkPollInterval = setInterval(pollApkStatus, STATUS_POLL_INTERVAL);
+    }
+    if (!options.fromHistoryLoad) {
+        showToast(`已恢复 APK 任务: ${status?.filename || task.filename || taskId}`, 'info');
+    }
 }
 
 function initApkSourceResizer() {
@@ -141,22 +248,8 @@ async function handleApkFile(file) {
             $('apk-analysis-result').style.display = 'none';
             $('apk-analysis-progress-container').style.display = 'none';
 
-            const sourceTree = $('apk-source-tree');
-            if (sourceTree) {
-                sourceTree.dataset.loaded = '';
-                sourceTree.innerHTML = '';
-            }
-            const permList = $('apk-permissions-list');
-            if (permList) {
-                permList.dataset.loaded = '';
-                permList.innerHTML = '';
-            }
-            const manifestInfo = $('apk-manifest-info');
-            if (manifestInfo) manifestInfo.innerHTML = '';
-            const rawXml = $('apk-raw-xml');
-            if (rawXml) rawXml.textContent = '';
-            closeApkFileViewer();
-            switchApkTab('manifest');
+            resetApkTaskPanels();
+            void loadApkTaskHistory(true);
             await startApkAnalysis();
         } else {
             showToast(`上传失败: ${data.error}`, 'error');
@@ -183,6 +276,7 @@ async function startApkAnalysis() {
 
     const btn = $('apk-btn-analyze');
     if (btn) {
+        btn.style.display = 'inline-flex';
         btn.disabled = true;
         btn.textContent = '⏳ 分析中...';
     }
@@ -195,6 +289,7 @@ async function startApkAnalysis() {
 
         if (data.success) {
             window.apkPollInterval = setInterval(pollApkStatus, STATUS_POLL_INTERVAL);
+            void loadApkTaskHistory(true);
             await pollApkStatus();
         } else {
             showToast(`分析失败: ${data.error}`, 'error');
@@ -247,6 +342,14 @@ async function pollApkStatus() {
             status.status === 'analyzing' ? `正在反编译... (${status.progress}%)` :
             status.status === 'completed' ? '反编译完成' :
             status.status === 'error' ? `错误: ${status.error}` : status.status;
+        const analyzeBtn = $('apk-btn-analyze');
+        if (analyzeBtn) {
+            analyzeBtn.style.display = ['uploaded', 'error', 'analyzing'].includes(status.status) ? 'inline-flex' : 'none';
+            analyzeBtn.disabled = status.status === 'analyzing';
+            analyzeBtn.textContent = status.status === 'analyzing'
+                ? '⏳ 分析中...'
+                : status.status === 'error' ? '🔬 重新分析' : '🔬 开始分析';
+        }
 
         if (status.status === 'completed') {
             stopApkPolling();
@@ -254,6 +357,7 @@ async function pollApkStatus() {
             $('apk-btn-download').style.display = 'inline-block';
             $('apk-analysis-state').textContent = '反编译完成 - 可查看结果';
             $('apk-analysis-result').style.display = 'block';
+            void loadApkTaskHistory(true);
 
             loadApkManifest();
             if (window.apkPendingOpenTarget?.filePath) {
@@ -280,6 +384,7 @@ async function pollApkStatus() {
             window.apkPendingOpenTarget = null;
 
             showToast(`分析失败: ${status.error}`, 'error');
+            void loadApkTaskHistory(true);
             if (window.apkNotifiedTaskId !== window.apkCurrentTaskId) {
                 window.apkNotifiedTaskId = window.apkCurrentTaskId;
                 notifyOperationResult(
@@ -293,6 +398,7 @@ async function pollApkStatus() {
                 );
             }
         }
+        return status;
     } catch (e) {
         stopApkPolling();
         $('apk-analysis-state').textContent = `状态查询失败: ${e.message}`;
@@ -779,22 +885,11 @@ function resetApkAnalysis() {
     $('apk-progress-fill').style.width = '0%';
     $('apk-analysis-progress-container').style.display = 'none';
     $('apk-analysis-progress-bar').style.width = '0%';
-
-    const sourceTree = $('apk-source-tree');
-    if (sourceTree) {
-        sourceTree.dataset.loaded = '';
-        sourceTree.innerHTML = '';
-    }
-    const permList = $('apk-permissions-list');
-    if (permList) {
-        permList.dataset.loaded = '';
-        permList.innerHTML = '';
-    }
-    const manifestInfo = $('apk-manifest-info');
-    if (manifestInfo) manifestInfo.innerHTML = '';
-    const rawXml = $('apk-raw-xml');
-    if (rawXml) rawXml.textContent = '';
-    closeApkFileViewer();
+    const analyzeBtn = $('apk-btn-analyze');
+    if (analyzeBtn) analyzeBtn.style.display = 'none';
+    const history = $('apk-task-history');
+    if (history) history.value = '';
+    resetApkTaskPanels();
 }
 
 // ==================== APK 文件搜索功能 ====================
@@ -897,3 +992,5 @@ window.expandApkTreeToPath = expandApkTreeToPath;
 window.debounceFilterApkFiles = debounceFilterApkFiles;
 window.handleApkFile = handleApkFile;
 window.initApkAnalysisPage = initApkAnalysisPage;
+window.loadApkTaskHistory = loadApkTaskHistory;
+window.restoreApkTask = restoreApkTask;
