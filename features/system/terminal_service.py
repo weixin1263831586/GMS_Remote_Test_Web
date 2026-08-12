@@ -3,7 +3,6 @@ import asyncio
 import logging
 import os
 import shlex
-import threading
 import time
 import uuid
 from typing import Any
@@ -18,6 +17,7 @@ from foundation.config import config_manager
 from foundation.networking import is_local_host
 
 from .terminal_channels import LocalPtyChannel, close_terminal_session_resources
+from .terminal_output import start_terminal_output_pump
 
 
 logger = logging.getLogger(__name__)
@@ -206,73 +206,21 @@ async def handle_adb_shell_connect(
             'generation': claim['generation'],
         })
 
-        def read_adb_shell_output():
-            """后台线程持续读取终端输出"""
-            next_renewal = time.monotonic() + 30
-            try:
-                while True:
-                    if session_id not in global_state.terminal_ssh_sessions:
-                        break
+        def renew_claim(_session: dict[str, Any]) -> bool:
+            return claim_registry.renew(
+                claim_source_id,
+                TERMINAL_CLAIM_TTL_SECONDS,
+                device_keys=[claim['device_key']],
+            ) == 1
 
-                    try:
-                        session_info = global_state.terminal_ssh_sessions[session_id]
-                        if not _terminal_device_claim_valid(session_info):
-                            logger.warning(
-                                "[TERMINAL] Device claim was revoked for %s", session_id
-                            )
-                            break
-                        if time.monotonic() >= next_renewal:
-                            renewed = claim_registry.renew(
-                                claim_source_id,
-                                TERMINAL_CLAIM_TTL_SECONDS,
-                                device_keys=[claim['device_key']],
-                            )
-                            if renewed != 1:
-                                break
-                            next_renewal = time.monotonic() + 30
-                        current_channel = session_info['channel']
-
-                        if current_channel.recv_ready():
-                            data_chunk = current_channel.recv(4096)
-                            if not data_chunk:
-                                break
-
-                            text = data_chunk.decode('utf-8', errors='replace')
-
-                            try:
-                                future = asyncio.run_coroutine_threadsafe(
-                                    websocket.send_json({
-                                        'type': 'terminal_data',
-                                        'data': text
-                                    }),
-                                    loop
-                                )
-                                future.result(timeout=5)
-                            except Exception as e:
-                                logger.error(f"[TERMINAL] Error sending ADB data: {e}")
-                                break
-                        else:
-                            time.sleep(0.01)
-
-                    except TimeoutError:
-                        continue
-                    except Exception as e:
-                        logger.error(f"[TERMINAL] ADB read error: {e}")
-                        break
-
-            except Exception as e:
-                logger.error(f"[TERMINAL] ADB read thread error: {e}")
-            finally:
-                with global_state.terminal_lock:
-                    session_info = global_state.terminal_ssh_sessions.pop(
-                        session_id, None
-                    )
-                if session_info:
-                    close_terminal_session_resources(session_info)
-                logger.info(f"[TERMINAL] ADB read thread exiting for {session_id}")
-
-        thread = threading.Thread(target=read_adb_shell_output, daemon=True)
-        thread.start()
+        start_terminal_output_pump(
+            session_id,
+            websocket,
+            loop,
+            thread_name=f"terminal_adb_read_{session_id}",
+            validate_session=_terminal_device_claim_valid,
+            maintain_session=renew_claim,
+        )
 
     except Exception as e:
         close_websocket_terminal(websocket)
@@ -393,38 +341,13 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                 'connection_id': session_id,
             })
 
-            def read_local_terminal_output():
-                try:
-                    while True:
-                        if session_id not in global_state.terminal_ssh_sessions:
-                            break
-                        try:
-                            current_channel = global_state.terminal_ssh_sessions[session_id]['channel']
-                            if current_channel.recv_ready():
-                                data_chunk = current_channel.recv(4096)
-                                if not data_chunk:
-                                    break
-                                text = data_chunk.decode('utf-8', errors='ignore')
-                                future = asyncio.run_coroutine_threadsafe(
-                                    websocket.send_json({'type': 'terminal_data', 'data': text}),
-                                    loop
-                                )
-                                future.result(timeout=5)
-                            else:
-                                time.sleep(0.01)
-                        except OSError:
-                            break
-                        except Exception as e:
-                            logger.error(f"[TERMINAL] Local read error: {e}")
-                            break
-                finally:
-                    with global_state.terminal_lock:
-                        if session_id in global_state.terminal_ssh_sessions:
-                            close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
-                            del global_state.terminal_ssh_sessions[session_id]
-
-            thread = threading.Thread(target=read_local_terminal_output, daemon=True, name=f"terminal_local_read_{session_id}")
-            thread.start()
+            start_terminal_output_pump(
+                session_id,
+                websocket,
+                loop,
+                thread_name=f"terminal_local_read_{session_id}",
+                encoding_errors="ignore",
+            )
             return
 
         # Remote SSH terminal
@@ -496,51 +419,13 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
             'connection_id': session_id,
         })
 
-        def read_ssh_terminal_output():
-            try:
-                while True:
-                    if session_id not in global_state.terminal_ssh_sessions:
-                        break
-                    try:
-                        current_channel = global_state.terminal_ssh_sessions[session_id]['channel']
-                        if current_channel.recv_ready():
-                            data_chunk = current_channel.recv(4096)
-                            if not data_chunk:
-                                break
-                            text = data_chunk.decode('utf-8', errors='replace')
-                            try:
-                                future = asyncio.run_coroutine_threadsafe(
-                                    websocket.send_json({'type': 'terminal_data', 'data': text}),
-                                    loop
-                                )
-                                future.result(timeout=5)
-                            except Exception as e:
-                                logger.error(f"[TERMINAL] Error sending data: {e}")
-                                break
-                        else:
-                            time.sleep(0.01)
-                    except TimeoutError:
-                        continue
-                    except Exception as e:
-                        logger.error(f"[TERMINAL] Read error: {e}")
-                        break
-            except Exception as e:
-                logger.error(f"[TERMINAL] Read thread error: {e}")
-            finally:
-                with global_state.terminal_lock:
-                    if session_id in global_state.terminal_ssh_sessions:
-                        close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
-                        del global_state.terminal_ssh_sessions[session_id]
-                try:
-                    asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({'type': 'terminal_error', 'error': '连接已断开'}),
-                        loop
-                    )
-                except (WebSocketDisconnect, ConnectionError, KeyError):
-                    pass
-
-        thread = threading.Thread(target=read_ssh_terminal_output, daemon=True, name=f"terminal_read_{session_id}")
-        thread.start()
+        start_terminal_output_pump(
+            session_id,
+            websocket,
+            loop,
+            thread_name=f"terminal_read_{session_id}",
+            notify_disconnect=True,
+        )
 
     except paramiko.AuthenticationException:
         close_websocket_terminal(websocket)

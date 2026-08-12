@@ -34,13 +34,20 @@ APK_SYMBOL_INDEX_MAX_FILE_SIZE = 2 * 1024 * 1024
 
 def create_apk_task(task_id, apk_path, filename, owner_id: str):
     """创建APK分析任务并限制总数"""
+    owner_id = str(owner_id or '').strip()
+    if not owner_id:
+        raise ValueError('APK analysis owner is required')
     os.makedirs(runtime.apk_upload_dir, exist_ok=True)
     with runtime.global_state.apk_analysis_tasks_lock:
         if len(runtime.global_state.apk_analysis_tasks) >= runtime.apk_max_tasks:
+            # Capacity cleanup must never delete another user's durable result.
+            # A user may rotate their own oldest terminal task; otherwise the
+            # shared pool reports pressure and leaves every owner's data intact.
             removable = [
                 item
                 for item in runtime.global_state.apk_analysis_tasks.items()
                 if item[1].get('status') != 'analyzing'
+                and item[1].get('owner_id') == owner_id
             ]
             if not removable:
                 raise ValueError('APK analysis capacity is full; retry later')

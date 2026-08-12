@@ -147,9 +147,24 @@ function buildReadablePathQuery(params) {
     return params.toString().replace(/%2F/gi, '/');
 }
 
+let suiteBrowserInitialized = false;
+let suiteBrowserInitPromise = null;
+let suiteBrowserDirectoryRequestGeneration = 0;
+
 async function initTestSuiteBrowserPage() {
+    if (suiteBrowserInitPromise) return suiteBrowserInitPromise;
+    const pending = initTestSuiteBrowserPageOnce();
+    suiteBrowserInitPromise = pending;
+    try {
+        return await pending;
+    } finally {
+        if (suiteBrowserInitPromise === pending) suiteBrowserInitPromise = null;
+    }
+}
+
+async function initTestSuiteBrowserPageOnce() {
     const listEl = $('suite-browser-list');
-    if (listEl) {
+    if (listEl && !suiteBrowserInitialized) {
         listEl.innerHTML = '<div class="suite-empty">正在加载...</div>';
     }
 
@@ -171,6 +186,17 @@ async function initTestSuiteBrowserPage() {
     await loadSuitesForBrowserWorker(false);
     renderTestSuiteBrowserList();
 
+    // 普通页面回访保留已绘制的目录和滚动位置。套件列表仍会
+    // 在上方同步，但不用“正在加载”临时页覆盖已经可用的内容。
+    if (suiteBrowserInitialized && !routeParams) {
+        const selectedSuite = testSuitesCache.find(
+            suite => suite.tools_path === state.suiteBrowser.selectedSuitePath
+        );
+        if (!state.suiteBrowser.selectedSuitePath || selectedSuite) return;
+        clearSuiteBrowserSelection('已选择的测试套件不存在');
+        return;
+    }
+
     if (routeParams) {
         state.suiteBrowser.highlightPath = routeParams.filePath || '';
         await selectTestSuiteForBrowser(
@@ -178,6 +204,7 @@ async function initTestSuiteBrowserPage() {
             routeParams.directoryPath || '',
             { preserveHighlight: true }
         );
+        suiteBrowserInitialized = true;
         return;
     }
 
@@ -185,12 +212,14 @@ async function initTestSuiteBrowserPage() {
         const selectedSuite = testSuitesCache.find(s => s.tools_path === state.suiteBrowser.selectedSuitePath);
         if (selectedSuite) {
             await selectTestSuiteForBrowser(selectedSuite.tools_path, state.suiteBrowser.currentPath || '');
+            suiteBrowserInitialized = true;
             return;
         }
     }
 
     clearSuiteBrowserSelection('请选择左侧测试套件');
     resumeSuiteDownloadIfNeeded();
+    suiteBrowserInitialized = true;
 }
 
 let _suiteWorkerSelectorPromise = null;
@@ -1081,7 +1110,13 @@ async function loadSuiteBrowserDirectory(path = '') {
     }
 
     const fileList = $('suite-file-list');
-    if (fileList) {
+    const requestGeneration = ++suiteBrowserDirectoryRequestGeneration;
+    const requestedSuitePath = state.suiteBrowser.selectedSuitePath;
+    const hadRenderedDirectory = Boolean(
+        state.suiteBrowser.suiteRoot || fileList?.querySelector('.suite-file-row')
+    );
+    if (fileList) fileList.setAttribute('aria-busy', 'true');
+    if (fileList && !hadRenderedDirectory) {
         fileList.innerHTML = '<div class="suite-empty">正在加载目录...</div>';
     }
 
@@ -1095,6 +1130,8 @@ async function loadSuiteBrowserDirectory(path = '') {
         const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
             ? '/api/cluster/suites/files' : '/api/test/suites/files';
         const result = await apiCall(`${endpoint}?${params.toString()}`);
+        if (requestGeneration !== suiteBrowserDirectoryRequestGeneration
+                || state.suiteBrowser.selectedSuitePath !== requestedSuitePath) return;
         const data = result.data || {};
         state.suiteBrowser.currentPath = data.path || '';
         // 保留解析后的套件根绝对路径，供"报告分析"等需要绝对路径的操作使用。
@@ -1102,7 +1139,16 @@ async function loadSuiteBrowserDirectory(path = '') {
         renderSuiteBreadcrumb(state.suiteBrowser.currentPath);
         renderSuiteFiles(data.items || []);
     } catch (error) {
-        renderSuiteFileEmpty(`加载失败: ${error.message}`);
+        if (requestGeneration !== suiteBrowserDirectoryRequestGeneration) return;
+        if (hadRenderedDirectory) {
+            showToast(`目录刷新失败: ${error.message}`, 'error');
+        } else {
+            renderSuiteFileEmpty(`加载失败: ${error.message}`);
+        }
+    } finally {
+        if (requestGeneration === suiteBrowserDirectoryRequestGeneration && fileList) {
+            fileList.setAttribute('aria-busy', 'false');
+        }
     }
 }
 

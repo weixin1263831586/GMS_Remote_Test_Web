@@ -23,6 +23,7 @@ async def upload_firmware_to_test_host(
     remote_path: str,
     filename: str,
     file_size: int,
+    upload_id: str = "",
 ) -> None:
     progress = {'current_percentage': 0.0, 'last_lock_update': 0.0}
     complete = threading.Event()
@@ -32,6 +33,9 @@ async def upload_firmware_to_test_host(
         if percentage != 0 and percentage - progress['last_lock_update'] < 10:
             return
         with runtime.global_state.firmware_upload_progress_lock:
+            current = runtime.global_state.firmware_upload_progress.get(client_id) or {}
+            if upload_id and current.get('upload_id') not in {None, '', upload_id}:
+                return
             runtime.global_state.firmware_upload_progress[client_id] = {
                 'progress': percentage,
                 'filename': filename,
@@ -39,6 +43,7 @@ async def upload_firmware_to_test_host(
                 'total_size': file_size,
                 'timestamp': time.time(),
                 'stage': 'uploading_to_server',
+                'upload_id': upload_id,
             }
         progress['last_lock_update'] = percentage
 
@@ -105,7 +110,9 @@ async def upload_firmware_to_test_host(
         })
     finally:
         with runtime.global_state.firmware_upload_progress_lock:
-            runtime.global_state.firmware_upload_progress.pop(client_id, None)
+            current = runtime.global_state.firmware_upload_progress.get(client_id) or {}
+            if not upload_id or current.get('upload_id') == upload_id:
+                runtime.global_state.firmware_upload_progress.pop(client_id, None)
 
 
 async def _send_progress(

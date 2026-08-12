@@ -22,7 +22,9 @@ let securityAuditState = {
     loading: false,
     hasMore: false,
     currentFilterParams: null,
-    recordsCache: []
+    recordsCache: [],
+    loaded: false,
+    requestGeneration: 0
 };
 
 function getSecurityAuditFilterParams() {
@@ -40,18 +42,29 @@ function getSecurityAuditFilterParams() {
     return params;
 }
 
+function getSecurityAuditFilterKey() {
+    const params = getSecurityAuditFilterParams();
+    params.delete('offset');
+    params.delete('limit');
+    return params.toString();
+}
+
 async function loadSecurityAudit(reset = false) {
     const tbody = $('security-audit-table-body');
     if (!tbody) return;
 
-    if (securityAuditState.loading) return;
+    if (securityAuditState.loading && !reset) return;
+    const requestGeneration = reset
+        ? ++securityAuditState.requestGeneration
+        : securityAuditState.requestGeneration;
+    const hadRenderedRecords = securityAuditState.loaded;
+    const previousOffset = securityAuditState.offset;
     securityAuditState.loading = true;
+    tbody.setAttribute('aria-busy', 'true');
 
     if (reset) {
         securityAuditState.offset = 0;
-        securityAuditState.recordsCache = [];
-        securityAuditState.hasMore = false;
-        tbody.innerHTML = `
+        if (!hadRenderedRecords) tbody.innerHTML = `
             <tr>
                 <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                     加载中...
@@ -62,8 +75,9 @@ async function loadSecurityAudit(reset = false) {
 
     try {
         const params = getSecurityAuditFilterParams();
-        securityAuditState.currentFilterParams = params.toString();
+        const requestedFilterKey = getSecurityAuditFilterKey();
         const result = await apiCall(`/api/security-audit/logs?${params.toString()}`);
+        if (requestGeneration !== securityAuditState.requestGeneration) return false;
         const payload = result.data || {};
         const fetchedRecords = payload.records || [];
         securityAuditState.hasMore = payload.has_more || false;
@@ -75,10 +89,15 @@ async function loadSecurityAudit(reset = false) {
             securityAuditState.recordsCache.push(...fetchedRecords);
             appendSecurityAuditRows(fetchedRecords);
         }
+        securityAuditState.loaded = true;
+        securityAuditState.currentFilterParams = requestedFilterKey;
         updateSecurityAuditStats(payload.stats || {});
+        return true;
     } catch (error) {
+        if (requestGeneration !== securityAuditState.requestGeneration) return false;
+        if (reset && hadRenderedRecords) securityAuditState.offset = previousOffset;
         const needElevation = error.status === 403 && !state.elevated;
-        if (reset) {
+        if (reset && (needElevation || !hadRenderedRecords)) {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
@@ -88,12 +107,20 @@ async function loadSecurityAudit(reset = false) {
                     </td>
                 </tr>
             `;
-        } else {
-            if (!needElevation) showToast('加载更多审计记录失败: ' + error.message, 'error');
+        } else if (!needElevation) {
+            showToast(
+                reset ? '审计记录刷新失败: ' + error.message
+                    : '加载更多审计记录失败: ' + error.message,
+                'error'
+            );
         }
+        return false;
     } finally {
-        securityAuditState.loading = false;
-        updateSecurityAuditLoadMoreButton();
+        if (requestGeneration === securityAuditState.requestGeneration) {
+            securityAuditState.loading = false;
+            tbody.setAttribute('aria-busy', 'false');
+            updateSecurityAuditLoadMoreButton();
+        }
     }
 }
 
@@ -113,8 +140,17 @@ function updateSecurityAuditLoadMoreButton() {
 
 async function loadMoreSecurityAudit() {
     if (!securityAuditState.hasMore || securityAuditState.loading) return;
+    if (securityAuditState.currentFilterParams !== getSecurityAuditFilterKey()) {
+        await loadSecurityAudit(true);
+        return;
+    }
+    const previousOffset = securityAuditState.offset;
     securityAuditState.offset += securityAuditState.limit;
-    await loadSecurityAudit(false);
+    const requestedOffset = securityAuditState.offset;
+    const loaded = await loadSecurityAudit(false);
+    if (!loaded && securityAuditState.offset === requestedOffset) {
+        securityAuditState.offset = previousOffset;
+    }
 }
 
 function appendSecurityAuditRows(records) {

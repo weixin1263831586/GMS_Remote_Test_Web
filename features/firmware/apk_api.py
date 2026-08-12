@@ -64,6 +64,7 @@ async def upload_apk(
     """Upload APK file for analysis."""
     if not file:
         return ApiResponse.error("No file provided", status_code=400)
+    owner_id = _owner_id(request)
 
     try:
         filename = normalize_apk_filename(file_name or file.filename)
@@ -96,7 +97,11 @@ async def upload_apk(
             if _task_id_in_use(task_id):
                 return ApiResponse.error('Task ID already exists', status_code=409)
             metadata_path = safe_join(task_dir, 'upload_metadata.json')
-            metadata = {'filename': filename, 'total_chunks': total_chunks}
+            metadata = {
+                'filename': filename,
+                'total_chunks': total_chunks,
+                'owner_id': owner_id,
+            }
             if os.path.exists(metadata_path):
                 try:
                     with open(metadata_path, encoding='utf-8') as handle:
@@ -157,7 +162,7 @@ async def upload_apk(
                 return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
 
             try:
-                create_apk_task(task_id, apk_path, filename, _owner_id(request))
+                create_apk_task(task_id, apk_path, filename, owner_id)
             except ValueError as exc:
                 cleanup_files([apk_path])
                 return ApiResponse.error(str(exc), status_code=429)
@@ -167,6 +172,15 @@ async def upload_apk(
         async with upload_lock:
             if _task_id_in_use(task_id):
                 return ApiResponse.error('Task ID already exists', status_code=409)
+            # Do not allow a single-file request to take over an incomplete
+            # chunk session (including one owned by another authenticated user).
+            metadata_path = safe_join(task_dir, 'upload_metadata.json')
+            if os.path.exists(metadata_path):
+                return ApiResponse.error('Upload session already exists', status_code=409)
+            with os.scandir(task_dir) as entries:
+                session_has_files = any(entries)
+            if session_has_files:
+                return ApiResponse.error('Upload session directory is not empty', status_code=409)
             try:
                 file_size = await save_upload_to_path(
                     file, apk_path, runtime.apk_max_file_size
@@ -175,7 +189,7 @@ async def upload_apk(
                 cleanup_files([apk_path])
                 return ApiResponse.error(str(e), status_code=413)
             try:
-                create_apk_task(task_id, apk_path, filename, _owner_id(request))
+                create_apk_task(task_id, apk_path, filename, owner_id)
             except ValueError as exc:
                 cleanup_files([apk_path])
                 return ApiResponse.error(str(exc), status_code=429)

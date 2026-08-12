@@ -31,7 +31,7 @@ class SidebarNavigationConfigTests(unittest.TestCase):
         self.assertIn('id="sidebar-visibility-modal"', template)
         for marker in ('id="sidebar-settings-panel-guide"', "function switchSidebarSettingsTab", "function openGuideImageLightbox", 'id="guide-image-modal"'):
             self.assertIn(marker, template)
-        for image_name in ["test-parameters.png", "device-screen.png", "usbip-local-device.png", "report-management.png", "report-analysis.png", "apk-analysis.png", "test-suites.png", "ats-create-run.png", "device-flashing.png"]:
+        for image_name in ["test-parameters.png", "device-screen.png", "usbip-local-device.png", "report-management.png", "report-analysis.png", "apk-analysis.png", "test-suites.png", "ats-create-run.png", "device-flashing.png", "agent-routing.png", "cluster-refresh.png"]:
             self.assertIn(f'/static/images/guide/{image_name}', template)
             self.assertTrue(Path(f"web/static/images/guide/{image_name}").is_file())
         for marker in ("function applySidebarVisibility", "function saveSidebarVisibilityFromModal", "visible_pages"):

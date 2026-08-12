@@ -70,6 +70,24 @@ class ApkUploadSecurityTests(unittest.TestCase):
         self.assertEqual(changed.status_code, 400)
         self.assertIn('metadata', changed.json()['error'])
 
+    def test_chunk_upload_session_cannot_be_taken_over_by_another_owner(self):
+        with TemporaryDirectory() as tmp, patch.object(runtime, 'apk_upload_dir', tmp):
+            common = {
+                'upload_id': '00000000-0000-0000-0000-000000000008',
+                'file_name': 'app.apk',
+                'total_chunks': '2',
+            }
+            first = self.client.post('/api/apk/upload', headers={'x-test-owner': 'alice'}, data={
+                **common, 'chunk_index': '0',
+            }, files={'file': ('app.apk', b'alice')})
+            takeover = self.client.post('/api/apk/upload', headers={'x-test-owner': 'bob'}, data={
+                **common, 'chunk_index': '1',
+            }, files={'file': ('app.apk', b'bob')})
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(takeover.status_code, 400)
+        self.assertIn('metadata', takeover.json()['error'])
+
     def test_enforces_cumulative_size_before_completion(self):
         with TemporaryDirectory() as tmp, patch.object(runtime, 'apk_upload_dir', tmp), patch.object(runtime, 'apk_max_file_size', 5):
             common = {
@@ -96,6 +114,20 @@ class ApkUploadSecurityTests(unittest.TestCase):
                 'upload_id': '00000000-0000-0000-0000-000000000005',
                 'file_name': 'new.apk',
             }, files={'file': ('new.apk', b'apk')})
+        self.assertEqual(response.status_code, 429)
+        self.assertIn(existing_id, runtime.global_state.apk_analysis_tasks)
+
+    def test_capacity_cleanup_never_evicts_another_owners_completed_task(self):
+        existing_id = '00000000-0000-0000-0000-000000000009'
+        runtime.global_state.apk_analysis_tasks[existing_id] = {
+            'status': 'completed', 'timestamp': 1, 'owner_id': 'bob',
+        }
+        with TemporaryDirectory() as tmp, patch.object(runtime, 'apk_upload_dir', tmp), patch.object(runtime, 'apk_max_tasks', 1):
+            response = self.client.post('/api/apk/upload', headers={'x-test-owner': 'alice'}, data={
+                'upload_id': '00000000-0000-0000-0000-000000000010',
+                'file_name': 'new.apk',
+            }, files={'file': ('new.apk', b'apk')})
+
         self.assertEqual(response.status_code, 429)
         self.assertIn(existing_id, runtime.global_state.apk_analysis_tasks)
 

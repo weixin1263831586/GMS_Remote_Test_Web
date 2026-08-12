@@ -428,6 +428,64 @@ body {
     display: flex;
 }
 
+.users-table-wrap,
+.devices-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto !important;
+}
+
+.embedded-frame-shell {
+    position: relative;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--light-bg);
+}
+
+.embedded-frame-shell > iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+}
+
+.embedded-frame-loading {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: var(--text-secondary);
+    background: var(--light-bg);
+    font-size: 13px;
+    text-align: center;
+}
+
+.embedded-frame-shell[data-frame-state="loading"] > iframe,
+.embedded-frame-shell[data-frame-state="error"] > iframe {
+    visibility: hidden;
+}
+
+.embedded-frame-shell[data-frame-state="loading"] > .embedded-frame-loading,
+.embedded-frame-shell[data-frame-state="error"] > .embedded-frame-loading {
+    display: flex;
+}
+
+.embedded-frame-shell[data-frame-state="error"] > .embedded-frame-loading {
+    color: var(--danger-color);
+}
+
+#page-architecture .embedded-frame-loading {
+    color: #94a3b8;
+    background: #020617;
+}
+
 /* 除测试工作台外，仅统一标题下方的内容外框；左上角标题保持在框外。 */
 .main-container > .page-content:not(#page-test) {
     --page-body-frame-inset: 15px;
@@ -702,23 +760,21 @@ body {
     display: inline-block;
 }
 
-/* 主页 ADB 标题行右侧「⭐ 只看关注」：收窄到贴合标题文字高度，
-   不撑高标题行、不影响下方设备列表的像素级位置。
-   用 flex-start 对齐 + 固定行高，让按钮顶部与标题色条顶部对齐；
-   避免用 transform 偏移（刷新重排时会出现「过程中位移、完成后回弹」）。 */
+/* 主页 ADB 标题行右侧「⭐ 只看关注」使用紧凑的 24px 点击目标，
+   与标题垂直居中且不靠 transform/负边距定位，避免刷新重排时回弹。 */
 .adb-title-row {
-    align-items: flex-start !important;
+    align-items: center !important;
 }
 .adb-title-row .section-title {
     line-height: 18px;
 }
 .adb-title-row .btn-xxs {
     min-width: 0;
-    min-height: 0;
-    padding: 1px 8px;
+    min-height: 24px;
+    padding: 2px 8px;
     font-size: 11px;
     line-height: 16px;
-    margin-top: -3px;
+    margin: 0;
 }
 
 /* 参数设置区。 */
@@ -1267,6 +1323,7 @@ body {
 
 .log-tab-btn {
     padding: 2px 8px;
+    min-height: 24px;
     background: transparent;
     border: 1px solid var(--border-color);
     border-radius: 4px;
@@ -2620,6 +2677,18 @@ body.modal-open {
     overflow: hidden;
 }
 
+.notification-dismiss-layer {
+    position: fixed;
+    z-index: 10019;
+    inset: 0;
+    display: none;
+    background: transparent;
+}
+
+.notification-dismiss-layer.show {
+    display: block;
+}
+
 .notification-panel.show {
     display: flex;
 }
@@ -3684,11 +3753,19 @@ body.modal-open {
 .tool-actions button {
     flex: 1;
     padding: 6px;
+    min-height: 24px;
     border: none;
     border-radius: 6px;
     font-size: 16px;
     cursor: pointer;
     transition: var(--transition-fast);
+}
+
+/* 网站导航和常用工具均会动态生成操作按钮；为 CSP 下无法依赖内联
+   样式的首帧提供稳定尺寸，同时满足紧凑控件的最小点击目标。 */
+#tools-grid button,
+#ut-grid button {
+    min-height: 24px;
 }
 
 .btn-visit {
@@ -4829,6 +4906,48 @@ body.modal-open {
 }
 
 /* ==================== APK Analysis ==================== */
+.apk-page-header {
+    min-height: 19.2px;
+    margin-bottom: 6px;
+    display: flex;
+    position: relative;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.apk-page-header > .section-title {
+    margin: 0;
+}
+
+.apk-task-history-controls {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 24px;
+}
+
+#apk-task-history {
+    width: min(360px, 42vw);
+    min-width: 180px;
+    height: 24px;
+    padding: 3px 8px;
+    font-size: 11px;
+}
+
+#apk-task-history-refresh {
+    min-width: 64px;
+    min-height: 24px;
+    height: 24px;
+}
+
 .apk-upload-zone {
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -4901,7 +5020,7 @@ body.modal-open {
     line-height: 1.6;
 }
 #page-report-analysis > .section-title,
-#page-apk-analysis > .section-title {
+.apk-page-header > .section-title {
     font-family: inherit;
     font-size: 12px;
     font-weight: 700;
@@ -4988,6 +5107,28 @@ body.modal-open {
     font-size: 16px;
     font-weight: 600;
     margin-bottom: 12px;
+}
+
+@media (max-width: 700px) {
+    .main-container > #page-apk-analysis.page-content {
+        --page-body-frame-top: 74px;
+    }
+
+    .apk-page-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .apk-task-history-controls {
+        position: static;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    #apk-task-history {
+        flex: 1 1 180px;
+        width: auto;
+    }
 }
 
 /* APK 分析进度条 */
@@ -5607,6 +5748,48 @@ body.apk-resizing {
     background: var(--darker-bg);
 }
 
+.agent-run-header {
+    min-height: 58px;
+    padding: 8px 10px 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.agent-run-header-copy {
+    min-width: 0;
+}
+
+.agent-model-line {
+    min-height: 24px;
+    margin-top: 3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+#agent-model-status {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#agent-model-status[data-state="available"] { color: var(--success-color); }
+#agent-model-status[data-state="unavailable"],
+#agent-model-status[data-state="credential_missing"] { color: var(--warning-color); }
+
+#agent-model-check.btn-xxs {
+    min-width: 44px;
+    min-height: 24px;
+    padding: 2px 7px;
+    font-size: 10px;
+}
+
 .user-actions-grid {
     display: grid;
     grid-template-columns: 44px 44px;
@@ -5695,6 +5878,10 @@ body.apk-resizing {
     .main-container > .page-content:not(#page-test) {
         --page-body-frame-inset: 8px;
         --page-body-frame-top: 33px;
+    }
+
+    .main-container > #page-apk-analysis.page-content {
+        --page-body-frame-top: 67px;
     }
 
     #page-test,

@@ -114,8 +114,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("window.preloadTestReports = preloadTestReports", reports)
         self.assertIn("scheduleDeferredPagePreload(initialPage)", navigation)
         self.assertIn("await Promise.all([initializeClusterMode(), configReady])", navigation)
-        self.assertIn("test-reports.js?v=20260810-page-load-2", shell)
-        self.assertIn("navigation.js?v=20260810-refresh-feedback", shell)
+        self.assertIn("test-reports.js?v=20260812-stable-surfaces", shell)
+        self.assertIn("navigation.js?v=20260812-stable-surfaces", shell)
 
     def test_server_file_browser_uses_resolved_suite_path(self):
         navigation_text = read_all_frontend_js()
@@ -241,6 +241,19 @@ class FrontendIntegrityTests(unittest.TestCase):
 
         self.assertIn("分享链接已复制，无需登录即可打开下载", navigation)
         self.assertNotIn("分享链接已复制，已登录客户端可直接打开下载", navigation)
+
+    def test_firmware_upload_stages_before_burn_and_keeps_errors_retryable(self):
+        firmware = read_text("web/static/js/pages/firmware-burn.js")
+        chunks = read_text("web/static/js/chunk-upload.js")
+        shell = read_text("web/shell/shell.html")
+
+        self.assertIn("stage_only: '1'", firmware)
+        self.assertIn("finalizeForm.append('finalize_upload', '1')", firmware)
+        self.assertIn("if (uploadResult.staged)", firmware)
+        self.assertIn("return await new Promise((resolve, reject)", chunks)
+        self.assertIn("const uploadError = error instanceof Error", chunks)
+        self.assertIn("formData.append('chunk_size', chunkSize)", chunks)
+        self.assertIn("chunk-upload.js?v=20260813-staged-firmware", shell)
 
     def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
         navigation = read_all_frontend_js()
@@ -385,7 +398,9 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("workerId", main_text)
         self.assertIn("mode:terminalMode", main_text)
         self.assertIn("serial_no:serialNo", main_text)
-        self.assertIn("shellReady:terminalMode==='adb'", main_text)
+        self.assertIn("shellReady:false", main_text)
+        self.assertIn("if(instance.mode==='adb')", main_text)
+        self.assertIn("const adbCommand=", main_text)
         self.assertNotIn("setTimeout(sendShell", main_text)
         self.assertNotIn("input: `adb -s ${rawSerial} shell", main_text)
 

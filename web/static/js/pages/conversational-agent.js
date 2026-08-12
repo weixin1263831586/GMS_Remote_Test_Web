@@ -4,7 +4,58 @@ let agentPollTimer = null;
 let agentInitialized = false;
 let agentInputHistory = JSON.parse(localStorage.getItem('gms_agent_input_history') || '[]');
 let agentHistoryIndex = -1;  // -1 = not browsing history
+let agentModelStatusLoaded = false;
 const agentHandledAutoOpenMessageIds = new Set();
+
+function agentModelStatusText(status) {
+    const providers = status?.providers || [];
+    const providerName = status?.local_provider || status?.primary_provider || '';
+    const provider = providers.find(item => item.provider === providerName) || providers[0];
+    if (!provider) return {text: '分析模型：未配置', state: 'unavailable', title: '未配置可用的 AI 分析模型'};
+    const label = provider.local ? '本地模型' : '分析模型';
+    if (provider.available === true) {
+        const latency = Number.isFinite(provider.latency_ms) ? ` · ${provider.latency_ms}ms` : '';
+        return {text: `${label}：可用${latency}`, state: 'available', title: `${provider.name} / ${provider.model}`};
+    }
+    if (provider.state === 'credential_missing') {
+        return {text: `${label}：缺少密钥`, state: 'credential_missing', title: provider.error || '请配置对应 API key 环境变量'};
+    }
+    if (provider.available === false || ['disabled', 'incomplete', 'unavailable'].includes(provider.state)) {
+        return {text: `${label}：不可用`, state: 'unavailable', title: provider.error || '模型配置不完整或探测失败'};
+    }
+    return {text: `${label}：待检测`, state: 'ready_to_probe', title: `${provider.name} / ${provider.model}；点击“检测”执行一次最小推理`};
+}
+
+async function loadAgentModelStatus(probe = false) {
+    const label = $('agent-model-status');
+    const button = $('agent-model-check');
+    if (!label || !button) return;
+    if (probe) {
+        button.disabled = true;
+        button.textContent = '检测中';
+        label.textContent = '分析模型：检测中…';
+        label.dataset.state = 'loading';
+    }
+    try {
+        const response = await fetch(`/api/config/ai${probe ? '?probe=true' : ''}`);
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.success) throw new Error(result.error || result.message || `HTTP ${response.status}`);
+        const view = agentModelStatusText(result.data?.status);
+        label.textContent = view.text;
+        label.dataset.state = view.state;
+        label.title = `${view.title}。该模型用于报告/知识分析；Agent 指令路由使用确定性规则。`;
+        if (probe) showToast(view.state === 'available' ? 'AI 分析模型可用' : view.text, view.state === 'available' ? 'success' : 'warning');
+    } catch (error) {
+        label.textContent = '分析模型：不可用';
+        label.dataset.state = 'unavailable';
+        label.title = error.message;
+        if (probe) showToast(`模型检测失败: ${error.message}`, 'warning');
+    } finally {
+        agentModelStatusLoaded = true;
+        button.disabled = false;
+        button.textContent = '检测';
+    }
+}
 
 function getAgentWorkspaceContext() {
     const context = window.GmsWorkspace?.get?.() || {};
@@ -424,11 +475,11 @@ function openAgentPageAction(page, paramsJson = '{}') {
         const query = new URLSearchParams();
         query.set('tab', params.tab || 'stats');
         if (params.name) query.set('name', params.name);
-        if (frame) frame.src = '/redmine-agent?' + query.toString();
+        if (frame) window.setLazyFrameSource?.(frame, '/redmine-agent?' + query.toString());
     }
     if (page === 'gerrit-dashboard') {
         const frame = document.getElementById('gerrit-dashboard-frame');
-        if (frame) frame.src = '/gerrit-dashboard';
+        if (frame) window.setLazyFrameSource?.(frame, '/gerrit-dashboard');
     }
     const contextPatch = {};
     if (params.worker_id) Object.assign(contextPatch, {worker_id: params.worker_id});
@@ -548,6 +599,8 @@ function initAgentPage() {
             });
         }
     }
+
+    if (!agentModelStatusLoaded) loadAgentModelStatus(false);
 
     if (agentSessionId) {
         fetchAgentSession();

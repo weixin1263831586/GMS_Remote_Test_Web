@@ -201,6 +201,10 @@ package_web_app() {
             --exclude 'tests/' \
             --exclude '*/tests/' \
             --exclude 'docs/superpowers/' \
+            --exclude 'docs/android-cli-ui-control-integration.md' \
+            --exclude 'docs/build-server-integration-assessment.md' \
+            --exclude 'docs/multi-host-cluster-implementation-plan.md' \
+            --exclude 'docs/refactor-parity-audit.md' \
             --exclude 'configs/config_runtime.json' \
             --exclude 'configs/client_ssh_credentials.local.json' \
             --exclude 'configs/redmine_auth.json' \
@@ -302,6 +306,10 @@ copy_project() {
             --exclude 'tests/' \
             --exclude '*/tests/' \
             --exclude 'docs/superpowers/' \
+            --exclude 'docs/android-cli-ui-control-integration.md' \
+            --exclude 'docs/build-server-integration-assessment.md' \
+            --exclude 'docs/multi-host-cluster-implementation-plan.md' \
+            --exclude 'docs/refactor-parity-audit.md' \
             --exclude 'skills/rk_codesearch/config/config.json' \
             --exclude 'configs/config_runtime.json' \
             --exclude 'configs/client_ssh_credentials.local.json' \

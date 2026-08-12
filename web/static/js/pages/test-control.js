@@ -364,8 +364,7 @@ async function saveGmsAssistantConfig() {
         const frame = document.getElementById('gms-assistant-frame');
         const dataSrc = frame?.getAttribute('data-src');
         if (frame && dataSrc) {
-            frame.removeAttribute('src');
-            setTimeout(() => frame.setAttribute('src', dataSrc), 0);
+            window.setLazyFrameSource?.(frame, dataSrc);
         }
     } catch (error) {
         showToast('保存 GMS助手配置失败: ' + error.message, 'error');

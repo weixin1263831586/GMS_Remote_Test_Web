@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260811-report-copy-layout">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260812-notification-dismiss">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
-    <script src="/static/js/chunk-upload.js?v=20260601-01" defer></script>
+    <script src="/static/js/chunk-upload.js?v=20260813-staged-firmware" defer></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260727-skill-install-action" defer></script>
     <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
@@ -16,28 +16,28 @@
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/state.js?v=20260718-anonymous-auth" defer></script>
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
-    <script src="/static/js/workspace-context.js?v=20260716-host-sync" defer></script>
+    <script src="/static/js/workspace-context.js?v=20260812-stable-surfaces" defer></script>
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/api.js?v=20260727-auth-account-hint" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
-    <script src="/static/js/notifications.js?v=20260601-01" defer></script>
+    <script src="/static/js/notifications.js?v=20260812-click-dismiss" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
-    <script src="/static/js/pages/test-suite-browser.js?v=20260811-report-copy-layout" defer></script>
-    <script src="/static/js/pages/firmware-burn.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/firmware-burn.js?v=20260813-staged-firmware" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/vpn-control.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/test-control.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/test-reports.js?v=20260810-page-load-2" defer></script>
-    <script src="/static/js/pages/report-analysis.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/conversational-agent.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/api-docs.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/apk-analysis.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/security-audit.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/test-control.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/report-analysis.js?v=20260813-upload-generation" defer></script>
+    <script src="/static/js/pages/conversational-agent.js?v=20260813-ai-status" defer></script>
+    <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/apk-analysis.js?v=20260813-task-recovery" defer></script>
+    <script src="/static/js/pages/security-audit.js?v=20260812-stable-surfaces" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260810-refresh-feedback" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260812-stable-surfaces" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -283,6 +283,30 @@
         body.workspace-scope-cluster #page-terminal .host-workspace-grid {
             padding: 8px;
         }
+        body.workspace-scope-cluster #page-desktop .host-workspace-pane-header,
+        body.workspace-scope-cluster #page-terminal .host-workspace-pane-header {
+            min-height: 27px;
+            padding: 2px 4px;
+            gap: 4px;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-pane-header select,
+        body.workspace-scope-cluster #page-terminal .host-workspace-pane-header select {
+            height: 22px;
+            padding: 1px 4px;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-pane-header .btn-xs,
+        body.workspace-scope-cluster #page-terminal .host-workspace-pane-header .btn-xs {
+            height: 22px;
+            min-height: 22px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-pane-header .host-workspace-refresh-btn,
+        body.workspace-scope-cluster #page-terminal .host-workspace-pane-header .host-workspace-refresh-btn {
+            width: 22px;
+            min-width: 22px;
+        }
         body.workspace-scope-pending .host-workspace-mode-pending,
         #page-desktop:not(.host-workspace-ready) .host-workspace-mode-pending,
         #page-terminal:not(.host-workspace-ready) .host-workspace-mode-pending { display: flex; align-items: center; gap: 6px; }
@@ -369,7 +393,7 @@
         #config-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); }
         #config-modal .modal-title, #config-modal .modal-close { color: #fff; }
         #page-architecture .architecture-container { background: transparent; border-radius: 8px; border: 0; padding: 0; flex: 1; min-height: 0; overflow: hidden; }
-        #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 7px; }
+        #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 7px; background: #020617; }
     </style>
     <style>
         /* Snackbar 右下角通知样式 */
@@ -644,7 +668,7 @@
                         <div class="project-guide-section">
                             <h4>5 步快速开始测试</h4>
                             <ol class="project-guide-steps">
-                                <li><strong>登录并选模式</strong>单机模式用当前主机；集群模式用于远端 Worker。</li>
+                                <li><strong>登录并选工作区</strong>单机工作区选择本地 Worker；集群工作区选择远端 Worker。该选择仅属于当前用户，不会切换整个服务。</li>
                                 <li><strong>选择执行环境</strong>在“测试界面”先选 Worker、测试套件和可用设备。</li>
                                 <li><strong>设置测试范围</strong>按需选择测试模块、测试用例或retry报告等任务；留空则执行套件默认范围。</li>
                                 <li><strong>开始测试</strong>确认参数后点击“开始测试”，页面自动切到“测试日志”。</li>
@@ -669,7 +693,19 @@
                                 </article>
                                 <article class="project-guide-card">
                                     <h5>🖥️ 远程主机与集群</h5>
-                                    <p><span class="project-guide-flow">主机集群 → 确认 Worker 在线 → 返回业务页选择 Worker</span><br>主机桌面、主机终端、设备与套件会跟随当前工作区 Worker；切换 Worker 后先确认目标设备再执行操作。</p>
+                                    <p><span class="project-guide-flow">主机集群 → 确认 Worker 在线 → 返回业务页选择 Worker</span><br>主机桌面、主机终端、设备与套件会跟随当前工作区 Worker；刷新期间保留已显示内容，只在新数据齐备后更新。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>🔌 ADB / USB/IP 接入</h5>
+                                    <p><span class="project-guide-flow">选择来源 → 选择目标 Worker → 选择设备/BUSID → 核对当前接入</span><br>ADB Proxy 适合 ADB/测试，不支持 Fastboot/烧写；USB/IP 提供物理 USB 通道。测试占用期间禁止断开，重复操作会被服务端拒绝。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>💬 对话 Agent</h5>
+                                    <p><span class="project-guide-flow">输入意图 → 查看计划 → 人工确认 → 跟踪步骤</span><br>Agent 是确定性工具编排器，不会无人值守接管项目或任意执行代码。本地/备用模型仅用于报告和知识分析，状态在步骤区单独显示。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>📦 上传与恢复</h5>
+                                    <p><span class="project-guide-flow">选择文件 → 分块暂存 → 校验 → 执行/分析</span><br>固件先完成可恢复的分块暂存，再进入不可中断烧写；APK 最近任务可恢复，报告页始终以最后一次选择为准。</p>
                                 </article>
                             </div>
                         </div>
@@ -681,10 +717,11 @@
                                     <tr><th>测试界面</th><td>配置并执行 CTS / GTS / VTS / STS；查看系统日志与测试日志。</td><th>设备管理</th><td>查看设备状态、占用关系和远端设备操作入口。</td></tr>
                                     <tr><th>主机桌面 / 终端</th><td>通过 noVNC 或终端操作当前 Worker 主机。</td><th>测试套件</th><td>下载、添加、解压并检查不同 Worker 上的套件。</td></tr>
                                     <tr><th>报告管理 / 分析</th><td>检索、下载测试报告，并汇总失败项和趋势。</td><th>GMS ATS</th><td>编排构建、设备预留、烧写、测试与报告全流程。</td></tr>
-                                    <tr><th>主机集群</th><td>查看 Worker 在线状态、能力和任务分配。</td><th>其他工具</th><td>GMS 助手、Gerrit、Redmine、知识库和 Agent 用于查询与协作。</td></tr>
+                                    <tr><th>主机集群</th><td>查看 Worker 在线状态、能力和任务分配；刷新时保留稳定内容。</td><th>ADB / USB/IP</th><td>在“本地设备/ADB接入”中管理来源、目标、设备与逐端口接入。</td></tr>
+                                    <tr><th>APK / Agent</th><td>恢复 APK 历史任务；以受控计划执行 Agent 支持的查询和操作。</td><th>其他工具</th><td>GMS 助手、Gerrit、Redmine和知识库用于分析与协作。</td></tr>
                                 </tbody>
                             </table>
-                            <div class="project-guide-notice"><strong>日志规则：</strong>“开始测试”进入测试日志；烧写固件、烧写 GSI、设备信息和其他设备操作进入系统日志。烧写阶段不可强制停止，异常时先保留日志并联系管理员。</div>
+                            <div class="project-guide-notice"><strong>安全与日志：</strong>“开始测试”进入测试日志；烧写固件、烧写 GSI、设备信息和其他设备操作进入系统日志。固件上传暂存阶段可重试，进入最终烧写后不可强制停止；异常时保留日志和任务编号。ADB Proxy/USB/IP 断开会核对设备占用，不能用来绕过租约。</div>
                         </div>
 
                         <div class="project-guide-section">
@@ -711,13 +748,13 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="本地设备：USB/IP 接入" data-guide-caption="本地设备接入仅作用于 Controller：确认设备主机，检查 SSHD，再连接 USB/IP 并刷新设备，直到设备显示 Available。" onclick="openGuideImageLightbox(this)">
-                                        <img src="/static/images/guide/usbip-local-device.png" alt="本地设备 USB/IP 标注：设备主机、检查 SSHD、本地设备、刷新设备和 Available 状态" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="本地设备：USB/IP 精确接入" data-guide-caption="选择 Windows 来源、Controller 或远端 Worker 目标及 BUSID；当前接入按端口显示，可单独断开且不会清理同来源其他设备。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/usbip-local-device.png" alt="USB/IP 接入标注：Windows 来源、目标 Worker、BUSID 多选、当前接入和服务端操作保护" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
                                         <h5>③ 本地设备 USB/IP</h5>
-                                        <p>依次确认设备主机、检查 SSHD、连接本地设备、刷新 ADB，并确认 Available。</p>
+                                        <p>明确来源、目标 Worker 和 BUSID；逐端口查看/断开，并说明测试占用与重复操作保护。</p>
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
@@ -741,13 +778,13 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="APK 分析：Manifest、权限与源码" data-guide-caption="上传 APK/JAR 并等待分析完成；核对 Manifest 与权限后，使用搜索和源码浏览定位实现。" onclick="openGuideImageLightbox(this)">
-                                        <img src="/static/images/guide/apk-analysis.png" alt="APK 分析标注：上传、下载源码、Manifest、权限、源码浏览和文件搜索" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="APK 分析：任务恢复、Manifest、权限与源码" data-guide-caption="可从最近任务恢复刷新前的进度或历史结果；上传 APK/JAR 后核对 Manifest 与权限，再使用搜索和源码浏览定位实现。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/apk-analysis.png" alt="APK 分析标注：最近任务恢复、上传、源码下载、Manifest、权限和源码检索" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
                                         <h5>⑥ APK 分析</h5>
-                                        <p>覆盖文件上传、反编译源码下载、Manifest/权限/源码视图切换和文件检索。</p>
+                                        <p>覆盖最近任务恢复、文件上传、反编译源码下载、Manifest/权限/源码视图切换和文件检索。</p>
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
@@ -777,7 +814,27 @@
                                     </button>
                                     <div class="project-guide-example-header">
                                         <h5>⑨ 设备烧写</h5>
-                                        <p>高风险操作单独说明设备核对、固件/GSI 入口、设备信息和系统日志注意事项。</p>
+                                        <p>高风险操作单独说明设备核对、固件/GSI 入口、设备信息和系统日志；固件先分块暂存校验，最终烧写阶段才锁定界面。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="对话 Agent：受控计划与模型边界" data-guide-caption="Agent 使用确定性规则将自然语言映射到受支持工具；写操作需要确认。本地/备用模型只用于报告和知识分析，不负责权限绕过或任意项目代码执行。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/agent-routing.png" alt="对话 Agent 标注：输入、执行确认、分析模型状态和执行步骤" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑩ 对话 Agent</h5>
+                                        <p>说明自然语言计划、人工确认、模型可用性和设备租约/Worker 能力检查之间的边界。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="主机集群：无黑屏稳定刷新" data-guide-caption="刷新时保留当前主机、设备、任务和图表内容；按钮显示忙碌状态，新数据齐备后再原子替换，局部失败不会清空整页。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/cluster-refresh.png" alt="主机集群刷新标注：保留摘要、刷新忙碌状态、图表和运行任务" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑪ 主机集群刷新</h5>
+                                        <p>展示刷新期间保留稳定页面、阻止重复刷新以及局部接口失败不影响其他区域。</p>
                                     </div>
                                 </article>
                             </div>
@@ -1205,7 +1262,7 @@
 
 
             <!-- 设备列表 -->
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+            <div class="devices-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
                 <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                         <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
@@ -1437,9 +1494,18 @@
 
         <!-- APK分析页面 -->
         <div class="container page-content" id="page-apk-analysis">
-            <div class="section-title section-title-with-icon">
-                <img src="/static/icons/jadx-icon.webp" alt="" class="section-title-icon" aria-hidden="true">
-                <span>APK分析</span>
+            <div class="apk-page-header">
+                <div class="section-title section-title-with-icon">
+                    <img src="/static/icons/jadx-icon.webp" alt="" class="section-title-icon" aria-hidden="true">
+                    <span>APK分析</span>
+                </div>
+                <div class="apk-task-history-controls">
+                    <label for="apk-task-history">最近任务</label>
+                    <select id="apk-task-history" class="entry-field" onchange="restoreApkTask(this.value)">
+                        <option value="">正在读取…</option>
+                    </select>
+                    <button id="apk-task-history-refresh" class="btn-xs ui-refresh-action" type="button" onclick="loadApkTaskHistory(true)">↻ 刷新</button>
+                </div>
             </div>
 
             <!-- 上传区域 -->
@@ -1475,8 +1541,9 @@
                             <div style="font-size: 12px; color: var(--success-color);" id="apk-analysis-state">准备分析...</div>
                         </div>
                         <div style="display: flex; gap: 8px;">
+                            <button class="btn-xs" id="apk-btn-analyze" onclick="startApkAnalysis()" style="display: none;">🔬 开始分析</button>
                             <button class="btn-xs" id="apk-btn-download" onclick="downloadApkSource()" style="display: none;">📥 下载源码</button>
-                            <button class="btn-xs" onclick="resetApkAnalysis()">🗑️ 清除</button>
+                            <button class="btn-xs" onclick="resetApkAnalysis()">关闭</button>
                         </div>
                     </div>
                     <div id="apk-analysis-progress-container" style="display: none; margin-top: 12px;">
@@ -1717,41 +1784,56 @@
                 <div class="section-title" style="margin: 0;">🎓 GMS助手</div>
                 <button class="btn-xxs" type="button" onclick="showGmsAssistantConfig()" style="position: absolute; top: -4px; right: 0;">助手配置</button>
             </div>
-            <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
-                    style="width: 100%; flex: 1; min-height: 0; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); box-sizing: border-box;">
-            </iframe>
+            <div class="embedded-frame-shell" data-frame-state="idle">
+                <div class="embedded-frame-loading" role="status">正在加载 GMS助手...</div>
+                <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
+                        style="border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg);">
+                </iframe>
+            </div>
         </div>
 
         <!-- GMS ATS页面 -->
         <div class="container page-content" id="page-automation">
             <div class="section-title" style="text-transform:none">⚙️ GMS ATS</div>
-            <iframe id="automation-frame" data-src="/automation"
-                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
-            </iframe>
+            <div class="embedded-frame-shell" data-frame-state="idle">
+                <div class="embedded-frame-loading" role="status">正在加载 GMS ATS...</div>
+                <iframe id="automation-frame" data-src="/automation" data-wait-for-ready="true"
+                        style="border: none; border-radius: 8px; background: var(--light-bg);">
+                </iframe>
+            </div>
         </div>
 
         <!-- 主机集群页面 -->
         <div class="container page-content" id="page-cluster">
             <div class="section-title" style="text-transform:none">🖧 主机集群</div>
-            <iframe id="cluster-frame" data-src="/cluster"
-                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
-            </iframe>
+            <div class="embedded-frame-shell" data-frame-state="idle">
+                <div class="embedded-frame-loading" role="status">正在加载主机集群...</div>
+                <iframe id="cluster-frame" data-src="/cluster" data-wait-for-ready="true"
+                        style="border: none; border-radius: 8px; background: var(--light-bg);">
+                </iframe>
+            </div>
         </div>
 
         <!-- RedmineAgent页面 -->
         <div class="container page-content" id="page-redmine-agent">
             <div class="section-title" style="text-transform:none">🧭 Redmine</div>
-            <iframe id="redmine-agent-frame" data-src="/redmine-agent"
-                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
-            </iframe>
+            <div class="embedded-frame-shell" data-frame-state="idle">
+                <div class="embedded-frame-loading" role="status">正在加载 Redmine...</div>
+                <iframe id="redmine-agent-frame" data-src="/redmine-agent" data-wait-for-ready="true"
+                        style="border: none; border-radius: 8px; background: var(--light-bg);">
+                </iframe>
+            </div>
         </div>
 
         <!-- Gerrit看板页面 -->
         <div class="container page-content" id="page-gerrit-dashboard">
             <div class="section-title" style="text-transform:none">🔀 Gerrit看板</div>
-            <iframe id="gerrit-dashboard-frame" data-src="/gerrit-dashboard"
-                    style="width: 100%; flex: 1; min-height: 0; border: none; border-radius: 8px; background: var(--light-bg);">
-            </iframe>
+            <div class="embedded-frame-shell" data-frame-state="idle">
+                <div class="embedded-frame-loading" role="status">正在加载 Gerrit看板...</div>
+                <iframe id="gerrit-dashboard-frame" data-src="/gerrit-dashboard" data-wait-for-ready="true"
+                        style="border: none; border-radius: 8px; background: var(--light-bg);">
+                </iframe>
+            </div>
         </div>
 
         <!-- 对话Agent页面 -->
@@ -1759,8 +1841,8 @@
             <div style="position: relative; margin-bottom: 6px;">
                 <div class="section-title" style="margin: 0;">💬 对话Agent</div>
                 <div style="position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 6px;">
-                    <button class="btn-xs" onclick="newAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 22px;">新会话</button>
-                    <button class="btn-xs" onclick="cancelAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 22px;">取消Agent</button>
+                    <button class="btn-xs" onclick="newAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 24px;">新会话</button>
+                    <button class="btn-xs" onclick="cancelAgentSession()" style="padding: 2px 6px; font-size: 10px; min-height: 24px;">取消Agent</button>
                 </div>
             </div>
 
@@ -1778,8 +1860,14 @@
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
-                    <div style="padding: 10px 12px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
-                        <div style="font-size: 13px; font-weight: 600;">执行步骤</div>
+                    <div class="agent-run-header">
+                        <div class="agent-run-header-copy">
+                            <div style="font-size: 13px; font-weight: 600;">执行步骤</div>
+                            <div class="agent-model-line">
+                                <span id="agent-model-status" data-state="loading" title="本地/备用模型仅用于报告和知识分析，Agent 指令路由使用确定性规则。">分析模型：读取配置…</span>
+                                <button id="agent-model-check" class="btn-xxs" type="button" onclick="loadAgentModelStatus(true)">检测</button>
+                            </div>
+                        </div>
                         <span id="agent-status" style="font-size: 11px; color: var(--text-secondary);">idle</span>
                     </div>
                     <div id="agent-steps" style="flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
@@ -2007,7 +2095,8 @@
         <!-- 系统架构页面 -->
         <div class="container page-content" id="page-architecture">
             <div class="section-title">🏗️ 系统架构</div>
-            <div class="architecture-container">
+            <div class="architecture-container embedded-frame-shell" data-frame-state="idle">
+                <div class="embedded-frame-loading" role="status">正在加载系统架构...</div>
                 <iframe data-src="/templates/architecture.html"
                         frameborder="0" scrolling="yes" id="architecture-iframe"></iframe>
             </div>
@@ -2824,6 +2913,7 @@
     <div id="snackbar-container" class="snackbar-container"></div>
 
     <!-- Notification Center -->
+    <div id="notification-dismiss-layer" class="notification-dismiss-layer" aria-hidden="true"></div>
     <div id="notification-panel" class="notification-panel">
         <div class="notification-panel-header">
             <span>消息通知</span>
@@ -3536,7 +3626,9 @@
                         <button data-multi-host-control class="btn-xs" onclick="maximizeHostWorkspacePane(${index})" title="${hostWorkspace.maximized === index ? '恢复布局' : '单屏显示'}">${hostWorkspace.maximized === index ? '▦' : '⛶'}</button>
                         <button data-multi-host-control class="btn-xs" onclick="closeHostWorkspacePane(${index})" title="关闭">×</button>
                     </div>
-                    <div class="host-workspace-pane-body" id="host-workspace-body-${index}"></div>
+                    <div class="host-workspace-pane-body" id="host-workspace-body-${index}">
+                        <div class="host-workspace-empty">${pane.type === 'empty' ? '桌面未打开' : '正在连接桌面…'}</div>
+                    </div>
                 </section>`).join('');
             // Give remote single-session VNC servers time to release the old
             // iframe socket. The generation guard also cancels mounts from a
@@ -3819,7 +3911,7 @@
             disposeHostWorkspaceInstance(index);
             const paneGeneration = (hostWorkspace.paneGenerations.get(index) || 0) + 1;
             hostWorkspace.paneGenerations.set(index, paneGeneration);
-            body.replaceChildren();
+            body.innerHTML = '<div class="host-workspace-empty">正在连接桌面…</div>';
             setHostWorkspaceStatus(index, '正在连接桌面…');
             mountHostWorkspacePane(index, pane, hostWorkspace.renderGeneration, paneGeneration);
         }
@@ -3918,7 +4010,7 @@
         }
         function disposeTerminalWorkspaceInstance(index) {
             const instance=terminalWorkspace.instances.get(index);if(!instance)return;
-            instance.disposed=true;instance.resizeObserver?.disconnect();
+            instance.disposed=true;clearTerminalWorkspaceStartupTimer(instance);instance.resizeObserver?.disconnect();
             if(instance.socket){instance.socket.onclose=null;instance.socket.close();}
             if(instance.terminal){const oldTerminal=instance.terminal;setTimeout(()=>{try{oldTerminal.dispose();}catch(_){}},50);}
             terminalWorkspace.instances.delete(index);
@@ -3960,7 +4052,7 @@
                 <button data-multi-host-control data-terminal-pane-host-mode class="btn-xs" onclick="restoreHostTerminalWorkspacePane(${i})" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="${p.mode==='adb'?'':'display:none'}">↩ 主机终端</button>
                 <button class="btn-xs host-workspace-refresh-btn" onclick="refreshTerminalWorkspacePane(${i})" title="重新连接" aria-label="刷新主机终端">🔄</button>
                 <button data-multi-host-control class="btn-xs" onclick="maximizeTerminalWorkspacePane(${i})">${terminalWorkspace.maximized===i?'▦':'⛶'}</button></div>
-                <div class="host-workspace-pane-body" id="terminal-workspace-body-${i}"></div></section>`).join('');
+                <div class="host-workspace-pane-body" id="terminal-workspace-body-${i}"><div class="host-workspace-empty">${p.mode==='adb'?'正在打开 ADB Shell…':'正在加载终端…'}</div></div></section>`).join('');
             const singleHostModeButton=document.getElementById('terminal-workspace-host-mode-btn');
             if(singleHostModeButton)singleHostModeButton.style.display=terminalWorkspace.panes[0]?.mode==='adb'?'':'none';
             const generation=terminalWorkspace.generation;
@@ -3997,18 +4089,19 @@
             const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:{background:'#000',foreground:'#fff'},scrollback:2000,termName:'xterm-256color'});
             const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(el);fit.fit();
             const workerId=pane.workerId||host.worker_id||(host.id==='default'?workspaceLocalWorkerId():'');
-            const instance={type:'terminal',mode:terminalMode,hostId:host.id,workerId,serialNo,terminal:term,fit,socket:null,resizeObserver:null,disposed:false,initialData:'',shellReady:terminalMode==='adb',lastResizeCols:0,lastResizeRows:0};terminalWorkspace.instances.set(index,instance);
+            const instance={type:'terminal',mode:terminalMode,paneIndex:index,hostId:host.id,workerId,serialNo,terminal:term,fit,socket:null,resizeObserver:null,disposed:false,initialData:'',shellReady:false,startupFailed:false,startupTimer:null,lastResizeCols:0,lastResizeRows:0};terminalWorkspace.instances.set(index,instance);
             const parts=String(host.connection||'').split('@'),user=parts.shift()||'',address=parts.join('@');
             body.addEventListener('dragover',event=>{event.preventDefault();body.style.outline='2px dashed var(--primary-color)';});
             body.addEventListener('dragleave',()=>{body.style.outline='';});
             body.addEventListener('drop',async event=>{event.preventDefault();body.style.outline='';const file=event.dataTransfer?.files?.[0];if(!file)return;if(!await ensureTerminalElevation(false,'上传文件到主机','主机文件上传'))return;term.writeln(`\r\n\x1b[33m📤 正在上传 ${file.name}...\x1b[0m`);const form=new FormData();form.append('file',file);form.append('worker_id',workerId);try{const result=await apiCall('/api/terminal/push','POST',form);term.writeln(`\r\n\x1b[32m✅ 已上传到 ${result.remote_path}\x1b[0m`);}catch(error){term.writeln(`\r\n\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);}finally{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input:'\r'}));term.focus();}});
             const protocol=location.protocol==='https:'?'wss:':'ws:',socket=new WebSocket(`${protocol}//${location.host}/api/system/websocket/terminal_workspace_${index}_${Date.now()}_${Math.random().toString(36).slice(2)}`);instance.socket=socket;
-            term.writeln(terminalMode==='adb'
-                ? `\x1b[33m⏳ 正在打开 ${serialNo} 的 ADB Shell...\x1b[0m`
-                : `\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
-            term.onData(input=>{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input}));});
+            // ADB 启动时宿主 Shell 会依次回显 clear 和 adb shell 命令。
+            // 状态栏已经提供连接反馈，终端画布等设备提示符就绪后再一次性显示，
+            // 避免“加载文字 -> 清屏 -> 宿主输出 -> 再清屏”的闪烁。
+            if(terminalMode!=='adb')term.writeln(`\x1b[33m⏳ 正在连接 ${user}@${address}...\x1b[0m`);
+            term.onData(input=>{if(!instance.startupFailed&&socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'terminal_input',input}));});
             let suppressPasteUntil=0;
-            const sendInput=input=>{if(socket.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify({type:'terminal_input',input}));return true;};
+            const sendInput=input=>{if(instance.startupFailed||socket.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify({type:'terminal_input',input}));return true;};
             const pasteText=text=>sendInput(String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n'));
             const pasteClipboard=async()=>{try{if(navigator.clipboard?.readText)pasteText(await navigator.clipboard.readText());}catch(error){console.debug('[Terminal workspace] clipboard read failed',error);}finally{term.focus();}};
             term.attachCustomKeyEventHandler(event=>{if(event.type!=='keydown')return true;const key=event.key.length===1?event.key.toLowerCase():event.key,isCtrl=event.ctrlKey&&!event.altKey&&!event.metaKey;if(isCtrl&&key==='c'){if(term.hasSelection()){const text=term.getSelection();navigator.clipboard?.writeText(text);term.clearSelection();term.focus();}else sendInput('\x03');return false;}if(isCtrl&&key==='v'){suppressPasteUntil=Date.now()+500;pasteClipboard();return false;}if(isCtrl&&/^[a-z]$/.test(key)){sendInput(String.fromCharCode(key.charCodeAt(0)-96));return false;}return true;});
@@ -4016,15 +4109,66 @@
             el.addEventListener('paste',event=>{if(Date.now()<suppressPasteUntil){event.preventDefault();event.stopPropagation();return;}const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();event.stopPropagation();pasteText(text);term.focus();}},true);
             el.addEventListener('contextmenu',event=>{if(navigator.clipboard?.readText){event.preventDefault();event.stopPropagation();pasteClipboard();}});
             socket.onopen=()=>{if(!instance.disposed)socket.send(JSON.stringify({type:'terminal_connect',mode:terminalMode,worker_id:workerId,...(terminalMode==='adb'?{serial_no:serialNo}:{})}));};
-            socket.onmessage=e=>{if(instance.disposed)return;try{const m=JSON.parse(e.data);if(m.type==='terminal_data')writeTerminalWorkspaceData(instance,m.data||'');else if(m.type==='terminal_connected'){if(terminalMode==='adb'){term.clear();term.writeln(`\x1b[32m✅ ADB Shell · ${serialNo}\x1b[0m\r\n`);terminalWorkspaceStatus(index,`ADB · ${serialNo}`,true);}else{terminalWorkspaceStatus(index,`${user}@${address}`,true);}setTimeout(()=>resizeHostWorkspaceTerminal(instance),0);}else if(m.type==='terminal_error'||m.type==='error'){term.writeln(`\r\n\x1b[31m${m.error||m.message||'连接失败'}\x1b[0m`);if(m.elevation_required){terminalWorkspaceStatus(index,'等待管理员认证');recoverTerminalElevation(instance,'重新连接主机终端',()=>refreshTerminalWorkspacePane(index));}else if(m.credential_required&&m.device_host&&typeof showDevicePasswordModal==='function'){terminalWorkspaceStatus(index,'等待 SSH 凭据');showDevicePasswordModal(m.device_host,'terminal',()=>refreshTerminalWorkspacePane(index));}else{terminalWorkspaceStatus(index,'连接失败');}}}catch(_){}};
-            socket.onclose=()=>{if(!instance.disposed){term.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m');terminalWorkspaceStatus(index,'已断开');}};
-            socket.onerror=()=>{if(!instance.disposed)terminalWorkspaceStatus(index,'连接错误');};instance.resizeObserver=new ResizeObserver(()=>resizeHostWorkspaceTerminal(instance));instance.resizeObserver.observe(body);
+            socket.onmessage=e=>{if(instance.disposed)return;try{const m=JSON.parse(e.data);if(m.type==='terminal_data')writeTerminalWorkspaceData(instance,m.data||'');else if(m.type==='terminal_connected'){if(terminalMode==='adb'){terminalWorkspaceStatus(index,'正在进入 ADB Shell…');clearTerminalWorkspaceStartupTimer(instance);if(!instance.shellReady)instance.startupTimer=setTimeout(()=>failTerminalWorkspaceStartup(instance,'ADB Shell 启动超时'),15000);}else{terminalWorkspaceStatus(index,`${user}@${address}`,true);}setTimeout(()=>resizeHostWorkspaceTerminal(instance),0);}else if(m.type==='terminal_error'||m.type==='error'){clearTerminalWorkspaceStartupTimer(instance);term.writeln(`\r\n\x1b[31m${m.error||m.message||'连接失败'}\x1b[0m`);if(m.elevation_required){terminalWorkspaceStatus(index,'等待管理员认证');recoverTerminalElevation(instance,'重新连接主机终端',()=>refreshTerminalWorkspacePane(index));}else if(m.credential_required&&m.device_host&&typeof showDevicePasswordModal==='function'){terminalWorkspaceStatus(index,'等待 SSH 凭据');showDevicePasswordModal(m.device_host,'terminal',()=>refreshTerminalWorkspacePane(index));}else{terminalWorkspaceStatus(index,'连接失败');}}}catch(_){}};
+            socket.onclose=()=>{if(!instance.disposed){clearTerminalWorkspaceStartupTimer(instance);if(instance.startupFailed){terminalWorkspaceStatus(index,'ADB Shell 启动失败');return;}term.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m');terminalWorkspaceStatus(index,'已断开');}};
+            socket.onerror=()=>{if(!instance.disposed)terminalWorkspaceStatus(index,instance.startupFailed?'ADB Shell 启动失败':'连接错误');};instance.resizeObserver=new ResizeObserver(()=>resizeHostWorkspaceTerminal(instance));instance.resizeObserver.observe(body);
+        }
+        function clearTerminalWorkspaceStartupTimer(instance){
+            if(instance?.startupTimer){clearTimeout(instance.startupTimer);instance.startupTimer=null;}
+        }
+        function terminalWorkspaceAdbStartupDetail(instance){
+            const plain=String(instance?.initialData||'')
+                .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g,'')
+                .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g,'');
+            const adbCommand=/\badb\s+-s\s+(?:"[^"]*"|'[^']*'|[^\s]+)\s+shell(?:\s|$)/.exec(plain);
+            if(!adbCommand)return '';
+            const lines=plain.slice(adbCommand.index+adbCommand[0].length).split(/\r\n|\n|\r/);
+            const hostPrompt=lines.findIndex(line=>/^[^\s@]+@[^\s:]+:[^\r\n]*[$#]\s*$/.test(line));
+            return lines.slice(0,hostPrompt<0?lines.length:hostPrompt)
+                .map(line=>line.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g,'').trim())
+                .filter(Boolean).join('\r\n').slice(-4096);
+        }
+        function failTerminalWorkspaceStartup(instance,reason,detail=''){
+            if(!instance||instance.disposed||instance.shellReady||instance.startupFailed)return;
+            clearTerminalWorkspaceStartupTimer(instance);
+            instance.startupFailed=true;
+            const failureDetail=detail||terminalWorkspaceAdbStartupDetail(instance);
+            instance.initialData='';
+            instance.terminal.write(`\x1b[31m❌ ${reason}\x1b[0m${failureDetail?`\r\n\r\n${failureDetail}`:''}`);
+            terminalWorkspaceStatus(instance.paneIndex,'ADB Shell 启动失败');
+            if(instance.socket?.readyState===WebSocket.OPEN)instance.socket.close();
         }
         function writeTerminalWorkspaceData(instance,data){
             if(instance.shellReady){instance.terminal.write(data);return;}
+            if(instance.startupFailed)return;
             instance.initialData=(instance.initialData+String(data||'')).slice(-32768);
-            const plain=instance.initialData.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g,'');
-            const lines=plain.split(/\r?\n/),prompt=[...lines].reverse().find(line=>/@[^\s:]+:[^\r\n]*[$#]\s*$/.test(line));
+            const plain=instance.initialData
+                .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g,'')
+                .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g,'');
+            const lines=plain.split(/\r\n|\n|\r/);
+            if(instance.mode==='adb'){
+                // The backend enters ADB through an interactive host shell.
+                // Do not paint its welcome text, clear sequence, command echo,
+                // and intermediate prompts. Reveal only once Android is ready.
+                const adbCommand=/\badb\s+-s\s+(?:"[^"]*"|'[^']*'|[^\s]+)\s+shell(?:\s|$)/.exec(plain);
+                if(!adbCommand)return;
+                const adbLines=plain.slice(adbCommand.index+adbCommand[0].length).split(/\r\n|\n|\r/);
+                const devicePromptIndex=adbLines.findIndex(line=>/^(?:[\w.-]+@)?[^\s:]+:\/[^\r\n]*[$#]\s*$/.test(line));
+                const hostPromptIndex=adbLines.findIndex(line=>/^[^\s@]+@[^\s:]+:[^\r\n]*[$#]\s*$/.test(line));
+                if(hostPromptIndex>=0&&(devicePromptIndex<0||hostPromptIndex<devicePromptIndex)){
+                    failTerminalWorkspaceStartup(instance,'ADB Shell 启动失败',terminalWorkspaceAdbStartupDetail(instance));
+                    return;
+                }
+                if(devicePromptIndex<0)return;
+                const prompt=adbLines[devicePromptIndex];
+                clearTerminalWorkspaceStartupTimer(instance);
+                instance.shellReady=true;
+                instance.initialData='';
+                instance.terminal.write(`\x1b[32m✅ ADB Shell · ${instance.serialNo}\x1b[0m\r\n\r\n${prompt}`);
+                terminalWorkspaceStatus(instance.paneIndex,`ADB · ${instance.serialNo}`,true);
+                return;
+            }
+            const prompt=[...lines].reverse().find(line=>/@[^\s:]+:[^\r\n]*[$#]\s*$/.test(line));
             if(prompt){instance.shellReady=true;instance.initialData='';instance.terminal.write(prompt);}
         }
         function terminalWorkspaceRenderSignature(){return JSON.stringify({layout:terminalWorkspace.layout,panes:terminalWorkspace.panes,maximized:terminalWorkspace.maximized});}
@@ -4055,7 +4199,10 @@
             const pane=terminalWorkspace.panes[i],body=document.getElementById(`terminal-workspace-body-${i}`);if(!pane||!body)return;
             disposeTerminalWorkspaceInstance(i);
             const paneGeneration=(terminalWorkspace.paneGenerations.get(i)||0)+1;terminalWorkspace.paneGenerations.set(i,paneGeneration);
-            body.replaceChildren();terminalWorkspaceStatus(i,'正在刷新…');
+            // clone-replace 清除上一次 mount 残留的 dragover/drop 等事件监听器，
+            // 避免刷新 N 次后拖放文件触发 N 次上传。
+            body.replaceWith(body.cloneNode(false));
+            terminalWorkspaceStatus(i,'正在刷新…');
             mountTerminalWorkspacePane(i,pane,terminalWorkspace.generation,paneGeneration);
         }
         function restoreHostTerminalWorkspacePane(i){
@@ -4112,8 +4259,11 @@
 
         // ==================== 用户管理功能 ====================
         let usersRefreshInterval = null;
+        let usersHasLoaded = false;
 
         async function loadUsersList(elevationRetried = false) {
+            const tbody = document.getElementById('users-table-body');
+            if (tbody) tbody.setAttribute('aria-busy', 'true');
             try {
                 const resp = await fetch('/api/users/list', { credentials: 'same-origin' });
                 const data = await resp.json();
@@ -4140,7 +4290,10 @@
                 }
             } catch (e) {
                 console.error('[Users] Error loading users:', e);
-                displayUsersListAccessMessage(`用户列表加载失败：${e.message}`);
+                if (usersHasLoaded) showToast(`用户列表刷新失败：${e.message}`, 'error');
+                else displayUsersListAccessMessage(`用户列表加载失败：${e.message}`);
+            } finally {
+                if (tbody) tbody.setAttribute('aria-busy', 'false');
             }
         }
 
@@ -4212,6 +4365,7 @@
                         </td>
                     </tr>
                 `;
+                usersHasLoaded = true;
                 return;
             }
 
@@ -4291,6 +4445,7 @@
                     button
                 ));
             });
+            usersHasLoaded = true;
         }
 
         function formatTime(isoString) {
@@ -5194,6 +5349,9 @@
                     workerId
                 }];
                 terminalWorkspace.renderedSignature = null;
+                // 先隐藏旧终端画布再切换页面，避免 renderTerminalWorkspace
+                // 异步执行期间暴露上一次终端的残留内容。
+                setHostWorkspaceSurfaceReady('terminal', false);
                 switchPage('terminal');
             } catch (error) {
                 console.error('打开 Shell 失败:', error);
@@ -5532,6 +5690,7 @@
                 'dcfg-prop-refresh', 'dcfg-ovr-refresh'
             ]) dcfgSetButtonBusy(refreshId, false, '↻ 刷新');
             for (const [resultId, emptyText] of [
+                ['dcfg-results', '正在查询…'],
                 ['dcfg-pkg-results', '点击「刷新」加载'],
                 ['dcfg-feat-results', '点击「刷新」加载'],
                 ['dcfg-prop-results', '点击「刷新」加载'],
@@ -5539,6 +5698,11 @@
             ]) {
                 const result = document.getElementById(resultId);
                 if (result) {
+                    result.dataset.renderGeneration = String(
+                        Number(result.dataset.renderGeneration || 0) + 1
+                    );
+                    delete result.dataset.loaded;
+                    result.setAttribute('aria-busy', 'false');
                     result.classList.add('dcfg-empty');
                     result.textContent = emptyText;
                 }
@@ -5681,29 +5845,42 @@
             };
         }
 
-        function dcfgRenderRows(tbody, rows, renderRow, chunkSize = 250) {
-            tbody.innerHTML = '';
+        function dcfgRenderRows(tbody, rows, renderRow, chunkSize = 250, onComplete = null) {
             let index = 0;
             const append = () => {
                 const end = Math.min(index + chunkSize, rows.length);
                 let html = '';
                 for (; index < end; index++) html += renderRow(rows[index]);
                 tbody.insertAdjacentHTML('beforeend', html);
-                if (index < rows.length) requestAnimationFrame(append);
+                if (index < rows.length) {
+                    requestAnimationFrame(append);
+                } else if (onComplete) {
+                    onComplete();
+                }
             };
             append();
         }
 
         function dcfgSetTable(box, colgroup, headerHtml, rows, renderRow, chunkSize = 250) {
-            box.classList.remove('dcfg-empty');
-            box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
+            const renderGeneration = Number(box.dataset.renderGeneration || 0) + 1;
+            box.dataset.renderGeneration = String(renderGeneration);
+            const table = document.createElement('table');
+            table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;';
+            table.innerHTML = `
                 ${colgroup}
                 <thead><tr>${headerHtml}</tr></thead>
                 <tbody></tbody>
-            </table>`;
-            const tbody = box.querySelector('tbody');
+            `;
+            const tbody = table.querySelector('tbody');
             if (!tbody) return;
-            dcfgRenderRows(tbody, rows, renderRow, chunkSize);
+            // 在脱离 DOM 的 table 中分块构建，完成后一次替换。这既保留
+            // 大数据量分帧渲染，又不会在用户眼前先清空旧表格。
+            dcfgRenderRows(tbody, rows, renderRow, chunkSize, () => {
+                if (Number(box.dataset.renderGeneration || 0) !== renderGeneration) return;
+                box.classList.remove('dcfg-empty');
+                box.replaceChildren(table);
+                box.dataset.loaded = 'true';
+            });
         }
 
         // 根据类型切换 值输入控件：数组类型用 textarea，其余用 input
@@ -5760,8 +5937,12 @@
             const loadId = ++dcfgOverrideLoadId;
             dcfgSetButtonBusy('dcfg-ovr-refresh', true, '↻ 刷新');
             const box = document.getElementById('dcfg-ovr-results');
-            box.classList.add('dcfg-empty');
-            box.innerHTML = '加载中…';
+            const hadRenderedEntries = box.dataset.loaded === 'true';
+            box.setAttribute('aria-busy', 'true');
+            if (!hadRenderedEntries) {
+                box.classList.add('dcfg-empty');
+                box.innerHTML = '加载中…';
+            }
             try {
                 // 并发拉 status + entries + preview；任一接口失败不阻断其它结果显示
                 const [stR, enR, pvR] = await Promise.all([
@@ -5776,13 +5957,18 @@
                         (pvR.data.manifest || '') + '\n\n' + (pvR.data.config_xml || '（无覆盖项）');
                 }
                 if (!enR.success) {
-                    box.innerHTML = '❌ ' + dcfgEscapeHtml(enR.error || '加载失败');
+                    if (hadRenderedEntries) {
+                        showToast('覆盖项刷新失败: ' + (enR.error || '加载失败'), 'error');
+                    } else {
+                        box.innerHTML = '❌ ' + dcfgEscapeHtml(enR.error || '加载失败');
+                    }
                     return;
                 }
                 dcfgRenderOvrEntries(enR.data.entries || []);
             } finally {
                 if (dcfgContextIsCurrent(context) && loadId === dcfgOverrideLoadId) {
                     dcfgSetButtonBusy('dcfg-ovr-refresh', false, '↻ 刷新');
+                    box.setAttribute('aria-busy', 'false');
                 }
             }
         }
@@ -5793,6 +5979,7 @@
             if (!dcfgOvrEntries.length) {
                 box.classList.add('dcfg-empty');
                 box.innerHTML = '暂无覆盖项。在上方添加（资源名+类型+值），再点「应用」';
+                box.dataset.loaded = 'true';
                 return;
             }
             box.classList.remove('dcfg-empty');
@@ -5814,6 +6001,7 @@
                     <th class="dcfg-th">覆盖值</th><th class="dcfg-th">操作</th>
                 </tr></thead>
                 <tbody>${rows}</tbody></table>`;
+            box.dataset.loaded = 'true';
         }
 
         async function dcfgAddOverride() {
@@ -5988,27 +6176,36 @@
             dcfgPkgLoading = context.generation;
             dcfgSetButtonBusy('dcfg-pkg-refresh', true, '↻ 刷新');
             const box = document.getElementById('dcfg-pkg-results');
-            box.classList.add('dcfg-empty');
-            box.innerHTML = '加载中…';
+            const hadRenderedRows = box.dataset.loaded === 'true';
+            box.setAttribute('aria-busy', 'true');
+            if (!hadRenderedRows) {
+                box.classList.add('dcfg-empty');
+                box.innerHTML = '加载中…';
+            }
             try {
                 const j = context.remote
                     ? await dcfgInspect('packages_with_path', {}, context)
                     : await fetch('/api/config-explorer/packages-with-path?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
                 if (!dcfgContextIsCurrent(context)) return;
-                if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
+                if (!j.success) {
+                    if (hadRenderedRows) showToast('应用列表刷新失败: ' + (j.error || '加载失败'), 'error');
+                    else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); }
+                    return;
+                }
                 dcfgPkgRows = (context.remote ? j.rows : j.data?.rows) || [];
                 document.getElementById('dcfg-pkg-stat').textContent = `共 ${dcfgPkgRows.length} 个`;
                 dcfgFilterPkg();
             } catch (e) {
                 if (dcfgContextIsCurrent(context)) {
-                    box.classList.add('dcfg-empty');
-                    box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message);
+                    if (hadRenderedRows) showToast('应用列表刷新失败: ' + e.message, 'error');
+                    else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
                 }
             } finally {
                 if (dcfgPkgLoading === context.generation) {
                     dcfgPkgLoading = 0;
                     if (dcfgContextIsCurrent(context)) {
                         dcfgSetButtonBusy('dcfg-pkg-refresh', false, '↻ 刷新');
+                        box.setAttribute('aria-busy', 'false');
                     }
                 }
             }
@@ -6017,7 +6214,7 @@
             const q = document.getElementById('dcfg-pkg-filter').value.trim().toLowerCase();
             const box = document.getElementById('dcfg-pkg-results');
             const rows = q ? dcfgPkgRows.filter(r => (r.package + ' ' + r.path).toLowerCase().includes(q)) : dcfgPkgRows;
-            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; return; }
+            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; box.dataset.loaded = 'true'; return; }
             dcfgSetTable(
                 box,
                 '<colgroup><col style="width:30%"><col style="width:58%"><col style="width:12%"></colgroup>',
@@ -6136,27 +6333,36 @@
             dcfgFeatLoading = context.generation;
             dcfgSetButtonBusy('dcfg-feat-refresh', true, '↻ 刷新');
             const box = document.getElementById('dcfg-feat-results');
-            box.classList.add('dcfg-empty');
-            box.innerHTML = '加载中…';
+            const hadRenderedRows = box.dataset.loaded === 'true';
+            box.setAttribute('aria-busy', 'true');
+            if (!hadRenderedRows) {
+                box.classList.add('dcfg-empty');
+                box.innerHTML = '加载中…';
+            }
             try {
                 const j = context.remote
                     ? await dcfgInspect('features', {}, context)
                     : await fetch('/api/config-explorer/features?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
                 if (!dcfgContextIsCurrent(context)) return;
-                if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
+                if (!j.success) {
+                    if (hadRenderedRows) showToast('特性列表刷新失败: ' + (j.error || '加载失败'), 'error');
+                    else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); }
+                    return;
+                }
                 dcfgFeatRows = (context.remote ? j.rows : j.data?.rows) || [];
                 document.getElementById('dcfg-feat-stat').textContent = `共 ${dcfgFeatRows.length} 个`;
                 dcfgFilterFeat();
             } catch (e) {
                 if (dcfgContextIsCurrent(context)) {
-                    box.classList.add('dcfg-empty');
-                    box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message);
+                    if (hadRenderedRows) showToast('特性列表刷新失败: ' + e.message, 'error');
+                    else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
                 }
             } finally {
                 if (dcfgFeatLoading === context.generation) {
                     dcfgFeatLoading = 0;
                     if (dcfgContextIsCurrent(context)) {
                         dcfgSetButtonBusy('dcfg-feat-refresh', false, '↻ 刷新');
+                        box.setAttribute('aria-busy', 'false');
                     }
                 }
             }
@@ -6165,7 +6371,7 @@
             const q = document.getElementById('dcfg-feat-filter').value.trim().toLowerCase();
             const box = document.getElementById('dcfg-feat-results');
             const rows = q ? dcfgFeatRows.filter(r => r.name.toLowerCase().includes(q)) : dcfgFeatRows;
-            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; return; }
+            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; box.dataset.loaded = 'true'; return; }
             dcfgSetTable(
                 box,
                 '<colgroup><col style="width:70%"><col style="width:30%"></colgroup>',
@@ -6189,27 +6395,36 @@
             dcfgPropLoading = context.generation;
             dcfgSetButtonBusy('dcfg-prop-refresh', true, '↻ 刷新');
             const box = document.getElementById('dcfg-prop-results');
-            box.classList.add('dcfg-empty');
-            box.innerHTML = '加载中…';
+            const hadRenderedRows = box.dataset.loaded === 'true';
+            box.setAttribute('aria-busy', 'true');
+            if (!hadRenderedRows) {
+                box.classList.add('dcfg-empty');
+                box.innerHTML = '加载中…';
+            }
             try {
                 const j = context.remote
                     ? await dcfgInspect('props', {}, context)
                     : await fetch('/api/config-explorer/props?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
                 if (!dcfgContextIsCurrent(context)) return;
-                if (!j.success) { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); return; }
+                if (!j.success) {
+                    if (hadRenderedRows) showToast('属性列表刷新失败: ' + (j.error || '加载失败'), 'error');
+                    else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); }
+                    return;
+                }
                 dcfgPropRows = (context.remote ? j.rows : j.data?.rows) || [];
                 document.getElementById('dcfg-prop-stat').textContent = `共 ${dcfgPropRows.length} 项`;
                 dcfgFilterProp();
             } catch (e) {
                 if (dcfgContextIsCurrent(context)) {
-                    box.classList.add('dcfg-empty');
-                    box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message);
+                    if (hadRenderedRows) showToast('属性列表刷新失败: ' + e.message, 'error');
+                    else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(e.message); }
                 }
             } finally {
                 if (dcfgPropLoading === context.generation) {
                     dcfgPropLoading = 0;
                     if (dcfgContextIsCurrent(context)) {
                         dcfgSetButtonBusy('dcfg-prop-refresh', false, '↻ 刷新');
+                        box.setAttribute('aria-busy', 'false');
                     }
                 }
             }
@@ -6218,7 +6433,7 @@
             const q = document.getElementById('dcfg-prop-filter').value.trim().toLowerCase();
             const box = document.getElementById('dcfg-prop-results');
             const rows = q ? dcfgPropRows.filter(r => (r.name + ' ' + r.value).toLowerCase().includes(q)) : dcfgPropRows;
-            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; return; }
+            if (!rows.length) { box.classList.add('dcfg-empty'); box.innerHTML = '无匹配'; box.dataset.loaded = 'true'; return; }
             dcfgSetTable(
                 box,
                 '<colgroup><col style="width:40%"><col style="width:60%"></colgroup>',
@@ -6276,9 +6491,13 @@
 
             const stat = document.getElementById('dcfg-stat');
             const results = document.getElementById('dcfg-results');
-            stat.classList.remove('active');
-            results.classList.add('dcfg-empty');
-            results.innerHTML = withEffective ? '正在查询 overlay 生效值（逐个 adb 调用，请稍候）…' : '查询中…';
+            const hadRenderedResults = results.dataset.loaded === 'true';
+            results.setAttribute('aria-busy', 'true');
+            if (!hadRenderedResults) {
+                stat.classList.remove('active');
+                results.classList.add('dcfg-empty');
+                results.innerHTML = withEffective ? '正在查询 overlay 生效值（逐个 adb 调用，请稍候）…' : '查询中…';
+            }
             dcfgSetButtonBusy('dcfg-query', true, '查询', '查询中…');
 
             try {
@@ -6293,19 +6512,24 @@
                     : await fetch('/api/config-explorer?' + params).then(r => r.json());
                 if (!dcfgContextIsCurrent(context) || queryId !== dcfgQueryRequestId) return;
                 if (!j.success) {
-                    results.classList.add('dcfg-empty');
-                    results.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || j.message || '查询失败');
+                    if (hadRenderedResults) {
+                        showToast('配置查询失败: ' + (j.error || j.message || '查询失败'), 'error');
+                    } else {
+                        results.classList.add('dcfg-empty');
+                        results.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || j.message || '查询失败');
+                    }
                     return;
                 }
                 renderDeviceConfigResults(context.remote ? j : j.data, withEffective);
             } catch (e) {
                 if (dcfgContextIsCurrent(context) && queryId === dcfgQueryRequestId) {
-                    results.classList.add('dcfg-empty');
-                    results.innerHTML = '❌ 请求失败: ' + dcfgEscapeHtml(e.message);
+                    if (hadRenderedResults) showToast('配置查询失败: ' + e.message, 'error');
+                    else { results.classList.add('dcfg-empty'); results.innerHTML = '❌ 请求失败: ' + dcfgEscapeHtml(e.message); }
                 }
             } finally {
                 if (dcfgContextIsCurrent(context) && queryId === dcfgQueryRequestId) {
                     dcfgSetButtonBusy('dcfg-query', false, '查询', '查询中…');
+                    results.setAttribute('aria-busy', 'false');
                 }
             }
         }
@@ -6317,6 +6541,7 @@
             if (!res.length) {
                 results.classList.add('dcfg-empty');
                 results.innerHTML = '没有匹配的资源';
+                results.dataset.loaded = 'true';
                 stat.classList.remove('active');
                 return;
             }
@@ -6747,6 +6972,79 @@
             }
         }
 
+        function revealLazyFrame(frame, deferUntilPaint = true) {
+            const shell = frame?.closest('.embedded-frame-shell');
+            if (!shell || shell.dataset.frameState !== 'loading') return;
+            if (frame.__surfaceReadyFallbackTimer) {
+                clearTimeout(frame.__surfaceReadyFallbackTimer);
+                frame.__surfaceReadyFallbackTimer = null;
+            }
+            const reveal = () => {
+                if (shell.dataset.frameState === 'loading') shell.dataset.frameState = 'ready';
+            };
+            if (deferUntilPaint) requestAnimationFrame(() => requestAnimationFrame(reveal));
+            else reveal();
+        }
+
+        function markLazyFrameReady(frame) {
+            if (!frame) return;
+            frame.dataset.surfaceReadyReceived = 'true';
+            // 子页主动发出的 ready 表示它的稳定首帧已经完成布局，比 iframe
+            // load（可能被图表/CDN/慢接口拖延）更可靠；收到后即可揭示。
+            revealLazyFrame(frame, false);
+        }
+        window.markLazyFrameReady = markLazyFrameReady;
+
+        function bindLazyFrameState(frame) {
+            if (!frame || frame.dataset.frameStateBound === 'true') return;
+            frame.dataset.frameStateBound = 'true';
+            frame.addEventListener('load', () => {
+                const shell = frame.closest('.embedded-frame-shell');
+                if (!shell) return;
+                frame.dataset.documentLoaded = 'true';
+                if (frame.dataset.waitForReady === 'true'
+                        && frame.dataset.surfaceReadyReceived !== 'true') {
+                    // 同源微前端在首批数据已原子渲染后主动通知。
+                    // 超时只是容错，避免子页异常时永久遮挡诊断信息。
+                    frame.__surfaceReadyFallbackTimer = setTimeout(
+                        () => markLazyFrameReady(frame),
+                        5000
+                    );
+                    return;
+                }
+                // load 事件早于 iframe 内容的首次合成；延后两帧再揭示，
+                // 避免用户看到 about:blank 或子页样式尚未绘制的中间帧。
+                revealLazyFrame(frame);
+            });
+            frame.addEventListener('error', () => {
+                const shell = frame.closest('.embedded-frame-shell');
+                if (!shell) return;
+                if (frame.__surfaceReadyFallbackTimer) clearTimeout(frame.__surfaceReadyFallbackTimer);
+                shell.dataset.frameState = 'error';
+                const status = shell.querySelector('.embedded-frame-loading');
+                if (status) status.textContent = '页面加载失败，请稍后重试';
+            });
+        }
+
+        function setLazyFrameSource(frame, source) {
+            if (!frame || !source) return;
+            bindLazyFrameState(frame);
+            const shell = frame.closest('.embedded-frame-shell');
+            if (shell) {
+                const status = shell.querySelector('.embedded-frame-loading');
+                if (status && !status.dataset.loadingText) {
+                    status.dataset.loadingText = status.textContent;
+                }
+                if (status) status.textContent = status.dataset.loadingText || '正在加载...';
+                shell.dataset.frameState = 'loading';
+            }
+            if (frame.__surfaceReadyFallbackTimer) clearTimeout(frame.__surfaceReadyFallbackTimer);
+            frame.dataset.documentLoaded = 'false';
+            frame.dataset.surfaceReadyReceived = 'false';
+            frame.setAttribute('src', source);
+        }
+        window.setLazyFrameSource = setLazyFrameSource;
+
         // 页面切换函数：iframe 微前端懒加载
         // 解决 F5 刷新后 iframe 内容丢失的问题
         function ensureLazyFrameLoaded(pageName, forceReload = false) {
@@ -6770,18 +7068,16 @@
 
             // 首次加载：iframe 没有 src，从 data-src 加载
             if (!hasSrc) {
-                frame.setAttribute('src', dataSrc);
+                setLazyFrameSource(frame, dataSrc);
                 return;
             }
 
-            // F5 刷新后：iframe 有 src 但内容可能空白
-            // 只有 forceReload=true 时才强制重新加载（避免页面切换时不必要的重载）
+            // F5 刷新后：iframe 有 src 但内容可能空白。
+            // 只有 forceReload=true 时才强制重新加载（避免页面切换时不必要的重载）。
+            // 直接覆盖 src 触发重载，不先移除 src，避免中间空白帧闪烁。
             if (forceReload) {
                 const currentSrc = frame.getAttribute('src');
-                frame.removeAttribute('src');
-                setTimeout(() => {
-                    frame.setAttribute('src', currentSrc);
-                }, 0);
+                if (currentSrc) setLazyFrameSource(frame, currentSrc);
             }
         }
 
@@ -6884,7 +7180,7 @@
             }
 
             if (pageName === 'security-audit') {
-                loadSecurityAudit(true);
+                if (!securityAuditState.loaded) loadSecurityAudit(true);
             }
             if (pageName === 'devices') {
                 loadDevicesManagement();
@@ -6995,6 +7291,8 @@
             currentNodeId: '',
             currentFavorite: false,
             dirty: false,
+            docsLoaded: false,
+            docsRequestGeneration: 0,
         };
 
         function kbApiData(result) {
@@ -7076,27 +7374,47 @@
 
         async function kbLoadDocs() {
             const box = document.getElementById('kb-doc-list');
-            if (box) box.innerHTML = '<div class="suite-empty" style="padding:20px;text-align:center;">加载中...</div>';
+            const requestGeneration = ++kbState.docsRequestGeneration;
+            const hadRenderedDocs = kbState.docsLoaded;
+            if (box) {
+                box.setAttribute('aria-busy', 'true');
+                if (!hadRenderedDocs) {
+                    box.innerHTML = '<div class="suite-empty" style="padding:20px;text-align:center;">加载中...</div>';
+                }
+            }
             const q = (document.getElementById('kb-search-input') || {}).value || '';
             const params = new URLSearchParams();
             params.set('space_id', kbState.currentSpace);
             if (q.trim()) params.set('q', q.trim());
             if (!q.trim() && kbState.currentParent) params.set('parent_id', kbState.currentParent);
             const url = q.trim() ? '/api/knowledge/search?' + params.toString() : '/api/knowledge/docs?' + params.toString();
-            const data = await kbFetch(url);
-            const docs = data.docs || data.items || [];
-            if (!box) return;
-            if (!docs.length) {
-                box.innerHTML = '<div class="suite-empty" style="padding:28px;text-align:center;">暂无文档</div>';
-                return;
+            try {
+                const data = await kbFetch(url);
+                if (requestGeneration !== kbState.docsRequestGeneration) return;
+                const docs = data.docs || data.items || [];
+                if (!box) return;
+                if (!docs.length) {
+                    box.innerHTML = '<div class="suite-empty" style="padding:28px;text-align:center;">暂无文档</div>';
+                    kbState.docsLoaded = true;
+                    return;
+                }
+                box.innerHTML = docs.map(doc => `
+                    <div class="report-failure-card" data-doc-id="${kbEsc(doc.doc_id)}" style="cursor:pointer;margin-bottom:8px;${doc.doc_id === kbState.currentDocId ? 'border-color:var(--primary-color);' : ''}" onclick="kbOpenDoc('${kbEsc(doc.doc_id)}')">
+                        <div style="font-weight:600;margin-bottom:4px;">${doc.favorite ? '★ ' : ''}${kbEsc(doc.title || '无标题')}</div>
+                        <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">${kbEsc(doc.summary || kbSnippet(doc.content_md || doc.raw_content, 110))}</div>
+                        <div style="margin-top:6px;">${(doc.tags || []).map(t => `<span class="badge">${kbEsc(t)}</span>`).join(' ')}</div>
+                    </div>
+                `).join('');
+                kbState.docsLoaded = true;
+            } catch (error) {
+                if (requestGeneration !== kbState.docsRequestGeneration) return;
+                if (hadRenderedDocs) showToast('文档列表刷新失败: ' + error.message, 'error');
+                else if (box) box.innerHTML = `<div class="suite-empty" style="padding:20px;text-align:center;">加载失败: ${kbEsc(error.message)}</div>`;
+            } finally {
+                if (requestGeneration === kbState.docsRequestGeneration && box) {
+                    box.setAttribute('aria-busy', 'false');
+                }
             }
-            box.innerHTML = docs.map(doc => `
-                <div class="report-failure-card" data-doc-id="${kbEsc(doc.doc_id)}" style="cursor:pointer;margin-bottom:8px;${doc.doc_id === kbState.currentDocId ? 'border-color:var(--primary-color);' : ''}" onclick="kbOpenDoc('${kbEsc(doc.doc_id)}')">
-                    <div style="font-weight:600;margin-bottom:4px;">${doc.favorite ? '★ ' : ''}${kbEsc(doc.title || '无标题')}</div>
-                    <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">${kbEsc(doc.summary || kbSnippet(doc.content_md || doc.raw_content, 110))}</div>
-                    <div style="margin-top:6px;">${(doc.tags || []).map(t => `<span class="badge">${kbEsc(t)}</span>`).join(' ')}</div>
-                </div>
-            `).join('');
         }
 
         function kbSelectSpace(spaceId) {
@@ -10682,8 +11000,11 @@
             }
 
             // 设备提示符出现后再显示 ADB 启动输出。
+            // 路由命令模式同样保持画布空白：silentMode 检测到 shell 提示符后会
+            // terminal.clear() 再写入路由横幅，提前打印"正在连接"会造成清屏闪烁。
             const isAdbLaunch = Boolean(pendingAdbDevice);
-            if (!isAdbLaunch) {
+            const isRouteLaunch = silentMode.type === 'route' && Boolean(silentMode.pendingCommand);
+            if (!isAdbLaunch && !isRouteLaunch) {
                 terminal.writeln('\x1b[33m⏳ 正在连接到 Ubuntu 主机...\x1b[0m');
                 terminal.writeln(`\x1b[90m主机: ${terminalConfig.ssh_user}@${terminalConfig.ssh_host}\x1b[0m\r\n`);
             } else {

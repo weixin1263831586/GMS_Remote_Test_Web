@@ -161,7 +161,9 @@
         if (event.origin !== window.location.origin || !event.data || typeof event.data !== 'object') return;
         const page = sourcePageForWindow(event.source);
         if (!page) return;
-        if (event.data.type === 'workspace-context-request') {
+        if (event.data.type === 'embedded-surface-ready') {
+            window.markLazyFrameReady?.(frameForPage(page));
+        } else if (event.data.type === 'workspace-context-request') {
             postToFrame(page);
         } else if (event.data.type === 'workspace-context-update') {
             update(event.data.context || {}, {source: page});

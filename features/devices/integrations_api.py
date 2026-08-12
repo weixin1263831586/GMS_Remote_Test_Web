@@ -40,6 +40,14 @@ from .usbip import detach_ubuntu_usbip_ports, find_device_host_password, usbip_m
 from .usbip_access import enforce_usbip_host_access, usbip_request_user
 from .usbip_install_api import install_usbipd
 from .usbip_install_api import router as usbip_install_router
+from .usbip_operations import (
+    has_remaining_usbip_assignments,
+    selected_usbip_serials,
+    serialize_usbip_operation,
+)
+from .usbip_operations import (
+    usbip_error_fields as _usbip_error_fields,
+)
 from .utils import DeviceUtils
 
 
@@ -52,34 +60,6 @@ _USBIP_ATTACHING_STALE_SECONDS = 30 * 60
 _USBIP_ADB_ENUMERATION_GRACE_SECONDS = 45
 
 __all__ = ["install_usbipd", "router"]
-
-
-def _usbip_error_fields(message: str) -> dict[str, object]:
-    detail = str(message or "")
-    lowered = detail.lower()
-    rules = (
-        (("ssh", "凭据"), "USBIP_SOURCE_SSH_FAILED", "请检查来源主机SSH地址、凭据和sshd服务。"),
-        (("usbipd未安装",), "USBIPD_NOT_INSTALLED", "请先在Windows来源主机安装usbipd-win。"),
-        (("未找到android设备", "未找到android usb", "设备已不可用"), "USBIP_SOURCE_DEVICE_NOT_FOUND", "请刷新USB设备列表并确认设备仍连接来源主机。"),
-        (("绑定失败", "bind failed"), "USBIP_BIND_FAILED", "请检查usbipd共享状态和Windows管理员权限。"),
-        (("vhci",), "VHCI_LOAD_FAILED", "请在目标Linux主机安装USB/IP工具并加载vhci_hcd。"),
-        (("attach",), "USBIP_ATTACH_FAILED", "请检查TCP 3240、防火墙及残留USB/IP会话。"),
-        (("unauthorized",), "ADB_UNAUTHORIZED", "请在设备端确认ADB授权。"),
-        (("offline",), "ADB_OFFLINE", "请检查USB链路并等待ADB重新枚举。"),
-        (("回滚", "cleanup"), "ROLLBACK_INCOMPLETE", "请使用当前接入中的“清理”操作完成残留会话清理。"),
-    )
-    for markers, code, remediation in rules:
-        if any(marker in lowered for marker in markers):
-            return {
-                "error_code": code,
-                "retryable": code not in {"USBIPD_NOT_INSTALLED"},
-                "remediation": remediation,
-            }
-    return {
-        "error_code": "USBIP_OPERATION_FAILED",
-        "retryable": True,
-        "remediation": "请查看USB/IP分层状态和来源/目标主机日志后重试。",
-    }
 
 
 def _resolve_usbip_device_host(request: Request, config: dict | None = None, explicit: str | None = None) -> str:
@@ -819,6 +799,7 @@ async def get_usbip_status(
 # ==================== USB/IP Connect ====================
 
 @router.post("/api/usbip/connect")
+@serialize_usbip_operation
 async def start_usbip(
     request: Request,
     req: USBIPStartRequest | None = Body(default=None),
@@ -1632,6 +1613,7 @@ def _invalidate_device_cache() -> None:
 # ==================== USB/IP Disconnect ====================
 
 @router.post("/api/usbip/disconnect")
+@serialize_usbip_operation
 async def stop_usbip(
     request: Request,
     req: USBIPDisconnectRequest | None = Body(default=None),
@@ -1857,6 +1839,19 @@ async def stop_usbip(
         )
 
         devices_to_remove = _usbip_devices_for_host(config["device_host"])
+        selected_busids = list(req.busids) if req and req.busids else []
+        assignments_before_disconnect = _usbip_assignments()
+        if selected_busids:
+            devices_to_remove = selected_usbip_serials(
+                assignments_before_disconnect,
+                config["device_host"],
+                selected_busids,
+            )
+        has_remaining_assignments = has_remaining_usbip_assignments(
+            assignments_before_disconnect,
+            config["device_host"],
+            selected_busids,
+        ) if selected_busids else False
         if not devices_to_remove and device_lock_manager.get_all_locks():
             return JSONResponse(
                 content={
@@ -1931,15 +1926,16 @@ async def stop_usbip(
                     finally:
                         runtime.ssh_manager.return_connection(verification_ssh)
 
-        with runtime.global_state.usbip_states_lock:
-            runtime.global_state.usbip_states[config["device_host"]] = {
-                "connected": False,
-                "timestamp": time.time(),
-                "transport_connected": False,
-                "adb_ready": False,
-                "reconnecting": False,
-                "protocol_status": {},
-            }
+        if not has_remaining_assignments:
+            with runtime.global_state.usbip_states_lock:
+                runtime.global_state.usbip_states[config["device_host"]] = {
+                    "connected": False,
+                    "timestamp": time.time(),
+                    "transport_connected": False,
+                    "adb_ready": False,
+                    "reconnecting": False,
+                    "protocol_status": {},
+                }
 
         # 失效缓存，避免返回已断开的 USB/IP 设备。
         _invalidate_device_cache()
