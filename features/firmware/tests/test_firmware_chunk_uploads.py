@@ -80,6 +80,7 @@ def test_staged_upload_is_resumable_and_owner_scoped():
         staged, error = chunk_uploads.load_staged_upload(root, "alice", "upload-1")
         assert error is None
         assert Path(staged["path"]).read_bytes() == b"12345678"
+        assert Path(staged["path"]).name == "staged-update.img"
         other_staged, other_error = chunk_uploads.load_staged_upload(
             root, "bob", "upload-1"
         )
@@ -102,6 +103,67 @@ def test_short_chunk_is_rejected_without_publishing_partial_file():
         session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-1"))
         assert not (session / "chunk_00000").exists()
         assert not list(session.glob("*.upload"))
+
+
+def test_content_fingerprint_prevents_stale_resume_for_same_file_metadata():
+    state = _state()
+    first_fingerprint = "a" * 64
+    second_fingerprint = "b" * 64
+    with TemporaryDirectory() as root:
+        first_response, _ = asyncio.run(
+            chunk_uploads.handle_chunk_upload(
+                _chunk_form(b"1234", content_fingerprint=first_fingerprint),
+                "alice",
+                root,
+                state,
+                3600,
+            )
+        )
+        conflicting_response, merged = asyncio.run(
+            chunk_uploads.handle_chunk_upload(
+                _chunk_form(
+                    b"abcd",
+                    content_fingerprint=second_fingerprint,
+                    chunk_index="0",
+                ),
+                "alice",
+                root,
+                state,
+                3600,
+            )
+        )
+
+        assert first_response.status_code == 200
+        assert conflicting_response.status_code == 400
+        assert "metadata does not match" in _payload(conflicting_response)["error"].lower()
+        assert merged is None
+
+
+def test_legacy_bin_staging_is_renamed_with_original_firmware_extension():
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-1"))
+        session.mkdir(parents=True)
+        (session / "upload_metadata.json").write_text(
+            json.dumps({
+                "file_name": "update.img",
+                "total_chunks": 1,
+                "file_size": 8,
+            }),
+            encoding="utf-8",
+        )
+        legacy = session / chunk_uploads.LEGACY_STAGED_FILENAME
+        legacy.write_bytes(b"firmware")
+
+        staged, error = chunk_uploads.load_staged_upload(
+            root,
+            "alice",
+            "upload-1",
+        )
+
+        assert error is None
+        assert Path(staged["path"]).name == "staged-update.img"
+        assert Path(staged["path"]).read_bytes() == b"firmware"
+        assert not legacy.exists()
 
 
 def test_burn_lock_prevents_parallel_finalize_and_can_be_released():

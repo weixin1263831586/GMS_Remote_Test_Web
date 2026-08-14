@@ -5,6 +5,7 @@
     let resolveReady;
     const ready = new Promise(resolve => { resolveReady = resolve; });
     let initialized = false;
+    let parentSurfaceVisible = true;
 
     function snapshot() {
         return {
@@ -47,6 +48,16 @@
         send('embedded-surface-ready');
     }
 
+    function isVisible() {
+        return parentSurfaceVisible && !document.hidden;
+    }
+
+    function dispatchVisibility() {
+        window.dispatchEvent(new CustomEvent('gms:embedded-visibility', {
+            detail: {visible: isVisible()}
+        }));
+    }
+
     window.addEventListener('message', event => {
         if (
             event.origin !== window.location.origin
@@ -56,10 +67,20 @@
         ) return;
         if (['workspace-context', 'workspace-context-navigate'].includes(event.data.type)) {
             accept(event.data.context || {}, event.data.type);
+        } else if (event.data.type === 'embedded-surface-visibility') {
+            const nextVisible = event.data.visible === true;
+            if (nextVisible !== parentSurfaceVisible) {
+                parentSurfaceVisible = nextVisible;
+                dispatchVisibility();
+            }
         }
     });
 
-    window.GmsEmbeddedWorkspace = Object.freeze({ready, get: snapshot, update, navigate, markReady});
+    document.addEventListener('visibilitychange', dispatchVisibility);
+
+    window.GmsEmbeddedWorkspace = Object.freeze({
+        ready, get: snapshot, update, navigate, markReady, isVisible
+    });
     send('workspace-context-request');
     window.addEventListener('DOMContentLoaded', () => send('workspace-context-request'), {once: true});
 })();

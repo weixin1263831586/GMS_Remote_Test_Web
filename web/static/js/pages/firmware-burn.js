@@ -72,8 +72,8 @@ function browseLocalFileForFirmware() {
                 const savedLastModified = parseInt(sessionStorage.getItem('firmwareUploadLastModified') || '-1');
                 const interrupted = sessionStorage.getItem('firmwareUploadInterrupted') === 'true';
                 if (interrupted && savedName === file.name && savedSize === file.size && savedLastModified === (file.lastModified || 0)) {
-                    showToast(`已选择同一固件，将从已上传分片续传: ${file.name}`, 'info');
-                    addLogEntry(`已选择同一固件，准备断点续传: ${file.name}`, 'info');
+                    showToast(`已选择同名固件，将校验内容指纹后续传: ${file.name}`, 'info');
+                    addLogEntry(`已选择同名固件，准备校验内容指纹: ${file.name}`, 'info');
                 } else {
                     showToast(`已选择固件文件: ${file.name}`, 'info');
                 }
@@ -554,8 +554,12 @@ async function submitFirmwareBurn() {
             return;
         }
 
+        let firmwareUploadId = '';
+        let firmwareFingerprint = '';
         if (selectedFirmwareFile) {
-            const uploadId = getReusableFirmwareUploadId(selectedFirmwareFile);
+            const identity = await getReusableFirmwareUploadId(selectedFirmwareFile);
+            firmwareUploadId = identity.uploadId;
+            firmwareFingerprint = identity.fingerprint;
             // 设置上传状态标记，防止刷新导致进度丢失
             saveFirmwareUploadState(
                 selectedFirmwareFile.name,
@@ -564,8 +568,9 @@ async function submitFirmwareBurn() {
                 0,
                 0,
                 selectedFirmwareFile.size,
-                uploadId,
-                selectedFirmwareFile.lastModified || 0
+                firmwareUploadId,
+                selectedFirmwareFile.lastModified || 0,
+                firmwareFingerprint
             );
 
             // 添加beforeunload事件监听，警告用户不要刷新
@@ -576,7 +581,7 @@ async function submitFirmwareBurn() {
 
         let uploadResult;
         if (selectedFirmwareFile) {
-            const uploadId = getReusableFirmwareUploadId(selectedFirmwareFile);
+            const uploadId = firmwareUploadId;
             const startedAt = parseInt(sessionStorage.getItem('firmwareUploadStartTime') || Date.now());
             notifyOperationResult('固件上传已启动', '固件分片上传任务已开始', 'info', 'firmware-burn');
             addLogEntry(`固件上传任务已启动，设备: ${devices.join(', ')}`, 'success');
@@ -590,6 +595,7 @@ async function submitFirmwareBurn() {
                     resume: true,
                     checkExisting: true,
                     uploadId,
+                    contentFingerprint: firmwareFingerprint,
                     extraFormData: {
                         stage_only: '1',
                     },
@@ -612,7 +618,8 @@ async function submitFirmwareBurn() {
                             uploadedSize,
                             selectedFirmwareFile.size,
                             uploadId,
-                            selectedFirmwareFile.lastModified || 0
+                            selectedFirmwareFile.lastModified || 0,
+                            firmwareFingerprint
                         );
                         updateUploadProgress(progress, selectedFirmwareFile.name, uploadedSize, selectedFirmwareFile.size);
                     }

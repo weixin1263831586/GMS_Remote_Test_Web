@@ -812,6 +812,15 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                             loaderDisplay: getComputedStyle(
                               shell.querySelector('.embedded-frame-loading')
                             ).display,
+                            skeletonDisplay: getComputedStyle(
+                              shell.querySelector('.embedded-frame-skeleton')
+                            ).display,
+                            skeletonCards: shell.querySelectorAll(
+                              '.embedded-frame-skeleton-card'
+                            ).length,
+                            skeletonPanels: shell.querySelectorAll(
+                              '.embedded-frame-skeleton-panel'
+                            ).length,
                             rect: {width: rect.width, height: rect.height},
                           };
                         }""",
@@ -819,7 +828,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     )
                     self.assertEqual(loading["state"], "loading", loading)
                     self.assertEqual(loading["frameVisibility"], "hidden", loading)
-                    self.assertEqual(loading["loaderDisplay"], "flex", loading)
+                    self.assertEqual(loading["loaderDisplay"], "block", loading)
+                    self.assertEqual(loading["skeletonDisplay"], "grid", loading)
+                    self.assertEqual(loading["skeletonCards"], 4, loading)
+                    self.assertEqual(loading["skeletonPanels"], 2, loading)
                     self.assertGreater(loading["rect"]["height"], 100, loading)
 
                     page.wait_for_function(
@@ -865,6 +877,157 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         ),
                         "ready",
                     )
+        finally:
+            page.close()
+
+    def test_lazy_frame_reload_keeps_previous_surface_visible(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('cluster', null)")
+            page.wait_for_function(
+                "document.querySelector('#cluster-frame').closest("
+                "'.embedded-frame-shell').dataset.frameState === 'ready'"
+            )
+
+            reloading = page.evaluate(
+                """() => {
+                  const frame = document.querySelector('#cluster-frame');
+                  const shell = frame.closest('.embedded-frame-shell');
+                  const previousText = frame.contentDocument.body.innerText;
+                  setLazyFrameSource(frame, frame.getAttribute('src'));
+                  const loader = shell.querySelector('.embedded-frame-loading');
+                  return {
+                    state: shell.dataset.frameState,
+                    hasContent: shell.dataset.frameHasContent,
+                    frameVisibility: getComputedStyle(frame).visibility,
+                    loaderDisplay: getComputedStyle(loader).display,
+                    loaderBackground: getComputedStyle(loader).backgroundColor,
+                    skeletonDisplay: getComputedStyle(
+                      loader.querySelector('.embedded-frame-skeleton')
+                    ).display,
+                    previousContentRetained:
+                      previousText.length > 0
+                      && frame.contentDocument.body.innerText === previousText,
+                  };
+                }"""
+            )
+            self.assertEqual(reloading["state"], "loading", reloading)
+            self.assertEqual(reloading["hasContent"], "true", reloading)
+            self.assertEqual(reloading["frameVisibility"], "visible", reloading)
+            self.assertEqual(reloading["loaderDisplay"], "block", reloading)
+            self.assertEqual(reloading["loaderBackground"], "rgba(0, 0, 0, 0)", reloading)
+            self.assertEqual(reloading["skeletonDisplay"], "none", reloading)
+            self.assertTrue(reloading["previousContentRetained"], reloading)
+            page.wait_for_function(
+                "document.querySelector('#cluster-frame').closest("
+                "'.embedded-frame-shell').dataset.frameState === 'ready'"
+            )
+        finally:
+            page.close()
+
+    def test_saved_cluster_refresh_has_stable_surface_before_dom_ready(self):
+        page = self.new_page()
+        try:
+            page.add_init_script(
+                """
+                localStorage.setItem('gms_current_page', 'cluster');
+                window.__clusterFirstSurface = null;
+                const observer = new MutationObserver(() => {
+                  if (window.__clusterFirstSurface) return;
+                  const frame = document.querySelector('#cluster-frame');
+                  const shell = frame?.closest('.embedded-frame-shell');
+                  const loader = shell?.querySelector('.embedded-frame-loading');
+                  if (!frame || !shell || !loader) return;
+                  window.__clusterFirstSurface = {
+                    readyState: document.readyState,
+                    state: shell.dataset.frameState,
+                    frameVisibility: getComputedStyle(frame).visibility,
+                    loaderDisplay: getComputedStyle(loader).display,
+                    loaderBackground: getComputedStyle(loader).backgroundColor,
+                  };
+                  observer.disconnect();
+                });
+                observer.observe(document, {childList: true, subtree: true});
+                """
+            )
+
+            for _ in range(2):
+                page.goto(self.base_url, wait_until="domcontentloaded")
+                page.wait_for_function("Boolean(window.__clusterFirstSurface)")
+                first_surface = page.evaluate("window.__clusterFirstSurface")
+                self.assertEqual(first_surface["readyState"], "loading", first_surface)
+                self.assertEqual(first_surface["state"], "loading", first_surface)
+                self.assertEqual(first_surface["frameVisibility"], "hidden", first_surface)
+                self.assertEqual(first_surface["loaderDisplay"], "flex", first_surface)
+                self.assertNotEqual(
+                    first_surface["loaderBackground"], "rgb(2, 6, 23)", first_surface
+                )
+                page.wait_for_function(
+                    "document.querySelector('#cluster-frame').closest("
+                    "'.embedded-frame-shell').dataset.frameState === 'ready'"
+                )
+        finally:
+            page.close()
+
+    def test_hidden_embedded_pages_pause_background_refresh(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            frames = [
+                ("cluster", "#cluster-frame", "clusterRefreshInterval"),
+                ("automation", "#automation-frame", "automationRefreshInterval"),
+                ("redmine-agent", "#redmine-agent-frame", "redmineStatusRefreshInterval"),
+            ]
+            for page_name, selector, timer_name in frames:
+                with self.subTest(page=page_name):
+                    page.evaluate("name => switchPage(name, null)", page_name)
+                    page.wait_for_function(
+                        "selector => document.querySelector(selector).closest("
+                        "'.embedded-frame-shell').dataset.frameState === 'ready'",
+                        arg=selector,
+                    )
+                    frame = self.frame_for(page, selector)
+                    page.wait_for_function(
+                        "selector => document.querySelector(selector).contentWindow."
+                        "GmsEmbeddedWorkspace?.isVisible() === true",
+                        arg=selector,
+                    )
+                    self.assertTrue(frame.evaluate(f"Boolean({timer_name})"))
+
+                    page.evaluate("switchPage('test', null)")
+                    page.wait_for_function(
+                        "selector => document.querySelector(selector).contentWindow."
+                        "GmsEmbeddedWorkspace?.isVisible() === false",
+                        arg=selector,
+                    )
+                    self.assertFalse(frame.evaluate(f"Boolean({timer_name})"))
+
+                    page.evaluate("name => switchPage(name, null)", page_name)
+                    page.wait_for_function(
+                        "selector => document.querySelector(selector).contentWindow."
+                        "GmsEmbeddedWorkspace?.isVisible() === true",
+                        arg=selector,
+                    )
+                    self.assertTrue(frame.evaluate(f"Boolean({timer_name})"))
+        finally:
+            page.close()
+
+    def test_non_embedded_page_refresh_timers_stop_after_navigation(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            timers = [
+                ("users", "usersRefreshInterval"),
+                ("devices", "devicesRefreshInterval"),
+                ("reports", "reportsRefreshInterval"),
+            ]
+            for page_name, timer_name in timers:
+                with self.subTest(page=page_name):
+                    page.evaluate("name => switchPage(name, null)", page_name)
+                    page.wait_for_function(f"Boolean({timer_name})")
+                    page.evaluate("switchPage('test', null)")
+                    page.wait_for_function(f"!{timer_name}")
         finally:
             page.close()
 

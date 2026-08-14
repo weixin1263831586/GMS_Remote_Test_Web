@@ -144,6 +144,42 @@ class FirmwareApiTests(unittest.TestCase):
         )
         self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
 
+    def test_invalid_staged_firmware_is_rejected_before_loader(self):
+        fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_MISSING__\n")
+        runtime.configure_runtime(ssh_manager=fake_ssh)
+
+        with TemporaryDirectory() as tmp, patch(
+            "features.firmware.firmware_api._FIRMWARE_CHUNK_ROOT",
+            tmp,
+        ), patch(
+            "features.firmware.firmware_api.validate_local_update_image",
+            return_value=firmware_api.FirmwareValidationResult(
+                valid=False,
+                message="固件预检失败，设备尚未重启：Loader 哈希校验失败。",
+            ),
+        ):
+            session = Path(
+                firmware_api._firmware_upload_session_dir(
+                    "codex@127.0.0.1",
+                    "invalid-loader",
+                )
+            )
+            session.mkdir(parents=True)
+            (session / "upload_metadata.json").write_text(
+                '{"file_name":"update.img","total_chunks":1,"file_size":8}',
+                encoding="utf-8",
+            )
+            (session / "merged_firmware.bin").write_bytes(b"firmware")
+
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={"finalize_upload": "1", "upload_id": "invalid-loader"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("设备尚未重启", response.json()["error"])
+        self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
+
     def test_gsi_relative_vendor_image_resolves_under_suite_dir(self):
         fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_FOUND__\n")
         runtime.configure_runtime(ssh_manager=fake_ssh)
