@@ -253,7 +253,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("return await new Promise((resolve, reject)", chunks)
         self.assertIn("const uploadError = error instanceof Error", chunks)
         self.assertIn("formData.append('chunk_size', chunkSize)", chunks)
-        self.assertIn("chunk-upload.js?v=20260813-staged-firmware", shell)
+        self.assertIn("chunk-upload.js?v=20260813-firmware-content-id", shell)
 
     def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
         navigation = read_all_frontend_js()

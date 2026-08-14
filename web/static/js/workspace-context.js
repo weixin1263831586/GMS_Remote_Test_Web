@@ -17,6 +17,7 @@
     let revision = 0;
     let localWorkerId = 'ats-worker-controller';
     let context = {...DEFAULT_CONTEXT};
+    let activePage = String(window.__targetPage || 'test');
     let resolveReady;
     const ready = new Promise(resolve => { resolveReady = resolve; });
 
@@ -47,6 +48,20 @@
         const frame = frameForPage(page);
         if (!frame?.contentWindow) return;
         frame.contentWindow.postMessage({type, context: snapshot()}, window.location.origin);
+    }
+
+    function postVisibilityToFrame(page) {
+        const frame = frameForPage(page);
+        if (!frame?.contentWindow) return;
+        frame.contentWindow.postMessage({
+            type: 'embedded-surface-visibility',
+            visible: page === activePage
+        }, window.location.origin);
+    }
+
+    function setActivePage(page) {
+        activePage = String(page || 'test');
+        Object.keys(EMBEDDED_FRAMES).forEach(postVisibilityToFrame);
     }
 
     function broadcast() {
@@ -165,6 +180,7 @@
             window.markLazyFrameReady?.(frameForPage(page));
         } else if (event.data.type === 'workspace-context-request') {
             postToFrame(page);
+            postVisibilityToFrame(page);
         } else if (event.data.type === 'workspace-context-update') {
             update(event.data.context || {}, {source: page});
         } else if (event.data.type === 'workspace-navigate' && event.data.page) {
@@ -174,13 +190,16 @@
 
     Object.entries(EMBEDDED_FRAMES).forEach(([page, id]) => {
         window.addEventListener('DOMContentLoaded', () => {
-            document.getElementById(id)?.addEventListener('load', () => postToFrame(page));
+            document.getElementById(id)?.addEventListener('load', () => {
+                postToFrame(page);
+                postVisibilityToFrame(page);
+            });
         }, {once: true});
     });
 
     window.GmsWorkspace = Object.freeze({
         ready, get: snapshot, update, navigate, postToFrame,
-        initialize, localWorkerId: () => localWorkerId
+        initialize, setActivePage, localWorkerId: () => localWorkerId
     });
     initialize();
 })();

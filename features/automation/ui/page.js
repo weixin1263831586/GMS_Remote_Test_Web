@@ -1807,8 +1807,20 @@ function userIsEditing() {
     return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
 }
 
-// 统一定时刷新：用户正在编辑输入时跳过本轮，避免打断
-setInterval(async () => {
+// 统一定时刷新：用户正在编辑输入时跳过本轮，避免打断。
+// 页面隐藏时暂停请求，重新进入后立即追平一次状态。
+let automationRefreshInterval = null;
+let automationRefreshStarted = false;
+let automationRefreshPromise = null;
+async function refreshAutomationActivity() {
+    if (automationRefreshPromise) return automationRefreshPromise;
+    automationRefreshPromise = refreshAutomationActivityOnce().finally(() => {
+        automationRefreshPromise = null;
+    });
+    return automationRefreshPromise;
+}
+
+async function refreshAutomationActivityOnce() {
     if (userIsEditing()) return;
     try {
         await loadWorkerStatus();
@@ -1820,7 +1832,23 @@ setInterval(async () => {
         }
         if (activeWorkflowPane === 'events' && selectedRunId) await refreshSelectedEvents();
     } catch (_) { /* 后台刷新静默失败 */ }
-}, 8000);
+}
+
+function syncAutomationAutoRefresh(event) {
+    const visible = event?.detail?.visible
+        ?? window.GmsEmbeddedWorkspace?.isVisible?.()
+        ?? true;
+    if (automationRefreshInterval) {
+        clearInterval(automationRefreshInterval);
+        automationRefreshInterval = null;
+    }
+    if (!visible) return;
+    if (automationRefreshStarted) refreshAutomationActivity();
+    automationRefreshStarted = true;
+    automationRefreshInterval = setInterval(refreshAutomationActivity, 8000);
+}
+window.addEventListener('gms:embedded-visibility', syncAutomationAutoRefresh);
+syncAutomationAutoRefresh();
 
 document.addEventListener('DOMContentLoaded', () => {
     document.body.dataset.automationReady = 'true';

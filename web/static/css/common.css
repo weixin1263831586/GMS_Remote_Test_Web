@@ -458,32 +458,155 @@ body {
     z-index: 2;
     inset: 0;
     display: none;
-    align-items: center;
-    justify-content: center;
     padding: 20px;
     color: var(--text-secondary);
-    background: var(--light-bg);
+    background: var(--card-bg);
     font-size: 13px;
     text-align: center;
+    pointer-events: none;
 }
 
-.embedded-frame-shell[data-frame-state="loading"] > iframe,
-.embedded-frame-shell[data-frame-state="error"] > iframe {
+.embedded-frame-shell:not([data-frame-has-content="true"])[data-frame-state="loading"] > iframe,
+.embedded-frame-shell:not([data-frame-has-content="true"])[data-frame-state="error"] > iframe {
     visibility: hidden;
 }
 
 .embedded-frame-shell[data-frame-state="loading"] > .embedded-frame-loading,
 .embedded-frame-shell[data-frame-state="error"] > .embedded-frame-loading {
+    display: block;
+}
+
+/* HTML 解析到 DOMContentLoaded 之前也给刷新目标一个稳定首帧。 */
+.embedded-frame-shell[data-frame-state="loading"] > .embedded-frame-loading:not([data-hydrated="true"]) {
     display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.embedded-frame-shell[data-frame-state="error"] > .embedded-frame-loading {
+.embedded-frame-skeleton {
+    display: grid;
+    height: 100%;
+    grid-template-rows: 46px minmax(76px, 0.34fr) minmax(150px, 1fr);
+    gap: 14px;
+    opacity: 0.78;
+}
+
+.embedded-frame-skeleton-bar,
+.embedded-frame-skeleton-card,
+.embedded-frame-skeleton-panel {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--light-bg);
+}
+
+.embedded-frame-skeleton-bar {
+    max-width: 520px;
+}
+
+.embedded-frame-skeleton-cards,
+.embedded-frame-skeleton-panels {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.embedded-frame-skeleton-panels {
+    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.6fr);
+}
+
+.embedded-frame-skeleton-bar::after,
+.embedded-frame-skeleton-card::after,
+.embedded-frame-skeleton-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.12), transparent);
+    animation: embedded-frame-skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes embedded-frame-skeleton-shimmer {
+    to { transform: translateX(100%); }
+}
+
+.embedded-frame-loading-chip {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    left: 50%;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 32px);
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--card-bg) 94%, transparent);
+    box-shadow: var(--shadow-sm);
+    transform: translate(-50%, -50%);
+}
+
+.embedded-frame-loading-spinner {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    border: 2px solid color-mix(in srgb, var(--primary-color) 24%, transparent);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: embedded-frame-loading-spin 0.8s linear infinite;
+}
+
+@keyframes embedded-frame-loading-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 重载时保留上一帧可用内容，只显示不拦截操作的轻量状态角标。 */
+.embedded-frame-shell[data-frame-has-content="true"] > .embedded-frame-loading {
+    inset: 0;
+    padding: 0;
+    background: transparent;
+}
+
+.embedded-frame-shell[data-frame-has-content="true"] .embedded-frame-skeleton {
+    display: none;
+}
+
+.embedded-frame-shell[data-frame-has-content="true"] .embedded-frame-loading-chip {
+    top: 12px;
+    right: 12px;
+    left: auto;
+    transform: none;
+}
+
+.embedded-frame-shell[data-frame-state="error"] .embedded-frame-loading-chip {
     color: var(--danger-color);
+    border-color: color-mix(in srgb, var(--danger-color) 45%, var(--border-color));
 }
 
-#page-architecture .embedded-frame-loading {
-    color: #94a3b8;
-    background: #020617;
+.embedded-frame-shell[data-frame-state="error"] .embedded-frame-loading-spinner {
+    display: none;
+}
+
+@media (max-width: 760px) {
+    .embedded-frame-skeleton-cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .embedded-frame-skeleton-panels {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .embedded-frame-skeleton-bar::after,
+    .embedded-frame-skeleton-card::after,
+    .embedded-frame-skeleton-panel::after,
+    .embedded-frame-loading-spinner {
+        animation: none;
+    }
 }
 
 /* 除测试工作台外，仅统一标题下方的内容外框；左上角标题保持在框外。 */

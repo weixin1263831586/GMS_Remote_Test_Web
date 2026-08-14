@@ -15,6 +15,7 @@ let selectedClusterJob=null;
 let selectedClusterReport=null;
 let applyingClusterWorkspace=false;
 let refreshPromise=null;
+let clusterRefreshInterval=null;
 let toastTimer=null;
 const clusterModalStack=[];
 function syncClusterModalState(){
@@ -631,8 +632,15 @@ if(typeof ResizeObserver!=='undefined'){
  dashResizeObserver=new ResizeObserver(scheduleDashboardChartsResize);
  const dashboard=document.querySelector('#dashboard');if(dashboard)dashResizeObserver.observe(dashboard);
 }
-// DOM 中的固定骨架已经完整解析，立即通知父页面；父页面会再等待两个
-// animation frame 后揭示，因此即使 iframe 当前 visibility:hidden 也不会
-// 因浏览器暂停其 rAF 而卡在“正在加载主机集群”。
+// 保底通知：page.html 中已在前置 <script> 尽早调用 markReady()，
+// 这里重复调用是幂等的（surfaceReadySent 守卫），确保万无一失。
 window.GmsEmbeddedWorkspace?.markReady();
-refresh();setInterval(()=>refresh(),10000);
+function syncClusterAutoRefresh(event){
+ const visible=event?.detail?.visible??window.GmsEmbeddedWorkspace?.isVisible?.()??true;
+ if(clusterRefreshInterval){clearInterval(clusterRefreshInterval);clusterRefreshInterval=null}
+ if(!visible)return;
+ refresh();
+ clusterRefreshInterval=setInterval(()=>refresh(),10000);
+}
+window.addEventListener('gms:embedded-visibility',syncClusterAutoRefresh);
+syncClusterAutoRefresh();

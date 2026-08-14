@@ -24,6 +24,7 @@ async function uploadFileInChunks(file, url, options = {}) {
         concurrent = 8, // 并发上传数 (增加并发)
         resume = false, // 是否支持断点续传
         uploadId: providedUploadId = '',
+        contentFingerprint = '',
         extraFormData = null,
         headers = null,
         checkExisting = false
@@ -86,6 +87,7 @@ async function uploadFileInChunks(file, url, options = {}) {
         formData.append('file_name', file.name);
         formData.append('file_size', fileSize);
         formData.append('chunk_size', chunkSize);
+        if (contentFingerprint) formData.append('content_fingerprint', contentFingerprint);
         appendExtraFields(formData);
 
         return new Promise((resolve, reject) => {
@@ -134,6 +136,7 @@ async function uploadFileInChunks(file, url, options = {}) {
         formData.append('file_name', file.name);
         formData.append('file_size', fileSize);
         formData.append('chunk_size', chunkSize);
+        if (contentFingerprint) formData.append('content_fingerprint', contentFingerprint);
         formData.append('resume', resume ? '1' : '0');
         appendExtraFields(formData);
 

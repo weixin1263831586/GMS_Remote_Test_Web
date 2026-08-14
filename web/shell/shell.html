@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260812-notification-dismiss">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260813-stable-frame-refresh">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
-    <script src="/static/js/chunk-upload.js?v=20260813-staged-firmware" defer></script>
+    <script src="/static/js/chunk-upload.js?v=20260813-firmware-content-id" defer></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260727-skill-install-action" defer></script>
     <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
@@ -16,7 +16,7 @@
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/state.js?v=20260718-anonymous-auth" defer></script>
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
-    <script src="/static/js/workspace-context.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/workspace-context.js?v=20260813-frame-visibility" defer></script>
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
@@ -25,10 +25,10 @@
     <script src="/static/js/notifications.js?v=20260812-click-dismiss" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
     <script src="/static/js/pages/test-suite-browser.js?v=20260812-stable-surfaces" defer></script>
-    <script src="/static/js/pages/firmware-burn.js?v=20260813-staged-firmware" defer></script>
+    <script src="/static/js/pages/firmware-burn.js?v=20260813-firmware-content-id" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/vpn-control.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/file-browser.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/file-browser.js?v=20260813-firmware-content-id" defer></script>
     <script src="/static/js/pages/test-control.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20260813-upload-generation" defer></script>
@@ -182,6 +182,16 @@
                 }).join('') : '');
             document.head.appendChild(style);
         })();
+
+        // 提前在 DOMContentLoaded 触发懒加载 iframe，无需等到 window load。
+        // 这样 iframe 的网络请求与剩余资源加载重叠，大幅缩短用户看到的
+        // "正在加载主机集群" 等遮罩持续时间。
+        document.addEventListener('DOMContentLoaded', function() {
+            var earlyPage = window.__targetPage || 'test';
+            if (typeof ensureLazyFrameLoaded === 'function') {
+                ensureLazyFrameLoaded(earlyPage, false);
+            }
+        }, {once: true});
     </script>
     <style>
         .btn-xs { padding: 4px 10px; font-size: 11px; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-primary); cursor: pointer; transition: all 0.2s; font-weight: 500; }
@@ -1784,7 +1794,7 @@
                 <div class="section-title" style="margin: 0;">🎓 GMS助手</div>
                 <button class="btn-xxs" type="button" onclick="showGmsAssistantConfig()" style="position: absolute; top: -4px; right: 0;">助手配置</button>
             </div>
-            <div class="embedded-frame-shell" data-frame-state="idle">
+            <div class="embedded-frame-shell" data-frame-state="loading">
                 <div class="embedded-frame-loading" role="status">正在加载 GMS助手...</div>
                 <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
                         style="border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg);">
@@ -1795,7 +1805,7 @@
         <!-- GMS ATS页面 -->
         <div class="container page-content" id="page-automation">
             <div class="section-title" style="text-transform:none">⚙️ GMS ATS</div>
-            <div class="embedded-frame-shell" data-frame-state="idle">
+            <div class="embedded-frame-shell" data-frame-state="loading">
                 <div class="embedded-frame-loading" role="status">正在加载 GMS ATS...</div>
                 <iframe id="automation-frame" data-src="/automation" data-wait-for-ready="true"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
@@ -1806,9 +1816,9 @@
         <!-- 主机集群页面 -->
         <div class="container page-content" id="page-cluster">
             <div class="section-title" style="text-transform:none">🖧 主机集群</div>
-            <div class="embedded-frame-shell" data-frame-state="idle">
+            <div class="embedded-frame-shell" data-frame-state="loading">
                 <div class="embedded-frame-loading" role="status">正在加载主机集群...</div>
-                <iframe id="cluster-frame" data-src="/cluster" data-wait-for-ready="true"
+                <iframe id="cluster-frame" data-src="/cluster"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
                 </iframe>
             </div>
@@ -1817,7 +1827,7 @@
         <!-- RedmineAgent页面 -->
         <div class="container page-content" id="page-redmine-agent">
             <div class="section-title" style="text-transform:none">🧭 Redmine</div>
-            <div class="embedded-frame-shell" data-frame-state="idle">
+            <div class="embedded-frame-shell" data-frame-state="loading">
                 <div class="embedded-frame-loading" role="status">正在加载 Redmine...</div>
                 <iframe id="redmine-agent-frame" data-src="/redmine-agent" data-wait-for-ready="true"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
@@ -1828,7 +1838,7 @@
         <!-- Gerrit看板页面 -->
         <div class="container page-content" id="page-gerrit-dashboard">
             <div class="section-title" style="text-transform:none">🔀 Gerrit看板</div>
-            <div class="embedded-frame-shell" data-frame-state="idle">
+            <div class="embedded-frame-shell" data-frame-state="loading">
                 <div class="embedded-frame-loading" role="status">正在加载 Gerrit看板...</div>
                 <iframe id="gerrit-dashboard-frame" data-src="/gerrit-dashboard" data-wait-for-ready="true"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
@@ -2095,7 +2105,7 @@
         <!-- 系统架构页面 -->
         <div class="container page-content" id="page-architecture">
             <div class="section-title">🏗️ 系统架构</div>
-            <div class="architecture-container embedded-frame-shell" data-frame-state="idle">
+            <div class="architecture-container embedded-frame-shell" data-frame-state="loading">
                 <div class="embedded-frame-loading" role="status">正在加载系统架构...</div>
                 <iframe data-src="/templates/architecture.html"
                         frameborder="0" scrolling="yes" id="architecture-iframe"></iframe>
@@ -4330,7 +4340,7 @@
         function startUsersAutoRefresh() {
             if (usersRefreshInterval) return;
             usersRefreshInterval = setInterval(() => {
-                if (currentPage === 'users') {
+                if (currentPage === 'users' && !document.hidden) {
                     loadUsersList();
                 }
             }, 10000);
@@ -4484,6 +4494,11 @@
         let devicesManagementClusterMode = false;
         let allDevices = [];  // 存储所有设备数据用于排序
         let currentSort = { field: null, direction: 'asc' };
+
+        function stopDevicesAutoRefresh() {
+            if (devicesRefreshInterval) clearInterval(devicesRefreshInterval);
+            devicesRefreshInterval = null;
+        }
 
         function requestedDevicesManagementScope() {
             return window.GmsWorkspace?.get?.().scope_mode === 'cluster'
@@ -4662,9 +4677,9 @@
                 }
 
                 // 启动自动刷新（每10秒）
-                if (!devicesRefreshInterval) {
+                if (currentPage === 'devices' && !devicesRefreshInterval) {
                     devicesRefreshInterval = setInterval(() => {
-                        if (currentPage === 'devices') {
+                        if (currentPage === 'devices' && !document.hidden) {
                             loadDevicesManagement();
                         }
                     }, 10000);
@@ -6972,6 +6987,56 @@
             }
         }
 
+        function prepareLazyFrameLoadingSurface(frame) {
+            const shell = frame?.closest('.embedded-frame-shell');
+            const status = shell?.querySelector('.embedded-frame-loading');
+            if (!status) return null;
+            if (!status.dataset.loadingText) {
+                status.dataset.loadingText = status.textContent.trim() || '正在加载...';
+            }
+            if (status.dataset.hydrated === 'true') return status;
+
+            const skeleton = document.createElement('div');
+            skeleton.className = 'embedded-frame-skeleton';
+            skeleton.setAttribute('aria-hidden', 'true');
+
+            const bar = document.createElement('div');
+            bar.className = 'embedded-frame-skeleton-bar';
+            const cards = document.createElement('div');
+            cards.className = 'embedded-frame-skeleton-cards';
+            for (let index = 0; index < 4; index += 1) {
+                const card = document.createElement('div');
+                card.className = 'embedded-frame-skeleton-card';
+                cards.appendChild(card);
+            }
+            const panels = document.createElement('div');
+            panels.className = 'embedded-frame-skeleton-panels';
+            for (let index = 0; index < 2; index += 1) {
+                const panel = document.createElement('div');
+                panel.className = 'embedded-frame-skeleton-panel';
+                panels.appendChild(panel);
+            }
+            skeleton.append(bar, cards, panels);
+
+            const chip = document.createElement('span');
+            chip.className = 'embedded-frame-loading-chip';
+            const spinner = document.createElement('span');
+            spinner.className = 'embedded-frame-loading-spinner';
+            spinner.setAttribute('aria-hidden', 'true');
+            const text = document.createElement('span');
+            text.className = 'embedded-frame-loading-text';
+            chip.append(spinner, text);
+            status.replaceChildren(skeleton, chip);
+            status.dataset.hydrated = 'true';
+            return status;
+        }
+
+        function setLazyFrameStatus(frame, message) {
+            const status = prepareLazyFrameLoadingSurface(frame);
+            const text = status?.querySelector('.embedded-frame-loading-text');
+            if (text) text.textContent = message;
+        }
+
         function revealLazyFrame(frame, deferUntilPaint = true) {
             const shell = frame?.closest('.embedded-frame-shell');
             if (!shell || shell.dataset.frameState !== 'loading') return;
@@ -6980,7 +7045,10 @@
                 frame.__surfaceReadyFallbackTimer = null;
             }
             const reveal = () => {
-                if (shell.dataset.frameState === 'loading') shell.dataset.frameState = 'ready';
+                if (shell.dataset.frameState === 'loading') {
+                    shell.dataset.frameHasContent = 'true';
+                    shell.dataset.frameState = 'ready';
+                }
             };
             if (deferUntilPaint) requestAnimationFrame(() => requestAnimationFrame(reveal));
             else reveal();
@@ -7008,7 +7076,7 @@
                     // 超时只是容错，避免子页异常时永久遮挡诊断信息。
                     frame.__surfaceReadyFallbackTimer = setTimeout(
                         () => markLazyFrameReady(frame),
-                        5000
+                        2500
                     );
                     return;
                 }
@@ -7021,8 +7089,7 @@
                 if (!shell) return;
                 if (frame.__surfaceReadyFallbackTimer) clearTimeout(frame.__surfaceReadyFallbackTimer);
                 shell.dataset.frameState = 'error';
-                const status = shell.querySelector('.embedded-frame-loading');
-                if (status) status.textContent = '页面加载失败，请稍后重试';
+                setLazyFrameStatus(frame, '页面加载失败，请稍后重试');
             });
         }
 
@@ -7031,11 +7098,8 @@
             bindLazyFrameState(frame);
             const shell = frame.closest('.embedded-frame-shell');
             if (shell) {
-                const status = shell.querySelector('.embedded-frame-loading');
-                if (status && !status.dataset.loadingText) {
-                    status.dataset.loadingText = status.textContent;
-                }
-                if (status) status.textContent = status.dataset.loadingText || '正在加载...';
+                const status = prepareLazyFrameLoadingSurface(frame);
+                setLazyFrameStatus(frame, status?.dataset.loadingText || '正在加载...');
                 shell.dataset.frameState = 'loading';
             }
             if (frame.__surfaceReadyFallbackTimer) clearTimeout(frame.__surfaceReadyFallbackTimer);
@@ -7069,13 +7133,17 @@
             // 首次加载：iframe 没有 src，从 data-src 加载
             if (!hasSrc) {
                 setLazyFrameSource(frame, dataSrc);
+                frame.dataset.lazyLoadedAt = String(Date.now());
                 return;
             }
 
             // F5 刷新后：iframe 有 src 但内容可能空白。
             // 只有 forceReload=true 时才强制重新加载（避免页面切换时不必要的重载）。
-            // 直接覆盖 src 触发重载，不先移除 src，避免中间空白帧闪烁。
+            // 如果 iframe 在 10 秒内刚被加载过（例如 DOMContentLoaded 提前触发），
+            // 跳过重复重载，避免用户看到二次"正在加载"遮罩。
             if (forceReload) {
+                const loadedAt = Number(frame.dataset.lazyLoadedAt || 0);
+                if (loadedAt && Date.now() - loadedAt < 10000) return;
                 const currentSrc = frame.getAttribute('src');
                 if (currentSrc) setLazyFrameSource(frame, currentSrc);
             }
@@ -7184,9 +7252,13 @@
             }
             if (pageName === 'devices') {
                 loadDevicesManagement();
+            } else {
+                stopDevicesAutoRefresh();
             }
             if (pageName === 'reports') {
                 loadTestReports(typeof currentUserFilter !== 'undefined' ? currentUserFilter : false);
+            } else if (typeof cleanupReportsPolling === 'function') {
+                cleanupReportsPolling();
             }
             if (pageName === 'api-docs') {
                 loadApiDocs();
@@ -7252,6 +7324,7 @@
             // 显示目标页面
             pageEl.classList.add('active');
             ensureLazyFrameLoaded(pageName);
+            window.GmsWorkspace?.setActivePage(pageName);
             window.GmsWorkspace?.update({origin_page: pageName}, {source: 'navigation'});
             window.GmsWorkspace?.postToFrame(pageName);
             if (document.readyState !== 'complete') {
@@ -11353,6 +11426,7 @@
 
             // 刷新恢复页面时显式加载懒加载 iframe。
             ensureLazyFrameLoaded(targetPage, true);
+            window.GmsWorkspace?.setActivePage(targetPage);
 
             currentPage = targetPage;
 

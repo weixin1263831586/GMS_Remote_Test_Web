@@ -2600,20 +2600,13 @@ redmineInitialLoad.catch(function() {}).finally(function() {
   window.GmsEmbeddedWorkspace && window.GmsEmbeddedWorkspace.markReady();
 });
 
-// 页面加载时恢复正在运行任务的按钮状态。
-(async function() {
-  try {
-    const status = await api('/api/redmine-agent/status');
-    if (!status.running) {
-      var btn = document.getElementById('scanBtn');
-      if (btn) { btn.disabled = false; btn.textContent = '🔍 扫描'; }
-    }
-  } catch(_) {}
-})();
-
-// Auto-refresh status
-setInterval(async () => {
-  try {
+// Auto-refresh status. Hidden iframe pages do not need to keep polling.
+var redmineStatusRefreshInterval = null;
+var redmineStatusRefreshPromise = null;
+function refreshRedmineAgentStatus() {
+  if (redmineStatusRefreshPromise) return redmineStatusRefreshPromise;
+  redmineStatusRefreshPromise = (async function() {
+   try {
     const status = await api('/api/redmine-agent/status');
     var btn = document.getElementById('scanBtn');
     if (status.running) {
@@ -2622,5 +2615,24 @@ setInterval(async () => {
       document.title = '🔧 RedmineAgent';
       if (btn && btn.disabled) { btn.disabled = false; btn.textContent = '🔍 扫描'; }
     }
-  } catch (_) {}
-}, 10000);
+   } catch (_) {}
+  })().finally(function() { redmineStatusRefreshPromise = null; });
+  return redmineStatusRefreshPromise;
+}
+function syncRedmineStatusRefresh(event) {
+  var visible = event && event.detail && event.detail.visible;
+  if (visible === undefined) {
+    visible = window.GmsEmbeddedWorkspace && window.GmsEmbeddedWorkspace.isVisible
+      ? window.GmsEmbeddedWorkspace.isVisible()
+      : true;
+  }
+  if (redmineStatusRefreshInterval) {
+    clearInterval(redmineStatusRefreshInterval);
+    redmineStatusRefreshInterval = null;
+  }
+  if (!visible) return;
+  refreshRedmineAgentStatus();
+  redmineStatusRefreshInterval = setInterval(refreshRedmineAgentStatus, 10000);
+}
+window.addEventListener('gms:embedded-visibility', syncRedmineStatusRefresh);
+syncRedmineStatusRefresh();

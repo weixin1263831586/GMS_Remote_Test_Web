@@ -103,27 +103,61 @@ async function handleUploadFile() {
 /**
  * 保存固件上传状态到 sessionStorage
  */
-function getFirmwareUploadId(file) {
-    const raw = `${state.clientId || 'client'}:${file.name}:${file.size}:${file.lastModified || 0}`;
-    return 'fw-' + btoa(unescape(encodeURIComponent(raw))).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 96);
+async function getFirmwareUploadFingerprint(file) {
+    const sampleSize = 64 * 1024;
+    const offsets = [
+        0,
+        Math.max(0, Math.floor((file.size - sampleSize) / 2)),
+        Math.max(0, file.size - sampleSize),
+    ];
+    const samples = await Promise.all(
+        offsets.map(offset => file.slice(offset, Math.min(file.size, offset + sampleSize)).arrayBuffer())
+    );
+    const metadata = new TextEncoder().encode(
+        `${file.name}\0${file.size}\0${file.lastModified || 0}\0`
+    );
+    const totalLength = metadata.byteLength + samples.reduce((sum, sample) => sum + sample.byteLength, 0);
+    const input = new Uint8Array(totalLength);
+    input.set(metadata, 0);
+    let cursor = metadata.byteLength;
+    for (const sample of samples) {
+        input.set(new Uint8Array(sample), cursor);
+        cursor += sample.byteLength;
+    }
+    const digest = await crypto.subtle.digest('SHA-256', input);
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function getReusableFirmwareUploadId(file) {
+async function getFirmwareUploadId(file) {
+    const fingerprint = await getFirmwareUploadFingerprint(file);
+    return {uploadId: `fw-v2-${fingerprint}`, fingerprint};
+}
+
+async function getReusableFirmwareUploadId(file) {
+    const fingerprint = await getFirmwareUploadFingerprint(file);
     const savedName = sessionStorage.getItem('firmwareUploadFileName');
     const savedSize = parseInt(sessionStorage.getItem('firmwareUploadFileSize') || '0');
     const savedLastModified = parseInt(sessionStorage.getItem('firmwareUploadLastModified') || '-1');
+    const savedFingerprint = sessionStorage.getItem('firmwareUploadFingerprint') || '';
     const savedId = sessionStorage.getItem('firmwareUploadId');
-    if (savedId && savedName === file.name && savedSize === file.size && savedLastModified === (file.lastModified || 0)) {
-        return savedId;
+    if (
+        savedId
+        && savedName === file.name
+        && savedSize === file.size
+        && savedLastModified === (file.lastModified || 0)
+        && savedFingerprint === fingerprint
+    ) {
+        return {uploadId: savedId, fingerprint};
     }
-    return getFirmwareUploadId(file);
+    return {uploadId: `fw-v2-${fingerprint}`, fingerprint};
 }
 
-function saveFirmwareUploadState(fileName, fileSize, startTime, progress = 0, uploadedSize = 0, totalSize = 0, uploadId = '', lastModified = 0) {
+function saveFirmwareUploadState(fileName, fileSize, startTime, progress = 0, uploadedSize = 0, totalSize = 0, uploadId = '', lastModified = 0, fingerprint = '') {
     sessionStorage.setItem('firmwareUploadInProgress', 'true');
     sessionStorage.setItem('firmwareUploadFileName', fileName);
     sessionStorage.setItem('firmwareUploadFileSize', fileSize);
     sessionStorage.setItem('firmwareUploadLastModified', String(lastModified || 0));
+    sessionStorage.setItem('firmwareUploadFingerprint', fingerprint || '');
     sessionStorage.setItem('firmwareUploadStartTime', startTime.toString());
     if (uploadId) {
         sessionStorage.setItem('firmwareUploadId', uploadId);
@@ -145,6 +179,7 @@ function clearFirmwareUploadState() {
     sessionStorage.removeItem('firmwareUploadFileName');
     sessionStorage.removeItem('firmwareUploadFileSize');
     sessionStorage.removeItem('firmwareUploadLastModified');
+    sessionStorage.removeItem('firmwareUploadFingerprint');
     sessionStorage.removeItem('firmwareUploadStartTime');
     sessionStorage.removeItem('firmwareUploadProgress');
     sessionStorage.removeItem('firmwareUploadedSize');

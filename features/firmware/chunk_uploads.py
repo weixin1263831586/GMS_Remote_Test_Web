@@ -26,7 +26,7 @@ MAX_FIRMWARE_UPLOAD_BYTES = 32 * 1024 * 1024 * 1024
 MAX_FIRMWARE_CHUNK_BYTES = 128 * 1024 * 1024
 MAX_FIRMWARE_CHUNKS = 10_000
 MERGE_LOCK_STALE_SECONDS = 60 * 60
-STAGED_FILENAME = "merged_firmware.bin"
+LEGACY_STAGED_FILENAME = "merged_firmware.bin"
 
 
 def safe_upload_token(value: str) -> str:
@@ -93,6 +93,7 @@ def _validate_metadata(
     file_name: str,
     total_chunks: int,
     file_size: int,
+    content_fingerprint: str = "",
 ) -> str | None:
     if total_chunks <= 0 or total_chunks > MAX_FIRMWARE_CHUNKS:
         return f"total_chunks must be between 1 and {MAX_FIRMWARE_CHUNKS}"
@@ -103,6 +104,8 @@ def _validate_metadata(
         "total_chunks": total_chunks,
         "file_size": file_size,
     }
+    if content_fingerprint:
+        metadata["content_fingerprint"] = content_fingerprint
     path = _metadata_path(session_dir)
     try:
         existing = _read_metadata(session_dir) if os.path.exists(path) else None
@@ -130,6 +133,14 @@ def _chunk_paths(session_dir: str, total_chunks: int) -> list[str]:
     return [os.path.join(session_dir, f"chunk_{idx:05d}") for idx in range(total_chunks)]
 
 
+def _staged_path(session_dir: str, file_name: str) -> str:
+    # Rockchip upgrade_tool uses the filename extension to distinguish a
+    # complete update image from a standalone Loader. Keep the source
+    # extension instead of publishing every merged upload as a .bin file.
+    staged_name = f"staged-{os.path.basename(file_name)}"
+    return safe_upload_target_path(session_dir, staged_name, allow_nested=False)
+
+
 def load_staged_upload(root: str, client_id: str, upload_id: str) -> tuple[dict | None, str | None]:
     if not str(upload_id or "").strip():
         return None, "upload_id is required"
@@ -138,11 +149,23 @@ def load_staged_upload(root: str, client_id: str, upload_id: str) -> tuple[dict 
     if not metadata:
         return None, "Firmware upload session was not found"
     try:
-        staged_path = safe_upload_target_path(session_dir, STAGED_FILENAME, allow_nested=False)
         expected_size = int(metadata["file_size"])
         file_name = os.path.basename(str(metadata["file_name"]))
+        staged_path = _staged_path(session_dir, file_name)
+        legacy_path = safe_upload_target_path(
+            session_dir,
+            LEGACY_STAGED_FILENAME,
+            allow_nested=False,
+        )
     except (KeyError, TypeError, ValueError):
         return None, "Firmware upload session metadata is invalid"
+    if file_name and not os.path.isfile(staged_path) and os.path.isfile(legacy_path):
+        # Migrate durable uploads created by the regression without copying or
+        # requiring the browser to upload multi-gigabyte firmware again.
+        try:
+            os.replace(legacy_path, staged_path)
+        except OSError:
+            return None, "Failed to migrate staged firmware filename"
     if not file_name or not os.path.isfile(staged_path):
         return None, "Firmware upload is not staged"
     if os.path.getsize(staged_path) != expected_size:
@@ -231,11 +254,15 @@ async def handle_chunk_upload(form, client_id: str, root: str, global_state, max
     total_chunks, file_size, chunk_size, shape_error = _parse_chunk_shape(form)
     if shape_error:
         return error_response(shape_error, 400), None
+    content_fingerprint = str(form.get("content_fingerprint") or "").strip().lower()
+    if content_fingerprint and not re.fullmatch(r"[0-9a-f]{64}", content_fingerprint):
+        return error_response("Invalid content_fingerprint", 400), None
     metadata_error = _validate_metadata(
         session_dir,
         file_name=file_name,
         total_chunks=total_chunks,
         file_size=file_size,
+        content_fingerprint=content_fingerprint,
     )
     if metadata_error:
         return error_response(metadata_error, 400), None
@@ -325,7 +352,7 @@ async def handle_chunk_upload(form, client_id: str, root: str, global_state, max
             "progress": 100, "upload_id": upload_id,
         }), None
 
-    merged_path = safe_upload_target_path(session_dir, STAGED_FILENAME, allow_nested=False)
+    merged_path = _staged_path(session_dir, file_name)
     merge_temp = f"{merged_path}.{threading.get_ident()}.merge"
     try:
         await asyncio.to_thread(merge_files_to_path, chunk_paths, merge_temp)

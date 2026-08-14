@@ -17,6 +17,11 @@ from foundation.responses import error_response, success_response
 from foundation.uploads import upload_temp_root
 
 from . import chunk_uploads, runtime
+from .firmware_validation import (
+    FirmwareValidationResult,
+    validate_local_update_image,
+    validate_remote_update_image,
+)
 from .gsi_diagnostics import diagnose_gsi_burn_failure
 from .gsi_transport import prepare_gsi_command, upload_gsi_assets
 from .models import SNBurnRequest
@@ -118,6 +123,33 @@ async def _lock_devices(request: Request, client_id: str, devices: list, error_p
         devices=devices,
         error_prefix=error_prefix,
     )
+
+
+async def _reject_invalid_firmware(
+    client_id: str,
+    locked_devices: list[str],
+    devices: list[str],
+    firmware_name: str,
+    validation: FirmwareValidationResult,
+):
+    if client_id in runtime.global_state.websocket_connections:
+        with contextlib.suppress(Exception):
+            await runtime.safe_websocket_send(client_id, {
+                "type": "log_update",
+                "log": validation.message,
+                "log_type": "error",
+            })
+    if runtime.store_notification:
+        runtime.store_notification(
+            client_id,
+            "Firmware validation failed",
+            validation.message[:300],
+            "error",
+            "firmware",
+            {"devices": devices, "firmware": firmware_name, "stage": "preflight"},
+        )
+    await runtime.release_firmware_devices(client_id, locked_devices)
+    return error_response(validation.message, status_code=422)
 
 
 def _partition_devices_by_flash_state(
@@ -268,6 +300,28 @@ async def burn_firmware(
             await runtime.release_firmware_devices(client_id, locked_devices)
             return error_response("Please upload a firmware file or provide a firmware path")
 
+        local_tool = os.path.join(runtime.project_root, "tools", "upgrade_tool")
+        if not os.path.exists(local_tool):
+            await runtime.release_firmware_devices(client_id, locked_devices)
+            return error_response(f"upgrade_tool not found: {local_tool}")
+
+        # Staged browser uploads are local files, so reject malformed Rockchip
+        # update images before spending time on SCP or rebooting a device.
+        if merged_firmware:
+            local_validation = await asyncio.to_thread(
+                validate_local_update_image,
+                local_tool,
+                firmware_path,
+            )
+            if not local_validation.valid:
+                return await _reject_invalid_firmware(
+                    client_id,
+                    locked_devices,
+                    devices,
+                    merged_firmware["name"],
+                    local_validation,
+                )
+
         config = runtime.config_manager.load_config()
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
@@ -329,6 +383,20 @@ async def burn_firmware(
                         if file_size <= 0:
                             await runtime.release_firmware_devices(client_id, locked_devices)
                             return error_response("Firmware file is empty")
+                        if not merged_firmware:
+                            local_validation = await asyncio.to_thread(
+                                validate_local_update_image,
+                                local_tool,
+                                local_firmware_path,
+                            )
+                            if not local_validation.valid:
+                                return await _reject_invalid_firmware(
+                                    client_id,
+                                    locked_devices,
+                                    devices,
+                                    firmware_name,
+                                    local_validation,
+                                )
                         await _upload_firmware_to_test_host(
                             ssh,
                             client_id,
@@ -342,17 +410,32 @@ async def burn_firmware(
                 # Upload upgrade_tool only after the firmware source has been
                 # validated. Missing paths must not reboot devices into loader.
                 logger.info("[Firmware Burn] Uploading upgrade_tool...")
-                local_tool = os.path.join(runtime.project_root, "tools", "upgrade_tool")
-                remote_tool = os.path.join(gms_suite_dir, "upgrade_tool")
-
-                if not os.path.exists(local_tool):
-                    await runtime.release_firmware_devices(client_id, locked_devices)
-                    return error_response(f"upgrade_tool not found: {local_tool}")
+                # Use a private path so the platform does not overwrite a
+                # potentially newer operator-managed upgrade_tool.
+                remote_tool = os.path.join(gms_suite_dir, ".gms_upgrade_tool")
 
                 import scp
                 scp_client = scp.SCPClient(ssh.get_transport())
                 scp_client.put(local_tool, remote_tool)
                 scp_client.close()
+
+                # Validate the exact remote bytes that will be burned. This
+                # catches both invalid loader packages and transport damage.
+                remote_validation = await asyncio.to_thread(
+                    validate_remote_update_image,
+                    runtime.ssh_manager,
+                    ssh,
+                    remote_tool,
+                    remote_firmware,
+                )
+                if not remote_validation.valid:
+                    return await _reject_invalid_firmware(
+                        client_id,
+                        locked_devices,
+                        devices,
+                        firmware_name,
+                        remote_validation,
+                    )
 
                 # Enter Loader mode
                 for device in devices:
@@ -363,15 +446,16 @@ async def burn_firmware(
 
                 # Check Loader devices
                 quoted_suite_dir = shlex.quote(gms_suite_dir)
-                check_cmd = f"cd {quoted_suite_dir} && ./upgrade_tool ld"
+                quoted_remote_tool = shlex.quote(remote_tool)
+                check_cmd = f"cd {quoted_suite_dir} && {quoted_remote_tool} ld"
                 output, _, _ = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=5)
 
                 if "List of rockusb connected(0)" in output or "List of rockusb connected" not in output:
                     await runtime.release_firmware_devices(client_id, locked_devices)
-                    return error_response(f"No Loader devices detected. Output:\n{output}")
+                    return error_response(f"No Loader devices detected. Output:\n{output}", status_code=409)
 
                 # Burn firmware
-                burn_cmd = f"cd {quoted_suite_dir} && ./upgrade_tool uf {shlex.quote(remote_firmware)}"
+                burn_cmd = f"cd {quoted_suite_dir} && {quoted_remote_tool} uf {shlex.quote(remote_firmware)}"
 
                 if client_id in runtime.global_state.websocket_connections:
                     with contextlib.suppress(Exception):
@@ -453,7 +537,11 @@ async def burn_firmware(
 
                     runtime.store_notification(client_id, "Firmware burn failed", (error_output or "Burn failed")[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name, "exit_status": exit_status})
                     await runtime.release_firmware_devices(client_id, locked_devices)
-                    return error_response(error_output or "Firmware burn failed")
+                    clean_output = strip_ansi_codes(error_output).strip()
+                    burn_error_msg = f"Firmware burn failed (exit code: {exit_status})"
+                    if clean_output:
+                        burn_error_msg += f": {clean_output[:300]}"
+                    return error_response(burn_error_msg, status_code=422)
 
             except Exception as e:
                 await runtime.release_firmware_devices(client_id, locked_devices)

@@ -188,16 +188,16 @@ else
     echo $! > fastapi.pid
 fi
 
-# 健康检查（带重试，最多等待 15 秒）
+# 健康检查（带重试，最多等待 60 秒；清理 Python 缓存后冷启动可能超过 20 秒）
 echo -e "${BLUE}  进行健康检查...${NC}"
 HEALTH_OK=false
-for attempt in $(seq 1 5); do
+for attempt in $(seq 1 20); do
     sleep 3
-    if timeout 5 curl -sk -f "https://localhost:${PORT}/" >/dev/null 2>&1; then
+    if timeout 5 curl -sk -f "https://localhost:${PORT}/api/system/health/live" >/dev/null 2>&1; then
         HEALTH_OK=true
         break
     fi
-    echo -e "${BLUE}  等待服务就绪... (${attempt}/5)${NC}"
+    echo -e "${BLUE}  等待服务就绪... (${attempt}/20)${NC}"
 done
 
 if [[ "${HEALTH_OK}" == "true" ]]; then

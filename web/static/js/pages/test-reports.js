@@ -10,6 +10,7 @@ let reportsRequestGeneration = 0;
 let reportsHasLoaded = false;
 let reportsLastLoadedAt = 0;
 let reportsLastQueryKey = '';
+let reportsRefreshInFlight = false;
 const REPORTS_REENTRY_CACHE_MS = 10000;
 const reportsRequests = new Map();
 
@@ -193,11 +194,12 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
         renderReportsPagination();
 
         // 启动自动刷新（每15秒）带变更检测
-        if (!reportsRefreshInterval) {
+        if (currentPage === 'reports' && !reportsRefreshInterval) {
             let lastReportsHash = null;
 
             reportsRefreshInterval = setInterval(async () => {
-                if (currentPage === 'reports') {
+                if (currentPage === 'reports' && !document.hidden && !reportsRefreshInFlight) {
+                    reportsRefreshInFlight = true;
                     try {
                         if (reportsLoadedPages > 1) return;
                         const url = reportsListUrl(currentUserFilter);
@@ -219,6 +221,8 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
                         }
                     } catch (error) {
                         console.error('[Reports] Error refreshing reports:', error);
+                    } finally {
+                        reportsRefreshInFlight = false;
                     }
                 }
             }, REPORTS_REFRESH_INTERVAL);
