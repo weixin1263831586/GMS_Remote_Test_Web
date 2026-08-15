@@ -12,6 +12,37 @@ from features.firmware import runtime, shares_api
 
 
 class FirmwareShareHomeTests(unittest.TestCase):
+    def test_rejects_path_outside_allowed_prefixes(self):
+        config = {"firmware_shares": {"allowed_prefixes": ["/home/hcq/"]}}
+
+        with self.assertRaises(ValueError):
+            shares_api._validate_remote_path("/etc/passwd", config)
+
+    def test_parses_suffix_range(self):
+        self.assertEqual(
+            shares_api._parse_range("bytes=-100", 1000),
+            (900, 999, 100),
+        )
+
+    def test_credentials_use_password_fallback_for_exact_host(self):
+        creds = shares_api._host_credentials(
+            "10.10.10.206",
+            "hcq",
+            {"ubuntu_host": "10.10.10.206", "ubuntu_pswd": "rockchip"},
+        )
+
+        self.assertEqual(creds["username"], "hcq")
+        self.assertEqual(creds["password"], "rockchip")
+
+    def test_does_not_send_ubuntu_password_to_other_host(self):
+        creds = shares_api._host_credentials(
+            "attacker.invalid",
+            "hcq",
+            {"ubuntu_host": "10.10.10.206", "ubuntu_pswd": "rockchip"},
+        )
+
+        self.assertIsNone(creds["password"])
+
     def test_credentials_use_exact_host_scoped_password(self):
         manager = SimpleNamespace(
             find_device_host_password=lambda device_host, _config: (

@@ -244,3 +244,60 @@ async def test_local_usbip_partial_disconnect_preserves_sibling_assignment_and_s
     assert f"{device_host}|1-2" in runtime_config["usbip_cluster_assignments"]
     with global_state.usbip_states_lock:
         assert global_state.usbip_states[device_host] == previous_state
+
+
+def test_partial_disconnect_error_preserves_sibling_source_state():
+    import features.devices.integrations_api as integrations
+
+    device_host = "user@10.0.0.1"
+    previous_state = {
+        "connected": True,
+        "transport_connected": True,
+        "adb_ready": True,
+        "protocol_status": {"mode": "adb"},
+    }
+    global_state = SimpleNamespace(
+        usbip_states={device_host: dict(previous_state)},
+        usbip_states_lock=threading.RLock(),
+    )
+
+    with patch.object(integrations.runtime, "global_state", global_state):
+        integrations._mark_usbip_source_disconnected(
+            device_host,
+            has_remaining_assignments=True,
+        )
+
+    assert global_state.usbip_states[device_host] == previous_state
+
+
+def test_unconfirmed_remote_detach_leaves_assignment_retryable():
+    import features.devices.integrations_api as integrations
+
+    device_host = "user@10.0.0.1"
+    runtime_config = {
+        "usbip_cluster_assignments": {
+            f"{device_host}|1-1": {
+                "device_host": device_host,
+                "worker_id": "worker-1",
+                "busid": "1-1",
+                "status": "detaching",
+                "generation": 7,
+            },
+        },
+    }
+
+    class ConfigManager:
+        def get_runtime_config(self):
+            return dict(runtime_config)
+
+        def update_runtime_config(self, updates):
+            runtime_config.update(updates)
+            return True
+
+    with patch.object(integrations.runtime, "config_manager", ConfigManager()):
+        integrations._mark_usbip_detach_unknown(
+            device_host, ["1-1"], "worker-1", 7
+        )
+
+    assignment = runtime_config["usbip_cluster_assignments"][f"{device_host}|1-1"]
+    assert assignment["status"] == "unknown"

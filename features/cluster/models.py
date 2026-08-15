@@ -169,8 +169,8 @@ class ClusterSuiteExtract(BaseModel):
 
 
 class TransferComplete(BaseModel):
-    filename: str
-    size_bytes: int = Field(ge=0)
+    filename: str = Field(min_length=1, max_length=255)
+    size_bytes: int = Field(ge=1)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     chunk_count: int = Field(ge=1, le=100000)
 

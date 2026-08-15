@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import os
 import re
@@ -8,6 +9,7 @@ import shutil
 import tempfile
 import uuid
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -23,6 +25,7 @@ from .transfer_support import worker_device
 
 
 router = APIRouter()
+_TRANSFER_ID_RE = re.compile(r"^transfer-[a-f0-9]{32}$")
 
 
 def _transfer_helpers():
@@ -31,6 +34,40 @@ def _transfer_helpers():
     from . import transfers_api
 
     return transfers_api
+
+
+async def _read_limited_body(request: Request, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(413, "invalid transfer chunk size")
+        chunks.append(chunk)
+    body = b"".join(chunks)
+    if not body:
+        raise HTTPException(413, "invalid transfer chunk size")
+    return body
+
+
+@contextmanager
+def _locked_transfer_root(transfer_id: str):
+    if not _TRANSFER_ID_RE.fullmatch(str(transfer_id or "")):
+        raise HTTPException(404, "transfer not found")
+    transfer_root = _transfer_helpers()._transfer_root().resolve()
+    root = (transfer_root / transfer_id).resolve()
+    if not root.is_relative_to(transfer_root):
+        raise HTTPException(404, "transfer not found")
+    root.mkdir(parents=True, exist_ok=True)
+    lock_handle = (root / ".operation.lock").open("a+b")
+    try:
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise HTTPException(409, "transfer operation is already in progress") from exc
+        yield transfer_root, root
+    finally:
+        lock_handle.close()
 
 
 @router.post("/devices/export")
@@ -102,19 +139,40 @@ async def upload_transfer_chunk(
     transfer = service().repository.get_transfer(transfer_id)
     if not transfer or transfer["worker_id"] != worker_id:
         raise HTTPException(404, "transfer not found for worker")
-    if transfer["status"] not in {"created", "uploading"}:
-        raise HTTPException(409, "transfer no longer accepts chunks")
-    if index < 0 or index > 100000:
+    if index < 0 or index >= 100000:
         raise HTTPException(400, "invalid chunk index")
-    body = await request.body()
-    max_chunk = int(os.getenv("GMS_CLUSTER_TRANSFER_CHUNK_BYTES", str(8 * 1024 * 1024)))
-    if not body or len(body) > max_chunk:
-        raise HTTPException(413, "invalid transfer chunk size")
-    root = _transfer_helpers()._transfer_root()
-    chunk_dir = root / transfer_id / "chunks"
-    chunk_dir.mkdir(parents=True, exist_ok=True)
-    (chunk_dir / f"{index:08d}.part").write_bytes(body)
-    service().repository.update_transfer(transfer_id, status="uploading")
+    max_chunk = configured_max_bytes(
+        "GMS_CLUSTER_TRANSFER_CHUNK_BYTES",
+        8 * 1024 * 1024,
+    )
+    body = await _read_limited_body(request, max_chunk)
+    max_bytes = configured_max_bytes(
+        "GMS_CLUSTER_TRANSFER_MAX_BYTES",
+        service().config.transfer_max_bytes,
+    )
+    with _locked_transfer_root(transfer_id) as (_transfer_root, root):
+        transfer = service().repository.get_transfer(transfer_id)
+        if not transfer or transfer["worker_id"] != worker_id:
+            raise HTTPException(404, "transfer not found for worker")
+        if transfer["status"] not in {"created", "uploading"}:
+            raise HTTPException(409, "transfer no longer accepts chunks")
+        chunk_dir = root / "chunks"
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        chunk_path = chunk_dir / f"{index:08d}.part"
+        existing_size = sum(
+            path.stat().st_size
+            for path in chunk_dir.glob("*.part")
+            if path != chunk_path
+        )
+        if existing_size + len(body) > max_bytes:
+            raise HTTPException(413, "transfer is too large")
+        temporary = chunk_dir / f".{index:08d}.{uuid.uuid4().hex}.upload"
+        try:
+            temporary.write_bytes(body)
+            os.replace(temporary, chunk_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        service().repository.update_transfer(transfer_id, status="uploading")
     return {"success": True, "index": index, "size_bytes": len(body)}
 
 
@@ -126,50 +184,69 @@ def complete_transfer(
     authorization: str | None = Header(default=None),
 ):
     _authenticate(worker_id, authorization)
-    transfer = service().repository.get_transfer(transfer_id)
-    if not transfer or transfer["worker_id"] != worker_id:
-        raise HTTPException(404, "transfer not found for worker")
-    if transfer["status"] not in {"created", "uploading"}:
-        raise HTTPException(409, "transfer cannot be completed from its current state")
     max_bytes = configured_max_bytes(
         "GMS_CLUSTER_TRANSFER_MAX_BYTES", service().config.transfer_max_bytes
     )
     if body.size_bytes > max_bytes:
         raise HTTPException(413, "transfer is too large")
     safe_name = re.sub(r"[^A-Za-z0-9._+-]", "_", Path(body.filename).name)
-    if not safe_name:
+    if not safe_name or safe_name in {".", ".."}:
         raise HTTPException(400, "invalid transfer filename")
-    transfer_root = _transfer_helpers()._transfer_root()
-    root = transfer_root / transfer_id
-    chunks = [root / "chunks" / f"{index:08d}.part" for index in range(body.chunk_count)]
-    if not all(path.is_file() for path in chunks):
-        raise HTTPException(409, "transfer chunks are incomplete")
-    destination = root / safe_name
-    digest = hashlib.sha256()
-    total = 0
-    with destination.open("wb") as output:
-        for chunk in chunks:
-            data = chunk.read_bytes()
-            total += len(data)
-            if total > max_bytes:
-                destination.unlink(missing_ok=True)
-                raise HTTPException(413, "transfer is too large")
-            digest.update(data)
-            output.write(data)
-    if total != body.size_bytes or digest.hexdigest() != body.sha256:
-        destination.unlink(missing_ok=True)
-        raise HTTPException(409, "transfer checksum or size mismatch")
-    for chunk in chunks:
-        chunk.unlink(missing_ok=True)
-    transfer = service().repository.update_transfer(
-        transfer_id,
-        status="completed",
-        filename=safe_name,
-        relative_path=str(destination.relative_to(transfer_root)),
-        size_bytes=total,
-        sha256=body.sha256,
-        completed_at=utc_now(),
-    )
+    # Reject unknown transfers before acquiring the lock: _locked_transfer_root
+    # creates the transfer directory, and a well-formed but unknown id must not
+    # leave orphan storage behind.
+    transfer = service().repository.get_transfer(transfer_id)
+    if not transfer or transfer["worker_id"] != worker_id:
+        raise HTTPException(404, "transfer not found for worker")
+    with _locked_transfer_root(transfer_id) as (transfer_root, root):
+        transfer = service().repository.get_transfer(transfer_id)
+        if not transfer or transfer["worker_id"] != worker_id:
+            raise HTTPException(404, "transfer not found for worker")
+        if transfer["status"] == "completed":
+            if (
+                transfer.get("filename") == safe_name
+                and int(transfer.get("size_bytes") or 0) == body.size_bytes
+                and transfer.get("sha256") == body.sha256
+            ):
+                return {"success": True, "transfer": transfer}
+            raise HTTPException(409, "transfer completion does not match stored artifact")
+        if transfer["status"] not in {"created", "uploading"}:
+            raise HTTPException(409, "transfer cannot be completed from its current state")
+        chunk_dir = root / "chunks"
+        chunks = [chunk_dir / f"{index:08d}.part" for index in range(body.chunk_count)]
+        if set(chunk_dir.glob("*.part")) != set(chunks) or not all(
+            path.is_file() for path in chunks
+        ):
+            raise HTTPException(409, "transfer chunks are incomplete or inconsistent")
+        destination = root / safe_name
+        temporary = root / f".{safe_name}.{uuid.uuid4().hex}.merge"
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            with temporary.open("xb") as output:
+                for chunk in chunks:
+                    with chunk.open("rb") as source:
+                        while data := source.read(1024 * 1024):
+                            total += len(data)
+                            if total > max_bytes:
+                                raise HTTPException(413, "transfer is too large")
+                            digest.update(data)
+                            output.write(data)
+            if total != body.size_bytes or digest.hexdigest() != body.sha256:
+                raise HTTPException(409, "transfer checksum or size mismatch")
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        transfer = service().repository.update_transfer(
+            transfer_id,
+            status="completed",
+            filename=safe_name,
+            relative_path=str(destination.relative_to(transfer_root)),
+            size_bytes=total,
+            sha256=body.sha256,
+            completed_at=utc_now(),
+        )
+        shutil.rmtree(chunk_dir, ignore_errors=True)
     return {"success": True, "transfer": transfer}
 
 
