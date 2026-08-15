@@ -14,6 +14,7 @@ from features.devices import DeviceUtils, parse_adb_device_states
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
+from foundation.security import sanitize_device_ids
 from foundation.uploads import upload_temp_root
 
 from . import chunk_uploads, runtime
@@ -77,6 +78,17 @@ def _remote_join(base_dir: str, path: str) -> str:
     return f"{base_dir.rstrip('/')}/{path.lstrip('/')}"
 
 
+def _normalize_firmware_devices(values: list[str]) -> tuple[list[str], list[str]]:
+    requested = list(dict.fromkeys(
+        str(value or "").strip()
+        for value in values
+        if str(value or "").strip()
+    ))
+    devices = sanitize_device_ids(requested)
+    invalid = [value for value in requested if value not in devices]
+    return devices, invalid
+
+
 def _resolve_gsi_remote_image(ssh, gms_suite_dir: str, image_path: str, label: str) -> tuple[str | None, str | None]:
     image_path = str(image_path or "").strip()
     if not image_path:
@@ -127,7 +139,6 @@ async def _lock_devices(request: Request, client_id: str, devices: list, error_p
 
 async def _reject_invalid_firmware(
     client_id: str,
-    locked_devices: list[str],
     devices: list[str],
     firmware_name: str,
     validation: FirmwareValidationResult,
@@ -148,7 +159,6 @@ async def _reject_invalid_firmware(
             "firmware",
             {"devices": devices, "firmware": firmware_name, "stage": "preflight"},
         )
-    await runtime.release_firmware_devices(client_id, locked_devices)
     return error_response(validation.message, status_code=422)
 
 
@@ -245,6 +255,7 @@ async def burn_firmware(
     merged_firmware = None
     burn_lock_path = None
     burn_succeeded = False
+    locked_devices: list[str] = []
     try:
         client_id = runtime.get_client_id_from_request(request)
 
@@ -271,10 +282,14 @@ async def burn_firmware(
 
         devices_param = request.query_params.get("devices")
         if devices_param:
-            devices = devices_param.split(",")
+            raw_devices = devices_param.split(",")
         else:
             devices_str = form.get("devices")
-            devices = devices_str.split(",") if devices_str else []
+            raw_devices = devices_str.split(",") if devices_str else []
+
+        devices, invalid_devices = _normalize_firmware_devices(raw_devices)
+        if invalid_devices:
+            return error_response("Invalid device serial", status_code=400)
 
         if not devices:
             return error_response("No devices selected")
@@ -297,12 +312,10 @@ async def burn_firmware(
             firmware_path = merged_firmware["path"]
 
         if not firmware_file and not firmware_path:
-            await runtime.release_firmware_devices(client_id, locked_devices)
             return error_response("Please upload a firmware file or provide a firmware path")
 
         local_tool = os.path.join(runtime.project_root, "tools", "upgrade_tool")
         if not os.path.exists(local_tool):
-            await runtime.release_firmware_devices(client_id, locked_devices)
             return error_response(f"upgrade_tool not found: {local_tool}")
 
         # Staged browser uploads are local files, so reject malformed Rockchip
@@ -316,7 +329,6 @@ async def burn_firmware(
             if not local_validation.valid:
                 return await _reject_invalid_firmware(
                     client_id,
-                    locked_devices,
                     devices,
                     merged_firmware["name"],
                     local_validation,
@@ -325,7 +337,6 @@ async def burn_firmware(
         config = runtime.config_manager.load_config()
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
-                await runtime.release_firmware_devices(client_id, locked_devices)
                 return error_response("SSH connection failed")
 
             try:
@@ -333,7 +344,6 @@ async def burn_firmware(
                 if firmware_file:
                     firmware_name = os.path.basename(firmware_file.filename or "").strip()
                     if not firmware_name:
-                        await runtime.release_firmware_devices(client_id, locked_devices)
                         return error_response("Invalid firmware filename")
 
                     firmware_stream = firmware_file.file
@@ -342,11 +352,9 @@ async def burn_firmware(
                         firmware_size = firmware_stream.tell()
                         firmware_stream.seek(0)
                     except Exception as e:
-                        await runtime.release_firmware_devices(client_id, locked_devices)
                         return error_response(f"Failed to inspect firmware size: {e}")
 
                     if firmware_size <= 0:
-                        await runtime.release_firmware_devices(client_id, locked_devices)
                         return error_response("Uploaded firmware file is empty")
 
                     remote_firmware = os.path.join(gms_suite_dir, firmware_name)
@@ -366,7 +374,6 @@ async def burn_firmware(
                         elif os.path.exists(firmware_path):
                             local_firmware_path = firmware_path
                         else:
-                            await runtime.release_firmware_devices(client_id, locked_devices)
                             return error_response(f"Firmware not found: {firmware_path}")
                     elif os.path.exists(firmware_path):
                         local_firmware_path = firmware_path
@@ -375,13 +382,11 @@ async def burn_firmware(
                         if await asyncio.to_thread(_remote_file_exists, ssh, remote_candidate):
                             remote_firmware = remote_candidate
                         else:
-                            await runtime.release_firmware_devices(client_id, locked_devices)
                             return error_response(f"Firmware not found: {firmware_path}")
 
                     if local_firmware_path:
                         file_size = os.path.getsize(local_firmware_path)
                         if file_size <= 0:
-                            await runtime.release_firmware_devices(client_id, locked_devices)
                             return error_response("Firmware file is empty")
                         if not merged_firmware:
                             local_validation = await asyncio.to_thread(
@@ -392,7 +397,6 @@ async def burn_firmware(
                             if not local_validation.valid:
                                 return await _reject_invalid_firmware(
                                     client_id,
-                                    locked_devices,
                                     devices,
                                     firmware_name,
                                     local_validation,
@@ -431,7 +435,6 @@ async def burn_firmware(
                 if not remote_validation.valid:
                     return await _reject_invalid_firmware(
                         client_id,
-                        locked_devices,
                         devices,
                         firmware_name,
                         remote_validation,
@@ -439,7 +442,7 @@ async def burn_firmware(
 
                 # Enter Loader mode
                 for device in devices:
-                    cmd = f"adb -s {device} reboot loader"
+                    cmd = f"adb -s {shlex.quote(device)} reboot loader"
                     await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, cmd, timeout=5)
 
                 await asyncio.sleep(8)
@@ -451,7 +454,6 @@ async def burn_firmware(
                 output, _, _ = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=5)
 
                 if "List of rockusb connected(0)" in output or "List of rockusb connected" not in output:
-                    await runtime.release_firmware_devices(client_id, locked_devices)
                     return error_response(f"No Loader devices detected. Output:\n{output}", status_code=409)
 
                 # Burn firmware
@@ -517,8 +519,7 @@ async def burn_firmware(
                             await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Firmware burn complete!", "log_type": "success"})
 
                     runtime.store_notification(client_id, "Firmware burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "firmware": firmware_name})
-                    await runtime.release_firmware_devices(client_id, locked_devices)
-                    # 设备锁已释放，通知前端刷新 ADB 设备状态（避免界面仍显示锁定）
+                    # 通知前端刷新 ADB 设备状态；设备锁由 finally 统一释放。
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
                             await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": devices, "success": True})
@@ -536,7 +537,6 @@ async def burn_firmware(
                             pass
 
                     runtime.store_notification(client_id, "Firmware burn failed", (error_output or "Burn failed")[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name, "exit_status": exit_status})
-                    await runtime.release_firmware_devices(client_id, locked_devices)
                     clean_output = strip_ansi_codes(error_output).strip()
                     burn_error_msg = f"Firmware burn failed (exit code: {exit_status})"
                     if clean_output:
@@ -544,7 +544,6 @@ async def burn_firmware(
                     return error_response(burn_error_msg, status_code=422)
 
             except Exception as e:
-                await runtime.release_firmware_devices(client_id, locked_devices)
                 runtime.store_notification(client_id, "Firmware burn error", str(e)[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name if 'firmware_name' in dir() else ""})
                 return error_response(str(e))
 
@@ -563,6 +562,9 @@ async def burn_firmware(
         chunk_uploads.release_burn_lock(burn_lock_path)
         if burn_succeeded and merged_firmware:
             chunk_uploads.remove_staged_upload(merged_firmware)
+        if locked_devices and client_id:
+            with contextlib.suppress(Exception):
+                await runtime.release_firmware_devices(client_id, locked_devices)
 
 @router.post("/api/burn/gsi")
 async def burn_gsi(

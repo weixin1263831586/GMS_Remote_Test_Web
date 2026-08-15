@@ -2,10 +2,31 @@ import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from features.firmware.firmware_api import _normalize_firmware_devices
 from features.firmware.firmware_validation import (
     validate_local_update_image,
     validate_remote_update_image,
 )
+
+
+def test_firmware_device_ids_are_deduplicated_and_shell_safe():
+    devices, invalid = _normalize_firmware_devices([
+        " RK3576-1 ",
+        "RK3576-1",
+        "worker:SERIAL_2",
+    ])
+
+    assert devices == ["RK3576-1", "worker:SERIAL_2"]
+    assert invalid == []
+
+
+def test_firmware_device_ids_reject_shell_metacharacters():
+    devices, invalid = _normalize_firmware_devices([
+        "RK3576-1;touch /tmp/pwned",
+    ])
+
+    assert devices == []
+    assert invalid == ["RK3576-1;touch /tmp/pwned"]
 
 
 def test_local_preflight_reports_loader_hash_failure():

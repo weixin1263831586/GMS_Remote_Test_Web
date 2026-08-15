@@ -100,6 +100,147 @@ class ClusterApiHardeningTests(unittest.TestCase):
         )
         self.assertFalse(artifact_path.exists())
 
+    def test_transfer_upload_enforces_total_capacity_before_completion(self):
+        transfer = self.repo.create_transfer("worker-246", owner_id="admin-id")
+        endpoint = f"/api/cluster/transfers/{transfer['id']}/chunks"
+        with patch.dict(
+            "os.environ",
+            {
+                "GMS_CLUSTER_TRANSFER_CHUNK_BYTES": "4",
+                "GMS_CLUSTER_TRANSFER_MAX_BYTES": "4",
+            },
+        ):
+            first = self.client.put(
+                f"{endpoint}/0",
+                headers=self.worker_headers(),
+                content=b"1234",
+            )
+            oversized = self.client.put(
+                f"{endpoint}/1",
+                headers=self.worker_headers(),
+                content=b"5",
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(oversized.status_code, 413)
+        chunk_dir = self.repo.db_path.parent / "transfers" / transfer["id"] / "chunks"
+        self.assertEqual(
+            [path.name for path in chunk_dir.glob("*.part")],
+            ["00000000.part"],
+        )
+
+    def test_transfer_upload_rejects_oversized_chunk_before_staging(self):
+        transfer = self.repo.create_transfer("worker-246", owner_id="admin-id")
+        endpoint = f"/api/cluster/transfers/{transfer['id']}/chunks/0"
+        with patch.dict(
+            "os.environ", {"GMS_CLUSTER_TRANSFER_CHUNK_BYTES": "4"}
+        ):
+            response = self.client.put(
+                endpoint,
+                headers=self.worker_headers(),
+                content=b"12345",
+            )
+
+        self.assertEqual(response.status_code, 413)
+        chunk_dir = self.repo.db_path.parent / "transfers" / transfer["id"] / "chunks"
+        self.assertFalse(chunk_dir.exists())
+
+    def test_transfer_completion_rejects_unexpected_orphan_chunk(self):
+        transfer = self.repo.create_transfer("worker-246", owner_id="admin-id")
+        endpoint = f"/api/cluster/transfers/{transfer['id']}"
+        for index, content in enumerate((b"one", b"orphan")):
+            response = self.client.put(
+                f"{endpoint}/chunks/{index}",
+                headers=self.worker_headers(),
+                content=content,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        completed = self.client.post(
+            f"{endpoint}/complete",
+            headers=self.worker_headers(),
+            json={
+                "filename": "report.zip",
+                "size_bytes": 3,
+                "sha256": "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
+                "chunk_count": 1,
+            },
+        )
+
+        self.assertEqual(completed.status_code, 409)
+        self.assertEqual(self.repo.get_transfer(transfer["id"])["status"], "uploading")
+
+    def test_transfer_completion_retry_is_idempotent(self):
+        transfer = self.repo.create_transfer("worker-246", owner_id="admin-id")
+        endpoint = f"/api/cluster/transfers/{transfer['id']}"
+        uploaded = self.client.put(
+            f"{endpoint}/chunks/0",
+            headers=self.worker_headers(),
+            content=b"one",
+        )
+        payload = {
+            "filename": "report.zip",
+            "size_bytes": 3,
+            "sha256": "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
+            "chunk_count": 1,
+        }
+        completed = self.client.post(
+            f"{endpoint}/complete", headers=self.worker_headers(), json=payload
+        )
+        retried = self.client.post(
+            f"{endpoint}/complete", headers=self.worker_headers(), json=payload
+        )
+
+        self.assertEqual(uploaded.status_code, 200)
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(retried.status_code, 200)
+        self.assertEqual(retried.json()["transfer"]["status"], "completed")
+
+    def test_transfer_rejects_out_of_protocol_chunk_index(self):
+        transfer = self.repo.create_transfer("worker-246", owner_id="admin-id")
+        response = self.client.put(
+            f"/api/cluster/transfers/{transfer['id']}/chunks/100000",
+            headers=self.worker_headers(),
+            content=b"chunk",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_transfer_completion_rejects_invalid_id_without_creating_storage(self):
+        response = self.client.post(
+            "/api/cluster/transfers/transfer-invalid/complete",
+            headers=self.worker_headers(),
+            json={
+                "filename": "report.zip",
+                "size_bytes": 3,
+                "sha256": "0" * 64,
+                "chunk_count": 1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(
+            (self.repo.db_path.parent / "transfers" / "transfer-invalid").exists()
+        )
+
+    def test_transfer_completion_rejects_wellformed_unknown_id_without_creating_storage(self):
+        unknown_id = "transfer-" + "a" * 32
+        response = self.client.post(
+            f"/api/cluster/transfers/{unknown_id}/complete",
+            headers=self.worker_headers(),
+            json={
+                "filename": "report.zip",
+                "size_bytes": 3,
+                "sha256": "0" * 64,
+                "chunk_count": 1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(
+            (self.repo.db_path.parent / "transfers" / unknown_id).exists()
+        )
+
     def test_oversized_gsi_is_rejected_and_staging_is_removed(self):
         with patch.dict("os.environ", {"GMS_CLUSTER_FIRMWARE_MAX_BYTES": "3"}):
             response = self.client.post(

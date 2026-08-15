@@ -1610,6 +1610,42 @@ def _invalidate_device_cache() -> None:
         runtime.global_state.device_cache = {"devices": [], "timestamp": 0}
 
 
+def _mark_usbip_source_disconnected(
+    device_host: str, *, has_remaining_assignments: bool,
+) -> None:
+    if has_remaining_assignments:
+        return
+    with runtime.global_state.usbip_states_lock:
+        runtime.global_state.usbip_states[device_host] = {
+            "connected": False,
+            "timestamp": time.time(),
+            "transport_connected": False,
+            "adb_ready": False,
+            "reconnecting": False,
+            "protocol_status": {},
+        }
+
+
+def _mark_usbip_detach_unknown(
+    device_host: str,
+    busids: list[str],
+    worker_id: str,
+    generation: int,
+) -> None:
+    with _usbip_assignment_lock:
+        assignments = _usbip_assignments()
+        for busid in busids:
+            key = _usbip_assignment_key(device_host, busid)
+            current = assignments.get(key) or {}
+            if (
+                current.get("worker_id") == worker_id
+                and int(current.get("generation") or 0) == generation
+            ):
+                current.update({"status": "unknown", "timestamp": time.time()})
+                assignments[key] = current
+        _save_usbip_assignments(assignments)
+
+
 # ==================== USB/IP Disconnect ====================
 
 @router.post("/api/usbip/disconnect")
@@ -1741,30 +1777,20 @@ async def stop_usbip(
                     timeout=90,
                 )
             except HTTPException as exc:
-                with _usbip_assignment_lock:
-                    assignments = _usbip_assignments()
-                    for busid in req.busids:
-                        key = _usbip_assignment_key(req.device_host, busid)
-                        current = assignments.get(key) or {}
-                        if int(current.get("generation") or 0) == disconnect_generation:
-                            current.update({"status": "unknown", "timestamp": time.time()})
-                            assignments[key] = current
-                    _save_usbip_assignments(assignments)
+                _mark_usbip_detach_unknown(
+                    req.device_host, req.busids, req.worker_id,
+                    disconnect_generation,
+                )
                 if claim_source and exc.status_code != 504:
                     cluster.repository.claims.release(
                         claim_source, status="failed"
                     )
                 raise
             except Exception:
-                with _usbip_assignment_lock:
-                    assignments = _usbip_assignments()
-                    for busid in req.busids:
-                        key = _usbip_assignment_key(req.device_host, busid)
-                        current = assignments.get(key) or {}
-                        if int(current.get("generation") or 0) == disconnect_generation:
-                            current.update({"status": "unknown", "timestamp": time.time()})
-                            assignments[key] = current
-                    _save_usbip_assignments(assignments)
+                _mark_usbip_detach_unknown(
+                    req.device_host, req.busids, req.worker_id,
+                    disconnect_generation,
+                )
                 if claim_source:
                     cluster.repository.claims.release(
                         claim_source, status="failed"
@@ -1772,6 +1798,10 @@ async def stop_usbip(
                 raise
             already_detached = bool(result.get("already_detached"))
             if not result.get("detached_ports") and not already_detached:
+                _mark_usbip_detach_unknown(
+                    req.device_host, req.busids, req.worker_id,
+                    disconnect_generation,
+                )
                 return error_response(
                     f"{req.worker_id} 未确认USB/IP设备已断开，保留分配记录",
                     status_code=502,
@@ -1831,6 +1861,7 @@ async def stop_usbip(
     remaining_devices_after_detach: list[str] = []
     claim_source_id = ""
     claim_records: list[dict] = []
+    has_remaining_assignments = False
 
     try:
         from features.devices.reconnect import (
@@ -1926,16 +1957,10 @@ async def stop_usbip(
                     finally:
                         runtime.ssh_manager.return_connection(verification_ssh)
 
-        if not has_remaining_assignments:
-            with runtime.global_state.usbip_states_lock:
-                runtime.global_state.usbip_states[config["device_host"]] = {
-                    "connected": False,
-                    "timestamp": time.time(),
-                    "transport_connected": False,
-                    "adb_ready": False,
-                    "reconnecting": False,
-                    "protocol_status": {},
-                }
+        _mark_usbip_source_disconnected(
+            config["device_host"],
+            has_remaining_assignments=has_remaining_assignments,
+        )
 
         # 失效缓存，避免返回已断开的 USB/IP 设备。
         _invalidate_device_cache()
@@ -1986,15 +2011,10 @@ async def stop_usbip(
             pass
         _clear_usbip_device_sources(config["device_host"], devices_to_remove)
 
-        with runtime.global_state.usbip_states_lock:
-            runtime.global_state.usbip_states[config["device_host"]] = {
-                "connected": False,
-                "timestamp": time.time(),
-                "transport_connected": False,
-                "adb_ready": False,
-                "reconnecting": False,
-                "protocol_status": {},
-            }
+        _mark_usbip_source_disconnected(
+            config["device_host"],
+            has_remaining_assignments=has_remaining_assignments,
+        )
 
         # 失效缓存，避免返回已断开的 USB/IP 设备。
         _invalidate_device_cache()

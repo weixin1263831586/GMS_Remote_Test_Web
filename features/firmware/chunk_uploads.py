@@ -13,6 +13,7 @@ import re
 import shutil
 import threading
 import time
+import uuid
 
 from fastapi.responses import JSONResponse
 
@@ -26,7 +27,6 @@ MAX_FIRMWARE_UPLOAD_BYTES = 32 * 1024 * 1024 * 1024
 MAX_FIRMWARE_CHUNK_BYTES = 128 * 1024 * 1024
 MAX_FIRMWARE_CHUNKS = 10_000
 MERGE_LOCK_STALE_SECONDS = 60 * 60
-LEGACY_STAGED_FILENAME = "merged_firmware.bin"
 
 
 def safe_upload_token(value: str) -> str:
@@ -81,7 +81,7 @@ def _read_uploaded_chunks(session_dir: str) -> set[int]:
 
 def _write_uploaded_chunks(session_dir: str, uploaded_chunks: set[int]) -> None:
     target = os.path.join(session_dir, "uploaded_chunks.json")
-    temporary = f"{target}.{threading.get_ident()}.tmp"
+    temporary = f"{target}.{uuid.uuid4().hex}.tmp"
     with open(temporary, "w", encoding="utf-8") as handle:
         json.dump(sorted(uploaded_chunks), handle)
     os.replace(temporary, target)
@@ -113,7 +113,7 @@ def _validate_metadata(
             return None if existing == metadata else "Chunk metadata does not match the existing upload session"
         if os.path.exists(path):
             return "Upload session metadata is invalid"
-        temporary = f"{path}.{threading.get_ident()}.tmp"
+        temporary = f"{path}.{uuid.uuid4().hex}.tmp"
         with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(metadata, handle)
         try:
@@ -152,20 +152,8 @@ def load_staged_upload(root: str, client_id: str, upload_id: str) -> tuple[dict 
         expected_size = int(metadata["file_size"])
         file_name = os.path.basename(str(metadata["file_name"]))
         staged_path = _staged_path(session_dir, file_name)
-        legacy_path = safe_upload_target_path(
-            session_dir,
-            LEGACY_STAGED_FILENAME,
-            allow_nested=False,
-        )
     except (KeyError, TypeError, ValueError):
         return None, "Firmware upload session metadata is invalid"
-    if file_name and not os.path.isfile(staged_path) and os.path.isfile(legacy_path):
-        # Migrate durable uploads created by the regression without copying or
-        # requiring the browser to upload multi-gigabyte firmware again.
-        try:
-            os.replace(legacy_path, staged_path)
-        except OSError:
-            return None, "Failed to migrate staged firmware filename"
     if not file_name or not os.path.isfile(staged_path):
         return None, "Firmware upload is not staged"
     if os.path.getsize(staged_path) != expected_size:
@@ -219,9 +207,9 @@ def _parse_chunk_shape(form) -> tuple[int, int, int, str | None]:
         chunk_size = int(form.get("chunk_size") or 0)
     except (TypeError, ValueError):
         return 0, 0, 0, "Invalid chunk metadata"
-    if chunk_size < 0 or chunk_size > MAX_FIRMWARE_CHUNK_BYTES:
+    if chunk_size <= 0 or chunk_size > MAX_FIRMWARE_CHUNK_BYTES:
         return total_chunks, file_size, chunk_size, "Invalid chunk_size"
-    if chunk_size and math.ceil(file_size / chunk_size) != total_chunks:
+    if math.ceil(file_size / chunk_size) != total_chunks:
         return total_chunks, file_size, chunk_size, "Chunk size does not match total_chunks"
     return total_chunks, file_size, chunk_size, None
 
@@ -267,10 +255,11 @@ async def handle_chunk_upload(form, client_id: str, root: str, global_state, max
     if metadata_error:
         return error_response(metadata_error, 400), None
 
+    staged, _staged_error = load_staged_upload(root, client_id, upload_id)
+    if staged:
+        return _staged_response(staged, total_chunks), None
+
     if str(form.get("check_chunks") or "").strip().lower() in {"1", "true", "yes"}:
-        staged, _error = load_staged_upload(root, client_id, upload_id)
-        if staged:
-            return _staged_response(staged, total_chunks), None
         paths = _chunk_paths(session_dir, total_chunks)
         uploaded_chunks = {idx for idx, path in enumerate(paths) if os.path.isfile(path)}
         uploaded_size = sum(os.path.getsize(paths[idx]) for idx in uploaded_chunks)
@@ -296,13 +285,13 @@ async def handle_chunk_upload(form, client_id: str, root: str, global_state, max
         return error_response("No chunk file provided", 400), None
 
     chunk_path = os.path.join(session_dir, f"chunk_{chunk_index:05d}")
-    temporary = f"{chunk_path}.{threading.get_ident()}.upload"
-    expected_size = min(chunk_size, file_size - chunk_index * chunk_size) if chunk_size else 0
+    temporary = f"{chunk_path}.{uuid.uuid4().hex}.upload"
+    expected_size = min(chunk_size, file_size - chunk_index * chunk_size)
     try:
         written = await save_upload_to_path(
             upload_file,
             temporary,
-            expected_size or min(MAX_FIRMWARE_CHUNK_BYTES, file_size),
+            expected_size,
         )
         if expected_size and written != expected_size:
             return error_response("Firmware chunk size mismatch", 400), None

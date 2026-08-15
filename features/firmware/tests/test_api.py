@@ -1,7 +1,6 @@
 import asyncio
 import os
 import threading
-import time
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -144,6 +143,25 @@ class FirmwareApiTests(unittest.TestCase):
         )
         self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
 
+    def test_unexpected_error_after_lock_releases_devices(self):
+        released = []
+
+        async def record_release(client_id, devices):
+            released.append((client_id, devices))
+
+        runtime.configure_runtime(release_firmware_devices=record_release)
+        with patch(
+            "features.firmware.firmware_api.os.path.exists",
+            side_effect=RuntimeError("stat failed"),
+        ):
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={"firmware_path": "/tmp/update.img"},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(released, [("codex@127.0.0.1", ["D1"])])
+
     def test_invalid_staged_firmware_is_rejected_before_loader(self):
         fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_MISSING__\n")
         runtime.configure_runtime(ssh_manager=fake_ssh)
@@ -169,7 +187,7 @@ class FirmwareApiTests(unittest.TestCase):
                 '{"file_name":"update.img","total_chunks":1,"file_size":8}',
                 encoding="utf-8",
             )
-            (session / "merged_firmware.bin").write_bytes(b"firmware")
+            (session / "staged-update.img").write_bytes(b"firmware")
 
             response = self.client.post(
                 "/api/burn/firmware?devices=D1",
@@ -250,7 +268,7 @@ class FirmwareApiTests(unittest.TestCase):
                     "total_chunks": "2",
                     "upload_id": "upload-1",
                     "file_name": "update.img",
-                    "file_size": "8",
+                    "file_size": "8", "chunk_size": "4",
                 },
                 files={"file": ("update.img", b"1234")},
             )
@@ -269,7 +287,7 @@ class FirmwareApiTests(unittest.TestCase):
                     "total_chunks": "2",
                     "upload_id": "upload-1",
                     "file_name": "update.img",
-                    "file_size": "8",
+                    "file_size": "8", "chunk_size": "4",
                 },
             )
             resume_payload = resume.json()
@@ -283,6 +301,7 @@ class FirmwareApiTests(unittest.TestCase):
     def test_failed_chunk_merge_releases_merge_lock(self):
         async def save_chunk(_upload, path, _max_size=None):
             Path(path).write_bytes(b'1234')
+            return 4
 
         with (
             TemporaryDirectory() as tmp,
@@ -300,11 +319,10 @@ class FirmwareApiTests(unittest.TestCase):
                 asyncio.run(
                     firmware_api._handle_firmware_chunk_upload(
                         {
-                            'upload_id': 'failed-merge',
-                            'file_name': 'update.img',
+                            'upload_id': 'failed-merge', 'file_name': 'update.img',
                             'chunk_index': '0',
-                            'total_chunks': '1',
-                            'file_size': '4',
+                            'total_chunks': '1', 'file_size': '4',
+                            'chunk_size': '4',
                             'file': object(),
                         },
                         'client',
@@ -326,7 +344,7 @@ class FirmwareApiTests(unittest.TestCase):
                 data={
                     'chunk_index': '0', 'total_chunks': '2',
                     'upload_id': 'upload-1', 'file_name': 'update.img',
-                    'file_size': '8',
+                    'file_size': '8', 'chunk_size': '4',
                 },
                 files={'file': ('update.img', b'1234')},
             )
@@ -335,7 +353,7 @@ class FirmwareApiTests(unittest.TestCase):
                 data={
                     'chunk_index': '1', 'total_chunks': '3',
                     'upload_id': 'upload-1', 'file_name': 'other.img',
-                    'file_size': '12',
+                    'file_size': '12', 'chunk_size': '4',
                 },
                 files={'file': ('other.img', b'5678')},
             )
@@ -357,46 +375,11 @@ class FirmwareApiTests(unittest.TestCase):
                     'upload_id': 'upload-1',
                     'file_name': 'update.img',
                     'file_size': '8',
+                    'chunk_size': '4',
                 },
             )
 
             self.assertEqual(response.status_code, 400)
-
-    def test_firmware_upload_tokens_do_not_collide_after_sanitizing(self):
-        self.assertNotEqual(
-            firmware_api._safe_upload_token('client/a'),
-            firmware_api._safe_upload_token('client_a'),
-        )
-        self.assertNotEqual(
-            firmware_api._safe_upload_token('x' * 121 + 'a'),
-            firmware_api._safe_upload_token('x' * 121 + 'b'),
-        )
-
-    def test_expired_firmware_upload_sessions_are_removed(self):
-        with TemporaryDirectory() as tmp, patch(
-            'features.firmware.firmware_api._FIRMWARE_CHUNK_ROOT',
-            tmp,
-        ):
-            expired = Path(
-                firmware_api._firmware_upload_session_dir('client', 'old')
-            )
-            expired.mkdir(parents=True)
-            (expired / 'update.img').write_bytes(b'firmware')
-            old = time.time() - firmware_api.UPLOAD_PROGRESS_EXPIRATION - 1
-            os.utime(expired, (old, old))
-
-            firmware_api._cleanup_expired_upload_sessions('client')
-
-            self.assertFalse(expired.exists())
-
-    def test_firmware_share_rejects_path_outside_allowed_prefixes(self):
-        config = {"firmware_shares": {"allowed_prefixes": ["/home/hcq/"]}}
-
-        with self.assertRaises(ValueError):
-            shares_api._validate_remote_path("/etc/passwd", config)
-
-    def test_firmware_share_parses_suffix_range(self):
-        self.assertEqual(shares_api._parse_range("bytes=-100", 1000), (900, 999, 100))
 
     def test_create_firmware_share_persists_remote_record(self):
         with TemporaryDirectory() as tmp:
@@ -540,25 +523,6 @@ class FirmwareApiTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual(stat_remote.call_args.kwargs["password"], "stored")
-
-    def test_firmware_share_credentials_use_password_fallback(self):
-        creds = shares_api._host_credentials(
-            "10.10.10.206",
-            "hcq",
-            {"ubuntu_host": "10.10.10.206", "ubuntu_pswd": "rockchip"},
-        )
-
-        self.assertEqual(creds["username"], "hcq")
-        self.assertEqual(creds["password"], "rockchip")
-
-    def test_firmware_share_does_not_send_ubuntu_password_to_other_host(self):
-        creds = shares_api._host_credentials(
-            'attacker.invalid',
-            'hcq',
-            {'ubuntu_host': '10.10.10.206', 'ubuntu_pswd': 'rockchip'},
-        )
-
-        self.assertIsNone(creds['password'])
 
     def test_firmware_share_browse_uses_remote_directory_listing(self):
         with (

@@ -1,6 +1,8 @@
 import asyncio
 import json
+import os
 import threading
+import time
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -105,6 +107,58 @@ def test_short_chunk_is_rejected_without_publishing_partial_file():
         assert not list(session.glob("*.upload"))
 
 
+def test_chunk_size_is_required_to_bound_total_session_storage():
+    state = _state()
+    with TemporaryDirectory() as root:
+        response, merged = asyncio.run(
+            chunk_uploads.handle_chunk_upload(
+                _chunk_form(b"1234", chunk_size=""),
+                "alice",
+                root,
+                state,
+                3600,
+            )
+        )
+
+        assert response.status_code == 400
+        assert "chunk_size" in _payload(response)["error"]
+        assert merged is None
+
+
+def test_retry_after_staging_is_idempotent_and_does_not_recreate_chunks():
+    state = _state()
+    with TemporaryDirectory() as root:
+        asyncio.run(
+            chunk_uploads.handle_chunk_upload(
+                _chunk_form(b"1234"), "alice", root, state, 3600
+            )
+        )
+        asyncio.run(
+            chunk_uploads.handle_chunk_upload(
+                _chunk_form(b"5678", chunk_index="1"),
+                "alice",
+                root,
+                state,
+                3600,
+            )
+        )
+
+        response, merged = asyncio.run(
+            chunk_uploads.handle_chunk_upload(
+                _chunk_form(b"1234", chunk_index="0"),
+                "alice",
+                root,
+                state,
+                3600,
+            )
+        )
+
+        assert _payload(response)["staged"] is True
+        assert merged is None
+        session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-1"))
+        assert not list(session.glob("chunk_*"))
+
+
 def test_content_fingerprint_prevents_stale_resume_for_same_file_metadata():
     state = _state()
     first_fingerprint = "a" * 64
@@ -139,33 +193,6 @@ def test_content_fingerprint_prevents_stale_resume_for_same_file_metadata():
         assert merged is None
 
 
-def test_legacy_bin_staging_is_renamed_with_original_firmware_extension():
-    with TemporaryDirectory() as root:
-        session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-1"))
-        session.mkdir(parents=True)
-        (session / "upload_metadata.json").write_text(
-            json.dumps({
-                "file_name": "update.img",
-                "total_chunks": 1,
-                "file_size": 8,
-            }),
-            encoding="utf-8",
-        )
-        legacy = session / chunk_uploads.LEGACY_STAGED_FILENAME
-        legacy.write_bytes(b"firmware")
-
-        staged, error = chunk_uploads.load_staged_upload(
-            root,
-            "alice",
-            "upload-1",
-        )
-
-        assert error is None
-        assert Path(staged["path"]).name == "staged-update.img"
-        assert Path(staged["path"]).read_bytes() == b"firmware"
-        assert not legacy.exists()
-
-
 def test_burn_lock_prevents_parallel_finalize_and_can_be_released():
     with TemporaryDirectory() as root:
         session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-1"))
@@ -179,3 +206,21 @@ def test_burn_lock_prevents_parallel_finalize_and_can_be_released():
 
         chunk_uploads.release_burn_lock(first)
         assert chunk_uploads.acquire_burn_lock(staged)
+
+
+def test_upload_tokens_do_not_collide_after_sanitizing():
+    assert chunk_uploads.safe_upload_token('client/a') != chunk_uploads.safe_upload_token('client_a')
+    assert chunk_uploads.safe_upload_token('x' * 121 + 'a') != chunk_uploads.safe_upload_token('x' * 121 + 'b')
+
+
+def test_expired_upload_sessions_are_removed():
+    with TemporaryDirectory() as root:
+        expired = Path(chunk_uploads.upload_session_dir(root, 'client', 'old'))
+        expired.mkdir(parents=True)
+        (expired / 'update.img').write_bytes(b'firmware')
+        old = time.time() - 2
+        os.utime(expired, (old, old))
+
+        chunk_uploads.cleanup_expired_upload_sessions(root, 'client', max_age=1)
+
+        assert not expired.exists()
