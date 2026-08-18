@@ -10,6 +10,7 @@ from .mainline_issues import (
 )
 from .models import VNCStartRequest, VPNConnectRequest
 from .network import check_local_vpn_connected
+from .notifications import queue_notification
 from .security_audit import security_audit_logger
 from .ssh import ssh_manager
 from .vnc import novnc_url
@@ -24,6 +25,7 @@ __all__ = [
     "init_mainline_issues_db",
     "novnc_url",
     "query_mainline_exemption_match",
+    "queue_notification",
     "security_audit_logger",
     "ssh_manager",
 ]

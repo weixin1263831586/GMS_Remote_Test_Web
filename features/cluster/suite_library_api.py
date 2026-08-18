@@ -12,6 +12,7 @@ from features.auth import (
     CurrentUser,
     require_authenticated_user_when_auth_required,
 )
+from foundation.archives import is_complete_archive_file
 
 from .api import _authenticate
 from .local_bridge import _suite_roots
@@ -70,6 +71,8 @@ def controller_suite_library(
                 "name": path.name,
                 "size": stat.st_size,
                 "modified": int(stat.st_mtime),
+                # 残缺压缩包（如传输中断的 ZIP 缺 EOCD）不可下发解压。
+                "complete": is_complete_archive_file(str(path)),
             },
         )
     archives.sort(key=lambda item: item["modified"], reverse=True)

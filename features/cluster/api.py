@@ -14,11 +14,13 @@ from features.auth import (
     CurrentUser,
     authentication_required,
     get_authenticated_user,
+    is_elevated,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
     require_elevated_admin_when_auth_required,
     require_role,
 )
+from foundation.archives import is_complete_archive_file
 
 from .config import ClusterConfig
 from .models import (
@@ -278,6 +280,16 @@ def _require_cluster_enabled(remote: bool = False) -> None:
         raise HTTPException(409, "remote dispatch is disabled")
 
 
+def _command_owner_id(request: Request, user: CurrentUser | None) -> str:
+    """Best-effort owner tagging for commands created on behalf of a user.
+
+    Returns the authenticated account id so non-admin creators can still
+    poll their own command status; empty in anonymous dev mode.
+    """
+    authenticated = user or get_authenticated_user(request)
+    return str(authenticated.id) if authenticated else ""
+
+
 @router.get("/hosts")
 def list_hosts():
     """Return the stable host directory used by host-scoped UI pages."""
@@ -310,7 +322,7 @@ def get_command(command_id: str, request: Request):
     user = get_authenticated_user(request)
     if user is None and authentication_required():
         user = require_authenticated_user(request)
-    if user and user.role != "admin":
+    if user and user.role != "admin" and not is_elevated(request):
         job_id = str(command.get("job_id") or "")
         job = service().repository.get_job(job_id) if job_id else None
         owner_id = str((command.get("payload") or {}).get("owner_id") or "")
@@ -524,16 +536,35 @@ async def cluster_suite_results(
 @router.post("/suites/download")
 def cluster_suite_download(
     body: ClusterSuiteDownload,
+    request: Request,
     _admin: CurrentUser = Depends(require_role("admin")),
 ):
     _require_cluster_enabled(remote=body.worker_id != service().config.local_worker_id)
     worker = service().repository.get_worker(body.worker_id)
     if not worker or worker.get("status") not in {"online", "busy"}:
         raise HTTPException(409, "worker is not online")
+    # 套件库内的压缩包若残缺（如下载中断的 ZIP），直接拒绝下发，
+    # 避免向 Worker 传输数 GB 后才在解压阶段失败。
+    filename = str(body.filename or "")
+    if filename:
+        from .suite_library_api import controller_suite_archives
+
+        library_archive = next(
+            (item for item in controller_suite_archives() if item.name == filename),
+            None,
+        )
+        if library_archive is not None and not is_complete_archive_file(str(library_archive)):
+            raise HTTPException(
+                409,
+                f"suite archive is incomplete or corrupted: {filename}; "
+                "delete and re-download it",
+            )
+    owner_id = _command_owner_id(request, _admin)
     command = service().repository.create_command({
         "worker_id": body.worker_id, "command_type": "suite_action",
         "payload": {"action": "download_url", "url": body.url,
-                    "filename": body.filename, "size_bytes": body.size_bytes},
+                    "filename": body.filename, "size_bytes": body.size_bytes,
+                    "owner_id": owner_id},
     })
     return {"success": True, "accepted": True, "command_id": command["id"]}
 
@@ -551,16 +582,19 @@ async def cluster_suite_archives(
 @router.post("/suites/extract")
 def cluster_suite_extract(
     body: ClusterSuiteExtract,
+    request: Request,
     _admin: CurrentUser = Depends(require_role("admin")),
 ):
     _require_cluster_enabled(remote=body.worker_id != service().config.local_worker_id)
     worker = service().repository.get_worker(body.worker_id)
     if not worker or worker.get("status") not in {"online", "busy"}:
         raise HTTPException(409, "worker is not online")
+    owner_id = _command_owner_id(request, _admin)
     command = service().repository.create_command({
         "worker_id": body.worker_id, "command_type": "suite_action",
         "payload": {"action": "extract", "archive_path": body.archive_path,
-                    "target_dir_name": body.target_dir_name},
+                    "target_dir_name": body.target_dir_name,
+                    "owner_id": owner_id},
     })
     return {"success": True, "accepted": True, "command_id": command["id"]}
 

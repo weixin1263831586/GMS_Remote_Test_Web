@@ -5,7 +5,32 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from worker_agent.inventory import flash_gsi
+from worker_agent.inventory import flash_gsi, scan_suites
+from worker_agent.suite_detection import suite_details
+
+
+def test_suite_detection_covers_verifier_launcher() -> None:
+    """CTS Verifier 的主机端启动器也应被识别为可部署套件。"""
+    verifier = Path(
+        "/suites/android-cts-verifier-17_r1/android-cts-verifier/"
+        "android-cts-v-host/tools/cts-v-host-tradefed"
+    )
+    assert suite_details(verifier) == ("CTS_V", "17_r1")
+    regular = Path("/suites/android-cts-17_r1/android-cts/tools/cts-tradefed")
+    assert suite_details(regular) == ("CTS", "17_r1")
+
+
+def test_scan_suites_reports_verifier_launcher(tmp_path: Path) -> None:
+    tools = tmp_path / "android-cts-verifier-17_r1" / "android-cts-verifier" / "android-cts-v-host" / "tools"
+    tools.mkdir(parents=True)
+    launcher = tools / "cts-v-host-tradefed"
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    config = SimpleNamespace(suite_roots=[tmp_path])
+    suites = scan_suites(config)
+    assert [(s["suite_type"], s["suite_version"], s["available"]) for s in suites] == [
+        ("CTS_V", "17_r1", True)
+    ]
 
 
 def test_worker_gsi_uses_python_preparation_and_thin_script(tmp_path: Path) -> None:

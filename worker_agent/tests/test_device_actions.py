@@ -341,6 +341,55 @@ def test_prepare_suite_directory_export_creates_zip(tmp_path):
         assert bundle.read("run-1/test_result.xml") == b"result"
 
 
+class _TruncatedResponse(io.BytesIO):
+    """urlopen response that promises more bytes than it delivers."""
+
+    def __init__(self, body: bytes, content_length: int):
+        super().__init__(body)
+        self.headers = {"Content-Length": str(content_length)}
+
+
+def test_suite_download_rejects_truncated_archive(tmp_path):
+    root = tmp_path / "suites"
+    root.mkdir()
+    config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
+                          suite_roots=[root], data_root=tmp_path / "data")
+    with patch("worker_agent.inventory.urllib.request.urlopen",
+               return_value=_TruncatedResponse(b"PK-header-only", 1000)):
+        try:
+            execute_suite_action(config, {
+                "action": "download_url",
+                "url": "https://example.test/android-cts-17_r1.zip",
+            })
+        except ValueError as exc:
+            assert "incomplete" in str(exc)
+        else:
+            raise AssertionError("expected truncated download rejection")
+    assert not (root / "android-cts-17_r1.zip").exists()
+    assert not list(root.glob(".*.part"))
+
+
+def test_suite_extract_reports_truncated_zip(tmp_path):
+    root = tmp_path / "suites"
+    root.mkdir()
+    archive = root / "android-cts-17_r1.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("android-cts/tools/cts-tradefed", "probe")
+    # 截断：保留 ZIP 头、丢弃结尾 EOCD，复现传输中断的现场。
+    data = archive.read_bytes()
+    archive.write_bytes(data[: max(1, data.index(b"PK\x05\x06"))])
+    config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
+                          suite_roots=[root], data_root=tmp_path / "data")
+    try:
+        execute_suite_action(config, {"action": "extract", "archive_path": str(archive),
+                                       "target_dir_name": "cts-truncated"})
+    except ValueError as exc:
+        assert "incomplete or corrupted" in str(exc)
+    else:
+        raise AssertionError("expected truncated zip rejection")
+
+
+
 def test_import_suite_report_extracts_one_timestamp_directory(tmp_path):
     report_name = "2026.08.07_15.56.09.558_3101"
     root = tmp_path / "suites"
