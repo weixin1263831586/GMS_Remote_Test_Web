@@ -449,6 +449,10 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                 headers["Authorization"] = f"Bearer {config.token}"
             request = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(request, timeout=60, context=ssl_context) as response, temporary.open("wb") as output:
+                try:
+                    expected_bytes = int((getattr(response, "headers", None) or {}).get("Content-Length") or 0)
+                except (AttributeError, TypeError, ValueError):
+                    expected_bytes = 0
                 while True:
                     block = response.read(1024 * 1024)
                     if not block:
@@ -462,6 +466,11 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                         total = int(payload.get("size_bytes") or headers.get("Content-Length") or 0)
                         progress_callback({"downloaded_bytes": downloaded, "total_bytes": total})
                         last_reported = downloaded
+                # 与 Content-Length 比对，避免把截断的压缩包当成功保存。
+                if expected_bytes and downloaded != expected_bytes:
+                    raise ValueError(
+                        f"suite download incomplete: received {downloaded} of {expected_bytes} bytes"
+                    )
             temporary.replace(destination)
         except Exception:
             temporary.unlink(missing_ok=True)
@@ -502,6 +511,13 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                 # filter adds stdlib ownership/mode/link protections.
                 bundle.extractall(destination, members=members, filter="data")
         else:
+            if archive.name.lower().endswith(".zip"):
+                # is_zipfile 失败多为传输截断：ZIP 缺少结尾 EOCD 记录。
+                raise ValueError(
+                    f"suite archive {archive.name} is incomplete or corrupted "
+                    "(missing ZIP end-of-central-directory record); "
+                    "delete and re-download the archive"
+                )
             raise ValueError("unsupported suite archive format")
         return {"extracted_path": str(destination), "message": f"extracted {archive.name}"}
     suite_path = Path(str(payload.get("suite_path") or "")).expanduser().resolve()
@@ -808,7 +824,8 @@ def flash_gsi(config: WorkerConfig, system_img: Path | None, vendor_img: Path | 
 def scan_suites(config: WorkerConfig) -> list[dict[str, Any]]:
     suites = []
     seen = set()
-    names = {"cts-tradefed", "gts-tradefed", "vts-tradefed", "sts-tradefed"}
+    names = {"cts-tradefed", "gts-tradefed", "vts-tradefed", "sts-tradefed",
+             "cts-v-host-tradefed"}
     for root in config.suite_roots:
         if not root.exists():
             continue

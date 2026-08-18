@@ -61,7 +61,6 @@ _USBIP_ADB_ENUMERATION_GRACE_SECONDS = 45
 
 __all__ = ["install_usbipd", "router"]
 
-
 def _resolve_usbip_device_host(request: Request, config: dict | None = None, explicit: str | None = None) -> str:
     """Resolve the reachable Windows USB/IP host for this request."""
     if explicit:
@@ -82,14 +81,12 @@ def _resolve_usbip_device_host(request: Request, config: dict | None = None, exp
         or ""
     )
 
-
 def _usbip_remote_host(device_host: str, usbip_attach_host: str | None = None) -> str:
     if usbip_attach_host:
         return usbip_attach_host
     host = str(device_host or "").split("@", 1)[-1]
     hostname, _port = split_host_port(host)
     return hostname or "127.0.0.1"
-
 
 def _attached_usbip_serials(result: dict) -> list[str]:
     values = result.get("new_devices") or result.get("device_list")
@@ -104,7 +101,6 @@ def _attached_usbip_serials(result: dict) -> list[str]:
         for item in values
         if str(item or "").strip()
     ))
-
 
 def _rollback_local_usbip_attach(
     config: dict,
@@ -154,14 +150,12 @@ def _rollback_local_usbip_attach(
         "errors": errors,
     }
 
-
 def _usbip_assignments() -> dict[str, dict]:
     getter = getattr(runtime.config_manager, "get_runtime_config", None)
     runtime_config = getter() if callable(getter) else {}
     runtime_config = runtime_config or {}
     assignments = runtime_config.get("usbip_cluster_assignments") or {}
     return dict(assignments) if isinstance(assignments, dict) else {}
-
 
 def _save_usbip_assignments(assignments: dict[str, dict]) -> None:
     updater = getattr(runtime.config_manager, "update_runtime_config", None)
@@ -175,7 +169,6 @@ def _save_usbip_assignments(assignments: dict[str, dict]) -> None:
         saved = runtime.config_manager.save_runtime_config(runtime_config)
     if not saved:
         raise RuntimeError("无法保存USB/IP集群分配状态")
-
 
 def _record_usbip_network_quality(
     device_host: str,
@@ -207,7 +200,6 @@ def _record_usbip_network_quality(
             runtime_config["usbip_network_quality_history"] = history
             runtime.config_manager.save_runtime_config(runtime_config)
 
-
 def _local_worker_id() -> str:
     try:
         from features.cluster import get_cluster_service
@@ -215,7 +207,6 @@ def _local_worker_id() -> str:
         return str(get_cluster_service().config.local_worker_id or "ats-worker-controller")
     except Exception:
         return "ats-worker-controller"
-
 
 def _persist_local_usbip_sources(device_host: str, serials: list[str]) -> None:
     """Persist USB/IP source metadata used by local device-list endpoints."""
@@ -267,7 +258,6 @@ def _persist_local_usbip_sources(device_host: str, serials: list[str]) -> None:
         runtime.global_state.usbip_devices_source.update(updates)
     getattr(usbip_manager, "device_sources", {}).update(updates)
 
-
 def _reconcile_usbip_assignment_serials(
     device_host: str,
     source_devices: list[dict],
@@ -301,7 +291,6 @@ def _reconcile_usbip_assignment_serials(
     _persist_local_usbip_sources(device_host, local_serials)
     return changed
 
-
 def _adb_proxy_target_assignments(worker_id: str) -> list[dict]:
     """Return persisted ADB Proxy routes that currently target a Worker."""
     from .adb_proxy_service import adb_proxy_service
@@ -311,7 +300,6 @@ def _adb_proxy_target_assignments(worker_id: str) -> list[dict]:
         for item in adb_proxy_service.assignments().values()
         if str(item.get("target_worker_id") or "") == worker_id
     ]
-
 
 def annotate_cluster_usbip_devices(
     devices: list[dict], worker_id: str = ""
@@ -353,7 +341,6 @@ def annotate_cluster_usbip_devices(
             "properties": properties,
         })
     return annotated
-
 
 def reconcile_cluster_usbip_heartbeat(
     worker_id: str,
@@ -418,7 +405,6 @@ def reconcile_cluster_usbip_heartbeat(
         if changed:
             _save_usbip_assignments(assignments)
     return changed
-
 
 def reconcile_cluster_usbip_command(command: dict, repository) -> None:
     """Apply a terminal Worker USB/IP result even after its HTTP waiter timed out."""
@@ -512,10 +498,8 @@ def reconcile_cluster_usbip_command(command: dict, repository) -> None:
         if changed:
             _save_usbip_assignments(assignments)
 
-
 def _usbip_assignment_key(device_host: str, busid: str) -> str:
     return f"{device_host}|{busid}"
-
 
 def _next_transport_generation(assignments: dict[str, dict]) -> int:
     return max(
@@ -526,7 +510,6 @@ def _next_transport_generation(assignments: dict[str, dict]) -> int:
         ) + 1,
     )
 
-
 def _is_usbip_recoverable_attach_error(exc: Exception) -> bool:
     detail = str(getattr(exc, "detail", "") or exc).lower()
     return (
@@ -535,16 +518,13 @@ def _is_usbip_recoverable_attach_error(exc: Exception) -> bool:
         or "device in error state" in detail
     )
 
-
 def _is_usbip_export_busy(exc: Exception) -> bool:
     detail = str(getattr(exc, "detail", "") or exc).lower()
     return "busy (exported)" in detail or "残留usb/ip会话占用" in detail
 
-
 def _usbip_worker_command_timeout(busids: list[str]) -> int:
     """Cover the Worker's bounded attach+rollback budget for a multi-select."""
     return 120 + 25 * max(1, len(busids))
-
 
 def _preserve_usbip_assignment_after_error(exc: Exception) -> str:
     detail = str(getattr(exc, "detail", "") or exc)
@@ -554,7 +534,6 @@ def _preserve_usbip_assignment_after_error(exc: Exception) -> str:
         return "cleanup_required"
     return ""
 
-
 def _adb_devices_on_ssh(ssh) -> set[str]:
     output, error, _code = runtime.ssh_manager.execute_command(
         ssh,
@@ -562,7 +541,6 @@ def _adb_devices_on_ssh(ssh) -> set[str]:
         timeout=8,
     )
     return set(DeviceUtils.parse_adb_devices(output or error or ""))
-
 
 def _detach_ubuntu_usbip_for_devices(
     ssh,
@@ -602,7 +580,6 @@ def _detach_ubuntu_usbip_for_devices(
         "detached_ports": detached_ports,
         "remaining_devices": sorted(remaining),
     }
-
 
 def _wait_for_adb_devices_removed(
     ssh,
@@ -648,7 +625,6 @@ async def list_usbip_source_devices(
         result.get("devices") or [],
     )
     return JSONResponse(content=result)
-
 
 @router.get("/api/usbip/status")
 async def get_usbip_status(
@@ -794,7 +770,6 @@ async def get_usbip_status(
         ),
         "network_quality_history": quality_history,
     })
-
 
 # ==================== USB/IP Connect ====================
 
@@ -1543,7 +1518,6 @@ async def start_usbip(
             **_usbip_error_fields(str(e)),
         )
 
-
 def _persist_device_source_removal(devices_to_remove: list):
     """Remove device IDs from runtime config's usbip_devices_source and save."""
     if not devices_to_remove:
@@ -1559,7 +1533,6 @@ def _persist_device_source_removal(devices_to_remove: list):
             logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
     except Exception as e:
         logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")
-
 
 def _usbip_devices_for_host(device_host: str) -> list[str]:
     """Return known USB/IP device ids for a host from memory and runtime config."""
@@ -1581,7 +1554,6 @@ def _usbip_devices_for_host(device_host: str) -> list[str]:
         logger.warning("[USB/IP Stop] Failed to read runtime USB/IP sources: %s", e)
     return list(devices)
 
-
 def _clear_usbip_device_sources(
     device_host: str,
     devices_to_remove: list[str],
@@ -1599,7 +1571,6 @@ def _clear_usbip_device_sources(
 
     _persist_device_source_removal(devices_to_remove)
 
-
 def _invalidate_device_cache() -> None:
     """Clear the device-list cache so the next /api/devices/list re-queries ADB.
 
@@ -1608,7 +1579,6 @@ def _invalidate_device_cache() -> None:
     """
     with runtime.global_state.device_cache_lock:
         runtime.global_state.device_cache = {"devices": [], "timestamp": 0}
-
 
 def _mark_usbip_source_disconnected(
     device_host: str, *, has_remaining_assignments: bool,
@@ -1624,7 +1594,6 @@ def _mark_usbip_source_disconnected(
             "reconnecting": False,
             "protocol_status": {},
         }
-
 
 def _mark_usbip_detach_unknown(
     device_host: str,
@@ -1644,7 +1613,6 @@ def _mark_usbip_detach_unknown(
                 current.update({"status": "unknown", "timestamp": time.time()})
                 assignments[key] = current
         _save_usbip_assignments(assignments)
-
 
 # ==================== USB/IP Disconnect ====================
 

@@ -33,7 +33,8 @@ def _probe_devices() -> list[dict[str, Any]]:
 def _scan_suites(roots: list[Path]) -> list[dict[str, Any]]:
     suites: list[dict[str, Any]] = []
     seen: set[str] = set()
-    names = {"cts-tradefed", "gts-tradefed", "vts-tradefed", "sts-tradefed"}
+    names = {"cts-tradefed", "gts-tradefed", "vts-tradefed", "sts-tradefed",
+             "cts-v-host-tradefed"}
     for root in roots:
         if not root.exists():
             continue

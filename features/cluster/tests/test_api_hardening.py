@@ -46,6 +46,8 @@ class ClusterApiHardeningTests(unittest.TestCase):
                 username=username,
                 role=request.headers.get("X-Test-Role", "admin"),
             )
+            if request.headers.get("X-Test-Elevated"):
+                request.state.is_elevated = True
             return await call_next(request)
 
         app.include_router(cluster_api.router)

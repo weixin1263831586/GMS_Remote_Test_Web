@@ -1,6 +1,7 @@
 """Helpers for request/response security audit summarization."""
 
 import json
+import re
 from typing import Any
 
 from fastapi import Request
@@ -56,6 +57,13 @@ AUDIT_WEB_READONLY_NOISE_PATHS = {
 AUDIT_WEB_READONLY_NOISE_PREFIXES = (
     '/api/favicon/',
 )
+# 高频只读状态轮询的参数化路径（任务详情/日志轮询、命令结果轮询）。
+# 与精确名单同语义：仅跳过 web GET/HEAD 的常规审计，失败仍会记录。
+AUDIT_WEB_READONLY_NOISE_PATTERNS = (
+    re.compile(r'^/api/cluster/jobs/[^/]+$'),
+    re.compile(r'^/api/cluster/jobs/[^/]+/events$'),
+    re.compile(r'^/api/cluster/commands/[^/]+$'),
+)
 AUDIT_PAGE_VIEW_SKIP_PAGES = {'security-audit'}
 
 MAX_AUDIT_REQUEST_BODY_BYTES = 64 * 1024
@@ -77,6 +85,8 @@ def should_audit_request(path: str, source: str, method: str) -> bool:
         if path in AUDIT_WEB_READONLY_NOISE_PATHS:
             return False
         if any(path.startswith(prefix) for prefix in AUDIT_WEB_READONLY_NOISE_PREFIXES):
+            return False
+        if any(pattern.fullmatch(path) for pattern in AUDIT_WEB_READONLY_NOISE_PATTERNS):
             return False
 
     return True

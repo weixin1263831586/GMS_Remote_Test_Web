@@ -29,24 +29,24 @@ logger = logging.getLogger(__name__)
 EMOJI_TARGET = "🎯"
 EMOJI_CHART = "📊"
 EMOJI_CHECK = "✅"
+# GLM-5.x 等常开思考模型拒绝关闭思考参数，要求改用推理档位（low/high/max）。
+_THINKING_CONTROL_KEYS = ('disable_thinking', 'skip_reasoning', 'enable_thinking')
+_ALWAYS_THINKING_MARKERS = ('不支持关闭思考', '始终思考')
+
+
+def _rejects_disabling_thinking(error_text: str) -> bool: return any(m in (error_text or '') for m in _ALWAYS_THINKING_MARKERS)
 
 
 class UniversalAIAnalyzer:
     """通用AI模型分析器"""
 
     def __init__(self, config: dict = None):
-        """
-        初始化通用AI分析器
-
-        Args:
-            config: AI模型配置字典
-        """
+        """初始化通用AI分析器。config: AI模型配置字典。"""
         self.config = config or {}
         self.timeout = 60
         # API 格式常量
         self.API_FORMAT_ANTHROPIC = 'anthropic'  # /v1/messages 端点
         self.API_FORMAT_OPENAI = 'openai'  # /v1/chat/completions 端点
-
 
     def _get_api_format(self, provider_name: str, config: dict) -> str:
         """返回提供商使用的 Anthropic 或 OpenAI API 格式。"""
@@ -92,16 +92,28 @@ class UniversalAIAnalyzer:
         return None
 
     def get_local_provider(self) -> str | None: return first_local_provider(self.config, _is_local_provider)
+    # 常开思考模型（GLM-5.x）拒绝 disable_thinking 时改用 reasoning_effort=low 重试一次。
+    def _post_chat(self, url: str, headers: dict, data: dict, api_format: str):
+        response = requests.post(url, headers={'Connection': 'keep-alive', **headers},
+                                 json=data, timeout=self.timeout)
+        if response.status_code != 200:
+            try:
+                message = response.json().get('error', {}).get('message', '')
+            except Exception:
+                message = response.text[:300]
+            if _rejects_disabling_thinking(message):
+                retry_data = {k: v for k, v in data.items() if k not in _THINKING_CONTROL_KEYS}
+                if api_format != self.API_FORMAT_ANTHROPIC:
+                    retry_data['reasoning_effort'] = 'low'
+                response = requests.post(url, headers={'Connection': 'keep-alive', **headers},
+                                         json=retry_data, timeout=self.timeout)
+        return response
 
     def get_provider_statuses(self) -> list[dict]:
         return provider_statuses(self.config)
 
     def probe_provider(self, provider_name: str) -> dict:
-        return probe_provider_health(
-            self.config,
-            provider_name,
-            self._generate_with_provider,
-        )
+        return probe_provider_health(self.config, provider_name, self._generate_with_provider)
 
     def generate(self, user_prompt: str, system_prompt: str = '', max_tokens: int | None = None,
                  preferred_provider: str | None = None) -> dict:
@@ -168,7 +180,7 @@ class UniversalAIAnalyzer:
                         "enable_thinking": False}
                 url = f"{base_url}/v1/chat/completions" if not (base_url.endswith('/chat/completions') or base_url.endswith('/completions')) else base_url
 
-            response = requests.post(url, headers={'Connection': 'keep-alive', **headers}, json=data, timeout=self.timeout)
+            response = self._post_chat(url, headers, data, api_format)
             if response.status_code != 200:
                 try:
                     err = response.json().get('error', {}).get('message', f'HTTP {response.status_code}')
@@ -287,12 +299,7 @@ class UniversalAIAnalyzer:
 
             for attempt in range(max_retries):
                 try:
-                    response = requests.post(
-                        url,
-                        headers={'Connection': 'keep-alive', **headers},
-                        json=data,
-                        timeout=self.timeout
-                    )
+                    response = self._post_chat(url, headers, data, api_format)
                     break  # 成功则退出重试循环
                 except requests.exceptions.ConnectionError as e:
                     if attempt < max_retries - 1:

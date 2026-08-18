@@ -335,6 +335,49 @@ async def push_notification(
     return record
 
 
+def queue_notification(
+    client_id: str,
+    title: str,
+    message: str = "",
+    level: str = "info",
+    category: str = "system",
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """保存通知并异步调度 WebSocket 推送；供同步端点/工作线程调用。
+
+    与 push_notification 等价，但不需要事件循环：推送被调度到应用
+    lifespan 绑定的 ASGI 循环上。owner 为空时什么也不做。
+    """
+    owner_id = str(client_id or '').strip()
+    if not owner_id:
+        return None
+    record = store_notification(owner_id, title, message, level, category, data)
+    loop = _event_loop
+    if loop is None or loop.is_closed():
+        return record
+
+    def create_task() -> None:
+        task = loop.create_task(safe_websocket_send(owner_id, {
+            'type': 'notification',
+            'notification': record,
+        }))
+        global_state.background_tasks.add(task)
+        task.add_done_callback(global_state.background_tasks.discard)
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    try:
+        if running_loop is loop:
+            create_task()
+        else:
+            loop.call_soon_threadsafe(create_task)
+    except RuntimeError:
+        logger.debug("EventBus loop stopped before notification could be sent")
+    return record
+
+
 def list_client_notifications(client_id: str, limit: int = 100) -> dict[str, Any]:
     """获取客户端通知列表"""
     limit = max(1, min(int(limit or 100), MAX_NOTIFICATIONS_PER_CLIENT))

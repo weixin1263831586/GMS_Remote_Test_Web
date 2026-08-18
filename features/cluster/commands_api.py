@@ -72,6 +72,46 @@ def synchronize_command(command: dict[str, Any]) -> None:
                 status="failed",
                 error=command.get("error") or "worker export failed",
             )
+    if command.get("command_type") == "suite_action" \
+            and command.get("status") in {"completed", "failed", "cancelled"}:
+        _notify_suite_action_result(command)
+
+
+def _notify_suite_action_result(command: dict[str, Any]) -> None:
+    """套件下发/解压命令到达终态时，向发起人发送通知中心消息。"""
+    # 跨 feature 只允许走 features.system 公开包边界。
+    from features.system import queue_notification
+
+    payload = command.get("payload") or {}
+    owner_id = str(payload.get("owner_id") or "")
+    if not owner_id:
+        return
+    action = str(payload.get("action") or "")
+    action_label = {"download_url": "下发", "extract": "解压"}.get(action, "处理")
+    status = str(command.get("status") or "")
+    subject = str(
+        payload.get("filename") or payload.get("target_dir_name") or ""
+    ).strip() or "测试套件"
+    worker_id = str(command.get("worker_id") or "")
+    title = f"测试套件{action_label}{'完成' if status == 'completed' else '失败' if status == 'failed' else '已取消'}"
+    parts = [f"{subject}（Worker: {worker_id}）"] if worker_id else [subject]
+    error = str(command.get("error") or "").strip()
+    if error:
+        parts.append(error[:300])
+    level = {"completed": "success", "failed": "error"}.get(status, "warning")
+    queue_notification(
+        owner_id,
+        title,
+        "；".join(parts),
+        level,
+        "cluster",
+        {
+            "command_id": str(command.get("id") or ""),
+            "worker_id": worker_id,
+            "action": action,
+            "status": status,
+        },
+    )
 
 
 @router.post("/workers/{worker_id}/commands/poll")

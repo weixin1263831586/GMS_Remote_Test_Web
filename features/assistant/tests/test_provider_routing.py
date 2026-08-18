@@ -167,6 +167,80 @@ class ProviderRoutingTests(unittest.TestCase):
             ['glm_local', 'remote'],
         )
 
+    def test_always_thinking_model_retries_with_reasoning_effort(self):
+        """GLM-5.x 拒绝关闭思考时，去掉开关参数并改用 reasoning_effort=low 重试。"""
+        analyzer = UniversalAIAnalyzer({
+            'enabled': True,
+            'providers': {
+                'glm_local': {
+                    'enabled': True,
+                    'base_url': 'http://172.16.14.248:3000',
+                    'model': 'GLM-5.2',
+                    'api_key': 'k',
+                    'api_format': 'openai',
+                },
+            },
+        })
+
+        class _Response:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._payload = payload
+
+            def json(self):
+                return self._payload
+
+        rejected = _Response(400, {
+            'error': {'message': '该模型始终思考，不支持关闭思考；请使用 low、high 或 max。'},
+        })
+        accepted = _Response(200, {
+            'choices': [{'message': {'content': '总结内容'}}],
+        })
+
+        with patch(
+            'features.assistant.universal_ai.requests.post',
+            side_effect=[rejected, accepted],
+        ) as post:
+            result = analyzer.generate('生成周报', preferred_provider='glm_local')
+
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['content'], '总结内容')
+        self.assertEqual(post.call_count, 2)
+        retry_payload = post.call_args_list[1].kwargs['json']
+        for key in ('disable_thinking', 'skip_reasoning', 'enable_thinking'):
+            self.assertNotIn(key, retry_payload)
+        self.assertEqual(retry_payload['reasoning_effort'], 'low')
+
+    def test_regular_bad_request_does_not_retry_with_reasoning_effort(self):
+        analyzer = UniversalAIAnalyzer({
+            'enabled': True,
+            'providers': {
+                'glm_local': {
+                    'enabled': True,
+                    'base_url': 'http://172.16.14.248:3000',
+                    'model': 'GLM-5.2',
+                    'api_key': 'k',
+                    'api_format': 'openai',
+                },
+            },
+        })
+
+        class _Response:
+            status_code = 400
+
+            def json(self):
+                return {'error': {'message': 'invalid model'}}
+
+        with patch(
+            'features.assistant.universal_ai.requests.post',
+            return_value=_Response(),
+        ) as post:
+            result = analyzer.generate('hello', preferred_provider='glm_local')
+
+        self.assertFalse(result['success'])
+        self.assertIn('API错误', result['provider_errors'][0])
+        self.assertEqual(post.call_count, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

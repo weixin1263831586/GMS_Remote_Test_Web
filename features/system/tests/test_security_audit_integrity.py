@@ -160,5 +160,37 @@ class SecurityAuditIntegrityTests(unittest.TestCase):
             self.assertTrue(again["valid"])
 
 
+class AuditNoisePathTests(unittest.TestCase):
+    def test_high_frequency_readonly_polling_is_not_audited(self):
+        """浏览器侧任务/命令高频只读轮询不进常规审计（失败仍记录）。"""
+        from features.system.security_audit_utils import should_audit_request
+
+        for path in (
+            "/api/cluster/jobs/job-abc123",
+            "/api/cluster/jobs/job-abc123/events",
+            "/api/cluster/commands/cmd-abc123",
+        ):
+            self.assertFalse(
+                should_audit_request(path, "web", "GET"),
+                f"polling path should be skipped: {path}",
+            )
+
+    def test_write_and_non_web_sources_still_audited(self):
+        from features.system.security_audit_utils import should_audit_request
+
+        # 写操作仍需审计
+        self.assertTrue(
+            should_audit_request("/api/cluster/jobs/job-abc123", "web", "DELETE")
+        )
+        # 非 web 来源（如 Worker）仍需审计
+        self.assertTrue(
+            should_audit_request("/api/cluster/jobs/job-abc123", "worker", "GET")
+        )
+        # 相似但不同的路径不受影响
+        self.assertTrue(
+            should_audit_request("/api/cluster/jobs/job-abc123/artifacts", "web", "GET")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

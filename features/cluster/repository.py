@@ -58,11 +58,8 @@ class ClusterRepository(
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if claim_db_path is None:
-            claim_db_path = (
-                self.db_path.parent.parent / "device_claims.sqlite3"
-                if self.db_path.parent.name == "cluster"
-                else self.db_path.parent / "device_claims.sqlite3"
-            )
+            base = self.db_path.parent
+            claim_db_path = (base.parent if base.name == "cluster" else base) / "device_claims.sqlite3"
         self.claims = DeviceClaimRegistry(claim_db_path)
         self.claim_lease_ttl_seconds = max(30, int(claim_lease_ttl_seconds))
         self._lock = threading.RLock()
@@ -264,6 +261,7 @@ class ClusterRepository(
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_timeline_job ON cluster_timeline_events(job_id,id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_timeline_trace ON cluster_timeline_events(trace_id,id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_worker_metrics_time ON cluster_worker_metrics(worker_id,recorded_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_job_events_job ON cluster_job_events(job_id,sequence)")
 
     @staticmethod
     def _migrate_transfers(conn: sqlite3.Connection) -> None:
