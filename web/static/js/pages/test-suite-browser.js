@@ -2518,7 +2518,9 @@ function buildDeviceItemEl({
     displaySerial = ''
 }) {
     const div = document.createElement('div');
-    const isSelected = state.selectedDevices.has(deviceId);
+    // 不可选（占用/状态异常）设备保留在选中集合中，但复选框不显示勾选：
+    // 复选框随不可选被禁用，设备恢复可选后勾选自动恢复。
+    const isSelected = selectable && state.selectedDevices.has(deviceId);
     div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
     div.dataset.deviceId = deviceId;
     if (!selectable) div.dataset.locked = 'true';
@@ -2733,6 +2735,11 @@ async function rebootDevices() {
 }
 
 async function remountDevices() {
+    const devices = selectedTestDeviceIds();
+    if (!devices.length) {
+        showToast('请重新选择要操作的设备', 'warning');
+        return;
+    }
     const button = document.getElementById('btn-remount-devices');
 
     // 禁用按钮，防止重复点击
@@ -2747,10 +2754,10 @@ async function remountDevices() {
         const workerId = selectedClusterWorker();
         if (workerId) {
             await apiCall('/api/cluster/devices/actions', 'POST', {
-                worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'remount'
+                worker_id: workerId, devices, action: 'remount'
             });
         } else {
-            await callDeviceApi('/api/devices/remount');
+            await apiCall('/api/devices/remount', 'POST', {devices});
         }
     } catch (error) {
         addLogEntry('Remount失败: ' + error.message, 'error');

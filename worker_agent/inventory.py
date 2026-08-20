@@ -432,11 +432,34 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         try:
             headers = {"User-Agent": "GMS-Worker/0.1"}
             ssl_context = None
-            controller_host = urllib.parse.urlparse(config.controller_url).hostname
-            # 回调 Controller 时附加令牌和固定 CA，兼容代理及域名别名。
+            controller = urllib.parse.urlparse(config.controller_url)
+            default_ports = {"http": 80, "https": 443}
+            is_controller_download_path = parsed.path.startswith(
+                "/api/cluster/suite-library-download/"
+            )
+            if is_controller_download_path:
+                # Browser-visible aliases are not part of the Worker's trust
+                # configuration. Route reserved callback paths through the
+                # configured Controller origin before attaching credentials.
+                controller_path = controller.path.rstrip("/") + parsed.path
+                url = urllib.parse.urlunparse((
+                    controller.scheme,
+                    controller.netloc,
+                    controller_path,
+                    "",
+                    parsed.query,
+                    "",
+                ))
+                parsed = urllib.parse.urlparse(url)
+            controller_port = controller.port or default_ports.get(controller.scheme)
+            download_port = parsed.port or default_ports.get(parsed.scheme)
+            # Worker 凭据只能发往配置的 Controller 同源下载端点。路径本身
+            # 不是可信边界，第三方站点可以构造完全相同的 URL path。
             is_controller_callback = (
-                parsed.hostname == controller_host
-                or parsed.path.startswith("/api/cluster/suite-library-download/")
+                parsed.scheme == controller.scheme
+                and parsed.hostname == controller.hostname
+                and download_port == controller_port
+                and is_controller_download_path
             )
             if parsed.scheme == "https":
                 import ssl

@@ -187,6 +187,19 @@ class ClusterCommandRepositoryMixin:
             )
         return self.get_command(command_id)
 
+    def claim_terminal_notification(self, command_id: str) -> bool:
+        """Atomically reserve the one terminal notification for a command."""
+        now = _utc_now()
+        with self._lock, self.connect() as conn:
+            updated = conn.execute(
+                """UPDATE cluster_commands
+                   SET terminal_notified_at=?
+                   WHERE id=? AND terminal_notified_at=''
+                     AND status IN ('completed','failed','cancelled')""",
+                (now, command_id),
+            )
+            return updated.rowcount == 1
+
     def attach_command_to_job(self, job_id: str, command: dict[str, Any]) -> None:
         with self._lock, self.connect() as conn:
             job = conn.execute(

@@ -512,6 +512,23 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("currentPage === 'devices'", navigation_text)
         self.assertIn("loadDevicesManagement().catch", navigation_text)
 
+    def test_unselectable_devices_stay_selected_but_render_unchecked(self):
+        navigation = read_text("web/static/js/navigation.js")
+        browser = read_text("web/static/js/pages/test-suite-browser.js")
+
+        # loadDevices：只从选中集合删除已消失的设备，回填仅按存在性判断；
+        # 不可选（占用/状态异常）设备保留勾选状态，恢复可选后自动回选。
+        self.assertIn("if (!currentIds.has(id)) {", navigation)
+        self.assertIn("if (currentIds.has(id)) state.selectedDevices.add(id);", navigation)
+        # device_lock_update：被占用不取消勾选，仅由渲染层隐藏勾选。
+        self.assertNotIn("state.selectedDevices.delete(deviceId);", navigation)
+        self.assertNotIn("syncWorkspaceDeviceSelection", navigation)
+        # 渲染兜底：不可选设备的复选框不显示勾选。
+        self.assertIn(
+            "const isSelected = selectable && state.selectedDevices.has(deviceId);",
+            browser,
+        )
+
     def test_automation_api_handles_non_json_errors_without_unhandled_promises(self):
         automation_text = read_text("features/automation/ui/page.js")
 

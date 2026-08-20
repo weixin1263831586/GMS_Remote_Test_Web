@@ -14,17 +14,28 @@ function createAnalysisModal(type, title, loadingMessage) {
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 900px; max-height: min(90vh, calc(100dvh - 16px));">
             <div class="modal-header">
-                <span class="modal-title">${title}</span>
-                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
+                <span class="modal-title"></span>
+                <span class="modal-close" role="button" tabindex="0" aria-label="关闭">&times;</span>
             </div>
             <div class="modal-body">
                 <div style="text-align: center; padding: 40px;">
                     <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
-                    <div style="color: var(--text-secondary); margin-bottom: 12px;">${loadingMessage}</div>
+                    <div class="modal-loading-message" style="color: var(--text-secondary); margin-bottom: 12px;"></div>
                 </div>
             </div>
         </div>
     `;
+
+    modal.querySelector('.modal-title').textContent = String(title ?? '');
+    modal.querySelector('.modal-loading-message').textContent = String(loadingMessage ?? '');
+    const closeButton = modal.querySelector('.modal-close');
+    closeButton.addEventListener('click', () => ModalManager.close(modalId));
+    closeButton.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            ModalManager.close(modalId);
+        }
+    });
 
     document.body.appendChild(modal);
     ModalManager.open(modalId);

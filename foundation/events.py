@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Well-known event types emitted by the bus.
 EVENT_WORKER_UPDATED = "worker.updated"
+EVENT_WORKER_AVAILABILITY_CHANGED = "worker.availability_changed"
 EVENT_DEVICE_LOCK_CHANGED = "device_lock.changed"
 EVENT_JOB_TRANSITION = "job.transition"
 

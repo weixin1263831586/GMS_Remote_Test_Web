@@ -2689,6 +2689,52 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_hidden_unselectable_device_is_excluded_from_burn_request(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """async () => {
+                    state.devices = [
+                        {device_id: 'READY-1', status: 'online', locked: false},
+                        {device_id: 'BUSY-1', status: 'online', locked: true}
+                    ];
+                    state.selectedDevices = new Set(['READY-1', 'BUSY-1']);
+                    renderDevices();
+                    const originalApiCall = window.apiCall;
+                    const originalLoadDevices = window.loadDevices;
+                    const originalElevatedAccess = window.requestElevatedAccess;
+                    let requestDevices = [];
+                    window.apiCall = async (_endpoint, _method, body) => {
+                        requestDevices = body.devices;
+                        return {success: true, results: []};
+                    };
+                    window.loadDevices = async () => state.devices;
+                    window.requestElevatedAccess = async () => true;
+                    try {
+                        await executeBurnOperation(
+                            '/api/burn/serial', {sn_code: 'SN001'}, '烧写SN码'
+                        );
+                        return {
+                            requestDevices,
+                            selectedDevices: Array.from(state.selectedDevices),
+                            busyChecked: document.querySelector(
+                                '.device-item[data-device-id="BUSY-1"] input'
+                            ).checked
+                        };
+                    } finally {
+                        window.apiCall = originalApiCall;
+                        window.loadDevices = originalLoadDevices;
+                        window.requestElevatedAccess = originalElevatedAccess;
+                    }
+                }"""
+            )
+            self.assertEqual(result["requestDevices"], ["READY-1"])
+            self.assertEqual(result["selectedDevices"], ["READY-1", "BUSY-1"])
+            self.assertFalse(result["busyChecked"])
+        finally:
+            page.close()
+
     def test_adb_proxy_device_is_visible_for_tests_but_blocks_usb_actions(self):
         page = self.new_page()
         try:

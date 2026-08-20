@@ -1,6 +1,6 @@
 // ==================== VNC & Remote Control ====================
 async function burnFirmware() {
-    if (state.selectedDevices.size === 0) {
+    if (selectedTestDeviceIds().length === 0) {
         showToast('请先选择要烧写固件的设备', 'warning');
         return;
     }
@@ -498,7 +498,7 @@ async function submitFirmwareBurn() {
     const fileInput = document.getElementById('firmware-file-input');
     const selectedFirmwareFile = fileInput?.files?.[0] || null;
 
-    const devices = Array.from(state.selectedDevices);
+    const devices = selectedTestDeviceIds();
     if (!devices.length) {
         showToast('请重新选择要烧写的设备', 'warning');
         return;
@@ -699,7 +699,7 @@ async function submitFirmwareBurn() {
 }
 
 async function burnGsiImage() {
-    if (state.selectedDevices.size === 0) {
+    if (selectedWorkspaceDeviceIds().length === 0) {
         showToast('请先选择要烧写GSI的设备', 'warning');
         return;
     }
@@ -870,12 +870,16 @@ async function submitGsiBurn() {
 
     try {
         const workerId = selectedClusterWorker();
+        const devices = workerId
+            ? selectedTestDeviceIds()
+            : selectedWorkspaceDeviceIds();
+        if (!devices.length) throw new Error('请重新选择要烧写GSI的设备');
         if (workerId) {
             if (!state.gsiSystemFile && !state.gsiVendorFile) throw new Error('远端 GSI 烧写必须选择本机 System 或 Vendor Boot 镜像');
-            if (state.selectedDevices.size !== 1) throw new Error('集群 GSI 烧写一次只允许一台设备');
+            if (devices.length !== 1) throw new Error('集群 GSI 烧写一次只允许一台设备');
             const form = new FormData();
             form.append('worker_id', workerId);
-            form.append('devices', Array.from(state.selectedDevices).join(','));
+            form.append('devices', devices.join(','));
             if (state.gsiSystemFile) form.append('system_file', state.gsiSystemFile, state.gsiSystemFile.name);
             if (state.gsiVendorFile) form.append('vendor_file', state.gsiVendorFile, state.gsiVendorFile.name);
             closeGsiModal();
@@ -913,7 +917,7 @@ async function submitGsiBurn() {
 }
 
 async function burnSerialNumber() {
-    if (state.selectedDevices.size === 0) {
+    if (selectedTestDeviceIds().length === 0) {
         showToast('请先选择要烧写SN码的设备', 'warning');
         return;
     }
@@ -940,12 +944,13 @@ async function submitSnBurn() {
 
 // ==================== 烧写操作辅助函数 ====================
 async function executeBurnOperation(endpoint, data, operationName, closeModalFunc) {
-    if (state.selectedDevices.size === 0) {
-        showToast('请先选择要操作的设备', 'warning');
+    const devices = endpoint === '/api/burn/gsi'
+        ? selectedWorkspaceDeviceIds()
+        : selectedTestDeviceIds();
+    if (!devices.length) {
+        showToast('请重新选择要操作的设备', 'warning');
         return;
     }
-
-    const devices = Array.from(state.selectedDevices);
     let stopDeviceProtocolRefresh = () => {};
     try {
         const granted = await requestElevatedAccess(operationName);
@@ -1036,7 +1041,8 @@ async function initAndStartVnc(forceRestart = false) {
 }
 
 async function showDeviceScreen() {
-    if (state.selectedDevices.size === 0) {
+    const devices = selectedTestDeviceIds();
+    if (!devices.length) {
         showToast('请先选择设备', 'warning');
         return;
     }
@@ -1046,9 +1052,9 @@ async function showDeviceScreen() {
         if (workerId) {
             addLogEntry(`正在 ${workerId} 启动设备投屏...`, 'info');
             const result = await apiCall('/api/cluster/devices/actions', 'POST', {
-                worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'scrcpy_start'
+                worker_id: workerId, devices, action: 'scrcpy_start'
             });
-            addLogEntry(`已在 ${workerId} 启动 ${result.summary?.success || state.selectedDevices.size} 个投屏窗口`, 'success');
+            addLogEntry(`已在 ${workerId} 启动 ${result.summary?.success || devices.length} 个投屏窗口`, 'success');
             window.GmsWorkspace?.update({worker_id: workerId, origin_page: 'desktop'}, {source: 'device-screen'});
             switchPage('desktop');
             return;
@@ -1058,7 +1064,7 @@ async function showDeviceScreen() {
 
         addLogEntry('正在启动屏幕投屏...', 'info');
         const result = await apiCall('/api/devices/scrcpy', 'POST', {
-            devices: Array.from(state.selectedDevices)
+            devices
         });
 
         // Display result message

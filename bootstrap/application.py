@@ -335,7 +335,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             )
         if path.startswith('/static/'):
             response.headers['Cache-Control'] = (
-                'public, max-age=86400, immutable'
+                'public, max-age=300, must-revalidate'
             )
         elif path.startswith('/api/'):
             response.headers['Cache-Control'] = (
