@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import ClusterConfig
 from .state_machine import InvalidJobTransitionError
+from .worker_availability_events import emit_worker_availability
 
 
 def _utc_now() -> str:
@@ -86,7 +87,12 @@ class ClusterInventoryRepositoryMixin:
                     "previous_session_id": previous_session,
                 },
             )
-        return self.get_worker(data["worker_id"]) or {}
+        worker = self.get_worker(data["worker_id"]) or {}
+        # Only a real offline -> online recovery is announced; re-registering
+        # with a fresh session while still online stays silent to avoid noise.
+        if recovered and existing and existing["status"] == "offline":
+            emit_worker_availability(worker, "online")
+        return worker
 
     def get_worker(self, worker_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
@@ -155,9 +161,10 @@ class ClusterInventoryRepositoryMixin:
         revoked_attempt_ids: set[str] = set()
         with self._lock, self.connect() as conn:
             session = conn.execute(
-                "SELECT session_id,connection_generation FROM cluster_workers WHERE id=?",
+                "SELECT status,session_id,connection_generation FROM cluster_workers WHERE id=?",
                 (worker_id,),
             ).fetchone()
+            previous_status = str(session["status"] or "") if session else ""
             if session is not None and session["session_id"] and (
                 str(session["session_id"]) != str(data.get("session_id") or "")
                 or int(session["connection_generation"] or 0)
@@ -290,6 +297,10 @@ class ClusterInventoryRepositoryMixin:
         from foundation.events import EVENT_WORKER_UPDATED, event_bus
 
         event_bus.emit(EVENT_WORKER_UPDATED, {"worker_id": worker_id, "status": status})
+        # A heartbeat arriving while the stored status is still offline means
+        # the Worker recovered without re-registering (session unchanged).
+        if worker is not None and previous_status == "offline" and status != "offline":
+            emit_worker_availability(worker, "online")
         return worker
 
     def refresh_worker_devices(
@@ -312,7 +323,8 @@ class ClusterInventoryRepositoryMixin:
         now = _utc_now()
         with self._lock, self.connect() as conn:
             worker = conn.execute(
-                "SELECT session_id,connection_generation FROM cluster_workers WHERE id=?",
+                "SELECT id,status,name,session_id,connection_generation "
+                "FROM cluster_workers WHERE id=?",
                 (worker_id,),
             ).fetchone()
             conn.execute(
@@ -363,6 +375,10 @@ class ClusterInventoryRepositoryMixin:
                     "affected_jobs": [item["id"] for item in jobs],
                 },
             )
+        # Guarded so repeated watchdog passes (or a worker that was never
+        # online) do not spam duplicate offline notifications.
+        if worker is not None and str(worker["status"] or "") != "offline":
+            emit_worker_availability(worker, "offline")
 
     def _replace_devices(
         self,

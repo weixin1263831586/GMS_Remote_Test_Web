@@ -121,6 +121,38 @@ function cleanupReportsPolling() {
     }
 }
 
+function ensureReportsPolling() {
+    if (currentPage !== 'reports' || reportsRefreshInterval) return;
+    let lastReportsHash = null;
+
+    reportsRefreshInterval = setInterval(async () => {
+        if (currentPage === 'reports' && !document.hidden && !reportsRefreshInFlight) {
+            reportsRefreshInFlight = true;
+            try {
+                if (reportsLoadedPages > 1) return;
+                const url = reportsListUrl(currentUserFilter);
+                const data = await requestReportsData(url);
+                const reportsHash = JSON.stringify(data.reports);
+
+                if (reportsHash !== lastReportsHash) {
+                    lastReportsHash = reportsHash;
+                    reportsLoadedItems = Array.isArray(data.reports) ? data.reports : [];
+                    reportsNextCursor = data.next_cursor || '';
+                    reportsHasLoaded = true;
+                    reportsLastLoadedAt = Date.now();
+                    reportsLastQueryKey = url;
+                    displayTestReports(reportsLoadedItems);
+                    renderReportsPagination();
+                }
+            } catch (error) {
+                console.error('[Reports] Error refreshing reports:', error);
+            } finally {
+                reportsRefreshInFlight = false;
+            }
+        }
+    }, REPORTS_REFRESH_INTERVAL);
+}
+
 function renderReportsPagination() {
     const wrapper = document.getElementById('reports-load-more-wrapper');
     if (!wrapper) return;
@@ -161,6 +193,7 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
             await workersPromise;
             displayTestReports(reportsLoadedItems);
             renderReportsPagination();
+            ensureReportsPolling();
             if (Date.now() - reportsLastLoadedAt < REPORTS_REENTRY_CACHE_MS) return;
         }
         if (!append) {
@@ -192,41 +225,7 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
         displayTestReports(reportsLoadedItems);
         if (tbody) tbody.setAttribute('aria-busy', 'false');
         renderReportsPagination();
-
-        // 启动自动刷新（每15秒）带变更检测
-        if (currentPage === 'reports' && !reportsRefreshInterval) {
-            let lastReportsHash = null;
-
-            reportsRefreshInterval = setInterval(async () => {
-                if (currentPage === 'reports' && !document.hidden && !reportsRefreshInFlight) {
-                    reportsRefreshInFlight = true;
-                    try {
-                        if (reportsLoadedPages > 1) return;
-                        const url = reportsListUrl(currentUserFilter);
-                        const data = await requestReportsData(url);
-
-                        // 计算报告列表的哈希值以检测变更
-                        const reportsHash = JSON.stringify(data.reports);
-
-                        // 只有在报告列表发生变化时才更新DOM
-                        if (reportsHash !== lastReportsHash) {
-                            lastReportsHash = reportsHash;
-                            reportsLoadedItems = Array.isArray(data.reports) ? data.reports : [];
-                            reportsNextCursor = data.next_cursor || '';
-                            reportsHasLoaded = true;
-                            reportsLastLoadedAt = Date.now();
-                            reportsLastQueryKey = url;
-                            displayTestReports(reportsLoadedItems);
-                            renderReportsPagination();
-                        }
-                    } catch (error) {
-                        console.error('[Reports] Error refreshing reports:', error);
-                    } finally {
-                        reportsRefreshInFlight = false;
-                    }
-                }
-            }, REPORTS_REFRESH_INTERVAL);
-        }
+        ensureReportsPolling();
     } catch (e) {
         if (requestGeneration !== reportsRequestGeneration) return;
         console.error('[Reports] Error loading reports:', e);

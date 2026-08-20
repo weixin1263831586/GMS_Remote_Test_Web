@@ -216,11 +216,8 @@ def test_controller_suite_download_sends_worker_token(tmp_path):
     assert request.get_header("Authorization") == "Bearer worker-secret"
 
 
-def test_controller_suite_download_attaches_token_when_browser_host_differs(tmp_path):
-    """The browser builds the download URL from window.location, whose host may
-    differ from the controller_url the Worker dials (reverse proxy / DNS alias).
-    The suite-library-download path is unique to the Controller, so the Worker
-    must still attach its token instead of failing the callback with 401."""
+def test_controller_suite_download_routes_browser_alias_through_controller(tmp_path):
+    """A browser alias is replaced by the Worker's trusted Controller origin."""
     root = tmp_path / "suites"
     root.mkdir()
     config = WorkerConfig(
@@ -244,7 +241,38 @@ def test_controller_suite_download_attaches_token_when_browser_host_differs(tmp_
         )
 
     request = opened.call_args.args[0]
+    assert request.full_url == (
+        "https://controller.internal/api/cluster/"
+        "suite-library-download/safe/file.zip"
+    )
     assert request.get_header("Authorization") == "Bearer worker-secret"
+
+
+def test_external_suite_download_does_not_send_worker_token(tmp_path):
+    root = tmp_path / "suites"
+    root.mkdir()
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://controller:8443",
+        token="worker-secret",
+        suite_roots=[root],
+        data_root=tmp_path / "data",
+    )
+    with patch(
+        "worker_agent.inventory.urllib.request.urlopen",
+        return_value=io.BytesIO(b"suite"),
+    ) as opened:
+        execute_suite_action(
+            config,
+            {
+                "action": "download_url",
+                "url": "https://downloads.example.test/releases/file.zip",
+                "filename": "file.zip",
+            },
+        )
+
+    request = opened.call_args.args[0]
+    assert request.get_header("Authorization") is None
 
 
 def test_suite_archive_listing_and_safe_extraction(tmp_path):

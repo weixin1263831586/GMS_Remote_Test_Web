@@ -148,7 +148,8 @@ class ClusterRepository(
                     trace_id TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL, result_json TEXT NOT NULL, error TEXT NOT NULL,
                     created_at TEXT NOT NULL, delivered_at TEXT NOT NULL,
-                    acknowledged_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    acknowledged_at TEXT NOT NULL,
+                    terminal_notified_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
                     FOREIGN KEY(worker_id) REFERENCES cluster_workers(id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_cluster_commands_poll
@@ -293,6 +294,7 @@ class ClusterRepository(
         for column, definition in {
             "operation_id": "TEXT NOT NULL DEFAULT ''",
             "trace_id": "TEXT NOT NULL DEFAULT ''",
+            "terminal_notified_at": "TEXT NOT NULL DEFAULT ''",
         }.items():
             cls._ensure_column(conn, "cluster_commands", column, definition)
         for column, definition in {

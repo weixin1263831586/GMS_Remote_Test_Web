@@ -74,7 +74,9 @@ def synchronize_command(command: dict[str, Any]) -> None:
             )
     if command.get("command_type") == "suite_action" \
             and command.get("status") in {"completed", "failed", "cancelled"}:
-        _notify_suite_action_result(command)
+        command_id = str(command.get("id") or "")
+        if command_id and service().repository.claim_terminal_notification(command_id):
+            _notify_suite_action_result(command)
 
 
 def _notify_suite_action_result(command: dict[str, Any]) -> None:

@@ -736,7 +736,8 @@ function initWebSocket() {
                             data.devices.forEach(update => {
                                 const deviceId = update.device_id;
                                 debugLog(`[Device Lock] Updating ${deviceId}: locked=${update.locked}, by=${update.locked_by}`);
-                                // 更新 state.devices 中的锁定状态
+                                // 被占用设备保留在选中集合中，仅由渲染层隐藏勾选，
+                                // 解除占用后勾选自动恢复。这里只更新锁定状态。
                                 const device = state.devices.find(d => {
                                     const id = typeof d === 'string' ? d : d.device_id;
                                     return id === deviceId;
@@ -915,6 +916,33 @@ function handleServerEvent(eventType, payload) {
                 loadClusterWorkers().catch(() => {});
             }
             break;
+        case 'worker.availability_changed': {
+            // Emitted only on real online/offline flips (not per heartbeat).
+            // Surface it through the notification center, a toast and, when
+            // the tab is hidden, a browser notification.
+            const workerId = String(payload?.worker_id || '');
+            if (!workerId) break;
+            const name = String(payload?.name || '');
+            const label = name && name !== workerId ? `${name}（${workerId}）` : workerId;
+            if (payload?.status === 'offline') {
+                handleRealtimeNotification({
+                    title: '主机离线',
+                    message: `${label} 心跳超时，已标记为离线`,
+                    level: 'warning',
+                    category: 'cluster',
+                    data: { worker_id: workerId, status: 'offline' }
+                });
+            } else if (payload?.status === 'online') {
+                handleRealtimeNotification({
+                    title: '主机上线',
+                    message: `${label} 已重新上线`,
+                    level: 'success',
+                    category: 'cluster',
+                    data: { worker_id: workerId, status: 'online' }
+                });
+            }
+            break;
+        }
         case 'job.transition':
             // Wake the test status poller so it picks up the new job state
             // immediately rather than waiting for the next interval.
@@ -1650,6 +1678,23 @@ function isSelectableWorkspaceDevice(device) {
     return !device.locked && ['online', 'available'].includes(status);
 }
 
+function selectedDeviceIdsMatching(predicate) {
+    return Array.from(state.selectedDevices).filter(deviceId => {
+        const device = state.devices.find(item => (
+            (typeof item === 'string' ? item : item.device_id) === deviceId
+        ));
+        return device && predicate(device);
+    });
+}
+
+function selectedTestDeviceIds() {
+    return selectedDeviceIdsMatching(isSelectableTestDevice);
+}
+
+function selectedWorkspaceDeviceIds() {
+    return selectedDeviceIdsMatching(isSelectableWorkspaceDevice);
+}
+
 function selectedFastbootDeviceIds() {
     return Array.from(state.selectedDevices).filter(deviceId => {
         const device = state.devices.find(item => {
@@ -1732,9 +1777,9 @@ async function loadDevices(forceRefresh = false, options = {}) {
             return state.devices;
         }
         state.devices = devices;
-        // 设备列表更新后，清理选中集合里已消失的设备。否则 USB 抖动导致设备断开时，
-        // 它仍残留在 state.selectedDevices 中，会被烧写/重启等批量操作一起送进后端，
-        // 触发"部分设备失败"（离线那台等 fastboot 超时才暴露）。
+        // 设备列表更新后，只清理选中集合里已消失的设备。
+        // 已不可选（占用/状态异常）的设备保留在选中集合和列表展示中：
+        // 复选框由渲染层按"可选才显示勾选"处理，设备恢复可选后勾选自动恢复。
         const currentIds = new Set(devices.map(d => typeof d === 'string' ? d : d.device_id).filter(Boolean));
         for (const id of Array.from(state.selectedDevices)) {
             if (!currentIds.has(id)) {

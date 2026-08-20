@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import queue
 import sqlite3
 import threading
 from contextlib import asynccontextmanager, suppress
@@ -101,7 +100,7 @@ async def _dispatch_usb_events(app) -> None:
 
     while True:
         try:
-            event = app.state.usb_event_queue.get_nowait()
+            event = await app.state.usb_event_queue.get()
             with global_state.websocket_connections_lock:
                 clients = list(global_state.websocket_connections.values())
             await asyncio.gather(
@@ -112,8 +111,6 @@ async def _dispatch_usb_events(app) -> None:
                 ),
                 return_exceptions=True,
             )
-        except queue.Empty:
-            await asyncio.sleep(0.2)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -141,8 +138,24 @@ def _start_local_vnc():
 
 
 def _start_usb_monitor(app):
-    app.state.usb_event_queue = queue.Queue()
+    loop = asyncio.get_running_loop()
+    app.state.usb_event_queue = asyncio.Queue(maxsize=256)
     state = {'previous_devices': set()}
+
+    def enqueue_usb_event(event):
+        queue_ref = app.state.usb_event_queue
+        if queue_ref.full():
+            try:
+                queue_ref.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        queue_ref.put_nowait(event)
+
+    def submit_usb_event(event):
+        try:
+            loop.call_soon_threadsafe(enqueue_usb_event, event)
+        except RuntimeError:
+            logger.debug('USB event dropped because the application loop is closed')
 
     def on_usb_devices_changed(devices):
         reconcile_observed_usbip_devices(devices)
@@ -157,7 +170,7 @@ def _start_usb_monitor(app):
                 reason='USB monitor detected disconnect',
             )
         invalidate_device_cache(global_state)
-        app.state.usb_event_queue.put(
+        submit_usb_event(
             {
                 'type': 'devices_changed',
                 'devices': visible_devices,

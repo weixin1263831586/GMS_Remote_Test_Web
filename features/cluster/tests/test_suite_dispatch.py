@@ -179,6 +179,15 @@ class SuiteDispatchTests(_ClusterApiTestBase):
         self.assertIn("解压完成", success_args[1])
         self.assertEqual(success_args[3], "success")
 
+        with patch("features.system.queue_notification") as queued:
+            response = self.client.post(
+                f"/api/cluster/workers/worker-246/commands/{completed['id']}/ack",
+                headers={"Authorization": "Bearer token"},
+                json={"status": "completed", "result": {}, "error": ""},
+            )
+            self.assertEqual(response.status_code, 200)
+            queued.assert_not_called()
+
         unowned = self.repo.create_command({
             "worker_id": "worker-246",
             "command_type": "suite_action",
