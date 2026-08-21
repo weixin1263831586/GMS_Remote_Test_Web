@@ -101,6 +101,24 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertNotIn("fetch('/api/cluster/hosts'", shell[terminal_start:terminal_end])
         self.assertIn("hosts = await window.loadClusterHostDirectory()", navigation)
 
+    def test_page_initialization_is_deduplicated_and_rejections_are_handled(self):
+        shell = read_text("web/shell/shell.html")
+
+        self.assertIn("const pendingAuthPageInitializers = new Set()", shell)
+        self.assertIn("if (pendingAuthPageInitializers.has(pageName)) return", shell)
+        self.assertIn("runPageInitializers(pageName).catch(error =>", shell)
+        self.assertIn("initializePageSafely(pageName)", shell)
+
+    def test_system_status_pages_use_consistent_chinese_loading_copy(self):
+        for path in (
+            "features/system/mainline_issues/ui/page.html",
+            "features/system/update_monitor/ui/page.html",
+        ):
+            with self.subTest(path=path):
+                text = read_text(path)
+                self.assertNotIn("Loading...", text)
+                self.assertIn("加载中…", text)
+
     def test_report_page_reuses_recent_data_and_parallelizes_initial_requests(self):
         reports = read_text("web/static/js/pages/test-reports.js")
         navigation = read_text("web/static/js/navigation.js")
@@ -230,11 +248,13 @@ class FrontendIntegrityTests(unittest.TestCase):
         api_script = read_text("web/static/js/api.js")
 
         self.assertIn("SSH用户名@客户端IP，例如 ", shell)
+        self.assertIn("可使用平台管理员账号", shell)
         self.assertIn("通常与系统登录/锁屏密码相同", shell)
         self.assertIn("identity.includes('@')", api_script)
         self.assertIn("但尚不知道 SSH 用户名", api_script)
-        self.assertIn("usernameInput.placeholder === '正在读取客户端身份…'", api_script)
+        self.assertIn("usernameInput.placeholder.includes('正在读取客户端身份')", api_script)
         self.assertIn("此处不使用客户端 SSH 账号", api_script)
+        self.assertIn("loginHost !== String(result.client_ip || '')", api_script)
 
     def test_firmware_share_copy_explains_public_download(self):
         navigation = read_all_frontend_js()

@@ -13,6 +13,7 @@ import paramiko
 from foundation.common_utils import CommonUtils
 from foundation.config import get_ubuntu_user
 from foundation.networking import split_host_port
+from foundation.ssh import SSHD_INSTALL_GUIDE
 from foundation.ssh_security import configure_strict_host_keys
 
 
@@ -31,33 +32,6 @@ SSHD_INSTALL_CMD = 'Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.
 SSHD_CHECK_CMD = 'Get-WindowsCapability -Online | Where-Object Name -like \'OpenSSH*\''
 SSHD_START_CMD = 'Start-Service sshd'
 SSHD_ENABLE_CMD = 'Set-Service -Name sshd -StartupType \'Automatic\''
-
-# SSHD 安装指南（Windows PowerShell 命令）
-SSHD_INSTALL_GUIDE = """以【管理员身份】运行 PowerShell, 按照下面步骤安装:
-
-1️⃣ 安装sshd
-Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH*'
-
-2️⃣ 启动sshd
-Start-Service sshd
-
-3️⃣ 设置sshd开机自启动
-Set-Service -Name sshd -StartupType 'Automatic'
-
-⚠️ 若上述步骤安装失败，先以【管理员身份】执行卸载操作，再执行上面的安装步骤
-
-1️⃣ 卸载sshd
-Get-Service sshd | Stop-Service -Force
-Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-
-2️⃣ 删除残留文件
-Remove-Item -Path "C:\\ProgramData\\ssh" -Recurse -Force -ErrorAction SilentlyContinue
-
-3️⃣ 重启计算机
-Restart-Computer
-"""
-
 
 class SSHManager:
     """提供连接池、命令执行和超时控制的同步 SSH 管理器。"""

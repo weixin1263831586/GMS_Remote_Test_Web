@@ -144,6 +144,19 @@ body {
     font-size: 12px;
 }
 
+/* 登录层内“本机未开启 SSH 服务”的提前提示。 */
+.auth-ssh-warning {
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    border: 1px solid rgba(229, 185, 79, 0.5);
+    border-left: 3px solid #e5b94f;
+    border-radius: 4px;
+    background: rgba(229, 185, 79, 0.08);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 /* 管理员验证弹框位于普通弹框之上、登录层之下。 */
 #elevate-modal {
     z-index: 15000;
@@ -546,7 +559,18 @@ body {
     color: var(--text-secondary);
     background: color-mix(in srgb, var(--card-bg) 94%, transparent);
     box-shadow: var(--shadow-sm);
+    opacity: 0;
     transform: translate(-50%, -50%);
+    visibility: hidden;
+    transition: opacity 0.16s ease;
+}
+
+/* 快速页面只经过结构骨架，不闪现重复的“正在加载某页面”文案。
+   只有超过短阈值仍未就绪，或明确失败时，才提升文字状态。 */
+.embedded-frame-shell[data-frame-progress="visible"] .embedded-frame-loading-chip,
+.embedded-frame-shell[data-frame-state="error"] .embedded-frame-loading-chip {
+    opacity: 1;
+    visibility: visible;
 }
 
 .embedded-frame-loading-spinner {

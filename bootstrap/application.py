@@ -159,6 +159,8 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             '/api/auth/setup',
             '/api/auth/login',
             '/api/auth/logout',
+            # 登录层主动探测客户端 SSH 端口（未装 SSHD 时提前提示安装）。
+            '/api/auth/client-ssh-status',
             # 登录前展示请求主机对应的身份。
             '/api/users/current',
             '/api/system/health',

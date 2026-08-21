@@ -184,8 +184,7 @@
         })();
 
         // 提前在 DOMContentLoaded 触发懒加载 iframe，无需等到 window load。
-        // 这样 iframe 的网络请求与剩余资源加载重叠，大幅缩短用户看到的
-        // "正在加载主机集群" 等遮罩持续时间。
+        // 这样 iframe 的网络请求与剩余资源加载重叠，缩短结构骨架的持续时间。
         document.addEventListener('DOMContentLoaded', function() {
             var earlyPage = window.__targetPage || 'test';
             if (typeof ensureLazyFrameLoaded === 'function') {
@@ -497,21 +496,34 @@
             <div class="auth-title" id="auth-title">登录</div>
             <div class="auth-row">
                 <label for="auth-username">账号</label>
-                <input id="auth-username" name="username" type="text" autocomplete="username" placeholder="正在读取客户端身份…" aria-describedby="auth-username-help" required>
-                <div class="auth-help" id="auth-username-help">格式：SSH用户名@客户端IP，例如 hcq@172.16.14.66。</div>
+                <input id="auth-username" name="username" type="text" autocomplete="username" placeholder="管理员账号，或正在读取客户端身份…" aria-describedby="auth-username-help" required>
+                <div class="auth-help" id="auth-username-help">可使用平台管理员账号，或 SSH用户名@客户端IP，例如 hcq@172.16.14.66。</div>
             </div>
             <div class="auth-row">
                 <label for="auth-password">密码</label>
-                <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="客户端主机 SSH 登录密码" aria-describedby="auth-password-help" required>
-                <div class="auth-help" id="auth-password-help">请输入该账号的 SSH 密码，通常与系统登录/锁屏密码相同。</div>
+                <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="管理员密码或客户端 SSH 密码" aria-describedby="auth-password-help" required>
+                <div class="auth-help" id="auth-password-help">管理员请输入平台密码；客户端账号请输入 SSH 密码（通常与系统登录/锁屏密码相同）。</div>
             </div>
             <div class="auth-row" id="auth-display-name-row" style="display: none;">
                 <label for="auth-display-name">显示名</label>
                 <input id="auth-display-name" name="display_name" type="text" autocomplete="name">
             </div>
             <div class="auth-message" id="auth-message"></div>
+            <!-- 登录层打开时主动探测本机 SSH 端口；未装 SSHD 时提前提示安装 -->
+            <div class="auth-ssh-warning" id="auth-ssh-warning" style="display:none" role="alert">
+                <span id="auth-ssh-warning-text"></span>
+                <button type="button" id="auth-ssh-warning-link" class="btn-primary" style="width:100%;height:28px;margin-top:8px;">查看 SSHD 安装步骤</button>
+            </div>
             <button id="auth-submit" class="btn-primary auth-submit" type="submit">登录</button>
         </form>
+        <!-- 客户端 SSH 不可达（未安装 SSHD 等）时的安装指南视图：登录验证依赖
+             回连客户端的 SSH 服务，此处直接给出指引，避免用户被困在登录层。 -->
+        <div id="auth-sshd-guide" class="auth-panel" style="display:none;width:min(560px,100%);max-height:min(92vh,720px);overflow:auto;" aria-hidden="true">
+            <div class="auth-title">客户端未开启 SSH 服务</div>
+            <div class="auth-help" id="auth-sshd-guide-reason"></div>
+            <pre id="auth-sshd-guide-content" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:46vh;overflow:auto;font-size:11px;line-height:1.5;color:var(--text-secondary);background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;padding:10px;margin:10px 0;"></pre>
+            <button type="button" class="btn-primary auth-submit" onclick="closeAuthSshdGuide()">返回登录</button>
+        </div>
     </div>
     <div class="main-container">
         <!-- 左侧导航栏 -->
@@ -1795,7 +1807,7 @@
                 <button class="btn-xxs" type="button" onclick="showGmsAssistantConfig()" style="position: absolute; top: -4px; right: 0;">助手配置</button>
             </div>
             <div class="embedded-frame-shell" data-frame-state="loading">
-                <div class="embedded-frame-loading" role="status">正在加载 GMS助手...</div>
+                <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
                 <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
                         style="border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg);">
                 </iframe>
@@ -1806,7 +1818,7 @@
         <div class="container page-content" id="page-automation">
             <div class="section-title" style="text-transform:none">⚙️ GMS ATS</div>
             <div class="embedded-frame-shell" data-frame-state="loading">
-                <div class="embedded-frame-loading" role="status">正在加载 GMS ATS...</div>
+                <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
                 <iframe id="automation-frame" data-src="/automation" data-wait-for-ready="true"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
                 </iframe>
@@ -1817,7 +1829,7 @@
         <div class="container page-content" id="page-cluster">
             <div class="section-title" style="text-transform:none">🖧 主机集群</div>
             <div class="embedded-frame-shell" data-frame-state="loading">
-                <div class="embedded-frame-loading" role="status">正在加载主机集群...</div>
+                <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
                 <iframe id="cluster-frame" data-src="/cluster"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
                 </iframe>
@@ -1828,7 +1840,7 @@
         <div class="container page-content" id="page-redmine-agent">
             <div class="section-title" style="text-transform:none">🧭 Redmine</div>
             <div class="embedded-frame-shell" data-frame-state="loading">
-                <div class="embedded-frame-loading" role="status">正在加载 Redmine...</div>
+                <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
                 <iframe id="redmine-agent-frame" data-src="/redmine-agent" data-wait-for-ready="true"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
                 </iframe>
@@ -1839,7 +1851,7 @@
         <div class="container page-content" id="page-gerrit-dashboard">
             <div class="section-title" style="text-transform:none">🔀 Gerrit看板</div>
             <div class="embedded-frame-shell" data-frame-state="loading">
-                <div class="embedded-frame-loading" role="status">正在加载 Gerrit看板...</div>
+                <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
                 <iframe id="gerrit-dashboard-frame" data-src="/gerrit-dashboard" data-wait-for-ready="true"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
                 </iframe>
@@ -2106,7 +2118,7 @@
         <div class="container page-content" id="page-architecture">
             <div class="section-title">🏗️ 系统架构</div>
             <div class="architecture-container embedded-frame-shell" data-frame-state="loading">
-                <div class="embedded-frame-loading" role="status">正在加载系统架构...</div>
+                <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
                 <iframe data-src="/templates/architecture.html"
                         frameborder="0" scrolling="yes" id="architecture-iframe"></iframe>
             </div>
@@ -3221,6 +3233,20 @@
         const PRODUCT_BRANDING = {{ config.get('product_branding', {}) | tojson }};
         const OPENGROK_BASE_URL = {{ config.get('opengrok', {}).get('base_url', '') | tojson }};
 
+        function createTerminalTheme() {
+            return {
+                background: '#000000',
+                foreground: '#ffffff',
+                cursor: '#ffffff',
+                cursorAccent: '#000000',
+                // xterm 默认灰色选区会压低 ANSI 彩色文本的对比度；固定前景色后，
+                // 鼠标拖选路径和命令时仍能清楚辨认内容及选区边界。
+                selectionBackground: 'rgba(124, 92, 255, 0.55)',
+                selectionForeground: '#ffffff',
+                selectionInactiveBackground: 'rgba(124, 92, 255, 0.35)'
+            };
+        }
+
         function workspaceHostForWorker(workerId = '') {
             const requested = workerId || window.GmsWorkspace?.get?.().worker_id || workspaceLocalWorkerId();
             return isLocalWorkspaceWorker(requested)
@@ -3795,7 +3821,7 @@
             terminalElement.className = 'host-workspace-terminal';
             body.replaceChildren(terminalElement);
             const term = new Terminal({cursorBlink: true, fontSize: 13, fontFamily: 'Consolas, "Courier New", monospace',
-                theme: {background: '#000000', foreground: '#ffffff'}, scrollback: 2000, termName: 'xterm-256color'});
+                theme: createTerminalTheme(), scrollback: 2000, termName: 'xterm-256color'});
             const fit = new FitAddon.FitAddon();
             term.loadAddon(fit);
             term.open(terminalElement);
@@ -3870,13 +3896,19 @@
                 instance.fit.fit();
                 const cols = instance.terminal.cols;
                 const rows = instance.terminal.rows;
-                if (cols < 2 || rows < 1 ||
-                    (cols === instance.lastResizeCols && rows === instance.lastResizeRows)) return;
+                if (cols < 2 || rows < 1) return;
+                // Cache the last size that actually reached the backend PTY,
+                // not merely the last browser measurement. ResizeObserver can
+                // run before WebSocket.open; caching that early measurement
+                // caused the post-connect resize to be skipped, leaving the
+                // PTY at 80 columns while xterm rendered a much wider surface.
+                // Readline history/cursor redraw then wrapped at different
+                // columns on each side and left prompts/commands overlapping.
+                if (instance.socket?.readyState !== WebSocket.OPEN) return;
+                if (cols === instance.lastResizeCols && rows === instance.lastResizeRows) return;
+                instance.socket.send(JSON.stringify({type: 'terminal_resize', cols, rows}));
                 instance.lastResizeCols = cols;
                 instance.lastResizeRows = rows;
-                if (instance.socket?.readyState === WebSocket.OPEN) {
-                    instance.socket.send(JSON.stringify({type: 'terminal_resize', cols, rows}));
-                }
             } catch (_) {}
         }
 
@@ -4096,7 +4128,7 @@
             try{await loadXTermScripts();}catch(error){console.error('[Terminal workspace] xterm.js load failed:',error);if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';terminalWorkspaceStatus(index,'加载失败');return;}
             if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;
             const el=document.createElement('div');el.className='host-workspace-terminal';body.replaceChildren(el);
-            const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:{background:'#000',foreground:'#fff'},scrollback:2000,termName:'xterm-256color'});
+            const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:createTerminalTheme(),scrollback:2000,termName:'xterm-256color'});
             const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(el);fit.fit();
             const workerId=pane.workerId||host.worker_id||(host.id==='default'?workspaceLocalWorkerId():'');
             const instance={type:'terminal',mode:terminalMode,paneIndex:index,hostId:host.id,workerId,serialNo,terminal:term,fit,socket:null,resizeObserver:null,disposed:false,initialData:'',shellReady:false,startupFailed:false,startupTimer:null,lastResizeCols:0,lastResizeRows:0};terminalWorkspace.instances.set(index,instance);
@@ -6987,12 +7019,14 @@
             }
         }
 
+        const LAZY_FRAME_PROGRESS_DELAY_MS = 650;
+
         function prepareLazyFrameLoadingSurface(frame) {
             const shell = frame?.closest('.embedded-frame-shell');
             const status = shell?.querySelector('.embedded-frame-loading');
             if (!status) return null;
             if (!status.dataset.loadingText) {
-                status.dataset.loadingText = status.textContent.trim() || '正在加载...';
+                status.dataset.loadingText = status.textContent.trim() || '页面仍在准备中…';
             }
             if (status.dataset.hydrated === 'true') return status;
 
@@ -7044,10 +7078,15 @@
                 clearTimeout(frame.__surfaceReadyFallbackTimer);
                 frame.__surfaceReadyFallbackTimer = null;
             }
+            if (frame.__surfaceProgressTimer) {
+                clearTimeout(frame.__surfaceProgressTimer);
+                frame.__surfaceProgressTimer = null;
+            }
             const reveal = () => {
                 if (shell.dataset.frameState === 'loading') {
                     shell.dataset.frameHasContent = 'true';
                     shell.dataset.frameState = 'ready';
+                    shell.dataset.frameProgress = 'hidden';
                 }
             };
             if (deferUntilPaint) requestAnimationFrame(() => requestAnimationFrame(reveal));
@@ -7088,7 +7127,9 @@
                 const shell = frame.closest('.embedded-frame-shell');
                 if (!shell) return;
                 if (frame.__surfaceReadyFallbackTimer) clearTimeout(frame.__surfaceReadyFallbackTimer);
+                if (frame.__surfaceProgressTimer) clearTimeout(frame.__surfaceProgressTimer);
                 shell.dataset.frameState = 'error';
+                shell.dataset.frameProgress = 'visible';
                 setLazyFrameStatus(frame, '页面加载失败，请稍后重试');
             });
         }
@@ -7099,10 +7140,18 @@
             const shell = frame.closest('.embedded-frame-shell');
             if (shell) {
                 const status = prepareLazyFrameLoadingSurface(frame);
-                setLazyFrameStatus(frame, status?.dataset.loadingText || '正在加载...');
+                setLazyFrameStatus(frame, status?.dataset.loadingText || '页面仍在准备中…');
                 shell.dataset.frameState = 'loading';
+                shell.dataset.frameProgress = 'hidden';
             }
             if (frame.__surfaceReadyFallbackTimer) clearTimeout(frame.__surfaceReadyFallbackTimer);
+            if (frame.__surfaceProgressTimer) clearTimeout(frame.__surfaceProgressTimer);
+            frame.__surfaceProgressTimer = setTimeout(() => {
+                if (shell?.dataset.frameState === 'loading') {
+                    shell.dataset.frameProgress = 'visible';
+                }
+                frame.__surfaceProgressTimer = null;
+            }, LAZY_FRAME_PROGRESS_DELAY_MS);
             frame.dataset.documentLoaded = 'false';
             frame.dataset.surfaceReadyReceived = 'false';
             frame.setAttribute('src', source);
@@ -7140,7 +7189,7 @@
             // F5 刷新后：iframe 有 src 但内容可能空白。
             // 只有 forceReload=true 时才强制重新加载（避免页面切换时不必要的重载）。
             // 如果 iframe 在 10 秒内刚被加载过（例如 DOMContentLoaded 提前触发），
-            // 跳过重复重载，避免用户看到二次"正在加载"遮罩。
+            // 跳过重复重载，避免用户看到二次结构骨架。
             if (forceReload) {
                 const loadedAt = Number(frame.dataset.lazyLoadedAt || 0);
                 if (loadedAt && Date.now() - loadedAt < 10000) return;
@@ -7149,14 +7198,28 @@
             }
         }
 
+        const pendingAuthPageInitializers = new Set();
+
+        function initializePageSafely(pageName) {
+            runPageInitializers(pageName).catch(error => {
+                console.error(`[Navigation] Failed to initialize page ${pageName}:`, error);
+                if (currentPage === pageName) {
+                    showToast(`页面初始化失败：${error?.message || '未知错误'}`, 'error');
+                }
+            });
+        }
+
         async function runPageInitializers(pageName) {
             if (!state.authReady) {
+                if (pendingAuthPageInitializers.has(pageName)) return;
+                pendingAuthPageInitializers.add(pageName);
                 window.addEventListener(
                     'gms:auth-ready',
                     () => {
+                        pendingAuthPageInitializers.delete(pageName);
                         // Do not initialize a page that the user already left;
                         // entering it later will invoke this initializer again.
-                        if (currentPage === pageName) runPageInitializers(pageName);
+                        if (currentPage === pageName) initializePageSafely(pageName);
                     },
                     { once: true }
                 );
@@ -7345,7 +7408,7 @@
                 recordSecurityPageView(pageName);
             }
 
-            runPageInitializers(pageName);
+            initializePageSafely(pageName);
         }
 
         // 将 switchPage 导出到全局作用域，供外部脚本调用
@@ -11038,12 +11101,7 @@
                 cursorBlink: true,
                 fontSize: 14,
                 fontFamily: 'Consolas, "Courier New", monospace',
-                theme: {
-                    background: '#000000',
-                    foreground: '#ffffff',
-                    cursor: '#ffffff',
-                    selection: 'rgba(255, 255, 255, 0.3)'
-                },
+                theme: createTerminalTheme(),
                 scrollback: 1000,
                 convertEol: false,  // 不转换行尾，保持原始格式
                 ignoreBracketedPasteMode: true,  // 粘贴时不包裹 \x1b[200~...\x1b[201~

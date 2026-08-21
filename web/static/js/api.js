@@ -58,8 +58,8 @@ function normalizeApiErrorMessage(message, status) {
     return text || '请求与当前资源状态冲突';
 }
 
-async function apiCall(url, method = 'GET', data = null) {
-    return _apiCallOnce(url, method, data, { _elevationRetried: false });
+async function apiCall(url, method = 'GET', data = null, opts = {}) {
+    return _apiCallOnce(url, method, data, { _elevationRetried: false, ...opts });
 }
 
 async function _apiCallOnce(url, method, data, opts) {
@@ -151,7 +151,12 @@ async function _apiCallOnce(url, method, data, opts) {
             error.details = structured?.error_details || structured?.network_quality || {};
             if (response.status === 401) {
                 error.suppressToast = true;
-                if (state.authRequired) showAuthGate(false);
+                // 用户主动发起的请求失败才重新弹出登录层；后台轮询
+                // （options.background）保持静默，尊重用户手动关闭的选择。
+                if (state.authRequired && !opts.background) {
+                    state.authGateDismissed = false;
+                    showAuthGate(false);
+                }
             }
             if (needsElevation) error.suppressToast = true;
             if (result.need_password) {
@@ -209,6 +214,9 @@ async function resetElevationForNewBrowserTab(status) {
 function showAuthGate(setupRequired = false) {
     const gate = document.getElementById('auth-gate');
     if (!gate) return;
+    // 用户手动关闭后仍处于未认证状态：后台轮询/初始化请求的 401 静默
+    // 跳过（避免刚关掉就被弹回），只有主动操作会清除 dismissed 再弹出。
+    if (!setupRequired && state.authGateDismissed) return;
     const active = document.activeElement;
     const focusInsideGate = active && gate.contains(active);
     // 登录层已显示时不重复抢占输入焦点。
@@ -226,27 +234,37 @@ function showAuthGate(setupRequired = false) {
     if (submit) submit.textContent = setupRequired ? '创建管理员并进入' : '登录';
     if (displayNameRow) displayNameRow.style.display = setupRequired ? 'flex' : 'none';
     if (usernameInput) {
-        usernameInput.placeholder = setupRequired ? '管理员账号' : '正在读取客户端身份…';
+        usernameInput.placeholder = setupRequired ? '管理员账号' : '管理员账号，或正在读取客户端身份…';
     }
     if (passwordInput) {
-        passwordInput.placeholder = setupRequired ? '管理员密码' : '客户端主机 SSH 登录密码';
+        passwordInput.placeholder = setupRequired ? '管理员密码' : '管理员密码或客户端 SSH 密码';
     }
     if (usernameHelp) {
         usernameHelp.textContent = setupRequired
             ? '创建平台管理员账号；此处不使用客户端 SSH 账号。'
-            : '格式：SSH用户名@客户端IP，例如 hcq@172.16.14.66。';
+            : '可使用平台管理员账号，或 SSH用户名@客户端IP，例如 hcq@172.16.14.66。';
     }
     if (passwordHelp) {
         passwordHelp.textContent = setupRequired
             ? '请设置平台管理员密码。'
-            : '请输入该账号的 SSH 密码，通常与系统登录/锁屏密码相同。';
+            : '管理员请输入平台密码；客户端账号请输入 SSH 密码（通常与系统登录/锁屏密码相同）。';
     }
     const message = document.getElementById('auth-message');
     if (message) message.textContent = setupRequired ? '首次访问需要创建管理员账户。' : '';
-    // 仅初始化模式允许关闭登录层并匿名进入。
+    // 所有模式均允许关闭登录层：关闭后以未认证状态继续，受限操作会
+    // 再次弹出登录层（而非把用户困在全屏遮罩里）。
     const closeBtn = document.getElementById('auth-close');
-    if (closeBtn) closeBtn.style.display = setupRequired ? 'block' : 'none';
-    if (!setupRequired) prefillAuthUsernameFromClient();
+    if (closeBtn) closeBtn.style.display = 'block';
+    if (setupRequired) {
+        hideClientSshWarning();
+    } else {
+        if (usernameInput && usernameInput.dataset.sshProbeBound !== 'true') {
+            usernameInput.dataset.sshProbeBound = 'true';
+            usernameInput.addEventListener('input', scheduleClientSshCheck);
+        }
+        // 先完成客户端身份预填，再仅对 SSH用户@来源IP 账号探测端口。
+        prefillAuthUsernameFromClient().finally(checkClientSshAtGate);
+    }
     if (!wasVisible && !focusInsideGate) {
         setTimeout(() => {
             if (document.activeElement && gate.contains(document.activeElement)) return;
@@ -288,7 +306,7 @@ async function prefillAuthUsernameFromClient() {
     } catch (error) {
         debugLog('[Auth] client identity prefill failed:', error);
     } finally {
-        if (usernameInput.placeholder === '正在读取客户端身份…') {
+        if (usernameInput.placeholder.includes('正在读取客户端身份')) {
             usernameInput.placeholder = defaultPlaceholder;
         }
     }
@@ -300,9 +318,105 @@ function hideAuthGate() {
 }
 
 function closeAuthGate() {
-    // 不刷新页面，以匿名身份继续初始化应用。
+    // 关闭后以未认证状态继续初始化应用；记录 dismissed 让后台 401
+    // 不再自动弹回，用户主动操作触发 401 时会重新弹出登录层。
+    state.authGateDismissed = !state.authSetupRequired;
     hideAuthGate();
     continueAppInitialization();
+}
+
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const gate = document.getElementById('auth-gate');
+    if (gate && gate.style.display === 'flex') {
+        // 登录层不是 ModalManager 管理的弹框；在其可见时优先关闭登录层，
+        // 避免被底层弹框的 Esc 处理抢占。
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeAuthGate();
+    }
+}, true);
+
+let clientSshCheckTimer = null;
+let clientSshCheckGeneration = 0;
+
+function hideClientSshWarning() {
+    const banner = document.getElementById('auth-ssh-warning');
+    if (banner) banner.style.display = 'none';
+}
+
+function scheduleClientSshCheck() {
+    clientSshCheckGeneration += 1;
+    hideClientSshWarning();
+    if (clientSshCheckTimer) clearTimeout(clientSshCheckTimer);
+    clientSshCheckTimer = setTimeout(() => {
+        clientSshCheckTimer = null;
+        checkClientSshAtGate();
+    }, 350);
+}
+
+async function checkClientSshAtGate() {
+    const banner = document.getElementById('auth-ssh-warning');
+    const username = document.getElementById('auth-username')?.value.trim() || '';
+    const at = username.lastIndexOf('@');
+    const loginHost = at > 0 ? username.slice(at + 1).trim() : '';
+    const looksLikeIp = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(loginHost) || loginHost.includes(':');
+    if (!banner || !looksLikeIp) {
+        hideClientSshWarning();
+        return;
+    }
+    const generation = ++clientSshCheckGeneration;
+    let result = null;
+    try {
+        const response = await fetch('/api/auth/client-ssh-status', { credentials: 'same-origin' });
+        if (response.ok) result = await response.json();
+    } catch (error) {
+        debugLog('[Auth] client SSH probe failed:', error);
+    }
+    if (generation !== clientSshCheckGeneration) return;
+    // 只解释“当前浏览器来源主机”的客户端 SSH 登录。管理员账号或
+    // 显式填写其他主机时不展示无关警告。
+    if (!result || result.ssh_reachable || loginHost !== String(result.client_ip || '')) {
+        hideClientSshWarning();
+        return;
+    }
+    const textEl = document.getElementById('auth-ssh-warning-text');
+    if (textEl) textEl.textContent = result.hint || '未检测到本机 SSH 服务（端口 22），登录验证需要它。';
+    const link = document.getElementById('auth-ssh-warning-link');
+    if (link) {
+        link.onclick = () => showAuthSshdGuide(
+            result.hint || '无法通过 SSH 连接到客户端主机',
+            result.install_guide || ''
+        );
+    }
+    banner.style.display = 'block';
+}
+
+function showAuthSshdGuide(reason, guide) {
+    const panel = document.getElementById('auth-sshd-guide');
+    const form = document.getElementById('auth-gate')?.querySelector('form.auth-panel');
+    if (!panel || !form) return;
+    const reasonEl = document.getElementById('auth-sshd-guide-reason');
+    const guideEl = document.getElementById('auth-sshd-guide-content');
+    if (reasonEl) reasonEl.textContent = reason;
+    if (guideEl) guideEl.textContent = guide || '未获取到安装指南，请在 Windows 上以管理员身份安装 OpenSSH Server 并启动 sshd 服务。';
+    form.style.display = 'none';
+    panel.style.display = 'block';
+    panel.setAttribute('aria-hidden', 'false');
+}
+
+function closeAuthSshdGuide() {
+    const panel = document.getElementById('auth-sshd-guide');
+    const form = document.getElementById('auth-gate')?.querySelector('form.auth-panel');
+    if (panel) {
+        panel.style.display = 'none';
+        panel.setAttribute('aria-hidden', 'true');
+    }
+    if (form) form.style.display = '';
+    const message = document.getElementById('auth-message');
+    if (message) message.textContent = '';
+    const passwordInput = document.getElementById('auth-password');
+    if (passwordInput) passwordInput.focus();
 }
 
 async function submitAuthForm() {
@@ -323,11 +437,18 @@ async function submitAuthForm() {
         });
         const result = await response.json().catch(() => ({ success: false, error: '认证响应解析失败' }));
         if (!response.ok || result.success === false) {
+            // 客户端 SSH 服务不可达（未安装 SSHD 等）：登录验证依赖回连客户端
+            // 的 SSH，此时在登录层内直接展示安装指南，用户装好后返回重试即可。
+            if (result.error_code === 'client_ssh_unavailable') {
+                showAuthSshdGuide(result.error || '无法通过 SSH 连接到客户端主机', result.install_guide || '');
+                return;
+            }
             throw new Error(result.error || result.message || '认证失败');
         }
         state.currentUser = result.user || null;
         state.clientId = result.client_id || result.user?.id || null;
         state.authReady = true;
+        state.authGateDismissed = false;
         hideAuthGate();
         // 主机识别弹框已打开时增量恢复状态，不刷新页面。
         const detectOpen = typeof ModalManager !== 'undefined' && ModalManager.isOpen('username-detect-modal');
@@ -414,6 +535,8 @@ window.ensureAuthenticatedBeforeAppStart = ensureAuthenticatedBeforeAppStart;
 window.showAuthGate = showAuthGate;
 window.hideAuthGate = hideAuthGate;
 window.closeAuthGate = closeAuthGate;
+window.showAuthSshdGuide = showAuthSshdGuide;
+window.closeAuthSshdGuide = closeAuthSshdGuide;
 window.submitAuthForm = submitAuthForm;
 window.prefillAuthUsernameFromClient = prefillAuthUsernameFromClient;
 window.logoutCurrentUser = logoutCurrentUser;

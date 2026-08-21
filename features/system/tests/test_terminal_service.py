@@ -2,10 +2,17 @@ import unittest
 from itertools import count
 from unittest.mock import patch
 
-from features.system.terminal_service import LocalPtyChannel
+from features.system.terminal_service import LocalPtyChannel, create_local_terminal_channel
 
 
 class LocalPtyChannelTests(unittest.TestCase):
+    def test_local_terminal_uses_same_term_type_as_xterm_client(self):
+        with patch("features.system.terminal_service.LocalPtyChannel") as channel_class:
+            create_local_terminal_channel(["/bin/sh"])
+
+        env = channel_class.call_args.kwargs["env"]
+        self.assertEqual(env["TERM"], "xterm-256color")
+
     def test_close_reaps_child_during_grace_period(self):
         channel = object.__new__(LocalPtyChannel)
         channel.pid = 12345

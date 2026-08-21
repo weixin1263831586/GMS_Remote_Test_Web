@@ -145,6 +145,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/auth/client-ssh-status"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/auth/elevate"

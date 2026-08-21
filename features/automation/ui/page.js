@@ -1,6 +1,21 @@
+const AUTOMATION_WORKFLOW_STORAGE_KEY = 'gms_automation_workflow_pane';
+const AUTOMATION_STATUS_STORAGE_KEY = 'gms_automation_status_filter';
+const AUTOMATION_WORKFLOW_PANES = new Set(['overview', 'create', 'runs', 'build', 'events', 'reports']);
+const AUTOMATION_STATUS_FILTERS = new Set(['', 'queued', 'testing', 'completed']);
+
+function restoreAutomationViewValue(queryKey, storageKey, allowed, fallback) {
+    let value = new URLSearchParams(window.location.search).get(queryKey) || '';
+    if (!allowed.has(value)) {
+        try { value = window.sessionStorage.getItem(storageKey) || ''; } catch (_error) { value = ''; }
+    }
+    return allowed.has(value) ? value : fallback;
+}
+
 let atsProfiles = [];
 let atsRuns = [];
-let atsStatus = '';
+let atsStatus = restoreAutomationViewValue(
+    'status', AUTOMATION_STATUS_STORAGE_KEY, AUTOMATION_STATUS_FILTERS, ''
+);
 let selectedRunId = '';
 let buildServers = [];
 let buildTemplates = [];
@@ -9,7 +24,9 @@ let buildPasswordCache = {};
 let testSuites = [];
 let connectedDevices = [];
 let selectedBuildJobId = '';
-let activeWorkflowPane = 'overview';
+let activeWorkflowPane = restoreAutomationViewValue(
+    'tab', AUTOMATION_WORKFLOW_STORAGE_KEY, AUTOMATION_WORKFLOW_PANES, 'overview'
+);
 let toastTimer = null;
 let atsWorkspaceContext = {};
 let applyingWorkspaceContext = false;
@@ -1248,27 +1265,35 @@ function switchMonitorPane(pane) {
     switchWorkflowPane(pane);
 }
 
-function switchWorkflowPane(pane) {
-    activeWorkflowPane = pane;
-    const panes = ['overview', 'create', 'runs', 'build', 'events', 'reports'];
-    panes.forEach(key => {
+function switchWorkflowPane(pane, {persist = true, load = true} = {}) {
+    const target = AUTOMATION_WORKFLOW_PANES.has(pane) ? pane : 'overview';
+    activeWorkflowPane = target;
+    AUTOMATION_WORKFLOW_PANES.forEach(key => {
         const el = qs(`workflow-pane-${key}`);
         if (el) {
-            el.classList.toggle('active', key === pane);
-            el.setAttribute('aria-hidden', key === pane ? 'false' : 'true');
+            el.classList.toggle('active', key === target);
+            el.setAttribute('aria-hidden', key === target ? 'false' : 'true');
         }
     });
     document.querySelectorAll('.workflow-tab').forEach(tab => {
-        const active = tab.dataset.workflow === pane;
+        const active = tab.dataset.workflow === target;
         tab.classList.toggle('active', active);
         tab.setAttribute('aria-selected', active ? 'true' : 'false');
         tab.tabIndex = active ? 0 : -1;
     });
-    if (pane === 'overview') loadDashboard().catch(err => toast(err.message));
-    if (pane === 'runs' || pane === 'reports') {
+    if (persist) {
+        try { window.sessionStorage.setItem(AUTOMATION_WORKFLOW_STORAGE_KEY, target); } catch (_error) {}
+        const url = new URL(window.location.href);
+        if (target === 'overview') url.searchParams.delete('tab');
+        else url.searchParams.set('tab', target);
+        window.history.replaceState({}, '', url.toString());
+    }
+    if (!load) return;
+    if (target === 'overview') loadDashboard().catch(err => toast(err.message));
+    if (target === 'runs' || target === 'reports') {
         loadRuns().catch(err => toast(err.message));
     }
-    if (pane === 'build') loadBuildJobs().catch(err => toast(err.message));
+    if (target === 'build') loadBuildJobs().catch(err => toast(err.message));
 }
 
 function collectTestPlan() {
@@ -1761,11 +1786,24 @@ async function dryRunProfile() {
     } catch (err) { toast(err.message); }
 }
 
-function setStatusFilter(status) {
-    atsStatus = status;
-    document.querySelectorAll('.subtabs .tab').forEach(btn => btn.classList.toggle('active', btn.dataset.status === status));
-    loadRuns().catch(err => toast(err.message));
+function setStatusFilter(status, {persist = true, load = true} = {}) {
+    const target = AUTOMATION_STATUS_FILTERS.has(status) ? status : '';
+    atsStatus = target;
+    document.querySelectorAll('.subtabs .tab').forEach(btn => btn.classList.toggle('active', btn.dataset.status === target));
+    if (persist) {
+        try { window.sessionStorage.setItem(AUTOMATION_STATUS_STORAGE_KEY, target); } catch (_error) {}
+        const url = new URL(window.location.href);
+        if (target) url.searchParams.set('status', target);
+        else url.searchParams.delete('status');
+        window.history.replaceState({}, '', url.toString());
+    }
+    if (load) loadRuns().catch(err => toast(err.message));
 }
+
+// page.html 先绘制默认骨架；脚本加载后、首批 API 请求前恢复当前标签页状态，
+// 避免刷新时先触发错误面板的额外请求或覆盖已保存筛选。
+switchWorkflowPane(activeWorkflowPane, {persist: false, load: false});
+setStatusFilter(atsStatus, {persist: false, load: false});
 
 async function loadWorkerStatus() {
     try {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import logging
 import threading
 import time
@@ -51,8 +52,22 @@ def start_terminal_output_pump(
     """Forward one PTY/SSH channel with bounded batching and idle backoff."""
 
     def run() -> None:
+        decoder = codecs.getincrementaldecoder("utf-8")(errors=encoding_errors)
         next_maintenance = time.monotonic() + maintenance_interval
         ended_by_backend = False
+
+        def send_payload(data: str) -> None:
+            if not data:
+                return
+            future = asyncio.run_coroutine_threadsafe(
+                websocket.send_json({
+                    "type": "terminal_data",
+                    "data": data,
+                }),
+                event_loop,
+            )
+            future.result(timeout=5)
+
         try:
             while True:
                 with global_state.terminal_lock:
@@ -70,15 +85,12 @@ def start_terminal_output_pump(
 
                 payload, eof = _read_available(session["channel"])
                 if payload:
-                    future = asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({
-                            "type": "terminal_data",
-                            "data": payload.decode("utf-8", errors=encoding_errors),
-                        }),
-                        event_loop,
-                    )
-                    future.result(timeout=5)
+                    # PTY reads may split a UTF-8 code point across batches.
+                    # Preserve decoder state instead of replacing/dropping the
+                    # character at each arbitrary read boundary.
+                    send_payload(decoder.decode(payload, final=False))
                 if eof:
+                    send_payload(decoder.decode(b"", final=True))
                     ended_by_backend = True
                     break
                 if not payload:

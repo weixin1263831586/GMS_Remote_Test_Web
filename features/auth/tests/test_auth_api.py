@@ -10,11 +10,13 @@ from fastapi.testclient import TestClient
 
 from bootstrap.application import create_app
 from features.auth import AuthService, auth_service
+from features.auth.api import _client_ssh_probe_cache
 from foundation.config import config_manager
 
 
 class AuthApiTests(unittest.TestCase):
     def setUp(self):
+        _client_ssh_probe_cache.clear()
         self.tmp = tempfile.TemporaryDirectory()
         self.original_db_path = auth_service.db_path
         self.original_initialized = auth_service._initialized
@@ -24,6 +26,7 @@ class AuthApiTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
+        _client_ssh_probe_cache.clear()
         auth_service.db_path = self.original_db_path
         auth_service._initialized = self.original_initialized
         self.tmp.cleanup()
@@ -447,6 +450,95 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 429)
         self.assertTrue(int(blocked.headers["Retry-After"]) > 0)
         self.assertEqual(still_blocked.status_code, 429)
+
+    def test_client_ssh_unreachable_login_returns_install_guide(self):
+        with patch.object(
+            config_manager,
+            "find_device_host_password",
+            return_value=None,
+        ), patch(
+            "features.auth.api._client_ssh_authenticator",
+            return_value=(
+                False,
+                "",
+                "SSH 连接被拒绝：172.16.14.188 未开启 SSH 服务（端口 22）",
+            ),
+        ):
+            login = self.client.post(
+                "/api/auth/login",
+                json={
+                    "username": "hjf@172.16.14.188",
+                    "password": "whatever",
+                },
+            )
+
+        self.assertEqual(login.status_code, 401)
+        body = login.json()
+        self.assertEqual(body["error_code"], "client_ssh_unavailable")
+        self.assertIn("未开启 SSH 服务", body["error"])
+        self.assertIn("Add-WindowsCapability", body["install_guide"])
+
+    def test_client_ssh_wrong_password_keeps_generic_login_error(self):
+        with patch.object(
+            config_manager,
+            "find_device_host_password",
+            return_value=None,
+        ), patch(
+            "features.auth.api._client_ssh_authenticator",
+            return_value=(False, "", "SSH 认证失败：请检查用户名和密码是否正确"),
+        ):
+            login = self.client.post(
+                "/api/auth/login",
+                json={
+                    "username": "hjf@172.16.14.188",
+                    "password": "wrong",
+                },
+            )
+
+        self.assertEqual(login.status_code, 401)
+        body = login.json()
+        self.assertNotIn("error_code", body)
+        self.assertNotIn("install_guide", body)
+        self.assertEqual(body["error"], "用户名或密码错误")
+
+    def test_client_ssh_status_is_public_and_warns_when_unreachable(self):
+        with patch("socket.create_connection", side_effect=OSError("connection refused")):
+            response = self.client.get("/api/auth/client-ssh-status")
+
+        # 未登录也能访问（公开路径），且附带回连失败提示与安装指南。
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["ssh_reachable"])
+        self.assertIn("OpenSSH Server", body["hint"])
+        self.assertIn("Add-WindowsCapability", body["install_guide"])
+
+    def test_client_ssh_status_reachable_omits_guide(self):
+        class _Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        with patch("socket.create_connection", return_value=_Conn()):
+            response = self.client.get("/api/auth/client-ssh-status")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["ssh_reachable"])
+        self.assertNotIn("install_guide", body)
+        self.assertNotIn("hint", body)
+
+    def test_client_ssh_status_reuses_short_lived_source_probe(self):
+        with patch("socket.create_connection", side_effect=OSError("connection refused")) as connect:
+            first = self.client.get("/api/auth/client-ssh-status")
+            second = self.client.get("/api/auth/client-ssh-status")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(first.json()["ssh_reachable"])
+        self.assertFalse(second.json()["ssh_reachable"])
+        connect.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -17,6 +17,10 @@ const state = {
     authRequired: false,
     authSetupRequired: false,
     authReady: false,
+    // 用户手动关闭登录层后置 true：后台轮询/初始化中的 401 不再自动
+    // 弹回登录层（否则刚关闭就被重新拉起）；用户主动操作触发 401 时
+    // 会清除此标记并重新弹出。
+    authGateDismissed: false,
     usernameDetectShown: false,
     // 敏感操作使用当前会话的管理员二次认证状态。
     // Populated from /api/auth/status (elevated/elevated_until).
@@ -37,7 +41,9 @@ const state = {
     domCache: {},
     lastLogCount: 0,
     wsLogStallTicks: 0,
-    currentLogTab: 'system',
+    currentLogTab: sessionStorage.getItem('gms_test_log_tab') === 'module'
+        ? 'module'
+        : 'system',
     pendingDeviceRefresh: null,
     deviceRefreshPromise: null,
     isRefreshingDevices: false,

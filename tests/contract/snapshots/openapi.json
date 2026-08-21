@@ -3531,6 +3531,23 @@
         "summary": "Upload Apk"
       }
     },
+    "/api/auth/client-ssh-status": {
+      "get": {
+        "description": "登录层主动探测客户端 SSH 端口。\n\n客户端账号登录依赖回连本机的 SSH 服务验证身份；端口不通时提前提示\n安装 SSHD，而不是等用户输入账号密码后才在失败信息里得知。\n仅探测请求来源 IP 自身（端口 22），不提供任意主机探测能力。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Auth Client Ssh Status"
+      }
+    },
     "/api/auth/elevate": {
       "post": {
         "description": "Re-authenticate as admin to unlock sensitive operations.\n\nVerifies the supplied credentials belong to an admin, then stamps an\nelevation onto the caller's current session that lasts for the rest of\nthat session. In anonymous development mode this is also the point where\nan admin session is created; ordinary page loading remains anonymous while\nsensitive actions still require credentials.",

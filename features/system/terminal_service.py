@@ -127,7 +127,11 @@ def create_local_terminal_channel(command: list[str] | None = None) -> LocalPtyC
     shell = os.environ.get("SHELL") or "/bin/bash"
     terminal_command = command or [shell, "-l"]
     env = os.environ.copy()
-    env.setdefault("TERM", "xterm-256color")
+    # The browser advertises xterm-256color and remote Paramiko channels use
+    # the same terminal type. Do not inherit TERM=xterm/dumb from the service
+    # manager, otherwise readline may choose capabilities that disagree with
+    # the xterm.js client during cursor/history redraws.
+    env["TERM"] = "xterm-256color"
     return LocalPtyChannel(terminal_command, cwd=os.path.expanduser("~"), env=env)
 
 
