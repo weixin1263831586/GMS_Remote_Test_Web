@@ -28,6 +28,21 @@ class _WebSocket:
         self.messages.append(value)
 
 
+class _SplitUtf8Channel(_Channel):
+    """Expose one chunk per polling cycle to model a split PTY code point."""
+
+    def __init__(self, chunks):
+        super().__init__(chunks)
+        self.poll_ready = True
+
+    def recv_ready(self):
+        if not self.chunks:
+            return False
+        ready = self.poll_ready
+        self.poll_ready = not self.poll_ready
+        return ready
+
+
 class TerminalOutputTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         with global_state.terminal_lock:
@@ -88,3 +103,28 @@ class TerminalOutputTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(thread.is_alive())
         self.assertEqual(websocket.messages, [])
+
+    async def test_utf8_code_point_split_between_batches_is_preserved(self):
+        session_id = "split-utf8-session"
+        channel = _SplitUtf8Channel([b"\xe4\xbd", b"\xa0", b""])
+        websocket = _WebSocket()
+        with global_state.terminal_lock:
+            global_state.terminal_ssh_sessions[session_id] = {
+                "channel": channel,
+                "ssh": None,
+                "mode": "local",
+            }
+
+        thread = start_terminal_output_pump(
+            session_id,
+            websocket,
+            asyncio.get_running_loop(),
+            thread_name="test-terminal-split-utf8",
+        )
+        await asyncio.to_thread(thread.join, 1)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(websocket.messages, [{
+            "type": "terminal_data",
+            "data": "你",
+        }])

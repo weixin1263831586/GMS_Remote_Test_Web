@@ -808,6 +808,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                           const rect = shell.getBoundingClientRect();
                           return {
                             state: shell.dataset.frameState,
+                            progressState: shell.dataset.frameProgress,
                             frameVisibility: getComputedStyle(frame).visibility,
                             loaderDisplay: getComputedStyle(
                               shell.querySelector('.embedded-frame-loading')
@@ -821,17 +822,22 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                             skeletonPanels: shell.querySelectorAll(
                               '.embedded-frame-skeleton-panel'
                             ).length,
+                            progressVisibility: getComputedStyle(
+                              shell.querySelector('.embedded-frame-loading-chip')
+                            ).visibility,
                             rect: {width: rect.width, height: rect.height},
                           };
                         }""",
                         [page_name, selector],
                     )
                     self.assertEqual(loading["state"], "loading", loading)
+                    self.assertEqual(loading["progressState"], "hidden", loading)
                     self.assertEqual(loading["frameVisibility"], "hidden", loading)
                     self.assertEqual(loading["loaderDisplay"], "block", loading)
                     self.assertEqual(loading["skeletonDisplay"], "grid", loading)
                     self.assertEqual(loading["skeletonCards"], 4, loading)
                     self.assertEqual(loading["skeletonPanels"], 2, loading)
+                    self.assertEqual(loading["progressVisibility"], "hidden", loading)
                     self.assertGreater(loading["rect"]["height"], 100, loading)
 
                     page.wait_for_function(
@@ -926,6 +932,67 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_lazy_frame_progress_text_is_deferred_until_load_is_slow(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            initial = page.evaluate(
+                """() => {
+                  const shell = document.createElement('div');
+                  shell.className = 'embedded-frame-shell';
+                  shell.dataset.frameState = 'loading';
+                  const status = document.createElement('div');
+                  status.className = 'embedded-frame-loading';
+                  status.dataset.loadingText = '页面仍在准备中…';
+                  const frame = document.createElement('iframe');
+                  // Keep the synthetic frame pending so the delay can be
+                  // observed without depending on network timing.
+                  frame.setAttribute = () => {};
+                  shell.append(status, frame);
+                  document.body.appendChild(shell);
+                  setLazyFrameSource(frame, '/held-frame');
+                  window.__deferredFrameFixture = {shell, frame};
+                  return {
+                    state: shell.dataset.frameState,
+                    progress: shell.dataset.frameProgress,
+                    chipVisibility: getComputedStyle(
+                      status.querySelector('.embedded-frame-loading-chip')
+                    ).visibility,
+                  };
+                }"""
+            )
+            self.assertEqual(initial, {
+                "state": "loading",
+                "progress": "hidden",
+                "chipVisibility": "hidden",
+            })
+
+            page.wait_for_function(
+                "window.__deferredFrameFixture.shell.dataset.frameProgress === 'visible'"
+            )
+            visible = page.evaluate(
+                """() => {
+                  const {shell, frame} = window.__deferredFrameFixture;
+                  const chip = shell.querySelector('.embedded-frame-loading-chip');
+                  const result = {
+                    progress: shell.dataset.frameProgress,
+                    chipVisibility: getComputedStyle(chip).visibility,
+                    text: chip.textContent,
+                  };
+                  if (frame.__surfaceProgressTimer) clearTimeout(frame.__surfaceProgressTimer);
+                  shell.remove();
+                  delete window.__deferredFrameFixture;
+                  return result;
+                }"""
+            )
+            self.assertEqual(visible, {
+                "progress": "visible",
+                "chipVisibility": "visible",
+                "text": "页面仍在准备中…",
+            })
+        finally:
+            page.close()
+
     def test_saved_cluster_refresh_has_stable_surface_before_dom_ready(self):
         page = self.new_page()
         try:
@@ -967,6 +1034,201 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "document.querySelector('#cluster-frame').closest("
                     "'.embedded-frame-shell').dataset.frameState === 'ready'"
                 )
+        finally:
+            page.close()
+
+    def test_cluster_management_tab_survives_shell_refresh(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('cluster', null)")
+            page.wait_for_function(
+                "document.querySelector('#cluster-frame').closest("
+                "'.embedded-frame-shell').dataset.frameState === 'ready'"
+            )
+            cluster = self.frame_for(page, "#cluster-frame")
+            self.close_initial_modals(page)
+            cluster.locator('[data-dash-tab="management"]').click()
+            expect(cluster.locator("#tab-management")).to_be_visible()
+            expect(cluster.locator("#tab-dashboard")).to_be_hidden()
+
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function(
+                "currentPage === 'cluster' && document.querySelector('#page-cluster').classList.contains('active')"
+            )
+            page.wait_for_function(
+                "document.querySelector('#cluster-frame').closest("
+                "'.embedded-frame-shell').dataset.frameState === 'ready'"
+            )
+            cluster = self.frame_for(page, "#cluster-frame")
+
+            expect(cluster.locator('[data-dash-tab="management"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            expect(cluster.locator('[data-dash-tab="management"]')).to_have_attribute(
+                "aria-selected", "true"
+            )
+            expect(cluster.locator("#tab-management")).to_be_visible()
+            expect(cluster.locator("#tab-dashboard")).to_be_hidden()
+            self.assertEqual(
+                cluster.evaluate(
+                    "window.sessionStorage.getItem('gms_cluster_active_tab')"
+                ),
+                "management",
+            )
+        finally:
+            page.close()
+
+    def test_test_log_tab_survives_shell_refresh(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof switchLogTab === 'function'")
+            page.evaluate("switchLogTab('module')")
+            expect(page.locator('[data-log-tab="module"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function(
+                """currentPage === 'test'
+                && document.querySelector('[data-log-tab="module"]')
+                    .classList.contains('active')"""
+            )
+
+            expect(page.locator('[data-log-tab="module"]')).to_have_attribute(
+                "aria-selected", "true"
+            )
+            self.assertEqual(
+                page.evaluate("sessionStorage.getItem('gms_test_log_tab')"),
+                "module",
+            )
+        finally:
+            page.close()
+
+    def test_apk_analysis_tab_survives_shell_refresh(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('apk-analysis', null)")
+            page.wait_for_function("typeof switchApkTab === 'function'")
+            page.evaluate("switchApkTab('permissions')")
+            expect(page.locator('[data-apk-tab="permissions"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function(
+                """currentPage === 'apk-analysis'
+                && document.querySelector('[data-apk-tab="permissions"]')
+                    .classList.contains('active')"""
+            )
+
+            # 没有选择 APK 任务时结果容器整体隐藏；此处验证内部面板自身
+            # 的选中状态，任务恢复场景另有运行时用例覆盖。
+            expect(page.locator("#apk-tab-permissions")).to_have_css(
+                "display", "block"
+            )
+            expect(page.locator("#apk-tab-manifest")).to_have_css(
+                "display", "none"
+            )
+            self.assertEqual(
+                page.evaluate("sessionStorage.getItem('gms_apk_analysis_tab')"),
+                "permissions",
+            )
+        finally:
+            page.close()
+
+    def test_automation_workflow_and_status_filter_survive_refresh(self):
+        page = self.new_page()
+        try:
+            page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.wait_for_function("document.body.dataset.automationReady === 'true'")
+            page.evaluate("switchWorkflowPane('runs'); setStatusFilter('queued')")
+            expect(page.locator('[data-workflow="runs"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            expect(page.locator('[data-status="queued"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("document.body.dataset.automationReady === 'true'")
+
+            expect(page.locator('[data-workflow="runs"]')).to_have_attribute(
+                "aria-selected", "true"
+            )
+            expect(page.locator("#workflow-pane-runs")).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            expect(page.locator('[data-status="queued"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            self.assertEqual(
+                page.evaluate("({pane: activeWorkflowPane, status: atsStatus})"),
+                {"pane": "runs", "status": "queued"},
+            )
+            self.assertIn("tab=runs", page.url)
+            self.assertIn("status=queued", page.url)
+        finally:
+            page.close()
+
+    def test_update_monitor_tab_survives_refresh(self):
+        page = self.new_page()
+        try:
+            page.goto(
+                f"{self.base_url}/gms-update-monitor",
+                wait_until="domcontentloaded",
+            )
+            page.wait_for_function("typeof setTab === 'function'")
+            page.evaluate("setTab('artifacts')")
+            expect(page.locator('[data-tab="artifacts"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("typeof setTab === 'function'")
+
+            expect(page.locator('[data-tab="artifacts"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            self.assertEqual(page.evaluate("tab"), "artifacts")
+            self.assertEqual(
+                page.evaluate("sessionStorage.getItem('gms_update_monitor_tab')"),
+                "artifacts",
+            )
+            self.assertIn("tab=artifacts", page.url)
+        finally:
+            page.close()
+
+    def test_redmine_case_view_survives_refresh(self):
+        page = self.new_page()
+        try:
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.wait_for_function("typeof switchCaseView === 'function'")
+            page.evaluate("switchTab('cases'); switchCaseView('cases')")
+            expect(page.locator("#viewBtnCases")).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("currentTab === 'cases' && caseView === 'cases'")
+
+            expect(page.locator('[data-tab="cases"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            expect(page.locator("#viewBtnCases")).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            self.assertEqual(
+                page.evaluate(
+                    "({top: currentTab, inner: caseView, saved: "
+                    "sessionStorage.getItem('redmineCaseView')})"
+                ),
+                {"top": "cases", "inner": "cases", "saved": "cases"},
+            )
+            self.assertIn("tab=cases", page.url)
+            self.assertIn("case_view=cases", page.url)
         finally:
             page.close()
 
@@ -4423,6 +4685,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.evaluate(
                 """
                 state.selectedDevices = new Set(['D1']);
+                state.devices = [{device_id: 'D1', status: 'online'}];
                 window.apkCurrentTaskId = 'apk-task';
                 executeBurnOperation = async (endpoint, data) => {
                     await apiCall(endpoint, 'POST', {
@@ -5496,6 +5759,139 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertTrue(after["same"])
             self.assertEqual(after["line"], before)
             self.assertEqual(len(terminal_websockets), 1)
+        finally:
+            page.close()
+
+    def test_terminal_mouse_selection_keeps_selected_text_readable(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                },
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            page.evaluate(
+                "state.elevated = true; state.elevatedUntil = Date.now() + 60000"
+            )
+            page.evaluate("switchPage('terminal', null)")
+            page.wait_for_function(
+                """() => {
+                  const instance = terminalWorkspace.instances.get(0);
+                  return instance?.socket?.readyState === WebSocket.OPEN
+                    && instance.shellReady;
+                }"""
+            )
+
+            marker = "/home/hcq/Launcher3QuickStepGo.apk"
+            metrics = page.evaluate(
+                """marker => {
+                  const term = terminalWorkspace.instances.get(0).terminal;
+                  term.reset();
+                  term.write(`\\x1b[32m${marker}\\x1b[0m`);
+                  const rect = term.element.querySelector('.xterm-screen')
+                    .getBoundingClientRect();
+                  const cell = term._core._renderService.dimensions.css.cell;
+                  return {
+                    x: rect.x,
+                    y: rect.y,
+                    cellWidth: cell.width,
+                    cellHeight: cell.height,
+                    selectionBackground: term.options.theme.selectionBackground,
+                    selectionForeground: term.options.theme.selectionForeground,
+                  };
+                }""",
+                marker,
+            )
+            page.wait_for_timeout(100)
+
+            page.mouse.move(
+                metrics["x"] + metrics["cellWidth"] * 0.25,
+                metrics["y"] + metrics["cellHeight"] * 0.5,
+            )
+            page.mouse.down()
+            page.mouse.move(
+                metrics["x"] + metrics["cellWidth"] * (len(marker) - 0.25),
+                metrics["y"] + metrics["cellHeight"] * 0.5,
+                steps=8,
+            )
+            page.mouse.up()
+
+            selection = page.evaluate(
+                """() => {
+                  const term = terminalWorkspace.instances.get(0).terminal;
+                  return {hasSelection: term.hasSelection(), text: term.getSelection()};
+                }"""
+            )
+            self.assertTrue(selection["hasSelection"])
+            self.assertEqual(selection["text"], marker)
+            self.assertEqual(metrics["selectionForeground"], "#ffffff")
+            self.assertEqual(
+                metrics["selectionBackground"], "rgba(124, 92, 255, 0.55)"
+            )
+        finally:
+            page.close()
+
+    def test_terminal_resize_before_socket_open_is_sent_after_connect(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """() => {
+                  const pageSurface = document.createElement('div');
+                  pageSurface.className = 'page-content active';
+                  const paneBody = document.createElement('div');
+                  paneBody.className = 'host-workspace-pane-body';
+                  Object.defineProperties(paneBody, {
+                    clientWidth: {value: 900},
+                    clientHeight: {value: 500},
+                  });
+                  const terminalElement = document.createElement('div');
+                  paneBody.appendChild(terminalElement);
+                  pageSurface.appendChild(paneBody);
+                  document.body.appendChild(pageSurface);
+
+                  const sent = [];
+                  const socket = {
+                    readyState: WebSocket.CONNECTING,
+                    send: payload => sent.push(JSON.parse(payload)),
+                  };
+                  const instance = {
+                    disposed: false,
+                    fit: {fit() {}},
+                    terminal: {element: terminalElement, cols: 137, rows: 31},
+                    socket,
+                    lastResizeCols: 0,
+                    lastResizeRows: 0,
+                  };
+
+                  resizeHostWorkspaceTerminal(instance);
+                  const beforeOpen = {
+                    sent: [...sent],
+                    cols: instance.lastResizeCols,
+                    rows: instance.lastResizeRows,
+                  };
+                  socket.readyState = WebSocket.OPEN;
+                  resizeHostWorkspaceTerminal(instance);
+                  const afterOpen = {
+                    sent: [...sent],
+                    cols: instance.lastResizeCols,
+                    rows: instance.lastResizeRows,
+                  };
+                  pageSurface.remove();
+                  return {beforeOpen, afterOpen};
+                }"""
+            )
+
+            self.assertEqual(result["beforeOpen"], {"sent": [], "cols": 0, "rows": 0})
+            self.assertEqual(result["afterOpen"], {
+                "sent": [{"type": "terminal_resize", "cols": 137, "rows": 31}],
+                "cols": 137,
+                "rows": 31,
+            })
         finally:
             page.close()
 

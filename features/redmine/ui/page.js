@@ -486,16 +486,21 @@ function copyText(text, btn) {
 
 // ---- Tab switching ----
 function switchTab(tab) {
-  currentTab = tab;
-  try { window.sessionStorage.setItem('redmineLastTab', tab); } catch(_) {}
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + tab));
-  if (tab === 'issues') return loadIssues();
-  if (tab === 'cases') return loadCases();
-  if (tab === 'runs') return loadRuns();
-  if (tab === 'department') return loadDepartmentOverdue(false);
-  if (tab === 'project') return loadProjectDashboard(false);
-  if (tab === 'stats') return loadStatistics();
+  var target = document.getElementById('tab-' + tab) ? tab : 'stats';
+  currentTab = target;
+  try { window.sessionStorage.setItem('redmineLastTab', target); } catch(_) {}
+  var url = new URL(window.location.href);
+  if (target === 'stats') url.searchParams.delete('tab');
+  else url.searchParams.set('tab', target);
+  window.history.replaceState({}, '', url.toString());
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === target));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + target));
+  if (target === 'issues') return loadIssues();
+  if (target === 'cases') return loadCases();
+  if (target === 'runs') return loadRuns();
+  if (target === 'department') return loadDepartmentOverdue(false);
+  if (target === 'project') return loadProjectDashboard(false);
+  if (target === 'stats') return loadStatistics();
   return Promise.resolve();
 }
 
@@ -2148,14 +2153,27 @@ let currentCaseOffset = 0;
 const casePageSize = 30;
 let pendingReferenceIssueId = 0;
 let pendingInternalSource = null; // {type:'issue'|'case', id}
-let caseView = 'facts'; // 'facts' (imported issue facts) | 'cases' (mature cases)
+const REDMINE_CASE_VIEW_STORAGE_KEY = 'redmineCaseView';
+const REDMINE_CASE_VIEWS = new Set(['facts', 'cases']);
+let caseView = new URLSearchParams(window.location.search).get('case_view') || '';
+if (!REDMINE_CASE_VIEWS.has(caseView)) {
+  try { caseView = window.sessionStorage.getItem(REDMINE_CASE_VIEW_STORAGE_KEY) || ''; } catch(_) { caseView = ''; }
+}
+if (!REDMINE_CASE_VIEWS.has(caseView)) caseView = 'facts';
 
-function switchCaseView(view) {
-  caseView = view;
-  document.getElementById('viewBtnFacts').classList.toggle('active', view === 'facts');
-  document.getElementById('viewBtnCases').classList.toggle('active', view === 'cases');
+function switchCaseView(view, {persist = true, load = true} = {}) {
+  caseView = REDMINE_CASE_VIEWS.has(view) ? view : 'facts';
+  document.getElementById('viewBtnFacts').classList.toggle('active', caseView === 'facts');
+  document.getElementById('viewBtnCases').classList.toggle('active', caseView === 'cases');
+  if (persist) {
+    try { window.sessionStorage.setItem(REDMINE_CASE_VIEW_STORAGE_KEY, caseView); } catch(_) {}
+    var url = new URL(window.location.href);
+    if (caseView === 'facts') url.searchParams.delete('case_view');
+    else url.searchParams.set('case_view', caseView);
+    window.history.replaceState({}, '', url.toString());
+  }
   currentCaseOffset = 0;
-  loadCases();
+  if (load) loadCases();
 }
 
 async function loadCases() {
@@ -2583,6 +2601,7 @@ window.addEventListener('gms:embedded-workspace', function(event) {
   ).catch(function(error) { notifyUser('打开工单失败', error.message, 'error'); });
 });
 restoreRedmineProfileState();
+switchCaseView(caseView, {persist: false, load: false});
 var initialTab = new URLSearchParams(window.location.search).get('tab') || (window.sessionStorage.getItem('redmineLastTab') || 'stats');
 if (!document.getElementById('tab-' + initialTab)) initialTab = 'stats';
 var redmineInitialLoad = Promise.resolve(switchTab(initialTab));

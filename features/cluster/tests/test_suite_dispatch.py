@@ -19,6 +19,7 @@ from features.auth import CurrentUser
 from features.cluster import api as cluster_api
 from features.cluster.repository import ClusterRepository
 from features.cluster.service import ClusterService
+from features.cluster.suite_library_api import controller_suite_library
 
 
 class _ClusterApiTestBase(unittest.TestCase):
@@ -82,6 +83,26 @@ class _ClusterApiTestBase(unittest.TestCase):
 
 
 class SuiteDispatchTests(_ClusterApiTestBase):
+    def test_controller_suite_library_is_sorted_by_name(self):
+        with tempfile.TemporaryDirectory() as suite_dir:
+            paths = [
+                Path(suite_dir) / "z-last.zip",
+                Path(suite_dir) / "A-first.zip",
+                Path(suite_dir) / "m-middle.zip",
+            ]
+            for path in paths:
+                path.write_bytes(b"not-a-complete-archive")
+            with patch(
+                "features.cluster.suite_library_api.controller_suite_archives",
+                return_value=paths,
+            ):
+                result = controller_suite_library()
+
+        self.assertEqual(
+            [item["name"] for item in result["archives"]],
+            ["A-first.zip", "m-middle.zip", "z-last.zip"],
+        )
+
     def test_suite_command_owner_can_poll_after_elevation_expires(self):
         created = self.client.post(
             "/api/cluster/suites/download",

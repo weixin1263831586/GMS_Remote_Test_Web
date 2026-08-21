@@ -7,8 +7,10 @@ from collections.abc import Callable
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from foundation.cache import TTLCache
 from foundation.config import config_manager
 from foundation.responses import error_response
+from foundation.ssh import SSHD_INSTALL_GUIDE
 
 from .access import (
     get_authenticated_user,
@@ -26,6 +28,26 @@ from .service import (
 
 router = APIRouter(prefix="/api/auth")
 _client_ssh_authenticator: Callable[[str, str, str], tuple[bool, str, str | None]] | None = None
+_client_ssh_probe_cache = TTLCache[str, bool](ttl_seconds=30)
+
+# 客户端 SSH 不可达（服务未安装/未启动/网络不通）的特征，区别于密码错误；
+# 命中时登录层附带 SSHD 安装指南，提示先在客户端开启 SSH。
+_SSH_UNAVAILABLE_MARKERS = (
+    'connection refused',
+    'no route to host',
+    'network is unreachable',
+    'timed out',
+    'timeout',
+    '连接被拒绝',
+    '连接超时',
+    '网络不可达',
+    '无法访问',
+)
+
+
+def _client_ssh_unavailable(error: str | None) -> bool:
+    text = str(error or '').lower()
+    return any(marker in text for marker in _SSH_UNAVAILABLE_MARKERS)
 
 
 def configure_client_ssh_authenticator(
@@ -63,23 +85,27 @@ def _rate_limit_response(retry_after: int) -> JSONResponse:
 def _authenticate_client_ssh_user(
     username: str,
     password: str,
-) -> CurrentUser | None:
+) -> tuple[CurrentUser | None, str | None]:
     """Authenticate a client with a host-scoped SSH password.
 
     Client accounts are separate from platform administrators and must use the
     explicit ``SSH_USER@CLIENT_IP`` form. The supplied password is verified by
     an actual SSH ``whoami`` call when no encrypted credential is stored yet.
+
+    Returns the authenticated user plus the authenticator error message (when
+    the SSH attempt itself failed), so callers can tell "host unreachable"
+    apart from "wrong password".
     """
     login_name = str(username or "").strip()
     if "@" not in login_name:
-        return None
+        return None, None
     client_user, client_host = login_name.rsplit("@", 1)
     if not client_user or not client_host:
-        return None
+        return None, None
     try:
         ipaddress.ip_address(client_host)
     except ValueError:
-        return None
+        return None, None
 
     canonical_username = f"{client_user}@{client_host}"
     expected = config_manager.find_device_host_password(canonical_username)
@@ -87,27 +113,27 @@ def _authenticate_client_ssh_user(
         # The first login may be the moment the host password is supplied. Use
         # it for a real SSH whoami check; never accept an unverified password.
         if _client_ssh_authenticator is None:
-            return None
-        success, detected_user, _error = _client_ssh_authenticator(
+            return None, None
+        success, detected_user, ssh_error = _client_ssh_authenticator(
             client_host,
             client_user,
             str(password or ""),
         )
         if not success or not detected_user:
-            return None
+            return None, ssh_error
         canonical_username = f"{detected_user}@{client_host}"
     elif not hmac.compare_digest(str(expected), str(password or "")):
-        return None
+        return None, None
 
     username = canonical_username
     existing = auth_service.get_enabled_user(username)
     if existing and existing.role != "user":
-        return None
+        return None, None
     if not existing and auth_service.user_exists(username):
         # A disabled client account must be re-enabled by an administrator;
         # a valid SSH password must not bypass that control.
-        return None
-    return existing or auth_service.create_client_user(username)
+        return None, None
+    return existing or auth_service.create_client_user(username), None
 
 
 @router.get("/status")
@@ -241,6 +267,7 @@ async def auth_login(request: Request, req: dict):
         username,
         str(req.get("password", "")),
     )
+    client_ssh_error = None
     if not user:
         try:
             ipaddress.ip_address(username)
@@ -260,7 +287,7 @@ async def auth_login(request: Request, req: dict):
             )
         from fastapi.concurrency import run_in_threadpool
 
-        user = await run_in_threadpool(
+        user, client_ssh_error = await run_in_threadpool(
             _authenticate_client_ssh_user,
             username,
             str(req.get("password", "")),
@@ -273,6 +300,15 @@ async def auth_login(request: Request, req: dict):
         )
         if retry_after:
             return _rate_limit_response(retry_after)
+        if client_ssh_error and _client_ssh_unavailable(client_ssh_error):
+            # 客户端 SSH 服务不可达（多为未安装 SSHD）：给出原因和安装指南，
+            # 否则用户会被全屏登录层困住且只看到误导性的“用户名或密码错误”。
+            return error_response(
+                client_ssh_error,
+                status_code=401,
+                error_code="client_ssh_unavailable",
+                install_guide=SSHD_INSTALL_GUIDE,
+            )
         return error_response("用户名或密码错误", status_code=401)
     auth_service.clear_auth_failures("login", username, source_ip)
 
@@ -288,6 +324,48 @@ async def auth_login(request: Request, req: dict):
     )
     _set_session_cookie(response, token)
     return response
+
+
+@router.get("/client-ssh-status")
+async def auth_client_ssh_status(request: Request):
+    """登录层主动探测客户端 SSH 端口。
+
+    客户端账号登录依赖回连本机的 SSH 服务验证身份；端口不通时提前提示
+    安装 SSHD，而不是等用户输入账号密码后才在失败信息里得知。
+    仅探测请求来源 IP 自身（端口 22），不提供任意主机探测能力。
+    """
+    import socket
+
+    from fastapi.concurrency import run_in_threadpool
+
+    client_ip = _request_source_ip(request)
+
+    cached = _client_ssh_probe_cache.get(client_ip)
+
+    def probe() -> bool:
+        try:
+            with socket.create_connection((client_ip, 22), timeout=2.0):
+                return True
+        except OSError:
+            return False
+
+    if cached is None:
+        reachable = await run_in_threadpool(probe)
+        _client_ssh_probe_cache.set(client_ip, reachable)
+    else:
+        reachable = cached
+    content = {
+        "success": True,
+        "client_ip": client_ip,
+        "ssh_reachable": reachable,
+    }
+    if not reachable:
+        content["hint"] = (
+            f"未检测到本机（{client_ip}）的 SSH 服务（端口 22）。"
+            "登录需要通过 SSH 验证本机身份，请先安装并启动 OpenSSH Server（SSHD）。"
+        )
+        content["install_guide"] = SSHD_INSTALL_GUIDE
+    return JSONResponse(content=content)
 
 
 @router.post("/logout")

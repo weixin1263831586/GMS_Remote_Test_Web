@@ -39,7 +39,7 @@
   <header>
     <div>
       <h1>GMS Update Monitor</h1>
-      <div id="summary" class="summary">Loading...</div>
+      <div id="summary" class="summary">加载中…</div>
     </div>
     <div class="actions">
       <button onclick="startSync('incremental')">增量扫描</button>
@@ -71,7 +71,7 @@
     <div class="table-wrap">
       <table>
         <thead id="thead"></thead>
-        <tbody id="rows"><tr><td class="muted">Loading...</td></tr></tbody>
+        <tbody id="rows"><tr><td class="muted">加载中…</td></tr></tbody>
       </table>
     </div>
     <div class="pager">
@@ -82,8 +82,13 @@
     <div id="toast" class="toast"></div>
   </main>
   <script>
-    const initialTab = new URLSearchParams(window.location.search).get('tab');
-    let tab = ['changes', 'artifacts', 'packages', 'mainline', 'requirements'].includes(initialTab) ? initialTab : 'changes';
+    const UPDATE_MONITOR_TAB_STORAGE_KEY = 'gms_update_monitor_tab';
+    const updateMonitorTabs = ['changes', 'artifacts', 'packages', 'mainline', 'requirements'];
+    let initialTab = new URLSearchParams(window.location.search).get('tab') || '';
+    if (!updateMonitorTabs.includes(initialTab)) {
+      try { initialTab = window.sessionStorage.getItem(UPDATE_MONITOR_TAB_STORAGE_KEY) || ''; } catch (_) { initialTab = ''; }
+    }
+    let tab = updateMonitorTabs.includes(initialTab) ? initialTab : 'changes';
     let offset = 0;
     const limit = 100;
     let total = 0;
@@ -109,7 +114,12 @@
       showToast(title + (message ? ': ' + message : ''), level);
     }
     function setTab(next) {
-      tab = next; offset = 0;
+      tab = updateMonitorTabs.includes(next) ? next : 'changes'; offset = 0;
+      try { window.sessionStorage.setItem(UPDATE_MONITOR_TAB_STORAGE_KEY, tab); } catch (_) {}
+      const url = new URL(window.location.href);
+      if (tab === 'changes') url.searchParams.delete('tab');
+      else url.searchParams.set('tab', tab);
+      window.history.replaceState({}, '', url.toString());
       document.querySelectorAll('.tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
       reload(true);
     }
@@ -258,6 +268,7 @@
       startSuiteDownload(linkEl.dataset.url || '');
     });
     document.querySelectorAll('.tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+    try { window.sessionStorage.setItem(UPDATE_MONITOR_TAB_STORAGE_KEY, tab); } catch (_) {}
     loadAll();
   </script>
 </body>

@@ -10,11 +10,14 @@ let dashResizeObserver=null;
 let localVpnConnected=null;
 let workerVpnCache={};
 const activeDeployments=new Set();
+const CLUSTER_DASHBOARD_TAB_STORAGE_KEY='gms_cluster_active_tab';
+const CLUSTER_DASHBOARD_TABS=new Set(['dashboard','management']);
 let clusterWorkspace={scope_mode:'cluster'};
 let selectedClusterJob=null;
 let selectedClusterReport=null;
 let applyingClusterWorkspace=false;
 let refreshPromise=null;
+let clusterInitialRefreshSettled=false;
 let clusterRefreshInterval=null;
 let toastTimer=null;
 const clusterModalStack=[];
@@ -69,6 +72,9 @@ function renderModeStatus(){
 function renderDashboard(){
  const hasECharts=typeof echarts!=='undefined';
  const statsEl=document.querySelector('#dashboard-stats');if(!statsEl)return;
+ // ECharts 资源可能早于首批接口返回并触发 renderDashboard。此时保留
+ // page.html 的稳定骨架，不能用空 state 伪装成“加载完成”。
+ if(!clusterInitialRefreshSettled)return;
  // 1. Overview stat cards
  const workersOnline=state.workers.filter(w=>w.status!=='offline').length;
  const workersOffline=state.workers.filter(w=>w.status==='offline').length;
@@ -441,6 +447,7 @@ async function refresh(showBusy=false){
    const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]];
    const results=await Promise.allSettled(requests.map(([,path])=>api(path))),errors=[];
    results.forEach((result,index)=>{const [stateKey,,payloadKey]=requests[index];if(result.status==='fulfilled')state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;else errors.push(`${stateKey}: ${result.reason.message}`)});
+   clusterInitialRefreshSettled=true;
    checkLocalVpn().catch(()=>{});checkWorkerVpn().then(render).catch(()=>{});render();
    await applyClusterWorkspace(clusterWorkspace);
    if(errors.length)toast(`部分数据刷新失败：${errors.join('；')}`);
@@ -622,14 +629,33 @@ document.querySelector('#cluster-search')?.addEventListener('input',render);
 document.querySelector('#job-status-filter')?.addEventListener('change',render);
 window.addEventListener('gms:embedded-workspace',event=>applyClusterWorkspace(event.detail?.context||{},event.detail?.type==='workspace-context-navigate').catch(e=>toast(e.message)));
 window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;window.updateDashGauges=updateDashGauges;window.updateDashTrend=updateDashTrend;window.renderDashPieDetail=renderDashPieDetail;window.renderDashboard=renderDashboard;document.querySelector('#refresh').onclick=()=>refresh(true);const dashRefreshBtn=document.querySelector('#dash-refresh-charts');if(dashRefreshBtn)dashRefreshBtn.onclick=()=>{dashTrendLastFetch=0;refresh(true)};document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-worker').onchange=()=>{updateJobOptions();syncClusterWorkspace()};document.querySelector('#job-suite').onchange=()=>syncClusterWorkspace();document.querySelector('#job-device').onchange=()=>syncClusterWorkspace();document.querySelector('#create-job').onclick=createJob;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>openClusterJobReport();document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.addEventListener('click',e=>{if(!e.target.closest('.worker-menu-wrap'))document.querySelectorAll('.worker-menu.open').forEach(m=>m.classList.remove('open'))});
-// Tab switching
-document.querySelectorAll('.dash-tab').forEach(btn=>btn.addEventListener('click',()=>{
- document.querySelectorAll('.dash-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
- const tab=btn.dataset.dashTab;
- document.getElementById('tab-dashboard').hidden=tab!=='dashboard';
- document.getElementById('tab-management').hidden=tab!=='management';
- if(tab==='dashboard'){setTimeout(()=>{scheduleDashboardChartsResize();if(typeof updateDashTrend==='function')updateDashTrend(true)},50)}
-}));
+// Tab switching. 与外层 gms_current_page 的刷新恢复保持一致；使用
+// sessionStorage 可在当前浏览器标签页刷新后恢复，同时不会让另一个标签页
+// 的集群视图互相覆盖。
+function selectClusterDashboardTab(tab,{persist=true}={}){
+ const target=CLUSTER_DASHBOARD_TABS.has(tab)?tab:'dashboard';
+ document.querySelectorAll('.dash-tab').forEach(button=>{
+  const active=button.dataset.dashTab===target;
+  button.classList.toggle('active',active);
+  button.setAttribute('aria-selected',active?'true':'false');
+ });
+ document.getElementById('tab-dashboard').hidden=target!=='dashboard';
+ document.getElementById('tab-management').hidden=target!=='management';
+ if(persist){
+  try{window.sessionStorage.setItem(CLUSTER_DASHBOARD_TAB_STORAGE_KEY,target)}catch(_error){}
+  const url=new URL(window.location.href);
+  if(target==='dashboard')url.searchParams.delete('tab');else url.searchParams.set('tab',target);
+  window.history.replaceState({},'',url.toString());
+ }
+ if(target==='dashboard'){setTimeout(()=>{scheduleDashboardChartsResize();if(typeof updateDashTrend==='function')updateDashTrend(true)},50)}
+ return target;
+}
+document.querySelectorAll('.dash-tab').forEach(button=>button.addEventListener('click',()=>selectClusterDashboardTab(button.dataset.dashTab)));
+let initialClusterDashboardTab=new URLSearchParams(window.location.search).get('tab')||'';
+if(!CLUSTER_DASHBOARD_TABS.has(initialClusterDashboardTab)){
+ try{initialClusterDashboardTab=window.sessionStorage.getItem(CLUSTER_DASHBOARD_TAB_STORAGE_KEY)||''}catch(_error){}
+}
+selectClusterDashboardTab(initialClusterDashboardTab,{persist:false});
 window.addEventListener('resize',scheduleDashboardChartsResize,{passive:true});
 if(typeof ResizeObserver!=='undefined'){
  dashResizeObserver=new ResizeObserver(scheduleDashboardChartsResize);

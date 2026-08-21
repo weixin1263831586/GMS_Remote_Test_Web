@@ -9,6 +9,17 @@ window.apkOpenFiles = new Map();
 window.apkActiveFilePath = null;
 window.apkTaskHistory = [];
 window.apkTaskHistoryPromise = null;
+const APK_ANALYSIS_TAB_STORAGE_KEY = 'gms_apk_analysis_tab';
+const APK_ANALYSIS_TABS = new Set(['manifest', 'permissions', 'source']);
+
+function storedApkAnalysisTab() {
+    try {
+        const saved = window.sessionStorage.getItem(APK_ANALYSIS_TAB_STORAGE_KEY) || '';
+        return APK_ANALYSIS_TABS.has(saved) ? saved : 'manifest';
+    } catch (_error) {
+        return 'manifest';
+    }
+}
 
 function stopApkPolling() {
     clearInterval(window.apkPollInterval);
@@ -31,6 +42,7 @@ function initApkAnalysisPage() {
 
     setApkUploadEmpty(!window.apkCurrentTaskId);
     initApkSourceResizer();
+    switchApkTab(storedApkAnalysisTab(), {persist: false});
     void loadApkTaskHistory(false);
 
     if (uploadZone.dataset.initialized === 'true') return;
@@ -118,7 +130,7 @@ async function loadApkTaskHistory(force = false) {
     return window.apkTaskHistoryPromise;
 }
 
-function resetApkTaskPanels() {
+function resetApkTaskPanels(tabName = 'manifest') {
     const sourceTree = $('apk-source-tree');
     if (sourceTree) {
         sourceTree.dataset.loaded = '';
@@ -134,7 +146,7 @@ function resetApkTaskPanels() {
     const rawXml = $('apk-raw-xml');
     if (rawXml) rawXml.textContent = '';
     closeApkFileViewer();
-    switchApkTab('manifest');
+    switchApkTab(tabName);
 }
 
 async function restoreApkTask(taskId, options = {}) {
@@ -144,7 +156,7 @@ async function restoreApkTask(taskId, options = {}) {
     window.apkCurrentTaskId = taskId;
     window.apkNotifiedTaskId = task.status === 'completed' ? taskId : null;
     setApkUploadEmpty(false);
-    resetApkTaskPanels();
+    resetApkTaskPanels(options.fromHistoryLoad ? storedApkAnalysisTab() : 'manifest');
 
     if ($('apk-analysis-status')) $('apk-analysis-status').style.display = 'block';
     if ($('apk-analysis-result')) $('apk-analysis-result').style.display = 'none';
@@ -838,24 +850,28 @@ function closeApkFileViewer() {
     renderApkFileTabs();
 }
 
-function switchApkTab(tabName) {
+function switchApkTab(tabName, {persist = true} = {}) {
+    const target = APK_ANALYSIS_TABS.has(tabName) ? tabName : 'manifest';
+    if (persist) {
+        try { window.sessionStorage.setItem(APK_ANALYSIS_TAB_STORAGE_KEY, target); } catch (_error) {}
+    }
     document.querySelectorAll('[data-apk-tab]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.apkTab === tabName);
+        btn.classList.toggle('active', btn.dataset.apkTab === target);
     });
 
-    $('apk-tab-manifest').style.display = tabName === 'manifest' ? 'block' : 'none';
-    $('apk-tab-permissions').style.display = tabName === 'permissions' ? 'block' : 'none';
-    $('apk-tab-source').style.display = tabName === 'source' ? 'block' : 'none';
+    $('apk-tab-manifest').style.display = target === 'manifest' ? 'block' : 'none';
+    $('apk-tab-permissions').style.display = target === 'permissions' ? 'block' : 'none';
+    $('apk-tab-source').style.display = target === 'source' ? 'block' : 'none';
 
-    if (tabName === 'permissions' && !$('apk-permissions-list').dataset.loaded) {
+    if (target === 'permissions' && !$('apk-permissions-list').dataset.loaded) {
         $('apk-permissions-list').dataset.loaded = 'true';
         loadApkPermissions();
     }
-    if (tabName === 'source' && !$('apk-source-tree').dataset.loaded) {
+    if (target === 'source' && !$('apk-source-tree').dataset.loaded) {
         initApkSourceResizer();
         $('apk-source-tree').dataset.loaded = 'true';
         loadApkSourceTree('');
-    } else if (tabName === 'source') {
+    } else if (target === 'source') {
         initApkSourceResizer();
     }
 }

@@ -75,7 +75,7 @@ def controller_suite_library(
                 "complete": is_complete_archive_file(str(path)),
             },
         )
-    archives.sort(key=lambda item: item["modified"], reverse=True)
+    archives.sort(key=lambda item: item["name"].lower())
     return {"success": True, "archives": archives}
 
 

@@ -581,7 +581,8 @@ function checkPendingFirmwareUpload() {
 // ==================== Configuration ====================
 async function loadConfig() {
     try {
-        const config = await apiCall('/api/config/read', 'GET');
+        // 初始化链路读取配置：未登录时静默失败，不弹登录层。
+        const config = await apiCall('/api/config/read', 'GET', null, {background: true});
         state.config = config;
     } catch (error) {
         debugLog('Failed to load config:', error);
@@ -618,8 +619,8 @@ function initWebSocket() {
         state.websocketReconnectTimer = null;
     }
 
-    // 获取客户端ID
-    apiCall('/api/users/current', 'GET').then(data => {
+    // 获取客户端ID（后台链路：401 不弹登录层，尊重用户手动关闭）
+    apiCall('/api/users/current', 'GET', null, {background: true}).then(data => {
         const clientId = data.client_id || 'unknown';
         state.clientId = clientId;
         state.clientDisplayId = data.display_client_id || clientId;
@@ -645,7 +646,7 @@ function initWebSocket() {
             // 避免断连期间的轮询已显示的日志在重连后被再次补发。
             // F5 刷新时 state.testing 可能尚未置位（checkInitialTestStatus 有延迟），
             // 因此不依赖 state.testing，只要服务端有日志就对齐游标。
-            apiCall('/api/test/status?logs=false').then(s => {
+            apiCall('/api/test/status?logs=false', 'GET', null, {background: true}).then(s => {
                 if (typeof s.log_count === 'number') {
                     state.lastLogCount = Math.max(state.lastLogCount || 0, s.log_count);
                 }
@@ -2171,6 +2172,7 @@ function isLogScrolledNearBottom(logOutput) {
 function switchLogTab(tabName) {
     const target = tabName === 'module' ? 'module' : 'system';
     state.currentLogTab = target;
+    sessionStorage.setItem('gms_test_log_tab', target);
 
     document.querySelectorAll('.log-tab-btn').forEach(btn => {
         const selected = btn.dataset.logTab === target;
@@ -2194,6 +2196,9 @@ document.addEventListener('click', (event) => {
     if (!button || button.disabled) return;
     switchLogTab('system');
 });
+
+// state.js 已从当前浏览器标签页恢复选择；DOM 解析完成后在首次绘制前应用。
+switchLogTab(state.currentLogTab || 'system');
 
 // 更新进度条 - 使用固件上传的进度条
 function updateProgressBar(percentage, message = '', title = '进度') {
@@ -2272,8 +2277,8 @@ function startStatusPolling() {
             if (state.clusterJobId) {
                 const jobId = encodeURIComponent(state.clusterJobId);
                 const [jobResponse, eventResponse] = await Promise.all([
-                    apiCall(`/api/cluster/jobs/${jobId}`),
-                    apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(state.clusterEventSequence ?? -1))}&limit=1000`)
+                    apiCall(`/api/cluster/jobs/${jobId}`, 'GET', null, {background: true}),
+                    apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(state.clusterEventSequence ?? -1))}&limit=1000`, 'GET', null, {background: true})
                 ]);
                 const job = jobResponse.job;
                 // 轮询只更新 job/attempt 元数据，不覆盖用户手动选择的 worker。
@@ -2337,7 +2342,7 @@ function startStatusPolling() {
             const statusUrl = shouldFetchLogs
                 ? `/api/test/status?since=${encodeURIComponent(String(state.lastLogCount || 0))}`
                 : '/api/test/status?logs=false';
-            const status = await apiCall(statusUrl);
+            const status = await apiCall(statusUrl, 'GET', null, {background: true});
 
             // Durable jobs survive a Controller restart and do not depend on
             // sessionStorage.  Recover the newest active job for the selected
@@ -2471,7 +2476,7 @@ async function checkInitialTestStatus() {
             }
             let response;
             try {
-                response = await apiCall(`/api/cluster/jobs/${encodeURIComponent(savedClusterJob)}`);
+                response = await apiCall(`/api/cluster/jobs/${encodeURIComponent(savedClusterJob)}`, 'GET', null, {background: true});
             } catch (fetchError) {
                 // 网络错误或 job 不存在：清理残留状态，不阻塞页面初始化。
                 debugLog('[Init] Failed to fetch cluster job, clearing stale state:', fetchError);
