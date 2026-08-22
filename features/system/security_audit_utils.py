@@ -68,6 +68,9 @@ AUDIT_PAGE_VIEW_SKIP_PAGES = {'security-audit'}
 
 MAX_AUDIT_REQUEST_BODY_BYTES = 64 * 1024
 MAX_AUDIT_RESPONSE_BODY_BYTES = 128 * 1024
+_FIRMWARE_SHARE_DOWNLOAD_PATH = re.compile(
+    r'^(/api/firmware-shares/)[^/]+(/download)$'
+)
 
 
 def can_audit_path(path: str) -> bool:
@@ -96,6 +99,15 @@ def get_audit_operation(path: str, method: str) -> str:
     if path == '/':
         return '打开Web首页'
     return f"{method} {path}"
+
+
+def sanitize_audit_path(path: str) -> str:
+    """Hide bearer-style identifiers that are carried in URL path segments."""
+
+    return _FIRMWARE_SHARE_DOWNLOAD_PATH.sub(
+        r'\1***REDACTED***\2',
+        str(path or ''),
+    )
 
 
 def safe_int(value: str | None, default: int = 0) -> int:
@@ -189,7 +201,10 @@ async def summarize_audit_response(response) -> tuple[Any, dict[str, Any]]:
             summary['body'] = security_audit_logger.sanitize_value('response', parsed)
     except Exception as e:
         summary['parse_error'] = str(e)
-        summary['preview'] = body[:300].decode('utf-8', errors='replace')
+        summary['preview'] = security_audit_logger.sanitize_value(
+            'preview',
+            body[:300].decode('utf-8', errors='replace'),
+        )
 
     headers = dict(response.headers)
     headers.pop('content-length', None)

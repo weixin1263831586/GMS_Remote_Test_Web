@@ -9,6 +9,8 @@ import time
 
 import requests
 
+from foundation.redaction import redact_sensitive_text
+
 from .provider_health import (
     auth_headers as _auth_headers,
 )
@@ -143,7 +145,7 @@ class UniversalAIAnalyzer:
                 'preferred_provider': provider_name,
             }
         except Exception as e:
-            return {'success': False, 'error': f'AI调用失败: {e!s}'}
+            return {'success': False, 'error': f'AI调用失败: {redact_sensitive_text(e)}'}
 
     def _generate_with_provider(
         self,
@@ -186,12 +188,12 @@ class UniversalAIAnalyzer:
                     err = response.json().get('error', {}).get('message', f'HTTP {response.status_code}')
                 except Exception:
                     err = f'HTTP {response.status_code}: {response.text[:100]}'
-                return {'success': False, 'error': f'{provider_name} API错误: {err}', 'provider': provider_name}
+                return {'success': False, 'error': f'{provider_name} API错误: {redact_sensitive_text(err)}', 'provider': provider_name}
 
             content = self._parse_response_raw(response.json(), api_format)
             return {'success': True, 'content': content.strip()}
         except Exception as e:
-            return {'success': False, 'error': f'{provider_name}调用失败: {e!s}'}
+            return {'success': False, 'error': f'{provider_name}调用失败: {redact_sensitive_text(e)}'}
 
     def analyze_test_failure(
         self,
@@ -241,8 +243,9 @@ class UniversalAIAnalyzer:
             result.update(provider_result)
 
         except Exception as e:
-            logger.error(f"AI分析失败: {e}")
-            result['error'] = f'分析失败: {e!s}'
+            safe_error = redact_sensitive_text(e)
+            logger.error("AI分析失败: %s", safe_error)
+            result['error'] = f'分析失败: {safe_error}'
 
         return result
 
@@ -307,14 +310,14 @@ class UniversalAIAnalyzer:
                         time.sleep(retry_delay)
                         retry_delay *= 2  # 指数退避
                     else:
-                        return {'success': False, 'error': f'连接失败: {e!s}'}
+                        return {'success': False, 'error': f'连接失败: {redact_sensitive_text(e)}'}
                 except requests.exceptions.Timeout as e:
                     if attempt < max_retries - 1:
                         logger.warning(f"[{provider_name}] 请求超时，{retry_delay}秒后重试 ({attempt+1}/{max_retries})")
                         time.sleep(retry_delay)
                         retry_delay *= 2
                     else:
-                        return {'success': False, 'error': f'请求超时: {e!s}'}
+                        return {'success': False, 'error': f'请求超时: {redact_sensitive_text(e)}'}
 
             if response.status_code == 200:
                 result = response.json()
@@ -403,10 +406,10 @@ class UniversalAIAnalyzer:
                     error_msg = error_data.get('error', {}).get('message', f'HTTP {response.status_code}')
                 except Exception:
                     error_msg = f'HTTP {response.status_code}: {response.text[:100]}'
-                return {'success': False, 'error': f'{provider_name} API错误: {error_msg}'}
+                return {'success': False, 'error': f'{provider_name} API错误: {redact_sensitive_text(error_msg)}'}
 
         except Exception as e:
-            return {'success': False, 'error': f'{provider_name}调用失败: {e!s}'}
+            return {'success': False, 'error': f'{provider_name}调用失败: {redact_sensitive_text(e)}'}
 
     def _parse_response_raw(self, payload: dict, api_format: str) -> str:
         """Extract raw text content from an AI model response JSON.

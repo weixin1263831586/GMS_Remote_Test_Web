@@ -2,13 +2,14 @@
 
 from fastapi import APIRouter
 
-from . import analysis_api, files_api, source_api, weekly_report_api
+from . import analysis_api, files_api, knowledge_api, source_api, weekly_report_api
 
 
 router = APIRouter()
 router.include_router(files_api.router)
 router.include_router(source_api.router)
 router.include_router(analysis_api.router)
+router.include_router(knowledge_api.router)
 router.include_router(weekly_report_api.router)
 
 list_reports = files_api.list_reports
@@ -19,5 +20,5 @@ extract_redmine_attachment = source_api.extract_redmine_attachment
 analyze_reports = analysis_api.analyze_reports
 diagnose_report_failure = analysis_api.diagnose_report_failure
 delete_report = analysis_api.delete_report
-knowledgebase_search = analysis_api.knowledgebase_search
-knowledgebase_stats = analysis_api.knowledgebase_stats
+knowledgebase_search = knowledge_api.knowledgebase_search
+knowledgebase_stats = knowledge_api.knowledgebase_stats

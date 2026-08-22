@@ -307,6 +307,17 @@ async function confirmAndSendRedmineReply(modalId) {
 }
 
 function resetReportAnalysis() {
+    // Invalidate every in-flight completion before clearing the DOM so an old
+    // upload/URL request cannot repopulate the workbench after the user clicks
+    // "清除".
+    reportUploadGeneration += 1;
+    if (currentReportUploadRequest && currentReportUploadRequest.readyState !== 4) {
+        currentReportUploadRequest.abort();
+    }
+    currentReportUploadRequest = null;
+    if (currentRedmineRequest) currentRedmineRequest.abort();
+    currentRedmineRequest = null;
+
     const resultDiv = ensureReportAnalysisResultStructure();
     const uploadZone = $('report-upload-zone');
     const summaryDiv = $('report-summary');
@@ -327,6 +338,18 @@ function resetReportAnalysis() {
         const content = uploadZone.querySelector('.report-upload-content');
         if (content) content.style.opacity = '1';
     }
+    resetReportUploadProgress();
+    const fileInput = $('report-file-input');
+    const folderInput = $('report-folder-input');
+    if (fileInput) fileInput.value = '';
+    if (folderInput) folderInput.value = '';
+
+    window.currentReportName = '';
+    window.currentReportAnalysisData = null;
+    window.reportDiagnosis = null;
+    ModalManager.close('report-diagnosis-modal');
+    const minimized = $('report-diagnosis-minimized');
+    if (minimized) minimized.style.display = 'none';
 
     debugLog('[resetReportAnalysis] Report analysis reset complete');
 }

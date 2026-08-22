@@ -1,7 +1,11 @@
+import asyncio
+import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from features.reports import api_helpers
+from features.reports import analysis_api, api_helpers
+from features.reports.api_helpers import AnalysisMode
 from features.reports.diagnosis_quality import (
     calibrate_ai_result,
     public_provider_error,
@@ -9,6 +13,29 @@ from features.reports.diagnosis_quality import (
 
 
 class ReportAiFallbackTests(unittest.TestCase):
+    def test_ai_analysis_endpoint_redacts_unexpected_provider_exception(self):
+        secret_error = RuntimeError(
+            'glm_local failed Bearer provider-token api_key=provider-key'
+        )
+        with patch.object(
+            analysis_api, "require_authenticated_user", return_value=SimpleNamespace()
+        ), patch.object(analysis_api, "analyze_with_ai", side_effect=secret_error):
+            response = asyncio.run(analysis_api.analyze_reports(
+                request=SimpleNamespace(),
+                mode=AnalysisMode.AI,
+                test_name="ExampleTest#testFailure",
+                error_message=None,
+                stack_trace=None,
+                module=None,
+                class_names=None,
+            ))
+
+        payload = json.loads(response.body)
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["data"]["ai_attempted"])
+        for secret in ("provider-token", "provider-key"):
+            self.assertNotIn(secret, response.body.decode("utf-8"))
+
     def test_rule_fallback_exposes_model_failure(self):
         analyzer = Mock()
         analyzer.get_local_provider.return_value = 'glm_local'
@@ -92,6 +119,17 @@ class ReportAiFallbackTests(unittest.TestCase):
         )
         self.assertNotIn('LiteLLM', public)
         self.assertNotIn('sk-secretvalue', public)
+
+    def test_provider_error_redacts_embedded_credentials(self):
+        raw = (
+            'glm_local: unauthorized Bearer provider-token '
+            'api_key=provider-key https://user:url-pass@example.test'
+        )
+
+        public = public_provider_error(raw)
+
+        for secret in ('provider-token', 'provider-key', 'user:url-pass'):
+            self.assertNotIn(secret, public)
 
     def test_ai_statement_is_calibrated_as_hypothesis_not_root_cause(self):
         result = calibrate_ai_result(

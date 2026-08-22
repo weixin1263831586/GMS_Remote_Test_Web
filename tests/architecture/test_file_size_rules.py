@@ -34,7 +34,7 @@ MIGRATION_LINE_LIMITS = {
     'features/redmine/client.py': 724,
     'features/redmine/knowledge_service.py': 636,
     'features/redmine/tests/test_dashboard_stats.py': 1093,
-    'features/reports/analysis_api.py': 765,
+    'features/reports/analysis_api.py': 712,
     'features/reports/api_helpers.py': 775,
     'features/reports/weekly_report_api.py': 1123,
     'features/system/api.py': 1123,

@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from foundation.redaction import redact_sensitive_text
+
 
 SENSITIVE_KEYWORDS = (
     'password',
@@ -250,6 +252,12 @@ class SecurityAuditLogger:
         self._cache_stats = stats
         return records, stats
 
+    @staticmethod
+    def redact_sensitive_text(value: str) -> str:
+        """Redact credentials embedded inside otherwise non-sensitive text."""
+
+        return redact_sensitive_text(value)
+
     def sanitize_value(self, key: str, value: Any) -> Any:
         if _WORD_BOUNDARY_PATTERN.search(key):
             return '***REDACTED***'
@@ -260,8 +268,10 @@ class SecurityAuditLogger:
                 self.sanitize_value(key, item)
                 for item in value[:50]
             ]
-        if isinstance(value, str) and len(value) > 300:
-            return value[:300] + '...'
+        if isinstance(value, str):
+            value = self.redact_sensitive_text(value)
+            if len(value) > 300:
+                return value[:300] + '...'
         return value
 
     def sanitize_mapping(self, mapping: dict[str, Any] | None) -> dict[str, Any]:
@@ -279,7 +289,10 @@ class SecurityAuditLogger:
             return {
                 'body_type': 'json',
                 'parse_error': str(e),
-                'preview': body[:300].decode('utf-8', errors='replace')
+                'preview': self.sanitize_value(
+                    'preview',
+                    body[:300].decode('utf-8', errors='replace'),
+                ),
             }
         if isinstance(payload, dict):
             return {'body_type': 'json', 'data': self.sanitize_mapping(payload)}

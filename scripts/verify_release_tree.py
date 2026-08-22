@@ -12,8 +12,14 @@ from typing import Any
 
 
 DENIED_NAMES = {
+    ".editorconfig",
+    ".gitignore",
     ".env.production",
+    "2.txt",
+    "AGENTS.md",
+    "conftest.py",
     "env.production",
+    "pyproject.toml",
     "runtime.json",
     "config_runtime.json",
     "client_ssh_credentials.local.json",
@@ -22,7 +28,33 @@ DENIED_NAMES = {
     "user_tools_data.json",
     "worker_tokens.json",
 }
-DENIED_COMPONENTS = {".git", ".certs", "certs", "__pycache__"}
+DENIED_COMPONENTS = {
+    ".agents",
+    ".codex",
+    ".git",
+    ".certs",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "certs",
+    "scripts_local",
+    "superpowers",
+    "tests",
+}
+DENIED_SUFFIXES = {".map"}
+INTERNAL_DOCUMENTS = {
+    "docs/android-cli-ui-control-integration.md",
+    "docs/build-server-integration-assessment.md",
+    "docs/code-audit-2026-07.md",
+    "docs/code-audit-2026-08-12.md",
+    "docs/multi-host-cluster-implementation-plan.md",
+    "docs/product-integration-cluster-audit-2026-07-15.md",
+    "docs/product-release-checklist-2026-07-15.md",
+    "docs/refactor-baseline.md",
+    "docs/refactor-parity-audit.md",
+    "docs/refactor-verification.md",
+    "docs/wiki-knowledge-base-plan.md",
+}
 SENSITIVE_KEYS = {
     "api_key",
     "authorization",
@@ -79,11 +111,16 @@ def verify_release_tree(root: Path) -> list[str]:
         return [f"release root is not a directory: {root}"]
     for path in root.rglob("*"):
         relative = path.relative_to(root)
+        relative_text = relative.as_posix()
         if any(part in DENIED_COMPONENTS for part in relative.parts):
             findings.append(f"denied path: {relative}")
             continue
         if path.name in DENIED_NAMES:
             findings.append(f"runtime file: {relative}")
+        if relative_text in INTERNAL_DOCUMENTS:
+            findings.append(f"internal document: {relative}")
+        if path.suffix.lower() in DENIED_SUFFIXES:
+            findings.append(f"source map: {relative}")
         if path.is_symlink():
             target = (path.parent / os.readlink(path)).resolve()
             if target != root and root not in target.parents:

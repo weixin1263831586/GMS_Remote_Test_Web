@@ -167,6 +167,7 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         body = resp.json()
         self.assertFalse(body["success"])
+        self.assertNotIn(str(self.suite_root), resp.text)
 
     def test_anonymous_development_mode_can_analyze_local_log_folder(self):
         self.client.cookies.clear()

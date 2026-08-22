@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import ipaddress
 import os
-import re
 import time
 from collections.abc import Callable
 from urllib.parse import urlparse
+
+from foundation.redaction import redact_sensitive_text
 
 
 def is_local_provider(provider_name: str, config: dict) -> bool:
@@ -135,7 +136,7 @@ def probe_provider(
     base_url = str(provider.get("base_url") or "")
     if base_url:
         raw_error = raw_error.replace(base_url, "模型服务")
-    raw_error = re.sub(r"\bsk-[A-Za-z0-9_-]+\b", "[已隐藏]", raw_error)
+    raw_error = redact_sensitive_text(raw_error)
     status.update({
         "available": False,
         "checked": True,

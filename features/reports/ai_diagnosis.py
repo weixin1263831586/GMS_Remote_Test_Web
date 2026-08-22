@@ -57,8 +57,11 @@ def analyze_failure_with_ai(
                 if provider_config else f'{provider_name.upper()} AI'
             )
             raw_provider_errors = result.get('provider_errors') or []
+            safe_provider_errors = [
+                public_provider_error(error) for error in raw_provider_errors
+            ]
             if raw_provider_errors:
-                logger.warning("AI provider 降级: %s", "; ".join(raw_provider_errors))
+                logger.warning("AI provider 降级: %s", "; ".join(safe_provider_errors))
             response = {
                 'root_cause': result.get('root_cause', ''),
                 'analysis': result.get('analysis', ''),
@@ -70,9 +73,7 @@ def analyze_failure_with_ai(
                 'ai_fallback_used': bool(result.get('fallback_used')),
                 'ai_preferred_provider': result.get('preferred_provider', ''),
                 'ai_providers_attempted': attempted_providers,
-                'ai_provider_errors': [
-                    public_provider_error(error) for error in raw_provider_errors
-                ],
+                'ai_provider_errors': safe_provider_errors,
                 'root_cause_evidence': result.get('evidence') or [],
                 'stack_trace': stack_trace,
             }
@@ -89,14 +90,14 @@ def analyze_failure_with_ai(
                     source_info.get('file_path', 'unknown'),
                 )
             return calibrate_ai_result(response, error_message, stack_trace)
-        ai_error = str(result.get('error') or 'AI分析失败')[:1000]
+        ai_error = public_provider_error(result.get('error') or 'AI分析失败')
         logger.warning("AI分析失败: %s", ai_error)
     except ImportError:
         ai_error = '通用AI分析器未安装'
         logger.warning("通用AI分析器未安装，使用基于规则的分析")
     except Exception as exc:
-        ai_error = str(exc)[:1000]
-        logger.warning("通用AI分析失败: %s，使用基于规则的分析", exc)
+        ai_error = public_provider_error(exc)
+        logger.warning("通用AI分析失败: %s，使用基于规则的分析", ai_error)
 
     fallback = rule_based_analysis(
         test_name, error_message, stack_trace, module

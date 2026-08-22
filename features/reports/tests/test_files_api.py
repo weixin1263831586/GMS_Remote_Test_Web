@@ -31,6 +31,37 @@ CURRENT_USER = CurrentUser(
 
 
 class ReportFilesApiTests(unittest.TestCase):
+    def test_missing_report_directory_is_not_exposed_in_response(self):
+        missing = "/srv/customer-secret/results/report-1"
+        report = {
+            "report_id": "report-1",
+            "timestamp": "report-1",
+            "result_dir": missing,
+            "owner_id": CURRENT_USER.id,
+        }
+        fake_db = SimpleNamespace(get_report=lambda *args, **kwargs: report)
+        request = SimpleNamespace(
+            state=SimpleNamespace(current_user=CURRENT_USER)
+        )
+
+        with self.assertLogs(files_api.logger, level="ERROR") as captured, patch(
+            "features.reports.files_api.test_report_db", fake_db
+        ), patch(
+            "features.reports.files_api.can_access_report", return_value=True
+        ), patch.object(files_api.dependencies, "file_utils", object()):
+            response = asyncio.run(download_report(
+                request,
+                report_id="report-1",
+                report_timestamp=None,
+                download=False,
+                file=None,
+                path=None,
+            ))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn(missing, response.body.decode("utf-8"))
+        self.assertNotIn(missing, "\n".join(captured.output))
+
     def test_report_file_preview_reads_registered_local_file_without_ssh(self):
         with TemporaryDirectory() as tmp:
             result_dir = Path(tmp) / "android-cts" / "results" / "2026.07.20_12.00.00"

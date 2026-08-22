@@ -68,6 +68,32 @@ class ProviderRoutingTests(unittest.TestCase):
         request.assert_called_once()
         self.assertEqual(request.call_args.args[0], 'glm_local')
 
+    def test_probe_error_does_not_expose_embedded_credentials(self):
+        analyzer = UniversalAIAnalyzer({
+            'enabled': True,
+            'providers': {
+                'glm_local': {
+                    'enabled': True,
+                    'base_url': 'http://127.0.0.1:3000',
+                    'model': 'local-model',
+                    'auth_required': False,
+                },
+            },
+        })
+
+        with patch.object(
+            analyzer,
+            '_generate_with_provider',
+            return_value={
+                'success': False,
+                'error': 'Bearer provider-secret api_key=provider-key',
+            },
+        ):
+            result = analyzer.probe_provider('glm_local')
+
+        self.assertNotIn('provider-secret', result['error'])
+        self.assertNotIn('provider-key', result['error'])
+
     def test_generate_prefers_local_then_fails_over(self):
         analyzer = UniversalAIAnalyzer({
             'enabled': True,

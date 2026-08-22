@@ -69,7 +69,9 @@ class RedmineAttachmentMixin:
         token = (result.get("upload") or {}).get("token", "")
         if not token:
             raise RuntimeError(f"Redmine upload returned no token: {result}")
-        logger.info("[Redmine Upload] File '%s' uploaded, token=%s...", filename, token[:16])
+        # Redmine upload tokens authorize a later issue update.  Never include
+        # the token (or the customer-supplied filename) in persistent logs.
+        logger.info("[Redmine Upload] Attachment uploaded successfully")
         return token
 
     async def download_attachment(self, attachment_id: str, destination: str, content_url: str = "") -> int:

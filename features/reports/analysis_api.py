@@ -7,6 +7,7 @@ from features.auth import (
 )
 from features.reports.access import can_access_report, get_accessible_report_by_timestamp
 from foundation.config import settings
+from foundation.redaction import redact_sensitive_text
 
 from .api_helpers import (
     AnalysisMode,
@@ -41,6 +42,7 @@ from .api_helpers import (
     test_report_db,
     test_report_manager,
 )
+from .diagnosis_quality import public_provider_error
 from .display import report_display_name
 from .knowledge_ranking import android_version_from_request, rank_kb_hits
 from .uploads import ReportUploadTooLargeError, stage_report_uploads
@@ -212,7 +214,7 @@ async def analyze_reports(
                     "analysis": "N/A",
                     "ai_enabled": False,
                     "ai_attempted": True,
-                    "ai_error": str(exc)[:1000],
+                    "ai_error": public_provider_error(exc),
                 }
 
             return JSONResponse(content={"success": True, "data": ai_result, "mode": "ai"})
@@ -250,9 +252,8 @@ async def analyze_reports(
                         uploaded_file.content_type or "",
                     )
                     logger.info(
-                        "[Report Analysis] Uploaded report: filename=%s detected=%s content_type=%s size=%s",
-                        uploaded_file.filename,
-                        detected_filename,
+                        "[Report Analysis] Uploaded report: extension=%s content_type=%s size=%s",
+                        os.path.splitext(detected_filename)[1].lower(),
                         uploaded_file.content_type,
                         bytes_written,
                     )
@@ -271,9 +272,8 @@ async def analyze_reports(
                         return JSONResponse(content={"success": True, "data": fallback_result, "mode": "upload"})
 
                     logger.warning(
-                        "[Report Analysis] Cannot parse uploaded report: filename=%s detected=%s content_type=%s size=%s",
-                        uploaded_file.filename,
-                        detected_filename,
+                        "[Report Analysis] Cannot parse uploaded report: extension=%s content_type=%s size=%s",
+                        os.path.splitext(detected_filename)[1].lower(),
                         uploaded_file.content_type,
                         bytes_written,
                     )
@@ -317,8 +317,8 @@ async def analyze_reports(
                         return JSONResponse(status_code=400, content={"success": False, "error": "Cannot parse report file", "message": "test_result.xml invalid or corrupted"})
 
     except Exception as e:
-        logger.error(f"Report analysis failed: {e}")
-        return error_response("Report analysis failed", 500, message=str(e))
+        logger.error("Report analysis failed: %s", redact_sensitive_text(e))
+        return error_response("Report analysis failed", 500)
 
 
 # 套件日志目录分析。
@@ -398,7 +398,7 @@ async def analyze_suite_log_dir(
             "日志目录在 Web 服务器本地不可访问",
             400,
             message=(
-                f"无法访问 {abs_path}：该路径位于远程测试主机，Web 服务器无法直接读取。"
+                "该路径位于远程测试主机，Web 服务器无法直接读取。"
                 "请将报告文件夹打包后通过上传模式分析。"
             ),
         )
@@ -433,14 +433,14 @@ async def analyze_suite_log_dir(
         else:
             result = await asyncio.to_thread(analyzer.analyze_log_dir, abs_path)
     except Exception as e:
-        logger.error(f"[Report Analysis] Suite log-dir analysis failed: {e}")
-        return error_response("Report analysis failed", 500, message=str(e))
+        logger.error("[Report Analysis] Suite log-dir analysis failed: %s", redact_sensitive_text(e))
+        return error_response("Report analysis failed", 500)
 
     if not result:
         return error_response(
             "未找到可分析的日志",
             400,
-            message=f"在 {abs_path} 下未找到 host_log_*.txt，无法解析报告。",
+            message="所选目录下未找到 host_log_*.txt，无法解析报告。",
         )
 
     result.setdefault("report_type", "log")
@@ -478,7 +478,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                     source_path=request.source_path,
                 )
             except Exception as target_error:
-                logger.warning(f"Suite target resolution failed: {target_error}")
+                logger.warning("Suite target resolution failed: %s", redact_sensitive_text(target_error))
                 if dependencies.make_empty_suite_target is None:
                     raise RuntimeError(
                         "Empty suite target factory is not configured"
@@ -488,7 +488,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                     suite_version=request.suite_version,
                     test_name=request.test_name,
                     class_names=class_names,
-                    match_notes=[f"Resolution failed: {target_error}"],
+                    match_notes=[f"Resolution failed: {redact_sensitive_text(target_error)}"],
                 )
 
         async def _run_ai_analysis():
@@ -500,7 +500,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                     "analysis": "N/A",
                     "ai_enabled": False,
                     "ai_attempted": True,
-                    "ai_error": str(exc)[:1000],
+                    "ai_error": public_provider_error(exc),
                 }
 
         async def _search_knowledge_base():
@@ -561,17 +561,17 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                             for issue in repo.search_similar(kb_query, 0, 20):
                                 _adapt(issue, "issue_store", issue_store=True)
                     except Exception as exc:
-                        logger.debug(f"Issue-store KB recall skipped: {exc}")
+                        logger.debug("Issue-store KB recall skipped: %s", redact_sensitive_text(exc))
                     try:
                         for s in kb.search_similar(kb_query, limit=20):
                             _adapt(s, "case_facts")
                     except Exception as exc:
-                        logger.debug(f"Case-facts KB recall skipped: {exc}")
+                        logger.debug("Case-facts KB recall skipped: %s", redact_sensitive_text(exc))
                     return rank_kb_hits(merged, probe)
 
                 return await asyncio.to_thread(_gather)
             except Exception as kb_error:
-                logger.warning(f"Knowledge base search failed: {kb_error}")
+                logger.warning("Knowledge base search failed: %s", redact_sensitive_text(kb_error))
             return []
 
         async def _search_mainline_exemptions():
@@ -579,7 +579,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             try:
                 return await asyncio.to_thread(_query_mainline_exemptions, request)
             except Exception as exc:
-                logger.debug(f"Mainline exemption lookup skipped: {exc}")
+                logger.debug("Mainline exemption lookup skipped: %s", redact_sensitive_text(exc))
                 return []
 
         suite_target, ai_result, kb_results, mainline_exemptions = await asyncio.gather(
@@ -604,7 +604,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             seen_paths = set()
             for hits in await asyncio.gather(*source_search_coros, return_exceptions=True):
                 if isinstance(hits, Exception):
-                    logger.warning(f"Source search failed: {hits}")
+                    logger.warning("Source search failed: %s", redact_sensitive_text(hits))
                     continue
                 for hit in hits or []:
                     dedup_key = f"{hit.get('path', '')}:{hit.get('line', '')}"
@@ -636,8 +636,8 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
 
         return success_response(diagnosis, message="Diagnosis complete")
     except Exception as e:
-        logger.error(f"Report diagnosis failed: {e}", exc_info=True)
-        return error_response("Report diagnosis failed", status_code=500, detail=str(e))
+        logger.error("Report diagnosis failed: %s", redact_sensitive_text(e), exc_info=True)
+        return error_response("Report diagnosis failed", status_code=500)
 
 
 # ==================== Delete Report ====================
@@ -679,14 +679,14 @@ async def delete_report(
         result_dir = report.get("result_dir")
         if result_dir and os.path.exists(result_dir):
             if not _is_safe_report_delete_dir(result_dir):
-                logger.warning(f"[DELETE] Refusing unsafe report directory deletion: {result_dir}")
+                logger.warning("[DELETE] Refusing unsafe report directory deletion")
                 return error_response("Unsafe report directory, refusing to delete files", 400)
             try:
                 shutil.rmtree(result_dir)
-                logger.info(f"Deleted report directory: {result_dir}")
+                logger.info("Deleted report directory")
             except Exception as e:
-                logger.error(f"Failed to delete report directory: {e}")
-                return error_response(f"Failed to delete directory: {e!s}", 500)
+                logger.error("Failed to delete report directory: %s", redact_sensitive_text(e))
+                return error_response("Failed to delete report directory", 500)
 
         success = (
             test_report_db.delete_report_by_id(
@@ -706,39 +706,5 @@ async def delete_report(
             return error_response("Failed to delete DB record", 500)
 
     except Exception as e:
-        logger.error(f"Error deleting report: {e}")
-        return error_response(str(e), 500)
-
-
-# ==================== Knowledge Base ====================
-
-@router.get("/api/knowledgebase/search")
-async def knowledgebase_search(request: Request, query: str = Query(..., min_length=1, max_length=256), limit: int = Query(8, ge=1, le=20)):
-    """Search the local Redmine-derived GMS knowledge base."""
-    require_authenticated_user(request)
-    try:
-        kb = _get_knowledge_base(request)
-        if not kb:
-            return success_response({"query": query.strip(), "results": [], "count": 0})
-        results = await asyncio.to_thread(kb.search_similar, query.strip(), limit)
-        return success_response({"query": query.strip(), "results": results, "count": len(results)})
-    except Exception as e:
-        logger.error(f"Knowledge base search failed: {e}", exc_info=True)
-        return error_response(str(e), status_code=500)
-
-
-@router.get("/api/knowledgebase/stats")
-async def knowledgebase_stats(request: Request):
-    """Return local Redmine-derived GMS knowledge base stats."""
-    require_authenticated_user(request)
-    try:
-        kb = _get_knowledge_base(request)
-        if not kb:
-            return success_response({"stats": {"total": 0, "mature_cases": 0}})
-        data = await asyncio.to_thread(lambda: kb.list_case_facts(limit=1))
-        mature = await asyncio.to_thread(lambda: kb.list_mature_cases(limit=1))
-        stats = {"total": data.get("total", 0), "mature_cases": mature.get("total", 0)}
-        return success_response({"stats": stats})
-    except Exception as e:
-        logger.error(f"Knowledge base stats failed: {e}", exc_info=True)
-        return error_response(str(e), status_code=500)
+        logger.error("Error deleting report: %s", redact_sensitive_text(e))
+        return error_response("Failed to delete report", 500)

@@ -7,6 +7,15 @@ from features.auth import CurrentUser
 
 
 class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
+    def test_url_log_target_omits_credentials_query_and_fragment(self):
+        from features.reports.source_api import _url_log_target
+
+        safe = _url_log_target(
+            "https://user:password@example.test/report.zip?token=secret#part"
+        )
+
+        self.assertEqual(safe, "https://example.test/report.zip")
+
     async def test_redmine_attachment_url_ignores_attachment_id_as_source_issue(self):
         from features.reports import source_api
 

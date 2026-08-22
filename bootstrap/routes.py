@@ -51,7 +51,7 @@ from features.redmine.dashboard import (
 from features.reports import api as reports
 from features.reports.dependencies import configure_report_dependencies
 from features.system import api as system
-from features.system import assets, audit, desktop, integrations
+from features.system import assets, audit, desktop, health_api, integrations
 from features.system import notifications_api as notifications
 from features.system import terminal_api as terminal
 from features.system.api import init_templates
@@ -124,6 +124,7 @@ ALL_ROUTERS = [
     gerrit_dashboard.page_router,
     gms_update_monitor.router,
     gms_update_monitor.page_router,
+    health_api.router,
     integrations.router,
     mainline_known_issues.router,
     notifications.router,
