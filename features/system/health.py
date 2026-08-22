@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +16,23 @@ from foundation.config import settings
 
 
 _CACHE_LOCK = threading.Lock()
-_CACHE: dict[str, Any] = {"expires_at": 0.0, "result": None}
+_CACHE: dict[str, Any] = {"key": None, "expires_at": 0.0, "result": None}
+_REQUIRED_CHECKS = frozenset({
+    "storage",
+    "database",
+    "automation_worker",
+    "local_worker",
+})
 
 
-def _check_storage() -> dict[str, Any]:
-    root = settings.data_root
+def _runtime_data_root(app: Any) -> Path:
+    services = getattr(getattr(app, "state", None), "services", None)
+    runtime_settings = getattr(services, "settings", None)
+    configured = getattr(runtime_settings, "data_root", settings.data_root)
+    return Path(configured).resolve()
+
+
+def _check_storage(root: Path) -> dict[str, Any]:
     root.mkdir(parents=True, exist_ok=True)
     usage = shutil.disk_usage(root)
     used_percent = round((usage.used / max(usage.total, 1)) * 100, 2)
@@ -32,8 +45,8 @@ def _check_storage() -> dict[str, Any]:
     }
 
 
-def _check_database_write() -> dict[str, Any]:
-    path = settings.data_root / "health/health.sqlite3"
+def _check_database_write(root: Path) -> dict[str, Any]:
+    path = root / "health/health.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     with sqlite3.connect(path, timeout=5) as connection:
@@ -137,24 +150,40 @@ def _check_local_worker() -> dict[str, Any]:
 
 
 def _check_runtime_queues(app: Any) -> dict[str, Any]:
-    queue = getattr(getattr(app, "state", None), "usb_event_queue", None)
+    state = getattr(app, "state", None)
+    queue = getattr(state, "usb_event_queue", None)
+    dispatcher = getattr(state, "usb_dispatch_task", None)
     backlog = int(queue.qsize()) if queue is not None else 0
     maximum = int(os.getenv("GMS_HEALTH_MAX_USB_QUEUE", "1000"))
-    return {"ok": backlog <= maximum, "usb_event_backlog": backlog, "maximum": maximum}
+    dispatcher_running = bool(dispatcher is not None and not dispatcher.done())
+    return {
+        "ok": bool(queue is not None and dispatcher_running and backlog <= maximum),
+        "initialized": queue is not None,
+        "dispatcher_running": dispatcher_running,
+        "usb_event_backlog": backlog,
+        "maximum": maximum,
+    }
 
 
 def readiness(app: Any, *, force: bool = False) -> dict[str, Any]:
     """Return cached dependency checks without exposing their details publicly."""
     cache_seconds = max(1, int(os.getenv("GMS_HEALTH_CACHE_SECONDS", "10")))
     now = time.monotonic()
+    data_root = _runtime_data_root(app)
+    cache_key = (id(app), str(data_root))
     with _CACHE_LOCK:
-        if not force and _CACHE["result"] is not None and now < _CACHE["expires_at"]:
-            return dict(_CACHE["result"])
+        if (
+            not force
+            and _CACHE["key"] == cache_key
+            and _CACHE["result"] is not None
+            and now < _CACHE["expires_at"]
+        ):
+            return deepcopy(_CACHE["result"])
 
         checks: dict[str, dict[str, Any]] = {}
         for name, check in (
-            ("storage", _check_storage),
-            ("database", _check_database_write),
+            ("storage", lambda: _check_storage(data_root)),
+            ("database", lambda: _check_database_write(data_root)),
             ("adb", _check_adb),
             ("ssh", _check_ssh),
             ("automation_worker", _check_automation_worker),
@@ -165,16 +194,34 @@ def readiness(app: Any, *, force: bool = False) -> dict[str, Any]:
             except Exception as exc:
                 checks[name] = {"ok": False, "error": str(exc)}
         checks["runtime_queues"] = _check_runtime_queues(app)
+        failed_required = sorted(
+            name
+            for name in _REQUIRED_CHECKS
+            if not bool(checks[name].get("ok"))
+        )
+        degraded_checks = sorted(
+            name
+            for name, item in checks.items()
+            if name not in _REQUIRED_CHECKS and not bool(item.get("ok"))
+        )
         result = {
-            "ready": all(bool(item.get("ok")) for item in checks.values()),
+            # Storage and persistence determine whether the control plane can
+            # safely accept work. Missing peripheral capabilities are exposed
+            # as degradation instead of taking the entire HTTP service out of
+            # rotation; their own endpoints still reject unavailable actions.
+            "ready": not failed_required,
+            "failed_required_checks": failed_required,
+            "degraded_checks": degraded_checks,
             "checks": checks,
             "checked_at": time.time(),
+            "data_root": str(data_root),
         }
-        _CACHE["result"] = result
+        _CACHE["key"] = cache_key
+        _CACHE["result"] = deepcopy(result)
         _CACHE["expires_at"] = now + cache_seconds
-        return dict(result)
+        return deepcopy(result)
 
 
 def reset_health_cache() -> None:
     with _CACHE_LOCK:
-        _CACHE.update({"expires_at": 0.0, "result": None})
+        _CACHE.update({"key": None, "expires_at": 0.0, "result": None})

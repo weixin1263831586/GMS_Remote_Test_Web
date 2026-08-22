@@ -33,11 +33,17 @@ from features.system.security_audit import classify_request_source, security_aud
 from features.system.security_audit_utils import (
     can_audit_path,
     get_audit_operation,
+    sanitize_audit_path,
     should_audit_request,
     summarize_audit_request,
     summarize_audit_response,
 )
 from features.users import get_client_id_from_request, get_client_ip, parse_client_id
+from foundation.product import (
+    APPLICATION_DESCRIPTION,
+    APPLICATION_TITLE,
+    APPLICATION_VERSION,
+)
 
 
 class UTF8JSONResponse(JSONResponse):
@@ -105,9 +111,9 @@ def create_app(services: AppServices | None = None) -> FastAPI:
     validate_production_security_configuration()
     auth_service.initialize()
     app = FastAPI(
-        title='GMS Auto Test - FastAPI Server (Port 5001)',
-        description='完整的测试管理服务',
-        version='4.0.0',
+        title=APPLICATION_TITLE,
+        description=APPLICATION_DESCRIPTION,
+        version=APPLICATION_VERSION,
         lifespan=create_lifespan(services),
         default_response_class=UTF8JSONResponse,
     )
@@ -278,7 +284,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
                                 request.method,
                             ),
                             'method': request.method,
-                            'path': path,
+                            'path': sanitize_audit_path(path),
                             'query': security_audit_logger.sanitize_mapping(
                                 dict(request.query_params)
                             ),

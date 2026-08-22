@@ -1232,6 +1232,31 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_gerrit_dashboard_tab_survives_refresh(self):
+        page = self.new_page()
+        try:
+            page.goto(f"{self.base_url}/gerrit-dashboard", wait_until="domcontentloaded")
+            page.wait_for_function("typeof switchTab === 'function'")
+            page.evaluate("switchTab('query')")
+            expect(page.locator('[data-tab="query"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("currentTab === 'query'")
+
+            expect(page.locator('[data-tab="query"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            expect(page.locator("#tab-query")).to_have_class(re.compile(r"\bactive\b"))
+            self.assertEqual(
+                page.evaluate("sessionStorage.getItem('gerritCurrentTab')"),
+                "query",
+            )
+            self.assertIn("tab=query", page.url)
+        finally:
+            page.close()
+
     def test_hidden_embedded_pages_pause_background_refresh(self):
         page = self.new_page()
         try:
@@ -4665,6 +4690,252 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_report_analysis_treats_uploaded_and_ai_values_as_untrusted_text(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        marker = "<img src=x onerror=window.__reportXss=(window.__reportXss||0)+1>"
+        try:
+            self.goto_shell(page)
+            page.evaluate(
+                """marker => {
+                    window.__reportXss = 0;
+                    displayReportAnalysis({
+                        report_name: marker,
+                        summary: {
+                            total: marker,
+                            pass: 0,
+                            fail: 1,
+                            pass_rate: marker,
+                        },
+                        details: {
+                            test_type: marker,
+                            suite_version: marker,
+                            android_version: marker,
+                            soc_platform: marker,
+                        },
+                        failures: [{
+                            module: marker,
+                            name: marker,
+                            reason: marker,
+                        }],
+                    });
+                    displayAIAnalysis({
+                        ai_model: marker,
+                        source_code_fetched: true,
+                        source_url: 'javascript:window.__reportXss=99',
+                        source_file_path: marker,
+                        root_cause: marker,
+                        analysis: marker,
+                        suggestions: [marker],
+                        related_docs: [{
+                            title: marker,
+                            url: 'javascript:window.__reportXss=100',
+                        }],
+                    }, 'test', 'failure');
+                    showRedmineAuthDialog(
+                        "https://example.test/report');window.__reportXss=101;//",
+                        null, null, null, null
+                    );
+                }""",
+                marker,
+            )
+            page.wait_for_timeout(100)
+
+            self.assertEqual(page.evaluate("window.__reportXss"), 0)
+            expect(page.locator("#report-analysis-result img")).to_have_count(0)
+            expect(page.locator("[id^='ai-analysis-modal-'] img")).to_have_count(0)
+            expect(page.locator("a[href^='javascript:']")).to_have_count(0)
+            expect(page.locator("#report-summary")).to_contain_text(marker)
+            page.locator("#redmine-auth-modal button.btn-primary").evaluate(
+                "button => button.click()"
+            )
+            self.assertEqual(page.evaluate("window.__reportXss"), 0)
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_report_analysis_clear_cancels_requests_and_drops_stale_state(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """() => {
+                    const beforeGeneration = reportUploadGeneration;
+                    const aborted = {upload: 0, redmine: 0};
+                    currentReportUploadRequest = {
+                        readyState: 1,
+                        abort() { aborted.upload += 1; },
+                    };
+                    currentRedmineRequest = {
+                        abort() { aborted.redmine += 1; },
+                    };
+                    window.currentReportName = 'stale-report';
+                    window.currentReportAnalysisData = {
+                        report_name: 'stale-report',
+                        summary: {total: 1},
+                    };
+                    window.reportDiagnosis = {data: {test_name: 'stale-test'}};
+                    document.getElementById('report-analysis-result').style.display = 'block';
+                    document.getElementById('report-upload-progress').style.opacity = '1';
+                    document.getElementById('report-progress-fill').style.width = '88%';
+                    document.getElementById('report-diagnosis-minimized').style.display = 'flex';
+                    ModalManager.open('report-diagnosis-modal');
+
+                    resetReportAnalysis();
+
+                    return {
+                        aborted,
+                        generationAdvanced: reportUploadGeneration === beforeGeneration + 1,
+                        uploadRequestCleared: currentReportUploadRequest === null,
+                        redmineRequestCleared: currentRedmineRequest === null,
+                        reportName: window.currentReportName,
+                        reportData: window.currentReportAnalysisData,
+                        diagnosis: window.reportDiagnosis,
+                        resultDisplay: document.getElementById('report-analysis-result').style.display,
+                        uploadEmpty: document.getElementById('report-upload-zone').classList.contains('upload-empty'),
+                        progressOpacity: document.getElementById('report-upload-progress').style.opacity,
+                        progressWidth: document.getElementById('report-progress-fill').style.width,
+                        diagnosisOpen: ModalManager.isOpen('report-diagnosis-modal'),
+                        minimizedDisplay: document.getElementById('report-diagnosis-minimized').style.display,
+                    };
+                }"""
+            )
+
+            self.assertEqual(result["aborted"], {"upload": 1, "redmine": 1})
+            self.assertTrue(result["generationAdvanced"])
+            self.assertTrue(result["uploadRequestCleared"])
+            self.assertTrue(result["redmineRequestCleared"])
+            self.assertEqual(result["reportName"], "")
+            self.assertIsNone(result["reportData"])
+            self.assertIsNone(result["diagnosis"])
+            self.assertEqual(result["resultDisplay"], "none")
+            self.assertTrue(result["uploadEmpty"])
+            self.assertEqual(result["progressOpacity"], "0")
+            self.assertEqual(result["progressWidth"], "0%")
+            self.assertFalse(result["diagnosisOpen"])
+            self.assertEqual(result["minimizedDisplay"], "none")
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_report_analysis_workbench_upload_diagnose_email_and_cross_page(self):
+        page = self.new_page()
+        page_errors = []
+        email_requests = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+
+        def diagnose(route):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "data": {
+                        "test_name": "com.example.SampleTest#testFailure",
+                        "module": "CtsSampleTestCases",
+                        "failure_index": 0,
+                        "error_message": "AssertionError: expected true",
+                        "stack_trace": "at com.example.SampleTest.testFailure(SampleTest.java:42)",
+                        "ai_result": {
+                            "ai_enabled": True,
+                            "ai_model": "Local GLM",
+                            "root_cause": "待验证：示例断言失败",
+                            "root_cause_status": "hypothesis",
+                            "root_cause_confidence": "low",
+                            "observed_failure": "AssertionError: expected true",
+                            "analysis": "需要复现并核对前置条件",
+                            "suggestions": ["执行单测复现"],
+                        },
+                        "suite_target": {},
+                        "source_search_results": [],
+                        "knowledge_base_results": [],
+                        "mainline_exemptions": [],
+                    },
+                }),
+            )
+
+        def send_email(route):
+            email_requests.append(route.request.post_data_json)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"data":{"to":["qa@example.test"]}}',
+            )
+
+        page.route("**/api/reports/diagnose", diagnose)
+        page.route("**/api/email/send", send_email)
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Result suite_name="CTS" suite_version="17_r1" devices="DEVICE-1" start_display="2026-08-21 17:00:00">
+  <Build build_version_release="17" />
+  <Summary pass="1" failed="1" />
+  <Module name="CtsSampleTestCases">
+    <TestCase name="com.example.SampleTest">
+      <Test name="testFailure" result="fail">
+        <Failure message="AssertionError: expected true">
+          <StackTrace>at com.example.SampleTest.testFailure(SampleTest.java:42)</StackTrace>
+        </Failure>
+      </Test>
+    </TestCase>
+  </Module>
+</Result>"""
+
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('report-analysis', null)")
+            page.locator("#report-file-input").set_input_files({
+                "name": "sample-test-result.xml",
+                "mimeType": "application/xml",
+                "buffer": xml.encode("utf-8"),
+            })
+
+            expect(page.locator("#report-analysis-result")).to_be_visible()
+            expect(page.locator("#report-summary")).to_contain_text("50.00%")
+            expect(page.locator("#report-failure-list")).to_contain_text(
+                "com.example.SampleTest#testFailure"
+            )
+
+            page.locator(".report-failure-action.diagnose").evaluate(
+                "button => button.click()"
+            )
+            expect(page.locator("#report-diagnosis-modal")).to_have_class(
+                re.compile(r"\bshow\b")
+            )
+            expect(page.locator("#report-diagnostic-result")).to_contain_text(
+                "示例断言失败"
+            )
+            page.locator("#report-diagnostic-result .dx-action-card").first.evaluate(
+                "button => button.click()"
+            )
+            expect(page.locator("#page-test")).to_be_visible()
+            expect(page.locator("#test-module")).to_have_value("CtsSampleTestCases")
+            expect(page.locator("#test-case")).to_have_value(
+                "com.example.SampleTest#testFailure"
+            )
+
+            page.evaluate("switchPage('report-analysis', null)")
+            answers = iter(["qa@example.test", ""])
+            page.on("dialog", lambda dialog: dialog.accept(next(answers)))
+            page.get_by_role("button", name="📧 发送邮件").evaluate(
+                "button => button.click()"
+            )
+            page.wait_for_function("() => window.currentReportAnalysisData !== null")
+            page.wait_for_timeout(100)
+            self.assertEqual(len(email_requests), 1)
+            self.assertEqual(email_requests[0]["to"], "qa@example.test")
+            self.assertIn("CtsSampleTestCases", email_requests[0]["body"])
+
+            page.get_by_role("button", name="清除").evaluate(
+                "button => button.click()"
+            )
+            expect(page.locator("#report-analysis-result")).to_be_hidden()
+            self.assertIsNone(page.evaluate("window.currentReportAnalysisData"))
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_firmware_and_apk_actions_send_expected_requests(self):
         page = self.new_page()
         requests = []
@@ -5831,6 +6102,68 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(metrics["selectionForeground"], "#ffffff")
             self.assertEqual(
                 metrics["selectionBackground"], "rgba(124, 92, 255, 0.55)"
+            )
+        finally:
+            page.close()
+
+    def test_terminal_arrow_keys_send_once_without_leaving_terminal_page(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                },
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            page.evaluate(
+                """() => {
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
+                  window.__terminalInputFrames = [];
+                  const nativeSend = WebSocket.prototype.send;
+                  WebSocket.prototype.send = function(payload) {
+                    if (this.url.includes('/api/system/websocket/terminal_workspace_')) {
+                      const frame = JSON.parse(payload);
+                      if (frame.type === 'terminal_input') {
+                        window.__terminalInputFrames.push(frame);
+                      }
+                    }
+                    return nativeSend.call(this, payload);
+                  };
+                }"""
+            )
+            page.evaluate("switchPage('terminal', null)")
+            page.wait_for_function(
+                """() => {
+                  const instance = terminalWorkspace.instances.get(0);
+                  return instance?.socket?.readyState === WebSocket.OPEN
+                    && instance.shellReady;
+                }"""
+            )
+            page.evaluate(
+                """() => {
+                  window.__terminalInputFrames = [];
+                  terminalWorkspace.instances.get(0).terminal.focus();
+                }"""
+            )
+
+            for key in ("ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"):
+                page.keyboard.press(key)
+            page.wait_for_function("window.__terminalInputFrames.length === 4")
+
+            result = page.evaluate(
+                """() => ({
+                  page: currentPage,
+                  frames: window.__terminalInputFrames,
+                })"""
+            )
+            self.assertEqual(result["page"], "terminal")
+            self.assertEqual(
+                [frame["input"] for frame in result["frames"]],
+                ["\x1b[A", "\x1b[B", "\x1b[D", "\x1b[C"],
             )
         finally:
             page.close()

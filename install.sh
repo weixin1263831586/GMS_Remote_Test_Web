@@ -172,6 +172,8 @@ package_web_app() {
             --exclude '.git/' \
             --exclude '.agents/' \
             --exclude '.codex/' \
+            --exclude '.editorconfig' \
+            --exclude '.gitignore' \
             --exclude '.certs/' \
             --exclude '.env.production' \
             --exclude 'configs/env.production' \
@@ -184,6 +186,11 @@ package_web_app() {
             --exclude '.pytest_cache/' \
             --exclude '.ruff_cache/' \
             --exclude 'AGENTS.md' \
+            --exclude 'conftest.py' \
+            --exclude 'pyproject.toml' \
+            --exclude '2.txt' \
+            --exclude '/*.png' \
+            --exclude '*.map' \
             --exclude '__pycache__/' \
             --exclude '*/__pycache__/' \
             --exclude '*.pyc' \
@@ -203,8 +210,15 @@ package_web_app() {
             --exclude 'docs/superpowers/' \
             --exclude 'docs/android-cli-ui-control-integration.md' \
             --exclude 'docs/build-server-integration-assessment.md' \
+            --exclude 'docs/code-audit-2026-07.md' \
+            --exclude 'docs/code-audit-2026-08-12.md' \
             --exclude 'docs/multi-host-cluster-implementation-plan.md' \
+            --exclude 'docs/product-integration-cluster-audit-2026-07-15.md' \
+            --exclude 'docs/product-release-checklist-2026-07-15.md' \
+            --exclude 'docs/refactor-baseline.md' \
             --exclude 'docs/refactor-parity-audit.md' \
+            --exclude 'docs/refactor-verification.md' \
+            --exclude 'docs/wiki-knowledge-base-plan.md' \
             --exclude 'configs/config_runtime.json' \
             --exclude 'configs/client_ssh_credentials.local.json' \
             --exclude 'configs/redmine_auth.json' \
@@ -279,6 +293,8 @@ copy_project() {
             --exclude '.git/' \
             --exclude '.agents/' \
             --exclude '.codex/' \
+            --exclude '.editorconfig' \
+            --exclude '.gitignore' \
             --exclude '.certs/' \
             --exclude '.env.production' \
             --exclude 'configs/env.production' \
@@ -294,6 +310,11 @@ copy_project() {
             --exclude '.pytest_cache/' \
             --exclude '.ruff_cache/' \
             --exclude 'AGENTS.md' \
+            --exclude 'conftest.py' \
+            --exclude 'pyproject.toml' \
+            --exclude '2.txt' \
+            --exclude '/*.png' \
+            --exclude '*.map' \
             --exclude 'data/' \
             --exclude 'logs/' \
             --exclude '*.log' \
@@ -308,8 +329,15 @@ copy_project() {
             --exclude 'docs/superpowers/' \
             --exclude 'docs/android-cli-ui-control-integration.md' \
             --exclude 'docs/build-server-integration-assessment.md' \
+            --exclude 'docs/code-audit-2026-07.md' \
+            --exclude 'docs/code-audit-2026-08-12.md' \
             --exclude 'docs/multi-host-cluster-implementation-plan.md' \
+            --exclude 'docs/product-integration-cluster-audit-2026-07-15.md' \
+            --exclude 'docs/product-release-checklist-2026-07-15.md' \
+            --exclude 'docs/refactor-baseline.md' \
             --exclude 'docs/refactor-parity-audit.md' \
+            --exclude 'docs/refactor-verification.md' \
+            --exclude 'docs/wiki-knowledge-base-plan.md' \
             --exclude 'skills/rk_codesearch/config/config.json' \
             --exclude 'configs/config_runtime.json' \
             --exclude 'configs/client_ssh_credentials.local.json' \

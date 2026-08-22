@@ -11,6 +11,36 @@ from features.system.security_audit import SecurityAuditLogger
 
 
 class SecurityAuditIntegrityTests(unittest.TestCase):
+    def test_embedded_credentials_are_redacted_from_freeform_values(self):
+        audit = SecurityAuditLogger.__new__(SecurityAuditLogger)
+        raw = (
+            'password=hunter2 Bearer bearer-token '
+            'https://operator:url-secret@example.test '
+            'api_key="service-key" sk-model-secret'
+        )
+
+        sanitized = audit.sanitize_value('error', raw)
+
+        for secret in (
+            'hunter2',
+            'bearer-token',
+            'operator:url-secret',
+            'service-key',
+            'sk-model-secret',
+        ):
+            self.assertNotIn(secret, sanitized)
+        self.assertIn('***REDACTED***', sanitized)
+
+    def test_malformed_json_preview_is_redacted(self):
+        audit = SecurityAuditLogger.__new__(SecurityAuditLogger)
+
+        summary = audit.summarize_json_body(
+            b'{"password":"customer-secret", "broken":'
+        )
+
+        self.assertNotIn('customer-secret', summary['preview'])
+        self.assertIn('***REDACTED***', summary['preview'])
+
     def test_signed_chain_detects_record_tampering(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             "os.environ",
@@ -161,6 +191,20 @@ class SecurityAuditIntegrityTests(unittest.TestCase):
 
 
 class AuditNoisePathTests(unittest.TestCase):
+    def test_public_firmware_share_token_is_redacted_from_audit_path(self):
+        from features.system.security_audit_utils import sanitize_audit_path
+
+        token = "09b054043429"
+        sanitized = sanitize_audit_path(
+            f"/api/firmware-shares/{token}/download"
+        )
+
+        self.assertNotIn(token, sanitized)
+        self.assertEqual(
+            sanitized,
+            "/api/firmware-shares/***REDACTED***/download",
+        )
+
     def test_high_frequency_readonly_polling_is_not_audited(self):
         """浏览器侧任务/命令高频只读轮询不进常规审计（失败仍记录）。"""
         from features.system.security_audit_utils import should_audit_request

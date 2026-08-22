@@ -1,7 +1,6 @@
 """System router - WebSocket, health check, docs, help, skills download, root page."""
 
 import asyncio
-import hmac
 import html
 import json
 import logging
@@ -11,7 +10,7 @@ from datetime import datetime
 from urllib.parse import quote, urlparse
 
 import aiohttp
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -20,10 +19,8 @@ from fastapi.responses import (
     Response,
 )
 
-from features.auth import AUTH_COOKIE_NAME, CurrentUser, auth_service, require_role
+from features.auth import AUTH_COOKIE_NAME, auth_service
 from features.system.api_docs_list import API_DOCS_LIST
-from features.system.health import readiness
-from features.system.metrics import metrics_token, render_metrics
 from features.system.state import global_state
 from features.system.terminal_auxiliary import (
     handle_tradefed_list_results,
@@ -356,69 +353,6 @@ async def proxy_gms_assistant_vite_fs(path: str, request: Request):
 )
 async def proxy_gms_assistant_public_api(path: str, request: Request):
     return await _proxy_gms_assistant_path(f"api/public/{path}", request)
-
-
-# ==================== Health Check ====================
-
-@router.get("/api/system/health")
-async def health_check():
-    """Compatibility liveness probe; dependency readiness has its own route."""
-    return JSONResponse(content={
-        "status": "alive",
-        "service": "gms-remote-test-controller",
-        "version": "4.0.0",
-        "timestamp": datetime.now().isoformat(),
-    })
-
-
-@router.get("/api/system/health/live")
-async def liveness_check():
-    return {"status": "alive", "timestamp": datetime.now().isoformat()}
-
-
-@router.get("/api/system/health/ready")
-async def readiness_check(request: Request):
-    result = await asyncio.to_thread(readiness, request.app)
-    return JSONResponse(
-        status_code=200 if result["ready"] else 503,
-        content={
-            "status": "ready" if result["ready"] else "not_ready",
-            "timestamp": datetime.now().isoformat(),
-        },
-    )
-
-
-@router.get("/api/system/health/details")
-async def health_details(
-    request: Request,
-    _admin: CurrentUser = Depends(require_role("admin")),
-):
-    result = await asyncio.to_thread(readiness, request.app, force=True)
-    return JSONResponse(
-        status_code=200 if result["ready"] else 503,
-        content=result,
-    )
-
-
-@router.get("/metrics", include_in_schema=False)
-async def prometheus_metrics(
-    authorization: str = Header(default="", alias="Authorization"),
-):
-    expected = metrics_token()
-    if not expected:
-        raise HTTPException(status_code=503, detail="GMS_METRICS_TOKEN is required")
-    scheme, separator, supplied = authorization.partition(" ")
-    if (
-        not separator
-        or scheme.lower() != "bearer"
-        or not hmac.compare_digest(supplied.strip(), expected)
-    ):
-        raise HTTPException(status_code=401, detail="Invalid metrics credential")
-    return Response(
-        content=await asyncio.to_thread(render_metrics),
-        media_type="text/plain; version=0.0.4; charset=utf-8",
-        headers={"Cache-Control": "no-store"},
-    )
 
 
 # ==================== Skills Download ====================

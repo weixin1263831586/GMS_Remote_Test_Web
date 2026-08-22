@@ -9,6 +9,7 @@ from features.auth import (
     require_authenticated_user,
 )
 from features.users import get_client_display_id_from_request
+from foundation.redaction import redact_sensitive_text
 
 from .access import (
     can_access_report,
@@ -292,7 +293,8 @@ async def download_report(
                         )
                     except RuntimeError as exc:
                         logger.warning(
-                            "[DOWNLOAD] Remote report bundle failed: %s", exc
+                            "[DOWNLOAD] Remote report bundle failed: %s",
+                            redact_sensitive_text(exc),
                         )
                         return error_response(
                             "远端报告导出失败，请稍后重试或检查 Worker 状态",
@@ -323,8 +325,8 @@ async def download_report(
 
             report_dir = report.get("result_dir")
             if not report_dir or not os.path.exists(report_dir):
-                logger.error(f"[DOWNLOAD] Report directory not found: {report_dir}")
-                return error_response(f"Report directory not found: {report_dir}", 404)
+                logger.error("[DOWNLOAD] Report directory not found")
+                return error_response("Report directory not found", 404)
 
             android_suite_dir = os.path.dirname(os.path.dirname(report_dir))
             run_folder = tradefed_result_folder_name(
@@ -390,5 +392,7 @@ async def download_report(
             return error_response("Please provide report_id or report_timestamp", 400)
 
     except Exception as e:
-        logger.error(f"[DOWNLOAD] Request failed: {e}", exc_info=True)
-        return error_response(str(e), 500)
+        logger.error(
+            "[DOWNLOAD] Request failed: %s", redact_sensitive_text(e), exc_info=True
+        )
+        return error_response("Report download failed", 500)

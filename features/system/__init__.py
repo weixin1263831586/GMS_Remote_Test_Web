@@ -1,7 +1,7 @@
 """System-owned public feature interfaces."""
 
-from .api import health_check
 from .api_docs_list import API_DOCS_LIST
+from .health_api import health_check
 from .mainline_issues import (
     init_db as init_mainline_issues_db,
 )

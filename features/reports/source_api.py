@@ -7,6 +7,7 @@ from foundation.outbound import (
     url_hostname,
     validate_outbound_url,
 )
+from foundation.redaction import redact_sensitive_text
 
 from .api_helpers import (
     COMPILED_REDMINE_ATTACHMENT_PATTERN,
@@ -47,6 +48,13 @@ router = APIRouter()
 MAX_REPORT_URL_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
 
+def _url_log_target(value: str) -> str:
+    """Return an origin/path-only URL suitable for operational logs."""
+
+    parsed = urlparse(str(value or ''))
+    return f"{parsed.scheme}://{parsed.hostname or ''}{parsed.path}"
+
+
 def _request_redmine_config_manager(request: Request):
     require_authenticated_user(request)
     return _redmine_config_manager_for_request(request)
@@ -81,7 +89,10 @@ async def analyze_report_from_url(request: Request):
         if not url:
             return error_response("Missing URL parameter", 400)
 
-        logger.info(f"[Report Analysis] URL analysis request: {url}")
+        logger.info(
+            "[Report Analysis] URL analysis request: %s",
+            _url_log_target(url),
+        )
 
         parsed_url = urlparse(url)
         filename = os.path.basename(parsed_url.path) or "downloaded_file.zip"
@@ -140,12 +151,18 @@ async def analyze_report_from_url(request: Request):
                         attachment_id = first_attachment.id
                         filename = first_attachment.filename or f"attachment_{attachment_id}"
                         url = first_attachment.content_url or client.download_url(attachment_id)
-                        logger.info(f"[Report Analysis] Extracted attachment: {filename} -> {url}")
+                        logger.info(
+                            "[Report Analysis] Extracted Redmine attachment ID: %s",
+                            attachment_id,
+                        )
                     finally:
                         await client.close()
                 except Exception as extract_error:
-                    logger.error(f"[Report Analysis] Attachment extraction failed: {extract_error}")
-                    return error_response(f"Cannot extract attachment: {extract_error!s}", 500)
+                    logger.error(
+                        "[Report Analysis] Attachment extraction failed: %s",
+                        redact_sensitive_text(extract_error),
+                    )
+                    return error_response("Cannot extract Redmine attachment", 500)
             else:
                 redmine_attach_match = COMPILED_REDMINE_ATTACHMENT_PATTERN.search(url)
                 if redmine_attach_match:
@@ -183,17 +200,20 @@ async def analyze_report_from_url(request: Request):
                             finally:
                                 await client.close()
                         except Exception as search_error:
-                            logger.warning(f"[Report Analysis] Query attachment owner failed: {search_error}")
+                            logger.warning(
+                                "[Report Analysis] Query attachment owner failed: %s",
+                                redact_sensitive_text(search_error),
+                            )
 
                     if "/attachments/download/" not in url:
                         if not redmine_base_url:
                             return error_response("Redmine base URL unavailable", 404)
                         url = RedmineClient(redmine_base_url).download_url(attachment_id)
-                        logger.info(f"[Report Analysis] Converted to download URL: {url}")
+                        logger.info("[Report Analysis] Converted attachment to download URL")
 
                     filename = f"attachment_{attachment_id}"
 
-        logger.info(f"[Report Analysis] Downloading: {filename}")
+        logger.info("[Report Analysis] Downloading staged report")
         temp_dir = tempfile.mkdtemp(prefix="redmine_download_")
         temp_file_path = ""
 
@@ -278,7 +298,7 @@ async def analyze_report_from_url(request: Request):
                     logger.info(f"[Report Analysis] Download complete: {downloaded_size} bytes")
                     temp_file_path, filename = _rename_downloaded_report_if_needed(temp_file_path, real_filename, content_type)
 
-            logger.info(f"[Report Analysis] Analyzing: {temp_file_path}")
+            logger.info("[Report Analysis] Analyzing staged report")
             result = await _analyze_report_file(temp_file_path, temp_dir)
             if result:
                 logger.info(f"[Report Analysis] Analysis complete - failures: {len(result.get('failures', []))}")
@@ -292,7 +312,7 @@ async def analyze_report_from_url(request: Request):
             # （HTML/非报告 XML/空内容等）。返回 422 让前端提示「不是有效报告」，
             # 而不是误导性的 500。
             if not result:
-                logger.warning(f"[Report Analysis] Empty analysis result for: {filename}")
+                logger.warning("[Report Analysis] Empty analysis result")
                 return error_response(
                     f"无法解析报告「{filename}」：不是有效的测试报告（test_result.xml/zip）",
                     status_code=422,
@@ -304,7 +324,7 @@ async def analyze_report_from_url(request: Request):
                 if original_issue_id:
                     report_filename = strip_redmine_report_prefix(filename)
                     report_name = f"Redmine-{original_issue_id}-{report_filename}"
-                    logger.info(f"[Report Analysis] Redmine prefix: {report_name}")
+                    logger.info("[Report Analysis] Redmine report provenance attached")
                 else:
                     issue_match = COMPILED_REDMINE_ISSUE_PATTERN.search(url)
                     if issue_match:
@@ -341,8 +361,11 @@ async def analyze_report_from_url(request: Request):
             raise download_error
 
     except Exception as e:
-        logger.error(f"[Report Analysis] URL analysis failed: {e}", exc_info=True)
-        return error_response(f"Download or analysis failed: {e!s}", 500)
+        logger.error(
+            "[Report Analysis] URL analysis failed: %s",
+            redact_sensitive_text(e),
+        )
+        return error_response("Download or analysis failed", 500)
 
 
 # ==================== Redmine Config ====================
@@ -355,8 +378,8 @@ async def get_redmine_config(request: Request):
         return JSONResponse(content={"success": True, "data": redmine_config})
     except ValueError as e:
         return error_response(str(e), status_code=404)
-    except Exception as e:
-        return error_response(f"Failed to get Redmine config: {e!s}", status_code=500)
+    except Exception:
+        return error_response("Failed to get Redmine config", status_code=500)
 
 
 # ==================== Extract Redmine Attachment ====================
@@ -412,9 +435,9 @@ async def extract_redmine_attachment(request: Request):
         finally:
             await client.close()
 
-        logger.info(f"[Redmine Extract] Found attachment: {first_attachment.filename} (ID: {first_attachment.id})")
+        logger.info("[Redmine Extract] Found attachment ID: %s", first_attachment.id)
         return JSONResponse(content={"success": True, "attachment_url": attachment_url, "filename": first_attachment.filename, "attachment_id": first_attachment.id})
 
     except Exception as e:
-        logger.error(f"[Redmine Extract] Failed: {e}")
-        return error_response(f"Extraction failed: {e!s}", 500)
+        logger.error("[Redmine Extract] Failed: %s", redact_sensitive_text(e))
+        return error_response("Extraction failed", 500)

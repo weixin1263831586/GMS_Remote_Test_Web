@@ -1,5 +1,14 @@
 // ==================== Report Analysis ====================
 
+function safeReportExternalUrl(value) {
+    try {
+        const parsed = new URL(String(value || ''), window.location.origin);
+        return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
+    } catch (error) {
+        return '';
+    }
+}
+
 function selectReportSource() {
     // 创建选择对话框
     const modal = document.createElement('div');
@@ -431,6 +440,7 @@ async function handleRedmineAttachment(url, context = {}) {
 
 function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill, context = {}) {
     window._pendingRedmineDropContext = context || {};
+    const escapedUrl = escapeJsAttr(url);
     // 显示 Redmine 凭证输入对话框
     const modal = document.createElement('div');
     modal.id = 'redmine-auth-modal';
@@ -444,7 +454,7 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
             </div>
             <div class="modal-body">
                 <p style="margin-bottom: 15px;">请输入 Redmine 账号密码以自动下载附件：</p>
-                <form onsubmit="event.preventDefault(); submitRedmineAuth('${url}');" autocomplete="off">
+                <form onsubmit="event.preventDefault(); submitRedmineAuth('${escapedUrl}');" autocomplete="off">
                 <div class="modal-form-row">
                     <label>用户名</label>
                     <input type="text" id="redmine-username" placeholder="输入 Redmine 用户名" autocomplete="username">
@@ -452,12 +462,12 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
                 <div class="modal-form-row">
                     <label>密码</label>
                     <input type="password" id="redmine-password" placeholder="输入 Redmine 密码" autocomplete="current-password"
-                           onkeypress="if(event.key === 'Enter') submitRedmineAuth('${url}')">
+                           onkeypress="if(event.key === 'Enter') submitRedmineAuth('${escapedUrl}')">
                 </div>
                 </form>
                 <div class="modal-buttons">
                     <button class="btn-xs" onclick="ModalManager.unregisterDynamic('redmine-auth-modal'); resetReportUploadProgress();">取消</button>
-                    <button class="btn-xs btn-primary" onclick="submitRedmineAuth('${url}')">确定</button>
+                    <button class="btn-xs btn-primary" onclick="submitRedmineAuth('${escapedUrl}')">确定</button>
                 </div>
                 <p style="font-size: 11px; color: var(--text-secondary); margin-top: 15px; text-align: center;">
                     💾 凭证将被加密存储，下次无需重新输入
@@ -848,46 +858,46 @@ function displayReportAnalysis(data) {
             ${data.details && data.details.test_type ? `
                 <div>
                     <span class="summary-label">测试类型：</span>
-                    <span class="summary-value">${data.details.test_type}</span>
+                    <span class="summary-value">${escapeHtml(data.details.test_type)}</span>
                 </div>
             ` : ''}
             ${data.details && data.details.suite_version ? `
                 <div>
                     <span class="summary-label">套件版本：</span>
-                    <span class="summary-value">${data.details.suite_version}</span>
+                    <span class="summary-value">${escapeHtml(data.details.suite_version)}</span>
                 </div>
             ` : ''}
             ${data.details && data.details.android_version ? `
                 <div>
                     <span class="summary-label">Android版本：</span>
-                    <span class="summary-value">${data.details.android_version}</span>
+                    <span class="summary-value">${escapeHtml(data.details.android_version)}</span>
                 </div>
             ` : ''}
             ${data.details && data.details.soc_platform ? `
                 <div>
                     <span class="summary-label">SOC平台：</span>
-                    <span class="summary-value">${data.details.soc_platform}</span>
+                    <span class="summary-value">${escapeHtml(data.details.soc_platform)}</span>
                 </div>
             ` : ''}
             <div>
                 <span class="summary-label">总用例数：</span>
-                <span class="summary-value">${summary.total || 0}</span>
+                <span class="summary-value">${escapeHtml(summary.total || 0)}</span>
             </div>
             <div>
                 <span class="summary-label">通过：</span>
-                <span class="summary-value pass">${summary.pass || 0}</span>
+                <span class="summary-value pass">${escapeHtml(summary.pass || 0)}</span>
             </div>
             <div>
                 <span class="summary-label">失败：</span>
-                <span class="summary-value fail">${summary.fail || 0}</span>
+                <span class="summary-value fail">${escapeHtml(summary.fail || 0)}</span>
             </div>
             <div>
                 <span class="summary-label">通过率：</span>
-                <span class="summary-value rate">${summary.pass_rate || '0%'}</span>
+                <span class="summary-value rate">${escapeHtml(summary.pass_rate || '0%')}</span>
             </div>
             <div>
                 <span class="summary-label">测试报告：</span>
-                <span class="summary-value">${data.report_name || data.test_result?.test_name || 'N/A'}</span>
+                <span class="summary-value">${escapeHtml(data.report_name || data.test_result?.test_name || 'N/A')}</span>
             </div>
         `;
 
@@ -1367,15 +1377,18 @@ function renderReportDiagnosis(data) {
     }
 
     const sourceCards = sourceResults.length > 0
-        ? sourceResults.map(item => `
-            <div class="dx-list-item${item.url ? ' dx-clickable' : ''}" ${item.url ? `onclick="window.open('${escapeJsAttr(item.url)}', '_blank')"` : ''}>
+        ? sourceResults.map(item => {
+            const itemUrl = safeReportExternalUrl(item.url);
+            return `
+            <div class="dx-list-item${itemUrl ? ' dx-clickable' : ''}" ${itemUrl ? `onclick="window.open('${escapeJsAttr(itemUrl)}', '_blank', 'noopener')"` : ''}>
                 <div class="dx-list-head">
                     <div class="dx-list-title">${escapeHtml(item.type || 'source')}</div>
-                    ${item.url ? `<a class="dx-link" href="${escapeHtml(item.url)}" target="_blank" onclick="event.stopPropagation()">打开 OpenGrok</a>` : ''}
+                    ${itemUrl ? `<a class="dx-link" href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">打开 OpenGrok</a>` : ''}
                 </div>
                 <div class="dx-list-path dx-list-path-inline">${escapeHtml(item.path || item.display_path || '')}${item.line ? `<span>:${escapeHtml(String(item.line))}</span>` : ''}</div>
             </div>
-        `).join('')
+        `;
+        }).join('')
         : renderDxEmpty('未检索到 OpenGrok 源码结果');
 
     const kbCards = kbResults.length > 0
@@ -1415,18 +1428,21 @@ function renderReportDiagnosis(data) {
                 <span class="dx-exempt-title">命中 Google Mainline 已知豁免（通常无需本地修复）</span>
             </div>
             <div class="dx-exempt-list">
-                ${exemptions.map(item => `
+                ${exemptions.map(item => {
+                    const sourceUrl = safeReportExternalUrl(item.source_url);
+                    return `
                     <div class="dx-exempt-item">
                         <div class="dx-exempt-item-head">
                             <b class="dx-exempt-id">exemption ${escapeHtml(String(item.exemption_id || ''))}</b>
                             <span class="dx-exempt-meta">${escapeHtml([item.issue_type, item.test_module].filter(Boolean).join(' · '))}</span>
                             ${item.match_kind === 'fuzzy' ? '<span class="dx-exempt-kind">模糊匹配</span>' : ''}
-                            ${item.source_url ? `<a class="dx-link" href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener">来源</a>` : ''}
+                            ${sourceUrl ? `<a class="dx-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">来源</a>` : ''}
                         </div>
                         <div class="dx-exempt-case">${escapeHtml(item.test_case || '')}</div>
                         ${item.issue_text ? `<div class="dx-exempt-text">${escapeHtml(String(item.issue_text).slice(0, 280))}</div>` : ''}
                     </div>
-                `).join('')}
+                `;
+                }).join('')}
             </div>
         </section>`
         : '';
@@ -2006,7 +2022,9 @@ async function analyzeFailureWithSource(testName, errorMessage) {
                 );
 
                 if (exactMatch) {
-                    let openGrokUrl = exactMatch.url || buildOpenGrokUrl(exactMatch.path, exactMatch.line);
+                    const openGrokUrl = safeReportExternalUrl(
+                        exactMatch.url || buildOpenGrokUrl(exactMatch.path, exactMatch.line)
+                    );
 
                     if (openGrokUrl) {
                         content += `
@@ -2015,9 +2033,9 @@ async function analyzeFailureWithSource(testName, errorMessage) {
                                 <div style="background: rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 12px; margin-bottom: 10px;">
                                     <div style="color: rgba(255, 255, 255, 0.8); font-size: 11px; margin-bottom: 4px;">📁 失败位置</div>
                                     <div style="color: white; font-family: 'Courier New', monospace; font-size: 13px; margin-bottom: 8px;">
-                                        ${exactMatch.path.split('/').pop()} :${failureLocation.line_number}
+                                        ${escapeHtml(exactMatch.path.split('/').pop())} :${escapeHtml(failureLocation.line_number)}
                                     </div>
-                                    <a href="${openGrokUrl}" target="_blank" style="display: inline-block; padding: 6px 12px; background: white; color: #667eea; text-decoration: none; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                                    <a href="${escapeHtml(openGrokUrl)}" target="_blank" rel="noopener" style="display: inline-block; padding: 6px 12px; background: white; color: #667eea; text-decoration: none; border-radius: 4px; font-size: 12px; font-weight: 600;">
                                         🚀 直接跳转到源码 ↗
                                     </a>
                                 </div>
@@ -2036,13 +2054,12 @@ async function analyzeFailureWithSource(testName, errorMessage) {
                 data.source_search_results.forEach(item => {
                     const fileIcon = item.file_type === 'kt' ? '🔷' : (item.file_type === 'java' ? '☕' : '📄');
                     // 优先使用 item.url，如果没有则根据配置生成
-                    let itemUrl = item.url;
-                    if (!itemUrl) {
-                        itemUrl = buildOpenGrokUrl(item.path, item.line);
-                    }
+                    const itemUrl = safeReportExternalUrl(
+                        item.url || buildOpenGrokUrl(item.path, item.line)
+                    );
 
                     const linkHtml = itemUrl ?
-                        `<a href="${itemUrl}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
+                        `<a href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
                             在 OpenGrok 中查看 →
                         </a>` :
                         '<span style="font-size: 10px; color: #999;">无链接</span>';
@@ -2053,16 +2070,16 @@ async function analyzeFailureWithSource(testName, errorMessage) {
                                 <div style="display: flex; align-items: center; gap: 6px;">
                                     <span style="font-size: 14px;">${fileIcon}</span>
                                     <span style="font-family: monospace; font-size: 12px; color: #1976d2; font-weight: 600;">
-                                        ${item.type}
+                                        ${escapeHtml(item.type)}
                                     </span>
                                 </div>
                                 ${linkHtml}
                             </div>
                             <div style="font-family: monospace; font-size: 11px; color: #616161; margin-bottom: 4px;">
-                                📁 ${item.path}
+                                📁 ${escapeHtml(item.path)}
                             </div>
                             <div style="font-family: monospace; font-size: 10px; color: #424242; background: #f5f5f5; padding: 6px; border-radius: 3px;">
-                                行 ${item.line || 'N/A'} ${item.project ? '· 项目：' + item.project : ''}
+                                行 ${escapeHtml(item.line || 'N/A')} ${item.project ? '· 项目：' + escapeHtml(item.project) : ''}
                             </div>
                         </div>
                     `;
@@ -2119,7 +2136,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         // 将类名列表格式化为多行显示
         const classNamesList = classNames.map((name, index) => {
             const prefix = index === 0 ? '' : '├── ';
-            return `${prefix}${name}`;
+            return `${prefix}${escapeHtml(name)}`;
         }).join('<br>');
 
         modal.querySelector('.modal-body').innerHTML = `
@@ -2128,7 +2145,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 <div style="color: var(--text-secondary); margin-bottom: 12px;">正在搜索相关源码...</div>
                 <div style="font-size: 16px; color: var(--text-secondary); margin-bottom: 8px;">找到 ${classNames.length} 个相关类</div>
                 <div style="font-size: 16px; font-family: 'Courier New', monospace; color: var(--primary-color); text-align: left; display: inline-block; max-width: 90%;">${classNamesList}</div>
-                ${failureLocation ? `<div style="font-size: 16px; color: var(--success-color); margin-top: 8px;">📍 失败位置: ${failureLocation.file_name}.${failureLocation.file_type}:${failureLocation.line_number}</div>` : ''}
+                ${failureLocation ? `<div style="font-size: 16px; color: var(--success-color); margin-top: 8px;">📍 失败位置: ${escapeHtml(failureLocation.file_name)}.${escapeHtml(failureLocation.file_type)}:${escapeHtml(failureLocation.line_number)}</div>` : ''}
             </div>
         `;
 
@@ -2207,7 +2224,10 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 content += '<div style="font-weight: 600; margin-bottom: 8px; color: var(--info-color);">📚 相关文档</div>';
                 content += '<div style="display: flex; flex-direction: column; gap: 8px;">';
                 data.related_docs.forEach(doc => {
-                    content += `<a href="${doc.url}" target="_blank" style="display: block; padding: 8px 12px; background: var(--info-color); color: white; text-decoration: none; border-radius: 4px; font-size: 12px; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">${doc.title} ↗</a>`;
+                    const docUrl = safeReportExternalUrl(doc.url);
+                    if (docUrl) {
+                        content += `<a href="${escapeHtml(docUrl)}" target="_blank" rel="noopener" style="display: block; padding: 8px 12px; background: var(--info-color); color: white; text-decoration: none; border-radius: 4px; font-size: 12px; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">${escapeHtml(doc.title)} ↗</a>`;
+                    }
                 });
                 content += '</div></div>';
             }
@@ -2221,21 +2241,23 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 data.opengrok_results.forEach(item => {
                     let opengrokUrl = '';
                     if (OPENGROK_CONFIG.isValid) {
-                        opengrokUrl = `${OPENGROK_CONFIG._baseUrl}/xref/${item.file}#${item.line}`;
+                        opengrokUrl = safeReportExternalUrl(
+                            `${OPENGROK_CONFIG._baseUrl}/xref/${encodeURI(item.file || '')}#${encodeURIComponent(item.line || '')}`
+                        );
                     }
 
                     content += `
                         <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                                 <div style="font-family: monospace; font-size: 11px; color: #1976d2; font-weight: 600;">
-                                    ${item.class_name}
+                                    ${escapeHtml(item.class_name)}
                                 </div>
-                                ${opengrokUrl ? `<a href="${opengrokUrl}" target="_blank" style="font-size: 10px; color: #9c27b0; text-decoration: none; white-space: nowrap;">
+                                ${opengrokUrl ? `<a href="${escapeHtml(opengrokUrl)}" target="_blank" rel="noopener" style="font-size: 10px; color: #9c27b0; text-decoration: none; white-space: nowrap;">
                                     查看源码 ↗
                                 </a>` : '<span style="font-size: 10px; color: #999;">无链接</span>'}
                             </div>
                             <div style="font-family: monospace; font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
-                                ${item.file}:${item.line}
+                                ${escapeHtml(item.file)}:${escapeHtml(item.line)}
                             </div>
                             <div style="font-family: monospace; font-size: 10px; color: #424242; background: white; padding: 4px; border-radius: 3px; overflow-x: auto;">
                                 ${escapeHtml(item.context)}
@@ -2255,10 +2277,9 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
 
                 data.source_search_results.forEach(item => {
                     // 优先使用 item.url，如果没有则根据配置生成
-                    let itemUrl = item.url;
-                    if (!itemUrl) {
-                        itemUrl = buildOpenGrokUrl(item.path, item.line);
-                    }
+                    const itemUrl = safeReportExternalUrl(
+                        item.url || buildOpenGrokUrl(item.path, item.line)
+                    );
 
                     // 调试信息
                     if (!itemUrl && DEBUG) {
@@ -2275,17 +2296,17 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                         <div style="background: white; border-radius: 4px; padding: 10px; margin-bottom: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                                 <div style="font-family: monospace; font-size: 12px; color: #1976d2; font-weight: 600;">
-                                    ${item.type}
+                                    ${escapeHtml(item.type)}
                                 </div>
-                                ${itemUrl ? `<a href="${itemUrl}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
+                                ${itemUrl ? `<a href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
                                     在 OpenGrok 中查看 →
                                 </a>` : '<span style="font-size: 10px; color: #999;">无链接</span>'}
                             </div>
                             <div style="font-family: monospace; font-size: 11px; color: #616161; margin-bottom: 4px;">
-                                📁 ${displayPath}
+                                📁 ${escapeHtml(displayPath)}
                             </div>
                             <div style="font-family: monospace; font-size: 10px; color: #424242; background: #f5f5f5; padding: 6px; border-radius: 3px; overflow-x: auto;">
-                                行 ${item.line} ${item.project ? '· 项目: ' + item.project : ''}
+                                行 ${escapeHtml(item.line)} ${item.project ? '· 项目: ' + escapeHtml(item.project) : ''}
                             </div>
                         </div>
                     `;
@@ -2306,7 +2327,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         } else {
             // 处理业务逻辑错误（success: false）
             const errorDetail = result.error || result.detail || '未知错误';
-            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${errorDetail}</div>`;
+            modal.querySelector('.modal-body').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">分析失败: ${escapeHtml(errorDetail)}</div>`;
         }
 
     } catch (error) {
@@ -2387,7 +2408,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
                 <div style="display: flex; align-items: center; gap: 10px;">
                     ${data.source_code_fetched ? '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
                     ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: white; padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
-                    ${data.ai_model ? `<span style="font-size: 10px; background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${data.ai_model}</span>` : ''}
+                    ${data.ai_model ? `<span style="font-size: 10px; background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${escapeHtml(data.ai_model)}</span>` : ''}
                     <button onclick="closeAIAnalysisModal('${modalId}')" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
                 </div>
             </div>
@@ -2398,8 +2419,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         html += `
             <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); border-left: 4px solid #667eea; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
                 <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #667eea;">💻 源码信息</div>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">文件路径: ${data.source_file_path || 'N/A'}</div>
-                <a href="${data.source_url}" target="_blank" style="font-size: 11px; color: #667eea; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">文件路径: ${escapeHtml(data.source_file_path || 'N/A')}</div>
+                <a href="${escapeHtml(safeReportExternalUrl(data.source_url))}" target="_blank" rel="noopener" style="font-size: 11px; color: #667eea; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
                     🔗 查看源码
                     <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
@@ -2415,7 +2436,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         html += `
             <div style="background: linear-gradient(135deg, rgba(245, 87, 108, 0.1) 0%, rgba(250, 177, 160, 0.1) 100%); border-left: 4px solid #f5576c; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
                 <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #f5576c;">🎯 根本原因</div>
-                <div style="font-size: 13px; color: var(--text-color); line-height: 1.6;">${data.root_cause}</div>
+                <div style="font-size: 13px; color: var(--text-color); line-height: 1.6;">${escapeHtml(data.root_cause)}</div>
             </div>
         `;
     }
@@ -2425,7 +2446,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         html += `
             <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
                 <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📊 详细分析</div>
-                <div style="font-size: 12px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;">${data.analysis}</div>
+                <div style="font-size: 12px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;">${escapeHtml(data.analysis)}</div>
             </div>
         `;
     }
@@ -2439,7 +2460,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
                     ${data.suggestions.map((suggestion, idx) => `
                         <div style="display: flex; gap: 10px; align-items: flex-start;">
                             <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0;">${idx + 1}</span>
-                            <span style="font-size: 12px; line-height: 1.6; color: var(--text-color);">${suggestion}</span>
+                            <span style="font-size: 12px; line-height: 1.6; color: var(--text-color);">${escapeHtml(suggestion)}</span>
                         </div>
                     `).join('')}
                 </div>
@@ -2453,13 +2474,17 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
             <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
                 <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📚 相关文档</div>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
-                    ${data.related_docs.map(doc => `
-                        <a href="${doc.url}" target="_blank" style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--darker-bg); border-radius: 6px; text-decoration: none; color: var(--text-color); transition: all 0.2s;">
+                    ${data.related_docs.map(doc => {
+                        const docUrl = safeReportExternalUrl(doc.url);
+                        if (!docUrl) return '';
+                        return `
+                        <a href="${escapeHtml(docUrl)}" target="_blank" rel="noopener" style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--darker-bg); border-radius: 6px; text-decoration: none; color: var(--text-color); transition: all 0.2s;">
                             <span style="font-size: 16px;">📖</span>
-                            <span style="font-size: 12px; flex: 1;">${doc.title}</span>
+                            <span style="font-size: 12px; flex: 1;">${escapeHtml(doc.title)}</span>
                             <span style="font-size: 10px; color: var(--primary-color);">查看 →</span>
                         </a>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </div>
             </div>
         `;

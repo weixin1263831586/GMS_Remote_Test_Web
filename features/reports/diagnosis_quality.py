@@ -5,18 +5,19 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from foundation.redaction import redact_sensitive_text
+
 
 _ROOT_PREFIX_RE = re.compile(
     r"^(?:(?:🎯|根本原因[:：]?|Root cause[:：]?|待验证假设[:：]?|待验证[:：]?|初步判断[:：]?)\s*)+",
     re.IGNORECASE,
 )
 _RESET_TIME_RE = re.compile(r"限额将在\s*([0-9-]+\s+[0-9:]+)\s*重置")
-_SECRET_RE = re.compile(r"\bsk-[A-Za-z0-9_-]+\b")
 
 
 def public_provider_error(raw_error: Any) -> str:
     """Return a concise operator-facing error without LiteLLM internals."""
-    raw = _SECRET_RE.sub("[已隐藏]", str(raw_error or "模型调用失败")).strip()
+    raw = redact_sensitive_text(raw_error or "模型调用失败").strip()
     provider_match = re.match(r"^([A-Za-z0-9_-]*(?:local|glm|zhipu|openai)[A-Za-z0-9_-]*)\b", raw, re.IGNORECASE)
     provider = raw.split(":", 1)[0].strip() if ":" in raw else (provider_match.group(1) if provider_match else "AI")
     is_local = "local" in provider.lower() or "本地" in raw

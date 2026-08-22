@@ -37,6 +37,7 @@ class ReleasePackagingTests(unittest.TestCase):
 
         for expected in (
             "--exclude '.certs/'",
+            "--exclude '.gitignore'",
             "--exclude '.env.production'",
             "--exclude 'configs/env.production'",
             "--exclude 'configs/certs/'",
@@ -44,6 +45,8 @@ class ReleasePackagingTests(unittest.TestCase):
             "--exclude 'configs/user_tools_data.json'",
             "--exclude 'configs/redmine_user_map.json'",
             "--exclude 'data/'",
+            "--exclude '/*.png'",
+            "--exclude '*.map'",
             "--exclude '/dist/'",
             "--exclude '/tools/gms-worker-native/target/'",
             "--exclude 'configs/config_runtime.json'",
@@ -60,8 +63,15 @@ class ReleasePackagingTests(unittest.TestCase):
         for internal_document in (
             "docs/android-cli-ui-control-integration.md",
             "docs/build-server-integration-assessment.md",
+            "docs/code-audit-2026-07.md",
+            "docs/code-audit-2026-08-12.md",
             "docs/multi-host-cluster-implementation-plan.md",
+            "docs/product-integration-cluster-audit-2026-07-15.md",
+            "docs/product-release-checklist-2026-07-15.md",
+            "docs/refactor-baseline.md",
             "docs/refactor-parity-audit.md",
+            "docs/refactor-verification.md",
+            "docs/wiki-knowledge-base-plan.md",
         ):
             self.assertEqual(source.count(f"--exclude '{internal_document}'"), 2)
 
@@ -256,6 +266,24 @@ class ReleasePackagingTests(unittest.TestCase):
             findings = verify_release_tree(root)
 
         self.assertTrue(any("private key material" in item for item in findings))
+
+    def test_release_verifier_rejects_development_and_internal_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "docs").mkdir()
+            (root / "web").mkdir()
+            (root / ".gitignore").write_text("data/\n", encoding="utf-8")
+            (root / "docs/code-audit-2026-08-12.md").write_text(
+                "internal release policy",
+                encoding="utf-8",
+            )
+            (root / "web/app.js.map").write_text("{}", encoding="utf-8")
+
+            findings = verify_release_tree(root)
+
+        self.assertTrue(any(".gitignore" in item for item in findings))
+        self.assertTrue(any("internal document" in item for item in findings))
+        self.assertTrue(any("source map" in item for item in findings))
 
 
 if __name__ == "__main__":
