@@ -1,5 +1,6 @@
 from .agent import RESOLVED_STATUSES
 from .api import (
+    configure_agent_factories,
     get_redmine_config_for_request,
     get_redmine_service_for_owner,
     get_redmine_service_for_request,
@@ -29,6 +30,7 @@ __all__ = [
     "RedmineClient",
     "RedmineService",
     "config_manager",
+    "configure_agent_factories",
     "display_names_from_mapping",
     "find_user_mapping",
     "get_redmine_config_for_request",

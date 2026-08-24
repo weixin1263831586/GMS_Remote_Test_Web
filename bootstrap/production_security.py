@@ -7,10 +7,10 @@ from urllib.parse import urlsplit
 
 from features.auth import authentication_required, secure_cookies_enabled
 from features.cluster import worker_tokens
-from features.system import security_audit_logger
 from features.system.metrics import metrics_token
 from foundation.config import settings
 from foundation.secrets import validate_secret_configuration
+from foundation.security_audit import security_audit_logger
 
 
 def _environment() -> str:

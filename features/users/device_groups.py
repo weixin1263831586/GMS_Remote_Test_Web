@@ -158,10 +158,10 @@ def cluster_device_properties(service: Any = None) -> dict[str, dict[str, str]]:
     """Return online remote Worker devices in the management/grouping shape."""
     try:
         if service is None:
-            from features.cluster import get_cluster_service
+            from features.users.cluster_access import get_cluster_service
 
             service = get_cluster_service()
-        if not service.effective_enabled:
+        if service is None or not service.effective_enabled:
             return {}
         local_worker_id = service.config.local_worker_id
         worker_names = {

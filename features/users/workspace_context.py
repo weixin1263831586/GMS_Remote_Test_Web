@@ -35,11 +35,14 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@/+-]*$")
 
 def _local_worker_id() -> str:
     try:
-        from features.cluster import get_cluster_service
+        from features.users.cluster_access import get_cluster_service
 
-        return str(get_cluster_service().config.local_worker_id or "ats-worker-controller")
+        service = get_cluster_service()
+        if service is not None:
+            return str(service.config.local_worker_id or "ats-worker-controller")
     except (AttributeError, RuntimeError):
-        return "ats-worker-controller"
+        pass
+    return "ats-worker-controller"
 
 
 class WorkspaceContextPatch(BaseModel):

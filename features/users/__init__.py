@@ -14,6 +14,7 @@ from .clients import (
     resolve_client_display_id,
     resolve_tailscale_device_host,
 )
+from .cluster_access import configure_cluster_service_provider
 from .device_groups import (
     auto_assign_new_devices,
     build_device_group_map,
@@ -37,6 +38,7 @@ __all__ = [
     "build_device_group_map",
     "client_manager",
     "cluster_device_properties",
+    "configure_cluster_service_provider",
     "current_username_for_request",
     "enforce_exclusive_device_group",
     "format_client_display_id",

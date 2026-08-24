@@ -208,7 +208,7 @@ def _merge_device_protocols(
 def _local_adb_proxy_sources(device_ids: list[str]) -> dict[str, dict[str, str]]:
     """Resolve connected Controller imports from persisted ADB Proxy routes."""
     try:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         local_worker_id = get_cluster_service().config.local_worker_id
     except Exception:

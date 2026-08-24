@@ -13,10 +13,10 @@ from features.auth import (
     require_authenticated_user,
     require_elevated_admin,
 )
-from features.system import security_audit_logger
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
+from foundation.security_audit import security_audit_logger
 
 from . import reconnect, runtime
 from .locks import device_lock_manager

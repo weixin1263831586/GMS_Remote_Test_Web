@@ -118,7 +118,7 @@ def _invalidate_vnc_status_cache() -> None:
 def _authorized_vnc_target(worker_id: str = "") -> tuple[str, str, str]:
     """Return host connection, SSH password, and VNC password from server state."""
 
-    from features.cluster import get_cluster_service
+    from foundation.cluster_port import get_cluster_service
 
     config = config_manager.load_config()
     cluster = get_cluster_service()
@@ -150,7 +150,7 @@ NOVNC_UPSTREAM_WS = NOVNC_UPSTREAM_HTTP.replace("http://", "ws://", 1).replace("
 
 
 def _cluster_novnc_upstream(worker_id: str) -> str:
-    from features.cluster import get_cluster_service
+    from foundation.cluster_port import get_cluster_service
 
     cluster = get_cluster_service()
     worker = cluster.repository.get_worker(worker_id)
@@ -185,7 +185,7 @@ def build_novnc_upstream_url(path: str, query_string: bytes = b"") -> str:
 
 
 def _novnc_worker_scope(worker_id: str = "", *, validate_remote: bool = True) -> str:
-    from features.cluster import get_cluster_service
+    from foundation.cluster_port import get_cluster_service
 
     cluster = get_cluster_service()
     normalized = str(worker_id or "").strip() or cluster.config.local_worker_id
@@ -293,7 +293,7 @@ async def create_novnc_access(
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    from features.cluster import get_cluster_service
+    from foundation.cluster_port import get_cluster_service
 
     local_worker_id = get_cluster_service().config.local_worker_id
     if worker_id == local_worker_id:
@@ -345,7 +345,7 @@ async def start_desktop_vnc(
     _admin: CurrentUser = Depends(require_elevated_admin),
 ):
     """启动Ubuntu主机桌面VNC（Ubuntu桌面的VNC服务）"""
-    from features.cluster import get_cluster_service
+    from foundation.cluster_port import get_cluster_service
 
     cluster = get_cluster_service()
     requested_worker = str(req.worker_id if req else "").strip() or cluster.config.local_worker_id
@@ -429,7 +429,7 @@ async def cluster_novnc_websockify_proxy(websocket: WebSocket, worker_id: str):
     subprotocol = _requested_novnc_subprotocol(websocket)
     await websocket.accept(subprotocol=subprotocol)
     try:
-        from features.cluster import worker_tokens
+        from foundation.cluster_port import worker_tokens
 
         worker_token = worker_tokens().get(worker_id, "")
         if not worker_token:

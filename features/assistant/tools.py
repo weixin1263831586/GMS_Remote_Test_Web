@@ -252,7 +252,7 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/websites/load": "features.system.assets:load_user_tools",
     "/api/tools/list": "features.system.assets:list_utility_tools",
     # --- 补充：配置 ---
-    "/api/config/ai": "features.users.config_api:get_ai_config",
+    "/api/config/ai": "features.assistant.config_api:get_ai_config",
     "/api/config/opengrok": "features.users.config_api:get_opengrok_config",
     "/api/config/redmine": "features.reports.api:get_redmine_config",
     "/api/tailscale/status": "features.users.config_api:get_tailscale_status",

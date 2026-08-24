@@ -220,7 +220,7 @@ async def get_connected_devices(
     devices_with_status = []
     cache_records = []
 
-    # 设备 -> 所属分组 id 列表（按当前用户读取其 per-user 分组；局部 import 规避循环依赖）
+    # 设备 -> 所属分组 id 列表（按当前用户读取其 per-user 分组）
     from features.users import (
         build_device_group_map,
         current_username_for_request,
@@ -350,7 +350,7 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
         value_to_devices: dict[str, list[str]] = {}
         local_worker_id = "ats-worker-controller"
         try:
-            from features.cluster import get_cluster_service
+            from foundation.cluster_port import get_cluster_service
             cluster = get_cluster_service()
             local_worker_id = cluster.config.local_worker_id
         except Exception:

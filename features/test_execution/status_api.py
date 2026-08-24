@@ -35,7 +35,7 @@ ACTIVE_JOB_STATUSES = {
 def _active_durable_jobs(owner_id: str) -> list[dict]:
     """Return browser-safe active jobs for exactly one authenticated owner."""
     try:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         jobs = get_cluster_service().repository.list_jobs(limit=500, owner_id=owner_id)
     except (AttributeError, RuntimeError):

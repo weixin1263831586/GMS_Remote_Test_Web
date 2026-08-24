@@ -607,6 +607,21 @@ function getDefaultSuitesPath() {
 }
 
 // FastAPI WebSocket 连接。
+// 会话失效（401/4401）或服务端不可达时按指数退避重连：固定 5 秒重试
+// 会让未登录的后台标签页无限空转，持续消耗本机连接资源。
+let wsReconnectAttempts = 0;
+
+function scheduleWebSocketReconnect() {
+    if (state.websocketReconnectTimer) return;
+    const delay = Math.min(5000 * 2 ** Math.min(wsReconnectAttempts, 4), 60000);
+    wsReconnectAttempts += 1;
+    state.websocketReconnectTimer = setTimeout(() => {
+        state.websocketReconnectTimer = null;
+        debugLog('[WebSocket] Attempting to reconnect...');
+        initWebSocket();
+    }, delay);
+}
+
 function initWebSocket() {
     if (state.websocket && (
         state.websocket.readyState === WebSocket.OPEN
@@ -637,6 +652,7 @@ function initWebSocket() {
             if (state.websocket !== websocket) {
                 return;
             }
+            wsReconnectAttempts = 0;
             debugLog('[WebSocket] Connected');
             updateConnectionStatus(true);
             // 显示可读的 username@ip，而非平台用户安全边界（裸 ID）。
@@ -672,12 +688,8 @@ function initWebSocket() {
             updateConnectionStatus(false);
             addLogEntry('WebSocket连接已断开', 'warning');
             wakeTestStatusPolling();
-            // 5秒后重连
-            state.websocketReconnectTimer = setTimeout(() => {
-                state.websocketReconnectTimer = null;
-                debugLog('[WebSocket] Attempting to reconnect...');
-                initWebSocket();
-            }, 5000);
+            // 指数退避重连：5s → 10s → 20s → 40s → 60s（上限），成功后归零。
+            scheduleWebSocketReconnect();
         };
 
         websocket.onerror = (error) => {
@@ -894,10 +906,8 @@ function initWebSocket() {
         };
     }).catch(error => {
         console.error('[WebSocket] Failed to get client ID:', error);
-        // 3秒后重试
-        setTimeout(() => {
-            initWebSocket();
-        }, 3000);
+        // 获取身份失败（如会话失效 401）同样走退避重连，登录成功后会整页刷新。
+        scheduleWebSocketReconnect();
     });
 }
 
@@ -2439,6 +2449,13 @@ function startStatusPolling() {
 
         } catch (error) {
             console.error('Status polling error:', error);
+            // 失败也要退避：会话失效（401）时轮询曾以 2 秒频率无限重试，
+            // 单个后台标签页一天可产生数万次请求，持续占用本机连接。
+            const authLost = error?.status === 401 || error?.status === 403;
+            pollInterval = Math.min(
+                Math.max(pollInterval, 2000) * (authLost ? 5 : 1.5),
+                maxPollInterval
+            );
         } finally {
             pollRunning = false;
             const nextDelay = pollRequested ? 0 : pollInterval;
@@ -2813,3 +2830,6 @@ window.openAgentApkAnalysis = openAgentApkAnalysis;
 window.showTailscaleInfoModal = showTailscaleInfoModal;
 window.copyDeployCommand = copyDeployCommand;
 window.copyTailscaleAccessUrl = copyTailscaleAccessUrl;
+
+// Set only after the complete navigation bundle has evaluated successfully.
+window.GmsNavigationReady = true;

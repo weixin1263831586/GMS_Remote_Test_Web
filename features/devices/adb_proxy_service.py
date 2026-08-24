@@ -77,7 +77,7 @@ class ADBProxyService:
         return dict(values) if isinstance(values, dict) else {}
 
     def status(self) -> dict[str, Any]:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         cluster = get_cluster_service()
         workers = cluster.list_workers()
@@ -249,7 +249,7 @@ class ADBProxyService:
 
     async def logs(self, worker_id: str) -> dict[str, Any]:
         """Fetch bounded, sanitized executor logs from one Worker on demand."""
-        from features.cluster import run_worker_command as _run_worker_command
+        from foundation.cluster_port import run_worker_command as _run_worker_command
 
         worker = self._online_proxy_worker(worker_id)
         capabilities = worker.get("capabilities") or {}
@@ -302,9 +302,9 @@ class ADBProxyService:
         target_worker_id: str,
         devices: list[str],
     ) -> dict[str, Any]:
-        from features.cluster import get_cluster_service
-        from features.cluster import require_cluster_enabled as _require_cluster_enabled
-        from features.cluster import run_worker_command as _run_worker_command
+        from foundation.cluster_port import get_cluster_service
+        from foundation.cluster_port import require_cluster_enabled as _require_cluster_enabled
+        from foundation.cluster_port import run_worker_command as _run_worker_command
 
         cluster = get_cluster_service()
         local_worker_id = cluster.config.local_worker_id
@@ -603,7 +603,7 @@ class ADBProxyService:
         source_worker_id: str,
         target_worker_id: str,
     ) -> dict[str, Any]:
-        from features.cluster import run_worker_command as _run_worker_command
+        from foundation.cluster_port import run_worker_command as _run_worker_command
 
         key = self._assignment_key(source_worker_id, target_worker_id)
         assignment = self.assignments().get(key)
@@ -685,7 +685,7 @@ class ADBProxyService:
 
     @staticmethod
     def _online_proxy_worker(worker_id: str) -> dict[str, Any]:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         cluster = get_cluster_service()
         worker = cluster.repository.get_worker(worker_id)
@@ -727,7 +727,7 @@ class ADBProxyService:
 
     @staticmethod
     def _require_idle_target(worker_id: str, worker: dict[str, Any]) -> None:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         if worker.get("status") != "online" or int(
             worker.get("running_jobs") or 0
@@ -762,7 +762,7 @@ class ADBProxyService:
         """
         if not proxy_devices:
             return
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         try:
             claimed = [

@@ -37,7 +37,7 @@
     <script src="/static/js/pages/apk-analysis.js?v=20260813-task-recovery" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260812-stable-surfaces" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260812-stable-surfaces" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260822-reconnect-backoff" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -11440,6 +11440,24 @@
 
         // 页面加载完成后，如果是终端页面则初始化终端
         window.addEventListener('load', () => {
+            // 核心脚本（state.js/api.js/navigation.js）因网络错误未加载时，内联逻辑会
+            // 因缺少全局 state 崩溃（控制台报 "state is not defined"）。
+            // 这里给出明确提示而非 ReferenceError，便于定位到本机网络问题。
+            if (
+                typeof state === 'undefined'
+                || typeof apiCall === 'undefined'
+                || window.GmsNavigationReady !== true
+            ) {
+                console.error('[Boot] 核心脚本未加载完成，页面初始化中止');
+                const bootBanner = document.createElement('div');
+                bootBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;'
+                    + 'background:#b3261e;color:#fff;padding:10px 16px;font-size:14px;'
+                    + 'text-align:center;line-height:1.6;';
+                bootBanner.textContent = '页面核心脚本加载失败（网络错误），功能暂不可用。'
+                    + '请刷新重试；若反复出现，请关闭本站多余标签页并检查本机网络代理/端口占用后重启浏览器。';
+                document.body.appendChild(bootBanner);
+                return;
+            }
             // 获取页面加载前确定的目标页面
             const pageWasSwitchedBeforeLoad = Boolean(window.__shellPageSwitchedBeforeLoad);
             let targetPage = pageWasSwitchedBeforeLoad

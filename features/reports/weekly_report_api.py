@@ -1074,14 +1074,12 @@ async def get_weekly_report_ai_summary(request: Request):
         f"=== GMS 认证测试进展（平台 × 模块当前态）===\n{gms_blocks or '(无)'}\n"
     )
 
-    # 调本地 AI
-    try:
-        from features.assistant import get_universal_analyzer
-        from features.reports.dependencies import dependencies
-    except Exception as e:  # pragma: no cover
-        return error_response(f"AI 模块加载失败: {e}", status_code=500)
+    # AI 分析器由组合根注入（configure_report_dependencies）。
+    from features.reports.dependencies import dependencies
 
-    factory = dependencies.universal_analyzer_factory or get_universal_analyzer
+    factory = dependencies.universal_analyzer_factory
+    if factory is None:
+        return error_response("AI 分析器未配置", status_code=500)
     try:
         analyzer = factory()
     except Exception as e:

@@ -284,9 +284,14 @@ async def list_users(
 
     # 合并持久化 Worker 任务的所有者和设备租约。
     try:
-        from features.cluster import get_cluster_service
+        from features.users.cluster_access import get_cluster_service
 
-        jobs = get_cluster_service().repository.list_jobs(limit=500)
+        cluster_service = get_cluster_service()
+        jobs = (
+            cluster_service.repository.list_jobs(limit=500)
+            if cluster_service is not None
+            else []
+        )
     except (RuntimeError, AttributeError):
         jobs = []
     active_statuses = {

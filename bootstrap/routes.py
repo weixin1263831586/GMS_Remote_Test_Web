@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from features import knowledge
 from features.assistant import api as assistant
+from features.assistant import config_api as assistant_config
 from features.assistant.universal_ai import get_universal_analyzer
 from features.auth import router as auth_router
 from features.auth.api import configure_client_ssh_authenticator
@@ -105,6 +106,7 @@ from workflows.firmware_device import (
 
 ALL_ROUTERS = [
     assistant.router,
+    assistant_config.router,
     assets.router,
     audit.router,
     auth_router,

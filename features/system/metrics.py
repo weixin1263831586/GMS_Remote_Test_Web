@@ -9,6 +9,8 @@ import threading
 from collections import defaultdict
 from typing import Any
 
+from foundation.automation_port import get_worker_status
+
 
 _LOCK = threading.Lock()
 _REQUESTS: dict[tuple[str, str, int], int] = defaultdict(int)
@@ -76,8 +78,6 @@ def render_metrics() -> str:
         f"gms_process_max_rss_bytes {int(usage.ru_maxrss) * 1024}",
     ])
     try:
-        from features.automation import get_worker_status
-
         worker = get_worker_status()
         lines.extend([
             "# HELP gms_automation_worker_up Whether the automation scheduler is running.",

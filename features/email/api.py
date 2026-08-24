@@ -8,19 +8,32 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Request
 
 from features.auth import require_authenticated_user
 from features.email.service import send_email
-from features.redmine import get_redmine_config_for_request
 from foundation.config import settings
 from foundation.responses import error_response, success_response
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# SMTP 凭证存放在 redmine 配置树；组合根在启动时注入按请求解析 manager 的 provider。
+_manager_provider = None
+
+
+def configure_manager_provider(provider: Callable[[Any], Any] | None) -> None:
+    """Register the callable turning a request into an owner config manager.
+
+    Passing ``None`` explicitly clears the provider (the endpoint then
+    sends with the default manager).
+    """
+    global _manager_provider
+    _manager_provider = provider
 
 
 @router.post("/api/email/send")
@@ -40,7 +53,7 @@ async def send_email_endpoint(request: Request):
 
     kwargs: dict[str, Any] = {
         "is_html": bool(body.get("is_html", False)),
-        "manager": get_redmine_config_for_request(request),
+        "manager": _manager_provider(request) if _manager_provider is not None else None,
     }
     if body.get("cc"):
         kwargs["cc"] = body.get("cc")
