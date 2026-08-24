@@ -41,7 +41,7 @@ async def start_test(
 
     owner_id = runtime.get_client_id_from_request(request)
     try:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         cluster = get_cluster_service()
     except (AttributeError, RuntimeError):
@@ -115,7 +115,10 @@ async def stop_test(
 
     owner_id = runtime.get_client_id_from_request(request)
     try:
-        from features.cluster import cancel_job, get_cluster_service
+        from foundation.cluster_port import (
+            cancel_durable_job,
+            get_cluster_service,
+        )
 
         repository = get_cluster_service().repository
     except (AttributeError, RuntimeError):
@@ -142,7 +145,7 @@ async def stop_test(
     if job_id:
         if not any(item.get("id") == job_id for item in active_jobs):
             return error_response("Active test job not found", 404)
-        return cancel_job(job_id, request)
+        return cancel_durable_job(job_id, request)
     if not active_jobs:
         return error_response("No test running", 400)
     if len(active_jobs) > 1:
@@ -151,4 +154,4 @@ async def stop_test(
             409,
             detail={"job_ids": [item["id"] for item in active_jobs]},
         )
-    return cancel_job(active_jobs[0]["id"], request)
+    return cancel_durable_job(active_jobs[0]["id"], request)

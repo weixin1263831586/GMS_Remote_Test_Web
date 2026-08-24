@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from foundation.config import config_manager as default_config_manager
+from foundation.config_paths import default_suites_path
 
 from . import runtime
 
@@ -73,7 +74,7 @@ def get_default_suites_path(config: dict[str, Any]) -> str:
     """Get default suites path from config or environment."""
     manager = runtime.config_manager or default_config_manager
     ubuntu_user = manager.get_ubuntu_user(config)
-    return config.get('suites_path', f"/home/{ubuntu_user}/GMS-Suite")
+    return default_suites_path(config, ubuntu_user)
 
 
 def is_config_host_local(config: dict[str, Any]) -> bool:

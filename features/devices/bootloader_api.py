@@ -10,7 +10,7 @@ import time
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from features.auth import require_elevated_admin_when_auth_required
-from features.test_execution import get_default_suites_path
+from foundation.config_paths import default_suites_path
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
 from worker_agent.fastboot_workflow import (
@@ -122,7 +122,10 @@ async def _manage_bootloader_lock(
                 runtime.project_root, "scripts", "run_Device_Lock.sh"
             )
             remote_script = os.path.join(
-                get_default_suites_path(config), "run_Device_Lock.sh"
+                default_suites_path(
+                    config, runtime.config_manager.get_ubuntu_user(config)
+                ),
+                "run_Device_Lock.sh",
             )
             if not os.path.exists(local_script):
                 return _api_error(

@@ -78,7 +78,7 @@ def report_client_display_id(
     worker_id = str(report.get("worker_id") or "").strip()
     if worker_id:
         try:
-            from features.cluster import get_cluster_service
+            from foundation.cluster_port import get_cluster_service
 
             worker = get_cluster_service().repository.get_worker(worker_id) or {}
             capabilities = worker.get("capabilities") or {}

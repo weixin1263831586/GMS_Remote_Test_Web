@@ -6,9 +6,9 @@ import logging
 
 from fastapi import WebSocket
 
-from features.devices import device_lock_manager
 from features.system.ssh import ssh_manager
 from foundation.config import config_manager
+from foundation.device_locks import device_lock_manager
 
 
 logger = logging.getLogger(__name__)

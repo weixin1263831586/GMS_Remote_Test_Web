@@ -91,7 +91,7 @@ def _normalize_host(host: str) -> str:
 
 def _local_worker_id() -> str:
     try:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         return str(get_cluster_service().config.local_worker_id or "")
     except Exception:

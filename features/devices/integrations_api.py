@@ -202,7 +202,7 @@ def _record_usbip_network_quality(
 
 def _local_worker_id() -> str:
     try:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         return str(get_cluster_service().config.local_worker_id or "ats-worker-controller")
     except Exception:
@@ -873,9 +873,9 @@ async def start_usbip(
         source_devices: dict[str, str] = {}
         unknown_busids: list[str] = []
         if worker_id:
-            from features.cluster import get_cluster_service
-            from features.cluster import require_cluster_enabled as _require_cluster_enabled
-            from features.cluster import run_worker_command as _run_worker_command
+            from foundation.cluster_port import get_cluster_service
+            from foundation.cluster_port import require_cluster_enabled as _require_cluster_enabled
+            from foundation.cluster_port import run_worker_command as _run_worker_command
 
             cluster = get_cluster_service()
             adb_proxy_routes = _adb_proxy_target_assignments(worker_id)
@@ -1632,8 +1632,8 @@ async def stop_usbip(
     tailscale_mode = False
 
     if req and req.worker_id:
-        from features.cluster import get_cluster_service
-        from features.cluster import run_worker_command as _run_worker_command
+        from foundation.cluster_port import get_cluster_service
+        from foundation.cluster_port import run_worker_command as _run_worker_command
 
         try:
             cluster = get_cluster_service()

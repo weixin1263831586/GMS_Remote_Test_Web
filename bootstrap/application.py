@@ -29,7 +29,6 @@ from features.auth import (
     csrf_rejection_reason,
 )
 from features.system.metrics import observe_request
-from features.system.security_audit import classify_request_source, security_audit_logger
 from features.system.security_audit_utils import (
     can_audit_path,
     get_audit_operation,
@@ -44,6 +43,7 @@ from foundation.product import (
     APPLICATION_TITLE,
     APPLICATION_VERSION,
 )
+from foundation.security_audit import classify_request_source, security_audit_logger
 
 
 class UTF8JSONResponse(JSONResponse):

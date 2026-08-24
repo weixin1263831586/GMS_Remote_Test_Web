@@ -58,7 +58,9 @@ class GlobalState:
         self.device_ssh_pools = {}
         self.device_ssh_pools_lock = threading.Lock()
         self.device_ssh_pools_max = DEVICE_SSH_POOLS_MAX
-        self.apk_analysis_tasks = {}  # {task_id: {'status': str, 'progress': int, 'apk_path': str, 'output_dir': str, 'filename': str, 'timestamp': float, 'error': str or None}}
+        # APK 分析任务表：{task_id: {status, progress, apk_path, output_dir,
+        # filename, timestamp, error}}
+        self.apk_analysis_tasks = {}
         self.apk_analysis_tasks_lock = threading.Lock()
         self.apk_upload_locks = {}
         self.apk_upload_locks_lock = threading.Lock()

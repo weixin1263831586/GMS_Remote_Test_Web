@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from features.auth import require_elevated_admin
-from features.cluster import authenticate_worker
+from foundation.cluster_port import authenticate_worker
 from foundation.responses import error_response
 
 from .adb_forward import adb_forward_manager
@@ -111,10 +111,10 @@ async def worker_adb_proxy_pair_code(
 ):
     """Return a pair code only to the target Worker holding a short-lived grant."""
     authenticate_worker(worker_id, authorization)
-    from features.cluster import require_worker_session
+    from foundation.cluster_port import require_worker_session
 
     require_worker_session(worker_id, worker_session, worker_generation)
-    from features.cluster import get_cluster_service
+    from foundation.cluster_port import get_cluster_service
 
     local_worker_id = get_cluster_service().config.local_worker_id
     try:

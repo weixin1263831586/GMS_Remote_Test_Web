@@ -42,7 +42,7 @@ def resolve_authorized_terminal_target(
         raise ValueError("不支持的终端模式")
 
     config = config_manager.load_config()
-    from features.cluster import get_cluster_service
+    from foundation.cluster_port import get_cluster_service
 
     cluster = get_cluster_service()
     requested_worker = str(worker_id or "").strip() or cluster.config.local_worker_id
@@ -261,7 +261,7 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         websocket.state.terminal_connection_id = session_id
 
         if mode == 'adb':
-            from features.cluster import get_cluster_service
+            from foundation.cluster_port import get_cluster_service
 
             claim_registry = get_cluster_service().repository.claims
             device_key = f"{worker_id}:{serial_no}"

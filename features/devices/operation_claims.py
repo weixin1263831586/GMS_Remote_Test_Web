@@ -88,9 +88,7 @@ def audit_device_operation(
     error: str = "",
 ) -> None:
     """Write an immutable, fenced device-mutation audit event."""
-
-    # 延迟导入以避免设备门面初始化时循环依赖。
-    from features.system import security_audit_logger
+    from foundation.security_audit import security_audit_logger
 
     user = require_authenticated_user(request)
     security_audit_logger.log_event({

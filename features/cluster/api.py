@@ -55,7 +55,7 @@ def configure_cluster(data_root: str | Path) -> ClusterService:
         Path(data_root) / "cluster/cluster.sqlite3",
         claim_lease_ttl_seconds=config.lease_ttl_seconds,
     )
-    from features.devices import device_lock_manager
+    from foundation.device_locks import device_lock_manager
 
     device_lock_manager.configure_local_worker(config.local_worker_id)
     cluster_service = ClusterService(repository, config=config)

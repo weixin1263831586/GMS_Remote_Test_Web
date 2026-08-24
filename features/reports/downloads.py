@@ -155,7 +155,7 @@ async def create_remote_report_bundle(
     timeout_seconds: float = 300,
 ) -> ReportBundle | None:
     """Export results/logs through the existing authenticated Worker channel."""
-    from features.cluster import get_cluster_service
+    from foundation.cluster_port import get_cluster_service
 
     cluster = get_cluster_service()
     worker_id = str(report.get("worker_id") or "")

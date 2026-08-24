@@ -12,6 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from foundation.automation_port import get_worker_status
 from foundation.config import settings
 
 
@@ -112,8 +113,6 @@ def _check_ssh() -> dict[str, Any]:
 
 def _check_automation_worker() -> dict[str, Any]:
     try:
-        from features.automation import get_worker_status
-
         status = get_worker_status()
         return {
             "ok": not status.get("enabled") or bool(status.get("running")),
@@ -127,7 +126,7 @@ def _check_automation_worker() -> dict[str, Any]:
 
 def _check_local_worker() -> dict[str, Any]:
     try:
-        from features.cluster import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         service = get_cluster_service()
         if not service.effective_enabled:

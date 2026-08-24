@@ -1,5 +1,7 @@
 """Multi-host test cluster controller."""
 
+from foundation import cluster_port
+
 from .api import configure_cluster, device_action, page_router, router
 from .api import service as get_cluster_service
 from .config import ClusterConfig
@@ -33,6 +35,46 @@ def require_worker_session(*args, **kwargs):
     return _require_worker_session(*args, **kwargs)
 
 
+def _port_cluster_service():
+    return get_cluster_service()
+
+
+def _port_cancel_job(*args, **kwargs):
+    return cancel_job(*args, **kwargs)
+
+
+def _port_worker_tokens():
+    # Resolve the package-level name so tests patching
+    # features.cluster.worker_tokens are honored.
+    return worker_tokens()
+
+
+def _port_authenticate_worker(*args, **kwargs):
+    return authenticate_worker(*args, **kwargs)
+
+
+# Register this feature with the foundation access port so consumers that
+# must not import cluster (devices / reports / system / test_execution /
+# users) share one seam. The wrappers resolve names per call, honoring test
+# patches and service reconfiguration.
+def register_cluster_port() -> None:
+    """Wire this feature's capabilities into ``foundation.cluster_port``.
+
+    Called by the composition root (``bootstrap.dependencies``) at startup;
+    importing this package alone does not wire the port, so single-module
+    consumers keep their documented single-host fallback.
+    """
+    cluster_port.configure_cluster_access(
+        service_provider=_port_cluster_service,
+        cancel_job=_port_cancel_job,
+        worker_tokens=_port_worker_tokens,
+        run_worker_command=run_worker_command,
+        require_worker_session=require_worker_session,
+        require_cluster_enabled=require_cluster_enabled,
+        authenticate_worker=_port_authenticate_worker,
+    )
+
+
 __all__ = [
     "ClusterConfig",
     "ClusterDeviceAction",
@@ -45,6 +87,7 @@ __all__ = [
     "get_cluster_service",
     "index_cluster_report",
     "page_router",
+    "register_cluster_port",
     "require_cluster_enabled",
     "require_worker_session",
     "router",

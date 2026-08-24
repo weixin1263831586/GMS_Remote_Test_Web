@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from features.email import send_email
 from features.redmine.agent import RedmineAgent
 from features.redmine.config import config_manager
 from features.redmine.dashboard import (
@@ -67,6 +68,34 @@ def configure_redmine_service(service: RedmineService) -> None:
         pass
 
 
+_REPORT_ANALYZER_FACTORY = None
+_AI_ANALYZER_FACTORY = None
+
+# Default for ``configure_agent_factories`` arguments: omitted means "keep
+# the current registration", while an explicit ``None`` clears it.
+_UNSET: Any = object()
+
+
+def configure_agent_factories(
+    *,
+    report_analyzer_factory=_UNSET,
+    ai_analyzer_factory=_UNSET,
+) -> None:
+    """Register the per-owner agent's analyzer factories.
+
+    ``report_analyzer_factory`` builds report analyzers (PDF/XML/zip) and
+    ``ai_analyzer_factory`` builds model analyzers; both are supplied by the
+    composition root. Without registration the agent degrades to rule-based
+    analysis. Omitted arguments keep their current registration; passing
+    ``None`` explicitly clears that factory.
+    """
+    global _REPORT_ANALYZER_FACTORY, _AI_ANALYZER_FACTORY
+    if report_analyzer_factory is not _UNSET:
+        _REPORT_ANALYZER_FACTORY = report_analyzer_factory
+    if ai_analyzer_factory is not _UNSET:
+        _AI_ANALYZER_FACTORY = ai_analyzer_factory
+
+
 def _build_user_redmine_service(owner_id: str) -> RedmineService:
     user_config = config_manager.for_owner(owner_id)
     repository = RedmineAgentDB(
@@ -80,35 +109,12 @@ def _build_user_redmine_service(owner_id: str) -> RedmineService:
             repository,
             redmine_config_manager=user_config,
             attachments_dir=owner_attachments_dir(owner_id),
-            ai_analyzer_factory=_make_ai_analyzer_factory(),
-            report_analyzer_factory=_make_report_analyzer_factory(),
+            ai_analyzer_factory=_AI_ANALYZER_FACTORY,
+            report_analyzer_factory=_REPORT_ANALYZER_FACTORY,
         ),
         knowledge_db=RedmineKnowledgeDB(owner_knowledge_db_path(owner_id)),
         knowledge_config=knowledge_cfg,
     )
-
-
-def _make_ai_analyzer_factory():
-    """Return a factory(config)->UniversalAIAnalyzer, or None if unavailable.
-
-    Enables RedmineAgent._summarize_with_model to call the configured AI model
-    (GLM-5.2 via ANTHROPIC_* env). Lazy import avoids hard dependency at import
-    time; the feature degrades to rule-based analysis if the module is missing.
-    """
-    try:
-        from features.assistant import UniversalAIAnalyzer
-    except Exception:
-        return None
-    return lambda config: UniversalAIAnalyzer(config)
-
-
-def _make_report_analyzer_factory():
-    """Return a factory(temp_dir)->ReportAnalyzer for PDF/XML/zip test reports."""
-    try:
-        from features.reports import ReportAnalyzer
-    except Exception:
-        return None
-    return lambda temp_dir=None: ReportAnalyzer(temp_dir)
 
 
 def get_redmine_service_for_owner(owner_id: str) -> RedmineService:
@@ -170,7 +176,6 @@ def _clear_stats_caches() -> None:
 
 def _clear_historical_trend_cache() -> None:
     """清除历史趋势长期缓存（缓存所有权在 client 模块，委托其统一入口）。"""
-    # 延迟导入避免 api↔client 层在模块加载期耦合；缓存失效逻辑应紧邻其所有者。
     from features.redmine.client import clear_historical_trend_cache
 
     clear_historical_trend_cache()
@@ -212,8 +217,6 @@ def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) ->
     :func:`features.email.send_email`，这里仅做透传，保持调用方与返回
     结构 ``{"sent", "mode", "error"}`` 不变。
     """
-    from features.email import send_email  # 延迟导入避免循环依赖
-
     selected_manager = manager or config_manager
     result = send_email(to_addr, subject, body, manager=selected_manager)
     # 仅保留对外约定的字段（sent/mode/error），丢弃 send_email 附加的明细

@@ -72,7 +72,7 @@ def validate_pair_grant(
 
 
 def _source_secret(source_worker_id: str, local_worker_id: str) -> bytes:
-    from features.cluster import worker_tokens
+    from foundation.cluster_port import worker_tokens
 
     token = worker_tokens().get(source_worker_id)
     if token:

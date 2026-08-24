@@ -27,3 +27,9 @@ def automation_profiles_path(project_root: Path | str) -> Path:
 
 def build_servers_path(project_root: Path | str) -> Path:
     return config_root(project_root) / "build_servers.json"
+
+
+def default_suites_path(config: dict[str, str], ubuntu_user: str) -> str:
+    """Resolve the GMS suite root: an explicit ``suites_path`` wins, else
+    the suite is assumed under the configured Ubuntu user's home."""
+    return config.get("suites_path", f"/home/{ubuntu_user}/GMS-Suite")

@@ -415,7 +415,7 @@ class AutomationOrchestrator:
     def _audit(run: dict[str, Any], from_status: str, to_status: str, detail: str) -> None:
         """Best-effort security audit of a state transition. Never raises."""
         try:
-            from features.system import security_audit_logger
+            from foundation.security_audit import security_audit_logger
 
             security_audit_logger.log_event({
                 "action_type": "automation_transition",

@@ -19,6 +19,7 @@ from typing import Any
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager, get_ubuntu_user
 from foundation.networking import is_local_host
+from foundation.novnc import NOVNC_WEB_PORT, novnc_url
 from foundation.processes import command_reports_running, start_detached_process
 
 from .ssh import ssh_manager
@@ -28,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 VNC_DISPLAY = ':0'
 VNC_PORT = 5900
-NOVNC_WEB_PORT = 6080
 REMOTE_NOVNC_DIR = '/opt/noVNC'
 
 
@@ -42,25 +42,6 @@ def x11vnc_display_pattern(display: str = VNC_DISPLAY) -> str:
 
 def websockify_pattern(web_port: int = NOVNC_WEB_PORT) -> str:
     return f'websockify.*{web_port}'
-
-
-def novnc_url(host: str, *, web_port: int = NOVNC_WEB_PORT, autoconnect: bool = True,
-              resize: str = 'scale') -> str:
-    """Return a noVNC URL with autoconnect and scaling mode preset.
-
-    The *resize* query parameter maps to noVNC's 'resize' setting:
-      - 'off'     -> no scaling
-      - 'scale'   -> local scaling
-      - 'remote'  -> remote resizing
-    """
-    params = []
-    if autoconnect:
-        params.append('autoconnect=true')
-    if resize:
-        params.append(f'resize={resize}')
-    if params:
-        return f'http://{host}:{web_port}/vnc.html?{"&".join(params)}'
-    return f'http://{host}:{web_port}/vnc.html'
 
 
 def vnc_password_temp_path() -> str:

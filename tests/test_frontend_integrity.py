@@ -109,6 +109,15 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("runPageInitializers(pageName).catch(error =>", shell)
         self.assertIn("initializePageSafely(pageName)", shell)
 
+    def test_shell_stops_boot_when_navigation_bundle_is_unavailable(self):
+        shell = read_text("web/shell/shell.html")
+        navigation = read_text("web/static/js/navigation.js")
+
+        self.assertIn("window.GmsNavigationReady !== true", shell)
+        self.assertTrue(
+            navigation.rstrip().endswith("window.GmsNavigationReady = true;")
+        )
+
     def test_system_status_pages_use_consistent_chinese_loading_copy(self):
         for path in (
             "features/system/mainline_issues/ui/page.html",
@@ -133,7 +142,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("scheduleDeferredPagePreload(initialPage)", navigation)
         self.assertIn("await Promise.all([initializeClusterMode(), configReady])", navigation)
         self.assertIn("test-reports.js?v=20260812-stable-surfaces", shell)
-        self.assertIn("navigation.js?v=20260812-stable-surfaces", shell)
+        self.assertIn("navigation.js?v=20260822-reconnect-backoff", shell)
 
     def test_server_file_browser_uses_resolved_suite_path(self):
         navigation_text = read_all_frontend_js()

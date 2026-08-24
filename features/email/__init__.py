@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 from . import api
-from .api import router
+from .api import configure_manager_provider, router
 from .service import send_email
 
 
-__all__ = ["api", "router", "send_email"]
+__all__ = ["api", "configure_manager_provider", "router", "send_email"]
