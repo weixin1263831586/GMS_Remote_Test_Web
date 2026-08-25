@@ -243,16 +243,42 @@ class SkillCliTests(unittest.TestCase):
             )
 
     def test_capabilities_are_machine_discoverable(self):
-        result = self._run("gms-rt-capabilities", "--json")
+        result = self._run("gms-rt-system-capabilities", "--json")
+        inventory_result = self._run("gms-rt-system-commands", "--json")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         envelope = json.loads(result.stdout)
         self.assertTrue(envelope["ok"])
-        self.assertEqual(envelope["data"]["schema_version"], 2)
+        self.assertEqual(envelope["data"]["schema_version"], 3)
         self.assertGreater(envelope["data"]["command_count"], 50)
+        self.assertNotIn("commands", envelope["data"])
+        self.assertEqual(
+            envelope["data"]["command_inventory"]["list_command"],
+            "gms-rt-system-commands",
+        )
+        self.assertEqual(inventory_result.returncode, 0, inventory_result.stderr)
+        inventory = json.loads(inventory_result.stdout)["data"]
         commands = {
-            item["name"]: item for item in envelope["data"]["commands"]
+            item["name"]: item for item in inventory["commands"]
         }
+        self.assertEqual(envelope["data"]["command_count"], len(commands))
+        for name in (
+            "gms-rt-system-capabilities",
+            "gms-rt-system-command-describe",
+            "gms-rt-system-commands",
+            "gms-rt-system-update",
+            "gms-rt-system-version",
+        ):
+            self.assertEqual(commands[name]["category"], "system", name)
+        for name in (
+            "gms-rt-capabilities",
+            "gms-rt-command-describe",
+            "gms-rt-commands",
+            "gms-rt-update",
+            "gms-rt-version",
+        ):
+            self.assertNotIn(name, commands)
+        self.assertEqual(commands["gms-rt-system-update"]["mode"], "mutating")
         self.assertEqual(commands["gms-rt-devices-list"]["mode"], "read_only")
         self.assertEqual(commands["gms-rt-burn-firmware"]["mode"], "mutating")
         self.assertEqual(commands["gms-rt-terminal-open"]["mode"], "interactive")
@@ -280,13 +306,13 @@ class SkillCliTests(unittest.TestCase):
 
     def test_command_description_and_per_invocation_server_override(self):
         described = self._run(
-            "gms-rt-command-describe",
+            "gms-rt-system-command-describe",
             "gms-rt-burn-firmware",
             "--json",
         )
         override_url = f"http://127.0.0.1:{self.server.server_port}"
         capabilities = self._run(
-            "gms-rt-capabilities",
+            "gms-rt-system-capabilities",
             "--server",
             override_url,
             "--json",
@@ -301,6 +327,20 @@ class SkillCliTests(unittest.TestCase):
             json.loads(capabilities.stdout)["data"]["server"],
             override_url,
         )
+
+    def test_removed_top_level_system_commands_are_unknown(self):
+        for command in (
+            "gms-rt-capabilities",
+            "gms-rt-command-describe",
+            "gms-rt-commands",
+            "gms-rt-update",
+            "gms-rt-version",
+        ):
+            result = self._run(command, "--json")
+            self.assertEqual(result.returncode, 2, command)
+            envelope = json.loads(result.stdout)
+            self.assertFalse(envelope["ok"], command)
+            self.assertIn("Unknown command", envelope["error"], command)
 
     def test_json_mode_returns_structured_success(self):
         result = self._run("gms-rt-system-health", "--json", "--non-interactive")

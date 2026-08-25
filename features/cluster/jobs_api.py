@@ -73,6 +73,32 @@ def _job_response(job: dict) -> dict:
     return item
 
 
+def _job_monitor_response(job: dict) -> dict:
+    """Return the non-sensitive fields needed for cross-owner active monitoring."""
+    item = _job_response(job)
+    return {
+        "id": item.get("id", ""),
+        "client_display_id": item.get("client_display_id", ""),
+        "source_type": item.get("source_type", ""),
+        "assigned_worker_id": item.get("assigned_worker_id", ""),
+        "suite_key": item.get("suite_key", ""),
+        "status": item.get("status", ""),
+        "created_at": item.get("created_at", ""),
+        "started_at": item.get("started_at", ""),
+        "updated_at": item.get("updated_at", ""),
+        "leases": [
+            {
+                "device_id": lease.get("device_id", ""),
+                "worker_id": lease.get("worker_id", ""),
+                "serial": lease.get("serial", ""),
+                "status": lease.get("status", ""),
+            }
+            for lease in item.get("leases") or []
+        ],
+        "monitor_only": True,
+    }
+
+
 @router.post("/jobs")
 def create_job(
     body: ClusterJobCreate,
@@ -230,16 +256,29 @@ def create_job(
 
 
 @router.get("/jobs")
-def list_jobs(request: Request, limit: int = Query(default=100, ge=1, le=500)):
+def list_jobs(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+    include_active: bool = Query(default=False),
+):
     user = get_authenticated_user(request)
     if user is None and authentication_required():
         user = require_authenticated_user(request)
     owner_id = user.id if user and user.role != "admin" else ""
+    jobs = service().repository.list_jobs(
+        limit,
+        owner_id=owner_id,
+        include_active=include_active,
+    )
     return {
         "success": True,
         "jobs": [
-            _job_response(item)
-            for item in service().repository.list_jobs(limit, owner_id=owner_id)
+            (
+                _job_monitor_response(item)
+                if owner_id and str(item.get("owner_id") or "") != owner_id
+                else _job_response(item)
+            )
+            for item in jobs
         ],
     }
 

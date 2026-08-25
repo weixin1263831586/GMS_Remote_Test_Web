@@ -60,7 +60,7 @@ body.modal-open{overflow:hidden}
       <label>设备<select id="job-device"><option value="">自动选择设备</option></select></label>
       <label>操作<span class="input-action"><button id="create-job" class="primary" type="button">创建并执行</button></span></label>
     </div>
-    <div class="table-wrap"><table><thead><tr><th>任务</th><th>Worker</th><th>状态</th><th>设备</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
+    <div class="table-wrap"><table><thead><tr><th>任务</th><th>用户</th><th>Worker</th><th>状态</th><th>设备</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
   <section id="detail" hidden><div class="section-head"><h2>任务详情</h2><div class="actions"><button id="job-open-test">打开测试页</button><button id="job-open-report">分析报告</button><button id="job-open-ats">打开 GMS ATS</button></div></div><div id="job-summary" class="meta"></div><details open><summary>原始任务数据</summary><pre id="job-detail"></pre></details><h3>远端运行日志</h3><pre id="job-logs"></pre><div id="artifacts" class="job-artifacts"></div></section>
   </div>
 </main>

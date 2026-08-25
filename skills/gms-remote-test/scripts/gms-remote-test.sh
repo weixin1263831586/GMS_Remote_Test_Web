@@ -2,10 +2,10 @@
 set -o pipefail
 # ==============================================================================
 # GMS Remote Test API Helper Script (FastAPI Port 5001)
-# Version: 2026.08.24-2
+# Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="2026.08.24-2"
+GMS_RT_VERSION="2026.08.25-1"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -2201,6 +2201,22 @@ gms-rt-system-skills() {
     fi
 }
 
+# Reinstall the latest Skill and CLI command links from the bound Controller.
+gms-rt-system-update() {
+    [ "$#" -eq 0 ] || {
+        error "Usage: gms-rt-system-update"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    local installer
+    installer="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install.sh"
+    [ -f "$installer" ] || {
+        error "Skill installer not found: $installer"
+        return "$GMS_RT_EXIT_OPERATION"
+    }
+    GMS_INSTALL_INSECURE="${GMS_CURL_INSECURE:-${GMS_INSTALL_INSECURE:-1}}" \
+        bash "$installer"
+}
+
 
 # Open terminal on test host (SSH connection)
 gms-rt-terminal-open() {
@@ -3043,7 +3059,7 @@ _gms_rt_command_usage() {
         gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-gsi) printf '%s' 'gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-serial) printf '%s' 'gms-rt-burn-serial <device_id> <serial>' ;;
-        gms-rt-command-describe) printf '%s' 'gms-rt-command-describe <gms-rt-command>' ;;
+        gms-rt-system-command-describe) printf '%s' 'gms-rt-system-command-describe <gms-rt-command>' ;;
         gms-rt-devices-info|gms-rt-devices-reboot|gms-rt-devices-remount|gms-rt-devices-bootloader-lock|gms-rt-devices-bootloader-unlock|gms-rt-devices-bootloader-status)
             printf '%s' "$1 <devices>"
             ;;
@@ -3056,6 +3072,7 @@ _gms_rt_command_usage() {
         gms-rt-jobs-wait) printf '%s' 'gms-rt-jobs-wait <job_id> [--interval SECONDS] [--max-wait SECONDS]' ;;
         gms-rt-jobs-cancel) printf '%s' 'gms-rt-jobs-cancel <job_id>' ;;
         gms-rt-system-doctor) printf '%s' 'gms-rt-system-doctor [read|device|firmware|gsi|test]' ;;
+        gms-rt-system-update) printf '%s' 'gms-rt-system-update' ;;
         gms-rt-test-start) printf '%s' 'gms-rt-test-start <device> [type] [module] [case] [suite] | --retry <timestamp> [device] [type] [suite] [--wait] [--max-wait SECONDS]' ;;
         gms-rt-test-stop) printf '%s' 'gms-rt-test-stop [job_id]' ;;
         gms-rt-test-suites) printf '%s' 'gms-rt-test-suites [base_path]' ;;
@@ -3066,7 +3083,13 @@ _gms_rt_command_usage() {
 
 _gms_rt_command_summary() {
     case "$1" in
+        gms-rt-system-capabilities) printf '%s' 'Print the CLI contract, global options, and exit codes' ;;
+        gms-rt-system-command-describe) printf '%s' 'Describe one CLI command for machine execution' ;;
+        gms-rt-system-commands) printf '%s' 'Print the machine-readable command inventory' ;;
         gms-rt-system-doctor) printf '%s' 'Check controller, session, tools, devices, and suites for an operation scope' ;;
+        gms-rt-system-help) printf '%s' 'Show the human-readable CLI command list' ;;
+        gms-rt-system-update) printf '%s' 'Reinstall the latest Skill and CLI command links' ;;
+        gms-rt-system-version) printf '%s' 'Print the local CLI version' ;;
         gms-rt-devices-wait) printf '%s' 'Wait for selected devices to become visible in the requested state' ;;
         gms-rt-test-suites-result) printf '%s' 'List tradefed results for a suite path or short suite name' ;;
         gms-rt-test-start) printf '%s' 'Start a test with smart args, suite short names, device prefixes, and optional --wait' ;;
@@ -3075,7 +3098,6 @@ _gms_rt_command_summary() {
         gms-rt-jobs-events) printf '%s' 'Read incremental durable test job events' ;;
         gms-rt-jobs-wait) printf '%s' 'Wait for a durable test job to reach a terminal state' ;;
         gms-rt-jobs-cancel) printf '%s' 'Request cancellation of a durable test job' ;;
-        gms-rt-command-describe) printf '%s' 'Describe one CLI command for machine execution' ;;
         gms-rt-burn-*) printf '%s' 'Perform an elevated firmware operation' ;;
         gms-rt-devices-*) printf '%s' 'Inspect or operate Android devices' ;;
         gms-rt-test-*) printf '%s' 'Inspect or operate GMS test execution' ;;
@@ -3095,7 +3117,7 @@ _gms_rt_command_catalog() {
     done < <(_gms_rt_command_names)
 }
 
-gms-rt-commands() {
+gms-rt-system-commands() {
     check_jq || return 1
     _gms_rt_command_catalog | jq -Rn --arg version "$GMS_RT_VERSION" '
         def category:
@@ -3107,7 +3129,7 @@ gms-rt-commands() {
                 "burn-|config-update|bootloader-(lock|unlock)|devices-(reboot|remount|push|wifi)"
                 + "|reports-delete|terminal-push|test-(start|stop|clean)|usbip-(install|connect|disconnect)"
                 + "|vpn-(connect|disconnect)|adb-forward-(start|stop)|desktop-vnc-(start|stop)|users-set-username"
-                + "|jobs-cancel"
+                + "|jobs-cancel|system-update"
             )
             then "mutating"
             else "read_only"
@@ -3118,7 +3140,7 @@ gms-rt-commands() {
             summary: ($fields[2] // ""),
             usage: ($fields[1] // ($name + " [arguments]")),
             mode: ($name | mode),
-            requires_auth: ($name | test("auth-(status|login)|system-(health|help)|capabilities|commands|command-describe|version") | not),
+            requires_auth: ($name | test("auth-(status|login)|system-(capabilities|command-describe|commands|health|help|update|version)") | not),
             requires_elevation: ($name | test(
                 "burn-|config-update|devices-bootloader-(lock|unlock)|adb-forward-"
                 + "|desktop-|terminal-(open|push)|usbip-(install|connect|disconnect)"
@@ -3138,15 +3160,15 @@ gms-rt-commands() {
         }'
 }
 
-gms-rt-command-describe() {
+gms-rt-system-command-describe() {
     local requested="${1:-}"
     [ -n "$requested" ] || {
-        error "Usage: gms-rt-command-describe <gms-rt-command>"
+        error "Usage: gms-rt-system-command-describe <gms-rt-command>"
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return "$GMS_RT_EXIT_OPERATION"
     local commands description
-    commands=$(gms-rt-commands) || return "$GMS_RT_EXIT_OPERATION"
+    commands=$(gms-rt-system-commands) || return "$GMS_RT_EXIT_OPERATION"
     description=$(echo "$commands" | jq -c --arg name "$requested" '.commands[] | select(.name == $name)')
     [ -n "$description" ] || {
         error "Unknown command: $requested"
@@ -3155,7 +3177,7 @@ gms-rt-command-describe() {
     echo "$description" | jq '.'
 }
 
-gms-rt-version() {
+gms-rt-system-version() {
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         jq -cn --arg version "$GMS_RT_VERSION" '{name: "gms-remote-test", version: $version}'
     else
@@ -3163,16 +3185,16 @@ gms-rt-version() {
     fi
 }
 
-gms-rt-capabilities() {
+gms-rt-system-capabilities() {
     check_jq || return 1
-    local commands
-    commands=$(gms-rt-commands) || return 1
+    local command_count
+    command_count=$(gms-rt-system-commands | jq '.commands | length') || return 1
     jq -cn \
         --arg version "$GMS_RT_VERSION" \
         --arg server "$SERVER_URL" \
-        --argjson commands "$commands" \
+        --argjson command_count "$command_count" \
         '{
-            schema_version: 2,
+            schema_version: 3,
             name: "gms-remote-test",
             version: $version,
             server: $server,
@@ -3203,8 +3225,11 @@ gms-rt-capabilities() {
                 network_or_timeout: 6,
                 operation_failed: 7
             },
-            command_count: ($commands.commands | length),
-            commands: $commands.commands
+            command_count: $command_count,
+            command_inventory: {
+                list_command: "gms-rt-system-commands",
+                describe_command: "gms-rt-system-command-describe"
+            }
         }'
 }
 
@@ -3270,16 +3295,16 @@ ${YELLOW}SSH Management:${NC}
   gms-rt-ssh-sshd          - Check SSHD status & install guide (optional: user@ip, e.g. ${DEFAULT_SSH_USER}@192.168.1.100)
 
 ${YELLOW}System:${NC}
-  gms-rt-capabilities            - Print machine-readable CLI capabilities
-  gms-rt-command-describe        - Describe one command for an AI agent
-  gms-rt-commands                - Print machine-readable command inventory
-  gms-rt-version                 - Print CLI version
+  gms-rt-system-capabilities     - Print machine-readable CLI capabilities
+  gms-rt-system-command-describe - Describe one command for an AI agent
+  gms-rt-system-commands         - Print machine-readable command inventory
   gms-rt-system-docs             - Get API documentation
   gms-rt-system-doctor           - Validate a remote CLI host and operation scope
   gms-rt-system-health           - Check server health
-  gms-rt-system-skills           - Download skills directory as ZIP
   gms-rt-system-help             - Show this command list
-  gms-rt-update                  - Update the Skill and all CLI command links
+  gms-rt-system-skills           - Download skills directory as ZIP
+  gms-rt-system-update           - Update the Skill and all CLI command links
+  gms-rt-system-version          - Print CLI version
 
 ${YELLOW}Code search:${NC}
   gms-rt-opengrok-search         - Search the configured OpenGrok service
@@ -3325,7 +3350,7 @@ ${YELLOW}Examples:${NC}
   gms-rt-devices-list
   gms-rt-devices-list --json
   printf '%s\n' "\$PASSWORD" | gms-rt-auth-login admin --password-stdin --non-interactive
-  gms-rt-capabilities --json
+  gms-rt-system-capabilities --json
   gms-rt-system-doctor test --json --non-interactive
   gms-rt-devices-wait DEVICE --state online --max-wait 300
   gms-rt-devices-bootloader-lock '["DEVICE-1", "DEVICE-2"]'

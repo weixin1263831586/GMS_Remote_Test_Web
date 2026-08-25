@@ -112,7 +112,6 @@ mapfile -t COMMAND_NAMES < <(
     sed -n 's/^\(gms-rt-[a-z0-9-]*\)().*/\1/p' \
         "${STAGING_DIR}/scripts/gms-remote-test.sh" | sort -u
 )
-COMMAND_NAMES+=("gms-rt-update")
 for command_name in "${COMMAND_NAMES[@]}"; do
     command_link="${BIN_DIR}/${command_name}"
     if { [ -e "$command_link" ] || [ -L "$command_link" ]; } \
@@ -174,7 +173,6 @@ fi
     printf '#!/usr/bin/env bash\n'
     printf 'set -e\n'
     printf 'HELPER=%q\n' "${TARGET_DIR}/scripts/gms-remote-test.sh"
-    printf 'INSTALLER=%q\n' "${TARGET_DIR}/scripts/install.sh"
     printf 'export GMS_REMOTE_TEST_SERVER=%q\n' "$SERVER_URL"
     printf 'export GMS_SKILL_DOWNLOAD_URL=%q\n' "$DOWNLOAD_URL"
     printf 'export GMS_CODEX_SKILLS_DIR=%q\n' "$SKILLS_DIR"
@@ -191,9 +189,6 @@ fi
     cat <<'WRAPPER'
 invoked_name=${0##*/}
 case "$invoked_name" in
-    gms-rt-update)
-        exec "$INSTALLER" "$@"
-        ;;
     gms-rt-*)
         exec "$HELPER" "$invoked_name" "$@"
         ;;
@@ -256,7 +251,7 @@ info "Installed Commands: ${#COMMAND_NAMES[@]} (gms-rt-*)"
 if [ "$path_ready" = true ]; then
     info "Run: gms-rt-auth-login USERNAME"
     info "     gms-rt-devices-list"
-    info "Update later: gms-rt-update"
+    info "Update later: gms-rt-system-update"
 else
     info "Open a new shell, then run: gms-rt-auth-login USERNAME"
     info "                            gms-rt-devices-list"
