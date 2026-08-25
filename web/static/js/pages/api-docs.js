@@ -1052,8 +1052,8 @@ function closeUsageExamplesModal() {
  * 生成与当前 Controller 地址绑定的一键安装命令。
  */
 function buildSkillInstallCommand() {
-    const insecureOption = window.location.protocol === 'https:' ? '-k ' : '';
-    return `curl ${insecureOption}-fsSL "${window.location.origin}/api/system/skills/install.sh" | bash`;
+    const curlOptions = window.location.protocol === 'https:' ? '-kfsSL' : '-fsSL';
+    return `curl ${curlOptions} "${window.location.origin}/api/system/skills/install.sh" | bash`;
 }
 
 /**

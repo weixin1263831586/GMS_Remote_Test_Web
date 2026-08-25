@@ -11747,7 +11747,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 一键安装Skill和CLI（可在任意Linux主机执行）</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl {% if request.url.scheme == 'https' %}-k {% endif %}-fsSL "{{ request.url.scheme }}://{{ request.url.netloc }}/api/system/skills/install.sh" | bash</code>
+                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl {% if request.url.scheme == 'https' %}-kfsSL{% else %}-fsSL{% endif %} "{{ request.url.scheme }}://{{ request.url.netloc }}/api/system/skills/install.sh" | bash</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" onclick="copyCommand('cmd-1')" onmouseover="this.style.background='var(--border-light)'" onmouseout="this.style.background='var(--border-color)'">📋 复制</span>
                         </div>
                     </div>

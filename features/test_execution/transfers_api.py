@@ -43,6 +43,7 @@ from .suite_download_security import (
 from .suite_download_security import (
     validate_suite_download_url as _validate_suite_download_url,
 )
+from .suite_helpers import resolve_suite_reference
 from .suites import (
     get_default_suites_path,
     is_config_host_local,
@@ -257,6 +258,16 @@ async def list_tradefed_results(
     try:
         config = runtime.config_manager.load_config()
         suite_path = req.suite_path
+        # Accept short suite names (e.g. android-cts-17_r1) by resolving them
+        # against the suite inventory before path validation runs.
+        try:
+            suite, message = resolve_suite_reference(config, suite_path)
+        except RuntimeError:
+            suite, message = None, ""
+        if suite:
+            suite_path = str(suite.get("tools_path") or suite_path)
+        elif message:
+            return error_response(message, 404)
         tradefed_bin = req.tradefed_bin
         logger.info(f"Querying test suite results for {suite_path}")
         result = await collect_tradefed_results(

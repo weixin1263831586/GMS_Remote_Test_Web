@@ -42,6 +42,72 @@ def get_available_test_suites(config: dict[str, Any], base_path: str | None = No
         return suites
 
 
+def _suite_reference_names(suite: dict[str, Any]) -> list[str]:
+    tools_path = str(suite.get("tools_path") or "").rstrip("/")
+    suite_root = tools_path[: -len("/tools")] if tools_path.endswith("/tools") else tools_path
+    names = [str(suite.get("version") or "")]
+    if suite_root:
+        names.append(os.path.basename(suite_root))
+    if tools_path:
+        names.append(os.path.basename(tools_path))
+    return [name for name in names if name]
+
+
+def _suite_reference_ambiguous_message(reference: str, suites: list[dict[str, Any]]) -> str:
+    versions = [str(suite.get("version") or suite.get("tools_path") or "") for suite in suites[:8]]
+    more = f" (+{len(suites) - len(versions)} more)" if len(suites) > len(versions) else ""
+    return f"Suite reference '{reference}' is ambiguous: {', '.join(versions)}{more}"
+
+
+def _deduplicate_suite_locations(suites: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse multiple Tradefed launchers that share one tools directory."""
+    unique = []
+    seen_paths = set()
+    for suite in suites:
+        tools_path = str(suite.get("tools_path") or "").rstrip("/\\")
+        if tools_path and tools_path in seen_paths:
+            continue
+        if tools_path:
+            seen_paths.add(tools_path)
+        unique.append(suite)
+    return unique
+
+
+def resolve_suite_reference(
+    config: dict[str, Any], reference: str, base_path: str | None = None
+) -> tuple[dict[str, str] | None, str]:
+    """Resolve a short suite name (e.g. android-cts-17_r1) to a suite entry.
+
+    Returns ``(suite, message)``. ``suite`` is the matched suite dict or None;
+    ``message`` explains an empty match (ambiguous or not found). References
+    containing a path separator resolve to ``(None, "")`` so callers can keep
+    treating them as plain paths. Matching: exact suite version / directory
+    name first, then a unique case-insensitive substring match.
+    """
+    reference = str(reference or "").strip()
+    if not reference or "/" in reference or "\\" in reference:
+        return None, ""
+
+    suites = _deduplicate_suite_locations(get_available_test_suites(config, base_path))
+
+    exact = [suite for suite in suites if reference in _suite_reference_names(suite)]
+    if len(exact) == 1:
+        return exact[0], ""
+    if len(exact) > 1:
+        return None, _suite_reference_ambiguous_message(reference, exact)
+
+    lowered = reference.lower()
+    fuzzy = [
+        suite for suite in suites
+        if any(lowered in name.lower() for name in _suite_reference_names(suite))
+    ]
+    if len(fuzzy) == 1:
+        return fuzzy[0], ""
+    if len(fuzzy) > 1:
+        return None, _suite_reference_ambiguous_message(reference, fuzzy)
+    return None, f"No test suite matches '{reference}'. List available suites via GET /api/test/suites."
+
+
 def _normalize_suite_match_text(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
 

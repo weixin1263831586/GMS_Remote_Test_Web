@@ -26,6 +26,31 @@ class _ApiHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
+        if self.path == "/api/auth/status":
+            self._write_json(
+                200,
+                {
+                    "authenticated": True,
+                    "auth_required": True,
+                    "setup_required": False,
+                    "elevated": True,
+                    "user": {"username": "agent", "role": "admin"},
+                },
+            )
+            return
+        if self.path == "/api/devices/list?force_refresh=true":
+            self._write_json(
+                200,
+                [
+                    {
+                        "device_id": "SERIAL-1",
+                        "status": "online",
+                        "protocol": "adb",
+                        "locked": False,
+                    }
+                ],
+            )
+            return
         if self.path == "/api/devices/list":
             self._write_json(
                 403,
@@ -48,6 +73,62 @@ class _ApiHandler(BaseHTTPRequestHandler):
                     "connected": False,
                     "hosts": [],
                     "assignments": [],
+                },
+            )
+            return
+        if self.path == "/api/test/suites":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "count": 1,
+                    "suites": [
+                        {
+                            "test_type": "CTS",
+                            "version": "test",
+                            "tools_path": "/srv/android-cts/tools",
+                        }
+                    ],
+                },
+            )
+            return
+        if self.path == "/api/cluster/jobs?limit=100":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "jobs": [{"id": "job-complete", "status": "completed"}],
+                },
+            )
+            return
+        if self.path == "/api/cluster/jobs/job-complete":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "job": {"id": "job-complete", "status": "completed"},
+                },
+            )
+            return
+        if self.path == "/api/cluster/jobs/job-failed":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "job": {
+                        "id": "job-failed",
+                        "status": "failed",
+                        "error": "tradefed failed",
+                    },
+                },
+            )
+            return
+        if self.path == "/api/cluster/jobs/job-complete/events?after=-1&limit=500":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "events": [{"sequence": 0, "message": "done"}],
                 },
             )
             return
@@ -79,6 +160,34 @@ class _ApiHandler(BaseHTTPRequestHandler):
             return
         if self.path in {"/api/adb-forward/start", "/api/adb-forward/stop"}:
             self._write_json(200, {"success": True})
+            return
+        if self.path == "/api/cluster/jobs/job-complete/cancel":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "already_terminal": True,
+                    "job": {"id": "job-complete", "status": "completed"},
+                },
+            )
+            return
+        if self.path == "/api/test/stop?job_id=job-complete":
+            self._write_json(200, {"success": True, "job_id": "job-complete"})
+            return
+        if self.path == "/api/burn/gsi":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "results": [
+                        {
+                            "device": "SERIAL-1",
+                            "success": True,
+                            "output": "done",
+                        }
+                    ],
+                },
+            )
             return
         self._write_json(404, {"detail": "Not found"})
 
@@ -139,7 +248,7 @@ class SkillCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         envelope = json.loads(result.stdout)
         self.assertTrue(envelope["ok"])
-        self.assertEqual(envelope["data"]["schema_version"], 1)
+        self.assertEqual(envelope["data"]["schema_version"], 2)
         self.assertGreater(envelope["data"]["command_count"], 50)
         commands = {
             item["name"]: item for item in envelope["data"]["commands"]
@@ -150,6 +259,47 @@ class SkillCliTests(unittest.TestCase):
         self.assertEqual(
             commands["gms-rt-adb-forward-status"]["mode"],
             "read_only",
+        )
+        self.assertIn("<job_id>", commands["gms-rt-jobs-wait"]["usage"])
+        self.assertTrue(
+            commands["gms-rt-jobs-cancel"]["requires_explicit_authorization"]
+        )
+        self.assertTrue(commands["gms-rt-burn-firmware"]["requires_elevation"])
+        for name in (
+            "gms-rt-adb-forward-status",
+            "gms-rt-desktop-vnc-status",
+            "gms-rt-terminal-open",
+            "gms-rt-terminal-push",
+            "gms-rt-test-suites-result",
+            "gms-rt-usbip-connect",
+            "gms-rt-usbip-disconnect",
+            "gms-rt-usbip-install",
+            "gms-rt-users-list",
+        ):
+            self.assertTrue(commands[name]["requires_elevation"], name)
+
+    def test_command_description_and_per_invocation_server_override(self):
+        described = self._run(
+            "gms-rt-command-describe",
+            "gms-rt-burn-firmware",
+            "--json",
+        )
+        override_url = f"http://127.0.0.1:{self.server.server_port}"
+        capabilities = self._run(
+            "gms-rt-capabilities",
+            "--server",
+            override_url,
+            "--json",
+        )
+
+        self.assertEqual(described.returncode, 0, described.stdout)
+        command = json.loads(described.stdout)["data"]
+        self.assertEqual(command["name"], "gms-rt-burn-firmware")
+        self.assertIn("firmware_path", command["usage"])
+        self.assertEqual(capabilities.returncode, 0, capabilities.stdout)
+        self.assertEqual(
+            json.loads(capabilities.stdout)["data"]["server"],
+            override_url,
         )
 
     def test_json_mode_returns_structured_success(self):
@@ -293,6 +443,120 @@ class SkillCliTests(unittest.TestCase):
             ),
             _ApiHandler.requests,
         )
+
+    def test_doctor_devices_wait_and_durable_job_commands(self):
+        doctor = self._run(
+            "gms-rt-system-doctor",
+            "test",
+            "--json",
+            "--non-interactive",
+        )
+        devices = self._run(
+            "gms-rt-devices-wait",
+            "SERIAL-1",
+            "--max-wait",
+            "1",
+            "--json",
+            "--non-interactive",
+        )
+        jobs = self._run("gms-rt-jobs-list", "--json", "--non-interactive")
+        status = self._run(
+            "gms-rt-jobs-status",
+            "job-complete",
+            "--json",
+            "--non-interactive",
+        )
+        events = self._run(
+            "gms-rt-jobs-events",
+            "job-complete",
+            "--json",
+            "--non-interactive",
+        )
+        waited = self._run(
+            "gms-rt-jobs-wait",
+            "job-complete",
+            "--json",
+            "--non-interactive",
+        )
+
+        self.assertEqual(doctor.returncode, 0, doctor.stdout)
+        self.assertTrue(json.loads(doctor.stdout)["data"]["ready"])
+        self.assertEqual(devices.returncode, 0, devices.stdout)
+        self.assertTrue(json.loads(devices.stdout)["data"]["ready"])
+        self.assertEqual(jobs.returncode, 0, jobs.stdout)
+        self.assertEqual(
+            json.loads(jobs.stdout)["data"]["jobs"][0]["id"],
+            "job-complete",
+        )
+        self.assertEqual(status.returncode, 0, status.stdout)
+        self.assertEqual(
+            json.loads(status.stdout)["data"]["job"]["status"],
+            "completed",
+        )
+        self.assertEqual(events.returncode, 0, events.stdout)
+        self.assertEqual(
+            json.loads(events.stdout)["data"]["events"][0]["sequence"],
+            0,
+        )
+        self.assertEqual(waited.returncode, 0, waited.stdout)
+
+    def test_job_wait_reports_terminal_failure(self):
+        result = self._run(
+            "gms-rt-jobs-wait",
+            "job-failed",
+            "--json",
+            "--non-interactive",
+        )
+
+        self.assertEqual(result.returncode, 7, result.stdout)
+        envelope = json.loads(result.stdout)
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["data"]["job"]["status"], "failed")
+        self.assertIn("finished with status: failed", envelope["diagnostics"])
+
+    def test_job_cancel_and_test_stop_use_explicit_job_id(self):
+        cancelled = self._run(
+            "gms-rt-jobs-cancel",
+            "job-complete",
+            "--json",
+            "--non-interactive",
+        )
+        stopped = self._run(
+            "gms-rt-test-stop",
+            "job-complete",
+            "--json",
+            "--non-interactive",
+        )
+
+        self.assertEqual(cancelled.returncode, 0, cancelled.stdout)
+        self.assertTrue(json.loads(cancelled.stdout)["data"]["already_terminal"])
+        self.assertEqual(stopped.returncode, 0, stopped.stdout)
+        self.assertEqual(json.loads(stopped.stdout)["data"]["job_id"], "job-complete")
+
+    def test_gsi_burn_uses_controller_managed_runner_and_returns_json(self):
+        _ApiHandler.requests.clear()
+        with tempfile.NamedTemporaryFile(suffix=".img") as image:
+            image.write(b"test-gsi")
+            image.flush()
+            result = self._run(
+                "gms-rt-burn-gsi",
+                image.name,
+                "SERIAL",
+                "--json",
+                "--non-interactive",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        envelope = json.loads(result.stdout)
+        self.assertTrue(envelope["data"]["success"])
+        request = next(
+            payload
+            for path, payload in _ApiHandler.requests
+            if path == "/api/burn/gsi"
+        )
+        self.assertEqual(request["system_img"], image.name)
+        self.assertEqual(request["script_path"], "controller-managed")
+        self.assertEqual(request["devices"], ["SERIAL-1"])
 
 
 if __name__ == "__main__":

@@ -12,6 +12,9 @@ from features.test_execution.models import (
 )
 from foundation.responses import error_response, success_response
 
+from . import runtime
+from .suite_helpers import resolve_suite_reference
+
 
 class LogLevel(str, Enum):
     INFO = "info"
@@ -42,6 +45,40 @@ UPLOAD_PROGRESS_EXPIRATION = 10
 
 # ==================== Parse Args ====================
 
+# Positional arguments starting with this prefix and containing no path
+# separator are treated as short suite names (e.g. android-cts-17_r1) and
+# resolved to the suite's tools path before positional parsing.
+_SUITE_REFERENCE_PREFIX = "android-"
+
+
+def _resolve_suite_references(params: list[str], warnings: list[str]) -> list[str]:
+    """Replace android-* short suite names in params with their tools paths."""
+    references = {
+        index: param
+        for index, param in enumerate(params)
+        if param.startswith(_SUITE_REFERENCE_PREFIX) and "/" not in param and "\\" not in param
+    }
+    if not references:
+        return list(params)
+
+    config = runtime.config_manager.load_config()
+    resolved = list(params)
+    reported: set[str] = set()
+    for index, reference in references.items():
+        try:
+            suite, message = resolve_suite_reference(config, reference)
+        except RuntimeError:
+            # Suite inventory unavailable (e.g. SSH down): keep the raw value
+            # so existing positional behavior is preserved.
+            suite, message = None, ""
+        if suite:
+            resolved[index] = str(suite.get("tools_path") or reference)
+        elif message and reference not in reported:
+            reported.add(reference)
+            warnings.append(message)
+    return resolved
+
+
 @router.post("/api/test/parse-args")
 async def parse_test_args(
     request: Request,
@@ -69,7 +106,6 @@ Supported Test Types: CTS, GTS, GTS-ROOT, STS, VTS, APTS, GSI
         return error_response("Missing params", 400)
 
     params = req.params
-    first_param = params[0] if params else ""
 
     result = {
         "success": True,
@@ -81,6 +117,11 @@ Supported Test Types: CTS, GTS, GTS-ROOT, STS, VTS, APTS, GSI
         "retry_dir": "",
         "warnings": [],
     }
+
+    # Resolve short suite names (android-*) into full tools paths first so
+    # positional classification below sees canonical paths.
+    params = _resolve_suite_references(params, result["warnings"])
+    first_param = params[0] if params else ""
 
     if first_param == "--retry":
         if len(params) < 2:

@@ -2,10 +2,10 @@
 set -o pipefail
 # ==============================================================================
 # GMS Remote Test API Helper Script (FastAPI Port 5001)
-# Version: 2026.07.28-2
+# Version: 2026.08.24-2
 # ==============================================================================
 
-GMS_RT_VERSION="2026.07.28-2"
+GMS_RT_VERSION="2026.08.24-2"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -93,6 +93,34 @@ if [[ "$SERVER_URL" == https://* ]]; then
         CURL_TLS_ARGS=(-k)
     fi
 fi
+
+_refresh_transport_config() {
+    SERVER_URL="${SERVER_URL%/}"
+    API_BASE="${SERVER_URL}/api"
+    CURL_TLS_ARGS=()
+    if [[ "$SERVER_URL" == https://* ]]; then
+        if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
+            CURL_TLS_ARGS=(--cacert "$GMS_CURL_CA_CERT")
+        elif [ "${GMS_CURL_INSECURE:-1}" != "0" ]; then
+            CURL_TLS_ARGS=(-k)
+        fi
+    fi
+}
+
+_validate_server_url() {
+    local value="${1:-}"
+    local authority
+    case "$value" in
+        http://*|https://*) ;;
+        *) return 1 ;;
+    esac
+    case "$value" in
+        *'@'*|*'?'*|*'#'*|*[[:space:]]*) return 1 ;;
+    esac
+    authority="${value#*://}"
+    authority="${authority%%/*}"
+    [ -n "$authority" ]
+}
 
 if [ "$GMS_RT_OUTPUT" = "json" ] || [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then
     RED=""
@@ -543,19 +571,44 @@ _copy_firmware_to_test_host() {
     local ssh_port="$5"
     local remote_path="${remote_dir%/}/$(basename "$firmware_path")"
     local quoted_remote_dir
+    local ssh_options=(-p "$ssh_port")
+    local scp_options=(-P "$ssh_port")
+    local rsync_ssh="ssh -p ${ssh_port}"
+    local connect_timeout="${GMS_SSH_CONNECT_TIMEOUT:-10}"
+    if ! [[ "$ssh_port" =~ ^[1-9][0-9]*$ ]] || [ "$ssh_port" -gt 65535 ]; then
+        error "Invalid test-host SSH port: $ssh_port"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    if ! [[ "$connect_timeout" =~ ^[1-9][0-9]*$ ]] || [ "$connect_timeout" -gt 300 ]; then
+        error "GMS_SSH_CONNECT_TIMEOUT must be between 1 and 300 seconds"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    if [ "$GMS_RT_NON_INTERACTIVE" = "1" ]; then
+        ssh_options+=(
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o "ConnectTimeout=${connect_timeout}"
+        )
+        scp_options+=(
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o "ConnectTimeout=${connect_timeout}"
+        )
+        rsync_ssh+=" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=${connect_timeout}"
+    fi
     quoted_remote_dir=$(_shell_quote "$remote_dir")
 
     info "Preparing remote firmware directory: ${ssh_user}@${ssh_host}:${remote_dir}" >&2
-    ssh -p "$ssh_port" "${ssh_user}@${ssh_host}" "mkdir -p ${quoted_remote_dir}" >/dev/null || return 1
+    ssh "${ssh_options[@]}" "${ssh_user}@${ssh_host}" "mkdir -p ${quoted_remote_dir}" >/dev/null || return 1
 
     if command -v rsync &> /dev/null; then
         info "Transferring firmware with rsync delta/partial support..." >&2
         rsync -a --partial --inplace --info=progress2 -s \
-            -e "ssh -p ${ssh_port}" \
+            -e "$rsync_ssh" \
             "$firmware_path" "${ssh_user}@${ssh_host}:${remote_dir%/}/" >&2 || return 1
     else
         warning "rsync not found; falling back to scp. Install rsync for faster repeat transfers." >&2
-        scp -P "$ssh_port" -p "$firmware_path" "${ssh_user}@${ssh_host}:${remote_dir%/}/" >&2 || return 1
+        scp "${scp_options[@]}" -p "$firmware_path" "${ssh_user}@${ssh_host}:${remote_dir%/}/" >&2 || return 1
     fi
 
     echo "$remote_path"
@@ -588,6 +641,79 @@ convert_devices_to_json() {
         # Convert space-separated list to JSON array
         echo "$devices" | jq -R -c 'split(" ") | map(select(length>0))'
     fi
+}
+
+# Resolve device input against the live device inventory. Exact IDs pass
+# through untouched; otherwise a unique serial prefix is expanded (e.g.
+# RK3572 -> RK3572GMS4). Ambiguous or unresolved input is returned unchanged
+# so the server reports the authoritative error. Output: space-separated IDs.
+_resolve_devices() {
+    local devices="$1"
+    if ! command -v jq >/dev/null 2>&1; then
+        printf '%s\n' "$devices"
+        return 0
+    fi
+    local requested response resolved
+    requested=$(convert_devices_to_json "$devices") || { printf '%s\n' "$devices"; return 0; }
+    response=$(api_call "/devices/list?force_refresh=true" 2>/dev/null) || { printf '%s\n' "$devices"; return 0; }
+    resolved=$(jq -cn --argjson requested "$requested" --argjson inventory "$response" '
+        ($inventory | if type == "array" then map(.device_id // empty) else [] end) as $ids |
+        [($requested[] | tostring) as $raw |
+            if ($ids | index($raw)) then
+                {id: $raw, rewritten: false}
+            else
+                ($ids | map(select(startswith($raw)))) as $matches |
+                if ($matches | length) == 1 then
+                    {id: $matches[0], rewritten: true}
+                else
+                    {id: $raw, rewritten: false}
+                end
+            end
+        ] |
+        if any(.[]; .rewritten == true) then
+            {
+                devices: (map(.id) | join(" ")),
+                rewrites: (map(select(.rewritten == true)) | map(.id) | join(" "))
+            }
+        else
+            {devices: (map(.id) | join(" ")), rewrites: ""}
+        end') || { printf '%s\n' "$devices"; return 0; }
+    local rewrites
+    rewrites=$(printf '%s' "$resolved" | jq -r '.rewrites')
+    if [ -n "$rewrites" ]; then
+        info "Resolved device prefix to: $rewrites" >&2
+    fi
+    printf '%s' "$resolved" | jq -r '.devices'
+}
+
+# Resolve a short suite name (e.g. android-cts-17_r1) to its tools path via
+# /api/test/suites. Prints the tools path on success; on any failure prints
+# nothing and returns non-zero so callers can fall back to the raw value
+# (the server also resolves short names and reports a precise error).
+_resolve_suite_reference() {
+    local reference="$1"
+    check_jq >/dev/null 2>&1 || return 1
+    local response matches
+    response=$(api_call "/test/suites" 2>/dev/null) || return 1
+    matches=$(printf '%s' "$response" | jq -r --arg q "$reference" '
+        [(.suites // [])[] |
+            select(
+                (.version // "") == $q
+                or ((.tools_path // "") | endswith("/" + $q))
+                or (((.version // "") | ascii_downcase) | contains($q | ascii_downcase))
+            )]
+        | unique_by(.tools_path // .full_path // .version)') || return 1
+    local count
+    count=$(printf '%s' "$matches" | jq 'length')
+    if [ "$count" -eq 1 ]; then
+        local path
+        path=$(printf '%s' "$matches" | jq -r '.[0].tools_path // empty')
+        if [ -n "$path" ]; then
+            printf '%s\n' "$path"
+            return 0
+        fi
+    fi
+    return 1
 }
 
 # ==============================================================================
@@ -654,17 +780,50 @@ gms-rt-adb-forward-stop() {
 # Burn Commands
 # ==============================================================================
 
+# Wait for devices to come back online after a burn, then return the wait status.
+_wait_devices_online_after_burn() {
+    local devices="$1"
+    local max_wait="$2"
+    echo "⏳ Waiting for devices to come back online (max ${max_wait}s)..."
+    local wait_args=("$devices" --state online --max-wait "$max_wait")
+    gms-rt-devices-wait "${wait_args[@]}"
+}
+
 # Burn firmware image to devices
 gms-rt-burn-firmware() {
     local firmware_path="$1"
     local devices="$2"
     local wipe_data="${3:-true}"
     local upload_mode="${GMS_BURN_UPLOAD_MODE:-auto}"
+    local wait_online=0
+    local wait_max="${GMS_BURN_WAIT_ONLINE_MAX:-600}"
 
-    [ -z "$firmware_path" ] && { error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"; return 1; }
-    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data]"; return 1; }
+    local positional=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --wait-online) wait_online=1 ;;
+            --wait-online=*)
+                wait_online=1
+                wait_max="${1#*=}"
+                ;;
+            *) positional+=("$1") ;;
+        esac
+        shift
+    done
+    set -- "${positional[@]}"
+    firmware_path="$1"
+    devices="$2"
+    wipe_data="${3:-true}"
+    if [ "$wait_online" = "1" ] && ! [[ "$wait_max" =~ ^[1-9][0-9]*$ ]]; then
+        error "--wait-online requires a positive maximum wait in seconds"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+
+    [ -z "$firmware_path" ] && { error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--wait-online[=SECONDS]]"; return 1; }
+    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--wait-online[=SECONDS]]"; return 1; }
     [ ! -f "$firmware_path" ] && { error "Firmware file not found: $firmware_path"; return 1; }
     check_jq || return 1
+    devices=$(_resolve_devices "$devices")
 
     echo "🔥 Burning firmware: $firmware_path to devices: $devices..."
     local response=""
@@ -713,6 +872,10 @@ gms-rt-burn-firmware() {
     if echo "$body" | jq -e '.success' > /dev/null 2>/dev/null; then
         success "Firmware burn completed successfully"
         echo "$body" | jq '.'
+        if [ "$wait_online" = "1" ]; then
+            _wait_devices_online_after_burn "$devices" "$wait_max"
+            return $?
+        fi
     else
         error "Firmware burn failed - API returned error"
         echo "$body" | jq '.' 2>/dev/null || echo "$body"
@@ -722,33 +885,62 @@ gms-rt-burn-firmware() {
 
 # Burn GSI image to devices
 gms-rt-burn-gsi() {
-    local gsi_path="$1"
-    local devices="$2"
+    local gsi_path="${1:-}"
+    local devices="${2:-}"
     local wipe_data="${3:-true}"
+    local wait_online=0
+    local wait_max="${GMS_BURN_WAIT_ONLINE_MAX:-600}"
 
-    [ -z "$gsi_path" ] && { error "GSI path required. Usage: gms-rt-burn-gsi <gsi_path> <devices> [wipe_data]"; return 1; }
-    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-gsi <gsi_path> <devices> [wipe_data]"; return 1; }
-    [ ! -f "$gsi_path" ] && { error "GSI file not found: $gsi_path"; return 1; }
-
-    check_jq
-    echo "🔥 Burning GSI: $gsi_path to devices: $devices..."
-
-    # Get absolute path of GSI image
-    local absolute_path=$(realpath "$gsi_path")
-
-    # Get absolute path of burn script (on local machine)
-    local local_script="${GMS_WEB_APP_DIR}/scripts/run_GSI_Burn.sh"
-
-    # Check if script exists
-    if [ ! -f "$local_script" ]; then
-        error "GSI burn script not found: $local_script"
-        return 1
+    local positional=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --wait-online) wait_online=1 ;;
+            --wait-online=*)
+                wait_online=1
+                wait_max="${1#*=}"
+                ;;
+            *) positional+=("$1") ;;
+        esac
+        shift
+    done
+    set -- "${positional[@]}"
+    gsi_path="${1:-}"
+    devices="${2:-}"
+    wipe_data="${3:-true}"
+    if [ "$wait_online" = "1" ] && ! [[ "$wait_max" =~ ^[1-9][0-9]*$ ]]; then
+        error "--wait-online requires a positive maximum wait in seconds"
+        return "$GMS_RT_EXIT_USAGE"
     fi
 
-    # Build JSON payload with script_path
-    local json_payload=$(jq -n \
-        --arg system_img "$absolute_path" \
-        --arg script_path "$local_script" \
+    [ -z "$gsi_path" ] && { error "GSI path required. Usage: gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ ! -f "$gsi_path" ] && { error "GSI file not found: $gsi_path"; return "$GMS_RT_EXIT_USAGE"; }
+
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    devices=$(_resolve_devices "$devices")
+    echo "🔥 Burning GSI: $gsi_path to devices: $devices..."
+
+    local absolute_path remote_path
+    absolute_path=$(realpath "$gsi_path")
+    remote_path="$absolute_path"
+    if ! _is_test_host; then
+        local ssh_host ssh_user ssh_port remote_dir
+        read -r ssh_host ssh_user ssh_port <<< "$(_resolve_ssh_host)"
+        remote_dir="${GMS_BURN_REMOTE_DIR:-/home/${ssh_user}/GMS-Suite}"
+        info "Transferring GSI to the test host before burn..."
+        remote_path=$(_copy_firmware_to_test_host \
+            "$absolute_path" "$remote_dir" "$ssh_host" "$ssh_user" "$ssh_port") || {
+            error "GSI transfer to the test host failed; this endpoint has no HTTP upload fallback"
+            return "$GMS_RT_EXIT_NETWORK"
+        }
+    fi
+
+    # The Controller uploads its trusted runner and misc.img. script_path is a
+    # required legacy request field, not a client-controlled execution path.
+    local json_payload
+    json_payload=$(jq -n \
+        --arg system_img "$remote_path" \
+        --arg script_path "controller-managed" \
         --argjson devices "$(convert_devices_to_json "$devices")" \
         '{system_img: $system_img, script_path: $script_path, devices: $devices}')
 
@@ -762,13 +954,21 @@ gms-rt-burn-gsi() {
 
     if echo "$body" | jq -e '.success' > /dev/null; then
         success "GSI burn completed successfully"
-        echo ""
-        echo "$body" | jq -r '.results[]? | "📱 \(.device): ✅ Success"' 2>/dev/null
-        echo ""
-        echo "📋 Detailed output:"
-        echo "$body" | jq -r '.results[]? | .output' 2>/dev/null | head -20
-        echo "..."
-        echo "(Full output available in response JSON)"
+        if [ "$GMS_RT_OUTPUT" = "json" ]; then
+            echo "$body" | jq '.'
+        else
+            echo ""
+            echo "$body" | jq -r '.results[]? | "📱 \(.device): ✅ Success"' 2>/dev/null
+            echo ""
+            echo "📋 Detailed output:"
+            echo "$body" | jq -r '.results[]? | .output' 2>/dev/null | head -20
+            echo "..."
+            echo "(Use --json for the full response)"
+        fi
+        if [ "$wait_online" = "1" ]; then
+            _wait_devices_online_after_burn "$devices" "$wait_max"
+            return $?
+        fi
     else
         error "GSI burn failed - API returned error"
         echo "$body" | jq '.' 2>/dev/null || echo "$body"
@@ -897,6 +1097,7 @@ gms-rt-devices-bootloader-lock() {
     local devices="$1"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-lock DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
+    devices=$(_resolve_devices "$devices")
     echo "🔒 锁定Bootloader..."
 
     local data=$(build_devices_json_data "$devices")
@@ -926,6 +1127,7 @@ gms-rt-devices-bootloader-unlock() {
     local devices="$1"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-unlock DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
+    devices=$(_resolve_devices "$devices")
     echo "🔓 解锁Bootloader..."
 
     local data=$(build_devices_json_data "$devices")
@@ -970,6 +1172,7 @@ gms-rt-devices-bootloader-status() {
     local devices="$1"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-status DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
+    devices=$(_resolve_devices "$devices")
     echo "🔐 检查Bootloader状态..."
 
     local data=$(build_devices_json_data "$devices")
@@ -988,6 +1191,7 @@ gms-rt-devices-info() {
     local devices="$1"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-info DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
+    devices=$(_resolve_devices "$devices")
     echo "📱 获取设备信息..."
 
     local data=$(build_devices_json_data "$devices")
@@ -1008,11 +1212,131 @@ gms-rt-devices-list() {
     api_call "/devices/list" | jq '.'
 }
 
+# Wait until every requested device reaches the requested controller state.
+gms-rt-devices-wait() {
+    local devices="${1:-}"
+    [ -n "$devices" ] || {
+        error "Usage: gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    shift
+
+    local expected_state="online"
+    local interval=3
+    local max_wait=300
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --state)
+                shift
+                [ "$#" -gt 0 ] || {
+                    error "--state requires online, fastboot, or any"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                expected_state="$1"
+                ;;
+            --state=*) expected_state="${1#*=}" ;;
+            --interval)
+                shift
+                [ "$#" -gt 0 ] || {
+                    error "--interval requires a positive integer"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                interval="$1"
+                ;;
+            --interval=*) interval="${1#*=}" ;;
+            --max-wait)
+                shift
+                [ "$#" -gt 0 ] || {
+                    error "--max-wait requires a positive integer"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                max_wait="$1"
+                ;;
+            --max-wait=*) max_wait="${1#*=}" ;;
+            *)
+                error "Unexpected argument: $1"
+                return "$GMS_RT_EXIT_USAGE"
+                ;;
+        esac
+        shift
+    done
+    case "$expected_state" in
+        online|fastboot|any) ;;
+        *)
+            error "--state requires online, fastboot, or any"
+            return "$GMS_RT_EXIT_USAGE"
+            ;;
+    esac
+    if ! [[ "$interval" =~ ^[1-9][0-9]*$ ]] || [ "$interval" -gt 60 ] \
+            || ! [[ "$max_wait" =~ ^[1-9][0-9]*$ ]]; then
+        error "--interval must be 1-60 seconds and --max-wait must be a positive integer"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    local requested response ready missing observed started_at elapsed
+    requested=$(convert_devices_to_json "$devices") || return "$GMS_RT_EXIT_USAGE"
+    [ "$(echo "$requested" | jq 'length')" -gt 0 ] || {
+        error "At least one device is required"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    # Expand unique serial prefixes (e.g. RK3572) before polling.
+    devices=$(_resolve_devices "$devices")
+    requested=$(convert_devices_to_json "$devices") || return "$GMS_RT_EXIT_USAGE"
+    [ "$(echo "$requested" | jq 'length')" -gt 0 ] || {
+        error "At least one device is required"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    started_at=$(date +%s)
+    while true; do
+        response=$(api_call "/devices/list?force_refresh=true") || return $?
+        if ! echo "$response" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            error "Device list returned an unexpected response"
+            echo "$response" | jq '.' 2>/dev/null || printf '%s\n' "$response"
+            return "$GMS_RT_EXIT_OPERATION"
+        fi
+        observed=$(jq -cn --argjson requested "$requested" --argjson devices "$response" \
+            --arg state "$expected_state" '
+            [$requested[] as $serial |
+                ($devices | map(select(.device_id == $serial)) | first // null) as $item |
+                {
+                    device_id: $serial,
+                    ready: ($item != null and (
+                        $state == "any"
+                        or ($state == "online" and $item.status == "online" and ($item.protocol // "adb") == "adb")
+                        or ($state == "fastboot" and (($item.protocol // "") == "fastboot" or $item.status == "fastboot"))
+                    )),
+                    status: ($item.status // "missing"),
+                    protocol: ($item.protocol // "")
+                }
+            ]')
+        ready=$(echo "$observed" | jq -r 'all(.ready == true)')
+        elapsed=$(( $(date +%s) - started_at ))
+        if [ "$ready" = "true" ]; then
+            jq -cn --arg state "$expected_state" --argjson elapsed "$elapsed" \
+                --argjson devices "$observed" \
+                '{success: true, ready: true, expected_state: $state, elapsed_seconds: $elapsed, devices: $devices}'
+            return 0
+        fi
+        if [ "$elapsed" -ge "$max_wait" ]; then
+            missing=$(echo "$observed" | jq -r '[.[] | select(.ready != true) | .device_id] | join(", ")')
+            jq -cn --arg state "$expected_state" --argjson elapsed "$elapsed" \
+                --argjson devices "$observed" \
+                '{success: false, ready: false, expected_state: $state, elapsed_seconds: $elapsed, devices: $devices}'
+            diagnostic "Timed out waiting for devices: $missing"
+            return "$GMS_RT_EXIT_OPERATION"
+        fi
+        info "Waiting for devices (${elapsed}s/${max_wait}s)..."
+        sleep "$interval"
+    done
+}
+
 # Reboot multiple devices (parallel)
 gms-rt-devices-reboot() {
     local devices="$1"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-reboot DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
+    devices=$(_resolve_devices "$devices")
     echo "🔄 重启设备..."
 
     local data=$(build_devices_json_data "$devices")
@@ -1042,6 +1366,7 @@ gms-rt-devices-remount() {
     local devices="$1"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-remount DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
+    devices=$(_resolve_devices "$devices")
     echo "🔄 重新挂载设备..."
 
     # 首先检查 bootloader 状态
@@ -1151,6 +1476,7 @@ gms-rt-devices-scrcpy() {
     local devices="$1"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-scrcpy DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
+    devices=$(_resolve_devices "$devices")
     echo "📺 显示设备屏幕..."
 
     local data=$(build_devices_json_data "$devices")
@@ -1254,6 +1580,7 @@ gms-rt-devices-wifi() {
     [ -z "$password" ] && { error "密码必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
 
     check_jq
+    devices=$(_resolve_devices "$devices")
     echo "📶 连接WiFi: $ssid..."
 
     local devices_json data
@@ -1703,6 +2030,147 @@ gms-rt-system-health() {
     api_call "/system/health" | jq '.'
 }
 
+# Validate a remote CLI host before device, firmware, or test automation.
+gms-rt-system-doctor() {
+    local scope="${1:-read}"
+    case "$scope" in
+        read|device|firmware|gsi|test) ;;
+        *)
+            error "Usage: gms-rt-system-doctor [read|device|firmware|gsi|test]"
+            return "$GMS_RT_EXIT_USAGE"
+            ;;
+    esac
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+
+    local binaries blockers health auth devices suites
+    local authenticated auth_required elevated device_count suite_count
+    local firmware_upload_mode="${GMS_BURN_UPLOAD_MODE:-auto}"
+    local direct_firmware_transfer=false ssh_found=false transfer_found=false
+    local ready=true result_status=0 binary found
+    binaries=$(jq -cn '{}')
+    blockers=$(jq -cn '[]')
+
+    for binary in curl jq; do
+        if command -v "$binary" >/dev/null 2>&1; then found=true; else found=false; fi
+        binaries=$(echo "$binaries" | jq -c --arg name "$binary" --argjson found "$found" '. + {($name): $found}')
+        if [ "$found" != "true" ]; then
+            blockers=$(echo "$blockers" | jq -c --arg value "missing_binary:$binary" '. + [$value]')
+            ready=false
+            result_status="$GMS_RT_EXIT_OPERATION"
+        fi
+    done
+    if [ "$scope" = "firmware" ] || [ "$scope" = "gsi" ]; then
+        if command -v ssh >/dev/null 2>&1; then ssh_found=true; fi
+        binaries=$(echo "$binaries" | jq -c --argjson found "$ssh_found" '. + {ssh: $found}')
+        if command -v rsync >/dev/null 2>&1; then
+            binaries=$(echo "$binaries" | jq -c '. + {rsync: true, scp: null}')
+            transfer_found=true
+        elif command -v scp >/dev/null 2>&1; then
+            binaries=$(echo "$binaries" | jq -c '. + {rsync: false, scp: true}')
+            transfer_found=true
+        else
+            binaries=$(echo "$binaries" | jq -c '. + {rsync: false, scp: false}')
+        fi
+        if [ "$ssh_found" = "true" ] && [ "$transfer_found" = "true" ]; then
+            direct_firmware_transfer=true
+        elif [ "$firmware_upload_mode" = "direct" ] || [ "$scope" = "gsi" ]; then
+            blockers=$(echo "$blockers" | jq -c '. + ["direct_firmware_transfer_unavailable"]')
+            ready=false
+            result_status="$GMS_RT_EXIT_OPERATION"
+        fi
+    fi
+
+    health=$(api_call "/system/health") || return $?
+    if ! echo "$health" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        health=$(jq -cn --arg raw "$health" '{raw: $raw}')
+        blockers=$(echo "$blockers" | jq -c '. + ["invalid_health_response"]')
+        ready=false
+        result_status="$GMS_RT_EXIT_NETWORK"
+    fi
+
+    auth=$(api_call "/auth/status") || return $?
+    authenticated=$(echo "$auth" | jq -r '.authenticated == true')
+    auth_required=$(echo "$auth" | jq -r '.auth_required == true')
+    elevated=$(echo "$auth" | jq -r '.elevated == true')
+    if [ "$auth_required" = "true" ] && [ "$authenticated" != "true" ]; then
+        blockers=$(echo "$blockers" | jq -c '. + ["authentication_required"]')
+        ready=false
+        result_status="$GMS_RT_EXIT_AUTH"
+    elif { [ "$scope" = "firmware" ] || [ "$scope" = "gsi" ]; } \
+            && [ "$elevated" != "true" ]; then
+        blockers=$(echo "$blockers" | jq -c '. + ["administrator_elevation_required"]')
+        ready=false
+        result_status="$GMS_RT_EXIT_PERMISSION"
+    fi
+
+    devices='null'
+    suites='null'
+    device_count=0
+    suite_count=0
+    if { [ "$auth_required" != "true" ] || [ "$authenticated" = "true" ]; } \
+            && [ "$scope" != "read" ]; then
+        devices=$(api_call "/devices/list?force_refresh=true") || return $?
+        if echo "$devices" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            device_count=$(echo "$devices" | jq 'length')
+        else
+            blockers=$(echo "$blockers" | jq -c '. + ["invalid_devices_response"]')
+            ready=false
+            [ "$result_status" -ne 0 ] || result_status="$GMS_RT_EXIT_OPERATION"
+        fi
+        if [ "$device_count" -eq 0 ]; then
+            blockers=$(echo "$blockers" | jq -c '. + ["no_visible_devices"]')
+            ready=false
+            [ "$result_status" -ne 0 ] || result_status="$GMS_RT_EXIT_CONFLICT"
+        fi
+    fi
+    if { [ "$auth_required" != "true" ] || [ "$authenticated" = "true" ]; } \
+            && [ "$scope" = "test" ]; then
+        suites=$(api_call "/test/suites") || return $?
+        suite_count=$(echo "$suites" | jq -r '.count // (.suites | length) // 0' 2>/dev/null || printf '0')
+        if ! [[ "$suite_count" =~ ^[0-9]+$ ]] || [ "$suite_count" -eq 0 ]; then
+            suite_count=0
+            blockers=$(echo "$blockers" | jq -c '. + ["no_available_test_suites"]')
+            ready=false
+            [ "$result_status" -ne 0 ] || result_status="$GMS_RT_EXIT_CONFLICT"
+        fi
+    fi
+
+    jq -cn \
+        --argjson success "$ready" \
+        --arg scope "$scope" \
+        --arg version "$GMS_RT_VERSION" \
+        --arg server "$SERVER_URL" \
+        --argjson binaries "$binaries" \
+        --argjson health "$health" \
+        --argjson auth "$auth" \
+        --argjson device_count "$device_count" \
+        --argjson suite_count "$suite_count" \
+        --arg firmware_upload_mode "$firmware_upload_mode" \
+        --argjson direct_firmware_transfer "$direct_firmware_transfer" \
+        --argjson blockers "$blockers" \
+        '{
+            success: $success,
+            ready: $success,
+            scope: $scope,
+            cli_version: $version,
+            server: $server,
+            checks: {
+                binaries: $binaries,
+                controller: $health,
+                authentication: $auth,
+                visible_devices: $device_count,
+                available_test_suites: $suite_count,
+                firmware_upload_mode: $firmware_upload_mode,
+                direct_firmware_transfer: $direct_firmware_transfer
+            },
+            blockers: $blockers
+        }'
+    if [ "$result_status" -ne 0 ]; then
+        diagnostic "Doctor found blockers: $(echo "$blockers" | jq -r 'join(", ")')"
+    fi
+    return "$result_status"
+}
+
 # Download skills ZIP
 gms-rt-system-skills() {
     local skill_name="${1:-gms-remote-test}"
@@ -1902,6 +2370,129 @@ gms-rt-terminal-push() {
 # Test Management Commands
 # ==============================================================================
 
+# Durable Cluster Job status commands. Test launches return cluster_job_id;
+# these endpoints are the authoritative way for agents to follow completion.
+gms-rt-jobs-list() {
+    local limit="${1:-100}"
+    if ! [[ "$limit" =~ ^[1-9][0-9]*$ ]] || [ "$limit" -gt 500 ]; then
+        error "Usage: gms-rt-jobs-list [limit: 1-500]"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    api_call "/cluster/jobs?limit=${limit}" | jq '.'
+}
+
+gms-rt-jobs-status() {
+    local job_id="${1:-}"
+    [ -n "$job_id" ] || {
+        error "Usage: gms-rt-jobs-status <job_id>"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    api_call "/cluster/jobs/$(_urlencode "$job_id")" | jq '.'
+}
+
+gms-rt-jobs-events() {
+    local job_id="${1:-}"
+    local after="${2:--1}"
+    local limit="${3:-500}"
+    [ -n "$job_id" ] || {
+        error "Usage: gms-rt-jobs-events <job_id> [after_sequence] [limit]"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    if ! [[ "$after" =~ ^-?[0-9]+$ ]] || ! [[ "$limit" =~ ^[1-9][0-9]*$ ]] || [ "$limit" -gt 2000 ]; then
+        error "after_sequence must be an integer and limit must be between 1 and 2000"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    api_call "/cluster/jobs/$(_urlencode "$job_id")/events?after=${after}&limit=${limit}" | jq '.'
+}
+
+gms-rt-jobs-cancel() {
+    local job_id="${1:-}"
+    [ -n "$job_id" ] || {
+        error "Usage: gms-rt-jobs-cancel <job_id>"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    api_call "/cluster/jobs/$(_urlencode "$job_id")/cancel" "POST" "{}" | jq '.'
+}
+
+gms-rt-jobs-wait() {
+    local job_id="${1:-}"
+    [ -n "$job_id" ] || {
+        error "Usage: gms-rt-jobs-wait <job_id> [--interval SECONDS] [--max-wait SECONDS]"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    shift
+    local interval=5
+    local max_wait=21600
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --interval)
+                shift
+                [ "$#" -gt 0 ] || {
+                    error "--interval requires a positive integer"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                interval="$1"
+                ;;
+            --interval=*) interval="${1#*=}" ;;
+            --max-wait)
+                shift
+                [ "$#" -gt 0 ] || {
+                    error "--max-wait requires a positive integer"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                max_wait="$1"
+                ;;
+            --max-wait=*) max_wait="${1#*=}" ;;
+            *)
+                error "Unexpected argument: $1"
+                return "$GMS_RT_EXIT_USAGE"
+                ;;
+        esac
+        shift
+    done
+    if ! [[ "$interval" =~ ^[1-9][0-9]*$ ]] || [ "$interval" -gt 60 ] \
+            || ! [[ "$max_wait" =~ ^[1-9][0-9]*$ ]]; then
+        error "--interval must be 1-60 seconds and --max-wait must be a positive integer"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    local response status started_at elapsed
+    started_at=$(date +%s)
+    while true; do
+        response=$(api_call "/cluster/jobs/$(_urlencode "$job_id")") || return $?
+        status=$(echo "$response" | jq -r '.job.status // empty')
+        [ -n "$status" ] || {
+            error "Job response does not contain job.status"
+            echo "$response" | jq '.' 2>/dev/null || printf '%s\n' "$response"
+            return "$GMS_RT_EXIT_OPERATION"
+        }
+        case "$status" in
+            completed)
+                echo "$response" | jq '.'
+                return 0
+                ;;
+            failed|cancelled)
+                echo "$response" | jq '.'
+                diagnostic "Job $job_id finished with status: $status"
+                return "$GMS_RT_EXIT_OPERATION"
+                ;;
+        esac
+        elapsed=$(( $(date +%s) - started_at ))
+        if [ "$elapsed" -ge "$max_wait" ]; then
+            echo "$response" | jq '.'
+            diagnostic "Timed out waiting for job $job_id (last status: $status)"
+            return "$GMS_RT_EXIT_OPERATION"
+        fi
+        info "Job $job_id: $status (${elapsed}s/${max_wait}s)"
+        sleep "$interval"
+    done
+}
+
 # Clean test environment
 gms-rt-test-clean() {
     check_jq
@@ -1921,15 +2512,71 @@ gms-rt-test-logs-stream() {
 gms-rt-test-start() {
     check_jq
 
-    # Collect all arguments into an array
-    local args=("$@")
-    local first_param="${args[0]:-}"
+    # Collect all arguments into an array; separate out local options.
+    local args=()
+    local wait_for_job=0
+    local wait_max=""
+    local first_param="${1:-}"
 
     # Show help if no arguments
     if [ -z "$first_param" ]; then
         _gms_rt_test_start_help
         return 1
     fi
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --wait)
+                wait_for_job=1
+                ;;
+            --wait=*)
+                wait_for_job=1
+                wait_max="${1#*=}"
+                ;;
+            --max-wait)
+                shift
+                [ "$#" -gt 0 ] && { wait_for_job=1; wait_max="$1"; } || {
+                    error "--max-wait requires a positive integer"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                ;;
+            --max-wait=*)
+                wait_for_job=1
+                wait_max="${1#*=}"
+                ;;
+            *) args+=("$1") ;;
+        esac
+        shift
+    done
+    if [ -n "$wait_max" ] && ! [[ "$wait_max" =~ ^[1-9][0-9]*$ ]]; then
+        error "--max-wait requires a positive integer"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    first_param="${args[0]:-}"
+    if [ -z "$first_param" ]; then
+        _gms_rt_test_start_help
+        return 1
+    fi
+
+    # Resolve short suite names (e.g. android-cts-17_r1) to tools paths so the
+    # positional parser receives a canonical path argument.
+    local positional=()
+    local argument
+    for argument in "${args[@]}"; do
+        if [[ "$argument" == android-* ]] && [[ "$argument" != */* ]]; then
+            local resolved
+            resolved=$(_resolve_suite_reference "$argument") || resolved=""
+            if [ -n "$resolved" ]; then
+                info "Suite '$argument' resolved to: $resolved"
+                positional+=("$resolved")
+                continue
+            fi
+            # Leave the raw value in place; the server resolves short names
+            # too and reports a precise error when it cannot match.
+        fi
+        positional+=("$argument")
+    done
+    args=("${positional[@]}")
 
     # Call API to parse arguments
     local params_json=$(printf '%s\n' "${args[@]}" | jq -R . | jq -s .)
@@ -1952,6 +2599,9 @@ gms-rt-test-start() {
     local test_suite=$(echo "$parse_response" | jq -r '.test_suite // ""')
     local retry_dir=$(echo "$parse_response" | jq -r '.retry_dir // ""')
     local warnings=$(echo "$parse_response" | jq -r '.warnings[]?' 2>/dev/null)
+    if [ -n "$device" ]; then
+        device=$(_resolve_devices "$device")
+    fi
 
     # Display parsed parameters
     if [ -n "$retry_dir" ]; then
@@ -2000,6 +2650,14 @@ gms-rt-test-start() {
 
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Test started successfully"
+        local job_id
+        job_id=$(echo "$response" | jq -r '.data.cluster_job_id // .cluster_job_id // .data.job_id // .job_id // empty')
+        if [ "$wait_for_job" = "1" ] && [ -n "$job_id" ]; then
+            local wait_args=("$job_id")
+            [ -n "$wait_max" ] && wait_args+=(--max-wait "$wait_max")
+            gms-rt-jobs-wait "${wait_args[@]}"
+            return $?
+        fi
         echo "$response" | jq '.'
     else
         local msg=$(extract_api_error "$response")
@@ -2012,18 +2670,21 @@ gms-rt-test-start() {
 _gms_rt_test_start_help() {
     cat << EOF
 Usage:
-  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE/SUITE] [CASE/SUITE] [SUITE]
-  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE]
+  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE/SUITE] [CASE/SUITE] [SUITE] [--wait] [--max-wait SECONDS]
+  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE] [--wait]
 
 智能参数识别：
   - 包含 '/' 的参数自动识别为路径（test_suite）
+  - 以 android- 开头的短套件名（如 android-cts-17_r1）自动解析为套件 tools 路径
   - 其他参数按位置识别为 test_module, test_case
 
 示例:
+  gms-rt-test-start RK3572GMS4 CTS android-cts-17_r1
   gms-rt-test-start RK3572GMS4 CTS /path/to/android-cts/tools
   gms-rt-test-start RK3572GMS4 CTS TestModuleName
   gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName
   gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName /path/to/suite
+  gms-rt-test-start RK3572GMS4 CTS TestModuleName --wait --max-wait 3600
 
 Supported Test Types:
   CTS      - Compatibility Test Suite
@@ -2051,11 +2712,15 @@ gms-rt-test-status() {
 
 # Stop running test
 gms-rt-test-stop() {
+    local job_id="${1:-}"
     check_jq
     echo "🛑 Stopping test..."
-    local response=$(api_call "/test/stop" "POST")
+    local endpoint="/test/stop"
+    [ -n "$job_id" ] && endpoint="${endpoint}?job_id=$(_urlencode "$job_id")"
+    local response=$(api_call "$endpoint" "POST")
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Test stopped successfully"
+        echo "$response" | jq '.'
     else
         warning "Failed to stop test or no test was running"
         return "$GMS_RT_EXIT_OPERATION"
@@ -2093,13 +2758,47 @@ gms-rt-test-suites() {
 
 # List test suite results (tradefed list results) - Using HTTP API
 gms-rt-test-suites-result() {
-    local suite_path="$1"
-    local force_refresh="$2"
-    [ -z "$suite_path" ] && { error "Suite path required. Usage: gms-rt-test-suites-result ~/GMS-Suite/android-gts-13.1-R2/android-gts/tools [--force-refresh]"; return 1; }
+    local suite_path=""
+    local force_refresh=0
+    local argument
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -f|--force-refresh) force_refresh=1 ;;
+            -h|--help)
+                echo "Usage: gms-rt-test-suites-result <suite_path|suite_name> [--force-refresh]"
+                echo "  suite_path  Full tools path, e.g. ~/GMS-Suite/android-cts-17_r1/android-cts/tools"
+                echo "  suite_name  Short suite name, e.g. android-cts-17_r1 (resolved automatically)"
+                return 0
+                ;;
+            *)
+                [ -z "$suite_path" ] || {
+                    error "Unexpected argument: $1"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                suite_path="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [ -z "$suite_path" ] && { error "Suite path required. Usage: gms-rt-test-suites-result <suite_path|suite_name> [--force-refresh]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
     # Expand tilde to home directory
     suite_path="${suite_path/#\~/$HOME}"
+
+    # Resolve short suite names (no path separator) against the suite inventory.
+    if [[ "$suite_path" != */* ]]; then
+        local resolved
+        resolved=$(_resolve_suite_reference "$suite_path") || resolved=""
+        if [ -n "$resolved" ]; then
+            info "Suite '$suite_path' resolved to: $resolved"
+            suite_path="$resolved"
+        fi
+        # Unresolved values are sent as-is; the server resolves short names
+        # too and returns a precise error listing next steps.
+    fi
 
     echo "📋 Listing test results for suite: $suite_path..."
 
@@ -2115,7 +2814,7 @@ gms-rt-test-suites-result() {
 
     # Call HTTP API endpoint with optional force_refresh parameter
     local url="/test/suites/result"
-    if [ "$force_refresh" = "--force-refresh" ] || [ "$force_refresh" = "-f" ]; then
+    if [ "$force_refresh" = "1" ]; then
         url="$url?force_refresh=true"
         echo "🔄 Force refresh requested (bypassing cache)..."
     fi
@@ -2155,6 +2854,9 @@ gms-rt-test-suites-result() {
     else
         local msg=$(extract_api_error "$response")
         error "Failed to list test results: $msg"
+        if [[ "$msg" == *suites_path* ]]; then
+            diagnostic "提示: 传入套件 tools 目录完整路径, 或短套件名 (如 android-cts-17_r1); 运行 gms-rt-test-suites 查看可用套件。"
+        fi
         echo "$response" | jq '.'
         return 1
     fi
@@ -2334,9 +3036,68 @@ _gms_rt_command_names() {
     declare -F | awk '$3 ~ /^gms-rt-/ {print $3}' | sort -u
 }
 
+_gms_rt_command_usage() {
+    case "$1" in
+        gms-rt-auth-login) printf '%s' 'gms-rt-auth-login [username] [--password-stdin]' ;;
+        gms-rt-auth-elevate) printf '%s' 'gms-rt-auth-elevate [admin_username] [--password-stdin]' ;;
+        gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
+        gms-rt-burn-gsi) printf '%s' 'gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
+        gms-rt-burn-serial) printf '%s' 'gms-rt-burn-serial <device_id> <serial>' ;;
+        gms-rt-command-describe) printf '%s' 'gms-rt-command-describe <gms-rt-command>' ;;
+        gms-rt-devices-info|gms-rt-devices-reboot|gms-rt-devices-remount|gms-rt-devices-bootloader-lock|gms-rt-devices-bootloader-unlock|gms-rt-devices-bootloader-status)
+            printf '%s' "$1 <devices>"
+            ;;
+        gms-rt-devices-wait) printf '%s' 'gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]' ;;
+        gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [command]' ;;
+        gms-rt-devices-push) printf '%s' 'gms-rt-devices-push <device_id> <local_file> <remote_path>' ;;
+        gms-rt-jobs-list) printf '%s' 'gms-rt-jobs-list [limit]' ;;
+        gms-rt-jobs-status) printf '%s' 'gms-rt-jobs-status <job_id>' ;;
+        gms-rt-jobs-events) printf '%s' 'gms-rt-jobs-events <job_id> [after_sequence] [limit]' ;;
+        gms-rt-jobs-wait) printf '%s' 'gms-rt-jobs-wait <job_id> [--interval SECONDS] [--max-wait SECONDS]' ;;
+        gms-rt-jobs-cancel) printf '%s' 'gms-rt-jobs-cancel <job_id>' ;;
+        gms-rt-system-doctor) printf '%s' 'gms-rt-system-doctor [read|device|firmware|gsi|test]' ;;
+        gms-rt-test-start) printf '%s' 'gms-rt-test-start <device> [type] [module] [case] [suite] | --retry <timestamp> [device] [type] [suite] [--wait] [--max-wait SECONDS]' ;;
+        gms-rt-test-stop) printf '%s' 'gms-rt-test-stop [job_id]' ;;
+        gms-rt-test-suites) printf '%s' 'gms-rt-test-suites [base_path]' ;;
+        gms-rt-test-suites-result) printf '%s' 'gms-rt-test-suites-result <tools_path|suite_name> [--force-refresh]' ;;
+        *) printf '%s' "$1 [arguments]" ;;
+    esac
+}
+
+_gms_rt_command_summary() {
+    case "$1" in
+        gms-rt-system-doctor) printf '%s' 'Check controller, session, tools, devices, and suites for an operation scope' ;;
+        gms-rt-devices-wait) printf '%s' 'Wait for selected devices to become visible in the requested state' ;;
+        gms-rt-test-suites-result) printf '%s' 'List tradefed results for a suite path or short suite name' ;;
+        gms-rt-test-start) printf '%s' 'Start a test with smart args, suite short names, device prefixes, and optional --wait' ;;
+        gms-rt-jobs-list) printf '%s' 'List durable test jobs visible to the current session' ;;
+        gms-rt-jobs-status) printf '%s' 'Get authoritative durable test job state' ;;
+        gms-rt-jobs-events) printf '%s' 'Read incremental durable test job events' ;;
+        gms-rt-jobs-wait) printf '%s' 'Wait for a durable test job to reach a terminal state' ;;
+        gms-rt-jobs-cancel) printf '%s' 'Request cancellation of a durable test job' ;;
+        gms-rt-command-describe) printf '%s' 'Describe one CLI command for machine execution' ;;
+        gms-rt-burn-*) printf '%s' 'Perform an elevated firmware operation' ;;
+        gms-rt-devices-*) printf '%s' 'Inspect or operate Android devices' ;;
+        gms-rt-test-*) printf '%s' 'Inspect or operate GMS test execution' ;;
+        gms-rt-auth-*) printf '%s' 'Inspect or change the authenticated CLI session' ;;
+        gms-rt-system-*) printf '%s' 'Inspect controller system capabilities' ;;
+        *) printf '%s' 'GMS Remote Test CLI operation' ;;
+    esac
+}
+
+_gms_rt_command_catalog() {
+    local command
+    while IFS= read -r command; do
+        printf '%s\t%s\t%s\n' \
+            "$command" \
+            "$(_gms_rt_command_usage "$command")" \
+            "$(_gms_rt_command_summary "$command")"
+    done < <(_gms_rt_command_names)
+}
+
 gms-rt-commands() {
     check_jq || return 1
-    _gms_rt_command_names | jq -Rn --arg version "$GMS_RT_VERSION" '
+    _gms_rt_command_catalog | jq -Rn --arg version "$GMS_RT_VERSION" '
         def category:
             split("-")[2] // "other";
         def mode:
@@ -2346,21 +3107,52 @@ gms-rt-commands() {
                 "burn-|config-update|bootloader-(lock|unlock)|devices-(reboot|remount|push|wifi)"
                 + "|reports-delete|terminal-push|test-(start|stop|clean)|usbip-(install|connect|disconnect)"
                 + "|vpn-(connect|disconnect)|adb-forward-(start|stop)|desktop-vnc-(start|stop)|users-set-username"
+                + "|jobs-cancel"
             )
             then "mutating"
             else "read_only"
             end;
-        [inputs | {
-            name: .,
-            category: category,
-            mode: mode,
-            agent_safe_unattended: (mode == "read_only")
+        [inputs | split("\t") as $fields | $fields[0] as $name | {
+            name: $name,
+            category: ($name | category),
+            summary: ($fields[2] // ""),
+            usage: ($fields[1] // ($name + " [arguments]")),
+            mode: ($name | mode),
+            requires_auth: ($name | test("auth-(status|login)|system-(health|help)|capabilities|commands|command-describe|version") | not),
+            requires_elevation: ($name | test(
+                "burn-|config-update|devices-bootloader-(lock|unlock)|adb-forward-"
+                + "|desktop-|terminal-(open|push)|usbip-(install|connect|disconnect)"
+                + "|users-list|test-suites-result"
+            )),
+            requires_explicit_authorization: (($name | mode) == "mutating"),
+            supports_json: true,
+            agent_safe_unattended: (
+                ($name | mode) == "read_only"
+                and ($name | test("auth-(login|logout|elevate|elevation-reset)|terminal-open|devices-(shell|scrcpy)|test-logs-stream") | not)
+            )
         }] |
         {
-            schema_version: 1,
+            schema_version: 2,
             cli_version: $version,
             commands: .
         }'
+}
+
+gms-rt-command-describe() {
+    local requested="${1:-}"
+    [ -n "$requested" ] || {
+        error "Usage: gms-rt-command-describe <gms-rt-command>"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    local commands description
+    commands=$(gms-rt-commands) || return "$GMS_RT_EXIT_OPERATION"
+    description=$(echo "$commands" | jq -c --arg name "$requested" '.commands[] | select(.name == $name)')
+    [ -n "$description" ] || {
+        error "Unknown command: $requested"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    echo "$description" | jq '.'
 }
 
 gms-rt-version() {
@@ -2380,7 +3172,7 @@ gms-rt-capabilities() {
         --arg server "$SERVER_URL" \
         --argjson commands "$commands" \
         '{
-            schema_version: 1,
+            schema_version: 2,
             name: "gms-remote-test",
             version: $version,
             server: $server,
@@ -2392,7 +3184,10 @@ gms-rt-capabilities() {
                 "--no-color",
                 "--non-interactive",
                 "--yes",
-                "--timeout SECONDS"
+                "--timeout SECONDS",
+                "--server URL",
+                "--ca-cert PATH",
+                "--insecure"
             ],
             authentication: {
                 cookie_session: true,
@@ -2431,8 +3226,8 @@ ${YELLOW}Authentication:${NC}
   gms-rt-auth-elevation-reset    - Clear administrator elevation
 
 ${YELLOW}Firmware Burning:${NC}
-  gms-rt-burn-firmware           - Burn firmware image
-  gms-rt-burn-gsi                - Burn GSI image
+  gms-rt-burn-firmware           - Burn firmware image (optional --wait-online[=SECONDS])
+  gms-rt-burn-gsi                - Burn GSI image (optional --wait-online[=SECONDS])
   gms-rt-burn-serial             - Burn serial number
 
 ${YELLOW}Configuration:${NC}
@@ -2448,6 +3243,7 @@ ${YELLOW}Desktop VNC:${NC}
 ${YELLOW}Device Management:${NC}
   gms-rt-devices-list               - List all connected devices
   gms-rt-devices-info               - Get detailed device information
+  gms-rt-devices-wait               - Wait for devices to become ready
   gms-rt-devices-bootloader-lock    - Lock bootloader
   gms-rt-devices-bootloader-unlock  - Unlock bootloader
   gms-rt-devices-bootloader-status  - Check bootloader status
@@ -2475,9 +3271,11 @@ ${YELLOW}SSH Management:${NC}
 
 ${YELLOW}System:${NC}
   gms-rt-capabilities            - Print machine-readable CLI capabilities
+  gms-rt-command-describe        - Describe one command for an AI agent
   gms-rt-commands                - Print machine-readable command inventory
   gms-rt-version                 - Print CLI version
   gms-rt-system-docs             - Get API documentation
+  gms-rt-system-doctor           - Validate a remote CLI host and operation scope
   gms-rt-system-health           - Check server health
   gms-rt-system-skills           - Download skills directory as ZIP
   gms-rt-system-help             - Show this command list
@@ -2493,11 +3291,18 @@ ${YELLOW}Terminal:${NC}
 ${YELLOW}Test Management:${NC}
   gms-rt-test-clean              - Clean test environment
   gms-rt-test-logs-stream        - Stream logs in real-time
-  gms-rt-test-start              - Start test or retry report
+  gms-rt-test-start              - Start test or retry report (suite short names, --wait)
   gms-rt-test-status             - Check test status
   gms-rt-test-stop               - Stop currently running test
   gms-rt-test-suites             - List available test suites
-  gms-rt-test-suites-result      - List test results (tradefed list results)
+  gms-rt-test-suites-result      - List test results (tools path or short suite name)
+
+${YELLOW}Durable Test Jobs:${NC}
+  gms-rt-jobs-list               - List durable test jobs
+  gms-rt-jobs-status             - Get one durable test job
+  gms-rt-jobs-events             - Read job events incrementally
+  gms-rt-jobs-wait               - Wait for a job to finish
+  gms-rt-jobs-cancel             - Cancel a durable test job
 
 ${YELLOW}USB/IP Connection:${NC}
   gms-rt-usbip-install           - Install USB/IP (requires host parameter)
@@ -2521,9 +3326,14 @@ ${YELLOW}Examples:${NC}
   gms-rt-devices-list --json
   printf '%s\n' "\$PASSWORD" | gms-rt-auth-login admin --password-stdin --non-interactive
   gms-rt-capabilities --json
+  gms-rt-system-doctor test --json --non-interactive
+  gms-rt-devices-wait DEVICE --state online --max-wait 300
   gms-rt-devices-bootloader-lock '["DEVICE-1", "DEVICE-2"]'
   gms-rt-desktop-vnc-start
   gms-rt-test-start DEVICE CTS TestModule
+  gms-rt-test-start DEVICE CTS android-cts-17_r1 --wait
+  gms-rt-test-suites-result android-cts-17_r1
+  gms-rt-burn-firmware firmware.zip DEVICE --wait-online
   gms-rt-test-logs-stream
   gms-rt-reports-list
 
@@ -2547,6 +3357,9 @@ Global options:
   --non-interactive      Never prompt for input
   --yes                  Accept supported confirmations
   --timeout SECONDS      Override the API timeout for this invocation
+  --server URL           Use another Controller for this invocation
+  --ca-cert PATH         Verify HTTPS with a trusted CA certificate
+  --insecure             Allow a controlled self-signed HTTPS Controller
 
 Exit codes: 0 success, 2 usage, 3 authentication, 4 permission/elevation,
             5 conflict/busy, 6 network/timeout, 7 operation failure
@@ -2623,10 +3436,51 @@ _gms_rt_dispatch() {
                     return $?
                 fi
                 ;;
+            --server)
+                shift
+                if [ "$#" -eq 0 ] || ! _validate_server_url "$1"; then
+                    _gms_rt_dispatch_usage_error "$command" "--server requires an http(s) Controller URL without credentials, query, or fragment"
+                    return $?
+                fi
+                SERVER_URL="$1"
+                GMS_REMOTE_TEST_SERVER="$1"
+                ;;
+            --server=*)
+                SERVER_URL="${1#*=}"
+                if ! _validate_server_url "$SERVER_URL"; then
+                    _gms_rt_dispatch_usage_error "$command" "--server requires an http(s) Controller URL without credentials, query, or fragment"
+                    return $?
+                fi
+                GMS_REMOTE_TEST_SERVER="$SERVER_URL"
+                ;;
+            --ca-cert)
+                shift
+                if [ "$#" -eq 0 ] || [ ! -r "$1" ]; then
+                    _gms_rt_dispatch_usage_error "$command" "--ca-cert requires a readable certificate file"
+                    return $?
+                fi
+                GMS_CURL_CA_CERT="$1"
+                GMS_CURL_INSECURE=0
+                ;;
+            --ca-cert=*)
+                GMS_CURL_CA_CERT="${1#*=}"
+                if [ ! -r "$GMS_CURL_CA_CERT" ]; then
+                    _gms_rt_dispatch_usage_error "$command" "--ca-cert requires a readable certificate file"
+                    return $?
+                fi
+                GMS_CURL_INSECURE=0
+                ;;
+            --insecure)
+                GMS_CURL_CA_CERT=""
+                GMS_CURL_INSECURE=1
+                ;;
             *) args+=("$1") ;;
         esac
         shift
     done
+
+    export GMS_REMOTE_TEST_SERVER GMS_CURL_CA_CERT GMS_CURL_INSECURE
+    _refresh_transport_config
 
     if [[ "$command" != gms-rt-* ]] || ! declare -F "$command" >/dev/null; then
         _gms_rt_dispatch_usage_error "$command" "Unknown command: $command"

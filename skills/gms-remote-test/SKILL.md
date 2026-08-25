@@ -1,6 +1,6 @@
 ---
 name: gms-remote-test
-description: Operate and maintain the GMS Remote Test FastAPI platform and its CLI, including authenticated device management, CTS/GTS/VTS/STS execution, reports, firmware, VNC, SSH, VPN, USB/IP, ADB forwarding, and repository changes. Use when inspecting or changing this project, calling its APIs, running gms-rt-* commands, troubleshooting Authentication required responses, or listing supported GMS Remote Test operations.
+description: Operate and maintain the GMS Remote Test FastAPI platform and its CLI, including authenticated device management, CTS/GTS/VTS/STS execution, durable job status, reports, firmware, VNC, SSH, VPN, USB/IP, ADB forwarding, remote build-host use, and repository changes. Use when inspecting or changing this project, calling its APIs, running gms-rt-* commands from a build server or AI agent, troubleshooting Authentication required responses, or listing supported GMS Remote Test operations.
 ---
 
 # GMS Remote Test
@@ -12,8 +12,8 @@ Use the implementation in the current checkout as the source of truth. Do not re
 On another Linux host, install or update the Skill and CLI from the Controller:
 
 ```bash
-curl -kfsSL https://CONTROLLER:5001/api/system/skills/install.sh | bash
-gms-rt-system-help
+curl -kfsSL "https://CONTROLLER:5001/api/system/skills/install.sh" | bash
+gms-rt-system-health --json --non-interactive
 ```
 
 Before calling protected APIs, inspect and establish the CLI session:
@@ -22,6 +22,7 @@ Before calling protected APIs, inspect and establish the CLI session:
 gms-rt-capabilities --json
 gms-rt-auth-status --json
 printf '%s\n' "$PASSWORD" | gms-rt-auth-login USERNAME --password-stdin --non-interactive --json
+gms-rt-system-doctor test --json --non-interactive
 gms-rt-devices-list --json
 ```
 
@@ -45,9 +46,24 @@ Use `--json` for automation. It emits exactly one JSON envelope with `ok`,
 Use `--non-interactive` for unattended execution and add `--yes` only when the
 requested operation explicitly authorizes supported confirmations.
 
+Use `gms-rt-command-describe COMMAND --json` for a command's usage, risk mode,
+authentication requirement, and elevation requirement. Test starts return a
+`cluster_job_id`; follow it with `gms-rt-jobs-status`, `gms-rt-jobs-events`, or
+`gms-rt-jobs-wait` instead of inferring completion from log text. Agents can
+also pass `--wait [--max-wait SECONDS]` to `gms-rt-test-start` so the command
+itself blocks until the durable job reaches a terminal state.
+
+Short names are accepted for suites and devices: `android-cts-17_r1` resolves
+to the suite tools path in `gms-rt-test-start` and
+`gms-rt-test-suites-result` (both CLI-side and inside `/api/test/parse-args`),
+and a unique serial prefix such as `RK3572` expands to the full device serial
+in the device commands. After firmware or GSI burns, add
+`--wait-online[=SECONDS]` to block until devices return to the `online` state.
+
 Set `GMS_REMOTE_TEST_SERVER` when the automatic server address is wrong. Set
 `GMS_CURL_CA_CERT` for a trusted CA, or set `GMS_CURL_INSECURE=1` only for a
-local self-signed deployment.
+local self-signed deployment. For one invocation, prefer `--server URL`,
+`--ca-cert PATH`, or the explicit `--insecure` override.
 
 Read [references/api-catalog.md](references/api-catalog.md) for supported CLI
 commands and examples. Read
