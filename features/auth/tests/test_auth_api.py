@@ -94,6 +94,9 @@ class AuthApiTests(unittest.TestCase):
             config_manager,
             "find_device_host_password",
             return_value="windows-lock-password",
+        ), patch(
+            "features.auth.api._request_source_ip",
+            return_value="172.16.14.66",
         ):
             login = self.client.post(
                 "/api/auth/login",
@@ -106,6 +109,51 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json()["user"]["username"], "hcq@172.16.14.66")
         self.assertEqual(login.json()["user"]["role"], "user")
+
+    def test_client_ssh_login_target_must_match_request_source_ip(self):
+        """登录的 SSH 目标只能是请求来源 IP，不能探测任意内网地址。"""
+        with patch.object(
+            config_manager,
+            "find_device_host_password",
+            return_value=None,
+        ), patch(
+            "features.auth.api._request_source_ip",
+            return_value="10.1.1.5",
+        ), patch(
+            "features.auth.api._client_ssh_authenticator",
+            return_value=(True, "user", None),
+        ) as detect:
+            same_host = self.client.post(
+                "/api/auth/login",
+                json={"username": "user@10.1.1.5", "password": "pw"},
+            )
+            self.assertEqual(same_host.status_code, 200)
+            detect.assert_called_once_with("10.1.1.5", "user", "pw")
+
+    def test_client_ssh_login_rejects_foreign_target_ip(self):
+        with patch.object(
+            config_manager,
+            "find_device_host_password",
+            return_value=None,
+        ), patch(
+            "features.auth.api._request_source_ip",
+            return_value="10.1.1.5",
+        ), patch(
+            "features.auth.api._client_ssh_authenticator",
+        ) as detect:
+            other_host = self.client.post(
+                "/api/auth/login",
+                json={"username": "user@10.1.1.6", "password": "pw"},
+            )
+            loopback = self.client.post(
+                "/api/auth/login",
+                json={"username": "root@127.0.0.1", "password": "pw"},
+            )
+
+        self.assertEqual(other_host.status_code, 401)
+        self.assertEqual(loopback.status_code, 401)
+        # 任意目标与回环地址都不允许触发 Controller 发起 SSH 连接。
+        detect.assert_not_called()
 
     def test_ip_only_client_login_is_rejected_even_with_known_host_mapping(self):
         with patch.object(
@@ -457,6 +505,9 @@ class AuthApiTests(unittest.TestCase):
             "find_device_host_password",
             return_value=None,
         ), patch(
+            "features.auth.api._request_source_ip",
+            return_value="172.16.14.188",
+        ), patch(
             "features.auth.api._client_ssh_authenticator",
             return_value=(
                 False,
@@ -483,6 +534,9 @@ class AuthApiTests(unittest.TestCase):
             config_manager,
             "find_device_host_password",
             return_value=None,
+        ), patch(
+            "features.auth.api._request_source_ip",
+            return_value="172.16.14.188",
         ), patch(
             "features.auth.api._client_ssh_authenticator",
             return_value=(False, "", "SSH 认证失败：请检查用户名和密码是否正确"),

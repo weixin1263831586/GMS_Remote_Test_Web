@@ -263,7 +263,11 @@ def cluster_status():
             "lease_enforcement_enabled": config.lease_enforcement_enabled and enabled,
             "local_worker_id": config.local_worker_id,
             "local_worker_online": local_online,
-            "worker_count": len(workers)}
+            "worker_count": len(workers),
+            # The shell needs the same directory immediately after status.
+            # Reuse this already-computed snapshot to avoid a second startup
+            # query to /workers; the dedicated endpoint remains compatible.
+            "workers": workers}
 
 
 

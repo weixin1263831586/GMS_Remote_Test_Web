@@ -14,7 +14,6 @@ from foundation.ssh_security import configure_strict_host_keys
 
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
-_SAFE_PARAM_RE = re.compile(r"^[A-Za-z0-9_./:@+=,\- ]*$")
 _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -59,7 +58,17 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
             raise BuildExecutionError(f"required parameter missing: {name}")
         value = str(value or "")
         validation = str(spec.get("validation") or "standard")
-        if validation == "integer":
+        # 默认所有参数 shell quote 后再渲染；只有模板作者显式声明
+        # trusted_shell_fragment 的完整命令片段才允许裸插入 shell 元字符。
+        if validation == "trusted_shell_fragment":
+            # 完整命令片段必须仍然通过 pattern/choices 白名单约束。
+            spec_pattern = spec.get("pattern")
+            spec_choices = {str(item) for item in spec.get("choices") or []}
+            if not (spec_pattern or spec_choices):
+                raise BuildExecutionError(
+                    f"trusted_shell_fragment requires pattern or choices: {name}"
+                )
+        elif validation == "integer":
             try:
                 num = int(value)
             except ValueError as exc:
@@ -71,8 +80,8 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
             if spec_max is not None and num > int(spec_max):
                 raise BuildExecutionError(f"parameter above maximum ({spec_max}): {name}")
             value = str(num)
-        elif validation != "none" and value and not _SAFE_PARAM_RE.match(value):
-            raise BuildExecutionError(f"invalid characters in parameter: {name}")
+        # validation == "none"/"standard"：值最终由 shlex.quote 包裹渲染，
+        # 元字符被中和，无需字符集白名单。
         if spec.get("choices") and value and value not in {str(item) for item in spec.get("choices") or []}:
             raise BuildExecutionError(f"invalid choice for parameter: {name}")
         spec_pattern = spec.get("pattern")
@@ -81,7 +90,15 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
         spec_max_length = int(spec.get("max_length") or 0)
         if spec_max_length and len(value) > spec_max_length:
             raise BuildExecutionError(f"parameter too long (max {spec_max_length}): {name}")
-        resolved[name] = shlex.quote(value) if validation == "shell" else value
+        if validation == "trusted_shell_fragment":
+            resolved[name] = value
+        elif name == "workspace" or spec.get("type") == "path":
+            # 工作区参数在路径上下文中渲染，随后由 validate_workspace 归一化；
+            # quote 会破坏路径拼接。
+            resolved[name] = value
+        else:
+            # 其余参数 quote 后渲染，防止改变参数边界或注入 shell 元字符。
+            resolved[name] = shlex.quote(value)
 
     def render(label: str, value: str) -> str:
         unknown = [name for name in _PLACEHOLDER_RE.findall(value) if name not in resolved]

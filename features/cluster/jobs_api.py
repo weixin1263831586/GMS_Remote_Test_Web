@@ -7,13 +7,15 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from features.auth import (
+    CurrentUser,
     authentication_required,
     get_authenticated_user,
     require_authenticated_user,
+    require_permission_when_auth_required,
 )
 from features.users import owner_id_from_request
 
@@ -72,7 +74,20 @@ def _job_response(job: dict) -> dict:
 
 
 @router.post("/jobs")
-def create_job(body: ClusterJobCreate, request: Request):
+def create_job(
+    body: ClusterJobCreate,
+    request: Request,
+    _actor: CurrentUser | None = Depends(
+        require_permission_when_auth_required("tests.execute")
+    ),
+):
+    # argv 是服务端从 execution_spec 派生的数据，不是浏览器可提交的输入；
+    # 接受 raw argv 会让 ExecutionSpec 校验（test_type/suite/设备绑定）被绕过。
+    if body.argv:
+        raise HTTPException(
+            400,
+            "raw argv is not accepted from browsers; supply execution_spec",
+        )
     local_worker_id = service().config.local_worker_id
     _require_cluster_enabled(
         remote=body.worker_id not in {"auto", local_worker_id}
@@ -98,49 +113,48 @@ def create_job(body: ClusterJobCreate, request: Request):
                 data["devices"] = selected_devices
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
-    if not data["argv"]:
-        spec = data.get("execution_spec")
-        if spec and spec.get("test_type"):
-            requested_path = str(spec.get("suite_path") or "")
-            if data.get("suite_path") and data["suite_path"] != requested_path:
-                raise HTTPException(
-                    409,
-                    "execution_spec suite_path does not match the job suite_path",
-                )
+    spec = data.get("execution_spec")
+    if spec and spec.get("test_type"):
+        requested_path = str(spec.get("suite_path") or "")
+        if data.get("suite_path") and data["suite_path"] != requested_path:
+            raise HTTPException(
+                409,
+                "execution_spec suite_path does not match the job suite_path",
+            )
+        suites = [
+            item
+            for item in service().repository.list_suites(data["worker_id"])
+            if item["tools_path"] == requested_path and item["available"]
+        ]
+        if data.get("suite_key"):
             suites = [
-                item
-                for item in service().repository.list_suites(data["worker_id"])
-                if item["tools_path"] == requested_path and item["available"]
+                item for item in suites if item["suite_key"] == data["suite_key"]
             ]
-            if data.get("suite_key"):
-                suites = [
-                    item for item in suites if item["suite_key"] == data["suite_key"]
-                ]
-            if not suites:
-                raise HTTPException(409, "suite is not available on worker")
-            selected_suite = suites[0]
-            data["suite_path"] = selected_suite["tools_path"]
-            data["suite_key"] = selected_suite["suite_key"]
-            data["execution_spec"] = canonicalize_execution_spec(
-                spec,
-                suite_path=data["suite_path"],
-                suite_type=selected_suite["suite_type"],
-                devices=data["devices"],
-                worker_id=data["worker_id"],
-            )
-            data["argv"] = build_argv_from_spec(data["execution_spec"])
-        else:
-            (
-                data["argv"],
-                data["suite_path"],
-                data["suite_key"],
-            ) = build_default_argv(
-                suite_path=data["suite_path"],
-                suite_key=data["suite_key"],
-                worker_id=data["worker_id"],
-                local_worker_id=local_worker_id,
-                available_suites=service().repository.list_suites(data["worker_id"]),
-            )
+        if not suites:
+            raise HTTPException(409, "suite is not available on worker")
+        selected_suite = suites[0]
+        data["suite_path"] = selected_suite["tools_path"]
+        data["suite_key"] = selected_suite["suite_key"]
+        data["execution_spec"] = canonicalize_execution_spec(
+            spec,
+            suite_path=data["suite_path"],
+            suite_type=selected_suite["suite_type"],
+            devices=data["devices"],
+            worker_id=data["worker_id"],
+        )
+        data["argv"] = build_argv_from_spec(data["execution_spec"])
+    else:
+        (
+            data["argv"],
+            data["suite_path"],
+            data["suite_key"],
+        ) = build_default_argv(
+            suite_path=data["suite_path"],
+            suite_key=data["suite_key"],
+            worker_id=data["worker_id"],
+            local_worker_id=local_worker_id,
+            available_suites=service().repository.list_suites(data["worker_id"]),
+        )
     from features.devices import incompatible_test_devices
 
     inventory = {

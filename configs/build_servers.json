@@ -1,135 +1,151 @@
 {
-  "servers": [
-    {
-      "id": "rk-build-206",
-      "name": "RK Build Server 206",
-      "host": "10.10.10.206",
-      "port": 22,
-      "username": "hcq",
-      "backend": "ssh",
-      "auth": {
-        "type": "env_password",
-        "env": "RK_BUILD_206_PASSWORD"
-      },
-      "workspace_root": "/home/hcq",
-      "max_concurrent_jobs": 1,
-      "artifact_patterns": [
-        "rockdev/Image-*/update.img",
-        "rockdev/pack/*.img",
-        "out/target/product/*/*.img",
-        "IMG/IMAGES/*.img"
-      ]
-    }
-  ],
-  "templates": [
-    {
-      "id": "rk-android-build",
-      "name": "RK Android Firmware Build",
-      "description": "Run a controlled Rockchip Android firmware build on rk-build-206.",
-      "server_id": "rk-build-206",
-      "workspace": "{workspace}",
-      "init_commands": [
-        "source build/envsetup.sh",
-        "lunch {lunch_target}"
-      ],
-      "command": "{build_command}",
-      "timeout_sec": 21600,
-      "artifact_patterns": [
-        "rockdev/Image-*/update.img",
-        "rockdev/pack/*.img",
-        "out/target/product/*/*.img",
-        "IMG/IMAGES/*.img"
-      ],
-      "parameters_schema": {
-        "workspace": {
-          "type": "string",
-          "required": true,
-          "validation": "standard"
-        },
-        "lunch_target": {
-          "type": "string",
-          "required": true,
-          "validation": "standard"
-        },
-        "build_command": {
-          "type": "string",
-          "default": "./build.sh -UCKApu -J 8",
-          "validation": "standard",
-          "pattern": "^\\./build\\.sh ",
-          "choices": [
-            "./build.sh -UCKApu -J 8",
-            "./build.sh -UCKApu -J 16",
-            "./build.sh -UCKApu -J 32"
-          ]
-        }
-      },
-      "enabled": true
+ "servers": [
+  {
+   "id": "rk-build-206",
+   "name": "RK Build Server 206",
+   "host": "10.10.10.206",
+   "port": 22,
+   "username": "hcq",
+   "backend": "ssh",
+   "auth": {
+    "type": "env_password",
+    "env": "RK_BUILD_206_PASSWORD"
+   },
+   "workspace_root": "/home/hcq",
+   "max_concurrent_jobs": 1,
+   "artifact_patterns": [
+    "rockdev/Image-*/update.img",
+    "rockdev/pack/*.img",
+    "out/target/product/*/*.img",
+    "IMG/IMAGES/*.img"
+   ]
+  }
+ ],
+ "templates": [
+  {
+   "id": "rk-android-build",
+   "name": "RK Android Firmware Build",
+   "description": "Run a controlled Rockchip Android firmware build on rk-build-206.",
+   "server_id": "rk-build-206",
+   "workspace": "{workspace}",
+   "init_commands": [
+    "source build/envsetup.sh",
+    "lunch {lunch_target}"
+   ],
+   "command": "{build_command}",
+   "timeout_sec": 21600,
+   "artifact_patterns": [
+    "rockdev/Image-*/update.img",
+    "rockdev/pack/*.img",
+    "out/target/product/*/*.img",
+    "IMG/IMAGES/*.img"
+   ],
+   "parameters_schema": {
+    "workspace": {
+     "type": "string",
+     "required": true,
+     "validation": "standard"
     },
-    {
-      "id": "rk-android-build-clean",
-      "name": "RK Android Clean Build",
-      "description": "Full clean rebuild (install + uboot + kernel + android + pack) on rk-build-206.",
-      "server_id": "rk-build-206",
-      "workspace": "{workspace}",
-      "init_commands": [
-        "source build/envsetup.sh",
-        "lunch {lunch_target}"
-      ],
-      "command": "{build_command}",
-      "timeout_sec": 28800,
-      "artifact_patterns": [
-        "rockdev/Image-*/update.img",
-        "rockdev/pack/*.img"
-      ],
-      "parameters_schema": {
-        "workspace": {"type": "string", "required": true, "validation": "standard"},
-        "lunch_target": {"type": "string", "required": true, "validation": "standard"},
-        "build_command": {
-          "type": "string",
-          "default": "./build.sh -UACKApu -J 8",
-          "validation": "standard",
-          "pattern": "^\\./build\\.sh ",
-          "choices": [
-            "./build.sh -UACKApu -J 8",
-            "./build.sh -UACKApu -J 16",
-            "./build.sh -UACKApu -J 32"
-          ]
-        }
-      },
-      "enabled": true
+    "lunch_target": {
+     "type": "string",
+     "required": true,
+     "validation": "standard"
     },
-    {
-      "id": "rk-android-lunch-imagetest",
-      "name": "RK Android Image Test Build",
-      "description": "Build only partition images (no pack) for quick flash-test iterations.",
-      "server_id": "rk-build-206",
-      "workspace": "{workspace}",
-      "init_commands": [
-        "source build/envsetup.sh",
-        "lunch {lunch_target}"
-      ],
-      "command": "{build_command}",
-      "timeout_sec": 21600,
-      "artifact_patterns": [
-        "out/target/product/*/*.img",
-        "IMG/IMAGES/*.img"
-      ],
-      "parameters_schema": {
-        "workspace": {"type": "string", "required": true, "validation": "standard"},
-        "lunch_target": {"type": "string", "required": true, "validation": "standard"},
-        "build_command": {
-          "type": "string",
-          "default": "./build.sh -UCKA -J 8",
-          "validation": "standard",
-          "pattern": "^\\./build\\.sh ",
-          "choices": [
-            "./build.sh -UCKA -J 8",
-            "./build.sh -UCKA -J 16",
-            "./build.sh -UCKA -J 32"
-          ]
-        }
-      },
-      "enabled": true
+    "build_command": {
+     "type": "string",
+     "default": "./build.sh -UCKApu -J 8",
+     "validation": "trusted_shell_fragment",
+     "pattern": "^\\./build\\.sh ",
+     "choices": [
+      "./build.sh -UCKApu -J 8",
+      "./build.sh -UCKApu -J 16",
+      "./build.sh -UCKApu -J 32"
+     ]
     }
-  ]
+   },
+   "enabled": true
+  },
+  {
+   "id": "rk-android-build-clean",
+   "name": "RK Android Clean Build",
+   "description": "Full clean rebuild (install + uboot + kernel + android + pack) on rk-build-206.",
+   "server_id": "rk-build-206",
+   "workspace": "{workspace}",
+   "init_commands": [
+    "source build/envsetup.sh",
+    "lunch {lunch_target}"
+   ],
+   "command": "{build_command}",
+   "timeout_sec": 28800,
+   "artifact_patterns": [
+    "rockdev/Image-*/update.img",
+    "rockdev/pack/*.img"
+   ],
+   "parameters_schema": {
+    "workspace": {
+     "type": "string",
+     "required": true,
+     "validation": "standard"
+    },
+    "lunch_target": {
+     "type": "string",
+     "required": true,
+     "validation": "standard"
+    },
+    "build_command": {
+     "type": "string",
+     "default": "./build.sh -UACKApu -J 8",
+     "validation": "trusted_shell_fragment",
+     "pattern": "^\\./build\\.sh ",
+     "choices": [
+      "./build.sh -UACKApu -J 8",
+      "./build.sh -UACKApu -J 16",
+      "./build.sh -UACKApu -J 32"
+     ]
+    }
+   },
+   "enabled": true
+  },
+  {
+   "id": "rk-android-lunch-imagetest",
+   "name": "RK Android Image Test Build",
+   "description": "Build only partition images (no pack) for quick flash-test iterations.",
+   "server_id": "rk-build-206",
+   "workspace": "{workspace}",
+   "init_commands": [
+    "source build/envsetup.sh",
+    "lunch {lunch_target}"
+   ],
+   "command": "{build_command}",
+   "timeout_sec": 21600,
+   "artifact_patterns": [
+    "out/target/product/*/*.img",
+    "IMG/IMAGES/*.img"
+   ],
+   "parameters_schema": {
+    "workspace": {
+     "type": "string",
+     "required": true,
+     "validation": "standard"
+    },
+    "lunch_target": {
+     "type": "string",
+     "required": true,
+     "validation": "standard"
+    },
+    "build_command": {
+     "type": "string",
+     "default": "./build.sh -UCKA -J 8",
+     "validation": "trusted_shell_fragment",
+     "pattern": "^\\./build\\.sh ",
+     "choices": [
+      "./build.sh -UCKA -J 8",
+      "./build.sh -UCKA -J 16",
+      "./build.sh -UCKA -J 32"
+     ]
+    }
+   },
+   "enabled": true
+  }
+ ]
 }

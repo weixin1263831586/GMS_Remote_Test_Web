@@ -4,6 +4,7 @@
   "local_worker_id": "ats-worker-controller",
   "heartbeat_interval_seconds": 15,
   "worker_offline_seconds": 45,
+  "worker_lost_fail_seconds": 3600,
   "worker_registration_timeout_seconds": 45,
   "lease_ttl_seconds": 90,
   "artifact_max_bytes": 21474836480,

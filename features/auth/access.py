@@ -130,9 +130,26 @@ def require_role_when_auth_required(*roles: str):
 def require_permission(permission: str):
     def dependency(request: Request) -> CurrentUser:
         user = require_authenticated_user(request)
-        if not user.has_permission(permission):
-            raise HTTPException(status_code=403, detail="Permission denied")
-        return user
+        if user.has_permission(permission):
+            return user
+        # 与 require_role 一致：临时管理员验证（elevation）也满足权限检查，
+        # 否则 UI 在成功二次验证后仍会收到 Permission denied。
+        if is_elevated(request):
+            return user
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    return dependency
+
+
+def require_permission_when_auth_required(permission: str):
+    """Require a permission in authenticated deployments, but keep dev anonymous mode."""
+
+    permission_dependency = require_permission(permission)
+
+    def dependency(request: Request) -> CurrentUser | None:
+        if not authentication_required():
+            return None
+        return permission_dependency(request)
 
     return dependency
 

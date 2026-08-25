@@ -20,6 +20,8 @@
     let activePage = String(window.__targetPage || 'test');
     let resolveReady;
     const ready = new Promise(resolve => { resolveReady = resolve; });
+    let resolveClusterStatusReady;
+    const clusterStatusReady = new Promise(resolve => { resolveClusterStatusReady = resolve; });
 
     function normalize(raw) {
         const next = {...DEFAULT_CONTEXT, ...(raw || {})};
@@ -143,15 +145,52 @@
         postToFrame(page, 'workspace-context-navigate');
     }
 
+    async function loadClusterStatus() {
+        const status = await clusterStatusReady;
+        if (status) return status;
+        const response = await fetch('/api/cluster/status', {cache: 'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+    }
+
+    async function loadClusterWorkers(forceRefresh = false) {
+        const cached = window.clusterWorkersSnapshot;
+        if (!forceRefresh && Array.isArray(cached?.workers)
+                && Date.now() - Number(cached.loadedAt || 0) < 5000) {
+            return cached.workers;
+        }
+        const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const workers = Array.isArray(payload.workers) ? payload.workers : [];
+        window.clusterWorkersSnapshot = {workers, loadedAt: Date.now()};
+        return workers;
+    }
+
+    async function loadInitialTestData(clusterModeReady) {
+        await Promise.all([clusterModeReady, ready]);
+        return Promise.allSettled([
+            window.loadClusterWorkers(),
+            window.loadDevices(false),
+        ]);
+    }
+
     async function initialize() {
+        let clusterStatus = null;
         try {
             const [response, clusterResponse] = await Promise.all([
                 fetch('/api/users/workspace-context', {cache: 'no-store'}),
                 fetch('/api/cluster/status', {cache: 'no-store'}).catch(() => null)
             ]);
             if (clusterResponse?.ok) {
-                const clusterStatus = await clusterResponse.json();
+                clusterStatus = await clusterResponse.json();
                 localWorkerId = String(clusterStatus.local_worker_id || localWorkerId);
+                if (Array.isArray(clusterStatus.workers)) {
+                    window.clusterWorkersSnapshot = {
+                        workers: clusterStatus.workers,
+                        loadedAt: Date.now(),
+                    };
+                }
             }
             if (!response.ok && response.status === 401 && typeof window.showAuthGate === 'function') {
                 window.showAuthGate(false);
@@ -160,6 +199,8 @@
             if (response.ok && payload?.data?.context) context = normalize(payload.data.context);
         } catch (error) {
             console.debug('[WorkspaceContext] load failed; using local default:', error);
+        } finally {
+            resolveClusterStatusReady(clusterStatus);
         }
         revision += 1;
         resolveReady(snapshot());
@@ -199,7 +240,9 @@
 
     window.GmsWorkspace = Object.freeze({
         ready, get: snapshot, update, navigate, postToFrame,
-        initialize, setActivePage, localWorkerId: () => localWorkerId
+        initialize, setActivePage, loadClusterStatus,
+        loadClusterWorkers, loadInitialTestData,
+        localWorkerId: () => localWorkerId
     });
     initialize();
 })();

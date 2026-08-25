@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from .state_machine import validate_job_transition
+from .state_machine import InvalidJobTransitionError, validate_job_transition
 
 
 def _utc_now() -> str:
@@ -161,6 +161,90 @@ class ClusterObservabilityRepositoryMixin:
             payload=payload,
         )
         return True
+
+    def fail_abandoned_worker_lost_jobs(self, min_age_seconds: int = 3600) -> list[str]:
+        """Fail ``worker_lost`` Cluster Jobs whose Worker never resumed them.
+
+        ``worker_lost`` waits for the same Attempt to resume once the Worker
+        reconnects.  A Worker that returns reports every persisted Attempt in
+        its first heartbeat, so a Job still ``worker_lost`` long after the
+        outage can never resume (the Worker lost it, or never received it).
+        Terminalize it and release residual leases and the device claim so
+        the owner stops showing as testing.
+        """
+        if min_age_seconds < 0:
+            return []
+        notified: list[tuple[str, str]] = []
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT id,owner_id FROM cluster_jobs
+                   WHERE status='worker_lost' AND last_transition_at!=''
+                     AND datetime(last_transition_at) <= datetime('now', ?)""",
+                (f"-{int(min_age_seconds)} seconds",),
+            ).fetchall()
+            for row in rows:
+                job_id = str(row["id"])
+                error = "worker lost and did not reconnect in time"
+                try:
+                    transitioned = self._transition_job_conn(
+                        conn,
+                        job_id,
+                        "failed",
+                        source="controller-watchdog",
+                        message=(
+                            "Worker did not resume the lost Attempt in time; "
+                            "failing the stale worker_lost Cluster Job"
+                        ),
+                        error=error,
+                    )
+                except InvalidJobTransitionError:
+                    continue
+                if not transitioned:
+                    continue
+                notified.append((job_id, str(row["owner_id"] or "")))
+                now = _utc_now()
+                attempt = conn.execute(
+                    "SELECT current_attempt_id FROM cluster_jobs WHERE id=?", (job_id,)
+                ).fetchone()
+                if attempt is not None and attempt["current_attempt_id"]:
+                    conn.execute(
+                        """UPDATE cluster_job_attempts SET status='failed',
+                           finished_at=?, error=? WHERE id=?
+                           AND status NOT IN ('completed','failed','cancelled')""",
+                        (now, error, attempt["current_attempt_id"]),
+                    )
+                leases = conn.execute(
+                    """SELECT device_id FROM device_leases
+                       WHERE job_id=? AND status IN ('active','orphaned')""",
+                    (job_id,),
+                ).fetchall()
+                conn.execute(
+                    """UPDATE device_leases SET status='released',released_at=?
+                       WHERE job_id=? AND status IN ('active','orphaned')""",
+                    (now, job_id),
+                )
+                conn.executemany(
+                    """UPDATE cluster_worker_devices SET state='available',updated_at=?
+                       WHERE id=?""",
+                    [(now, item["device_id"]) for item in leases],
+                )
+                self.claims.release(f"job:{job_id}", status="failed")
+        # Mirror transition_job(): notify the owner's frontend after commit.
+        if notified:
+            from foundation.events import EVENT_JOB_TRANSITION, event_bus
+
+            for job_id, owner_id in notified:
+                if owner_id:
+                    event_bus.emit(
+                        EVENT_JOB_TRANSITION,
+                        {
+                            "job_id": job_id,
+                            "status": "failed",
+                            "worker_id": "",
+                            "_target_client_id": owner_id,
+                        },
+                    )
+        return [job_id for job_id, _ in notified]
 
     def transition_job(
         self,

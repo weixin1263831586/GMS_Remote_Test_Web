@@ -264,6 +264,19 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         configured: true,
                         devices: [],
                         cluster_jobs: []
+                    }, {
+                        client_id: '172.16.14.246@172.16.14.246',
+                        username: '172.16.14.246',
+                        ip: '172.16.14.246',
+                        source_label: '内网',
+                        source: 'internal',
+                        status: 'online',
+                        running: false,
+                        configured: false,
+                        devices: [],
+                        cluster_jobs: [],
+                        removable: false,
+                        removal_reason: '临时在线会话没有持久配置，断开后会自动清理'
                     }]);
                     const actions = Array.from(document.querySelectorAll(
                         '#users-table-body tr td:last-child > div'
@@ -306,6 +319,12 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                             action => getComputedStyle(action).gridTemplateColumns
                         ),
                         buttonLabels: buttons.map(button => button.textContent.trim()),
+                        removeDisabled: Array.from(
+                            document.querySelectorAll('.user-remove-button')
+                        ).map(button => button.disabled),
+                        removeTitles: Array.from(
+                            document.querySelectorAll('.user-remove-button')
+                        ).map(button => button.title),
                         removeLefts: Array.from(
                             document.querySelectorAll(
                                 '#users-table-body button[data-remove-user]'
@@ -333,9 +352,15 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 """
             )
 
-            self.assertEqual(result["actionDisplays"], ["grid", "grid"])
-            self.assertEqual(result["actionColumns"], ["44px 44px", "44px 44px"])
-            self.assertEqual(result["buttonLabels"], ["任务", "移除", "移除"])
+            self.assertEqual(result["actionDisplays"], ["grid", "grid", "grid"])
+            self.assertEqual(
+                result["actionColumns"],
+                ["44px 44px", "44px 44px", "44px 44px"],
+            )
+            self.assertEqual(result["buttonLabels"], ["任务", "移除", "移除", "移除"])
+            self.assertEqual(result["removeDisabled"], [True, False, True])
+            self.assertIn("正在测试", result["removeTitles"][0])
+            self.assertIn("临时在线会话", result["removeTitles"][2])
             self.assertEqual(len(set(result["removeLefts"])), 1)
             self.assertEqual(result["reportClient"], "hcq@172.16.14.233")
             self.assertEqual(result["reportSuite"], "android-cts-17_r1")
@@ -4320,6 +4345,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
     def test_test_host_stays_disabled_until_initial_worker_list_is_ready(self):
         page = self.new_page()
+        cluster_status_calls = []
 
         def json_response(route, payload):
             route.fulfill(
@@ -4328,14 +4354,15 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 body=json.dumps(payload),
             )
 
-        page.route(
-            "**/api/cluster/status",
-            lambda route: json_response(route, {
+        def cluster_status(route):
+            cluster_status_calls.append(route.request.url)
+            json_response(route, {
                 "success": True,
                 "enabled": True,
                 "local_worker_id": "ats-worker-controller",
-            }),
-        )
+            })
+
+        page.route("**/api/cluster/status", cluster_status)
         page.route(
             "**/api/cluster/workers",
             lambda route: json_response(route, {
@@ -4351,12 +4378,22 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         page.add_init_script(
             """
             const nativeFetch = window.fetch.bind(window);
+            window.__testWorkerRequestFinished = false;
+            window.__deviceRequestedBeforeWorkersFinished = false;
             window.fetch = (input, options = {}) => {
-                if (String(input).includes('/api/cluster/workers')) {
+                const url = String(input);
+                if (url.includes('/api/cluster/workers')) {
                     return new Promise((resolve, reject) => setTimeout(
-                        () => nativeFetch(input, options).then(resolve, reject),
+                        () => nativeFetch(input, options).then(response => {
+                            window.__testWorkerRequestFinished = true;
+                            resolve(response);
+                        }, reject),
                         1500
                     ));
+                }
+                if ((url.includes('/api/devices/list') || url.includes('/api/cluster/devices'))
+                        && !window.__testWorkerRequestFinished) {
+                    window.__deviceRequestedBeforeWorkersFinished = true;
                 }
                 return nativeFetch(input, options);
             };
@@ -4388,6 +4425,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(loading["busy"], "true")
             self.assertEqual(loading["label"], "加载中...")
             self.assertEqual(loading["title"], "正在加载测试主机列表")
+            page.wait_for_function("window.__deviceRequestedBeforeWorkersFinished === true")
 
             page.wait_for_function(
                 """() => {
@@ -4405,6 +4443,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertFalse(ready["disabled"])
             self.assertEqual(ready["busy"], "false")
             self.assertEqual(ready["label"], "ats-worker-controller")
+            self.assertEqual(len(cluster_status_calls), 1)
         finally:
             page.close()
 

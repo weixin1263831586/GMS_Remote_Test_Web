@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from features.cluster import get_cluster_service
+from features.cluster.execution_spec import build_argv_from_spec
 from foundation.responses import error_response, success_response
 
 
@@ -39,31 +40,27 @@ def start_cluster_test(request: Any, client_id: str):
     if not selected_suite:
         return error_response("Selected suite is not available on the Worker", 409)
     tools_path = selected_suite["tools_path"]
-    parts = os.path.normpath(tools_path).split(os.sep)
-    try:
-        root_index = next(i for i, part in enumerate(parts) if part == "GMS-Suite")
-        suite_root = os.sep.join(parts[:root_index + 1]) or os.sep
-    except StopIteration:
-        suite_root = os.path.dirname(os.path.dirname(os.path.dirname(tools_path)))
-    script = os.path.join(suite_root, "run_GMS_Test_Auto.sh")
     serials = [item.split(":", 1)[1] if item.startswith(f"{request.worker_id}:") else item
                for item in request.devices]
-    cmd_parts = [script, (request.test_type or selected_suite["suite_type"]).lower()]
-    if request.retry_dir:
-        cmd_parts.extend(["retry", os.path.basename(request.retry_dir.rstrip("/"))])
-    else:
-        if request.test_module:
-            cmd_parts.append(request.test_module)
-        if request.test_case:
-            cmd_parts.append(request.test_case)
-    device_args = []
-    if len(serials) > 1:
-        device_args.extend(["--shard-count", str(len(serials))])
-    for serial in serials:
-        device_args.extend(["-s", serial])
-    cmd_parts.extend(["--device-args", " ".join(device_args), "--test-suite", tools_path])
-    if request.local_server:
-        cmd_parts.extend(["--local-server", request.local_server])
+    # argv 只能从 ExecutionSpec 派生：这里与 API 路径共用同一个 builder，
+    # 避免 workflow 与 features.cluster.execution_spec 出现两套拼装逻辑
+    # （spec 校验更新后 workflow 被遗忘、Automation 绕过校验）。
+    execution_spec = {
+        "test_type": (request.test_type or selected_suite["suite_type"]).lower(),
+        "suite_path": tools_path,
+        "module": request.test_module,
+        "test_case": request.test_case,
+        "retry_dir": os.path.basename(request.retry_dir.rstrip("/")) if request.retry_dir else "",
+        "devices": serials,
+        "local_server": request.local_server,
+        "no_retry": False,
+        "copy_remote": False,
+    }
+    try:
+        cmd_parts = build_argv_from_spec(execution_spec)
+    except Exception as exc:  # HTTPException from the shared builder
+        detail = getattr(exc, "detail", None) or str(exc)
+        return error_response(str(detail), 400)
     full_suite = not request.retry_dir and not request.test_module and not request.test_case
     required_memory_gb = (float(os.getenv("GMS_CTS_FULL_MEMORY_GB", "28"))
                           if full_suite and (request.test_type or selected_suite["suite_type"]).lower() == "cts"
@@ -75,17 +72,7 @@ def start_cluster_test(request: Any, client_id: str):
             "exclusive_host": full_suite, "required_memory_gb": required_memory_gb,
             "test_module": request.test_module, "test_case": request.test_case,
             "retry_dir": request.retry_dir}
-    data["execution_spec"] = {
-        "test_type": (request.test_type or selected_suite["suite_type"]).lower(),
-        "suite_path": tools_path,
-        "module": request.test_module,
-        "test_case": request.test_case,
-        "retry_dir": os.path.basename(request.retry_dir.rstrip("/")) if request.retry_dir else "",
-        "devices": serials,
-        "local_server": request.local_server,
-        "no_retry": False,
-        "copy_remote": False,
-    }
+    data["execution_spec"] = execution_spec
     data.update({
         "automation_run_id": request.automation_run_id,
         "device_reservation_id": request.device_reservation_id,

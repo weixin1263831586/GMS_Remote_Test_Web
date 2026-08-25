@@ -395,10 +395,11 @@ async function continueAppInitialization() {
     if (_appInitStarted) return;
     _appInitStarted = true;
     const initialPage = window.__targetPage || 'test';
-    const latencySensitivePage = ['desktop', 'terminal', 'reports'].includes(initialPage);
+    const needsTestWorkspace = initialPage === 'test';
+    const latencySensitivePage = ['test', 'desktop', 'terminal', 'reports'].includes(initialPage);
     // 文件浏览和传输功能依赖服务端路径配置。
     const configReady = loadConfig();
-    // 这三个页面只依赖模板中的主机配置，可与完整配置读取并行初始化。
+    // 首屏敏感页面只依赖模板中的主机配置，可与完整配置读取并行初始化。
     if (!latencySensitivePage) await configReady;
     // 通知页面恢复逻辑认证状态已就绪。
     window.dispatchEvent(new CustomEvent('gms:auth-ready'));
@@ -409,6 +410,11 @@ async function continueAppInitialization() {
 
     // 非阻塞加载OpenGrok配置（不等待，让它在后台加载）
     OPENGROK_CONFIG.init();
+
+    const clusterModeReady = initializeClusterMode();
+    if (needsTestWorkspace) {
+        void window.GmsWorkspace.loadInitialTestData(clusterModeReady);
+    }
 
     // 🚀 优先加载客户端信息，确保所有API调用都有正确的clientId
     try {
@@ -445,24 +451,7 @@ async function continueAppInitialization() {
     // 🔌 现在初始化WebSocket（需要clientId）
     initWebSocket();
 
-    await Promise.all([initializeClusterMode(), configReady]);
-
-    // 刷新非测试页面时不要启动 ADB、套件和用户列表等全局扫描。各页面会由
-    // runPageInitializers() 按需加载自己的数据，避免多个慢请求争抢后端资源。
-    const needsTestWorkspace = initialPage === 'test';
-
-    if (needsTestWorkspace) {
-        await loadClusterWorkers().catch(error =>
-            debugLog('[Cluster] Worker list unavailable:', error));
-    }
-
-    // 📱 测试页优先加载设备列表，缩短首屏等待时间。
-    // 必须先等待 workspace 上下文加载完成，否则 workspaceWorkerId() 会返回
-    // 默认的 ats-worker-controller，先加载本机设备再跳到实际主机，造成闪屏。
-    if (needsTestWorkspace) {
-        await (window.GmsWorkspace?.ready || Promise.resolve());
-        loadDevices();
-    }
+    await Promise.all([clusterModeReady, configReady]);
 
     // ⚙️ 延迟加载非关键数据（避免阻塞关键请求）
     setTimeout(() => {
@@ -924,7 +913,7 @@ function handleServerEvent(eventType, payload) {
             // on desktop/terminal/reports turns every heartbeat into an
             // unnecessary /api/cluster/workers request.
             if (currentPage === 'test' && typeof loadClusterWorkers === 'function') {
-                loadClusterWorkers().catch(() => {});
+                loadClusterWorkers(true).catch(() => {});
             }
             break;
         case 'worker.availability_changed': {
@@ -1254,9 +1243,24 @@ function initDragDrop() {
     });
 }
 
+function renderUserRemoveCell(user, normalizedStatus) {
+    const removable = user.removable !== undefined
+        ? Boolean(user.removable)
+        : Boolean(user.configured && normalizedStatus !== 'testing');
+    const reason = user.removal_reason || (normalizedStatus === 'testing'
+        ? '用户正在测试中，结束测试后才能移除'
+        : (user.source === 'cluster'
+            ? '集群任务所有者不是客户端配置，不能在此移除'
+            : '临时在线会话没有持久配置，断开后会自动清理'));
+    if (removable) {
+        return `<button class="btn-xxs user-remove-button" data-remove-user="${escapeHtml(user.ip || '')}">移除</button>`;
+    }
+    return `<button class="btn-xxs user-remove-button" type="button" disabled aria-disabled="true" title="${escapeHtml(reason)}">移除</button>`;
+}
+
 // ==================== Device Management ====================
 let _loadClusterWorkersInFlight = null;
-async function loadClusterWorkers() {
+async function loadClusterWorkers(forceRefresh = false) {
     const select = document.getElementById('cluster-worker');
     if (!select) return;
     if (typeof initializeClusterMode === 'function') {
@@ -1265,16 +1269,9 @@ async function loadClusterWorkers() {
     if (_loadClusterWorkersInFlight) return _loadClusterWorkersInFlight;
     _loadClusterWorkersInFlight = (async () => {
         try {
-            const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
-            if (!response.ok) return;
-            const data = await response.json();
-            window.clusterWorkersSnapshot = {
-                workers: Array.isArray(data.workers) ? data.workers : [],
-                loadedAt: Date.now(),
-            };
             await (window.GmsWorkspace?.ready || Promise.resolve());
             const localWorkerId = workspaceLocalWorkerId();
-            const workers = (data.workers || []).filter(worker =>
+            const workers = (await window.GmsWorkspace.loadClusterWorkers(forceRefresh)).filter(worker =>
                 worker.status !== 'offline'
                 && (state.clusterStatus?.enabled || worker.id === localWorkerId)
             );
@@ -1522,13 +1519,12 @@ async function initializeClusterMode() {
     if (_initializeClusterModeInFlight) return _initializeClusterModeInFlight;
     _initializeClusterModeInFlight = (async () => {
         try {
-            const [response, context] = await Promise.all([
-                fetch('/api/cluster/status', {cache: 'no-store'}),
+            const [status, context] = await Promise.all([
+                window.GmsWorkspace.loadClusterStatus(),
                 window.GmsWorkspace?.ready || Promise.resolve({scope_mode: 'single', worker_id: workspaceLocalWorkerId()})
             ]);
-            const status = await response.json();
             state.clusterStatus = status;
-            const enabled = Boolean(response.ok && status.enabled && context.scope_mode === 'cluster');
+            const enabled = Boolean(status.enabled && context.scope_mode === 'cluster');
             applyClusterMode(enabled);
             if (!enabled && context.scope_mode === 'cluster') {
                 window.GmsWorkspace?.update({scope_mode: 'single', worker_id: workspaceLocalWorkerId(), device_ids: []},
