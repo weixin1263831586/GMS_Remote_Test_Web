@@ -342,7 +342,18 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("📦 离线包", shell)
         self.assertIn("function buildSkillInstallCommand()", navigation)
         self.assertIn("function copySkillInstallCommand()", navigation)
-        self.assertIn("window.location.protocol === 'https:' ? '-k ' : ''", navigation)
+        self.assertIn(
+            "window.location.protocol === 'https:' ? '-kfsSL' : '-fsSL'",
+            navigation,
+        )
+        self.assertIn(
+            'curl -kfsSL "https://server:5001/api/system/skills/install.sh" | bash',
+            api_constants,
+        )
+        self.assertIn(
+            "{% if request.url.scheme == 'https' %}-kfsSL{% else %}-fsSL{% endif %}",
+            shell,
+        )
         self.assertIn("apiPath === '/api/system/skills/install.sh'", navigation)
         self.assertIn("apiPath === '/api/system/skills'", navigation)
         self.assertIn("全部独立gms-rt-*命令", api_constants)

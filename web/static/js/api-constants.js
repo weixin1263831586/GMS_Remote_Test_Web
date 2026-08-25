@@ -246,7 +246,7 @@ const API_DETAILS_MAP = {
         params: [],
         response: 'Shell安装脚本',
         usage: '在其他主机或编译服务器一键安装',
-        curl_example: 'curl -fsSL "http://server:5001/api/system/skills/install.sh" | bash'
+        curl_example: 'curl -kfsSL "https://server:5001/api/system/skills/install.sh" | bash'
     },
     '/api/system/docs': {
         title: '获取API文档',
