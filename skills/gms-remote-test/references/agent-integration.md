@@ -8,7 +8,8 @@ prompt text.
 ## Recommended bootstrap
 
 ```bash
-gms-rt-capabilities --json
+gms-rt-system-capabilities --json
+gms-rt-system-commands --json
 gms-rt-auth-status --json --non-interactive
 ```
 
@@ -34,7 +35,8 @@ Never put passwords directly in prompts or command arguments.
 
 ## Execution rules
 
-1. Discover commands through `gms-rt-capabilities --json`; do not scrape help.
+1. Inspect the runtime contract with `gms-rt-system-capabilities --json`, then
+   discover commands through `gms-rt-system-commands --json`; do not scrape help.
 2. Use `--json --non-interactive` for every unattended command.
 3. Treat `ok` and the process exit code as authoritative.
 4. Retry only exit code `6`, and only with a bounded retry count.

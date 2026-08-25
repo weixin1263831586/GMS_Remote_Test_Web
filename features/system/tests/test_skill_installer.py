@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import stat
@@ -89,11 +90,20 @@ class SkillInstallerTests(unittest.TestCase):
             command_names = set(
                 re.findall(r"^(gms-rt-[a-z0-9-]+)\(\)", helper_text, re.MULTILINE)
             )
-            command_names.add("gms-rt-update")
             for command_name in command_names:
                 command_link = bin_dir / command_name
                 self.assertTrue(command_link.is_symlink(), command_name)
                 self.assertEqual(command_link.resolve(), dispatcher.resolve())
+
+            removed_commands = (
+                "gms-rt-capabilities",
+                "gms-rt-command-describe",
+                "gms-rt-commands",
+                "gms-rt-update",
+                "gms-rt-version",
+            )
+            for command_name in removed_commands:
+                self.assertFalse((bin_dir / command_name).exists(), command_name)
 
             help_result = self._run([str(bin_dir / "gms-rt-system-help")], env)
             self.assertIn("GMS Remote Test API Helper", help_result.stdout)
@@ -101,6 +111,8 @@ class SkillInstallerTests(unittest.TestCase):
 
             stale_link = bin_dir / "gms-rt-obsolete"
             stale_link.symlink_to(dispatcher)
+            for command_name in removed_commands:
+                (bin_dir / command_name).symlink_to(dispatcher)
             legacy_wrapper = bin_dir / "gms-rt"
             legacy_wrapper.write_text(
                 "#!/usr/bin/env bash\n"
@@ -113,11 +125,22 @@ class SkillInstallerTests(unittest.TestCase):
             legacy_alias.symlink_to(legacy_wrapper)
             obsolete = target / "obsolete-after-update"
             obsolete.write_text("remove me", encoding="utf-8")
-            update_result = self._run([str(bin_dir / "gms-rt-update")], env)
+            update_result = self._run(
+                [str(bin_dir / "gms-rt-system-update"), "--json"],
+                env,
+            )
 
-            self.assertIn("Installed CLI Runtime:", update_result.stdout)
+            update_envelope = json.loads(update_result.stdout)
+            self.assertTrue(update_envelope["ok"])
+            self.assertEqual(
+                update_envelope["command"],
+                "gms-rt-system-update",
+            )
+            self.assertIn("Installed CLI Runtime:", update_envelope["output"])
             self.assertFalse(obsolete.exists())
             self.assertFalse(stale_link.exists())
+            for command_name in removed_commands:
+                self.assertFalse((bin_dir / command_name).exists(), command_name)
             self.assertFalse(legacy_wrapper.exists())
             self.assertFalse(legacy_alias.exists())
             self.assertEqual(

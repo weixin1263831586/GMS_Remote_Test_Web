@@ -31,7 +31,8 @@ downloads, DELETE requests, and log streams.
 | Connectivity | `gms-rt-ssh-ping`, `gms-rt-ssh-route`, `gms-rt-ssh-sshd`, `gms-rt-vpn-connect`, `gms-rt-vpn-disconnect`, `gms-rt-vpn-status`, `gms-rt-usbip-install`, `gms-rt-usbip-connect`, `gms-rt-usbip-disconnect`, `gms-rt-usbip-status`, `gms-rt-adb-forward-status`, `gms-rt-adb-forward-start`, `gms-rt-adb-forward-stop` |
 | Users | `gms-rt-users-current`, `gms-rt-users-detect`, `gms-rt-users-list`, `gms-rt-users-set-username` |
 | Durable jobs | `gms-rt-jobs-list`, `gms-rt-jobs-status`, `gms-rt-jobs-events`, `gms-rt-jobs-wait`, `gms-rt-jobs-cancel` |
-| Config, files, system | `gms-rt-config-read`, `gms-rt-config-update`, `gms-rt-files-progress`, `gms-rt-system-health`, `gms-rt-system-doctor`, `gms-rt-system-docs`, `gms-rt-system-skills`, `gms-rt-system-help`, `gms-rt-capabilities`, `gms-rt-command-describe`, `gms-rt-commands`, `gms-rt-version` |
+| Config and files | `gms-rt-config-read`, `gms-rt-config-update`, `gms-rt-files-progress` |
+| System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
 | Code search | `gms-rt-opengrok-search` |
 
 ## Examples
@@ -60,7 +61,7 @@ printf '%s\n' "$PASSWORD" |
 ```
 
 Install the command first with the Controller-hosted installer described in
-`SKILL.md`. Run `gms-rt-update` to refresh both the Skill and standalone CLI
+`SKILL.md`. Run `gms-rt-system-update` to refresh both the Skill and standalone CLI
 command links.
 
 ## Agent contract
@@ -93,9 +94,11 @@ returned as `diagnostics`.
 | 6 | Network, server, TLS, or timeout failure |
 | 7 | Operation failed |
 
-Run `gms-rt-capabilities --json` for runtime discovery,
-`gms-rt-commands --json` for the current command inventory, and
-`gms-rt-command-describe COMMAND --json` for exact usage and risk metadata.
+Run `gms-rt-system-capabilities --json` for runtime discovery,
+`gms-rt-system-commands --json` for the current command inventory, and
+`gms-rt-system-command-describe COMMAND --json` for exact usage and risk metadata.
+Capabilities reference the inventory commands instead of embedding a duplicate
+copy of the full inventory.
 Exact backend payload fields can still change; inspect the current route when
 individual fields are used programmatically.
 

@@ -520,6 +520,25 @@ class ClusterApiHardeningTests(unittest.TestCase):
         )
         self.assertEqual(hidden.status_code, 404)
 
+        hidden_list = self.client.get(
+            "/api/cluster/jobs",
+            headers={"X-Test-User": "bob", "X-Test-Role": "user"},
+        )
+        self.assertEqual(hidden_list.status_code, 200)
+        self.assertEqual(hidden_list.json()["jobs"], [])
+
+        monitored = self.client.get(
+            "/api/cluster/jobs?include_active=true",
+            headers={"X-Test-User": "bob", "X-Test-Role": "user"},
+        )
+        self.assertEqual(monitored.status_code, 200)
+        monitor_job = monitored.json()["jobs"][0]
+        self.assertEqual(monitor_job["id"], job["id"])
+        self.assertTrue(monitor_job["monitor_only"])
+        self.assertNotIn("owner_id", monitor_job)
+        self.assertNotIn("request", monitor_job)
+        self.assertNotIn("current_attempt_id", monitor_job)
+
         own = self.client.get(
             f"/api/cluster/jobs/{job['id']}",
             headers={"X-Test-User": "alice", "X-Test-Role": "user"},

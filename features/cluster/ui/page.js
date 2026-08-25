@@ -366,13 +366,14 @@ function render(){
  document.querySelector('#devices').innerHTML=state.devices.filter(device=>String(device.state||'').toLowerCase()!=='offline'&&matches([device.worker_id,device.serial,device.properties?.model,device.properties?.product].join(' '))).map(device=>{const t=device.transport||'local_usb';const tInfo={'local_usb':['本地','t-local'],'usbip':['USB/IP','t-usbip'],'adb_proxy':['ADB Proxy','t-proxy']}[t]||[t,'t-local'];const p=device.properties||{};let source='-';if(t==='adb_proxy')source=p.adb_proxy_source_name||p.adb_proxy_source_worker_id||'-';else if(t==='usbip')source=p.usbip_source_host||'-';else if(device.worker_id)source=device.worker_id;return `<tr><td>${esc(device.worker_id)}</td><td>${esc(device.serial)}</td><td><span class="status ${esc(tInfo[1])}">${esc(tInfo[0])}</span></td><td>${esc(source)}</td><td>${badge(device.state)}</td><td>${esc(p.model||p.product||'')}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">暂无匹配的在线设备</td></tr>';
  document.querySelector('#suites').innerHTML=state.suites.filter(suite=>suite.available&&matches([suite.worker_id,suite.suite_type,suite.suite_version,suite.tools_path].join(' '))).map(suite=>`<tr><td>${esc(suite.worker_id)}</td><td>${esc(suite.suite_type)}</td><td>${esc(suite.suite_version)}</td><td title="${esc(suite.tools_path)}">${esc(suite.tools_path)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">暂无匹配的可用套件</td></tr>';
  const jobFilter=document.querySelector('#job-status-filter')?.value||'';
- document.querySelector('#jobs').innerHTML=state.jobs.filter(job=>(!jobFilter||(jobFilter==='active'?!terminalJob(job.status):job.status===jobFilter))&&matches([job.id,job.assigned_worker_id,job.status,(job.leases||[]).map(item=>item.serial).join(' ')].join(' '))).map(job=>{
-  let action=` <button data-action="delete-job" data-job-id="${esc(job.id)}">删除</button>`;
-  if(job.status==='stopping')action=' <button disabled>停止中…</button>';
-  else if(!terminalJob(job.status))action=` <button data-action="cancel-job" data-job-id="${esc(job.id)}">停止</button>`;
+ document.querySelector('#jobs').innerHTML=state.jobs.filter(job=>(!jobFilter||(jobFilter==='active'?!terminalJob(job.status):job.status===jobFilter))&&matches([job.id,job.client_display_id,job.assigned_worker_id,job.status,(job.leases||[]).map(item=>item.serial).join(' ')].join(' '))).map(job=>{
+  const monitorOnly=Boolean(job.monitor_only);
+  let action=monitorOnly?'<span class="muted" title="其他用户的运行任务仅供集群监控">只读监控</span>':`<button data-action="show-job" data-job-id="${esc(job.id)}">查看</button> <button data-action="delete-job" data-job-id="${esc(job.id)}">删除</button>`;
+  if(!monitorOnly&&job.status==='stopping')action=`<button data-action="show-job" data-job-id="${esc(job.id)}">查看</button> <button disabled>停止中…</button>`;
+  else if(!monitorOnly&&!terminalJob(job.status))action=`<button data-action="show-job" data-job-id="${esc(job.id)}">查看</button> <button data-action="cancel-job" data-job-id="${esc(job.id)}">停止</button>`;
   const created=job.created_at?new Date(job.created_at).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'-';
-  return `<tr><td>${esc(job.id.slice(0,16))}</td><td>${esc(job.assigned_worker_id)}</td><td>${badge(job.status)}</td><td>${esc((job.leases||[]).map(item=>item.serial).join(', '))}</td><td>${esc(created)}</td><td><button data-action="show-job" data-job-id="${esc(job.id)}">查看</button>${action}</td></tr>`;
- }).join('')||'<tr><td colspan="6" class="empty">暂无集群任务</td></tr>';
+  return `<tr><td title="${esc(job.id)}">${esc(job.id.slice(0,16))}</td><td>${esc(job.client_display_id||'-')}</td><td>${esc(job.assigned_worker_id)}</td><td>${badge(job.status)}</td><td>${esc((job.leases||[]).map(item=>item.serial).join(', '))}</td><td>${esc(created)}</td><td>${action}</td></tr>`;
+ }).join('')||'<tr><td colspan="7" class="empty">暂无集群任务</td></tr>';
  renderJobForm();
  if(!activeDeployments.size)renderLibrary();
 }
@@ -444,7 +445,7 @@ async function refresh(showBusy=false){
  try{
   if(refreshPromise)return await refreshPromise;
   refreshPromise=(async()=>{
-   const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]];
+   const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs?include_active=true','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]];
    const results=await Promise.allSettled(requests.map(([,path])=>api(path))),errors=[];
    results.forEach((result,index)=>{const [stateKey,,payloadKey]=requests[index];if(result.status==='fulfilled')state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;else errors.push(`${stateKey}: ${result.reason.message}`)});
    clusterInitialRefreshSettled=true;

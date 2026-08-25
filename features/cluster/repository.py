@@ -631,9 +631,21 @@ class ClusterRepository(
             ).fetchone()
         return self.get_job(row["id"]) if row else None
 
-    def list_jobs(self, limit: int = 100, owner_id: str = "") -> list[dict[str, Any]]:
+    def list_jobs(
+        self,
+        limit: int = 100,
+        owner_id: str = "",
+        include_active: bool = False,
+    ) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            if owner_id:
+            if owner_id and include_active:
+                rows = conn.execute(
+                    """SELECT id FROM cluster_jobs
+                       WHERE owner_id=? OR status NOT IN ('completed','failed','cancelled')
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (owner_id, limit),
+                ).fetchall()
+            elif owner_id:
                 rows = conn.execute(
                     "SELECT id FROM cluster_jobs WHERE owner_id=? ORDER BY created_at DESC LIMIT ?",
                     (owner_id, limit),

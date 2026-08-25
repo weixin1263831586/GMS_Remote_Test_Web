@@ -19,14 +19,15 @@ gms-rt-system-health --json --non-interactive
 Before calling protected APIs, inspect and establish the CLI session:
 
 ```bash
-gms-rt-capabilities --json
+gms-rt-system-capabilities --json
+gms-rt-system-commands --json
 gms-rt-auth-status --json
 printf '%s\n' "$PASSWORD" | gms-rt-auth-login USERNAME --password-stdin --non-interactive --json
 gms-rt-system-doctor test --json --non-interactive
 gms-rt-devices-list --json
 ```
 
-Run `gms-rt-update` to reinstall the latest Skill and command links from the
+Run `gms-rt-system-update` to reinstall the latest Skill and command links from the
 same Controller. Commands are installed as standalone `gms-rt-*` executables so
 shell PATH completion can list them. Only those standalone commands are exposed;
 the shared dispatcher stays in the private runtime directory.
@@ -46,7 +47,7 @@ Use `--json` for automation. It emits exactly one JSON envelope with `ok`,
 Use `--non-interactive` for unattended execution and add `--yes` only when the
 requested operation explicitly authorizes supported confirmations.
 
-Use `gms-rt-command-describe COMMAND --json` for a command's usage, risk mode,
+Use `gms-rt-system-command-describe COMMAND --json` for a command's usage, risk mode,
 authentication requirement, and elevation requirement. Test starts return a
 `cluster_job_id`; follow it with `gms-rt-jobs-status`, `gms-rt-jobs-events`, or
 `gms-rt-jobs-wait` instead of inferring completion from log text. Agents can
