@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from features.auth import require_elevated_admin
+from features.auth import require_permission_when_auth_required
 from foundation.cluster_port import authenticate_worker
 from foundation.responses import error_response
 
@@ -26,14 +26,14 @@ router = APIRouter()
 
 
 @router.get("/api/adb-forward/status")
-async def adb_forward_status(_admin=Depends(require_elevated_admin)):
+async def adb_forward_status(_admin=Depends(require_permission_when_auth_required("devices.lease"))):
     return JSONResponse(content=adb_proxy_service.status())
 
 
 @router.get("/api/adb-forward/logs")
 async def adb_proxy_logs(
     worker_id: str = Query(min_length=1, max_length=128),
-    _admin=Depends(require_elevated_admin),
+    _admin=Depends(require_permission_when_auth_required("devices.lease")),
 ):
     return JSONResponse(content=await adb_proxy_service.logs(worker_id))
 
@@ -41,7 +41,7 @@ async def adb_proxy_logs(
 @router.post("/api/adb-forward/start")
 async def start_adb_forward(
     req: ADBForwardStartRequest | None = Body(default=None),
-    _admin=Depends(require_elevated_admin),
+    _admin=Depends(require_permission_when_auth_required("devices.lease")),
 ):
     try:
         if req and req.source_worker_id and req.target_worker_id:
@@ -79,7 +79,7 @@ async def start_adb_forward(
 @router.post("/api/adb-forward/stop")
 async def stop_adb_forward(
     req: ADBForwardStopRequest | None = Body(default=None),
-    _admin=Depends(require_elevated_admin),
+    _admin=Depends(require_permission_when_auth_required("devices.lease")),
 ):
     try:
         if req and req.source_worker_id and req.target_worker_id:

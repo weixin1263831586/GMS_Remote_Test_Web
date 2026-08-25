@@ -317,6 +317,10 @@ async def list_users(
             str(item.get("username") or ""),
         } or owner_display_id == str(item.get("client_id") or "")), None)
         if user_info is None:
+            # Historical jobs remain available in reports/cluster history, but
+            # an inactive owner with no client record is not a manageable user.
+            if not active_jobs:
+                continue
             owner_username, owner_ip = parse_client_id(owner_display_id)
             user_info = {
                 "client_id": owner_display_id,
@@ -355,6 +359,18 @@ async def list_users(
             user_info["status"] = "testing"
         elif user_info.get("status") not in {"online", "offline"}:
             user_info["status"] = "offline"
+        if user_info.get("status") == "testing":
+            user_info["removable"] = False
+            user_info["removal_reason"] = "用户正在测试中，结束测试后才能移除"
+        elif user_info.get("configured"):
+            user_info["removable"] = True
+            user_info["removal_reason"] = ""
+        elif user_info.get("source") == "cluster":
+            user_info["removable"] = False
+            user_info["removal_reason"] = "集群任务所有者不是客户端配置，不能在此移除"
+        else:
+            user_info["removable"] = False
+            user_info["removal_reason"] = "临时在线会话没有持久配置，断开后会自动清理"
 
     return JSONResponse(content={
         'total': len(users),

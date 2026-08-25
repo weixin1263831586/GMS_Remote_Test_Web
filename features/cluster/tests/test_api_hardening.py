@@ -481,6 +481,19 @@ class ClusterApiHardeningTests(unittest.TestCase):
         self.assertIsNotNone(self.repo.get_worker("worker-246"))
 
     def test_job_owner_is_server_principal_and_cross_user_id_is_hidden(self):
+        tools_path = "/srv/GMS-Suite/android-cts/tools"
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1",
+            "running_jobs": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+            "suites": [{
+                "suite_type": "CTS",
+                "suite_version": "17_r1",
+                "suite_key": "CTS:17_r1",
+                "tools_path": tools_path,
+                "available": True,
+            }],
+        })
         created = self.client.post(
             "/api/cluster/jobs",
             headers={"X-Test-User": "alice", "X-Test-Role": "user"},
@@ -488,11 +501,16 @@ class ClusterApiHardeningTests(unittest.TestCase):
                 "worker_id": "worker-246",
                 "suite_key": "CTS:17_r1",
                 "devices": ["ABC"],
-                "argv": ["/bin/true"],
+                "execution_spec": {
+                    "test_type": "cts",
+                    "suite_path": tools_path,
+                    "module": "CtsSecurityTestCases",
+                    "devices": ["ABC"],
+                },
                 "owner_id": "bob-id",
             },
         )
-        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.status_code, 200, created.text)
         job = created.json()["job"]
         self.assertEqual(job["owner_id"], "alice-id")
 
@@ -507,6 +525,22 @@ class ClusterApiHardeningTests(unittest.TestCase):
             headers={"X-Test-User": "alice", "X-Test-Role": "user"},
         )
         self.assertEqual(own.status_code, 200)
+
+    def test_browser_supplied_raw_argv_is_rejected(self):
+        """浏览器提交的 raw argv 必须被拒绝，防止绕过 ExecutionSpec 校验。"""
+        response = self.client.post(
+            "/api/cluster/jobs",
+            json={
+                "worker_id": "worker-246",
+                "suite_key": "CTS:17_r1",
+                "devices": ["ABC"],
+                "argv": ["/bin/true"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("raw argv is not accepted", response.json()["detail"])
+        self.assertIsNone(self.repo.list_jobs(1)[0]["id"] if self.repo.list_jobs(1) else None)
 
     def test_structured_job_uses_inventory_suite_and_leased_devices(self):
         tools_path = "/srv/GMS-Suite/android-cts/tools"

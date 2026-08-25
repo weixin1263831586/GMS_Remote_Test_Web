@@ -585,3 +585,57 @@ def test_artifact_upload_uses_resumable_bounded_chunks(tmp_path):
     assert chunk_call.args[2] == b"abcdefghij"
     assert chunk_call.kwargs["timeout"] == 300
     assert chunk_call.kwargs["extra_headers"]["X-Chunk-SHA256"] == hashlib.sha256(b"abcdefghij").hexdigest()
+
+
+def test_start_process_rebuilds_argv_from_execution_spec_not_payload(tmp_path):
+    """Worker 不得信任 Controller 下发的 argv：以 spec 重建的 argv 为准。"""
+    config = worker_config(tmp_path)
+    suite_root = config.suite_roots[0] / "GMS-Suite" / "android-cts" / "tools"
+    suite_root.mkdir(parents=True)
+    script = config.suite_roots[0] / "GMS-Suite" / "run_GMS_Test_Auto.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    script.chmod(0o755)
+    runtime = WorkerRuntime(config)
+    process = MagicMock(pid=1234)
+    spec = {
+        "test_type": "cts",
+        "suite_path": str(suite_root),
+        "module": "CtsSecurityTestCases",
+        "devices": ["ABC"],
+    }
+    tampered = [str(script), "cts", "CtsEvilTestCases"]
+
+    with patch("worker_agent.runtime.subprocess.Popen", return_value=process) as popen, patch(
+        "worker_agent.runtime.os.getpgid", return_value=1234
+    ):
+        runtime.start_process({
+            "id": "cmd-process",
+            "job_id": "job-1",
+            "attempt_id": "attempt-1",
+            "payload": {"argv": tampered, "execution_spec": spec,
+                        "worker_job_id": "wj-job-1"},
+        })
+
+    launched = popen.call_args.args[0]
+    assert "CtsSecurityTestCases" in launched
+    assert "CtsEvilTestCases" not in launched
+
+
+def test_start_process_rejects_invalid_execution_spec(tmp_path):
+    config = worker_config(tmp_path)
+    runtime = WorkerRuntime(config)
+    spec = {
+        "test_type": "cts",
+        "suite_path": "/srv/GMS-Suite/android-cts/tools",
+        # test_case without module is invalid per the shared spec builder.
+        "test_case": "Case#test",
+        "devices": ["ABC"],
+    }
+
+    with pytest.raises(ValueError, match="invalid execution_spec"):
+        runtime.start_process({
+            "id": "cmd-process",
+            "job_id": "job-1",
+            "attempt_id": "attempt-1",
+            "payload": {"argv": ["/bin/true"], "execution_spec": spec},
+        })

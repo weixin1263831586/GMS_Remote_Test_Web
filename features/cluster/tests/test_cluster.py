@@ -812,6 +812,39 @@ class ClusterRepositoryTests(unittest.TestCase):
         ]
         assert transitions == [("assigned", "worker_lost"), ("worker_lost", "running")]
 
+    def test_stale_worker_lost_job_is_failed_and_leases_released(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        })
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246", "owner_id": "tester",
+            "devices": ["worker-246:ABC"], "suite_key": "CTS:17_r1",
+        })
+        self.repo.mark_worker_offline("worker-246")
+        assert self.repo.get_job(job["id"])["status"] == "worker_lost"
+
+        # 刚失联的任务在宽限期内保持 worker_lost，等待 Worker 接回。
+        self.assertEqual(self.repo.fail_abandoned_worker_lost_jobs(3600), [])
+
+        failed = self.repo.fail_abandoned_worker_lost_jobs(0)
+        self.assertEqual(failed, [job["id"]])
+        reloaded = self.repo.get_job(job["id"])
+        self.assertEqual(reloaded["status"], "failed")
+        self.assertIn("did not reconnect", reloaded["error"])
+        self.assertEqual(reloaded["attempt"]["status"], "failed")
+        self.assertEqual(reloaded["leases"][0]["status"], "released")
+        self.assertEqual(self.repo.list_devices("worker-246")[0]["state"], "available")
+        # 回收是幂等的。
+        self.assertEqual(self.repo.fail_abandoned_worker_lost_jobs(0), [])
+        transitions = [
+            (item["from_state"], item["to_state"])
+            for item in self.repo.list_timeline(job_id=job["id"])
+            if item["event_type"] == "job.transition"
+        ]
+        assert transitions == [("assigned", "worker_lost"), ("worker_lost", "failed")]
+
     def test_running_attempt_is_revoked_when_unified_claim_was_lost(self):
         self.register()
         self.repo.heartbeat("worker-246", {

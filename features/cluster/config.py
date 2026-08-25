@@ -19,6 +19,7 @@ class ClusterConfig:
     lease_enforcement_enabled: bool = False
     local_worker_id: str = "ats-worker-controller"
     worker_offline_seconds: int = 45
+    worker_lost_fail_seconds: int = 3600
     lease_ttl_seconds: int = 90
     worker_registration_timeout_seconds: int = 45
     artifact_max_bytes: int = 20 * 1024**3
@@ -44,6 +45,9 @@ class ClusterConfig:
             lease_enforcement_enabled=enabled and bool(raw.get("lease_enforcement_enabled", False)),
             local_worker_id=str(raw.get("local_worker_id") or "ats-worker-controller"),
             worker_offline_seconds=max(15, int(raw.get("worker_offline_seconds", 45))),
+            worker_lost_fail_seconds=max(
+                60, int(raw.get("worker_lost_fail_seconds", 3600))
+            ),
             lease_ttl_seconds=max(30, int(raw.get("lease_ttl_seconds", 90))),
             worker_registration_timeout_seconds=max(
                 15, int(raw.get("worker_registration_timeout_seconds", 45))

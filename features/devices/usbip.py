@@ -62,6 +62,20 @@ def usbip_error(
     }
 
 
+def _usbip_attached_ports(ssh) -> set[str]:
+    """Return the set of currently attached usbip port numbers (as strings)."""
+    stdout, _, code = usbip_manager.ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
+    if code != 0:
+        return set()
+    return {
+        match.group(1)
+        for match in (
+            re.match(r'\s*Port\s+(\d+):', line) for line in (stdout or '').splitlines()
+        )
+        if match
+    }
+
+
 def detach_ubuntu_usbip_ports(
     ssh,
     remote_host: str | None = '127.0.0.1',
@@ -87,11 +101,16 @@ def detach_ubuntu_usbip_ports(
                 detach_out, detach_err, detach_code = usbip_manager.ssh_manager.execute_command(
                     ssh, f'sudo usbip detach -p {current_port}', timeout=15
                 )
-                logger.info(
-                    f"[USB/IP] Detached stale Ubuntu usbip port {current_port}: "
-                    f"code={detach_code} out={detach_out} err={detach_err}"
-                )
-                detached.append(current_port)
+                # 仅当 detach 命令成功或端口确实已消失时才计入 detached，
+                # 否则调用方会误以为端口已释放并继续 attach。
+                port_gone = current_port not in _usbip_attached_ports(ssh)
+                if detach_code == 0 or port_gone:
+                    detached.append(current_port)
+                else:
+                    logger.warning(
+                        f"[USB/IP] Failed to detach Ubuntu usbip port {current_port}: "
+                        f"code={detach_code} out={detach_out} err={detach_err}"
+                    )
             current_port = port_match.group(1)
             current_block = [line]
         elif current_port:

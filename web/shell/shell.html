@@ -16,7 +16,7 @@
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/state.js?v=20260718-anonymous-auth" defer></script>
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
-    <script src="/static/js/workspace-context.js?v=20260813-frame-visibility" defer></script>
+    <script src="/static/js/workspace-context.js?v=20260825-test-load" defer></script>
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
@@ -37,7 +37,7 @@
     <script src="/static/js/pages/apk-analysis.js?v=20260813-task-recovery" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260812-stable-surfaces" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260822-reconnect-backoff" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260825-user-actions" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -4432,10 +4432,7 @@
                 const devices = user.devices && user.devices.length > 0 ? user.devices.join(', ') : '-';
                 const sourceLabel = user.source_label || '-';
                 const sourceColor = user.source === 'internal' ? 'var(--primary-color)' : (user.source === 'public' ? 'var(--warning-color)' : 'var(--text-secondary)');
-                // 仅 config_runtime.client_hosts 中的用户可移除。
-                const removeCell = user.configured
-                    ? `<button class="btn-xxs user-remove-button" data-remove-user="${escapeHtml(user.ip || '')}">移除</button>`
-                    : '<span class="user-action-placeholder" title="临时会话">-</span>';
+                const removeCell = renderUserRemoveCell(user, normalizedStatus);
                 const clusterCell = activeClusterJob
                     ? `<button class="btn-xxs" style="width:44px;" data-cluster-job="${escapeHtml(activeClusterJob.id)}" data-worker-id="${escapeHtml(activeClusterJob.worker_id || '')}" data-attempt-id="${escapeHtml(activeClusterJob.attempt_id || '')}">任务</button>`
                     : '<span class="user-action-placeholder" aria-hidden="true">-</span>';

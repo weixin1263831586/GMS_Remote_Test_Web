@@ -140,9 +140,10 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("if (reportsRequests.has(url))", reports)
         self.assertIn("window.preloadTestReports = preloadTestReports", reports)
         self.assertIn("scheduleDeferredPagePreload(initialPage)", navigation)
-        self.assertIn("await Promise.all([initializeClusterMode(), configReady])", navigation)
+        self.assertIn("const clusterModeReady = initializeClusterMode()", navigation)
+        self.assertIn("await Promise.all([clusterModeReady, configReady])", navigation)
         self.assertIn("test-reports.js?v=20260812-stable-surfaces", shell)
-        self.assertIn("navigation.js?v=20260822-reconnect-backoff", shell)
+        self.assertIn("navigation.js?v=20260825-user-actions", shell)
 
     def test_server_file_browser_uses_resolved_suite_path(self):
         navigation_text = read_all_frontend_js()
@@ -317,7 +318,7 @@ class FrontendIntegrityTests(unittest.TestCase):
             main_text,
             r'<label>测试主机:</label>\s*<select id="cluster-worker"',
         )
-        load_start = navigation.index("async function loadClusterWorkers()")
+        load_start = navigation.index("async function loadClusterWorkers(forceRefresh = false)")
         load_end = navigation.index("async function resolveClusterHost", load_start)
         load_source = navigation[load_start:load_end]
         self.assertNotIn("select.style.visibility", load_source)
@@ -593,10 +594,13 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_user_actions_use_stable_grid_and_safe_event_binding(self):
         main_text = read_text("web/shell/shell.html")
+        navigation_text = read_all_frontend_js()
         css_text = read_text("web/static/css/common.css")
 
         self.assertIn('class="user-actions-grid"', main_text)
-        self.assertIn('data-remove-user=', main_text)
+        self.assertIn('data-remove-user=', navigation_text)
+        self.assertIn('renderUserRemoveCell(user, normalizedStatus)', main_text)
+        self.assertIn('disabled aria-disabled="true"', navigation_text)
         self.assertNotIn('onclick="removeUser(', main_text)
         self.assertIn("grid-template-columns: 44px 44px", css_text)
 

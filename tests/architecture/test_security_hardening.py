@@ -36,7 +36,7 @@ class TestBuildCommandInjectionPrevention(unittest.TestCase):
             "build_command": {
                 "type": "string",
                 "default": "./build.sh -J 8",
-                "validation": "standard",
+                "validation": "trusted_shell_fragment",
                 "pattern": r"^\./build\.sh ",
                 "choices": ["./build.sh -J 8", "./build.sh -J 16"],
             }

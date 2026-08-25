@@ -140,9 +140,8 @@ async def get_connected_devices(
             }.items()
             if value not in {None, ""}
         })
-    cached_ids = [item["device_id"] for item in cached_inventory]
     cache_fresh = bool(
-        cached_ids
+        cache_timestamp
         and not force_refresh
         and now - cache_timestamp < runtime.device_cache_ttl
     )
@@ -151,12 +150,14 @@ async def get_connected_devices(
     if cache_fresh:
         inventory = cached_inventory
     else:
-        adb_devices = await asyncio.to_thread(
-            device_manager.get_connected_devices,
-            force_refresh,
-        )
-        fastboot_devices = await asyncio.to_thread(
-            device_manager.get_fastboot_devices,
+        adb_devices, fastboot_devices = await asyncio.gather(
+            asyncio.to_thread(
+                device_manager.get_connected_devices,
+                force_refresh,
+            ),
+            asyncio.to_thread(
+                device_manager.get_fastboot_devices,
+            ),
         )
         if adb_devices:
             try:

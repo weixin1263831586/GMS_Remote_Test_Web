@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import require_elevated_admin
+from features.auth import require_permission_when_auth_required
 from features.users import get_client_display_id_from_request
 from foundation.responses import error_response
 
@@ -41,7 +41,7 @@ def resolve_install_host(request: Request, config: dict, client_id: str) -> str:
 async def install_usbipd(
     request: Request,
     device_host: str | None = None,
-    _admin=Depends(require_elevated_admin),
+    _operator=Depends(require_permission_when_auth_required("devices.lease")),
 ):
     """Install usbipd on an authorized Windows host."""
 

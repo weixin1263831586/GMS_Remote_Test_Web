@@ -85,12 +85,17 @@ def _rate_limit_response(retry_after: int) -> JSONResponse:
 def _authenticate_client_ssh_user(
     username: str,
     password: str,
+    expected_client_ip: str,
 ) -> tuple[CurrentUser | None, str | None]:
     """Authenticate a client with a host-scoped SSH password.
 
     Client accounts are separate from platform administrators and must use the
     explicit ``SSH_USER@CLIENT_IP`` form. The supplied password is verified by
     an actual SSH ``whoami`` call when no encrypted credential is stored yet.
+
+    ``client_host`` must equal the HTTP request's source IP. Without this the
+    public login endpoint could drive the Controller into SSH-probing arbitrary
+    internal addresses (unauthenticated network reconnaissance surface).
 
     Returns the authenticated user plus the authenticator error message (when
     the SSH attempt itself failed), so callers can tell "host unreachable"
@@ -103,9 +108,15 @@ def _authenticate_client_ssh_user(
     if not client_user or not client_host:
         return None, None
     try:
-        ipaddress.ip_address(client_host)
+        client_ip = ipaddress.ip_address(client_host)
     except ValueError:
         return None, None
+    try:
+        source_ip = ipaddress.ip_address(str(expected_client_ip or "").strip())
+    except ValueError:
+        return None, None
+    if client_ip != source_ip:
+        return None, "客户端IP与请求来源不一致，用户名需使用本机IP"
 
     canonical_username = f"{client_user}@{client_host}"
     expected = config_manager.find_device_host_password(canonical_username)
@@ -291,6 +302,7 @@ async def auth_login(request: Request, req: dict):
             _authenticate_client_ssh_user,
             username,
             str(req.get("password", "")),
+            source_ip,
         )
     if not user:
         retry_after = auth_service.record_auth_failure(

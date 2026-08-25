@@ -408,7 +408,28 @@ class WorkerRuntime:
 
     def start_process(self, command: dict[str, Any]) -> dict[str, Any]:
         payload = command.get("payload", {})
-        argv = payload.get("argv")
+        # execution_spec 是权威输入：Worker 用共享 builder 从 spec 重建 argv，
+        # 而不是信任 Controller 下发的 argv（argv 是派生数据，仅作对账）。
+        spec = payload.get("execution_spec")
+        if isinstance(spec, dict) and spec.get("test_type"):
+            from foundation.execution_spec import (
+                ExecutionSpecError,
+                build_argv_from_spec,
+            )
+
+            try:
+                argv = build_argv_from_spec(spec)
+            except ExecutionSpecError as exc:
+                raise ValueError(
+                    f"invalid execution_spec in start_test payload: {exc.detail}"
+                ) from exc
+            if payload.get("argv") != argv:
+                logger.warning(
+                    "[Worker] start_test argv differs from execution_spec; "
+                    "using argv rebuilt from spec"
+                )
+        else:
+            argv = payload.get("argv")
         if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
             raise ValueError("start_test payload requires argv string list")
         executable = Path(argv[0]).resolve()
@@ -423,15 +444,6 @@ class WorkerRuntime:
             raise ValueError(
                 f"test executable not found: {executable}. "
                 f"Ensure run_GMS_Test_Auto.sh is deployed to a suite root ({configured})."
-            )
-        spec = payload.get("execution_spec")
-        if spec:
-            logger.info(
-                "[Worker] start_test execution_spec: type=%s module=%s case=%s retry=%s",
-                spec.get("test_type", ""),
-                spec.get("module", ""),
-                spec.get("test_case", ""),
-                spec.get("retry_dir", ""),
             )
         worker_job_id = payload.get("worker_job_id") or f"wj-{command['id']}"
         work_dir = self.config.data_root / "jobs" / (command.get("job_id") or command["id"]) / (command.get("attempt_id") or "1")

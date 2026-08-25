@@ -123,6 +123,9 @@ class ClusterJobCreate(BaseModel):
     suite_key: str = ""
     suite_path: str = ""
     devices: list[str] = Field(default_factory=list)
+    # argv is derived server-side from execution_spec (or the default listing
+    # command); the browser-facing POST /api/cluster/jobs rejects non-empty
+    # argv so structured validation cannot be bypassed with raw commands.
     argv: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     owner_id: str = ""

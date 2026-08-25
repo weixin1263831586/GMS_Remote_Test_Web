@@ -32,7 +32,11 @@ def test_build_command_renders_workspace_init_and_command():
         "parameters_schema": {
             "workspace": {"required": True},
             "lunch_target": {"required": True},
-            "build_command": {"default": "./build.sh -J 8"},
+            "build_command": {
+                "default": "./build.sh -J 8",
+                "validation": "trusted_shell_fragment",
+                "pattern": r"^\./build\.sh ",
+            },
         },
     }
 
@@ -48,6 +52,42 @@ def test_build_command_renders_workspace_init_and_command():
     assert prepared.workspace == "/home/hcq/rk/android"
     assert prepared.init_commands[-1] == "lunch rk3566_rgo-userdebug"
     assert prepared.command == "./build.sh -J 8"
+
+
+def test_standard_parameters_are_shell_quoted_by_default():
+    """含空格的普通参数被 quote，不能改变参数边界或注入元字符。"""
+    server = {"workspace_root": "/srv"}
+    template = {
+        "workspace": "{workspace}",
+        "command": "./build.sh --product {product}",
+        "parameters_schema": {
+            "workspace": {"required": True},
+            "product": {"required": True},
+        },
+    }
+
+    prepared = build_command_from_template(
+        template,
+        server,
+        {"workspace": "/srv/build", "product": "rk3588 userdebug; rm -rf /"},
+    )
+
+    assert prepared.command == "./build.sh --product 'rk3588 userdebug; rm -rf /'"
+
+
+def test_trusted_shell_fragment_requires_pattern_or_choices():
+    """显式声明裸插入片段时必须同时提供 pattern/choices 白名单。"""
+    server = {"workspace_root": "/srv"}
+    template = {
+        "workspace": "/srv/build",
+        "command": "{build_command}",
+        "parameters_schema": {
+            "build_command": {"validation": "trusted_shell_fragment"},
+        },
+    }
+
+    with pytest.raises(BuildExecutionError, match="trusted_shell_fragment requires"):
+        build_command_from_template(template, server, {"build_command": "evil"})
 
 
 def test_build_command_rejects_workspace_escape():

@@ -31,6 +31,9 @@ class ClusterService:
             while not self._watchdog_stop.wait(interval):
                 try:
                     self.list_workers()
+                    self.repository.fail_abandoned_worker_lost_jobs(
+                        self.config.worker_lost_fail_seconds
+                    )
                 except Exception:
                     # The next pass retries; never terminate the watchdog on a
                     # transient SQLite or clock parsing failure.
