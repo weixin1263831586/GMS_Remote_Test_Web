@@ -140,7 +140,7 @@ async def api_status(
     """Read-only probe of the device's override-readiness."""
     if conflict := _read_claim_error(request, device_id):
         return conflict
-    status = await asyncio.to_thread(probe_status, device_id)
+    status = await asyncio.to_thread(probe_status, device_id, _store_for_request(request))
     return success_response(data=_status_dict(status), message="Success")
 
 

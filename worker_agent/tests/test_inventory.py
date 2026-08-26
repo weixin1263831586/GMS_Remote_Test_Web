@@ -18,7 +18,7 @@ def test_detailed_probe_enriches_management_properties_in_one_adb_shell_call():
             return ""
         raise AssertionError(argv)
 
-    with patch("worker_agent.inventory._run", side_effect=run) as runner:
+    with patch("worker_agent.device_actions._run", side_effect=run) as runner:
         devices = probe_devices(include_details=True)
 
     assert devices[0]["properties"] == {
@@ -34,7 +34,7 @@ def test_detailed_probe_enriches_management_properties_in_one_adb_shell_call():
 
 def test_lightweight_probe_skips_detail_shell_call():
     with patch(
-        "worker_agent.inventory._run",
+        "worker_agent.device_actions._run",
         side_effect=[
             "List of devices attached\nABC device product:rk model:Box\n",
             "",
@@ -48,7 +48,7 @@ def test_lightweight_probe_skips_detail_shell_call():
 
 def test_probe_keeps_fastbootd_device_visible():
     with patch(
-        "worker_agent.inventory._run",
+        "worker_agent.device_actions._run",
         side_effect=[
             "List of devices attached\n",
             "FB001\tfastbootd\n",
@@ -66,7 +66,7 @@ def test_probe_keeps_fastbootd_device_visible():
 
 def test_probe_reports_adb_proxy_import_with_source_metadata():
     with patch(
-        "worker_agent.inventory._run",
+        "worker_agent.device_actions._run",
         side_effect=[
             "List of devices attached\nRK3576GMS1 device model:Box\n",
             "",

@@ -336,7 +336,7 @@ for candidate in \
     fi
 done
 
-args=(-display "${display}" -forever -shared -rfbport 5900 -localhost -nopw)
+args=(-display "${display}" -forever -shared -rfbport 5900 -localhost -nopw -threads -noxdamage -wait 5 -defer 5 -clear_all -remap Caps_Lock-None)
 if [[ "${display}" != ":99" && -n "${auth}" && -r "${auth}" ]]; then
     args+=(-auth "${auth}")
 elif [[ "${display}" != ":99" ]]; then

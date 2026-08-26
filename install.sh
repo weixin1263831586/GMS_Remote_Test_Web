@@ -384,6 +384,8 @@ import sys
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 (
     key_path_raw,
@@ -420,9 +422,28 @@ create_private(token_path, secrets.token_urlsafe(48))
 audit_key_path = key_path.parent / "audit_hmac.key"
 webhook_token_path = key_path.parent / "automation-webhook.token"
 metrics_token_path = key_path.parent / "metrics.token"
+configured_skill_key = ""
+if env_path.exists():
+    try:
+        existing_env = json.loads(env_path.read_text(encoding="utf-8"))
+        if isinstance(existing_env, dict):
+            configured_skill_key = str(existing_env.get("GMS_SKILL_SIGNING_KEY_FILE") or "").strip()
+    except (OSError, json.JSONDecodeError):
+        pass
+skill_signing_key_path = Path(configured_skill_key) if configured_skill_key else key_path.parent / "skill-signing-ed25519.pem"
 create_private(audit_key_path, secrets.token_hex(32))
 create_private(webhook_token_path, secrets.token_urlsafe(48))
 create_private(metrics_token_path, secrets.token_urlsafe(48))
+if not skill_signing_key_path.exists():
+    signing_key = Ed25519PrivateKey.generate()
+    create_private(
+        skill_signing_key_path,
+        signing_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("ascii"),
+    )
 token = token_path.read_text(encoding="utf-8").strip()
 
 try:
@@ -440,6 +461,9 @@ if env_path.exists():
             values = {str(k): str(v) for k, v in loaded.items() if isinstance(v, str)}
     except (OSError, json.JSONDecodeError):
         pass
+bootstrap_token = values.get("GMS_BOOTSTRAP_TOKEN", "").strip()
+if len(bootstrap_token) < 32:
+    bootstrap_token = secrets.token_urlsafe(48)
 
 token_raw = {}
 if worker_tokens_path.exists():
@@ -470,6 +494,8 @@ values.update({
     "GMS_AUTOMATION_WEBHOOK_TOKEN": webhook_token_path.read_text(encoding="utf-8").strip(),
     "GMS_AUTOMATION_OWNER_ID": "service-automation",
     "GMS_METRICS_TOKEN": metrics_token_path.read_text(encoding="utf-8").strip(),
+    "GMS_SKILL_SIGNING_KEY_FILE": str(skill_signing_key_path),
+    "GMS_BOOTSTRAP_TOKEN": bootstrap_token,
     "GMS_AUTH_REQUIRED": "true",
     "GMS_SECURE_COOKIES": "true",
     "GMS_ALLOWED_ORIGINS": f"https://{host_ip}:{port},https://localhost:{port}",

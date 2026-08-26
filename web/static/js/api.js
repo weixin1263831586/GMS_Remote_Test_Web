@@ -186,6 +186,17 @@ async function fetchAuthStatus() {
     return response.json();
 }
 
+function runAfterAuthReady(callback) {
+    const invoke = () => {
+        if (state.authReady) callback();
+    };
+    if (state.authReady) {
+        invoke();
+        return;
+    }
+    window.addEventListener('gms:auth-ready', invoke, {once: true});
+}
+
 async function resetElevationForNewBrowserTab(status) {
     const tabKey = 'gms_browser_tab_session_v1';
     try {
@@ -226,18 +237,39 @@ function showAuthGate(setupRequired = false) {
     const title = document.getElementById('auth-title');
     const submit = document.getElementById('auth-submit');
     const displayNameRow = document.getElementById('auth-display-name-row');
+    const bootstrapTokenRow = document.getElementById('auth-bootstrap-token-row');
+    const bootstrapTokenInput = document.getElementById('auth-bootstrap-token');
     const usernameInput = document.getElementById('auth-username');
     const passwordInput = document.getElementById('auth-password');
+    const displayNameInput = document.getElementById('auth-display-name');
     const usernameHelp = document.getElementById('auth-username-help');
     const passwordHelp = document.getElementById('auth-password-help');
     if (title) title.textContent = setupRequired ? '初始化管理员账户' : '登录';
     if (submit) submit.textContent = setupRequired ? '创建管理员并进入' : '登录';
     if (displayNameRow) displayNameRow.style.display = setupRequired ? 'flex' : 'none';
+    if (bootstrapTokenRow) {
+        bootstrapTokenRow.style.display = setupRequired && state.authBootstrapTokenRequired !== false
+            ? 'flex'
+            : 'none';
+    }
+    if (bootstrapTokenInput) {
+        bootstrapTokenInput.required = setupRequired && state.authBootstrapTokenRequired !== false;
+    }
     if (usernameInput) {
         usernameInput.placeholder = setupRequired ? '管理员账号' : '管理员账号，或正在读取客户端身份…';
+        usernameInput.autocomplete = setupRequired ? 'off' : 'username';
+        if (setupRequired && usernameInput.dataset.setupDefaultApplied !== 'true') {
+            usernameInput.value = 'gms';
+            usernameInput.dataset.setupDefaultApplied = 'true';
+            delete usernameInput.dataset.autoFilled;
+        }
     }
     if (passwordInput) {
         passwordInput.placeholder = setupRequired ? '管理员密码' : '管理员密码或客户端 SSH 密码';
+        passwordInput.autocomplete = setupRequired ? 'new-password' : 'current-password';
+    }
+    if (setupRequired && displayNameInput && !displayNameInput.value.trim()) {
+        displayNameInput.value = 'gms';
     }
     if (usernameHelp) {
         usernameHelp.textContent = setupRequired
@@ -423,16 +455,21 @@ async function submitAuthForm() {
     const username = document.getElementById('auth-username')?.value.trim() || '';
     const password = document.getElementById('auth-password')?.value || '';
     const displayName = document.getElementById('auth-display-name')?.value.trim() || '';
+    const bootstrapToken = document.getElementById('auth-bootstrap-token')?.value || '';
     const setupRequired = document.getElementById('auth-gate')?.classList.contains('setup-mode');
     const message = document.getElementById('auth-message');
     const submit = document.getElementById('auth-submit');
     if (message) message.textContent = '';
     if (submit) submit.disabled = true;
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (setupRequired && bootstrapToken) {
+            headers['X-GMS-Bootstrap-Token'] = bootstrapToken;
+        }
         const response = await fetch(setupRequired ? '/api/auth/setup' : '/api/auth/login', {
             method: 'POST',
             credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ username, password, display_name: displayName })
         });
         const result = await response.json().catch(() => ({ success: false, error: '认证响应解析失败' }));
@@ -487,6 +524,9 @@ async function ensureAuthenticatedBeforeAppStart() {
     const status = await resetElevationForNewBrowserTab(await fetchAuthStatus());
     state.authRequired = status.auth_required !== false;
     state.authSetupRequired = Boolean(status.setup_required);
+    state.authBootstrapTokenRequired = typeof status.bootstrap_token_required === 'boolean'
+        ? status.bootstrap_token_required
+        : null;
     if (!status.authenticated) {
         state.currentUser = null;
         state.clientId = null;
@@ -539,6 +579,7 @@ window.showAuthSshdGuide = showAuthSshdGuide;
 window.closeAuthSshdGuide = closeAuthSshdGuide;
 window.submitAuthForm = submitAuthForm;
 window.prefillAuthUsernameFromClient = prefillAuthUsernameFromClient;
+window.runAfterAuthReady = runAfterAuthReady;
 window.logoutCurrentUser = logoutCurrentUser;
 window.applyRoleBasedUiAccess = applyRoleBasedUiAccess;
 window.isPlatformAdmin = isPlatformAdmin;

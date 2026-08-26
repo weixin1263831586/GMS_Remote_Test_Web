@@ -4,8 +4,14 @@ set -euo pipefail
 SKILL_NAME="gms-remote-test"
 DEFAULT_SERVER_URL='__GMS_REMOTE_TEST_SERVER__'
 DEFAULT_DOWNLOAD_URL='__GMS_SKILL_DOWNLOAD_URL__'
+DEFAULT_VERIFY_KEY_B64='__GMS_SKILL_VERIFY_KEY_B64__'
+DEFAULT_SIGNATURE_REQUIRED='__GMS_SKILL_SIGNATURE_REQUIRED__'
 SERVER_URL="${GMS_REMOTE_TEST_SERVER:-$DEFAULT_SERVER_URL}"
 DOWNLOAD_URL="${GMS_SKILL_DOWNLOAD_URL:-$DEFAULT_DOWNLOAD_URL}"
+case "$DEFAULT_VERIFY_KEY_B64" in __GMS_*) DEFAULT_VERIFY_KEY_B64='' ;; esac
+case "$DEFAULT_SIGNATURE_REQUIRED" in __GMS_*) DEFAULT_SIGNATURE_REQUIRED='0' ;; esac
+VERIFY_KEY_B64="${GMS_INSTALL_VERIFY_KEY_B64:-$DEFAULT_VERIFY_KEY_B64}"
+SIGNATURE_REQUIRED="${GMS_INSTALL_REQUIRE_SIGNATURE:-$DEFAULT_SIGNATURE_REQUIRED}"
 # GMS_SKILLS_DIR is the agent-neutral override. Keep the Codex-specific name
 # for backward compatibility with existing installations.
 SKILLS_DIR="${GMS_SKILLS_DIR:-${GMS_CODEX_SKILLS_DIR:-${CODEX_HOME:-${HOME}/.codex}/skills}}"
@@ -35,7 +41,10 @@ command -v curl >/dev/null 2>&1 || fail "需要 curl"
 CURL_ARGS=(-fsSL)
 if [ -n "${GMS_INSTALL_CA_CERT:-}" ]; then
     CURL_ARGS+=(--cacert "$GMS_INSTALL_CA_CERT")
-elif [[ "$DOWNLOAD_URL" == https://* ]] && [ "${GMS_INSTALL_INSECURE:-1}" != "0" ]; then
+elif [[ "$DOWNLOAD_URL" == https://* ]] \
+     && [ "${GMS_INSTALL_INSECURE:-0}" = "1" ]; then
+    # 默认校验 TLS 证书；自签 Controller 请优先使用 GMS_INSTALL_CA_CERT，
+    # 仅在明确接受 MITM 风险时才设置 GMS_INSTALL_INSECURE=1。
     CURL_ARGS+=(-k)
 fi
 
@@ -46,11 +55,106 @@ cleanup() {
 trap cleanup EXIT
 
 ARCHIVE_PATH="${TEMP_DIR}/${SKILL_NAME}.zip"
+HEADERS_PATH="${TEMP_DIR}/download.headers"
 EXTRACT_DIR="${TEMP_DIR}/extract"
 mkdir -p "$EXTRACT_DIR"
 
 info "Downloading ${SKILL_NAME} from ${SERVER_URL}"
-curl "${CURL_ARGS[@]}" "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"
+if ! curl "${CURL_ARGS[@]}" -D "$HEADERS_PATH" "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"; then
+    if [[ "$DOWNLOAD_URL" == https://* ]] \
+        && [ -z "${GMS_INSTALL_CA_CERT:-}" ] \
+        && [ "${GMS_INSTALL_INSECURE:-0}" != "1" ]; then
+        fail "下载失败。若 Controller 使用自签证书，请设置 GMS_INSTALL_CA_CERT=/path/ca.pem，或仅在可控网络内临时使用 GMS_INSTALL_INSECURE=1"
+    fi
+    fail "下载技能包失败: ${DOWNLOAD_URL}"
+fi
+
+# 完整性校验：Controller 在同一响应中返回 X-GMS-SHA256（与响应字节一致，
+# 无二次请求竞态）。此技能包会安装可执行代码，校验失败必须终止。
+verify_archive_sha256() {
+    local expected actual
+    expected="$(
+        awk 'tolower($1)=="x-gms-sha256:" {
+            sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print; exit
+        }' "$HEADERS_PATH" 2>/dev/null || true
+    )"
+    if [ -z "$expected" ]; then
+        if [ "${GMS_INSTALL_SKIP_SHA256:-0}" = "1" ]; then
+            info "警告：响应缺少 X-GMS-SHA256 且 GMS_INSTALL_SKIP_SHA256=1，跳过完整性校验"
+            return 0
+        fi
+        fail "技能包响应缺少 X-GMS-SHA256 校验头（Controller 版本过旧？）。确认可信后可临时设 GMS_INSTALL_SKIP_SHA256=1"
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual="$(sha256sum "$ARCHIVE_PATH" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        actual="$(shasum -a 256 "$ARCHIVE_PATH" | awk '{print $1}')"
+    else
+        fail "缺少 sha256sum/shasum，无法校验技能包"
+    fi
+    [ "$actual" = "$expected" ] \
+        || fail "技能包 SHA-256 校验失败（期望 ${expected}，实际 ${actual}）"
+    info "技能包 SHA-256 校验通过"
+}
+verify_archive_sha256
+
+decode_base64_to_file() {
+    local value="$1" destination="$2"
+    if command -v base64 >/dev/null 2>&1; then
+        printf '%s' "$value" | base64 -d > "$destination" 2>/dev/null
+    elif command -v openssl >/dev/null 2>&1; then
+        printf '%s' "$value" | openssl base64 -d -A > "$destination" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+verify_archive_signature() {
+    local signature algorithm public_key signature_path
+    signature="$(
+        awk 'tolower($1)=="x-gms-signature:" {
+            sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print; exit
+        }' "$HEADERS_PATH" 2>/dev/null || true
+    )"
+    algorithm="$(
+        awk 'tolower($1)=="x-gms-signature-algorithm:" {
+            sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print tolower($0); exit
+        }' "$HEADERS_PATH" 2>/dev/null || true
+    )"
+
+    # A supplied/embedded public key always upgrades signature verification to
+    # mandatory. This prevents a stripping attack from silently downgrading a
+    # signed Controller to hash-only installation.
+    if [ -n "$VERIFY_KEY_B64" ]; then
+        SIGNATURE_REQUIRED=1
+    fi
+    if [ "$SIGNATURE_REQUIRED" = "1" ] && [ -z "$VERIFY_KEY_B64" ]; then
+        fail "已要求技能包签名校验，但未提供 GMS_INSTALL_VERIFY_KEY_B64"
+    fi
+    if [ -z "$signature" ]; then
+        [ "$SIGNATURE_REQUIRED" != "1" ] \
+            || fail "技能包响应缺少 X-GMS-Signature，拒绝降级为仅哈希校验"
+        return 0
+    fi
+    [ "$algorithm" = "ed25519" ] \
+        || fail "不支持的技能包签名算法: ${algorithm:-missing}"
+    [ -n "$VERIFY_KEY_B64" ] \
+        || fail "技能包带有签名，但安装器没有可信 Ed25519 公钥"
+    command -v openssl >/dev/null 2>&1 \
+        || fail "缺少 openssl，无法校验技能包 Ed25519 签名"
+
+    public_key="${TEMP_DIR}/skill-signing-public.pem"
+    signature_path="${TEMP_DIR}/skill-signature.bin"
+    decode_base64_to_file "$VERIFY_KEY_B64" "$public_key" \
+        || fail "技能包 Ed25519 公钥不是有效 Base64"
+    decode_base64_to_file "$signature" "$signature_path" \
+        || fail "技能包签名不是有效 Base64"
+    openssl pkeyutl -verify -pubin -inkey "$public_key" -rawin \
+        -in "$ARCHIVE_PATH" -sigfile "$signature_path" >/dev/null 2>&1 \
+        || fail "技能包 Ed25519 签名校验失败"
+    info "技能包 Ed25519 签名校验通过"
+}
+verify_archive_signature
 
 if command -v python3 >/dev/null 2>&1; then
     python3 - "$ARCHIVE_PATH" "$EXTRACT_DIR" <<'PY'
@@ -180,8 +284,10 @@ fi
     printf 'export GMS_BIN_DIR=%q\n' "$BIN_DIR"
     printf 'export GMS_RUNTIME_BIN_DIR=%q\n' "$RUNTIME_BIN_DIR"
     printf 'export PATH=%q:"$PATH"\n' "$RUNTIME_BIN_DIR"
-    printf 'export GMS_INSTALL_INSECURE=%q\n' "${GMS_INSTALL_INSECURE:-1}"
-    printf 'export GMS_CURL_INSECURE=%q\n' "${GMS_INSTALL_INSECURE:-1}"
+    printf 'export GMS_INSTALL_INSECURE=%q\n' "${GMS_INSTALL_INSECURE:-0}"
+    printf 'export GMS_CURL_INSECURE=%q\n' "${GMS_INSTALL_INSECURE:-0}"
+    printf 'export GMS_INSTALL_VERIFY_KEY_B64=%q\n' "$VERIFY_KEY_B64"
+    printf 'export GMS_INSTALL_REQUIRE_SIGNATURE=%q\n' "$SIGNATURE_REQUIRED"
     if [ -n "${GMS_INSTALL_CA_CERT:-}" ]; then
         printf 'export GMS_INSTALL_CA_CERT=%q\n' "$GMS_INSTALL_CA_CERT"
         printf 'export GMS_CURL_CA_CERT=%q\n' "$GMS_INSTALL_CA_CERT"

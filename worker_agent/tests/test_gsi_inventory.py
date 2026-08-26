@@ -51,12 +51,12 @@ def test_worker_gsi_uses_python_preparation_and_thin_script(tmp_path: Path) -> N
 
     with (
         patch(
-            "worker_agent.inventory.probe_devices",
+            "worker_agent.device_actions.probe_devices",
             return_value=[{"serial": "RK3572GMS1"}],
         ),
-        patch("worker_agent.inventory.FastbootPreparer") as preparer,
+        patch("worker_agent.device_actions.FastbootPreparer") as preparer,
         patch(
-            "worker_agent.inventory.subprocess.run",
+            "worker_agent.device_actions.subprocess.run",
             return_value=completed,
         ) as run,
     ):
@@ -89,12 +89,12 @@ def test_worker_gsi_accepts_vendor_only_image(tmp_path: Path) -> None:
 
     with (
         patch(
-            "worker_agent.inventory.probe_devices",
+            "worker_agent.device_actions.probe_devices",
             return_value=[{"serial": "RK3572GMS1"}],
         ),
-        patch("worker_agent.inventory.FastbootPreparer") as preparer,
+        patch("worker_agent.device_actions.FastbootPreparer") as preparer,
         patch(
-            "worker_agent.inventory.subprocess.run",
+            "worker_agent.device_actions.subprocess.run",
             return_value=subprocess.CompletedProcess([], 0, stdout="done", stderr=""),
         ) as run,
     ):

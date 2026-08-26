@@ -17,7 +17,12 @@ from .access import (
     require_elevated_admin,
     require_role,
 )
-from .request_security import authentication_required, secure_cookies_enabled
+from .request_security import (
+    authentication_required,
+    bootstrap_token_matches,
+    bootstrap_token_required,
+    secure_cookies_enabled,
+)
 from .service import (
     AUTH_COOKIE_NAME,
     ROLE_PERMISSIONS,
@@ -160,6 +165,7 @@ async def auth_status(request: Request):
             "authenticated": user is not None,
             "auth_required": authentication_required(),
             "setup_required": auth_service.setup_required(),
+            "bootstrap_token_required": bootstrap_token_required(),
             "user": user.as_dict() if user else None,
             "elevated": bool(elevated_until),
             "elevated_until": elevated_until,
@@ -221,7 +227,7 @@ async def auth_elevate(request: Request, req: dict):
         issued_session = True
     if not token:
         return error_response("当前会话无效，请重新登录", status_code=401)
-    # 二次认证状态绑定当前认证会话。
+    # 二次认证状态绑定当前认证会话；固定 10 分钟 TTL（可配置）。
     if not auth_service.elevate_session(token, admin):
         return error_response("无法提权当前会话", status_code=400)
 
@@ -242,7 +248,14 @@ async def auth_elevate(request: Request, req: dict):
 
 
 @router.post("/setup")
-async def auth_setup(req: dict):
+async def auth_setup(request: Request, req: dict):
+    # 初始化窗口抢占防护：设置了 GMS_BOOTSTRAP_TOKEN 的部署（生产强制）
+    # 必须携带匹配的 X-GMS-Bootstrap-Token 才能创建首个管理员。
+    if not bootstrap_token_matches(request):
+        return error_response(
+            "初始化令牌无效，请携带正确的 X-GMS-Bootstrap-Token",
+            status_code=403,
+        )
     try:
         user = auth_service.create_initial_admin(
             str(req.get("username", "")),

@@ -1,0 +1,48 @@
+name: Nightly Android Soak
+
+on:
+  schedule:
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-android-soak
+  cancel-in-progress: false
+
+jobs:
+  device-chain:
+    # Provision this label only on the isolated Android/USB-IP lab runner.
+    runs-on: [self-hosted, linux, gms-android-lab]
+    timeout-minutes: 90
+    env:
+      GMS_SOAK_BASE_URL: ${{ secrets.GMS_SOAK_BASE_URL }}
+      GMS_SOAK_USERNAME: ${{ secrets.GMS_SOAK_USERNAME }}
+      GMS_SOAK_PASSWORD: ${{ secrets.GMS_SOAK_PASSWORD }}
+      GMS_SOAK_DEVICE_HOST: ${{ vars.GMS_SOAK_DEVICE_HOST }}
+      GMS_SOAK_WORKER_ID: ${{ vars.GMS_SOAK_WORKER_ID }}
+      GMS_SOAK_SUITE_KEY: ${{ vars.GMS_SOAK_SUITE_KEY }}
+      GMS_SOAK_MODULE: ${{ vars.GMS_SOAK_MODULE }}
+      GMS_SOAK_JOB_TIMEOUT: "3600"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install soak dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify required lab configuration
+        run: |
+          test -n "$GMS_SOAK_BASE_URL"
+          test -n "$GMS_SOAK_USERNAME"
+          test -n "$GMS_SOAK_PASSWORD"
+          test -n "$GMS_SOAK_DEVICE_HOST"
+          test -n "$GMS_SOAK_WORKER_ID"
+
+      - name: Controller → Worker → USB/IP → Tradefed → recovery
+        run: pytest tests/soak/test_device_chain_soak.py -q -s

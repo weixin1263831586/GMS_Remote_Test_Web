@@ -56,6 +56,9 @@ class ReleasePackagingTests(unittest.TestCase):
             "--exclude 'docs/refactor-parity-audit.md'",
             "--exclude 'tools/GMS-Host-Tools/gts-rockchip.json'",
             "Environment=GMS_ENV=production",
+            'bootstrap_token = values.get("GMS_BOOTSTRAP_TOKEN", "").strip()',
+            'bootstrap_token = secrets.token_urlsafe(48)',
+            '"GMS_BOOTSTRAP_TOKEN": bootstrap_token',
             'verify_release_tree.py" "${package_root}',
         ):
             self.assertIn(expected, source)

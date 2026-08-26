@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gerrit 看板</title>
+  <script src="/static/js/utils.js?v=20260601-01"></script>
   <style>
     :root { color-scheme: dark; --bg:#0b0d12; --panel:#131720; --panel2:#191f2b; --border:#2b3342; --text:#e8edf7; --muted:#96a1b5; --primary:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
     * { box-sizing:border-box; }
@@ -264,7 +265,7 @@ let pendingTrendChartKey = '';
 let gerritWorkspaceContext = {};
 let pendingWorkspaceChangeId = '';
 const gerritDashboardRequestGeneration = {personal: 0, department: 0};
-function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const esc = window.escapeHtml;
 async function api(url, options) {
   const r = await fetch(url, {credentials: 'same-origin', cache: 'no-store', ...(options || {})});
   const text = await r.text();

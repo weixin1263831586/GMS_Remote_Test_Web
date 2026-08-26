@@ -61,7 +61,9 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
         # 默认所有参数 shell quote 后再渲染；只有模板作者显式声明
         # trusted_shell_fragment 的完整命令片段才允许裸插入 shell 元字符。
         if validation == "trusted_shell_fragment":
-            # 完整命令片段必须仍然通过 pattern/choices 白名单约束。
+            # 完整命令片段必须仍然通过 pattern/choices 白名单约束；
+            # pattern 最终以 fullmatch 校验，前缀匹配不会放行
+            # "cmd ; malicious" 形式的注入。
             spec_pattern = spec.get("pattern")
             spec_choices = {str(item) for item in spec.get("choices") or []}
             if not (spec_pattern or spec_choices):
@@ -85,7 +87,7 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
         if spec.get("choices") and value and value not in {str(item) for item in spec.get("choices") or []}:
             raise BuildExecutionError(f"invalid choice for parameter: {name}")
         spec_pattern = spec.get("pattern")
-        if spec_pattern and value and not re.match(str(spec_pattern), value):
+        if spec_pattern and value and not re.fullmatch(str(spec_pattern), value):
             raise BuildExecutionError(f"invalid format for parameter: {name}")
         spec_max_length = int(spec.get("max_length") or 0)
         if spec_max_length and len(value) > spec_max_length:

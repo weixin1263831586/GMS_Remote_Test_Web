@@ -14,13 +14,20 @@
     <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
     <script src="/static/js/utils.js?v=20260601-01" defer></script>
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/state.js?v=20260718-anonymous-auth" defer></script>
+    <script src="/static/js/state.js?v=20260826-bootstrap-setup" defer></script>
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
-    <script src="/static/js/workspace-context.js?v=20260825-test-load" defer></script>
+    <script src="/static/js/workspace-context.js?v=20260826-auth-ready" defer></script>
+    <!-- Shell 模块（navigation.js 第二轮拆分）：日志/轮询/通用 UI 反馈，
+         依赖 state.js 与 api.js，必须在 navigation.js 之前加载 -->
+    <script src="/static/js/shell/logging.js?v=20260826-shell-split" defer></script>
+    <script src="/static/js/shell/status-polling.js?v=20260826-shell-split" defer></script>
+    <script src="/static/js/shell/ui-feedback.js?v=20260826-shell-split" defer></script>
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/api.js?v=20260727-auth-account-hint" defer></script>
+    <script src="/static/js/api.js?v=20260826-bootstrap-setup" defer></script>
+    <script src="/static/js/shell/websocket-manager.js?v=20260826-shell-split-2" defer></script>
+    <script src="/static/js/shell/workspace-devices.js?v=20260826-shell-split-2" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260812-click-dismiss" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
@@ -35,9 +42,9 @@
     <script src="/static/js/pages/conversational-agent.js?v=20260813-ai-status" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20260813-task-recovery" defer></script>
-    <script src="/static/js/pages/security-audit.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/security-audit.js?v=20260826-auth-ready" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260825-user-actions" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260826-shell-split-2" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -187,9 +194,11 @@
         // 这样 iframe 的网络请求与剩余资源加载重叠，缩短结构骨架的持续时间。
         document.addEventListener('DOMContentLoaded', function() {
             var earlyPage = window.__targetPage || 'test';
-            if (typeof ensureLazyFrameLoaded === 'function') {
-                ensureLazyFrameLoaded(earlyPage, false);
-            }
+            runAfterAuthReady(function() {
+                if (typeof ensureLazyFrameLoaded === 'function') {
+                    ensureLazyFrameLoaded(earlyPage, false);
+                }
+            });
         }, {once: true});
     </script>
     <style>
@@ -507,6 +516,11 @@
             <div class="auth-row" id="auth-display-name-row" style="display: none;">
                 <label for="auth-display-name">显示名</label>
                 <input id="auth-display-name" name="display_name" type="text" autocomplete="name">
+            </div>
+            <div class="auth-row" id="auth-bootstrap-token-row" style="display: none;">
+                <label for="auth-bootstrap-token">初始化令牌</label>
+                <input id="auth-bootstrap-token" name="bootstrap_token" type="password" autocomplete="off" aria-describedby="auth-bootstrap-token-help">
+                <div class="auth-help" id="auth-bootstrap-token-help">请输入 Controller 的 configs/runtime.json 中 GMS_BOOTSTRAP_TOKEN 的值；令牌只用于创建首个管理员。</div>
             </div>
             <div class="auth-message" id="auth-message"></div>
             <!-- 登录层打开时主动探测本机 SSH 端口；未装 SSHD 时提前提示安装 -->
@@ -5956,12 +5970,13 @@
                 document.getElementById('dcfg-ovr-status-summary').textContent = '';
                 return;
             }
+            const entryCount = s.configured_entry_count ?? s.applied_entry_count;
             const chips = [
                 dcfgOvrChip(s.is_userdebug, `build=${s.build_type || '?'}`),
                 dcfgOvrChip(s.verity_disabled, `verity=${s.verity_disabled ? 'disabled' : 'enforcing'}`),
                 dcfgOvrChip(s.rooted, `root=${s.rooted ? 'yes' : 'no'}`),
                 dcfgOvrChip(s.product_remountable, `/product ${s.product_remountable ? 'rw' : 'ro'}`),
-                dcfgOvrChip(s.overlay_installed, `overlay=${s.overlay_installed ? '已装' : '未装'}${s.applied_entry_count != null ? '(' + s.applied_entry_count + ')' : ''}`),
+                dcfgOvrChip(s.overlay_installed, `overlay=${s.overlay_installed ? '已装' : '未装'}`),
             ].join(' ');
             let warn = '';
             if (!s.is_userdebug) {
@@ -5973,7 +5988,9 @@
             }
             box.innerHTML = chips + warn;
             document.getElementById('dcfg-ovr-status-summary').textContent =
-                s.overlay_installed ? `已应用 ${s.applied_entry_count ?? '?'} 项` : '';
+                entryCount != null
+                    ? `已配置 ${entryCount} 项；Overlay ${s.overlay_installed ? '已安装' : '未安装'}`
+                    : `Overlay ${s.overlay_installed ? '已安装' : '未安装'}`;
         }
 
         async function loadDeviceOverrides(context = dcfgCaptureContext()) {
@@ -11472,8 +11489,8 @@
                 initStyle.remove();
             }
 
-            // 初始化客户端信息
-            initClientInfo();
+            // 认证状态确认后再读取客户端信息，避免首次初始化页面产生 401。
+            runAfterAuthReady(initClientInfo);
 
             if (pageWasSwitchedBeforeLoad && targetPage === currentPage) {
                 return;
@@ -11505,9 +11522,11 @@
 
             // 更新页面标题
             document.title = PAGE_TITLES[targetPage] || 'GMS远程测试';
-            if (typeof recordSecurityPageView === 'function') {
-                recordSecurityPageView(targetPage);
-            }
+            runAfterAuthReady(function() {
+                if (typeof recordSecurityPageView === 'function') {
+                    recordSecurityPageView(targetPage);
+                }
+            });
             runPageInitializers(targetPage);
 
         });
@@ -11715,7 +11734,7 @@
 
             // 初始化拖拽功能
             setTimeout(initSidebarDragDrop, 50);
-            loadSidebarConfigFromBackend();
+            runAfterAuthReady(loadSidebarConfigFromBackend);
 
             // 初始化默认页面的组件（如果默认是 APK 分析页面）
             const defaultPage = localStorage.getItem('gms_current_page') || readCurrentPageCookie() || 'test';

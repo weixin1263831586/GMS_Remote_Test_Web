@@ -16,6 +16,8 @@ const state = {
     currentUser: null,
     authRequired: false,
     authSetupRequired: false,
+    // null 表示后端版本尚未声明；首次初始化时按“需要令牌”安全降级。
+    authBootstrapTokenRequired: null,
     authReady: false,
     // 用户手动关闭登录层后置 true：后台轮询/初始化中的 401 不再自动
     // 弹回登录层（否则刚关闭就被重新拉起）；用户主动操作触发 401 时

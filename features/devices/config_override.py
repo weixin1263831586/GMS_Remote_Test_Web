@@ -4,14 +4,16 @@
 ``/product/overlay`` 并重启设备。
 """
 
+import contextlib
+import fcntl
 import json
 import logging
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import tempfile
+import uuid
 import xml.sax.saxutils as _saxutils
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -19,7 +21,7 @@ from pathlib import Path
 from foundation.config import settings
 
 from .adb_ops import mount_point_is_rw, reboot_with_runner, root_and_remount
-from .config_explorer import _APK_CACHE_DIR, _aapt2_path, _adb_path, _pull_apk, _resolve_package_apk
+from .config_explorer import _aapt2_path, _adb_path, _pull_apk, _resolve_package_apk
 from .network import run_local_shell_command
 
 
@@ -98,6 +100,8 @@ class OverrideStatus:
     product_remountable: bool | None = None
     overlay_installed: bool = False
     overlay_apk_path: str | None = None
+    configured_entry_count: int | None = None
+    # 兼容旧字段名：统计的是 Host Store 保存的配置数，未验证设备 APK 内容。
     applied_entry_count: int | None = None
 
 
@@ -257,21 +261,26 @@ def build_manifest(
     ).format(target=target_package, priority=priority)
 
 
+def resolve_cached_apk(device_id: str | None, package: str) -> str:
+    """Resolve a package to a local cached APK (content-hash keyed).
+
+    Single resolver shared by Config Explorer and Config Override: resolves the
+    on-device APK path, then pulls it through ``_pull_apk`` whose cache key
+    includes device, build fingerprint, path, size and mtime — so a build
+    change never serves a stale APK. Returns the local path.
+    """
+    on_device = _resolve_package_apk(device_id, package)
+    return _pull_apk(device_id, on_device, package)
+
+
 def resolve_symbol_apk(device_id: str | None, target_package: str) -> str:
     """Return a LOCAL path to the symbol APK to pass as ``aapt2 -I``.
 
     The overlay references framework resource ids by name, so aapt2 link needs
-    the target package's APK as the symbol table. For ``android`` this reuses
-    the config_explorer cache (``config_explorer_cache/android.apk``); for other
-    packages it pulls (and caches) the on-device APK.
+    the target package's APK as the symbol table. Delegates to the shared
+    content-hash cache resolver (``resolve_cached_apk``).
     """
-    if target_package == DEFAULT_TARGET_PACKAGE:
-        cached = os.path.join(_APK_CACHE_DIR, f"{target_package}.apk")
-        if os.path.exists(cached) and os.path.getsize(cached) > 0:
-            return cached
-    # Pull (caches under config_explorer_cache/<pkg>.apk via _pull_apk).
-    on_device = _resolve_package_apk(device_id, target_package)
-    return _pull_apk(device_id, on_device, target_package)
+    return resolve_cached_apk(device_id, target_package)
 
 
 def build_overlay_apk(
@@ -341,6 +350,29 @@ class OverrideStore:
         self.owner_id = (owner_id or "").strip()
 
     # -- internals --
+    def _lock_path(self) -> Path:
+        return self.path.with_suffix(self.path.suffix + ".lock")
+
+    @contextlib.contextmanager
+    def _transaction(self):
+        """Serialize load→mutate→save with an exclusive cross-process lock.
+
+        Without this, two concurrent requests can both ``_load()`` the same
+        snapshot and the second ``_save()`` silently drops the first write.
+        The lock file itself is stable (no tmp-swap), so ``flock`` works
+        across processes; the data file is still swapped atomically.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # SIM115: with-block 在 finally 中 flock 释放前不能关闭文件句柄，
+        # 因此这里显式 open/close 并由 try/finally 保证成对。
+        lock_file = open(self._lock_path(), "a+")  # noqa: SIM115
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+
     def _load(self) -> dict:
         if not self.path.exists():
             return {"schema_version": 1, "device_overrides": {}, "owner_overrides": {}}
@@ -357,10 +389,16 @@ class OverrideStore:
 
     def _save(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = str(self.path) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, self.path)
+        # 唯一 tmp 名避免多进程/多协程写同一临时文件互相覆盖。
+        tmp = f"{self.path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, self.path)
+        finally:
+            with contextlib.suppress(OSError):
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
 
     @staticmethod
     def _device_key(device_id: str | None) -> str:
@@ -386,11 +424,12 @@ class OverrideStore:
 
     # -- public API --
     def list_entries(self, device_id: str | None) -> list[OverrideEntry]:
-        data = self._load()
-        block = self._device_root(data).get(self._device_key(device_id))
-        if not block:
-            return []
-        return [OverrideEntry.from_dict(d) for d in block.get("entries", {}).values()]
+        with self._transaction():
+            data = self._load()
+            block = self._device_root(data).get(self._device_key(device_id))
+            if not block:
+                return []
+            return [OverrideEntry.from_dict(d) for d in block.get("entries", {}).values()]
 
     def upsert(self, device_id: str | None, entry: OverrideEntry) -> None:
         """Validate then insert/update by resource name. Raises ValueError on
@@ -398,31 +437,34 @@ class OverrideStore:
         if not entry.resource_name or not _RESOURCE_NAME_RE.match(entry.resource_name):
             raise ValueError(f"非法的资源名: {entry.resource_name!r}")
         entry.value = validate_override(entry.resource_type, entry.value)
-        data = self._load()
-        block = self._device_block(data, device_id)
-        entry.updated_at = _now_iso()
-        block["entries"][entry.resource_name] = entry.to_dict()
-        self._save(data)
+        with self._transaction():
+            data = self._load()
+            block = self._device_block(data, device_id)
+            entry.updated_at = _now_iso()
+            block["entries"][entry.resource_name] = entry.to_dict()
+            self._save(data)
 
     def remove(self, device_id: str | None, resource_name: str) -> bool:
-        data = self._load()
-        block = self._device_root(data).get(self._device_key(device_id))
-        if not block or resource_name not in block.get("entries", {}):
-            return False
-        del block["entries"][resource_name]
-        self._save(data)
-        return True
+        with self._transaction():
+            data = self._load()
+            block = self._device_root(data).get(self._device_key(device_id))
+            if not block or resource_name not in block.get("entries", {}):
+                return False
+            del block["entries"][resource_name]
+            self._save(data)
+            return True
 
     def clear(self, device_id: str | None) -> int:
         """Clear the HOST store for a device (does NOT touch the device)."""
-        data = self._load()
-        block = self._device_root(data).get(self._device_key(device_id))
-        if not block:
-            return 0
-        count = len(block.get("entries", {}))
-        block["entries"] = {}
-        self._save(data)
-        return count
+        with self._transaction():
+            data = self._load()
+            block = self._device_root(data).get(self._device_key(device_id))
+            if not block:
+                return 0
+            count = len(block.get("entries", {}))
+            block["entries"] = {}
+            self._save(data)
+            return count
 
 
 def _now_iso() -> str:
@@ -453,9 +495,18 @@ def _getprop(device_id: str | None, name: str) -> str:
     return out.strip()
 
 
-def probe_status(device_id: str | None) -> OverrideStatus:
-    """Read-only snapshot of override-readiness. Never mutates the device."""
+def probe_status(device_id: str | None, store: OverrideStore | None = None) -> OverrideStatus:
+    """Read-only snapshot of override-readiness. Never mutates the device.
+
+    ``store`` selects whose saved entries are counted; API 调用方必须传入
+    请求者的 store，否则多用户场景会统计到其他用户的配置数。
+    """
     status = OverrideStatus()
+    # Host-side configuration remains available even while the device is
+    # offline; populate it before the reachability probe can return early.
+    entries = (store or OverrideStore()).list_entries(device_id)
+    status.configured_entry_count = len(entries)
+    status.applied_entry_count = status.configured_entry_count
     # Reachability: a cheap getprop.
     build_type = _getprop(device_id, "ro.build.type")
     if not build_type:
@@ -481,10 +532,6 @@ def probe_status(device_id: str | None) -> OverrideStatus:
     if status.overlay_installed:
         status.overlay_apk_path = apk_remote
 
-    # 尽力读取预期生效的覆盖数量。
-    store = OverrideStore()
-    entries = store.list_entries(device_id)
-    status.applied_entry_count = len(entries) if entries else 0
     return status
 
 
@@ -546,11 +593,19 @@ def reboot_device(device_id: str | None) -> ApplyResult:
 
 # Orchestration: apply / revert
 
+def _stage_failed(stage: str, detail: str) -> ApplyResult:
+    return ApplyResult(False, stage, f"{stage} 失败: {detail}")
+
+
 def apply_overrides(
     device_id: str | None,
     store: OverrideStore | None = None,
 ) -> ApplyResult:
-    """从全部已存配置重建 Overlay APK，推送并重启设备。"""
+    """从全部已存配置重建 Overlay APK，推送并重启设备。
+
+    阶段化执行（VALIDATE → BUILD → REMOUNT → MKDIR → PUSH → VERIFY_FILE →
+    CHCON → VERIFY_CONTEXT → REBOOT），每一步失败即返回，不再"假成功"。
+    """
     store = store or OverrideStore()
     entries = store.list_entries(device_id)
     if not entries:
@@ -563,46 +618,80 @@ def apply_overrides(
         except ValueError as exc:
             return ApplyResult(False, "error", f"覆盖项 {e.resource_name} 无效: {exc}")
 
-    # 2. build locally (device untouched on failure).
-    symbol_apk = resolve_symbol_apk(device_id, DEFAULT_TARGET_PACKAGE)
-    work_dir = tempfile.mkdtemp(prefix="rro_build_")
+    # 2. build locally (device untouched on failure). TemporaryDirectory
+    #    guarantees cleanup on both success and failure paths.
+    try:
+        symbol_apk = resolve_symbol_apk(device_id, DEFAULT_TARGET_PACKAGE)
+        with tempfile.TemporaryDirectory(prefix="rro_build_") as work_dir:
+            return _apply_staged(device_id, entries, work_dir, symbol_apk)
+    except Exception as exc:
+        logger.exception("RRO apply failed")
+        return ApplyResult(False, "error", f"应用覆盖失败: {exc}")
+
+
+def _apply_staged(
+    device_id: str | None,
+    entries: list[OverrideEntry],
+    work_dir: str,
+    symbol_apk: str,
+) -> ApplyResult:
     try:
         apk_path = build_overlay_apk(entries, work_dir, symbol_apk)
     except Exception as exc:
         logger.exception("RRO build failed")
-        return ApplyResult(False, "error", f"编译 overlay APK 失败: {exc}")
+        return _stage_failed("error", f"编译 overlay APK 失败: {exc}")
 
     # 3. ensure writable.
     remount = root_and_remount(_run_adb_for_ops, device_id, "/product")
     if not remount.success:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        return ApplyResult(
-            False, "error",
+        return _stage_failed(
+            "remount",
             "无法 remount /product。若 dm-verity 未关闭，请先手动执行一次："
             "`adb disable-verity && adb reboot`（仅一次性，需重启）。"
             f"输出: {remount.remount_output.strip() or remount.root_output.strip()}",
         )
 
-    # Ensure the overlay dir exists (some builds lack it).
-    _run_adb(device_id, f"shell mkdir -p {OVERLAY_DIR}", timeout=10)
+    # 4. mkdir (checked).
+    mkdir_out, mkdir_code = _run_adb(device_id, f"shell mkdir -p {OVERLAY_DIR}", timeout=10)
+    if mkdir_code != 0:
+        return _stage_failed("mkdir", mkdir_out.strip())
 
-    # 4. push + chcon.
+    # 5. push (checked).
     remote = f"{OVERLAY_DIR}/{OVERLAY_APK_NAME}"
     push_out, push_code = _run_adb(
         device_id, f"push {shlex.quote(apk_path)} {shlex.quote(remote)}", timeout=60
     )
     if push_code != 0:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        return ApplyResult(False, "error", f"推送 overlay APK 失败: {push_out.strip()}")
+        return _stage_failed("push", push_out.strip())
 
-    _run_adb(
+    # 6. verify file present with expected size semantics (ls succeeds).
+    ls_out, ls_code = _run_adb(device_id, f"shell ls -l {shlex.quote(remote)}", timeout=10)
+    if ls_code != 0 or "No such file" in ls_out:
+        return _stage_failed("verify_file", ls_out.strip() or "推送后文件不可见")
+
+    # 7. chcon (checked).
+    chcon_out, chcon_code = _run_adb(
         device_id,
         f"shell chcon u:object_r:system_file:s0 {shlex.quote(remote)}",
         timeout=10,
     )
+    if chcon_code != 0:
+        return _stage_failed("chcon", chcon_out.strip())
 
-    # 5. reboot (fire-and-forget). HTTP returns before reconnect.
-    reboot_with_runner(_run_adb_for_ops, device_id, wait_for_online=False)
+    # 8. verify SELinux context actually applied.
+    lsz_out, lsz_code = _run_adb(device_id, f"shell ls -lZ {shlex.quote(remote)}", timeout=10)
+    if lsz_code != 0 or "u:object_r:system_file:s0" not in lsz_out:
+        return _stage_failed("verify_context", lsz_out.strip() or "SELinux context 未生效")
+
+    # 9. reboot. Request only — HTTP returns before reconnect; failure here
+    #    still means the overlay is in place, so report it explicitly.
+    reboot = reboot_with_runner(_run_adb_for_ops, device_id, wait_for_online=False)
+    if not reboot.success:
+        return ApplyResult(
+            False, "reboot",
+            f"overlay 已推送但重启失败: {reboot.output.strip()}（可手动重启设备）",
+            apk_path=remote,
+        )
     return ApplyResult(
         True, "rebooting", "已推送 overlay 并重启设备，约 40 秒后刷新状态。",
         apk_path=remote, rebooting=True,
@@ -618,8 +707,8 @@ def revert_all(
     # 1. ensure writable.
     remount = root_and_remount(_run_adb_for_ops, device_id, "/product")
     if not remount.success:
-        return ApplyResult(
-            False, "error",
+        return _stage_failed(
+            "remount",
             "无法 remount /product。若 dm-verity 未关闭，请先手动执行一次："
             "`adb disable-verity && adb reboot`。"
             f"输出: {remount.remount_output.strip() or remount.root_output.strip()}",
@@ -629,9 +718,13 @@ def revert_all(
     ls_out, ls_code = _run_adb(device_id, f"shell ls {shlex.quote(remote)}", timeout=10)
     installed = ls_code == 0 and "No such file" not in ls_out
     if installed:
-        _run_adb(device_id, f"shell rm -f {shlex.quote(remote)}", timeout=10)
+        rm_out, rm_code = _run_adb(device_id, f"shell rm -f {shlex.quote(remote)}", timeout=10)
+        if rm_code != 0:
+            return _stage_failed("rm", rm_out.strip())
 
-    reboot_with_runner(_run_adb_for_ops, device_id, wait_for_online=False)
+    reboot = reboot_with_runner(_run_adb_for_ops, device_id, wait_for_online=False)
+    if not reboot.success:
+        return ApplyResult(False, "reboot", f"重启失败: {reboot.output.strip()}")
     msg = (
         "已删除 overlay 并重启设备。" if installed
         else "设备上无 overlay 包，已重启以恢复状态。"

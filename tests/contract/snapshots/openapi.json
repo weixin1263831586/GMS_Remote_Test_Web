@@ -5501,6 +5501,16 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_active",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Active",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

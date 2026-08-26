@@ -42,8 +42,12 @@ def read_text(path: str) -> str:
 
 
 def read_all_frontend_js() -> str:
-    """Read navigation.js + all page modules as a single string for content checks."""
+    """Read navigation.js + shell modules + all page modules as one string."""
     parts = [read_text("web/static/js/navigation.js")]
+    shell_dir = Path("web/static/js/shell")
+    if shell_dir.is_dir():
+        for js_file in sorted(shell_dir.glob("*.js")):
+            parts.append(read_text(str(js_file)))
     pages_dir = Path("web/static/js/pages")
     if pages_dir.is_dir():
         for js_file in sorted(pages_dir.glob("*.js")):
@@ -93,13 +97,14 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_host_pages_share_short_lived_cluster_directory(self):
         shell = read_text("web/shell/shell.html")
         navigation = read_text("web/static/js/navigation.js")
+        workspace_devices = read_text("web/static/js/shell/workspace-devices.js")
         terminal_start = shell.index("async function loadTerminalClusterHosts()")
         terminal_end = shell.index("function applyTerminalHost", terminal_start)
 
         self.assertIn("async function loadClusterHostDirectory(force = false)", shell)
         self.assertIn("const directoryHosts = await loadClusterHostDirectory()", shell)
         self.assertNotIn("fetch('/api/cluster/hosts'", shell[terminal_start:terminal_end])
-        self.assertIn("hosts = await window.loadClusterHostDirectory()", navigation)
+        self.assertIn("hosts = await window.loadClusterHostDirectory()", workspace_devices)
 
     def test_page_initialization_is_deduplicated_and_rejections_are_handled(self):
         shell = read_text("web/shell/shell.html")
@@ -112,6 +117,7 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_shell_stops_boot_when_navigation_bundle_is_unavailable(self):
         shell = read_text("web/shell/shell.html")
         navigation = read_text("web/static/js/navigation.js")
+        workspace_devices = read_text("web/static/js/shell/workspace-devices.js")
 
         self.assertIn("window.GmsNavigationReady !== true", shell)
         self.assertTrue(
@@ -143,7 +149,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("const clusterModeReady = initializeClusterMode()", navigation)
         self.assertIn("await Promise.all([clusterModeReady, configReady])", navigation)
         self.assertIn("test-reports.js?v=20260812-stable-surfaces", shell)
-        self.assertIn("navigation.js?v=20260825-user-actions", shell)
+        self.assertIn("navigation.js?v=20260826-shell-split-2", shell)
 
     def test_server_file_browser_uses_resolved_suite_path(self):
         navigation_text = read_all_frontend_js()
@@ -162,6 +168,7 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_main_app_inline_handlers_resolve_to_global_functions(self):
         main_text = read_text("web/shell/shell.html")
         script_paths = list(Path("web/static/js").glob("*.js"))
+        script_paths.extend(Path("web/static/js/shell").glob("*.js"))
         script_paths.extend(Path("web/static/js/pages").glob("*.js"))
         script_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in script_paths)
         combined = main_text + "\n" + script_text
@@ -558,12 +565,13 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_unselectable_devices_stay_selected_but_render_unchecked(self):
         navigation = read_text("web/static/js/navigation.js")
+        workspace_devices = read_text("web/static/js/shell/workspace-devices.js")
         browser = read_text("web/static/js/pages/test-suite-browser.js")
 
         # loadDevices：只从选中集合删除已消失的设备，回填仅按存在性判断；
         # 不可选（占用/状态异常）设备保留勾选状态，恢复可选后自动回选。
-        self.assertIn("if (!currentIds.has(id)) {", navigation)
-        self.assertIn("if (currentIds.has(id)) state.selectedDevices.add(id);", navigation)
+        self.assertIn("if (!currentIds.has(id)) {", workspace_devices)
+        self.assertIn("if (currentIds.has(id)) state.selectedDevices.add(id);", workspace_devices)
         # device_lock_update：被占用不取消勾选，仅由渲染层隐藏勾选。
         self.assertNotIn("state.selectedDevices.delete(deviceId);", navigation)
         self.assertNotIn("syncWorkspaceDeviceSelection", navigation)
@@ -614,6 +622,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("dcfgRequireElevation('撤销设备 RRO 配置覆盖')", main_text)
         self.assertIn("requestElevatedAccess(actionLabel, {allowAnonymousDev: true})", main_text)
         self.assertIn("return apiCall(path + sep + qs", main_text)
+        self.assertIn("`已配置 ${entryCount} 项；Overlay ${", main_text)
+        self.assertNotIn("`已应用 ${entryCount", main_text)
 
     def test_modal_pages_support_escape_close(self):
         for label, paths in [

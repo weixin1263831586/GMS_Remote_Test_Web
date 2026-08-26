@@ -37,7 +37,9 @@ class TestBuildCommandInjectionPrevention(unittest.TestCase):
                 "type": "string",
                 "default": "./build.sh -J 8",
                 "validation": "trusted_shell_fragment",
-                "pattern": r"^\./build\.sh ",
+                # fullmatch 语义：pattern 必须覆盖整个值（允许 build.sh 的
+                # 安全参数字符，拒绝 "; rm -rf /" 等元字符）。
+                "pattern": r"\./build\.sh [A-Za-z0-9 ._/-]*",
                 "choices": ["./build.sh -J 8", "./build.sh -J 16"],
             }
         }

@@ -35,7 +35,8 @@ def test_build_command_renders_workspace_init_and_command():
             "build_command": {
                 "default": "./build.sh -J 8",
                 "validation": "trusted_shell_fragment",
-                "pattern": r"^\./build\.sh ",
+                # fullmatch 语义：需覆盖整个命令片段。
+                "pattern": r"\./build\.sh [A-Za-z0-9 ._/-]*",
             },
         },
     }

@@ -7,7 +7,9 @@ from unittest.mock import patch
 
 from features.test_execution import parse_api, transfers_api
 from features.test_execution.models import (
-    TestParseArgsRequest,
+    TestParseArgsRequest as ParseArgsRequest,
+)
+from features.test_execution.models import (
     TradefedListResultsRequest,
 )
 from features.test_execution.suite_helpers import resolve_suite_reference
@@ -118,7 +120,7 @@ class ParseArgsSuiteReferenceTests(unittest.IsolatedAsyncioTestCase):
             response = await parse_api.parse_test_args(
                 request=None,
                 help=False,
-                req=TestParseArgsRequest(
+                req=ParseArgsRequest(
                     params=["DEVICE-1", "CTS", "CtsCamera", "android-cts-17_r1"]
                 ),
             )
@@ -139,7 +141,7 @@ class ParseArgsSuiteReferenceTests(unittest.IsolatedAsyncioTestCase):
             response = await parse_api.parse_test_args(
                 request=None,
                 help=False,
-                req=TestParseArgsRequest(
+                req=ParseArgsRequest(
                     params=["DEVICE-1", "CTS", "android-cts-99_r9"]
                 ),
             )

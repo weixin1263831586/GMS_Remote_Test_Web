@@ -74,7 +74,7 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "features"]
+testpaths = ["tests", "features", "worker_agent/tests"]
 pythonpath = ["."]
 norecursedirs = ["rk-skills", "skills", "tools", "data", ".worktrees"]
 addopts = ["-p", "no:xonsh"]

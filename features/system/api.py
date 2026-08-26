@@ -1,6 +1,7 @@
 """System router - WebSocket, health check, docs, help, skills download, root page."""
 
 import asyncio
+import hashlib
 import html
 import json
 import logging
@@ -22,6 +23,10 @@ from fastapi.responses import (
 from features.auth import AUTH_COOKIE_NAME, auth_service
 from features.system.api_docs_list import API_DOCS_LIST
 from features.system.state import global_state
+from features.system.skill_archive_signing import (
+    sign_skill_archive,
+    skill_verify_key_b64,
+)
 from features.system.terminal_auxiliary import (
     handle_tradefed_list_results,
     refresh_devices_websocket,
@@ -192,7 +197,30 @@ code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"
 
-    excluded_headers = {
+    # 请求头白名单：仅将 Assistant 公共 API 所需的平台会话凭证转发给
+    # 已配置的内部 Assistant 上游；其它代理路径仍不转发认证信息。
+    forwarded_request_headers = {
+        "accept",
+        "accept-language",
+        "content-type",
+        "user-agent",
+        "x-request-id",
+        "x-trace-id",
+    }
+    request_headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() in forwarded_request_headers
+    }
+    if path.startswith("api/public/agents/"):
+        for credential in ("cookie", "authorization"):
+            value = request.headers.get(credential)
+            if value:
+                request_headers[credential.title()] = value
+    request_headers["Host"] = urlparse(upstream).netloc
+
+    # 响应头黑名单：除跳板/缓存类头外，必须剥离会话写入与服务器指纹。
+    excluded_response_headers = {
         "connection",
         "content-encoding",
         "content-length",
@@ -200,23 +228,18 @@ code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
         "date",
         "etag",
         "expires",
-        "host",
         "keep-alive",
         "last-modified",
         "proxy-authenticate",
-        "proxy-authorization",
         "server",
+        "set-cookie",
         "te",
         "trailer",
         "transfer-encoding",
         "upgrade",
+        "www-authenticate",
+        "x-frame-options",
     }
-    request_headers = {
-        key: value
-        for key, value in request.headers.items()
-        if key.lower() not in excluded_headers
-    }
-    request_headers["Host"] = urlparse(upstream).netloc
 
     try:
         timeout = aiohttp.ClientTimeout(total=60)
@@ -232,7 +255,7 @@ code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
             response_headers = {
                 key: value
                 for key, value in upstream_response.headers.items()
-                if key.lower() not in excluded_headers
+                if key.lower() not in excluded_response_headers
             }
 
             if upstream_response.status in {301, 302, 303, 307, 308}:
@@ -257,10 +280,16 @@ code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
                 media_type=content_type.split(";")[0] if content_type else None,
                 headers=response_headers,
             )
-    except Exception as e:
-        logger.error("[GMS_ASSISTANT_PROXY] 代理失败 %s: %s", upstream_url, e, exc_info=True)
+    except Exception:
+        # 详细异常只写服务端日志；前端只拿到通用错误与 request_id，
+        # 避免把内部连接细节（地址/超时/证书错误）泄漏给浏览器。
+        logger.exception("[GMS_ASSISTANT_PROXY] 代理失败 %s", upstream_url)
         return JSONResponse(
-            content={"success": False, "error": f"GMS助手代理失败: {e}"},
+            content={
+                "success": False,
+                "error": "GMS助手服务暂不可用",
+                "request_id": getattr(request.state, "request_id", None),
+            },
             status_code=502,
         )
 
@@ -400,12 +429,24 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
 
         zip_data, _file_count = result
 
+        # 与本次响应字节严格一致的完整性哈希：安装器用它校验下载，
+        # 防止传输损坏/代理篡改（配合默认开启的 TLS 证书校验）。
+        zip_sha256 = hashlib.sha256(zip_data).hexdigest()
+        zip_signature = sign_skill_archive(zip_data)
+        headers = {
+            "Content-Disposition": f'attachment; filename="{zip_filename}"',
+            "X-GMS-SHA256": zip_sha256,
+        }
+        if zip_signature:
+            headers.update({
+                "X-GMS-Signature": zip_signature,
+                "X-GMS-Signature-Algorithm": "ed25519",
+            })
+
         return Response(
             content=zip_data,
             media_type="application/zip",
-            headers={
-                "Content-Disposition": f"attachment; filename=\"{zip_filename}\""
-            }
+            headers=headers,
         )
 
     except Exception as e:
@@ -438,6 +479,7 @@ async def download_skill_installer(request: Request):
         f"{server_url}/api/system/skills?"
         f"skill_name={quote('gms-remote-test')}"
     )
+    verify_key_b64 = skill_verify_key_b64()
 
     def shell_literal(value: str) -> str:
         return value.replace("'", "'\"'\"'")
@@ -448,6 +490,12 @@ async def download_skill_installer(request: Request):
     ).replace(
         "__GMS_SKILL_DOWNLOAD_URL__",
         shell_literal(download_url),
+    ).replace(
+        "__GMS_SKILL_VERIFY_KEY_B64__",
+        shell_literal(verify_key_b64),
+    ).replace(
+        "__GMS_SKILL_SIGNATURE_REQUIRED__",
+        "1" if verify_key_b64 else "0",
     )
     return Response(
         content=content,

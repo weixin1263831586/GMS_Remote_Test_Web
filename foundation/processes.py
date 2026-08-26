@@ -16,6 +16,41 @@ def command_reports_running(output: str | None) -> bool:
     return any(line.strip() == 'RUNNING' for line in (output or '').splitlines())
 
 
+def run_local_command(
+    argv: list[str], timeout: int = 30
+) -> tuple[str, str, int]:
+    """Run a local command from an argv list (no shell interpretation).
+
+    Preferred over :func:`run_local_shell_command`: argv form has no shell
+    metacharacter surface, so callers cannot accidentally introduce injection
+    via unquoted dynamic values.
+    """
+    process = None
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        stdout, stderr = process.communicate(timeout=timeout)
+        return stdout, stderr, process.returncode
+    except subprocess.TimeoutExpired:
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except Exception as exc:
+                logger.warning("Failed to kill timed out command process group: %s", exc)
+            with contextlib.suppress(Exception):
+                process.communicate(timeout=1)
+        return "", "Command timed out", -1
+    except Exception as exc:
+        return "", str(exc), -1
+
+
 def run_local_shell_command(command: str, timeout: int = 30) -> tuple[str, str, int]:
     """Run a local shell command and return stdout, stderr, and exit code.
 

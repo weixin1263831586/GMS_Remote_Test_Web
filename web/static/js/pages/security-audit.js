@@ -1,7 +1,7 @@
 // ==================== Security Audit ====================
 
 function recordSecurityPageView(pageName) {
-    if (!pageName) return;
+    if (!pageName || !state.authReady) return;
     fetch('/api/security-audit/page-view', {
         method: 'POST',
         headers: {

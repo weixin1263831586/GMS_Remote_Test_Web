@@ -22,6 +22,7 @@
     const ready = new Promise(resolve => { resolveReady = resolve; });
     let resolveClusterStatusReady;
     const clusterStatusReady = new Promise(resolve => { resolveClusterStatusReady = resolve; });
+    let initializePromise = null;
 
     function normalize(raw) {
         const next = {...DEFAULT_CONTEXT, ...(raw || {})};
@@ -176,7 +177,21 @@
     }
 
     async function initialize() {
+        if (initializePromise) return initializePromise;
+        initializePromise = initializeFromServer();
+        return initializePromise;
+    }
+
+    async function initializeFromServer() {
         let clusterStatus = null;
+        if (window.state?.authRequired && !window.state?.authReady) {
+            resolveClusterStatusReady(clusterStatus);
+            revision += 1;
+            resolveReady(snapshot());
+            window.dispatchEvent(new CustomEvent('gms:workspace-context-ready', {detail: {context: snapshot()}}));
+            broadcast();
+            return snapshot();
+        }
         try {
             const [response, clusterResponse] = await Promise.all([
                 fetch('/api/users/workspace-context', {cache: 'no-store'}),
@@ -244,5 +259,9 @@
         loadClusterWorkers, loadInitialTestData,
         localWorkerId: () => localWorkerId
     });
-    initialize();
+    if (window.state?.authReady) {
+        initialize();
+    } else {
+        window.addEventListener('gms:auth-ready', initialize, {once: true});
+    }
 })();

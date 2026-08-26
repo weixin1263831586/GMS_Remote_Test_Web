@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from features.devices import config_explorer as ce
 from features.devices import config_override as co
 from features.devices.config_override import (
     OverrideEntry,
@@ -229,6 +230,33 @@ class TestStore(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.upsert("d", OverrideEntry("config/foo", "bool", "true"))
 
+    def test_concurrent_upserts_no_lost_update(self):
+        """Two concurrent writers must both survive (flock serialization)."""
+        import threading
+
+        for i in range(8):
+            self.store.upsert("d", OverrideEntry(f"config_item{i}", "bool", "true"))
+        writers = []
+
+        def write_many(prefix: str) -> None:
+            store = OverrideStore(self.path)
+            for i in range(10):
+                store.upsert("d", OverrideEntry(f"{prefix}_item{i}", "bool", "true"))
+
+        for prefix in ("a", "b", "c", "d"):
+            t = threading.Thread(target=write_many, args=(prefix,))
+            writers.append(t)
+            t.start()
+        for t in writers:
+            t.join()
+
+        names = {e.resource_name for e in self.store.list_entries("d")}
+        for prefix in ("a", "b", "c", "d"):
+            for i in range(10):
+                self.assertIn(f"{prefix}_item{i}", names)
+        # 8 原有 + 4×10 并发写入，一个都不能丢。
+        self.assertEqual(len(names), 8 + 40)
+
 
 # build_overlay_apk (real aapt2 if available, else skipped)
 
@@ -245,7 +273,7 @@ def _subprocess_run(cmd):
 @unittest.skipUnless(_shutil_which("aapt2"), "aapt2 not on PATH")
 class TestBuildApk(unittest.TestCase):
     def _framework_apk(self):
-        cached = os.path.join(co._APK_CACHE_DIR, "android.apk")
+        cached = os.path.join(ce._APK_CACHE_DIR, "android.apk")
         return cached if os.path.exists(cached) else None
 
     def test_build_real_apk(self):
@@ -268,11 +296,15 @@ class TestBuildApk(unittest.TestCase):
 
 class TestProbeStatus(unittest.TestCase):
     def test_unreachable_device(self):
+        store = OverrideStore(tempfile.mktemp())
+        store.upsert("none", OverrideEntry("config_foo", "bool", "true"))
         with patch.object(co, "run_local_shell_command") as m:
             m.return_value = ("", "", 1)  # getprop fails
-            status = co.probe_status("none")
+            status = co.probe_status("none", store)
         self.assertFalse(status.reachable)
         self.assertIsNone(status.build_type)
+        self.assertEqual(status.configured_entry_count, 1)
+        self.assertEqual(status.applied_entry_count, 1)
 
     def test_userdebug_with_overlay(self):
         seen_cmds = []
@@ -355,10 +387,20 @@ class TestApply(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.stage, "validated")
 
+    def test_apply_symbol_resolution_failure_is_reported(self):
+        """APK resolution failures must return a structured result, not HTTP 500."""
+        store = OverrideStore(tempfile.mktemp())
+        store.upsert("dev", OverrideEntry("config_foo", "bool", "true"))
+        with patch.object(co, "resolve_symbol_apk", side_effect=RuntimeError("adb pull failed")):
+            result = co.apply_overrides("dev", store)
+        self.assertFalse(result.success)
+        self.assertEqual(result.stage, "error")
+        self.assertIn("adb pull failed", result.message)
+
     def test_apply_reboots_on_success(self):
         store = OverrideStore(tempfile.mktemp())
         store.upsert("dev", OverrideEntry("config_defaultBrowser", "string", "com.test.verify"))
-        fw = os.path.join(co._APK_CACHE_DIR, "android.apk")
+        fw = os.path.join(ce._APK_CACHE_DIR, "android.apk")
         if not (os.path.exists(fw) and _shutil_which("aapt2")):
             self.skipTest("needs cached framework-res.apk + aapt2")
         workdir_used = {}
@@ -378,17 +420,49 @@ class TestApply(unittest.TestCase):
                 return ("pushed\n", "", 0)
             if "chcon" in cmd:
                 return ("", "", 0)
+            if "ls -lZ" in cmd:
+                # SELinux context verification must see the expected label.
+                return ("-rw-r--r-- root root u:object_r:system_file:s0 "
+                        "/product/overlay/GmsConfigOverrides.apk\n", "", 0)
             if "reboot" in cmd:
                 return ("", "", 0)
             return ("", "", 0)
-        with patch.object(co, "build_overlay_apk", side_effect=fake_build), \
+        with patch.object(co, "resolve_symbol_apk", return_value=fw), \
+             patch.object(co, "build_overlay_apk", side_effect=fake_build), \
              patch.object(co, "run_local_shell_command", side_effect=matcher), \
              patch("features.devices.adb_ops.time.sleep", return_value=None):
             result = co.apply_overrides("dev", store)
         self.assertTrue(result.success)
         self.assertTrue(result.rebooting)
         self.assertEqual(result.stage, "rebooting")
-        self.assertTrue(os.path.exists(workdir_used["apk"]))
+        # TemporaryDirectory cleans up; the staged APK must be gone afterwards.
+        self.assertFalse(os.path.exists(workdir_used["apk"]))
+
+    def test_apply_chcon_failure_reported(self):
+        """chcon failing must NOT report success (no more fake-success)."""
+        store = OverrideStore(tempfile.mktemp())
+        store.upsert("dev", OverrideEntry("config_foo", "bool", "true"))
+        fake_apk = tempfile.NamedTemporaryFile(suffix=".apk", delete=False)  # noqa: SIM115
+        fake_apk.write(b"placeholder")
+        fake_apk.close()
+        self.addCleanup(os.unlink, fake_apk.name)
+        def matcher(cmd, timeout=15):
+            if "root" in cmd:
+                return ("restarting adbd as root\n", "", 0)
+            if "remount /product" in cmd:
+                return ("Remount succeeded\n", "", 0)
+            if "chcon" in cmd:
+                return ("chcon: failed\n", "", 1)
+            if "ls -lZ" in cmd:
+                return ("-rw-r--r-- root root u:object_r:system_data_file:s0 apk\n", "", 0)
+            return ("", "", 0)
+        with patch.object(co, "resolve_symbol_apk", return_value=fake_apk.name), \
+             patch.object(co, "build_overlay_apk", return_value=fake_apk.name), \
+             patch.object(co, "run_local_shell_command", side_effect=matcher), \
+             patch("features.devices.adb_ops.time.sleep", return_value=None):
+            result = co.apply_overrides("dev", store)
+        self.assertFalse(result.success)
+        self.assertEqual(result.stage, "chcon")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,57 @@
+name: CI
+
+# 门禁流程（对应 2026-08 代码审核第五节的最低门禁建议）：
+# lint → 全量单测（含 worker_agent）→ 安全/架构测试 → 前端完整性 → 发布打包校验
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: lint-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Unit + feature + worker_agent tests
+        run: pytest tests features worker_agent/tests -q
+
+      - name: Security and architecture tests
+        run: |
+          pytest tests/architecture -q
+          pytest features/auth/tests/test_security_boundary.py \
+                 features/auth/tests/test_auth_api.py \
+                 features/system/tests/test_skill_installer.py \
+                 -q
+
+      - name: Frontend integrity
+        run: pytest tests/test_frontend_integrity.py -q
+
+      - name: Release tree validation
+        run: pytest tests/test_release_packaging.py -q
+
+      - name: Soak tests (self-skipping without real devices)
+        run: pytest tests/soak -q
+
+# 真机链路由 nightly-soak.yml 在隔离实验台 runner 上执行。
