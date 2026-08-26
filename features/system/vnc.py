@@ -52,6 +52,20 @@ LOCAL_X11VNC_PATTERN = x11vnc_port_pattern()
 X11VNC_DISPLAY_PATTERN = x11vnc_display_pattern()
 WEBSOCKIFY_PATTERN = websockify_pattern()
 
+# x11vnc 性能参数：合成型窗口管理器（GNOME/KDE）下 XDamage 事件风暴会让
+# x11vnc 卡顿甚至停顿，改用快速轮询检测变化；降低 wait/defer 提高刷新率
+# 并降低延迟；-threads 让每个客户端的输入/输出在独立线程处理。
+X11VNC_PERF_FLAGS = ('-threads', '-noxdamage', '-wait', '5', '-defer', '5')
+X11VNC_PERF_ARGS = ' '.join(X11VNC_PERF_FLAGS)
+
+# x11vnc 大小写参数：远端 X 的 CapsLock 状态会把客户端发来的按键大小写
+# 反向（noVNC 的按键 keysym 已携带本地大小写，远端再叠加一次 caps 会双
+# 重取反），而 x11vnc 不支持 QEMU LED 状态回传，noVNC 的自动纠偏不会触
+# 发。-clear_all 在启动时清除远端锁定状态，-remap Caps_Lock-None 阻止
+# VNC 客户端翻转远端 caps，使大小写完全跟随客户端本地键盘状态。
+X11VNC_KEYMAP_FLAGS = ('-clear_all', '-remap', 'Caps_Lock-None')
+X11VNC_KEYMAP_ARGS = ' '.join(X11VNC_KEYMAP_FLAGS)
+
 
 
 
@@ -179,6 +193,8 @@ class VNCManager:
                 '-rfbport', str(VNC_PORT),
                 '-localhost',
                 '-nopw',
+                *X11VNC_PERF_FLAGS,
+                *X11VNC_KEYMAP_FLAGS,
                 '-bg'
             ]
             subprocess.run(x11vnc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
@@ -385,7 +401,8 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     f"export DISPLAY={VNC_DISPLAY} && "
                     f"export XAUTHORITY=/home/{quoted_ubuntu_user}/.Xauthority && "
                     f"x11vnc -display {VNC_DISPLAY} -forever -shared "
-                    f"-rfbport {VNC_PORT} {auth_param} -bg -o ~/logs/x11vnc.log"
+                    f"-rfbport {VNC_PORT} {auth_param} {X11VNC_PERF_ARGS} {X11VNC_KEYMAP_ARGS} "
+                    f"-bg -o ~/logs/x11vnc.log"
                 )
                 _, x11_stderr, x11_code = self.ssh_manager.execute_command(
                     ssh, x11vnc_cmd, timeout=15

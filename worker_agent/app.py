@@ -992,7 +992,9 @@ class WorkerAgent:
 
 
 def main():
-    WorkerAgent(WorkerConfig.load()).run()
+    """Backward-compatible shim; deployment should use ``worker_agent.entrypoint``."""
+    from .entrypoint import main as entrypoint_main
+    entrypoint_main()
 
 
 if __name__ == "__main__":

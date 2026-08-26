@@ -634,6 +634,7 @@ def create_command(
 def _mount_subrouters() -> None:
     """Mount split routers after this module's shared dependencies exist."""
     global device_action
+    from .artifacts_api import router as artifacts_router
     from .commands_api import router as commands_router
     from .deployment_api import router as deployment_router
     from .device_actions_api import device_action as device_action
@@ -652,6 +653,7 @@ def _mount_subrouters() -> None:
     router.include_router(commands_router)
     router.include_router(transfers_router)
     router.include_router(jobs_router)
+    router.include_router(artifacts_router)
     router.include_router(job_control_router)
     router.include_router(timeline_router)
     router.include_router(suite_library_router)

@@ -368,9 +368,7 @@ async function sendReportAnalysisEmail() {
     if (!to || !to.trim()) return;
     const cc = (prompt('抄送（可留空，多个用逗号或分号分隔）：', '') || '').trim();
 
-    const esc = (s) => String(s == null ? '' : s)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+    const esc = escapeHtml;
 
     const s = data.summary || {};
     const d = data.details || {};

@@ -30,6 +30,9 @@ SESSION_ABSOLUTE_HOURS = int(
     os.getenv("GMS_SESSION_ABSOLUTE_HOURS", str(DEFAULT_SESSION_ABSOLUTE_HOURS))
 )
 SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "2"))
+# 管理员二次认证（提权）使用固定时长，不做滑动续期：普通会话的轮询
+# 会不断刷新 idle 超时，若提权跟随会话生命周期，会在整个工作日内保持。
+ELEVATION_MINUTES = int(os.getenv("GMS_ADMIN_ELEVATION_MINUTES", "10"))
 # 二次认证状态绑定当前会话，并随会话失效或重新登录清除。
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "user": frozenset({
@@ -447,9 +450,9 @@ class AuthService(AuthRateLimitMixin):
         Called after the caller has re-authenticated with admin credentials
         (verified via :meth:`authenticate`). The caller may be an ordinary
         client: the client keeps its own identity while this session records
-        which admin verified it. By default the grant stays valid for the
-        remainder of the session's lifetime and clears when the session
-        expires or is revoked.
+        which admin verified it. The grant uses a fixed short TTL
+        (``GMS_ADMIN_ELEVATION_MINUTES``, default 10 minutes) and clears when
+        the session expires or is revoked; it is never sliding-refreshed.
         """
         if admin_user.role != "admin":
             return False
@@ -472,11 +475,11 @@ class AuthService(AuthRateLimitMixin):
             ).fetchone()
             if not row:
                 return False
-            if minutes is not None:
-                elevated_until = now + timedelta(minutes=minutes)
-            else:
-                # Elevation lasts for the rest of the session's absolute lifetime.
-                elevated_until = _from_iso(str(row["expires_at"]))
+            # 固定短 TTL，且不超过会话本身的绝对有效期。
+            elevated_until = min(
+                now + timedelta(minutes=max(1, minutes or ELEVATION_MINUTES)),
+                _from_iso(str(row["expires_at"])),
+            )
             cur = conn.execute(
                 """
                 UPDATE platform_sessions

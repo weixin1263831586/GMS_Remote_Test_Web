@@ -54,6 +54,7 @@ class SecurityBoundaryTests(unittest.TestCase):
                 "GMS_METRICS_TOKEN": "metrics-token-for-security-tests-000001",
                 "GMS_AUTOMATION_WEBHOOK_TOKEN": "webhook-token-for-security-tests-00001",
                 "GMS_AUTOMATION_OWNER_ID": "service-automation",
+                "GMS_BOOTSTRAP_TOKEN": "bootstrap-token-for-security-tests-0001",
                 "GMS_CLUSTER_CONFIG": str(self.cluster_config_path),
                 "GMS_WORKER_TOKENS_FILE": str(self.tokens_path),
                 "GMS_ALLOWED_ORIGINS": "https://testserver",
@@ -76,7 +77,10 @@ class SecurityBoundaryTests(unittest.TestCase):
     def _setup_admin(self):
         return self.client.post(
             "/api/auth/setup",
-            headers={"Origin": "https://testserver"},
+            headers={
+                "Origin": "https://testserver",
+                "X-GMS-Bootstrap-Token": "bootstrap-token-for-security-tests-0001",
+            },
             json={"username": "admin", "password": "strongpass1"},
         )
 
@@ -92,6 +96,7 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertNotIn("password", client_identity.text.lower())
         self.assertEqual(status.status_code, 200)
         self.assertTrue(status.json()["auth_required"])
+        self.assertTrue(status.json()["bootstrap_token_required"])
         self.assertEqual(health.status_code, 200)
         self.assertEqual(installer.status_code, 200)
         self.assertIn(
@@ -149,6 +154,42 @@ class SecurityBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(blocked_write.status_code, 403)
         self.assertEqual(blocked_write.json()["error"], "Request origin is not allowed")
+
+    def test_production_setup_requires_bootstrap_token(self):
+        """设置了 GMS_BOOTSTRAP_TOKEN 后，缺失/错误 token 的 setup 被拒绝。"""
+        self.client.close()
+        self.environment.stop()
+        with patch.dict(
+            "os.environ",
+            {"GMS_BOOTSTRAP_TOKEN": "bootstrap-token-for-security-tests-0001"},
+        ):
+            self.client = TestClient(create_app(), base_url="https://testserver")
+            missing = self.client.post(
+                "/api/auth/setup",
+                headers={"Origin": "https://testserver"},
+                json={"username": "admin", "password": "strongpass1"},
+            )
+            self.assertEqual(missing.status_code, 403)
+
+            wrong = self.client.post(
+                "/api/auth/setup",
+                headers={
+                    "Origin": "https://testserver",
+                    "X-GMS-Bootstrap-Token": "wrong-token-value",
+                },
+                json={"username": "admin", "password": "strongpass1"},
+            )
+            self.assertEqual(wrong.status_code, 403)
+
+            ok = self.client.post(
+                "/api/auth/setup",
+                headers={
+                    "Origin": "https://testserver",
+                    "X-GMS-Bootstrap-Token": "bootstrap-token-for-security-tests-0001",
+                },
+                json={"username": "admin", "password": "strongpass1"},
+            )
+            self.assertEqual(ok.status_code, 200)
 
     def test_default_cors_does_not_reflect_untrusted_origin(self):
         response = self.client.options(
@@ -212,7 +253,10 @@ class SecurityBoundaryTests(unittest.TestCase):
             self.client = TestClient(create_app(), base_url="https://testserver")
             response = self.client.post(
                 "/api/auth/setup",
-                headers={"Origin": "https://testserver"},
+                headers={
+                    "Origin": "https://testserver",
+                    "X-GMS-Bootstrap-Token": "bootstrap-token-for-security-tests-0001",
+                },
                 json={"username": "admin", "password": "strongpass1"},
             )
 
@@ -236,6 +280,11 @@ class SecurityBoundaryTests(unittest.TestCase):
             create_app()
 
     def test_production_rejects_missing_service_tokens(self):
+        with (
+            patch.dict("os.environ", {"GMS_BOOTSTRAP_TOKEN": ""}),
+            self.assertRaisesRegex(RuntimeError, "GMS_BOOTSTRAP_TOKEN"),
+        ):
+            create_app()
         with (
             patch.dict("os.environ", {"GMS_METRICS_TOKEN": ""}),
             self.assertRaisesRegex(RuntimeError, "GMS_METRICS_TOKEN"),

@@ -31,6 +31,11 @@ def validate_production_security_configuration() -> None:
         raise RuntimeError("GMS_AUTH_REQUIRED cannot be disabled in production")
     if not secure_cookies_enabled():
         raise RuntimeError("GMS_SECURE_COOKIES cannot be disabled in production")
+    if len(os.getenv("GMS_BOOTSTRAP_TOKEN", "").strip()) < 32:
+        raise RuntimeError(
+            "GMS_BOOTSTRAP_TOKEN must be set (>= 32 chars) in production "
+            "to protect first-run admin setup"
+        )
 
     validate_secret_configuration()
     security_audit_logger.validate_configuration()

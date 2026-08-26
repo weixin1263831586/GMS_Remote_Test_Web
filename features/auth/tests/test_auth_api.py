@@ -213,6 +213,7 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(status.status_code, 200)
         self.assertFalse(status.json()["authenticated"])
         self.assertTrue(status.json()["setup_required"])
+        self.assertFalse(status.json()["bootstrap_token_required"])
         with sqlite3.connect(auth_service.db_path) as conn:
             tables = {
                 row[0]
@@ -377,7 +378,7 @@ class AuthApiTests(unittest.TestCase):
         self.assertTrue(resp.json()["detail"]["elevation_required"])
 
     def test_admin_elevation_lasts_for_session_and_clears_on_new_session(self):
-        # 二次认证仅在当前会话有效。
+        # 二次认证仅在当前会话有效，且为固定短 TTL（默认 10 分钟）。
         self.client.post(
             "/api/auth/setup",
             json={"username": "admin", "password": "strongpass1"},
@@ -391,7 +392,9 @@ class AuthApiTests(unittest.TestCase):
         status = self.client.get("/api/auth/status").json()
         self.assertTrue(status["elevated"])
         elevated_until = datetime.fromisoformat(status["elevated_until"])
-        self.assertGreater(elevated_until, datetime.now(timezone.utc) + timedelta(hours=1))
+        now = datetime.now(timezone.utc)
+        self.assertGreater(elevated_until, now)
+        self.assertLessEqual(elevated_until, now + timedelta(minutes=10))
 
         # A new session (logout + login) starts non-elevated.
         self.client.post("/api/auth/logout")

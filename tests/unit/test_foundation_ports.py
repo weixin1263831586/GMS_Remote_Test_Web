@@ -12,8 +12,8 @@ import unittest
 from unittest.mock import MagicMock
 
 from bootstrap import dependencies
-from foundation import automation_port, cluster_port
 from features.redmine import api as redmine_api
+from foundation import automation_port, cluster_port
 
 
 class ClusterPortConfigureSemanticsTests(unittest.TestCase):

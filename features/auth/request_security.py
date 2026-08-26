@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 from urllib.parse import urlsplit
 
@@ -28,6 +29,25 @@ def authentication_required() -> bool:
 def secure_cookies_enabled() -> bool:
     environment = os.getenv("GMS_ENV", "development").strip().lower()
     return env_flag("GMS_SECURE_COOKIES", environment == "production")
+
+
+def bootstrap_token() -> str:
+    """一次性初始化令牌；设置后 /api/auth/setup 必须携带它。"""
+    return os.getenv("GMS_BOOTSTRAP_TOKEN", "").strip()
+
+
+def bootstrap_token_required() -> bool:
+    """Return whether first-run setup must supply the bootstrap token."""
+    return bool(bootstrap_token())
+
+
+def bootstrap_token_matches(connection: HTTPConnection) -> bool:
+    """Constant-time comparison of the X-GMS-Bootstrap-Token header."""
+    expected = bootstrap_token()
+    if not expected:
+        return True
+    supplied = str(connection.headers.get("x-gms-bootstrap-token") or "")
+    return hmac.compare_digest(expected, supplied)
 
 
 def _normalized_origin(value: str) -> str:

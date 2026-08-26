@@ -75,6 +75,8 @@ class VNCManagerTests(unittest.TestCase):
         self.assertIn("pgrep -f -- 'websockify.*6080'", joined)
         self.assertIn("export XAUTHORITY=/home/'test user'/.Xauthority", joined)
         self.assertIn("x11vnc -display :0 -forever -shared -rfbport 5900", joined)
+        self.assertIn("-threads -noxdamage -wait 5 -defer 5", joined)
+        self.assertIn("-clear_all -remap Caps_Lock-None", joined)
         self.assertIn("./utils/websockify/run --web /opt/noVNC 6080 localhost:5900", joined)
         self.assertIn("cd /opt/noVNC", joined)
         self.assertIn("mkdir -p ~/logs ~/.vnc", joined)

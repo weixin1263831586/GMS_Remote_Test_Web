@@ -332,7 +332,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; base-uri 'self'; object-src 'none'; "
             "frame-ancestors 'self'; frame-src 'self'; form-action 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
             "font-src 'self' data:; connect-src 'self' https: ws: wss:; "
             "media-src 'self' blob:; worker-src 'self' blob:"

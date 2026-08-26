@@ -29,8 +29,8 @@ def test_aapt2_path_accepts_configured_worker_binary(tmp_path):
 def test_device_action_strips_worker_namespace_and_uses_argv():
     probe = [{"serial": "ABC", "state": "available"}]
     completed = subprocess.CompletedProcess([], 0, stdout="rebooting\n", stderr="")
-    with patch("worker_agent.inventory.probe_devices", return_value=probe), patch(
-        "worker_agent.inventory.subprocess.run", return_value=completed
+    with patch("worker_agent.device_actions.probe_devices", return_value=probe), patch(
+        "worker_agent.device_actions.subprocess.run", return_value=completed
     ) as run:
         result = execute_device_action("reboot_bootloader", ["worker-246:ABC"])
     assert result["summary"] == {"total": 1, "success": 1, "failed": 0}
@@ -39,7 +39,7 @@ def test_device_action_strips_worker_namespace_and_uses_argv():
 
 
 def test_device_action_rejects_device_not_attached_to_worker():
-    with patch("worker_agent.inventory.probe_devices", return_value=[]):
+    with patch("worker_agent.device_actions.probe_devices", return_value=[]):
         try:
             execute_device_action("reboot", ["worker-246:OTHER"])
         except ValueError as exc:
@@ -51,10 +51,10 @@ def test_device_action_rejects_device_not_attached_to_worker():
 def test_usbip_action_uses_required_native_executor():
     expected = {"attached_busids": ["1-2"]}
     with patch(
-        "worker_agent.inventory.resolve_native_tool",
+        "worker_agent.device_actions.resolve_native_tool",
         return_value="/opt/gms/gms-usbip-control",
     ), patch(
-        "worker_agent.inventory.execute_external_transport",
+        "worker_agent.device_actions.execute_external_transport",
         return_value=expected,
     ) as execute:
         result = execute_usbip_action(
@@ -77,7 +77,7 @@ def test_usbip_action_uses_required_native_executor():
 
 
 def test_usbip_action_rejects_shell_metacharacters_before_native_execution():
-    with patch("worker_agent.inventory.execute_external_transport") as execute:
+    with patch("worker_agent.device_actions.execute_external_transport") as execute:
         try:
             execute_usbip_action("attach", "192.0.2.10;touch", ["1-2"])
         except ValueError as exc:
@@ -89,8 +89,8 @@ def test_usbip_action_rejects_shell_metacharacters_before_native_execution():
 def test_wifi_action_passes_credentials_as_argv_without_shell_interpolation():
     probe = [{"serial": "ABC", "state": "available"}]
     completed = subprocess.CompletedProcess([], 0, stdout="ok", stderr="")
-    with patch("worker_agent.inventory.probe_devices", return_value=probe), patch(
-        "worker_agent.inventory.subprocess.run", return_value=completed
+    with patch("worker_agent.device_actions.probe_devices", return_value=probe), patch(
+        "worker_agent.device_actions.subprocess.run", return_value=completed
     ) as run:
         result = execute_device_action("wifi", ["worker-246:ABC"], {
             "ssid": "lab wifi; touch /tmp/no", "password": "p a$s",
@@ -106,10 +106,10 @@ def test_wifi_action_passes_credentials_as_argv_without_shell_interpolation():
 def test_scrcpy_action_is_scoped_to_serial_and_starts_detached_process():
     probe = [{"serial": "ABC", "state": "available"}]
     process = type("Process", (), {"pid": 1234})()
-    with patch("worker_agent.inventory.probe_devices", return_value=probe), patch(
-        "worker_agent.inventory.shutil.which", return_value="/usr/bin/scrcpy"
-    ), patch("worker_agent.inventory.Path.iterdir", return_value=[]), patch(
-        "worker_agent.inventory.subprocess.Popen", return_value=process
+    with patch("worker_agent.device_actions.probe_devices", return_value=probe), patch(
+        "worker_agent.device_actions.shutil.which", return_value="/usr/bin/scrcpy"
+    ), patch("worker_agent.device_actions.Path.iterdir", return_value=[]), patch(
+        "worker_agent.device_actions.subprocess.Popen", return_value=process
     ) as popen:
         result = execute_device_action("scrcpy_start", ["worker-246:ABC"], {"display": ":1"})
     argv = popen.call_args.args[0]
@@ -122,8 +122,8 @@ def test_scrcpy_action_is_scoped_to_serial_and_starts_detached_process():
 def test_screenshot_action_returns_png_data_url():
     probe = [{"serial": "ABC", "state": "available"}]
     completed = subprocess.CompletedProcess([], 0, stdout=b"\x89PNG\r\n", stderr=b"")
-    with patch("worker_agent.inventory.probe_devices", return_value=probe), patch(
-        "worker_agent.inventory.subprocess.run", return_value=completed
+    with patch("worker_agent.device_actions.probe_devices", return_value=probe), patch(
+        "worker_agent.device_actions.subprocess.run", return_value=completed
     ) as run:
         result = execute_device_action("screenshot", ["worker-246:ABC"])
     assert result["serial"] == "ABC"
@@ -166,7 +166,7 @@ def test_suite_download_streams_into_worker_suite_root(tmp_path):
     root.mkdir()
     config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
                           suite_roots=[root], data_root=tmp_path / "data")
-    with patch("worker_agent.inventory.urllib.request.urlopen", return_value=io.BytesIO(b"archive")):
+    with patch("worker_agent.suite_actions.urllib.request.urlopen", return_value=io.BytesIO(b"archive")):
         result = execute_suite_action(config, {
             "action": "download_url", "url": "https://example.test/android-cts-17_r1.zip"
         })
@@ -179,7 +179,7 @@ def test_suite_download_preserves_explicit_original_filename(tmp_path):
     root.mkdir()
     config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
                           suite_roots=[root], data_root=tmp_path / "data")
-    with patch("worker_agent.inventory.urllib.request.urlopen", return_value=io.BytesIO(b"sts")):
+    with patch("worker_agent.suite_actions.urllib.request.urlopen", return_value=io.BytesIO(b"sts")):
         result = execute_suite_action(config, {
             "action": "download_url", "url": "https://controller/suite-123.zip",
             "filename": "android-sts-17_sts-r52-linux-arm64.zip",
@@ -200,7 +200,7 @@ def test_controller_suite_download_sends_worker_token(tmp_path):
         data_root=tmp_path / "data",
     )
     with patch(
-        "worker_agent.inventory.urllib.request.urlopen",
+        "worker_agent.suite_actions.urllib.request.urlopen",
         return_value=io.BytesIO(b"suite"),
     ) as opened:
         execute_suite_action(
@@ -228,7 +228,7 @@ def test_controller_suite_download_routes_browser_alias_through_controller(tmp_p
         data_root=tmp_path / "data",
     )
     with patch(
-        "worker_agent.inventory.urllib.request.urlopen",
+        "worker_agent.suite_actions.urllib.request.urlopen",
         return_value=io.BytesIO(b"suite"),
     ) as opened:
         execute_suite_action(
@@ -259,7 +259,7 @@ def test_external_suite_download_does_not_send_worker_token(tmp_path):
         data_root=tmp_path / "data",
     )
     with patch(
-        "worker_agent.inventory.urllib.request.urlopen",
+        "worker_agent.suite_actions.urllib.request.urlopen",
         return_value=io.BytesIO(b"suite"),
     ) as opened:
         execute_suite_action(
@@ -382,7 +382,7 @@ def test_suite_download_rejects_truncated_archive(tmp_path):
     root.mkdir()
     config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
                           suite_roots=[root], data_root=tmp_path / "data")
-    with patch("worker_agent.inventory.urllib.request.urlopen",
+    with patch("worker_agent.suite_actions.urllib.request.urlopen",
                return_value=_TruncatedResponse(b"PK-header-only", 1000)):
         try:
             execute_suite_action(config, {
@@ -500,9 +500,9 @@ def test_firmware_flash_requires_worker_staging_and_exactly_one_loader(tmp_path)
         subprocess.CompletedProcess([], 0, stdout="Download Firmware Success", stderr=""),
     ]
     with patch.dict("os.environ", {"GMS_WORKER_UPGRADE_TOOL": str(tool)}), patch(
-        "worker_agent.inventory.probe_devices", return_value=[{"serial": "ABC"}]
-    ), patch("worker_agent.inventory.time.sleep"), patch(
-        "worker_agent.inventory.subprocess.run", side_effect=responses
+        "worker_agent.device_actions.probe_devices", return_value=[{"serial": "ABC"}]
+    ), patch("worker_agent.device_actions.time.sleep"), patch(
+        "worker_agent.device_actions.subprocess.run", side_effect=responses
     ) as run:
         result = flash_firmware(config, image, ["worker-246:ABC"])
     assert result["success"] is True

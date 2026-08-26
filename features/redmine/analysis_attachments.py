@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 import tempfile
 import zipfile
 from datetime import datetime
@@ -169,10 +170,15 @@ class AttachmentAnalysisMixin:
                 "parsed": False,
                 "error": "report analyzer is not configured",
             }
-        analyzer = self.report_analyzer_factory(
-            temp_dir=tempfile.mkdtemp(prefix="redmine_agent_report_")
-        )
-        result = analyzer.analyze_file(path)
+        # mkdtemp 的目录只作为 analyzer 的 workspace 父目录；analyzer 的
+        # finally 只清理它自己创建的 workspace，不清理传入的 temp_dir，
+        # 因此这里必须显式清理，否则每次附件分析都会在 /tmp 泄漏一个目录。
+        staging_dir = tempfile.mkdtemp(prefix="redmine_agent_report_")
+        try:
+            analyzer = self.report_analyzer_factory(temp_dir=staging_dir)
+            result = analyzer.analyze_file(path)
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
         if not result:
             return {"filename": os.path.basename(path), "failures": [], "summary": {}, "details": {}, "parsed": False}
         failures = []

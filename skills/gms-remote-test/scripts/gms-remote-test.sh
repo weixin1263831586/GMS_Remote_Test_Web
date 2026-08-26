@@ -83,13 +83,14 @@ CURL_EXIT_SSL_CERT=60
 GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/session.cookies}"
 CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
 
-# Local deployments commonly use a self-signed HTTPS certificate. Keep curl
-# usable by default, while allowing callers to provide a real CA bundle.
+# Local deployments commonly use a self-signed HTTPS certificate. Fail
+# closed by default; provide GMS_CURL_CA_CERT for a real CA bundle or set
+# GMS_CURL_INSECURE=1 only for a controlled self-signed deployment.
 CURL_TLS_ARGS=()
 if [[ "$SERVER_URL" == https://* ]]; then
     if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
         CURL_TLS_ARGS=(--cacert "$GMS_CURL_CA_CERT")
-    elif [ "${GMS_CURL_INSECURE:-1}" != "0" ]; then
+    elif [ "${GMS_CURL_INSECURE:-0}" = "1" ]; then
         CURL_TLS_ARGS=(-k)
     fi
 fi
@@ -101,7 +102,7 @@ _refresh_transport_config() {
     if [[ "$SERVER_URL" == https://* ]]; then
         if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
             CURL_TLS_ARGS=(--cacert "$GMS_CURL_CA_CERT")
-        elif [ "${GMS_CURL_INSECURE:-1}" != "0" ]; then
+        elif [ "${GMS_CURL_INSECURE:-0}" = "1" ]; then
             CURL_TLS_ARGS=(-k)
         fi
     fi
@@ -2213,7 +2214,7 @@ gms-rt-system-update() {
         error "Skill installer not found: $installer"
         return "$GMS_RT_EXIT_OPERATION"
     }
-    GMS_INSTALL_INSECURE="${GMS_CURL_INSECURE:-${GMS_INSTALL_INSECURE:-1}}" \
+    GMS_INSTALL_INSECURE="${GMS_CURL_INSECURE:-${GMS_INSTALL_INSECURE:-0}}" \
         bash "$installer"
 }
 
