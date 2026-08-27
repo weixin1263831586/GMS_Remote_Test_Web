@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import base64
+import hashlib
 import json
 import os
 import re
@@ -309,6 +309,37 @@ class SkillArchiveIntegrityTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0, result.stdout)
         return result
+
+
+class InstallerEndpointHostTests(unittest.TestCase):
+    """Controller 渲染 install.sh 时必须拒绝可疑 Host（3d1e089 后新增防护）。"""
+
+    def _installer(self, host: str):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from features.system.api import router
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app, base_url="http://placeholder")
+        return client.get(
+            "/api/system/skills/install.sh", headers={"Host": host}
+        )
+
+    def test_normal_hosts_render_installer(self):
+        for host in ("172.16.14.233:5001", "gms.example.local", "[::1]:5001"):
+            with self.subTest(host=host):
+                response = self._installer(host)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("GMS_REMOTE_TEST_SERVER", response.text)
+
+    def test_shell_metacharacter_host_is_rejected(self):
+        for host in ("evil'; id; '", "a b", "h/../../../etc", "h?x=1", "h#f"):
+            with self.subTest(host=host):
+                response = self._installer(host)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("服务地址", response.json()["error"])
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ RUN_HOME="$(readlink -f "$2")"
 HOST_TOOLS="${PROJECT_ROOT}/tools/GMS-Host-Tools"
 SOFTWARE_ROOT="${RUN_HOME}/Software"
 
+"${PROJECT_ROOT}/scripts/prepare_gms_host_tools.sh" "${PROJECT_ROOT}"
+
 [[ -f "${PROJECT_ROOT}/app.py" ]] || {
     echo "Invalid project root: ${PROJECT_ROOT}" >&2
     exit 2
@@ -60,8 +62,10 @@ install -m 755 "${HOST_TOOLS}/verify.sh" \
 install -m 644 "${HOST_TOOLS}/README.md" \
     "${SOFTWARE_ROOT}/GMS-Host-Tools/README.md"
 
-credential="${GMS_GTS_CREDENTIAL_FILE:-${HOST_TOOLS}/gts-rockchip.json}"
-if [[ -f "${credential}" ]]; then
+# Credentials never come from the repository tree (they are untracked and
+# forbidden in Git); the operator must supply GMS_GTS_CREDENTIAL_FILE.
+credential="${GMS_GTS_CREDENTIAL_FILE:-}"
+if [[ -n "${credential}" && -f "${credential}" ]]; then
     install -m 600 "${credential}" "${SOFTWARE_ROOT}/gts-rockchip.json"
 elif [[ ! -f "${SOFTWARE_ROOT}/gts-rockchip.json" ]]; then
     echo "GTS credential is not configured" >&2

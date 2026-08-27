@@ -96,8 +96,13 @@ class ConfigManager(ConfigPersistenceMixin):
 
         self.base_dir = base_dir
         self.project_root = Path(base_dir).resolve().parent
-        # 配置文件位于 configs 目录。
+        # 配置文件位于 configs 目录。真实 config.json 属于本机部署数据
+        # （不入库）；缺失时回退到随源码携带的 config.example.json，
+        # 保证全新 checkout / CI 可直接启动。
         self.config_path = os.path.join(base_dir, '..', 'configs', 'config.json')
+        self.config_fallback_path = os.path.join(
+            base_dir, '..', 'configs', 'config.example.json'
+        )
         self.runtime_config_path = str(runtime_config_path(self.project_root))
 
         # 缓存相关
@@ -136,7 +141,12 @@ class ConfigManager(ConfigPersistenceMixin):
             return False
 
         try:
-            static_mtime = os.path.getmtime(self.config_path)
+            static_path = (
+                self.config_path
+                if os.path.isfile(self.config_path)
+                else getattr(self, 'config_fallback_path', self.config_path)
+            )
+            static_mtime = os.path.getmtime(static_path)
             try:
                 runtime_mtime = os.path.getmtime(self.runtime_config_path)
             except OSError:
@@ -157,7 +167,11 @@ class ConfigManager(ConfigPersistenceMixin):
     def _load_and_merge_config(self) -> dict[str, Any]:
         """Load static config and overlay runtime overrides, returning the merged dict."""
         try:
-            self._static_mtime = os.path.getmtime(self.config_path)
+            self._static_mtime = os.path.getmtime(
+                self.config_path
+                if os.path.isfile(self.config_path)
+                else getattr(self, 'config_fallback_path', self.config_path)
+            )
             try:
                 self._runtime_mtime = os.path.getmtime(self.runtime_config_path)
             except OSError:
@@ -236,9 +250,18 @@ class ConfigManager(ConfigPersistenceMixin):
         return ai_config.get('enabled', False)
 
     def _load_static_config(self) -> dict[str, Any]:
-        """Load and validate the static config from disk (placeholders expanded)."""
+        """Load and validate the static config from disk (placeholders expanded).
+
+        Falls back to configs/config.example.json when the deployment-local
+        configs/config.json does not exist (fresh checkout / CI)."""
+        path = self.config_path
+        if not os.path.isfile(path):
+            path = getattr(self, 'config_fallback_path', '')
+            if not path or not os.path.isfile(path):
+                logger.warning(f"Config file not found: {self.config_path}")
+                return {}
         try:
-            with open(self.config_path, encoding='utf-8') as f:
+            with open(path, encoding='utf-8') as f:
                 config = json.load(f)
 
                 config_copy = self._replace_placeholders(config)
@@ -248,7 +271,7 @@ class ConfigManager(ConfigPersistenceMixin):
                 return config_copy
 
         except FileNotFoundError:
-            logger.warning(f"Config file not found: {self.config_path}")
+            logger.warning(f"Config file not found: {path}")
             return {}
         except Exception as e:
             logger.error(f"Error loading static config: {e}")

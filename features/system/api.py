@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlsplit
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -22,11 +22,11 @@ from fastapi.responses import (
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
 from features.system.api_docs_list import API_DOCS_LIST
-from features.system.state import global_state
 from features.system.skill_archive_signing import (
     sign_skill_archive,
     skill_verify_key_b64,
 )
+from features.system.state import global_state
 from features.system.terminal_auxiliary import (
     handle_tradefed_list_results,
     refresh_devices_websocket,
@@ -100,6 +100,15 @@ def _gms_assistant_upstream() -> str:
     config = config_manager.load_config()
     external = config.get("external_services") or {}
     return str(external.get("gms_assistant_url") or "").strip().rstrip("/")
+
+
+def _gms_assistant_api_key() -> str:
+    """Return the server-side API key used by the Assistant upstream."""
+    env_key = str(os.getenv("GMS_ASSISTANT_API_KEY") or "").strip()
+    if env_key:
+        return env_key
+    external = config_manager.load_config().get("external_services", {})
+    return str(external.get("gms_assistant_api_key") or "").strip()
 
 
 # ==================== Root Page ====================
@@ -217,6 +226,9 @@ code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
             value = request.headers.get(credential)
             if value:
                 request_headers[credential.title()] = value
+        assistant_api_key = _gms_assistant_api_key()
+        if assistant_api_key:
+            request_headers["X-API-Key"] = assistant_api_key
     request_headers["Host"] = urlparse(upstream).netloc
 
     # 响应头黑名单：除跳板/缓存类头外，必须剥离会话写入与服务器指纹。
@@ -475,6 +487,24 @@ async def download_skill_installer(request: Request):
         return error_response("技能安装脚本不可用", status_code=500)
 
     server_url = str(request.base_url).rstrip("/")
+    # base_url 直接反映 Host 头（反代配置不当时可被外部控制）。模板把它嵌进
+    # 安装器脚本，值会流向 curl 的下载地址与 CLI 的 API_BASE——虽然经过
+    # shell 引号转义不会执行，但会让安装器指向攻击者主机。这里校验
+    # scheme 与 hostname/port 字符集，拒绝携带 shell 元字符的值。
+    parsed_base = urlsplit(server_url)
+    base_host = parsed_base.hostname or ""
+    if (
+        parsed_base.scheme not in {"http", "https"}
+        or parsed_base.path not in {"", "/"}
+        or parsed_base.query
+        or parsed_base.fragment
+        or parsed_base.username
+        or parsed_base.password
+        or not re.fullmatch(r"[A-Za-z0-9.\-_:]+", base_host)
+        or not (parsed_base.port is None or 0 < parsed_base.port < 65536)
+    ):
+        logger.warning("[SKILLS_INSTALLER] rejected suspicious base_url: %r", server_url)
+        return error_response("无法从当前请求确定有效的服务地址", status_code=400)
     download_url = (
         f"{server_url}/api/system/skills?"
         f"skill_name={quote('gms-remote-test')}"

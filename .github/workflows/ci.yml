@@ -1,7 +1,7 @@
 name: CI
 
-# 门禁流程（对应 2026-08 代码审核第五节的最低门禁建议）：
-# lint → 全量单测（含 worker_agent）→ 安全/架构测试 → 前端完整性 → 发布打包校验
+# 门禁流程（对应 2026-08 代码审核第五节的最低门禁建议 + 2026-08-27 凭据泄漏评审）：
+# secret scan → lint → 全量单测（含 worker_agent）→ 安全/架构测试 → 前端完整性 → 发布打包校验
 on:
   push:
     branches: [main]
@@ -24,6 +24,14 @@ jobs:
         with:
           python-version: "3.10"
           cache: pip
+
+      - name: Tracked-file secret scan
+        run: python scripts/check_source_secrets.py .
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: |

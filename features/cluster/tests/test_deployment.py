@@ -513,9 +513,8 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
 
 
 class GtsCredentialResolutionTests(unittest.TestCase):
-    """The deployment API must keep working when GMS_GTS_CREDENTIAL_FILE is
-    unset, falling back to the bundled tools/GMS-Host-Tools/gts-rockchip.json
-    instead of failing the deployment with HTTP 503."""
+    """GTS credentials must be supplied via GMS_GTS_CREDENTIAL_FILE; the
+    repository tree never ships a fallback credential."""
 
     def _write_service_account(self, path: Path) -> None:
         path.write_text(
@@ -544,23 +543,13 @@ class GtsCredentialResolutionTests(unittest.TestCase):
                 result = _resolve_gts_credential()
             self.assertEqual(result, explicit.resolve())
 
-    def test_falls_back_to_bundled_credential_when_env_unset(self):
+    def test_missing_env_is_rejected_even_if_repo_file_exists(self):
         from features.cluster.deployment_api import _resolve_gts_credential
 
-        with tempfile.TemporaryDirectory() as directory:
-            project_root = Path(directory)
-            bundled = (
-                project_root
-                / "tools"
-                / "GMS-Host-Tools"
-                / "gts-rockchip.json"
-            )
-            bundled.parent.mkdir(parents=True)
-            self._write_service_account(bundled)
-            with patch.dict("os.environ", {}, clear=False):
-                os.environ.pop("GMS_GTS_CREDENTIAL_FILE", None)
-                result = _resolve_gts_credential(project_root=project_root)
-            self.assertEqual(result, bundled.resolve())
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("GMS_GTS_CREDENTIAL_FILE", None)
+            with self.assertRaises(ValueError):
+                _resolve_gts_credential()
 
 
 if __name__ == "__main__":

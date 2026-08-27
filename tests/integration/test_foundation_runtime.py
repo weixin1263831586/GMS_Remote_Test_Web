@@ -100,6 +100,23 @@ class FoundationConfigTests(unittest.TestCase):
         manager = ConfigManager(project_root=root)
         self.assertIn('redmine', manager.load_config(force_reload=True))
 
+    def test_example_config_fallback_keeps_cache_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = root / 'configs'
+            configs.mkdir()
+            (root / 'foundation').mkdir()
+            (configs / 'config.example.json').write_text(
+                '{"ubuntu_user": "operator"}', encoding='utf-8'
+            )
+            manager = ConfigManager(project_root=root)
+
+            self.assertEqual(
+                manager.load_config(force_reload=True)['ubuntu_user'],
+                'operator',
+            )
+            self.assertTrue(manager._is_cache_valid(time.time()))
+
 
 class TTLCacheTests(unittest.TestCase):
     def test_expired_value_is_removed(self):

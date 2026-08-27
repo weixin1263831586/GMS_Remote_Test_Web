@@ -27,6 +27,8 @@ DENIED_NAMES = {
     "redmine_user_map.json",
     "user_tools_data.json",
     "worker_tokens.json",
+    "gts-rockchip.json",
+    "platform-tools-gms-linux.zip",
 }
 DENIED_COMPONENTS = {
     ".agents",
@@ -40,6 +42,7 @@ DENIED_COMPONENTS = {
     "scripts_local",
     "superpowers",
     "tests",
+    "jdk-11",
 }
 DENIED_SUFFIXES = {".map"}
 INTERNAL_DOCUMENTS = {

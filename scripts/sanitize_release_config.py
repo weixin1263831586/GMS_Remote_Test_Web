@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -131,7 +132,27 @@ def sanitize_named_config(path: Path, raw: Any) -> Any:
     return sanitize_value(raw)
 
 
+def _example_for(path: Path) -> Path | None:
+    """Tracked example twin for a deployment-local config (2026-08-27 audit)."""
+    examples = {
+        "config.json": "config.example.json",
+        "automation_profiles.json": "automation_profiles.example.json",
+        "build_servers.json": "build_servers.example.json",
+    }
+    example = examples.get(path.name)
+    return path.with_name(example) if example else None
+
+
 def sanitize_file(path: Path) -> None:
+    if not path.is_file():
+        # 真实 config.json 等已不入库；打包全新 checkout 时从 example 起步，
+        # 让发布包仍带完整脱敏默认值。
+        example = _example_for(path)
+        if example and example.is_file():
+            shutil.copyfile(example, path)
+            sanitize_file(path)
+            return
+        raise SystemExit(f"required config is missing: {path}")
     raw = json.loads(path.read_text(encoding="utf-8") or "{}")
     sanitized = sanitize_named_config(path, raw)
     temporary = path.with_name(f".{path.name}.tmp")

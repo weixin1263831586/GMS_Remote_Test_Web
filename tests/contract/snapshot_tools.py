@@ -84,7 +84,9 @@ def ui_source_groups() -> dict[str, list[Path]]:
     return {
         'shell': [
             ROOT / 'web/shell/shell.html',
+            # 2026-08 shell 拆分后，页面内联 HTML/JS 也来自 web/static/js/shell/。
             *sorted((ROOT / 'web/static/js').glob('*.js')),
+            *sorted((ROOT / 'web/static/js/shell').glob('*.js')),
         ],
         'redmine-agent': sorted(redmine_ui.glob('*.*')),
         'gerrit-dashboard': [ROOT / 'features/gerrit/ui/page.html'],

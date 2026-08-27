@@ -3746,7 +3746,7 @@
             );
         }
 
-        async function resolveWorkspaceVncUrl(host) {
+        async function resolveWorkspaceVncUrl(host, elevationRetried = false) {
             const workerId = host.worker_id || (host.id === 'default' ? workspaceLocalWorkerId() : '');
             if (!workerId) {
                 throw new Error('该主机不在服务端授权目录中');
@@ -3767,6 +3767,10 @@
                     return url;
                 } catch (error) {
                     debugLog('[Desktop] Local VNC status/start failed:', error);
+                    if (error?.status === 403 && !elevationRetried) {
+                        const granted = await ensureTerminalElevation(true, '打开主机桌面', '主机桌面');
+                        if (granted) return resolveWorkspaceVncUrl(host, true);
+                    }
                     if (error?.status === 401 || /Authentication required/i.test(error?.message || '')) {
                         showAuthGate(false);
                     }

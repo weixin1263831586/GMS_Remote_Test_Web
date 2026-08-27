@@ -49,6 +49,21 @@ _ADBPROXY_PACKAGE_RELATIVE = Path(
 )
 
 
+def _prepare_gms_host_tools(project_root: Path) -> None:
+    """Fetch missing deployment-only host tools with mandatory checksums."""
+    script = project_root / "scripts/prepare_gms_host_tools.sh"
+    completed = subprocess.run(
+        [str(script), str(project_root)],
+        capture_output=True,
+        text=True,
+        timeout=900,
+        check=False,
+    )
+    if completed.returncode != 0:
+        message = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(message or "GMS Host Tools preparation failed")
+
+
 def _local_software_service_name() -> str:
     base = os.getenv("GMS_SERVICE_NAME", "gms-web-app").strip()
     if not re.fullmatch(r"[A-Za-z0-9_.@-]+", base):
@@ -222,26 +237,20 @@ def _validate_gts_credential(path: Path) -> Path:
     return resolved
 
 
-def _resolve_gts_credential(project_root: Path | None = None) -> Path:
-    """Resolve the GTS service-account file, falling back to the bundled copy.
+def _resolve_gts_credential() -> Path:
+    """Resolve the operator-supplied GTS service-account file.
 
-    Operators normally point GMS_GTS_CREDENTIAL_FILE at a repository-external
-    0600 JSON. When that variable is unset, fall back to the bundled
-    tools/GMS-Host-Tools/gts-rockchip.json so single-host deployments work out
-    of the box. The bundled file is never modified by deployments and is
-    already written mode 0600 by the release packaging step.
+    Credentials never ship inside the repository or release tree: deployments
+    must point GMS_GTS_CREDENTIAL_FILE at a repository-external 0600 JSON.
     """
 
     configured = os.getenv("GMS_GTS_CREDENTIAL_FILE", "").strip()
-    if configured:
-        return _validate_gts_credential(Path(configured))
-    root = project_root or Path(__file__).resolve().parents[2]
-    bundled = root / "tools" / "GMS-Host-Tools" / "gts-rockchip.json"
-    if not bundled.is_file():
+    if not configured:
         raise ValueError(
-            "GMS_GTS_CREDENTIAL_FILE is not set and no bundled credential exists"
+            "GMS_GTS_CREDENTIAL_FILE is required; repository-bundled "
+            "credentials are no longer supported"
         )
-    return _validate_gts_credential(bundled)
+    return _validate_gts_credential(Path(configured))
 
 
 def _deployment_host(connection: str) -> tuple[str, str, int]:
@@ -631,6 +640,7 @@ async def deploy_worker(
                     project_root / "tools/scrcpy-linux-x86_64-v3.3.4",
                     arcname="tools/scrcpy-linux-x86_64-v3.3.4",
                 )
+                _prepare_gms_host_tools(project_root)
                 host_tools = project_root / "tools/GMS-Host-Tools"
                 required_host_tools = (
                     "platform-tools-gms-linux.zip",
