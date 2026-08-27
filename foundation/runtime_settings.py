@@ -18,6 +18,37 @@ def _env_int(value: str, default: int) -> int:
         return default
 
 
+def runtime_environment(environ: dict[str, str] | None = None) -> str:
+    """Return the deployment environment name (single source of truth).
+
+    ``GMS_ENV`` wins; every production/development decision in the
+    Controller must go through this helper so validation and runtime
+    middleware can never disagree (the bug where security checks ran in
+    production mode while TrustedHost defaulted to ``*``).
+    """
+    env = os.environ if environ is None else environ
+    return env.get("GMS_ENV", "development").strip().lower()
+
+
+def is_production_environment(environ: dict[str, str] | None = None) -> bool:
+    return runtime_environment(environ) == "production"
+
+
+def allowed_origins(environ: dict[str, str] | None = None) -> list[str]:
+    """Return the configured browser origins (single CORS source of truth).
+
+    ``GMS_ALLOWED_ORIGINS`` is the only variable; production validation and
+    the actual CORS middleware both consume this list so a deployment that
+    passes validation can never run with a different runtime policy.
+    """
+    env = os.environ if environ is None else environ
+    return [
+        item.strip()
+        for item in env.get("GMS_ALLOWED_ORIGINS", "").split(",")
+        if item.strip()
+    ]
+
+
 @dataclass(frozen=True)
 class RuntimeSettings:
     project_root: Path

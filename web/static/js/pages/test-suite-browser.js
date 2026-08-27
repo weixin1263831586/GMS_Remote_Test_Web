@@ -2354,49 +2354,13 @@ async function analyzeSuiteApk(path, options = {}) {
     }
 }
 
-// 用户列表管理
-async function loadUsers(forceRefresh = false) {
-    if (state.isRefreshingUsers) {
-        return;
-    }
-
-    state.isRefreshingUsers = true;
-
-    try {
-        const url = forceRefresh ? '/api/users/list?force_refresh=1' : '/api/users/list';
-        const response = await apiCall(url);
-
-        debugLog('[loadUsers] API response:', response);
-
-        // 处理不同的响应格式
-        let users = [];
-        if (Array.isArray(response)) {
-            users = response;
-            debugLog('[loadUsers] Response is array, length:', users.length);
-        } else if (response && response.users && Array.isArray(response.users)) {
-            users = response.users;
-            debugLog('[loadUsers] Response has users array, length:', users.length);
-        } else if (response && response.data && Array.isArray(response.data)) {
-            users = response.data;
-            debugLog('[loadUsers] Response has data array, length:', users.length);
-        } else {
-            console.warn('[loadUsers] Unexpected user list format:', response);
-        }
-
-        state.users = users;
-        debugLog('[loadUsers] state.users set to:', state.users);
-        // renderUsers() 已移除，使用 HTML 中的 displayUsersList() 避免重复渲染
-    } catch (error) {
-        console.error('加载用户列表失败:', error);
-    } finally {
-        state.isRefreshingUsers = false;
-    }
-}
+// 用户列表由用户管理页的 loadUsersList()（shell.html）按需加载；
+// /api/users/list 需要管理员提权，启动预取会在每个新标签页触发 403
+// 和提权弹框，故此处不再提供 loadUsers 预取逻辑。
 
 
 // 防抖版本的刷新函数
 const debouncedRefreshDevices = debounce(() => loadDevices(false), 500);
-const debouncedRefreshUsers = debounce(() => loadUsers(false), 500);
 
 function renderDevices() {
     debugLog('[renderDevices] Called, state.devices:', state.devices);

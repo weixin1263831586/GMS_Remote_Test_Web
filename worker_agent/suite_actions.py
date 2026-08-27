@@ -22,7 +22,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .config import WorkerConfig
+from .config import WorkerConfig, _is_production
 from .suite_detection import suite_details
 
 
@@ -48,7 +48,7 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("suite URL must use http or https")
         if (
-            os.getenv("GMS_ENV", "development").strip().lower() == "production"
+            _is_production()
             and parsed.scheme != "https"
         ):
             raise ValueError("production suite downloads require HTTPS")

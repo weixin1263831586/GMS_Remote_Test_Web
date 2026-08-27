@@ -43,6 +43,7 @@ from foundation.product import (
     APPLICATION_TITLE,
     APPLICATION_VERSION,
 )
+from foundation.runtime_settings import allowed_origins, runtime_environment
 from foundation.security_audit import classify_request_source, security_audit_logger
 
 
@@ -121,7 +122,9 @@ def create_app(services: AppServices | None = None) -> FastAPI:
     auth_required = authentication_required()
     app.state.authentication_required = auth_required
 
-    cors_origins = _csv_env('CORS_ORIGINS')
+    # CORS 与生产校验共用 GMS_ALLOWED_ORIGINS 单一来源，避免
+    # validation config != runtime config 的漂移。
+    cors_origins = allowed_origins()
     if cors_origins:
         cors_credentials = os.getenv(
             'CORS_ALLOW_CREDENTIALS',
@@ -129,7 +132,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         ).strip().lower() == 'true'
         if cors_credentials and '*' in cors_origins:
             raise RuntimeError(
-                'CORS_ORIGINS cannot contain * when credentials are enabled'
+                'GMS_ALLOWED_ORIGINS cannot contain * when credentials are enabled'
             )
         app.add_middleware(
             CORSMiddleware,
@@ -139,7 +142,10 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             allow_headers=['*'],
             expose_headers=['X-Request-ID', 'X-Trace-ID'],
         )
-    environment = os.getenv('GMS_ENV', '').strip().lower()
+    # 环境判断走 foundation.runtime_environment() 单一真值，与
+    # production_security 校验保持一致，杜绝“校验按生产、HTTP 层按开发”
+    # 的 TrustedHosts 漂移。
+    environment = runtime_environment()
     trusted_hosts = _csv_env(
         'TRUSTED_HOSTS',
         '*' if environment != 'production' else '',

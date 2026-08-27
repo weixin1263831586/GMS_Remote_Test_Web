@@ -9,10 +9,22 @@ from unittest.mock import patch
 
 from foundation.cache import TTLCache
 from foundation.config import ConfigManager, RuntimeSettings
+from foundation.runtime_settings import allowed_origins, runtime_environment
 from foundation.tasks import SingleFlightTask
 
 
 class FoundationConfigTests(unittest.TestCase):
+    def test_environment_and_cors_helpers_use_canonical_variables(self):
+        environ = {
+            'GMS_ENV': ' Production ',
+            'GMS_ALLOWED_ORIGINS': 'https://one.example, https://two.example ',
+        }
+        self.assertEqual(runtime_environment(environ), 'production')
+        self.assertEqual(
+            allowed_origins(environ),
+            ['https://one.example', 'https://two.example'],
+        )
+
     def test_concurrent_incremental_updates_preserve_unrelated_sections(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

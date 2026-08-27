@@ -478,18 +478,9 @@ async function continueAppInitialization() {
         }
     }
 
-    // 延迟执行耗时操作，不阻塞页面加载
-    if (needsTestWorkspace) setTimeout(async () => {
-
-        // 加载用户列表
-        if (isPlatformAdmin()) {
-            try {
-                await loadUsers();
-            } catch (error) {
-                console.warn('[Init] Failed to load users:', error);
-            }
-        }
-    }, 100);  // 减少延迟时间，更快获取客户端信息
+    // 用户列表仅在用户管理页按需加载（shell.html loadUsersList）；
+    // /api/users/list 需要管理员提权，启动时后台预取只会在每个新
+    // 标签页触发一次 403 和提权弹框，因此不做启动预取。
 }
 
 document.addEventListener('DOMContentLoaded', async () => {

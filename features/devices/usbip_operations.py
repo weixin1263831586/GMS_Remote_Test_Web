@@ -1,20 +1,36 @@
 from __future__ import annotations
 
+import fcntl
 import functools
+import hashlib
 import inspect
+import os
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from foundation.responses import error_response
 
 
 class USBIPOperationGate:
-    """Reject overlapping mutations for the same physical USB/IP source."""
+    """Reject overlapping mutations for one source across threads/processes."""
 
-    def __init__(self) -> None:
+    def __init__(self, lock_dir: Path | str | None = None) -> None:
         self._lock = threading.Lock()
         self._active: set[str] = set()
+        data_root = Path(
+            os.getenv(
+                "GMS_DATA_ROOT",
+                str(Path(__file__).resolve().parents[2] / "data"),
+            )
+        )
+        self._lock_dir = Path(
+            lock_dir
+            or os.getenv("GMS_USBIP_OPERATION_LOCK_DIR", "")
+            or data_root / "locks" / "usbip"
+        )
+        self._descriptors: dict[str, int] = {}
 
     @staticmethod
     def normalize_scope(value: object) -> str:
@@ -25,12 +41,36 @@ class USBIPOperationGate:
         with self._lock:
             if key in self._active:
                 return False
+            self._lock_dir.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+            path = self._lock_dir / f"{digest}.lock"
+            descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                os.chmod(path, 0o600)
+                fcntl.flock(
+                    descriptor,
+                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                )
+            except BlockingIOError:
+                os.close(descriptor)
+                return False
+            except Exception:
+                os.close(descriptor)
+                raise
             self._active.add(key)
+            self._descriptors[key] = descriptor
             return True
 
     def release(self, scope: object) -> None:
         with self._lock:
-            self._active.discard(self.normalize_scope(scope))
+            key = self.normalize_scope(scope)
+            descriptor = self._descriptors.pop(key, None)
+            self._active.discard(key)
+            if descriptor is not None:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                finally:
+                    os.close(descriptor)
 
 
 usbip_operation_gate = USBIPOperationGate()

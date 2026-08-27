@@ -38,7 +38,6 @@ def _parse_csv_env(env_name: str, default: str) -> list[str]:
     return items or [default]
 
 
-CORS_ORIGINS = _parse_csv_env('CORS_ORIGINS', '*')
 TRUSTED_HOSTS = _parse_csv_env('TRUSTED_HOSTS', '*')
 
 UPLOAD_PROGRESS_QUERY_TIMEOUT = 5
