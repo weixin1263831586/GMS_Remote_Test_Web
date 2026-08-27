@@ -1,0 +1,23 @@
+{
+    "_comment": "Copy to configs/runtime.json, keep mode 0600, and fill secrets locally. This file is only a schema example.",
+    "GMS_ENV": "production",
+    "GMS_AUTH_REQUIRED": "true",
+    "GMS_SECURE_COOKIES": "true",
+    "GMS_UBUNTU_PASSWORD": "",
+    "GMS_VNC_PASSWORD": "",
+    "GMS_WIFI_PASSWORD": "",
+    "GMS_LOCAL_AI_API_KEY": "",
+    "GMS_ZHIPU_API_KEY": "",
+    "GMS_ASSISTANT_API_KEY": "",
+    "GMS_HOST_TOOLS_JDK_URL": "",
+    "GMS_HOST_TOOLS_JDK_SHA256": "",
+    "GMS_HOST_TOOLS_PLATFORM_URL": "",
+    "GMS_HOST_TOOLS_PLATFORM_SHA256": "",
+    "GMS_HOST_TOOLS_CA_CERT": "",
+    "GMS_SECRET_KEY_FILE": "",
+    "GMS_AUDIT_HMAC_KEY_FILE": "",
+    "GMS_METRICS_TOKEN": "",
+    "GMS_AUTOMATION_WEBHOOK_TOKEN": "",
+    "GMS_SKILL_SIGNING_KEY_FILE": "",
+    "GMS_BOOTSTRAP_TOKEN": ""
+}

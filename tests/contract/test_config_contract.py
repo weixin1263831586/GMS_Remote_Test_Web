@@ -14,7 +14,14 @@ class ConfigContractTests(unittest.TestCase):
             configs = project_root / "configs"
             configs.mkdir()
             (project_root / "foundation").mkdir()
-            shutil.copy2(config_manager.config_path, configs / "config.json")
+            # 真实 config.json 是本机部署数据（可能缺失）；契约针对随源码
+            # 携带的 example 默认值，保证形状稳定。
+            source = (
+                config_manager.config_path
+                if Path(config_manager.config_path).is_file()
+                else config_manager.config_fallback_path
+            )
+            shutil.copy2(source, configs / "config.json")
             isolated = ConfigManager(project_root=project_root)
 
             self.assertEqual(

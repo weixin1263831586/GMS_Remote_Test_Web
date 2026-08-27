@@ -2490,7 +2490,8 @@ UNAUTH001	unauthorized
                 global_state.usbip_states.update(old_states)
 
     def test_frontend_waits_for_backend_autoreconnects_usbip_disconnects(self):
-        text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in [Path("web/static/js/navigation.js"), *sorted(Path("web/static/js/pages").glob("*.js"))])
+        # 2026-08 shell 拆分后，USB/IP 前端重连逻辑分布在 pages/ 与 shell/websocket-manager.js。
+        text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in [Path("web/static/js/navigation.js"), *sorted(Path("web/static/js/pages").glob("*.js")), *sorted(Path("web/static/js/shell").glob("*.js"))])
 
         self.assertIn("device_host: deviceHost", text)
         self.assertIn("scheduleUsbipReconnect", text)

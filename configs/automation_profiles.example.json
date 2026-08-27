@@ -1,0 +1,44 @@
+{
+  "_comment": "Copy to configs/automation_profiles.json for local deployment. Server/template/workspace references below must point at entries from your build_servers.json.",
+  "profiles": [
+    {
+      "id": "example-cts-smoke",
+      "name": "Example CTS Smoke",
+      "enabled": true,
+      "gerrit": {},
+      "build": {
+        "provider": "ssh",
+        "server_id": "example-build-server",
+        "template_id": "example-android-build",
+        "parameters": {
+          "workspace": "/home/builder/android",
+          "lunch_target": "example_arm-userdebug",
+          "build_command": "./build.sh -UCKApu -J 8"
+        }
+      },
+      "jenkins": {},
+      "device_selector": {
+        "min_count": 1,
+        "exclusive": true
+      },
+      "flash": {
+        "mode": "firmware",
+        "wipe_data": true
+      },
+      "test_plan": {
+        "worker_id": "auto",
+        "test_type": "CTS",
+        "mode": "module",
+        "modules": [
+          "CtsAppSecurityHostTestCases"
+        ],
+        "retry_count": 0,
+        "analyze_on_failure": true
+      },
+      "reporting": {
+        "gerrit_comment": false,
+        "gerrit_verified_label": false
+      }
+    }
+  ]
+}

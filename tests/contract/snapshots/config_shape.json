@@ -29,7 +29,8 @@
     "crm_icon_url": "str",
     "gms_assistant_url": "str",
     "grafana_url": "str",
-    "router_icon_url": "str"
+    "router_icon_url": "str",
+    "gms_assistant_api_key": "str"
   },
   "firmware_shares": {
     "default_host": "str",

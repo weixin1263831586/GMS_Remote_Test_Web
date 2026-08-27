@@ -20,6 +20,22 @@ class SystemApiConfigTests(unittest.TestCase):
         ):
             self.assertEqual(api._gms_assistant_upstream(), "https://assistant.example")
 
+    def test_gms_assistant_api_key_prefers_environment(self):
+        with patch.dict(
+            os.environ, {"GMS_ASSISTANT_API_KEY": "env-secret"}, clear=True
+        ), patch.object(
+            api.config_manager, "load_config",
+            return_value={"external_services": {"gms_assistant_api_key": "config-secret"}},
+        ):
+            self.assertEqual(api._gms_assistant_api_key(), "env-secret")
+
+    def test_gms_assistant_api_key_falls_back_to_config(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            api.config_manager, "load_config",
+            return_value={"external_services": {"gms_assistant_api_key": "config-secret"}},
+        ):
+            self.assertEqual(api._gms_assistant_api_key(), "config-secret")
+
     def test_gms_assistant_proxy_removes_external_google_font_stylesheet(self):
         source = """<html><head>
         <link rel="preconnect" href="https://fonts.googleapis.com">

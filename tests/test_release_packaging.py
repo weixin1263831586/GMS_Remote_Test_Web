@@ -11,7 +11,10 @@ from scripts.verify_release_tree import verify_release_tree
 
 class ReleasePackagingTests(unittest.TestCase):
     def test_tracked_product_config_uses_runtime_secret_placeholders(self):
-        config = json.loads(Path("configs/config.json").read_text(encoding="utf-8"))
+        # 真实 config.json 不入库；example 是随源码携带的静态默认值。
+        config = json.loads(
+            Path("configs/config.example.json").read_text(encoding="utf-8")
+        )
 
         self.assertEqual(config["ubuntu_pswd"], "${GMS_UBUNTU_PASSWORD:}")
         self.assertEqual(config["vnc_password"], "${GMS_VNC_PASSWORD:}")
@@ -55,6 +58,8 @@ class ReleasePackagingTests(unittest.TestCase):
             "--exclude 'docs/multi-host-cluster-implementation-plan.md'",
             "--exclude 'docs/refactor-parity-audit.md'",
             "--exclude 'tools/GMS-Host-Tools/gts-rockchip.json'",
+            "--exclude 'tools/GMS-Host-Tools/jdk-11/'",
+            "--exclude 'tools/GMS-Host-Tools/platform-tools-gms-linux.zip'",
             "Environment=GMS_ENV=production",
             'bootstrap_token = values.get("GMS_BOOTSTRAP_TOKEN", "").strip()',
             'bootstrap_token = secrets.token_urlsafe(48)',
@@ -62,6 +67,16 @@ class ReleasePackagingTests(unittest.TestCase):
             'verify_release_tree.py" "${package_root}',
         ):
             self.assertIn(expected, source)
+
+        self.assertEqual(
+            source.count("--exclude 'tools/GMS-Host-Tools/jdk-11/'"), 2
+        )
+        self.assertEqual(
+            source.count(
+                "--exclude 'tools/GMS-Host-Tools/platform-tools-gms-linux.zip'"
+            ),
+            2,
+        )
 
         for internal_document in (
             "docs/android-cli-ui-control-integration.md",
@@ -281,10 +296,15 @@ class ReleasePackagingTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "web/app.js.map").write_text("{}", encoding="utf-8")
+            host_tools = root / "tools/GMS-Host-Tools"
+            (host_tools / "jdk-11").mkdir(parents=True)
+            (host_tools / "platform-tools-gms-linux.zip").write_bytes(b"zip")
 
             findings = verify_release_tree(root)
 
         self.assertTrue(any(".gitignore" in item for item in findings))
+        self.assertTrue(any("jdk-11" in item for item in findings))
+        self.assertTrue(any("platform-tools-gms-linux.zip" in item for item in findings))
         self.assertTrue(any("internal document" in item for item in findings))
         self.assertTrue(any("source map" in item for item in findings))
 

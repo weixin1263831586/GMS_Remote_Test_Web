@@ -1,14 +1,25 @@
 import json
 import stat
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.check_source_secrets import find_literal_secret_paths
+from scripts.check_source_secrets import find_literal_secret_paths, scan_tracked_files
 from scripts.sanitize_tracked_config import sanitize_config
 
 
 class SecurityHardeningTests(unittest.TestCase):
+    def _tracked_secret_findings(self, relative: str, content: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding='utf-8')
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            subprocess.run(['git', 'add', relative], cwd=root, check=True)
+            return scan_tracked_files(root)
+
     def test_literal_secret_detector_accepts_placeholders(self):
         payload = {
             'password': '${GMS_PASSWORD:}',
@@ -26,6 +37,20 @@ class SecurityHardeningTests(unittest.TestCase):
             find_literal_secret_paths(payload),
             ['password', 'provider.api_key'],
         )
+
+    def test_tracked_json_runs_content_marker_scan_after_key_scan(self):
+        token = 'gh' + 'p_' + ('A' * 32)
+        findings = self._tracked_secret_findings(
+            'metadata.json', json.dumps({'opaque_value': token})
+        )
+        self.assertTrue(any('github_token' in item for item in findings))
+
+    def test_tracked_test_fixture_is_not_blanket_exempt(self):
+        token = 'AI' + 'za' + ('A' * 32)
+        findings = self._tracked_secret_findings(
+            'tests/fixture.txt', f'credential={token}'
+        )
+        self.assertTrue(any('google_api_key' in item for item in findings))
 
     def test_sanitizer_migrates_literals_to_runtime_env(self):
         with tempfile.TemporaryDirectory() as directory:

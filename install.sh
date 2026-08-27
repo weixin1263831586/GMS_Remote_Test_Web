@@ -223,6 +223,8 @@ package_web_app() {
             --exclude 'configs/client_ssh_credentials.local.json' \
             --exclude 'configs/redmine_auth.json' \
             --exclude 'tools/GMS-Host-Tools/gts-rockchip.json' \
+            --exclude 'tools/GMS-Host-Tools/jdk-11/' \
+            --exclude 'tools/GMS-Host-Tools/platform-tools-gms-linux.zip' \
             "${PROJECT_DIR}/" "${package_root}/"
         mkdir -p "${package_root}/data"
         python3 "${PROJECT_DIR}/scripts/sanitize_release_config.py" \
@@ -343,6 +345,8 @@ copy_project() {
             --exclude 'configs/client_ssh_credentials.local.json' \
             --exclude 'configs/redmine_auth.json' \
             --exclude 'tools/GMS-Host-Tools/gts-rockchip.json' \
+            --exclude 'tools/GMS-Host-Tools/jdk-11/' \
+            --exclude 'tools/GMS-Host-Tools/platform-tools-gms-linux.zip' \
             "${PROJECT_DIR}/" "${INSTALL_DIR}/"
     fi
     sudo chown -R "${RUN_USER}:${RUN_GROUP}" "${INSTALL_DIR}"
@@ -461,6 +465,17 @@ if env_path.exists():
             values = {str(k): str(v) for k, v in loaded.items() if isinstance(v, str)}
     except (OSError, json.JSONDecodeError):
         pass
+for host_tools_name in (
+    "GMS_HOST_TOOLS_JDK_URL",
+    "GMS_HOST_TOOLS_JDK_SHA256",
+    "GMS_HOST_TOOLS_PLATFORM_URL",
+    "GMS_HOST_TOOLS_PLATFORM_SHA256",
+    "GMS_HOST_TOOLS_CA_CERT",
+    "GMS_HOST_TOOLS_ALLOW_HTTP",
+):
+    host_tools_value = str(os.getenv(host_tools_name) or "").strip()
+    if host_tools_value:
+        values[host_tools_name] = host_tools_value
 bootstrap_token = values.get("GMS_BOOTSTRAP_TOKEN", "").strip()
 if len(bootstrap_token) < 32:
     bootstrap_token = secrets.token_urlsafe(48)
