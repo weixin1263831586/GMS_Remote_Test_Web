@@ -8,13 +8,9 @@ from urllib.parse import urlsplit
 from features.auth import authentication_required, secure_cookies_enabled
 from features.cluster import worker_tokens
 from features.system.metrics import metrics_token
-from foundation.config import settings
+from foundation.runtime_settings import allowed_origins, is_production_environment
 from foundation.secrets import validate_secret_configuration
 from foundation.security_audit import security_audit_logger
-
-
-def _environment() -> str:
-    return os.getenv("GMS_ENV", settings.environment).strip().lower()
 
 
 def _require_secret(name: str, value: str, minimum: int = 32) -> None:
@@ -25,7 +21,7 @@ def _require_secret(name: str, value: str, minimum: int = 32) -> None:
 def validate_production_security_configuration() -> None:
     """Validate every control-plane secret before accepting traffic."""
 
-    if _environment() != "production":
+    if not is_production_environment():
         return
     if not authentication_required():
         raise RuntimeError("GMS_AUTH_REQUIRED cannot be disabled in production")
@@ -58,11 +54,7 @@ def validate_production_security_configuration() -> None:
             raise RuntimeError("Worker token entries require a worker id")
         _require_secret(f"worker token for {worker_id}", token)
 
-    origins = [
-        item.strip()
-        for item in os.getenv("GMS_ALLOWED_ORIGINS", "").split(",")
-        if item.strip()
-    ]
+    origins = allowed_origins()
     if not origins:
         raise RuntimeError("GMS_ALLOWED_ORIGINS is required in production")
     for origin in origins:

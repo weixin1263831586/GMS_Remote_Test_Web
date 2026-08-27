@@ -6,6 +6,8 @@ from urllib.parse import urlsplit
 
 from starlette.requests import HTTPConnection
 
+from foundation.runtime_settings import allowed_origins, runtime_environment
+
 from .service import AUTH_COOKIE_NAME, CurrentUser, auth_service
 
 
@@ -22,13 +24,11 @@ def env_flag(name: str, default: bool) -> bool:
 def authentication_required() -> bool:
     """返回是否全局强制浏览器和 API 认证。"""
 
-    environment = os.getenv("GMS_ENV", "development").strip().lower()
-    return env_flag("GMS_AUTH_REQUIRED", environment == "production")
+    return env_flag("GMS_AUTH_REQUIRED", runtime_environment() == "production")
 
 
 def secure_cookies_enabled() -> bool:
-    environment = os.getenv("GMS_ENV", "development").strip().lower()
-    return env_flag("GMS_SECURE_COOKIES", environment == "production")
+    return env_flag("GMS_SECURE_COOKIES", runtime_environment() == "production")
 
 
 def bootstrap_token() -> str:
@@ -73,8 +73,7 @@ def _allowed_origins(connection: HTTPConnection) -> set[str]:
     expected = _normalized_origin(f"{scheme}://{host}")
     configured = {
         _normalized_origin(item)
-        for item in os.getenv("GMS_ALLOWED_ORIGINS", "").split(",")
-        if item.strip()
+        for item in allowed_origins()
     }
     configured.discard("")
     if expected:

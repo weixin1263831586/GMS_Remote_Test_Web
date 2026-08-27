@@ -9,10 +9,11 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
 from foundation.config import settings
+from foundation.runtime_settings import is_production_environment
 
 
 def _production() -> bool:
-    return os.getenv("GMS_ENV", settings.environment).strip().lower() == "production"
+    return is_production_environment()
 
 
 def _validate_key(raw: bytes) -> bytes:

@@ -9,6 +9,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+def _is_production() -> bool:
+    """Worker 与 Controller 使用同一 GMS_ENV 语义（单一真值的本地镜像）。"""
+    return os.getenv("GMS_ENV", "development").strip().lower() == "production"
+
+
 @dataclass
 class WorkerConfig:
     worker_id: str
@@ -44,7 +49,7 @@ class WorkerConfig:
         parsed_controller = urlsplit(controller_url)
         if parsed_controller.scheme not in {"http", "https"} or not parsed_controller.hostname:
             raise RuntimeError("controller_url must be an absolute HTTP(S) URL")
-        production = os.getenv("GMS_ENV", "development").strip().lower() == "production"
+        production = _is_production()
         if production and parsed_controller.scheme != "https":
             raise RuntimeError("production Workers require an HTTPS Controller URL")
         controller_ca = os.getenv("GMS_CONTROLLER_CA", raw.get("controller_ca", ""))

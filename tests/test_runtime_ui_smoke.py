@@ -2161,6 +2161,30 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_admin_init_does_not_prefetch_users_list_or_prompt_elevation(self):
+        # /api/users/list 需要管理员提权，且每个新标签页都会重置提权；
+        # 启动预取只会在页面加载时触发 403 和提权弹框。用户列表应由
+        # 用户管理页的 loadUsersList() 按需加载。
+        page = self.new_page()
+        users_requests = []
+        page.on(
+            "request",
+            lambda request: users_requests.append(request.url)
+            if "/api/users/list" in request.url
+            else None,
+        )
+        try:
+            page.goto(self.base_url, wait_until="domcontentloaded")
+            page.wait_for_selector(".sidebar-item[data-page]")
+            # 旧实现延迟 100ms 后预取；多等一会确保断言覆盖到该窗口。
+            page.wait_for_timeout(800)
+            expect(page.locator("#elevate-modal")).not_to_have_class(
+                re.compile(r"\bshow\b")
+            )
+            self.assertEqual(users_requests, [])
+        finally:
+            page.close()
+
     def test_saved_architecture_page_sets_title_before_load_and_lazy_loads_frame(self):
         page = self.new_page()
         page_errors = []

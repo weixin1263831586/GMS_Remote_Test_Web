@@ -3,7 +3,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from bootstrap.application import create_app
 from bootstrap.dependencies import build_services
@@ -11,6 +13,43 @@ from foundation.runtime_settings import RuntimeSettings
 
 
 class BootstrapTests(unittest.TestCase):
+    def test_runtime_middleware_uses_canonical_environment_and_origins(self):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    'GMS_ENV': 'production',
+                    'GMS_ALLOWED_ORIGINS': 'https://gms.example',
+                    'TRUSTED_HOSTS': 'gms.example',
+                },
+            ),
+            patch(
+                'bootstrap.application.validate_production_security_configuration'
+            ),
+        ):
+            app = create_app()
+
+        cors = next(item for item in app.user_middleware if item.cls is CORSMiddleware)
+        trusted = next(
+            item for item in app.user_middleware
+            if item.cls is TrustedHostMiddleware
+        )
+        self.assertEqual(cors.kwargs['allow_origins'], ['https://gms.example'])
+        self.assertEqual(trusted.kwargs['allowed_hosts'], ['gms.example'])
+
+    def test_production_runtime_rejects_wildcard_trusted_hosts(self):
+        with (
+            patch.dict(
+                os.environ,
+                {'GMS_ENV': 'production', 'TRUSTED_HOSTS': '*'},
+            ),
+            patch(
+                'bootstrap.application.validate_production_security_configuration'
+            ),
+            self.assertRaisesRegex(RuntimeError, 'TRUSTED_HOSTS'),
+        ):
+            create_app()
+
     def test_create_app_preserves_metadata(self):
         app = create_app()
         self.assertEqual(app.title, 'GMS Auto Test - FastAPI Server (Port 5001)')

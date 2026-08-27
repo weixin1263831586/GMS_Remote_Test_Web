@@ -48,7 +48,6 @@ class SecurityBoundaryTests(unittest.TestCase):
                 "GMS_AUTH_REQUIRED": "true",
                 "GMS_ENV": "production",
                 "GMS_SECURE_COOKIES": "true",
-                "CORS_ORIGINS": "",
                 "GMS_SECRET_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
                 "GMS_AUDIT_HMAC_KEY": "audit-key-for-security-boundary-tests-0001",
                 "GMS_METRICS_TOKEN": "metrics-token-for-security-tests-000001",

@@ -17,9 +17,26 @@ from foundation.network_quality import probe_tcp_quality
 from foundation.networking import parse_host_address, split_host_port
 from foundation.ssh_security import configure_strict_host_keys
 
+from .physical_identity import resolve_physical_device_identity
 from .ssh_credentials import find_device_host_password
 from .usb import (
     parse_usbipd_android_busids,
+)
+from .usbip_identity import (
+    query_usbipd_busid_instance_ids,
+    query_windows_usb_identities,
+)
+from .usbip_transaction import (
+    detach_ubuntu_usbip_ports as _detach_ports_impl,
+)
+from .usbip_transaction import (
+    parse_usbip_port_entries,
+    rollback_ubuntu_attachments,
+    usbip_attached_ports,
+    usbip_error,
+)
+from .usbip_transaction import (
+    rollback_windows_binds as _rollback_windows_binds_impl,
 )
 from .utils import DeviceUtils
 
@@ -32,9 +49,22 @@ __all__ = [
     "find_device_host_password",
     "parse_adb_device_states",
     "parse_fastboot_devices",
+    "parse_usbip_port_entries",
     "usbip_manager",
     "wait_for_adb_serial_ready",
 ]
+
+
+def detach_ubuntu_usbip_ports(
+    ssh,
+    remote_host: str | None = '127.0.0.1',
+    detach_all: bool = False,
+    busids: list[str] | None = None,
+) -> list[str]:
+    """Detach Ubuntu usbip ports (compat wrapper over usbip_transaction)."""
+    return _detach_ports_impl(
+        usbip_manager.ssh_manager, ssh, remote_host, detach_all, busids
+    )
 
 # usbipd 安装命令常量
 USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
@@ -44,81 +74,9 @@ USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行Power
 验证安装：usbipd --version'''
 
 
-def usbip_error(
-    code: str,
-    message: str,
-    *,
-    retryable: bool = False,
-    remediation: str = "",
-    **extra: Any,
-) -> dict[str, Any]:
-    return {
-        "success": False,
-        "error_code": code,
-        "error": message,
-        "retryable": retryable,
-        "remediation": remediation,
-        **extra,
-    }
-
-
 def _usbip_attached_ports(ssh) -> set[str]:
     """Return the set of currently attached usbip port numbers (as strings)."""
-    stdout, _, code = usbip_manager.ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
-    if code != 0:
-        return set()
-    return {
-        match.group(1)
-        for match in (
-            re.match(r'\s*Port\s+(\d+):', line) for line in (stdout or '').splitlines()
-        )
-        if match
-    }
-
-
-def detach_ubuntu_usbip_ports(
-    ssh,
-    remote_host: str | None = '127.0.0.1',
-    detach_all: bool = False,
-    busids: list[str] | None = None,
-) -> list[str]:
-    """Detach Ubuntu usbip ports that point to a remote USB/IP host."""
-    detached: list[str] = []
-    stdout, stderr, code = usbip_manager.ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
-    if code != 0:
-        logger.info(f"[USB/IP] usbip port returned {code}: {stderr or stdout}")
-        return detached
-
-    current_port: str | None = None
-    current_block: list[str] = []
-    for line in [*(stdout or '').splitlines(), 'Port 999999:']:
-        port_match = re.match(r'\s*Port\s+(\d+):', line)
-        if port_match:
-            block_text = '\n'.join(current_block)
-            host_matches = bool(remote_host and remote_host in block_text)
-            busid_matches = not busids or any(busid in block_text for busid in busids)
-            if current_port and (detach_all or (host_matches and busid_matches)):
-                detach_out, detach_err, detach_code = usbip_manager.ssh_manager.execute_command(
-                    ssh, f'sudo usbip detach -p {current_port}', timeout=15
-                )
-                # 仅当 detach 命令成功或端口确实已消失时才计入 detached，
-                # 否则调用方会误以为端口已释放并继续 attach。
-                port_gone = current_port not in _usbip_attached_ports(ssh)
-                if detach_code == 0 or port_gone:
-                    detached.append(current_port)
-                else:
-                    logger.warning(
-                        f"[USB/IP] Failed to detach Ubuntu usbip port {current_port}: "
-                        f"code={detach_code} out={detach_out} err={detach_err}"
-                    )
-            current_port = port_match.group(1)
-            current_block = [line]
-        elif current_port:
-            current_block.append(line)
-
-    if detached:
-        time.sleep(2)
-    return detached
+    return usbip_attached_ports(usbip_manager.ssh_manager, ssh)
 
 
 def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> dict[str, Any]:
@@ -241,13 +199,11 @@ class USBIPManager:
                 # 检查系统类型
                 is_windows = self._is_windows_host(win_ssh)
                 if not is_windows:
-                    win_ssh.close()
                     return {'success': False, 'error': 'USB/IP仅支持Windows主机'}
 
                 # 检查usbipd是否已安装
                 installed, _version = self.check_usbipd_installed(win_ssh)
                 if not installed:
-                    win_ssh.close()
                     return {
                         'success': False,
                         'error': 'usbipd未安装',
@@ -278,11 +234,12 @@ class USBIPManager:
                 if requested and not set(requested).issubset(discovered_busids):
                     return {'success': False, 'error': '选择的USB设备已不可用，请刷新后重试'}
                 if not busids:
-                    win_ssh.close()
                     return {'success': False, 'error': '未找到Android设备'}
 
-                bound = self._bind_devices(win_ssh, busids)
-                win_ssh.close()
+                newly_bound: list[str] = []
+                bound = self._bind_devices(
+                    win_ssh, busids, track_newly_bound=newly_bound
+                )
 
                 if not bound:
                     return {'success': False, 'error': '设备绑定失败'}
@@ -290,7 +247,16 @@ class USBIPManager:
                 # 连接Ubuntu并attach设备
                 ubuntu_ssh = self.ssh_manager.get_connection(config)
                 if not ubuntu_ssh:
-                    return {'success': False, 'error': '无法连接Ubuntu主机'}
+                    rollback_complete = self._rollback_windows_binds(
+                        win_ssh, newly_bound
+                    )
+                    return usbip_error(
+                        "USBIP_ATTACH_FAILED",
+                        '无法连接Ubuntu主机',
+                        retryable=True,
+                        remediation="请检查Ubuntu主机SSH配置后重试。",
+                        rollback_complete=rollback_complete,
+                    )
 
                 try:
                     # 确保vhci驱动已加载
@@ -306,13 +272,28 @@ class USBIPManager:
                     )
 
                     if not attached:
+                        target_rollback_complete = rollback_ubuntu_attachments(
+                            self.ssh_manager,
+                            ubuntu_ssh,
+                            usbip_attach_host,
+                            busids,
+                        )
                         self.ssh_manager.return_connection(ubuntu_ssh)
-                        return {
-                            'success': False,
-                            'error': 'USB/IP attach 失败，未成功连接任何设备',
-                            'devices': [],
-                            'device_list': []
-                        }
+                        source_rollback_complete = self._rollback_windows_binds(
+                            win_ssh, newly_bound
+                        )
+                        return usbip_error(
+                            "USBIP_ATTACH_FAILED",
+                            'USB/IP attach 失败，未成功连接任何设备',
+                            retryable=True,
+                            remediation="请重试连接；若持续失败请检查Ubuntu侧vhci驱动与usbip工具。",
+                            rollback_complete=(
+                                target_rollback_complete
+                                and source_rollback_complete
+                            ),
+                            devices=[],
+                            device_list=[]
+                        )
 
                     protocol_status = self._scope_protocol_status(
                         self.probe_protocol_status(
@@ -350,14 +331,31 @@ class USBIPManager:
                     }
 
                 except Exception as e:
+                    target_rollback_complete = rollback_ubuntu_attachments(
+                        self.ssh_manager,
+                        ubuntu_ssh,
+                        usbip_attach_host,
+                        busids,
+                    )
                     ubuntu_ssh.close()
                     logger.error(f"Error in Ubuntu attach: {e}")
-                    return {'success': False, 'error': str(e)}
+                    source_rollback_complete = self._rollback_windows_binds(
+                        win_ssh, newly_bound
+                    )
+                    return usbip_error(
+                        "USBIP_ATTACH_FAILED",
+                        str(e),
+                        rollback_complete=(
+                            target_rollback_complete
+                            and source_rollback_complete
+                        ),
+                    )
 
             except Exception as e:
-                win_ssh.close()
                 logger.error(f"Error in Windows side: {e}")
                 return {'success': False, 'error': str(e)}
+            finally:
+                win_ssh.close()
 
         except Exception as e:
             logger.error(f"Error in start_usbip: {e}")
@@ -405,12 +403,16 @@ class USBIPManager:
                     for value in vid_pid_by_busid.values()
                 },
             )
-            identity_by_vid_pid = self._query_windows_usb_identities(
+            identity_by_vid_pid = query_windows_usb_identities(
+                self.ssh_manager,
                 ssh,
                 {
                     value.split(":", 1)[0]
                     for value in vid_pid_by_busid.values()
                 },
+            )
+            pnp_instance_by_busid = query_usbipd_busid_instance_ids(
+                self.ssh_manager, ssh
             )
             serial_by_busid = {
                 busid: (
@@ -427,38 +429,52 @@ class USBIPManager:
                 adb_serials = self._query_windows_adb_serials(ssh)
                 if len(adb_serials) == 1:
                     serial_by_busid[busids[0]] = adb_serials[0]
+            devices: list[dict[str, Any]] = []
+            for item in busids:
+                vid_pid = vid_pid_by_busid.get(item, "")
+                pnp_instance_id = pnp_instance_by_busid.get(item, "")
+                identity = (
+                    identity_by_vid_pid.get(
+                        f"pnp:{pnp_instance_id.casefold()}", {}
+                    )
+                    if pnp_instance_id
+                    else {}
+                ) or identity_by_vid_pid.get(vid_pid, {})
+                android_serial = serial_by_busid.get(item, "")
+                physical = resolve_physical_device_identity(
+                    source_host=device_host,
+                    current_usb_busid=item,
+                    logical_android_serial=android_serial,
+                    usb_serial=identity.get("usb_serial", ""),
+                    container_id=identity.get("container_id", ""),
+                    pnp_instance_id=(
+                        identity.get("pnp_instance_id", "")
+                        or pnp_instance_id
+                    ),
+                    location_path=identity.get("location_path", ""),
+                    vid_pid=vid_pid,
+                )
+                devices.append({
+                    "busid": item,
+                    "serial": android_serial,
+                    "logical_device_id": (
+                        android_serial
+                        or identity.get("pnp_instance_id", "")
+                        or item
+                    ),
+                    **physical.to_dict(),
+                    "vid_pid": vid_pid,
+                    # Backward-compatible alias; current_usb_busid is the new
+                    # explicit transport field.
+                    "current_busid": item,
+                    "label": self._append_serial(
+                        labels.get(item, item), android_serial
+                    ),
+                })
             return {
                 "success": True,
                 "device_host": device_host,
-                "devices": [
-                    {
-                        "busid": item,
-                        "serial": serial_by_busid.get(item, ""),
-                        "logical_device_id": (
-                            serial_by_busid.get(item, "")
-                            or identity_by_vid_pid.get(
-                                vid_pid_by_busid.get(item, ""), {}
-                            ).get("pnp_instance_id", "")
-                            or item
-                        ),
-                        "usb_serial": identity_by_vid_pid.get(
-                            vid_pid_by_busid.get(item, ""), {}
-                        ).get("usb_serial", ""),
-                        "pnp_instance_id": identity_by_vid_pid.get(
-                            vid_pid_by_busid.get(item, ""), {}
-                        ).get("pnp_instance_id", ""),
-                        "location_path": identity_by_vid_pid.get(
-                            vid_pid_by_busid.get(item, ""), {}
-                        ).get("location_path", ""),
-                        "vid_pid": vid_pid_by_busid.get(item, ""),
-                        "current_busid": item,
-                        "label": self._append_serial(
-                            labels.get(item, item),
-                            serial_by_busid.get(item),
-                        ),
-                    }
-                    for item in busids
-                ],
+                "devices": devices,
             }
         finally:
             ssh.close()
@@ -522,54 +538,6 @@ class USBIPManager:
             # vendor-scoped fallback still maps that physical device safely.
             result["*"] = next(iter(unique_candidates))
         return result
-
-    def _query_windows_usb_identities(
-        self,
-        ssh,
-        vendor_ids: set[str] | None = None,
-    ) -> dict[str, dict[str, str]]:
-        """Return stable PnP and physical-location identity when unambiguous."""
-        ps = (
-            "Get-PnpDevice -PresentOnly -Class USB | ForEach-Object { "
-            "$l=(Get-PnpDeviceProperty -InstanceId $_.InstanceId "
-            "-KeyName 'DEVPKEY_Device_LocationPaths' -ErrorAction SilentlyContinue).Data; "
-            "Write-Output ($_.InstanceId + '|' + ($l -join ',')) }"
-        )
-        try:
-            stdout, _stderr, code = self.ssh_manager.execute_command(
-                ssh, f'powershell -NoProfile -Command "{ps}"', timeout=20
-            )
-        except Exception:
-            return {}
-        if code != 0 or not stdout:
-            return {}
-        grouped: dict[str, list[dict[str, str]]] = {}
-        for raw in stdout.splitlines():
-            instance_id, _separator, location = raw.strip().partition("|")
-            match = re.search(
-                r"USB\\VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})"
-                r"([^\\]*)\\(.+)",
-                instance_id,
-            )
-            if not match:
-                continue
-            vid, pid, interface, tail = match.groups()
-            vid = vid.lower()
-            if vendor_ids and vid not in vendor_ids:
-                continue
-            if "&MI_" in interface.upper():
-                continue
-            usb_serial = tail.strip().split("&")[0].strip()
-            grouped.setdefault(f"{vid}:{pid.lower()}", []).append({
-                "usb_serial": usb_serial,
-                "pnp_instance_id": instance_id,
-                "location_path": location.strip(),
-            })
-        return {
-            key: values[0]
-            for key, values in grouped.items()
-            if len({item["pnp_instance_id"] for item in values}) == 1
-        }
 
     def _query_windows_adb_serials(self, ssh) -> list[str]:
         """Return stable Android serials visible to Windows ADB."""
@@ -815,7 +783,18 @@ class USBIPManager:
         logger.info("USB/IP devices (code=%s):\n%s", code, output)
         return output
 
-    def _bind_devices(self, ssh, busids: list[str]) -> list[str]:
+    def _bind_devices(
+        self,
+        ssh,
+        busids: list[str],
+        track_newly_bound: list[str] | None = None,
+    ) -> list[str]:
+        """Bind USB devices on the Windows source host.
+
+        ``track_newly_bound`` 收集本次调用真正执行 bind 的 busid（不含
+        之前已处于 Shared 状态的设备），供 attach 失败时回滚，避免把
+        本次事务之外预先存在的共享一并解除。
+        """
         bound = []
         for busid in busids:
             if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", str(busid or "")):
@@ -833,11 +812,13 @@ class USBIPManager:
                     )
                     continue
 
-                if 'Shared' in stdout:
+                # usbipd 状态是整词（STATE 列：Not Shared / Shared / Attached），
+                # "Not Shared" 含子串 "Shared"，必须按词边界判定而非 substring。
+                if re.search(r'\bShared\b', stdout) and not re.search(r'\bNot Shared\b', stdout):
                     logger.info(f"Device {busid} already shared")
                     bound.append(busid)
                     continue
-                elif 'Attached' in stdout:
+                elif re.search(r'\bAttached\b', stdout):
                     # Detach first
                     detach_out, detach_err, detach_code = (
                         self.ssh_manager.execute_command(
@@ -871,11 +852,29 @@ class USBIPManager:
                 time.sleep(2)
                 logger.info(f"Device {busid} bound")
                 bound.append(busid)
+                if track_newly_bound is not None:
+                    track_newly_bound.append(busid)
 
             except Exception as e:
                 logger.error(f"Error binding device {busid}: {e}")
 
         return bound
+
+    def _rollback_windows_binds(
+        self,
+        win_ssh,
+        newly_bound: list[str],
+    ) -> bool:
+        """Undo Windows-side binds created by the current start_usbip attempt.
+
+        实现在 usbip_transaction.rollback_windows_binds；此处仅注入本
+        manager 的 SSH 工厂与连接管理器。只回滚本次新 bind 的 busid。
+        """
+        return _rollback_windows_binds_impl(
+            self.ssh_manager,
+            win_ssh,
+            newly_bound,
+        )
 
     def _stop_windows_adb(self, ssh) -> dict[str, Any]:
         """Gracefully stop Windows ADB and force it only when still running."""

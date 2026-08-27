@@ -23,8 +23,8 @@ def _request() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_usbip_operation_gate_rejects_same_source_but_allows_other_source():
-    gate = USBIPOperationGate()
+async def test_usbip_operation_gate_rejects_same_source_but_allows_other_source(tmp_path):
+    gate = USBIPOperationGate(tmp_path)
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -54,8 +54,8 @@ async def test_usbip_operation_gate_rejects_same_source_but_allows_other_source(
 
 
 @pytest.mark.asyncio
-async def test_usbip_operation_gate_releases_source_after_failure():
-    gate = USBIPOperationGate()
+async def test_usbip_operation_gate_releases_source_after_failure(tmp_path):
+    gate = USBIPOperationGate(tmp_path)
     attempts = 0
 
     @serialize_usbip_operation(gate=gate)
@@ -70,6 +70,19 @@ async def test_usbip_operation_gate_releases_source_after_failure():
     with pytest.raises(RuntimeError, match="attach failed"):
         await guarded(request=_request(), req=model)
     assert (await guarded(request=_request(), req=model)).status_code == 200
+
+
+def test_usbip_operation_gate_serializes_separate_process_gate_instances(tmp_path):
+    """Independent uvicorn workers coordinate through the same file lock."""
+    first_worker = USBIPOperationGate(tmp_path)
+    second_worker = USBIPOperationGate(tmp_path)
+    source = "user@10.0.0.1"
+
+    assert first_worker.try_acquire(source)
+    assert not second_worker.try_acquire(source)
+    first_worker.release(source)
+    assert second_worker.try_acquire(source)
+    second_worker.release(source)
 
 
 def test_adb_proxy_disconnect_fails_closed_when_claim_inventory_is_unavailable():

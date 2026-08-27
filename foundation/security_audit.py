@@ -17,6 +17,7 @@ from typing import Any
 from uuid import uuid4
 
 from foundation.redaction import redact_sensitive_text
+from foundation.runtime_settings import is_production_environment
 
 
 SENSITIVE_KEYWORDS = (
@@ -110,7 +111,7 @@ class SecurityAuditLogger:
                     raise RuntimeError(f'audit HMAC key permissions must be 0600: {path}')
                 key = path.read_bytes().strip()
             else:
-                production = os.getenv('GMS_ENV', settings.environment).strip().lower() == 'production'
+                production = is_production_environment()
                 if production:
                     raise RuntimeError('GMS_AUDIT_HMAC_KEY or a mode-0600 key file is required')
                 path.parent.mkdir(parents=True, exist_ok=True)
