@@ -54,6 +54,13 @@ from .utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
 
+# usbipd-win 在驱动切换后可能接受 import（attach 返回 0），
+# 却在 vhci 完成 USB 枚举前立即释放会话。实机上同一 BUSID
+# 后续 attach 即可稳定；仅重试这种“命令成功但端口未稳定”
+# 的目标，确定性命令失败不会反复执行。
+USBIP_ATTACH_STABILIZATION_ATTEMPTS = 3
+USBIP_ATTACH_PORT_POLL_ATTEMPTS = 6
+
 __all__ = [
     "USBIPD_INSTALL_CMD",
     "USBIPD_INSTALL_GUIDE",
@@ -234,7 +241,13 @@ class USBIPManager:
                 try:
                     # 确保vhci驱动已加载
                     self._ensure_vhci_driver(ubuntu_ssh)
-                    detach_ubuntu_usbip_ports(ubuntu_ssh, usbip_attach_host, detach_all=False)
+                    # 只清理本次要 attach 的 (host, busid) vhci 端口：
+                    # 同一 Windows 主机上其他设备的 USB/IP 会话（如正在跑
+                    # CTS 的另一台手机）不能被连带 detach。
+                    detach_ubuntu_usbip_ports(
+                        ubuntu_ssh, usbip_attach_host, detach_all=False,
+                        busids=busids,
+                    )
 
                     # Attach设备
                     attached, device_list = self._attach_devices(
@@ -957,54 +970,107 @@ class USBIPManager:
             fastboot_before = set(parse_fastboot_devices(fastboot_before_out or fastboot_before_err or ""))
             logger.info(f"Devices before attach: {devices_before}")
 
-            # Attach设备
-            attached = []
-            for busid in busids:
-                cmd = f'sudo usbip attach -r {device_ip} -b {busid}'
-                logger.info(f"Attaching {busid} from {device_ip}...")
-                attach_out, attach_err, attach_code = self.ssh_manager.execute_command(ssh, cmd, timeout=15)
-                if attach_code != 0:
-                    logger.warning(f"Attach {busid} failed (code={attach_code}): {attach_err or attach_out}")
-                else:
-                    logger.info(f"Attach {busid} succeeded")
-                    attached.append(busid)
-
-            # ``usbip attach`` may exit with code 0 immediately before the
-            # vhci connection is closed (for example when a Windows export is
-            # stale).  Do not report transport success until the exact
-            # source/busid pair survives two target-side ``usbip port``
-            # snapshots.
             expected_busids = set(busids)
-            for verification_index in range(2):
-                missing = set(expected_busids)
-                attempts = 6 if verification_index == 0 else 1
-                for attempt in range(attempts):
-                    if verification_index or attempt:
+            stable_busids: set[str] = set()
+            retryable_busids: set[str] = set()
+            for stabilization_attempt in range(
+                1, USBIP_ATTACH_STABILIZATION_ATTEMPTS + 1,
+            ):
+                for busid in busids:
+                    if busid in stable_busids:
+                        continue
+                    cmd = f'sudo usbip attach -r {device_ip} -b {busid}'
+                    logger.info(
+                        "Attaching %s from %s (stabilization attempt %s/%s)...",
+                        busid,
+                        device_ip,
+                        stabilization_attempt,
+                        USBIP_ATTACH_STABILIZATION_ATTEMPTS,
+                    )
+                    attach_out, attach_err, attach_code = (
+                        self.ssh_manager.execute_command(
+                            ssh, cmd, timeout=15,
+                        )
+                    )
+                    if attach_code != 0:
+                        logger.warning(
+                            "Attach %s failed (code=%s): %s",
+                            busid,
+                            attach_code,
+                            attach_err or attach_out,
+                        )
+                    else:
+                        # 只有命令已成功、但稍后端口掉线的 BUSID
+                        # 才允许进入下一轮；避免对权限、导出等
+                        # 确定性失败重复 attach。
+                        retryable_busids.add(busid)
+                        logger.info("Attach %s command succeeded", busid)
+
+                # ``usbip attach`` 返回 0 时 vhci 仍可能在 USB 枚举
+                # 前掉线。要求精确 source/BUSID 连续两次出现；
+                # 第一次最多等待数秒覆盖正常枚举延迟。
+                first_snapshot: set[str] = set()
+                for poll_attempt in range(USBIP_ATTACH_PORT_POLL_ATTEMPTS):
+                    if poll_attempt:
                         time.sleep(1)
-                    port_out, port_err, port_code = self.ssh_manager.execute_command(
-                        ssh, USBIP_PORT_COMMAND, timeout=10,
+                    port_out, port_err, port_code = (
+                        self.ssh_manager.execute_command(
+                            ssh, USBIP_PORT_COMMAND, timeout=10,
+                        )
                     )
                     if port_code != 0:
                         logger.warning(
-                            "Unable to verify USB/IP attachments: code=%s detail=%s",
+                            "Unable to verify USB/IP attachments: "
+                            "code=%s detail=%s",
                             port_code,
                             (port_err or port_out or '').strip(),
                         )
                         return [], []
-                    verified_busids = {
+                    first_snapshot = {
                         entry['busid']
                         for entry in parse_usbip_port_entries(port_out or '')
                         if entry['host'] == str(device_ip)
-                    }
-                    missing = expected_busids - verified_busids
-                    if not missing:
+                    } & expected_busids
+                    if first_snapshot == expected_busids:
                         break
-                if missing:
+
+                time.sleep(1)
+                port_out, port_err, port_code = self.ssh_manager.execute_command(
+                    ssh, USBIP_PORT_COMMAND, timeout=10,
+                )
+                if port_code != 0:
+                    logger.warning(
+                        "Unable to verify USB/IP attachment stability: "
+                        "code=%s detail=%s",
+                        port_code,
+                        (port_err or port_out or '').strip(),
+                    )
+                    return [], []
+                second_snapshot = {
+                    entry['busid']
+                    for entry in parse_usbip_port_entries(port_out or '')
+                    if entry['host'] == str(device_ip)
+                } & expected_busids
+                stable_busids = first_snapshot & second_snapshot
+                missing = expected_busids - stable_busids
+                if not missing:
+                    break
+                if (
+                    stabilization_attempt
+                    >= USBIP_ATTACH_STABILIZATION_ATTEMPTS
+                    or not missing.issubset(retryable_busids)
+                ):
                     logger.warning(
                         "USB/IP attach did not stabilize after enumeration: %s",
                         ', '.join(sorted(missing)),
                     )
                     return [], []
+                logger.warning(
+                    "USB/IP attach session dropped before enumeration; "
+                    "retrying exact BUSID(s): %s",
+                    ', '.join(sorted(missing)),
+                )
+                time.sleep(1)
 
             # A repeated manual request can receive an "already attached"
             # command error.  The verified target-side port is authoritative;
@@ -1162,11 +1228,23 @@ class USBIPManager:
         protocol_status: dict[str, Any],
         device_list: list[str],
     ) -> dict[str, Any]:
-        """Keep protocol status focused on the USB/IP devices from this attach."""
-        if not device_list:
-            return protocol_status
-        allowed = set(device_list)
+        """Keep protocol status focused on the USB/IP devices from this attach.
+
+        device_list 为空（transport-only/Loader/枚举失败）时，全局探测结果
+        无法归因到本次 attach：Ubuntu 上其他来源设备（如直连的
+        RK3562GMS7）的 ADB/Fastboot 状态不能算作 USB/IP 设备状态，否则
+        重连 worker 会把"adb"误判为传输已恢复。此时清空归因列表并标记
+        mode=unknown，原始探测保留在 ``unscoped`` 字段供诊断。
+        """
         scoped = dict(protocol_status or {})
+        if not device_list:
+            scoped["adb"] = {}
+            for key in ("adb_ready", "recovery", "sideload", "unauthorized", "offline", "fastboot"):
+                scoped[key] = []
+            scoped["unscoped"] = dict(protocol_status or {})
+            scoped["mode"] = "unknown"
+            return scoped
+        allowed = set(device_list)
         adb_states = scoped.get("adb") or {}
         if isinstance(adb_states, dict):
             scoped["adb"] = {

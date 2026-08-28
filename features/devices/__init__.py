@@ -35,6 +35,7 @@ _LAZY_API_EXPORTS = {
     'connect_wifi': '.operations_api',
     'create_pair_grant': '.adb_proxy_security',
     'DeviceUtils': '.utils',
+    'bind_usbip_busid_via_ssh': '.usbip_flash',
     'ensure_usbip_auto_bind_policies': '.usbip_flash',
     'incompatible_test_devices': '.transport_policy',
     'local_proxy_secret': '.adb_proxy_security',
@@ -42,6 +43,9 @@ _LAZY_API_EXPORTS = {
     'reconcile_cluster_usbip_command': '.integrations_api',
     'reconcile_cluster_usbip_heartbeat': '.integrations_api',
     'resolve_usbip_flash_routes': '.usbip_flash',
+    'open_usbip_source_ssh': '.usbip_flash',
+    'usbipd_list_via_ssh': '.usbip_flash',
+    'usbipd_policy_list_via_ssh': '.usbip_flash',
     'validate_pair_grant': '.adb_proxy_security',
 }
 
@@ -82,6 +86,7 @@ __all__ = [
     "_build_management_props_command",
     "_parse_management_device_props",
     "annotate_cluster_usbip_devices",
+    "bind_usbip_busid_via_ssh",
     "broadcast_device_lock_update",
     "connect_wifi",
     "create_pair_grant",
@@ -93,6 +98,7 @@ __all__ = [
     "get_usb_monitor",
     "incompatible_test_devices",
     "local_proxy_secret",
+    "open_usbip_source_ssh",
     "pair_code_for_worker",
     "parse_adb_device_states",
     "reconcile_cluster_usbip_command",
@@ -102,5 +108,7 @@ __all__ = [
     "ssh_connection_failed_response",
     "update_user_state_field",
     "usbip_manager",
+    "usbipd_list_via_ssh",
+    "usbipd_policy_list_via_ssh",
     "validate_pair_grant",
 ]

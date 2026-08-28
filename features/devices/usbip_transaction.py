@@ -9,13 +9,32 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from typing import Any
 
 
 logger = logging.getLogger(__name__)
-USBIP_PORT_COMMAND = "sudo -n /usr/bin/usbip port"
+
+
+def _resolve_usbip_command() -> str:
+    """定位目标侧 usbip 客户端二进制。
+
+    install.sh 的 sudoers 同时放行 ``/usr/sbin/usbip *`` 与
+    ``/usr/bin/usbip *``；Ubuntu linux-tools 各版本安装位置不同，
+    逐个探测后再回退 PATH（sudo secure_path 含 /usr/sbin）。
+    """
+    override = os.environ.get("USBIP_BIN", "").strip()
+    if override:
+        return override
+    for candidate in ("/usr/bin/usbip", "/usr/sbin/usbip"):
+        if os.path.exists(candidate):
+            return candidate
+    return "usbip"
+
+
+USBIP_PORT_COMMAND = f"sudo -n {_resolve_usbip_command()} port"
 
 # usbip port 输出的设备行，例如：
 #     1-2 | 05ac:12a8 | Remix Mini | Remote USB/IP host 10.0.0.5

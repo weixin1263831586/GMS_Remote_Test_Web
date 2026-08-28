@@ -143,6 +143,266 @@ class FirmwareApiTests(unittest.TestCase):
         )
         self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
 
+    def test_maskrom_race_loss_retries_burn_once_and_succeeds(self):
+        notifications = []
+        watcher_started = {"count": 0}
+        reconnect_lifecycle = []
+        runtime.configure_runtime(
+            store_notification=lambda *args, **kwargs: notifications.append(args)
+        )
+
+        class FakeBurnChannel:
+            """单次 upgrade_tool 运行：先吐出 chunks 再退出。"""
+
+            def __init__(self, exit_status, chunks=()):
+                self._exit_status = exit_status
+                self._chunks = [chunk.encode("utf-8") for chunk in chunks]
+
+            def exit_status_ready(self):
+                return not self._chunks
+
+            def recv_ready(self):
+                return bool(self._chunks)
+
+            def recv(self, _size):
+                return self._chunks.pop(0)
+
+            def recv_exit_status(self):
+                return self._exit_status
+
+        class BurnFlowSsh(FakeSshManager):
+            def __init__(self):
+                super().__init__("__GMS_REMOTE_FILE_FOUND__\n")
+                self.burn_runs = []
+                self.watcher_armed_before_burn = []
+
+            def execute_command(self, _ssh, cmd, timeout=None):
+                self.commands.append((cmd, timeout))
+                if "test -f" in cmd:
+                    return self.file_check_output, "", 0
+                if " SFI " in cmd:
+                    return "loading firmware\n", "", 0
+                if "adb devices" in cmd:
+                    return "List of devices attached\nD1\tdevice\n", "", 0
+                if cmd.endswith(" ld"):
+                    return "List of rockusb connected(1)\n", "", 0
+                return "", "", 0
+
+            def exec_command(self, cmd, get_pty=False, timeout=None):
+                self.watcher_armed_before_burn.append(
+                    watcher_started["count"]
+                )
+                self.burn_runs.append(cmd)
+                if len(self.burn_runs) == 1:
+                    channel = FakeBurnChannel(255, [(
+                        "Loading firmware...\nStart to upgrade firmware...\n"
+                        "Download Boot Start\nDownload Boot Success\n"
+                        "Wait For Maskrom Start\nWait For Maskrom Fail\n"
+                    )])
+                else:
+                    channel = FakeBurnChannel(0)
+                stdout = SimpleNamespace(channel=channel)
+                stderr = SimpleNamespace(read=lambda: b"")
+                return object(), stdout, stderr
+
+        fake_ssh = BurnFlowSsh()
+        runtime.configure_runtime(ssh_manager=fake_ssh)
+        from features.firmware import usbip_transport
+
+        routes = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+            "device_ids": ["D1"],
+        }]
+
+        async def prepare_routes(_devices):
+            return routes, ""
+
+        async def capture_baseline(_routes):
+            return {
+                ("172.16.14.66", "1-1"): {
+                    "instance_id": "USB\\VID_2207&PID_351A\\D1",
+                    "vid_pid": "2207:351a",
+                }
+            }, ""
+
+        async def reattach_succeeds(_ssh, _routes, **_kwargs):
+            watcher_started["count"] += 1
+            return {"success": True, "attached": [{"busid": "1-1"}]}
+
+        async def pause_reconnects(_routes):
+            reconnect_lifecycle.append("pause")
+            return ["D1"], ""
+
+        def resume_reconnects(devices):
+            reconnect_lifecycle.append(("resume", tuple(devices)))
+
+        with patch("scp.SCPClient"), patch.object(
+            usbip_transport.usbip_reconnect,
+            "usbip_source_host_for_device",
+            return_value="",
+        ), patch.object(
+            firmware_api, "_prepare_usbip_firmware_routes",
+            side_effect=prepare_routes,
+        ), patch.object(
+            firmware_api, "_capture_rockusb_route_baseline",
+            side_effect=capture_baseline,
+        ), patch.object(
+            firmware_api, "_pause_usbip_reconnects",
+            side_effect=pause_reconnects,
+        ), patch.object(
+            firmware_api, "_resume_usbip_reconnects",
+            side_effect=resume_reconnects,
+        ), patch.object(
+            firmware_api, "_reattach_usbip_after_rockusb_reset",
+            side_effect=reattach_succeeds,
+        ):
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={"firmware_path": "/srv/update.img"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        # 第一次输给 MaskROM 竞态后必须自动重跑第二次。
+        self.assertEqual(len(fake_ssh.burn_runs), 2)
+        # watcher 必须在每次 upgrade_tool 启动前已进入运行。
+        self.assertEqual(fake_ssh.watcher_armed_before_burn, [1, 2])
+        self.assertEqual(
+            reconnect_lifecycle,
+            ["pause", ("resume", ("D1",))],
+        )
+        self.assertTrue(any("Firmware burn complete" in str(item) for item in notifications))
+
+    def test_descriptor_failure_defers_generic_reconnect(self):
+        reconnect_lifecycle = []
+
+        class FailedBurnChannel:
+            def __init__(self):
+                self._chunks = [(
+                    b"Download Boot Start\nDownload Boot Success\n"
+                    b"Wait For Maskrom Start\nWait For Maskrom Fail\n"
+                )]
+
+            def exit_status_ready(self):
+                return not self._chunks
+
+            def recv_ready(self):
+                return bool(self._chunks)
+
+            def recv(self, _size):
+                return self._chunks.pop(0)
+
+            def recv_exit_status(self):
+                return 255
+
+        class DescriptorFailureSsh(FakeSshManager):
+            def __init__(self):
+                super().__init__("__GMS_REMOTE_FILE_FOUND__\n")
+
+            def execute_command(self, _ssh, cmd, timeout=None):
+                self.commands.append((cmd, timeout))
+                if "test -f" in cmd:
+                    return self.file_check_output, "", 0
+                if " SFI " in cmd:
+                    return "loading firmware\n", "", 0
+                if "adb devices" in cmd:
+                    return "List of devices attached\nD1\tdevice\n", "", 0
+                if cmd.endswith(" ld"):
+                    return "List of rockusb connected(1)\n", "", 0
+                return "", "", 0
+
+            def exec_command(self, _cmd, get_pty=False, timeout=None):
+                stdout = SimpleNamespace(channel=FailedBurnChannel())
+                stderr = SimpleNamespace(read=lambda: b"")
+                return object(), stdout, stderr
+
+        fake_ssh = DescriptorFailureSsh()
+        runtime.configure_runtime(
+            ssh_manager=fake_ssh,
+            store_notification=lambda *_args, **_kwargs: None,
+        )
+        from features.firmware import usbip_transport
+
+        routes = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+            "device_ids": ["D1"],
+        }]
+
+        async def prepare_routes(_devices):
+            return routes, ""
+
+        async def capture_baseline(_routes):
+            return {
+                ("172.16.14.66", "1-1"): {
+                    "instance_id": "USB\\VID_2207&PID_351A\\D1",
+                    "vid_pid": "2207:351a",
+                }
+            }, ""
+
+        async def pause_reconnects(_routes):
+            reconnect_lifecycle.append("pause")
+            return ["D1"], ""
+
+        async def descriptor_failure(_ssh, _routes, **_kwargs):
+            return {
+                "success": False,
+                "attached": [],
+                "pending": [{"source_host": "172.16.14.66", "busid": "1-1"}],
+                "errors": {
+                    "172.16.14.66/1-1": (
+                        "Windows USB descriptor enumeration failed (0000:0002)"
+                    )
+                },
+                "source_list": (
+                    "Connected:\nBUSID  VID:PID    DEVICE              STATE\n"
+                    "1-1    0000:0002  Unknown USB Device "
+                    "(Device Descriptor Request Failed)    Allowed\n"
+                ),
+            }
+
+        with patch("scp.SCPClient"), patch.object(
+            usbip_transport.usbip_reconnect,
+            "usbip_source_host_for_device",
+            return_value="",
+        ), patch.object(
+            firmware_api, "_prepare_usbip_firmware_routes",
+            side_effect=prepare_routes,
+        ), patch.object(
+            firmware_api, "_capture_rockusb_route_baseline",
+            side_effect=capture_baseline,
+        ), patch.object(
+            firmware_api, "_pause_usbip_reconnects",
+            side_effect=pause_reconnects,
+        ), patch.object(
+            firmware_api, "_reattach_usbip_after_rockusb_reset",
+            side_effect=descriptor_failure,
+        ), patch.object(
+            firmware_api, "_defer_usbip_reconnects",
+            side_effect=lambda devices: reconnect_lifecycle.append(
+                ("defer", tuple(devices))
+            ),
+        ), patch.object(
+            firmware_api, "_resume_usbip_reconnects",
+            side_effect=lambda devices: reconnect_lifecycle.append(
+                ("resume", tuple(devices))
+            ),
+        ):
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={"firmware_path": "/srv/update.img"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("0000:0002", response.json()["error"])
+        self.assertEqual(
+            reconnect_lifecycle,
+            ["pause", ("defer", ("D1",))],
+        )
+
     def test_unexpected_error_after_lock_releases_devices(self):
         released = []
 

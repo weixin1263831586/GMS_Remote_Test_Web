@@ -58,6 +58,21 @@ abc                                   Android ADB Interface
             ["FB001", "FB002", "rk3572test"],
         )
 
+    def test_autobind_policy_match_requires_exact_busid_token(self):
+        from features.devices.usbip_flash import usbipd_policy_line_covers_busid
+
+        policy_output = "p1  Allow AutoBind 1-11\np2  Allow AutoBind 1-1.2\n"
+        # "1-1" 不能误命中 "1-11" / "1-1.2" 的既有规则。
+        self.assertFalse(usbipd_policy_line_covers_busid(policy_output, "1-1"))
+        self.assertTrue(usbipd_policy_line_covers_busid(policy_output, "1-11"))
+        self.assertTrue(usbipd_policy_line_covers_busid(policy_output, "1-1.2"))
+        self.assertTrue(usbipd_policy_line_covers_busid(
+            "Allow AutoBind 1-1", "1-1",
+        ))
+        self.assertFalse(usbipd_policy_line_covers_busid(
+            "Deny AutoBind 1-1", "1-1",
+        ))
+
     def test_firmware_route_uses_only_local_worker_assignment(self):
         runtime_config = {
             "usbip_cluster_assignments": {
@@ -137,6 +152,10 @@ abc                                   Android ADB Interface
             with patch.object(reconnect.runtime, "config_manager", Config()), \
                     patch.object(reconnect.runtime, "global_state", state), \
                     patch.object(reconnect, "usbip_manager", manager), \
+                    patch.object(
+                        reconnect, "_resolved_busids_for_devices",
+                        return_value=["1-1"],
+                    ), \
                     patch.object(reconnect, "has_blocked_adb_process", return_value=False):
                 reconnect._reconnect_worker(
                     "hcq@172.16.14.66", "loader", threading.Event(),
@@ -182,6 +201,10 @@ abc                                   Android ADB Interface
         with patch.object(reconnect.runtime, "config_manager", Config()), \
                 patch.object(reconnect.runtime, "global_state", state), \
                 patch.object(reconnect, "usbip_manager", manager), \
+                patch.object(
+                    reconnect, "_resolved_busids_for_devices",
+                    return_value=["1-1"],
+                ), \
                 patch.object(reconnect, "has_blocked_adb_process", side_effect=[True, False]), \
                 patch.object(reconnect, "USBIP_RECONNECT_INTERVAL_SECONDS", 0):
             reconnect._reconnect_worker(
@@ -189,6 +212,51 @@ abc                                   Android ADB Interface
                 ("USBIP001",),
             )
         self.assertEqual(manager.calls, 1)
+
+    def test_reconnect_refuses_unscoped_whole_host_fallback(self):
+        class Config:
+            def load_config(self, force_reload=False):
+                return {"device_pswd": "secret", "client_ssh_credentials": []}
+
+            def get_runtime_config(self):
+                return {}
+
+        class Usbip:
+            calls = 0
+
+            def start_usbip(self, device_host, device_password, **kwargs):
+                self.calls += 1
+                raise AssertionError("whole-host reconnect must be refused")
+
+        state = SimpleNamespace(
+            usbip_states={},
+            usbip_states_lock=threading.RLock(),
+            usbip_devices_source={},
+            usbip_devices_source_lock=threading.RLock(),
+            device_cache={"devices": [], "timestamp": 0},
+            device_cache_lock=threading.RLock(),
+        )
+        manager = Usbip()
+        with patch.object(reconnect.runtime, "config_manager", Config()), \
+                patch.object(reconnect.runtime, "global_state", state), \
+                patch.object(reconnect, "usbip_manager", manager), \
+                patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
+                patch.object(
+                    reconnect, "probe_existing_local_usbip_transport",
+                    return_value=None,
+                ), patch.object(
+                    reconnect, "_resolved_busids_for_devices", return_value=[],
+                ):
+            reconnect._reconnect_worker(
+                "hcq@172.16.14.66", "loader", threading.Event(),
+                ("USBIP001",),
+            )
+
+        self.assertEqual(manager.calls, 0)
+        self.assertIn(
+            "missing persistent BUSID assignment",
+            state.usbip_states["hcq@172.16.14.66"]["reason"],
+        )
 
     def test_reconnect_preserves_existing_transport_when_adb_is_offline(self):
         class Config:
@@ -325,6 +393,7 @@ class UsbipAttachVerificationTests(unittest.TestCase):
         class FakeSshManager:
             def __init__(self):
                 self.port_calls = 0
+                self.attach_calls = 0
 
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 if cmd == "adb devices":
@@ -332,6 +401,7 @@ class UsbipAttachVerificationTests(unittest.TestCase):
                 if cmd == "fastboot devices":
                     return ("", "", 0)
                 if cmd.startswith("sudo usbip attach"):
+                    self.attach_calls += 1
                     return ("attached", "", 0)
                 if cmd == "sudo -n /usr/bin/usbip port":
                     self.port_calls += 1
@@ -354,7 +424,8 @@ class UsbipAttachVerificationTests(unittest.TestCase):
 
         self.assertEqual(attached, [])
         self.assertEqual(devices, [])
-        self.assertEqual(manager.ssh_manager.port_calls, 2)
+        self.assertEqual(manager.ssh_manager.attach_calls, 3)
+        self.assertEqual(manager.ssh_manager.port_calls, 16)
 
     def test_protocol_status_is_scoped_to_attached_usbip_devices(self):
         manager = USBIPManager()
@@ -373,6 +444,30 @@ class UsbipAttachVerificationTests(unittest.TestCase):
         )
         self.assertEqual(scoped["adb"], {"USBIP001": "device"})
         self.assertEqual(scoped["adb_ready"], ["USBIP001"])
+
+    def test_protocol_status_without_attribution_is_unknown(self):
+        # transport-only/Loader/枚举失败时 device_list 为空：其他本地设备
+        # （如直连的 RK3562GMS7）的 ADB 在线状态不能算作 USB/IP 设备状态，
+        # 否则重连 worker 会把 "adb" 误判为传输已恢复。
+        manager = USBIPManager()
+        scoped = manager._scope_protocol_status(
+            {
+                "adb": {"RK3562GMS7": "device"},
+                "adb_ready": ["RK3562GMS7"],
+                "recovery": [],
+                "sideload": [],
+                "unauthorized": [],
+                "offline": [],
+                "fastboot": [],
+                "mode": "adb",
+            },
+            [],
+        )
+        self.assertEqual(scoped["mode"], "unknown")
+        self.assertEqual(scoped["adb_ready"], [])
+        self.assertEqual(scoped["adb"], {})
+        # 原始全局探测保留在 unscoped，供诊断展示。
+        self.assertEqual(scoped["unscoped"]["adb_ready"], ["RK3562GMS7"])
 
 
 class UsbipAssignmentPruningTests(unittest.TestCase):

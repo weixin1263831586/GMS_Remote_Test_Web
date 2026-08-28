@@ -4,6 +4,33 @@
 // 会让未登录的后台标签页无限空转，持续消耗本机连接资源。
 let wsReconnectAttempts = 0;
 
+// USB/IP 重新枚举到 ADB 注册之间存在窗口：devices_changed 事件可能先于
+// ADB 可见到达，单次立即刷新会拿到旧快照（表现为界面停留在空态/旧列表，
+// 提示"点击刷新按钮获取设备列表"）。对"已连接"设备做有界退避补刷。
+function scheduleConnectedDeviceCatchup(expectedSerials, delays) {
+    const schedule = Array.isArray(delays) && delays.length
+        ? delays
+        : [2000, 5000, 10000];
+    if (!expectedSerials || !expectedSerials.length || !schedule.length) return;
+    setTimeout(async () => {
+        try {
+            await loadDevices(true, { silent: true });
+        } catch (error) {
+            debugLog('[WebSocket] deferred device catch-up refresh failed:', error);
+            return;
+        }
+        const currentIds = new Set(
+            (state.devices || [])
+                .map(item => typeof item === 'string' ? item : (item.device_id || item.serial))
+                .filter(Boolean)
+        );
+        const missing = expectedSerials.filter(serial => !currentIds.has(serial));
+        if (missing.length) {
+            scheduleConnectedDeviceCatchup(missing, schedule.slice(1));
+        }
+    }, schedule[0]);
+}
+
 function scheduleWebSocketReconnect() {
     if (state.websocketReconnectTimer) return;
     const delay = Math.min(5000 * 2 ** Math.min(wsReconnectAttempts, 4), 60000);
@@ -220,6 +247,12 @@ function initWebSocket() {
                                 message += `，断开：${disconnected.join(' ')}`;
                             }
                             showToast(message, 'success');
+
+                            // USB/IP 重枚举后 ADB 注册滞后：若"已连接"设备
+                            // 尚未出现在刷新结果中，做有界退避补刷。
+                            if (connected.length > 0) {
+                                scheduleConnectedDeviceCatchup(connected.slice());
+                            }
 
                             // USB/IP 设备重启时优先自动重连。
                             if (
