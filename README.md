@@ -286,7 +286,16 @@ Loader 枚举为 `2207:351a / Rockusb Device`。部署可在 `configs/config.jso
 固件烧写还包含 Loader → MaskROM 的二次枚举。普通 `usbipd bind` 绑定的是
 Windows 设备实例；如果新实例显示为 `Not shared`，`upgrade_tool` 会停在
 `Wait For Maskrom Start`。平台在烧写预检时会针对已分配的物理 BUSID 创建
-usbipd-win 4.2+ `AutoBind` 策略，并在 `upgrade_tool` 运行期间快速重新 attach。
+usbipd-win 4.2+ `AutoBind` 策略。烧写前还会记录 Loader 的 PnP
+InstanceId 和 VID:PID。Loader 就绪后，固件任务会暂停目标设备的通用后台
+重连并等待已有重连线程退出，保证同一物理 BUSID 只由固件状态机操作；只有
+观察到旧 Loader 的 BUSID 从 Windows `Connected` 表完整消失，并且 MaskROM
+新实例稳定后才重新 attach。单纯的 VID:PID/InstanceId 变化可能只是 Rockchip
+中间枚举阶段，不会触发 attach。这避免后台 30 次重连循环或过早的 Windows
+USB 端口 cycle 导致 `0000:0002 Device Descriptor Request Failed`。若已经发生
+描述符失败，通用重连会冷却 5 分钟，避免请求结束后继续复位端口；手动连接及
+冷却到期后可再次恢复。平台不会在转换窗口内自动执行 `usbipd detach` 或撤销
+`Shared (forced)` 绑定。
 Windows SSH 账号必须具有执行策略命令的管理员权限。需要手工排查时，可在
 管理员 PowerShell 中执行：
 

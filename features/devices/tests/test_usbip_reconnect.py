@@ -1821,6 +1821,31 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertEqual(hosts, [])
         self.assertEqual(scheduled, [])
 
+    def test_firmware_pause_blocks_reconnect_without_hiding_device(self):
+        import features.devices.reconnect as reconnect
+
+        reconnect.pause_usbip_reconnect(device_ids=["USBIP001"])
+        try:
+            self.assertTrue(
+                reconnect.is_usbip_reconnect_paused(device_id="USBIP001")
+            )
+            self.assertFalse(reconnect.schedule_usbip_reconnect(
+                "hcq@172.16.14.66",
+                expected_devices=["USBIP001"],
+            ))
+            # Firmware ownership is not a user-requested disconnect; normal
+            # inventory must continue to show the selected serial.
+            self.assertEqual(
+                reconnect.filter_suppressed_usbip_devices(["USBIP001"]),
+                ["USBIP001"],
+            )
+        finally:
+            reconnect.resume_usbip_reconnect(device_ids=["USBIP001"])
+
+        self.assertFalse(
+            reconnect.is_usbip_reconnect_paused(device_id="USBIP001")
+        )
+
     def test_remote_worker_assignment_blocks_local_reconnect(self):
         import features.devices.reconnect as reconnect
 
@@ -2388,6 +2413,10 @@ BUSID  VID:PID    DEVICE                                                        
 
         with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
                 patch.object(reconnect, "usbip_manager", fake_usbip), \
+                patch.object(
+                    reconnect, "_resolved_busids_for_devices",
+                    return_value=["1-1"],
+                ), \
                 patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
                 patch.object(reconnect.device_manager, "get_connected_devices", side_effect=lambda force_refresh=True: next(device_sequences)), \
                 patch.object(reconnect, "USBIP_RECONNECT_INTERVAL_SECONDS", 0), \
@@ -2427,6 +2456,10 @@ BUSID  VID:PID    DEVICE                                                        
                 global_state.usbip_devices_source.clear()
             with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
                     patch.object(reconnect, "usbip_manager", FakeUsbipManager()), \
+                    patch.object(
+                        reconnect, "_resolved_busids_for_devices",
+                        return_value=["1-1"],
+                    ), \
                     patch.object(reconnect.device_manager, "get_connected_devices", return_value=["USBIP001"]):
                 reconnect._reconnect_worker(
                     "hcq@172.16.14.66",

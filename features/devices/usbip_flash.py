@@ -114,6 +114,92 @@ def resolve_usbip_flash_routes(
     return list(routes.values())
 
 
+def open_usbip_source_ssh(
+    device_host: str,
+    device_password: str | None = None,
+) -> tuple[Any | None, str]:
+    """Open an SSH session to a Windows usbipd source host."""
+    host = str(device_host or "").strip()
+    if not host:
+        return None, "缺少设备主机地址"
+    config = usbip_manager.config_manager.load_config()
+    password = (
+        device_password
+        or usbip_manager.config_manager.find_device_host_password(host, config)
+        or config.get("device_pswd", "")
+    )
+    if not password:
+        return None, f"未找到 {host} 的SSH凭据"
+    try:
+        username, hostname = parse_host_address(host)
+        ssh_hostname, ssh_port = split_host_port(hostname)
+    except Exception as exc:
+        return None, f"无效的设备主机地址: {exc}"
+    ssh = usbip_manager._create_windows_ssh(
+        ssh_hostname, username, password, ssh_port
+    )
+    if not ssh:
+        return None, f"SSH连接失败到 {host}"
+    return ssh, ""
+
+
+def _valid_usbip_busid(busid: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,64}", str(busid or "").strip()))
+
+
+def bind_usbip_busid_via_ssh(ssh, busid: str) -> dict[str, Any]:
+    """Actively share a present-but-unshared instance when AutoBind did not fire."""
+    busid = str(busid or "").strip()
+    if not _valid_usbip_busid(busid):
+        return {"success": False, "error": "无效的USB/IP BUSID"}
+    out, err, code = usbip_manager.ssh_manager.execute_command(
+        ssh, f"usbipd bind --busid {busid}", timeout=15,
+    )
+    detail = (err or out or "").strip()
+    return {"success": code == 0, "code": code, "detail": detail}
+
+
+def usbipd_list_via_ssh(ssh) -> tuple[str, str]:
+    """Capture the usbipd device table for post-mortem diagnosis."""
+    out, err, code = usbip_manager.ssh_manager.execute_command(
+        ssh, "usbipd list", timeout=15,
+    )
+    if code != 0:
+        return "", (err or out or f"usbipd list exited with code {code}").strip()
+    return (out or "").strip(), ""
+
+
+def usbipd_policy_list_via_ssh(ssh) -> str:
+    """Capture `usbipd policy list` for post-mortem AutoBind diagnosis."""
+    out, err, code = usbip_manager.ssh_manager.execute_command(
+        ssh, "usbipd policy list", timeout=15,
+    )
+    if code != 0:
+        return (err or out or f"usbipd policy list exited with code {code}").strip()
+    return (out or "").strip(), ""
+
+
+def usbipd_policy_line_covers_busid(output: str, busid: str) -> bool:
+    """Return True when a policy line already allows AutoBind for the exact busid.
+
+    BUSID 必须整词匹配：子串判断会让 "1-1" 误命中 "1-11" 的既有规则，
+    预检通过但实际 1-1 并没有 AutoBind 策略，MaskROM 重挂载随即失败。
+    """
+    token = re.compile(
+        rf"(?<![A-Za-z0-9._-]){re.escape(str(busid or ''))}(?![A-Za-z0-9._-])",
+        re.IGNORECASE,
+    )
+    for line in (output or "").splitlines():
+        normalized = line.replace("-", "").casefold()
+        if (
+            token.search(line)
+            and "allow" in line.casefold()
+            and "autobind" in normalized
+        ):
+            return True
+    return False
+
+
 def ensure_usbip_auto_bind_policies(
     device_host: str,
     busids: list[str],
@@ -124,31 +210,12 @@ def ensure_usbip_auto_bind_policies(
         str(item or "").strip() for item in busids or []
         if str(item or "").strip()
     ))
-    if not selected or any(
-        not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", item) for item in selected
-    ):
+    if not selected or any(not _valid_usbip_busid(item) for item in selected):
         return {"success": False, "error": "无效的USB/IP BUSID"}
 
-    config = usbip_manager.config_manager.load_config()
-    password = (
-        device_password
-        or usbip_manager.config_manager.find_device_host_password(
-            device_host, config
-        )
-        or config.get("device_pswd", "")
-    )
-    if not password:
-        return {"success": False, "error": f"未找到 {device_host} 的SSH凭据"}
-    try:
-        username, hostname = parse_host_address(device_host)
-        ssh_hostname, ssh_port = split_host_port(hostname)
-    except Exception as exc:
-        return {"success": False, "error": f"无效的设备主机地址: {exc}"}
-    ssh = usbip_manager._create_windows_ssh(
-        ssh_hostname, username, password, ssh_port
-    )
+    ssh, ssh_error = open_usbip_source_ssh(device_host, device_password)
     if not ssh:
-        return {"success": False, "error": f"SSH连接失败到 {device_host}"}
+        return {"success": False, "error": ssh_error}
 
     try:
         if not usbip_manager._is_windows_host(ssh):
@@ -175,12 +242,7 @@ def ensure_usbip_auto_bind_policies(
             }
 
         def covered(output: str, busid: str) -> bool:
-            return any(
-                busid.casefold() in line.casefold()
-                and "allow" in line.casefold()
-                and "autobind" in line.casefold().replace("-", "")
-                for line in (output or "").splitlines()
-            )
+            return usbipd_policy_line_covers_busid(output, busid)
 
         added, existing, errors = [], [], {}
         for busid in selected:

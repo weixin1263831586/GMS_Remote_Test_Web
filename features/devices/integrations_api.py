@@ -1408,10 +1408,22 @@ async def start_usbip(
 
             if request_data.get("manual_connect"):
                 try:
-                    from features.devices.reconnect import clear_usbip_reconnect_suppression
-                    clear_usbip_reconnect_suppression(device_host, device_list)
+                    from features.devices.reconnect import (
+                        clear_usbip_reconnect_suppression,
+                        resume_usbip_reconnect,
+                    )
+
+                    clear_usbip_reconnect_suppression(
+                        device_host, reported_serials
+                    )
+                    resume_usbip_reconnect(device_ids=reported_serials)
                 except Exception as e:
-                    logger.warning("[USB/IP] Failed to clear reconnect suppression for devices %s: %s", device_list, e)
+                    logger.warning(
+                        "[USB/IP] Failed to clear reconnect suppression/pause "
+                        "for devices %s: %s",
+                        reported_serials,
+                        e,
+                    )
 
             if submitted_device_password:
                 try:

@@ -9,6 +9,7 @@ from typing import Any
 from . import runtime
 from .manager import device_manager, has_blocked_adb_process
 from .usbip import find_device_host_password, usbip_manager
+from .usbip_flash import resolve_usbip_flash_routes
 from .usbip_transport_probe import probe_existing_local_usbip_transport
 
 
@@ -27,6 +28,16 @@ _suppressed_hosts: dict[str, float] = {}
 _suppressed_devices: dict[str, float] = {}
 _suppression_lock = threading.Lock()
 USBIP_MANUAL_DISCONNECT_SUPPRESS_SECONDS = 300
+
+# Firmware flashing owns the selected physical USB/IP route while the device
+# changes ADB/Loader/MaskROM identities.  This pause is deliberately separate
+# from manual-disconnect suppression: paused devices remain visible in normal
+# device views, but generic disappearance monitoring must not start a second
+# attach loop against the same BUSID.
+_paused_hosts: dict[str, float] = {}
+_paused_devices: dict[str, float] = {}
+_pause_lock = threading.Lock()
+USBIP_FIRMWARE_RECONNECT_PAUSE_SECONDS = 2 * 60 * 60
 
 
 def _runtime_usbip_sources() -> dict[str, dict[str, Any]]:
@@ -89,6 +100,64 @@ def is_usbip_reconnect_suppressed(device_host: str = "", device_id: str = "") ->
     return False
 
 
+def pause_usbip_reconnect(
+    device_host: str = "",
+    device_ids: Iterable[str] = (),
+    ttl_seconds: int = USBIP_FIRMWARE_RECONNECT_PAUSE_SECONDS,
+) -> None:
+    """Pause generic reconnect without hiding an owned firmware device."""
+    expires_at = time.time() + max(1, ttl_seconds)
+    with _pause_lock:
+        if device_host:
+            _paused_hosts[str(device_host).strip()] = expires_at
+        for device_id in device_ids or []:
+            if device_id:
+                _paused_devices[str(device_id).strip()] = expires_at
+
+
+def resume_usbip_reconnect(
+    device_host: str = "", device_ids: Iterable[str] = (),
+) -> None:
+    """Release a firmware reconnect pause."""
+    with _pause_lock:
+        if device_host:
+            _paused_hosts.pop(str(device_host).strip(), None)
+        for device_id in device_ids or []:
+            if device_id:
+                _paused_devices.pop(str(device_id).strip(), None)
+
+
+def is_usbip_reconnect_paused(
+    device_host: str = "", device_id: str = "",
+) -> bool:
+    now = time.time()
+    with _pause_lock:
+        for table, key in (
+            (_paused_hosts, device_host),
+            (_paused_devices, device_id),
+        ):
+            key = str(key or "").strip()
+            if not key:
+                continue
+            expires_at = table.get(key)
+            if expires_at and expires_at > now:
+                return True
+            if expires_at:
+                table.pop(key, None)
+    return False
+
+
+def _reconnect_paused_for_devices(
+    device_host: str, device_ids: Iterable[str],
+) -> bool:
+    if is_usbip_reconnect_paused(device_host=device_host):
+        return True
+    return any(
+        is_usbip_reconnect_paused(device_id=device_id)
+        for device_id in device_ids or ()
+    )
+
+
 def _normalize_host(host: str) -> str:
     """Strip user@ prefix and whitespace so host identities compare reliably."""
     host = str(host or "").strip()
@@ -104,6 +173,28 @@ def _local_worker_id() -> str:
         return str(get_cluster_service().config.local_worker_id or "")
     except Exception:
         return ""
+
+
+def _resolved_busids_for_devices(device_ids: set[str]) -> list[str]:
+    """Resolve assigned physical BUSIDs for the given Android serials.
+
+    Returns [] when no persistent assignment matches so callers can keep
+    their whole-host fallback.
+    """
+    if not device_ids:
+        return []
+    try:
+        routes = resolve_usbip_flash_routes(sorted(device_ids)) or []
+    except Exception as exc:
+        logger.warning("[USB/IP Reconnect] busid resolution failed: %s", exc)
+        return []
+    busids: list[str] = []
+    for route in routes:
+        for busid in route.get("busids") or []:
+            busid = str(busid or "").strip()
+            if busid and busid not in busids:
+                busids.append(busid)
+    return busids
 
 
 def _device_host_has_remote_assignment(device_host: str) -> bool:
@@ -183,6 +274,14 @@ def schedule_usbip_reconnect_for_removed_devices(
                 reason,
             )
             continue
+        if _reconnect_paused_for_devices(device_host, [device_id]):
+            logger.info(
+                "[USB/IP Reconnect] paused by firmware ownership for %s/%s (%s)",
+                device_host,
+                device_id,
+                reason,
+            )
+            continue
         _mark_usbip_reconnecting(device_host, [device_id], reason)
         if schedule_usbip_reconnect(
             device_host,
@@ -214,6 +313,15 @@ def schedule_usbip_reconnect_for_missing_devices(
                 reason,
             )
             continue
+        if _reconnect_paused_for_devices(device_host, [device_id]):
+            logger.info(
+                "[USB/IP Reconnect] startup/missing reconnect paused by firmware "
+                "ownership for %s/%s (%s)",
+                device_host,
+                device_id,
+                reason,
+            )
+            continue
         if schedule_usbip_reconnect(
             device_host,
             reason=f"{reason}: {device_id}",
@@ -237,10 +345,18 @@ def schedule_usbip_reconnect(
     visible. Generic disappearance monitoring keeps waiting for a protocol.
     """
     device_host = str(device_host or "").strip()
+    expected_devices = tuple(dict.fromkeys(expected_devices or ()))
     if not device_host:
         return False
     if is_usbip_reconnect_suppressed(device_host):
         logger.info("[USB/IP Reconnect] suppressed for %s (%s)", device_host, reason)
+        return False
+    if _reconnect_paused_for_devices(device_host, expected_devices):
+        logger.info(
+            "[USB/IP Reconnect] paused by firmware ownership for %s (%s)",
+            device_host,
+            reason,
+        )
         return False
     if _device_host_has_remote_assignment(device_host):
         logger.info(
@@ -264,7 +380,7 @@ def schedule_usbip_reconnect(
         stop_event = threading.Event()
         worker = threading.Thread(
             target=_reconnect_worker,
-            args=(device_host, reason, stop_event, tuple(dict.fromkeys(expected_devices or ()))),
+            args=(device_host, reason, stop_event, expected_devices),
             name=f"USBIPReconnect-{device_host}",
             daemon=True,
         )
@@ -372,6 +488,12 @@ def _reconnect_worker(
         for attempt in range(1, USBIP_RECONNECT_ATTEMPTS + 1):
             if stop_event.is_set():
                 return
+            if _reconnect_paused_for_devices(device_host, expected_set):
+                logger.info(
+                    "[USB/IP Reconnect] stopped by firmware ownership for %s",
+                    device_host,
+                )
+                return
             if attempt > 1 and stop_event.wait(USBIP_RECONNECT_INTERVAL_SECONDS):
                 return
             if has_blocked_adb_process():
@@ -394,6 +516,12 @@ def _reconnect_worker(
             )
             if is_usbip_reconnect_suppressed(device_host):
                 logger.info("[USB/IP Reconnect] stopped by manual disconnect suppression for %s", device_host)
+                return
+            if _reconnect_paused_for_devices(device_host, expected_set):
+                logger.info(
+                    "[USB/IP Reconnect] stopped by firmware ownership for %s",
+                    device_host,
+                )
                 return
             if stop_event.is_set():
                 return
@@ -429,13 +557,41 @@ def _reconnect_worker(
                 if accept_transport_only
                 else {}
             )
+            # 定向重连：按已分配的物理 BUSID 限定作用范围，避免同一
+            # Windows 主机上其他设备的传输被连带 detach/attach。只要调用方
+            # 指定了期望设备，就不允许退化为整主机发现；缺失分配记录需要
+            # 用户重新选择设备建立映射，不能拿同主机其他设备冒险兜底。
+            selected_busids = _resolved_busids_for_devices(expected_set)
+            if selected_busids:
+                start_kwargs["selected_busids"] = selected_busids
+            elif expected_set:
+                detail = (
+                    "missing persistent BUSID assignment for "
+                    + ", ".join(sorted(expected_set))
+                )
+                _mark_usbip_reconnecting(
+                    device_host, expected_set, f"{reason}; {detail}",
+                )
+                logger.error(
+                    "[USB/IP Reconnect] refusing whole-host fallback for %s: %s",
+                    device_host, detail,
+                )
+                return
             result = usbip_manager.start_usbip(
                 device_host,
                 device_password,
                 **start_kwargs,
             )
-            if is_usbip_reconnect_suppressed(device_host) or stop_event.is_set():
-                logger.info("[USB/IP Reconnect] result ignored after manual disconnect for %s", device_host)
+            if (
+                is_usbip_reconnect_suppressed(device_host)
+                or _reconnect_paused_for_devices(device_host, expected_set)
+                or stop_event.is_set()
+            ):
+                logger.info(
+                    "[USB/IP Reconnect] result ignored after reconnect was "
+                    "stopped or paused for %s",
+                    device_host,
+                )
                 return
             device_list = result.get("device_list") or []
             if result.get("success") and result.get("transport_connected", True):
