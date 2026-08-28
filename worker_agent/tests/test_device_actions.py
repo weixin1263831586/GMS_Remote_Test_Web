@@ -507,3 +507,37 @@ def test_firmware_flash_requires_worker_staging_and_exactly_one_loader(tmp_path)
         result = flash_firmware(config, image, ["worker-246:ABC"])
     assert result["success"] is True
     assert run.call_args_list[-1].args[0] == [str(tool), "uf", str(image)]
+
+
+def test_firmware_flash_accepts_device_already_in_fastboot(tmp_path):
+    data_root = tmp_path / "data"
+    image = data_root / "firmware" / "fw-1" / "update.img"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"image")
+    tool = tmp_path / "upgrade_tool"
+    tool.write_text("tool")
+    tool.chmod(0o755)
+    config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
+                          data_root=data_root, suite_roots=[tmp_path / "suites"])
+    responses = [
+        subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        subprocess.CompletedProcess([], 0, stdout="List of devices attached\nABC\tdevice\n", stderr=""),
+        subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        subprocess.CompletedProcess([], 0, stdout="List of rockusb connected(1)\n", stderr=""),
+        subprocess.CompletedProcess([], 0, stdout="Download Firmware Success", stderr=""),
+    ]
+    with patch.dict("os.environ", {"GMS_WORKER_UPGRADE_TOOL": str(tool)}), patch(
+        "worker_agent.device_actions.probe_devices",
+        return_value=[{"serial": "ABC", "state": "fastboot"}],
+    ), patch("worker_agent.device_actions.time.sleep"), patch(
+        "worker_agent.device_actions.subprocess.run", side_effect=responses
+    ) as run:
+        result = flash_firmware(config, image, ["worker-246:ABC"])
+
+    commands = [call.args[0] for call in run.call_args_list]
+    assert commands[:3] == [
+        ["fastboot", "-s", "ABC", "reboot"],
+        ["adb", "devices"],
+        ["adb", "-s", "ABC", "reboot", "loader"],
+    ]
+    assert result["success"] is True

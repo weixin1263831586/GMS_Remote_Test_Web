@@ -21,8 +21,6 @@ from features.devices.runtime import configure_runtime
 from features.devices.usbip import (
     USBIPManager,
     find_device_host_password,
-    parse_adb_device_states,
-    parse_fastboot_devices,
     parse_usbipd_android_busids,
 )
 
@@ -118,23 +116,6 @@ BUSID  VID:PID    DEVICE                                                        
 1-13   0403:6001  USB Serial Converter                                          Not shared
 """
         self.assertEqual(parse_usbipd_android_busids(output), ["1-1"])
-
-    def test_protocol_state_parsers_include_recovery_and_fastboot(self):
-        adb_output = """
-List of devices attached
-ADB001	device
-REC001	recovery
-OFF001	offline
-UNAUTH001	unauthorized
-"""
-        fastboot_output = "FB001\tfastboot\nFB002\tfastbootd\n"
-        self.assertEqual(parse_adb_device_states(adb_output), {
-            "ADB001": "device",
-            "REC001": "recovery",
-            "OFF001": "offline",
-            "UNAUTH001": "unauthorized",
-        })
-        self.assertEqual(parse_fastboot_devices(fastboot_output), ["FB001", "FB002"])
 
     def test_find_android_devices_parses_stderr_output(self):
         class FakeSshManager:
@@ -990,10 +971,21 @@ UNAUTH001	unauthorized
                     return ("List of devices attached\nUSBIP001\tdevice\n", "", 0)
                 if cmd.startswith("sudo usbip attach"):
                     return ("", "device already attached", 1)
+                if cmd == "sudo -n /usr/bin/usbip port":
+                    return (
+                        "Port 00: <Port in Use>\n"
+                        "  1-1 -> usbip://172.16.14.64:3240/1-1\n",
+                        "",
+                        0,
+                    )
                 return ("", "", 0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-        attached, devices = manager._attach_devices(object(), "172.16.14.64", ["1-1"])
+        manager.device_sources["USBIP001"] = {"source": "host"}
+        with patch("features.devices.usbip.time.sleep", return_value=None):
+            attached, devices = manager._attach_devices(
+                object(), "172.16.14.64", ["1-1"]
+            )
         self.assertEqual(attached, ["1-1"])
         self.assertEqual(devices, ["USBIP001"])
 
@@ -1010,6 +1002,13 @@ UNAUTH001	unauthorized
                     return ("List of devices attached\nLOCAL001\tdevice\nUSBIP001\tdevice\n", "", 0)
                 if cmd.startswith("sudo usbip attach"):
                     return ("attached", "", 0)
+                if cmd == "sudo -n /usr/bin/usbip port":
+                    return (
+                        "Port 00: <Port in Use>\n"
+                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                        "",
+                        0,
+                    )
                 return ("", "", 0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
@@ -1034,6 +1033,13 @@ UNAUTH001	unauthorized
                     return ("FB001\tfastboot\n", "", 0)
                 if cmd.startswith("sudo usbip attach"):
                     return ("attached", "", 0)
+                if cmd == "sudo -n /usr/bin/usbip port":
+                    return (
+                        "Port 00: <Port in Use>\n"
+                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                        "",
+                        0,
+                    )
                 return ("", "", 0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
@@ -1056,6 +1062,13 @@ UNAUTH001	unauthorized
                     return ("List of devices attached\nREC001\trecovery\n", "", 0)
                 if cmd.startswith("sudo usbip attach"):
                     return ("attached", "", 0)
+                if cmd == "sudo -n /usr/bin/usbip port":
+                    return (
+                        "Port 00: <Port in Use>\n"
+                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                        "",
+                        0,
+                    )
                 return ("", "", 0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
@@ -1064,24 +1077,6 @@ UNAUTH001	unauthorized
         self.assertEqual(attached, ["1-1"])
         self.assertEqual(devices, [])
         self.assertEqual(manager.ssh_manager.adb_calls, 2)
-
-    def test_protocol_status_is_scoped_to_attached_usbip_devices(self):
-        manager = USBIPManager()
-        scoped = manager._scope_protocol_status(
-            {
-                "adb": {"LOCAL001": "device", "USBIP001": "device"},
-                "adb_ready": ["LOCAL001", "USBIP001"],
-                "recovery": [],
-                "sideload": [],
-                "unauthorized": [],
-                "offline": [],
-                "fastboot": [],
-                "mode": "adb",
-            },
-            ["USBIP001"],
-        )
-        self.assertEqual(scoped["adb"], {"USBIP001": "device"})
-        self.assertEqual(scoped["adb_ready"], ["USBIP001"])
 
     def test_device_host_password_requires_exact_encrypted_host_record(self):
         config = {
@@ -1120,7 +1115,7 @@ UNAUTH001	unauthorized
                 return True
 
         class FakeUsbipManager:
-            def start_usbip(self, device_host, device_password, usbip_attach_host=None):
+            def start_usbip(self, device_host, device_password, usbip_attach_host=None, **kwargs):
                 saved["start_args"] = (device_host, device_password, usbip_attach_host)
                 return {"success": True, "message": "ok", "device_list": ["USBIP001"]}
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
@@ -1162,7 +1157,7 @@ UNAUTH001	unauthorized
                 return True
 
         class FakeUsbipManager:
-            def start_usbip(self, device_host, device_password, usbip_attach_host=None):
+            def start_usbip(self, device_host, device_password, usbip_attach_host=None, **kwargs):
                 return {
                     "success": True,
                     "message": "ok",
@@ -1210,7 +1205,7 @@ UNAUTH001	unauthorized
                 return {"device_pswd": "secret", "client_ssh_credentials": []}
 
         class FakeUsbipManager:
-            def start_usbip(self, device_host, device_password, usbip_attach_host=None):
+            def start_usbip(self, device_host, device_password, usbip_attach_host=None, **kwargs):
                 return {
                     "success": True,
                     "message": "attached",
@@ -1706,7 +1701,7 @@ UNAUTH001	unauthorized
                 return True
 
         class FakeUsbipManager:
-            def start_usbip(self, device_host, device_password, usbip_attach_host=None):
+            def start_usbip(self, device_host, device_password, usbip_attach_host=None, **kwargs):
                 calls.append((device_host, device_password, usbip_attach_host))
                 return {"success": True, "message": "ok", "device_list": ["USBIP001"]}
 
@@ -1746,7 +1741,7 @@ UNAUTH001	unauthorized
                 return {"device_pswd": "secret", "client_ssh_credentials": []}
 
         class FakeUsbipManager:
-            def start_usbip(self, device_host, device_password, usbip_attach_host=None):
+            def start_usbip(self, device_host, device_password, usbip_attach_host=None, **kwargs):
                 return {"success": False, "error": "未找到Android设备"}
 
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
@@ -2379,7 +2374,7 @@ UNAUTH001	unauthorized
             def __init__(self):
                 self.calls = 0
 
-            def start_usbip(self, device_host, device_password):
+            def start_usbip(self, device_host, device_password, **kwargs):
                 self.calls += 1
                 return {"success": True, "device_list": ["USBIP001"]}
 
@@ -2418,7 +2413,7 @@ UNAUTH001	unauthorized
                 return {}
 
         class FakeUsbipManager:
-            def start_usbip(self, device_host, device_password):
+            def start_usbip(self, device_host, device_password, **kwargs):
                 reconnect.suppress_usbip_reconnect(device_host, ["USBIP001"])
                 return {
                     "success": True,

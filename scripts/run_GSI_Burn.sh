@@ -28,9 +28,19 @@ wait_for_fastbootd() {
     return 1
 }
 
-fastboot -s "$SERIAL" oem "$UNLOCK_COMMAND"
-fastboot -s "$SERIAL" reboot fastboot
-wait_for_fastbootd
+is_fastbootd() {
+    local output=""
+    output="$(fastboot -s "$SERIAL" getvar is-userspace 2>&1 || true)"
+    [[ "${output,,}" == *"is-userspace: yes"* ]]
+}
+
+# Controller/Worker code normally performs this transition so USB/IP can
+# re-bind the new gadget identity.  Keep the fallback for direct script use.
+if ! is_fastbootd; then
+    fastboot -s "$SERIAL" oem "$UNLOCK_COMMAND"
+    fastboot -s "$SERIAL" reboot fastboot
+    wait_for_fastbootd
+fi
 
 fastboot -s "$SERIAL" delete-logical-partition product || true
 fastboot -s "$SERIAL" delete-logical-partition product_a || true
@@ -45,4 +55,6 @@ if [[ -n "$VENDOR_IMG" ]]; then
     fastboot -s "$SERIAL" flash "$VENDOR_PARTITION" "$VENDOR_IMG"
 fi
 
-fastboot -s "$SERIAL" reboot
+if [[ "${GMS_GSI_DEFER_REBOOT:-0}" != "1" ]]; then
+    fastboot -s "$SERIAL" reboot
+fi

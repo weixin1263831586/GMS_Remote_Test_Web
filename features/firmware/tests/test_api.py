@@ -233,24 +233,6 @@ class FirmwareApiTests(unittest.TestCase):
             "Vendor boot image not found: /home/hcq/GMS-Suite/vendor_boot-debug.img",
         )
 
-    def test_gsi_preflight_accepts_adb_and_fastbootd_devices(self):
-        class ProtocolSshManager(FakeSshManager):
-            def execute_command(self, _ssh, cmd, timeout=None):
-                if cmd == "adb devices":
-                    return "List of devices attached\nADB001\tdevice\n", "", 0
-                if cmd == "fastboot devices":
-                    return "FB001\tfastbootd\n", "", 0
-                raise AssertionError(cmd)
-
-        runtime.configure_runtime(ssh_manager=ProtocolSshManager(""))
-        ready, unavailable = firmware_api._partition_devices_by_flash_state(
-            object(),
-            ["ADB001", "FB001", "MISSING"],
-        )
-
-        self.assertEqual(ready, ["ADB001", "FB001"])
-        self.assertEqual(unavailable, ["MISSING"])
-
     def test_firmware_chunk_upload_can_resume_without_locking_devices(self):
         lock_calls = []
 

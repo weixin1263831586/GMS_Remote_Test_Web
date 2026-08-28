@@ -174,7 +174,9 @@
   "ubuntu_host": "str",
   "ubuntu_pswd": "str",
   "ubuntu_user": "str",
-  "usbip_vid_pid": "str",
+  "usbip_vid_pids": [
+    "str"
+  ],
   "use_key_auth": "bool",
   "vnc_password": "str",
   "vpn_gateways": [

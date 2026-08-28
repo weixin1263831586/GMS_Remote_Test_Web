@@ -24,7 +24,7 @@ from .support import (
     update_user_state_field,
 )
 from .ui_control_api import UiControlRequest, UiTapRequest
-from .usbip import parse_adb_device_states
+from .usbip import parse_adb_device_states, usbip_manager
 
 
 _LAZY_API_EXPORTS = {
@@ -35,11 +35,13 @@ _LAZY_API_EXPORTS = {
     'connect_wifi': '.operations_api',
     'create_pair_grant': '.adb_proxy_security',
     'DeviceUtils': '.utils',
+    'ensure_usbip_auto_bind_policies': '.usbip_flash',
     'incompatible_test_devices': '.transport_policy',
     'local_proxy_secret': '.adb_proxy_security',
     'pair_code_for_worker': '.adb_proxy_security',
     'reconcile_cluster_usbip_command': '.integrations_api',
     'reconcile_cluster_usbip_heartbeat': '.integrations_api',
+    'resolve_usbip_flash_routes': '.usbip_flash',
     'validate_pair_grant': '.adb_proxy_security',
 }
 
@@ -85,6 +87,7 @@ __all__ = [
     "create_pair_grant",
     "device_lock_manager",
     "device_manager",
+    "ensure_usbip_auto_bind_policies",
     "get_adb_proxy_service",
     "get_or_create_user_state",
     "get_usb_monitor",
@@ -95,7 +98,9 @@ __all__ = [
     "reconcile_cluster_usbip_command",
     "reconcile_cluster_usbip_heartbeat",
     "release_device_locks",
+    "resolve_usbip_flash_routes",
     "ssh_connection_failed_response",
     "update_user_state_field",
+    "usbip_manager",
     "validate_pair_grant",
 ]

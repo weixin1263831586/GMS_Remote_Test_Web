@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
+from collections.abc import Callable
 
 import scp
 
@@ -49,6 +50,7 @@ def prepare_gsi_command(
     system_img: str,
     misc_img: str,
     vendor_img: str,
+    on_transport_reset: Callable[[str, str], None] | None = None,
 ) -> str:
     def remote_runner(argv: list[str], timeout: int) -> CommandResult:
         output, error, code = ssh_manager.execute_command(
@@ -58,8 +60,13 @@ def prepare_gsi_command(
         )
         return CommandResult(output, error, code)
 
-    prepared = FastbootPreparer(remote_runner).prepare_bootloader(device)
+    prepared = FastbootPreparer(
+        remote_runner,
+        on_transport_reset=on_transport_reset,
+    ).prepare_gsi_fastbootd(device)
     argv = [
+        "env",
+        "GMS_GSI_DEFER_REBOOT=1",
         remote_script,
         device,
         prepared.oem_argument("unlock"),

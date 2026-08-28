@@ -249,6 +249,9 @@ async function showConfig() {
         addLogEntry('获取配置失败: ' + error.message, 'error');
         return;
     }
+    const usbipVidPids = Array.isArray(config.usbip_vid_pids)
+        ? config.usbip_vid_pids.join(', ')
+        : String(config.usbip_vid_pid || '');
 
     // Generate config form with actual values
     modalBody.innerHTML = `
@@ -278,8 +281,8 @@ async function showConfig() {
             <input type="text" id="config-local-server" value="${config.local_server || ''}" />
         </div>
         <div class="modal-form-row">
-            <label>USB设备VID:PID:</label>
-            <input type="text" id="config-usbip-vid-pid" value="${config.usbip_vid_pid || ''}" placeholder="例如: 2207:0006" />
+            <label>设备VID:PID:</label>
+            <input type="text" id="config-usbip-vid-pids" value="${escapeHtml(usbipVidPids)}" placeholder="例如: 2207:0006, 18d1:4d00" />
         </div>
         <div class="modal-form-row">
             <label>测试脚本路径:</label>
@@ -501,13 +504,17 @@ function closeModal(modalId) {
 async function saveConfig() {
     const ubuntuPassword = document.getElementById('config-ubuntu-pswd').value;
     const devicePassword = document.getElementById('config-device-pswd').value;
+    const usbipVidPids = document.getElementById('config-usbip-vid-pids').value
+        .split(/[,;\s]+/)
+        .map(value => value.trim().toLowerCase())
+        .filter(Boolean);
     const config = {
         ubuntu_user: document.getElementById('config-ubuntu-user').value,
         ubuntu_host: document.getElementById('config-ubuntu-host').value,
         device_host: document.getElementById('config-device-host').value,
         local_server: document.getElementById('config-local-server').value,
         suites_path: document.getElementById('config-suites-path').value,
-        usbip_vid_pid: document.getElementById('config-usbip-vid-pid').value
+        usbip_vid_pids: [...new Set(usbipVidPids)]
     };
 
     // Only include passwords if they are not empty

@@ -43,13 +43,14 @@ class DeviceUtils:
 
     @staticmethod
     def parse_fastboot_devices(output: str) -> list[str]:
-        """解析 `fastboot devices` 输出，兼容 bootloader Fastboot 和 Fastbootd。"""
+        """解析 Fastboot 枚举，兼容 ``Android Fastboot`` 等厂商标签。"""
         devices = []
         for line in (output or "").splitlines():
             parts = line.split()
-            if not parts:
+            if len(parts) < 2:
                 continue
-            if len(parts) >= 2 and parts[1].lower() in {"fastboot", "fastbootd"}:
+            states = {part.lower() for part in parts[1:]}
+            if states & {"fastboot", "fastbootd"}:
                 devices.append(parts[0])
         return devices
 

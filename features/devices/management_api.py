@@ -16,6 +16,7 @@ from . import runtime
 from .locks import device_lock_manager
 from .manager import device_manager, has_blocked_adb_process
 from .support import SSHConnection
+from .usbip_transaction import USBIP_PORT_COMMAND
 from .utils import DeviceUtils
 
 
@@ -57,7 +58,7 @@ def _source_host_token(source: str) -> str:
 
 
 def _active_usbip_source_hosts(config: dict[str, Any]) -> set[str] | None:
-    command = "usbip port"
+    command = USBIP_PORT_COMMAND
     try:
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
             output, _error, code = runtime.run_local_shell_command(command, 10)

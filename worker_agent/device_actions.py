@@ -406,6 +406,35 @@ def flash_firmware(config: WorkerConfig, firmware: Path, device_ids: list[str]) 
     tool = Path(os.getenv("GMS_WORKER_UPGRADE_TOOL", str(bundled))).resolve()
     if not tool.is_file() or not os.access(tool, os.X_OK):
         raise RuntimeError("upgrade_tool is not installed on this Worker")
+    if attached[serial].get("state") == "fastboot":
+        subprocess.run(
+            ["fastboot", "-s", serial, "reboot"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        deadline = time.monotonic() + 120
+        while True:
+            adb_devices = subprocess.run(
+                ["adb", "devices"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            states = {
+                parts[0]: parts[1]
+                for line in (adb_devices.stdout or "").splitlines()[1:]
+                if len(parts := line.split()) >= 2
+            }
+            if states.get(serial) == "device":
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "Fastboot device did not return to ADB; enter Loader/MaskROM manually"
+                )
+            time.sleep(2)
     reboot = subprocess.run(["adb", "-s", serial, "reboot", "loader"], capture_output=True,
                             text=True, timeout=30, check=False)
     if reboot.returncode != 0:
@@ -444,7 +473,7 @@ def flash_gsi(config: WorkerConfig, system_img: Path | None, vendor_img: Path | 
     misc_img = Path(__file__).resolve().parent.parent / "tools" / "misc.img"
     if not misc_img.is_file():
         raise RuntimeError("misc.img is not installed on Worker")
-    prepared = FastbootPreparer(subprocess_runner).prepare_bootloader(serial)
+    prepared = FastbootPreparer(subprocess_runner).prepare_gsi_fastbootd(serial)
     argv = [
         str(script),
         serial,

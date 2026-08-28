@@ -60,7 +60,7 @@ def test_worker_gsi_uses_python_preparation_and_thin_script(tmp_path: Path) -> N
             return_value=completed,
         ) as run,
     ):
-        preparer.return_value.prepare_bootloader.return_value = prepared
+        preparer.return_value.prepare_gsi_fastbootd.return_value = prepared
         result = flash_gsi(
             config,
             system_img,
@@ -98,7 +98,7 @@ def test_worker_gsi_accepts_vendor_only_image(tmp_path: Path) -> None:
             return_value=subprocess.CompletedProcess([], 0, stdout="done", stderr=""),
         ) as run,
     ):
-        preparer.return_value.prepare_bootloader.return_value = prepared
+        preparer.return_value.prepare_gsi_fastbootd.return_value = prepared
         result = flash_gsi(config, None, vendor_img, ["RK3572GMS1"])
 
     argv = run.call_args.args[0]

@@ -197,31 +197,6 @@ function runAfterAuthReady(callback) {
     window.addEventListener('gms:auth-ready', invoke, {once: true});
 }
 
-async function resetElevationForNewBrowserTab(status) {
-    const tabKey = 'gms_browser_tab_session_v1';
-    try {
-        if (sessionStorage.getItem(tabKey)) return status;
-        sessionStorage.setItem(tabKey, '1');
-    } catch (error) {
-        // If storage is unavailable, keep the server-side session behavior.
-        debugLog('[Auth] browser tab session storage unavailable:', error);
-        return status;
-    }
-    if (!status.authenticated) return status;
-    try {
-        const response = await fetch('/api/auth/elevation/reset', {
-            method: 'POST',
-            credentials: 'same-origin',
-        });
-        if (response.ok) {
-            return { ...status, elevated: false, elevated_until: null };
-        }
-    } catch (error) {
-        debugLog('[Auth] new browser tab elevation reset failed:', error);
-    }
-    return status;
-}
-
 function showAuthGate(setupRequired = false) {
     const gate = document.getElementById('auth-gate');
     if (!gate) return;
@@ -521,7 +496,10 @@ async function logoutCurrentUser() {
 }
 
 async function ensureAuthenticatedBeforeAppStart() {
-    const status = await resetElevationForNewBrowserTab(await fetchAuthStatus());
+    // Elevation is a fixed-TTL grant bound to the authenticated platform
+    // session. Browser tabs share that session cookie, so clearing the grant
+    // when any new tab opens would also revoke it in every existing tab.
+    const status = await fetchAuthStatus();
     state.authRequired = status.auth_required !== false;
     state.authSetupRequired = Boolean(status.setup_required);
     state.authBootstrapTokenRequired = typeof status.bootstrap_token_required === 'boolean'

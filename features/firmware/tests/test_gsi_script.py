@@ -55,6 +55,7 @@ exit 0
 
     assert result.returncode != 0
     assert command_log.read_text().splitlines() == [
+        "-s RK3572GMS1 getvar is-userspace",
         "-s RK3572GMS1 oem board:unlock",
         "-s RK3572GMS1 reboot fastboot",
     ]
@@ -97,12 +98,11 @@ exit 0
 
     assert result.returncode == 0, result.stderr
     commands = command_log.read_text().splitlines()
-    assert commands[:3] == [
-        "-s RK3572GMS1 oem board:unlock",
-        "-s RK3572GMS1 reboot fastboot",
+    assert commands[:2] == [
         "-s RK3572GMS1 getvar is-userspace",
+        "-s RK3572GMS1 delete-logical-partition product",
     ]
-    assert commands[3] == "-s RK3572GMS1 delete-logical-partition product"
+    assert "-s RK3572GMS1 reboot fastboot" not in commands
 
 
 def test_locked_fastboot_output_has_actionable_diagnosis() -> None:

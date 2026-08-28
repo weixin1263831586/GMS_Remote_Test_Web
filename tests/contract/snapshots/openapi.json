@@ -3588,7 +3588,7 @@
     },
     "/api/auth/elevation/reset": {
       "post": {
-        "description": "Drop admin verification when a new browser tab session is opened.",
+        "description": "Explicitly drop admin verification without logging out the session.",
         "responses": {
           "200": {
             "content": {

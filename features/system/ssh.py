@@ -73,15 +73,33 @@ class SSHManager:
 
             if config.get('use_key_auth', False):
                 key = self._load_ssh_key(config.get('private_key_path', '~/.ssh/id_rsa'))
-                if not key:
-                    return None
-                ssh.connect(
-                    host,
-                    port=port,
-                    username=username,
-                    pkey=key,
-                    timeout=10
-                )
+                if key:
+                    ssh.connect(
+                        host,
+                        port=port,
+                        username=username,
+                        pkey=key,
+                        timeout=10
+                    )
+                else:
+                    # 安装目录可能从另一台机器恢复，导致 runtime 配置仍指向
+                    # 已不存在的专用密钥。use_key_auth 表示使用密钥认证，不应
+                    # 因单个显式路径失效而禁止 Paramiko 的标准 Agent/default-key
+                    # 发现；否则本机已有可用 ~/.ssh/id_rsa 也会被误报为 SSH 失败。
+                    logger.warning(
+                        "[SSH] Configured private key is unavailable; "
+                        "trying SSH agent and default key files"
+                    )
+                    ssh.connect(
+                        host,
+                        port=port,
+                        username=username,
+                        timeout=10,
+                        banner_timeout=10,
+                        auth_timeout=10,
+                        allow_agent=True,
+                        look_for_keys=True,
+                    )
             else:
                 if not password:
                     logger.error("[SSH] No SSH password configured")

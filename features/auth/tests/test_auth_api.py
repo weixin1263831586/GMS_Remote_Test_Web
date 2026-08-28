@@ -401,7 +401,7 @@ class AuthApiTests(unittest.TestCase):
         self.client.post("/api/auth/login", json={"username": "admin", "password": "strongpass1"})
         self.assertFalse(self.client.get("/api/auth/status").json()["elevated"])
 
-    def test_browser_tab_reset_clears_elevation_without_logging_out_client(self):
+    def test_explicit_elevation_reset_clears_grant_without_logging_out_client(self):
         self.client.post(
             "/api/auth/setup",
             json={"username": "admin", "password": "strongpass1"},

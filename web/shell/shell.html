@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260813-stable-frame-refresh">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260828-password-toggle-icons">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260813-firmware-content-id" defer></script>
     <!-- 加载API常量定义 - 必须在app.js之前加载 -->
     <script src="/static/js/api-constants.js?v=20260727-skill-install-action" defer></script>
     <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
-    <script src="/static/js/utils.js?v=20260601-01" defer></script>
+    <script src="/static/js/utils.js?v=20260828-password-toggle-icons" defer></script>
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/state.js?v=20260826-bootstrap-setup" defer></script>
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
@@ -25,26 +25,26 @@
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/api.js?v=20260826-bootstrap-setup" defer></script>
+    <script src="/static/js/api.js?v=20260827-elevation-ttl" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20260826-shell-split-2" defer></script>
     <script src="/static/js/shell/workspace-devices.js?v=20260826-shell-split-2" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260812-click-dismiss" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
     <script src="/static/js/pages/test-suite-browser.js?v=20260827-user-lazy" defer></script>
-    <script src="/static/js/pages/firmware-burn.js?v=20260813-firmware-content-id" defer></script>
+    <script src="/static/js/pages/firmware-burn.js?v=20260827-fastboot-flash" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/vpn-control.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260813-firmware-content-id" defer></script>
-    <script src="/static/js/pages/test-control.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/test-control.js?v=20260827-usbip-vid-pids" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20260813-upload-generation" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20260813-ai-status" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
-    <script src="/static/js/pages/apk-analysis.js?v=20260813-task-recovery" defer></script>
+    <script src="/static/js/pages/apk-analysis.js?v=20260828-apk-scroll-containers" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260826-auth-ready" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260827-user-lazy" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260827-apts-gts-suite" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -510,7 +510,10 @@
             </div>
             <div class="auth-row">
                 <label for="auth-password">密码</label>
-                <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="管理员密码或客户端 SSH 密码" aria-describedby="auth-password-help" required>
+                <div class="password-input-wrap">
+                    <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="管理员密码或客户端 SSH 密码" aria-describedby="auth-password-help" required>
+                    <button type="button" class="password-visibility-toggle" onclick="togglePasswordVisibility(this)" aria-label="显示密码" title="显示密码"></button>
+                </div>
                 <div class="auth-help" id="auth-password-help">管理员请输入平台密码；客户端账号请输入 SSH 密码（通常与系统登录/锁屏密码相同）。</div>
             </div>
             <div class="auth-row" id="auth-display-name-row" style="display: none;">
@@ -1618,7 +1621,7 @@
                     </div>
                     <details open>
                         <summary style="cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 10px;">AndroidManifest.xml</summary>
-                        <pre id="apk-raw-xml" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; max-height: calc(100vh - 150px); overflow-y: auto;"></pre>
+                        <pre id="apk-raw-xml" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; font-size: 11px;"></pre>
                     </details>
                 </div>
 
@@ -2463,7 +2466,10 @@
                     </div>
                     <div class="modal-form-row">
                         <label>管理员密码:</label>
-                        <input type="password" id="elevate-password" placeholder="管理员密码" onkeypress="if(event.key==='Enter'){event.preventDefault();submitElevateForm();}" autocomplete="current-password" />
+                        <div class="password-input-wrap">
+                            <input type="password" id="elevate-password" placeholder="管理员密码" onkeypress="if(event.key==='Enter'){event.preventDefault();submitElevateForm();}" autocomplete="current-password" />
+                            <button type="button" class="password-visibility-toggle" onclick="togglePasswordVisibility(this)" aria-label="显示密码" title="显示密码"></button>
+                        </div>
                     </div>
                 </form>
                 <div class="modal-ssh-info">

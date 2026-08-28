@@ -9,6 +9,7 @@ from typing import Any
 from . import runtime
 from .manager import device_manager, has_blocked_adb_process
 from .usbip import find_device_host_password, usbip_manager
+from .usbip_transport_probe import probe_existing_local_usbip_transport
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ USBIP_RECONNECT_STABLE_INTERVAL_SECONDS = 2
 
 _tasks: dict[str, threading.Thread] = {}
 _stop_events: dict[str, threading.Event] = {}
+_transport_only_hosts: set[str] = set()
 _tasks_lock = threading.Lock()
 _suppressed_hosts: dict[str, float] = {}
 _suppressed_devices: dict[str, float] = {}
@@ -39,6 +41,12 @@ def _known_usbip_sources() -> dict[str, dict[str, Any]]:
     sources.update(getattr(usbip_manager, "device_sources", {}) or {})
     sources.update(_runtime_usbip_sources())
     return sources
+
+
+def usbip_source_host_for_device(device_id: str) -> str:
+    """Return the persisted USB/IP source host for an Android serial."""
+    source_info = _known_usbip_sources().get(str(device_id or "").strip()) or {}
+    return str(source_info.get("source") or "").strip()
 
 
 def suppress_usbip_reconnect(
@@ -219,8 +227,15 @@ def schedule_usbip_reconnect(
     device_host: str,
     reason: str = "",
     expected_devices: Iterable[str] = (),
+    *,
+    accept_transport_only: bool = False,
 ) -> bool:
-    """Start a background reconnect worker for a device host if one is not running."""
+    """Start a background reconnect worker for a device host if one is not running.
+
+    ``accept_transport_only`` is reserved for intentional flash-mode changes,
+    where RockUSB Loader is valid even though neither ADB nor Fastboot is
+    visible. Generic disappearance monitoring keeps waiting for a protocol.
+    """
     device_host = str(device_host or "").strip()
     if not device_host:
         return False
@@ -236,6 +251,11 @@ def schedule_usbip_reconnect(
         return False
 
     with _tasks_lock:
+        if accept_transport_only:
+            # A flash-mode request may race the generic ADB removal monitor.
+            # Upgrade an already-running task so Loader's protocol-less USB
+            # transport is accepted instead of repeatedly detached.
+            _transport_only_hosts.add(device_host)
         existing = _tasks.get(device_host)
         if existing and existing.is_alive():
             logger.info("[USB/IP Reconnect] already running for %s", device_host)
@@ -315,6 +335,7 @@ def stop_usbip_reconnect_tasks(timeout: float = 5) -> None:
             if not task.is_alive():
                 _tasks.pop(host, None)
                 _stop_events.pop(host, None)
+                _transport_only_hosts.discard(host)
 
 
 def stop_usbip_reconnect_for_host(device_host: str, timeout: float = 5) -> None:
@@ -336,6 +357,7 @@ def stop_usbip_reconnect_for_host(device_host: str, timeout: float = 5) -> None:
         if current is task and (not task or not task.is_alive()):
             _tasks.pop(device_host, None)
             _stop_events.pop(device_host, None)
+            _transport_only_hosts.discard(device_host)
 
 
 def _reconnect_worker(
@@ -357,14 +379,12 @@ def _reconnect_worker(
                     "[USB/IP Reconnect] paused for %s because local adb is blocked in kernel state",
                     device_host,
                 )
-                return
+                # ADB can be transiently blocked while the USB gadget is
+                # disappearing. Keep the scheduled task alive so the new
+                # Fastboot/Loader identity can be bound on the next attempt.
+                continue
 
             config = runtime.config_manager.load_config(force_reload=True)
-            device_password = find_device_host_password(device_host, config) or config.get("device_pswd", "")
-            if not device_password:
-                logger.warning("[USB/IP Reconnect] no SSH credential for %s", device_host)
-                return
-
             logger.info(
                 "[USB/IP Reconnect] attempt %s/%s for %s (%s)",
                 attempt,
@@ -383,7 +403,37 @@ def _reconnect_worker(
                     device_host,
                 )
                 return
-            result = usbip_manager.start_usbip(device_host, device_password)
+            existing_transport = probe_existing_local_usbip_transport(
+                device_host, expected_set, config,
+                local_worker_id=_local_worker_id(),
+            )
+            if existing_transport:
+                device_list = existing_transport.get("device_list") or []
+                _record_reconnected_devices(device_host, device_list, existing_transport)
+                logger.info(
+                    "[USB/IP Reconnect] preserving existing transport for %s, protocol=%s devices=%s",
+                    device_host,
+                    (existing_transport.get("protocol_status") or {}).get("mode", "unknown"),
+                    device_list,
+                )
+                return
+
+            device_password = find_device_host_password(device_host, config) or config.get("device_pswd", "")
+            if not device_password:
+                logger.warning("[USB/IP Reconnect] no SSH credential for %s", device_host)
+                return
+            with _tasks_lock:
+                accept_transport_only = device_host in _transport_only_hosts
+            start_kwargs = (
+                {"allow_transport_only": True}
+                if accept_transport_only
+                else {}
+            )
+            result = usbip_manager.start_usbip(
+                device_host,
+                device_password,
+                **start_kwargs,
+            )
             if is_usbip_reconnect_suppressed(device_host) or stop_event.is_set():
                 logger.info("[USB/IP Reconnect] result ignored after manual disconnect for %s", device_host)
                 return
@@ -404,7 +454,13 @@ def _reconnect_worker(
                     return
                 if not device_list:
                     protocol_mode = (result.get("protocol_status") or {}).get("mode", "unknown")
-                    if protocol_mode in {"fastboot", "recovery", "unauthorized", "offline", "adb_non_device"}:
+                    with _tasks_lock:
+                        accept_transport_only = device_host in _transport_only_hosts
+                    # RockUSB Loader has no ADB/Fastboot protocol endpoint, so
+                    # an attached transport with an unknown protocol is a valid
+                    # flash-ready state. Retrying here would detach the active
+                    # vhci port and can interrupt upgrade_tool mid-burn.
+                    if protocol_mode != "unknown" or accept_transport_only:
                         _record_reconnected_devices(device_host, [], result)
                         logger.info(
                             "[USB/IP Reconnect] transport restored for %s, protocol=%s",
@@ -412,7 +468,11 @@ def _reconnect_worker(
                             protocol_mode,
                         )
                         return
-                    _mark_usbip_reconnecting(device_host, expected_set, f"{reason}; protocol={protocol_mode}")
+                    _mark_usbip_reconnecting(
+                        device_host,
+                        expected_set,
+                        f"{reason}; protocol={protocol_mode}",
+                    )
                     logger.info(
                         "[USB/IP Reconnect] transport attached but protocol not visible for %s, continue waiting",
                         device_host,
@@ -433,6 +493,7 @@ def _reconnect_worker(
             if current is threading.current_thread():
                 _tasks.pop(device_host, None)
                 _stop_events.pop(device_host, None)
+                _transport_only_hosts.discard(device_host)
 
 
 def _usbip_devices_stable(

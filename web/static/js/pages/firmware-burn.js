@@ -5,14 +5,6 @@ async function burnFirmware() {
         return;
     }
     if (!validateLocalUsbDeviceSelection('烧写固件')) return;
-    const fastbootDevices = selectedFastbootDeviceIds();
-    if (fastbootDevices.length > 0) {
-        showToast(
-            `普通固件烧写需要 ADB 设备；Fastboot/Fastbootd 请使用“烧写GSI”: ${fastbootDevices.join(', ')}`,
-            'warning'
-        );
-        return;
-    }
 
     // Show firmware configuration modal
     ModalManager.open('firmware-modal');
@@ -2318,6 +2310,9 @@ async function loadUsbipSourceDevices(force = false, options = {}) {
         } else {
             select.innerHTML = '<option value="">USB设备加载失败</option>';
             if (message) message.textContent = `USB设备加载失败：${error.message}`;
+            if (error.installGuide) {
+                showInstallGuide('usbipd 安装指南', error.installGuide);
+            }
         }
         if (!options.silent && (error.needPassword || error.need_password)) {
             showDevicePasswordModal(source, 'usbip-list', loadUsbipSourceDevices);
@@ -2566,7 +2561,9 @@ async function attemptUsbipReconnect() {
         const status = await apiCall(statusPath, 'GET');
         const devices = await loadDevices(true);
         const usbipDevices = devices.filter(device => device && device.is_usbip);
-        if (status.connected && (status.adb_ready || usbipDevices.length > 0 || isUsbipProtocolVisible(status))) {
+        if (status.connected && (status.adb_ready || usbipDevices.length > 0 || isUsbipProtocolVisible(status)
+                || (status.transport_connected && status.reconnecting))) {
+            // Flash-mode transition: transport can be ready before ADB.
             state.usbipConnected = true;
             usbipReconnectWaiting = false;
             pendingUsbipDeviceHost = status.device_host || pendingUsbipDeviceHost || '';

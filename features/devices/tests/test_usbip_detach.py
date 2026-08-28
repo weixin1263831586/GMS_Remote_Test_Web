@@ -64,7 +64,7 @@ class ParseUsbipPortEntriesTests(unittest.TestCase):
 
     def test_host_prefix_does_not_match_longer_host(self):
         manager = _fake_ssh_manager({
-            "usbip port": (self.MULTI_HOST_LISTING, "", 0),
+            "sudo -n /usr/bin/usbip port": (self.MULTI_HOST_LISTING, "", 0),
             "sudo usbip detach -p 00": ("", "", 0),
             "sudo usbip detach -p 01": ("", "", 0),
             "sudo usbip detach -p 02": ("", "", 0),
@@ -80,7 +80,7 @@ class ParseUsbipPortEntriesTests(unittest.TestCase):
 
     def test_busid_prefix_does_not_match_longer_busid(self):
         manager = _fake_ssh_manager({
-            "usbip port": (self.MULTI_HOST_LISTING, "", 0),
+            "sudo -n /usr/bin/usbip port": (self.MULTI_HOST_LISTING, "", 0),
             "sudo usbip detach -p 00": ("", "", 0),
             "sudo usbip detach -p 02": ("", "", 0),
         })
@@ -99,7 +99,9 @@ class ParseUsbipPortEntriesTests(unittest.TestCase):
             "Port 03: <Port in Use>\n"
             "    unrecognised future format 10.0.0.5\n"
         )
-        manager = _fake_ssh_manager({"usbip port": (listing, "", 0)})
+        manager = _fake_ssh_manager({
+            "sudo -n /usr/bin/usbip port": (listing, "", 0)
+        })
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager):
             detached = usbip.detach_ubuntu_usbip_ports(
                 MagicMock(), remote_host="10.0.0.5"
@@ -110,7 +112,7 @@ class ParseUsbipPortEntriesTests(unittest.TestCase):
 class DetachUbuntuUsbipPortsTests(unittest.TestCase):
     def test_failed_detach_is_not_reported_as_detached(self):
         manager = _fake_ssh_manager({
-            "usbip port": (PORT_LISTING, "", 0),
+            "sudo -n /usr/bin/usbip port": (PORT_LISTING, "", 0),
             "sudo usbip detach -p 00": ("", "usbip: error", 1),
         })
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
@@ -124,7 +126,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
 
     def test_successful_detach_is_reported(self):
         manager = _fake_ssh_manager({
-            "usbip port": (PORT_LISTING, "", 0),
+            "sudo -n /usr/bin/usbip port": (PORT_LISTING, "", 0),
             "sudo usbip detach -p 00": ("", "", 0),
         })
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
@@ -142,7 +144,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
             "    future output format\n"
         )
         manager = _fake_ssh_manager({
-            "usbip port": (listing, "", 0),
+            "sudo -n /usr/bin/usbip port": (listing, "", 0),
             "sudo usbip detach -p 03": ("", "usbip: error", 1),
         })
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager):
@@ -154,7 +156,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
     def test_failed_detach_confirmed_gone_still_counts(self):
         """Detach 非零退出但端口确实消失（并发释放）时仍视为成功。"""
         manager = _fake_ssh_manager({
-            "usbip port": (PORT_LISTING, "", 0),
+            "sudo -n /usr/bin/usbip port": (PORT_LISTING, "", 0),
             "sudo usbip detach -p 00": ("", "no such port", 1),
         })
         # The re-check listing after the failed detach shows no attached ports.
@@ -164,7 +166,8 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
             ("List of attached gadgets\n", "", 0),
         ])
         manager.ssh_manager.execute_command.side_effect = (
-            lambda ssh, cmd, timeout=None: next(listings) if cmd == "usbip port"
+            lambda ssh, cmd, timeout=None: next(listings)
+            if cmd == "sudo -n /usr/bin/usbip port"
             else ("", "no such port", 1)
         )
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
