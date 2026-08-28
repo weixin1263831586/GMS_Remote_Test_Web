@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
@@ -130,14 +131,19 @@ fn busy_retry_delay() -> Duration {
     Duration::from_millis(milliseconds)
 }
 
-fn helper(action: &str, args: &[String]) -> CommandOutput {
-    let path = std::env::var("GMS_WORKER_USBIP_HELPER")
-        .unwrap_or_else(|_| "/usr/local/libexec/gms-worker-usbip".to_string());
-    let mut command_args = vec!["-n".to_string(), path, action.to_string()];
-    command_args.extend_from_slice(args);
+fn verification_delay() -> Duration {
+    let milliseconds = std::env::var("GMS_USBIP_VERIFY_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(1000)
+        .min(10_000);
+    Duration::from_millis(milliseconds)
+}
+
+fn sudo_command(command_args: &[String]) -> CommandOutput {
     run(
         "sudo",
-        &command_args,
+        command_args,
         Duration::from_secs(10),
         &BTreeMap::new(),
     )
@@ -151,6 +157,75 @@ fn helper(action: &str, args: &[String]) -> CommandOutput {
         stderr: error.message,
         error_code: Some(error.code),
     })
+}
+
+fn direct_helper(action: &str, args: &[String]) -> Option<CommandOutput> {
+    let direct_args = match action {
+        "port" => vec![
+            "-n".to_string(),
+            "/usr/bin/usbip".to_string(),
+            "port".to_string(),
+        ],
+        "detach" if args.len() == 1 => vec![
+            "-n".to_string(),
+            "/usr/bin/usbip".to_string(),
+            "detach".to_string(),
+            "-p".to_string(),
+            args[0].clone(),
+        ],
+        "attach" if args.len() == 2 => {
+            let module = sudo_command(&[
+                "-n".to_string(),
+                "/usr/sbin/modprobe".to_string(),
+                "vhci_hcd".to_string(),
+            ]);
+            if module.code != 0 {
+                return Some(module);
+            }
+            vec![
+                "-n".to_string(),
+                "/usr/bin/usbip".to_string(),
+                "attach".to_string(),
+                "-r".to_string(),
+                args[0].clone(),
+                "-b".to_string(),
+                args[1].clone(),
+            ]
+        }
+        _ => return None,
+    };
+    Some(sudo_command(&direct_args))
+}
+
+fn helper(action: &str, args: &[String]) -> CommandOutput {
+    let configured_path = std::env::var("GMS_WORKER_USBIP_HELPER").ok();
+    let path = configured_path
+        .clone()
+        .unwrap_or_else(|| "/usr/local/libexec/gms-worker-usbip".to_string());
+    if configured_path.is_none() && !Path::new(&path).is_file() {
+        return direct_helper(action, args).unwrap_or(CommandOutput {
+            code: 2,
+            stdout: String::new(),
+            stderr: format!("unsupported USB/IP helper action: {action}"),
+            error_code: None,
+        });
+    }
+    let mut command_args = vec!["-n".to_string(), path, action.to_string()];
+    command_args.extend_from_slice(args);
+    let output = sudo_command(&command_args);
+    let permission_error = output.stderr.to_ascii_lowercase();
+    if output.code == 0
+        || (!permission_error.contains("password is required")
+            && !permission_error.contains("not allowed to execute"))
+    {
+        return output;
+    }
+
+    // Controller installations created before the dedicated helper may have
+    // a narrower NOPASSWD rule for usbip/modprobe.  Preserve compatibility
+    // with that allow-list while keeping every argument validated by this
+    // executor and avoiding a shell fallback.
+    direct_helper(action, args).unwrap_or(output)
 }
 
 pub fn port_blocks(output: &str) -> Vec<(String, String)> {
@@ -512,19 +587,72 @@ fn attach(payload: &UsbipPayload, selected: &[String]) -> Result<OperationResult
             json!({"attach_errors": failure_map(&errors)}),
         ));
     }
+
+    // A successful attach process does not guarantee that vhci retained the
+    // remote device.  usbipd can accept the request and close the connection
+    // immediately afterwards, so verify the exact source/busid pairs twice
+    // before publishing an attached transport state.
+    for verification_index in 0..2 {
+        let attempts = if verification_index == 0 { 6 } else { 1 };
+        let mut missing = attached.clone();
+        for attempt in 0..attempts {
+            if verification_index > 0 || attempt > 0 {
+                thread::sleep(verification_delay());
+            }
+            let ports = helper("port", &[]);
+            if ports.code != 0 {
+                return Err(port_query_error(&ports, "post_attach_verification"));
+            }
+            let verified_blocks = port_blocks(&ports.stdout);
+            missing = attached
+                .iter()
+                .filter(|busid| {
+                    !verified_blocks
+                        .iter()
+                        .any(|(_, block)| port_matches(block, &payload.source_host, busid))
+                })
+                .cloned()
+                .collect();
+            if missing.is_empty() {
+                break;
+            }
+        }
+        if !missing.is_empty() {
+            return Err(NativeError::new(
+                "USBIP_ATTACH_UNSTABLE",
+                format!(
+                    "USB/IP接入未保持连接，目标Worker上已找不到端口: {}",
+                    missing.join(", ")
+                ),
+                true,
+                "Clear the stale source export, bind it again, and retry the attachment",
+                json!({
+                    "missing_busids": missing,
+                    "source_host": payload.source_host,
+                    "verification_index": verification_index + 1,
+                }),
+            ));
+        }
+    }
     if already_attached.len() == selected.len() && newly_attached.is_empty() {
+        let devices = probe_devices(true, adb_socket);
+        let ready = !devices.is_empty();
         return Ok(OperationResult {
             data: json!({
                 "attached_busids": attached,
                 "already_attached_busids": already_attached,
                 "errors": {},
-                "devices": probe_devices(true, adb_socket),
+                "devices": devices,
                 "new_devices": [],
-                "enumeration_pending": false,
+                "enumeration_pending": !ready,
             }),
             transport_state: "attached",
-            protocol_state: "adb",
-            readiness: "test_ready",
+            protocol_state: if ready { "adb" } else { "enumerating" },
+            readiness: if ready {
+                "test_ready"
+            } else {
+                "transport_ready"
+            },
             generation: payload.generation,
         });
     }

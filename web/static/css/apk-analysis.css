@@ -1,0 +1,38 @@
+/* APK analysis layouts kept separate from the common.css migration budget. */
+#apk-tab-manifest {
+    flex-direction: column;
+    height: calc(100vh - 280px);
+    min-height: 0;
+    overflow: hidden;
+}
+
+#apk-tab-manifest > details[open] {
+    position: relative;
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#apk-tab-manifest > details > summary {
+    flex: 0 0 auto;
+}
+
+#apk-raw-xml {
+    position: absolute;
+    top: 32px;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    overflow: auto;
+    box-sizing: border-box;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}

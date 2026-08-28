@@ -175,7 +175,7 @@ async def auth_status(request: Request):
 
 @router.post("/elevation/reset")
 async def auth_elevation_reset(request: Request):
-    """Drop admin verification when a new browser tab session is opened."""
+    """Explicitly drop admin verification without logging out the session."""
     user = get_authenticated_user(request)
     if not user:
         return error_response("请先登录", status_code=401)

@@ -53,6 +53,20 @@ function safeHeaderPercentEncode(value) {
     }
 }
 
+// 密码输入框明文/密文切换：按钮位于包裹层 .password-input-wrap 内，
+// 点击后在 password 与 text 之间切换，便于校验已输入的密码。
+// 按钮内含眼睛/闭眼两个 SVG（.icon-eye/.icon-eye-off），由 is-visible 类切换显示。
+function togglePasswordVisibility(button) {
+    const input = button.closest('.password-input-wrap')?.querySelector('input');
+    if (!input) return;
+    const showPlain = input.type === 'password';
+    input.type = showPlain ? 'text' : 'password';
+    button.classList.toggle('is-visible', showPlain);
+    const label = showPlain ? '隐藏密码' : '显示密码';
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+}
+
 function formatBytes(bytes, hideIfZero = false) {
     if (hideIfZero && (!bytes || bytes === '0')) return '';
     const numBytes = parseInt(bytes) || 0;
@@ -87,5 +101,6 @@ window.throttle = throttle;
 window.normalizeApiTextError = normalizeApiTextError;
 window.escapeHtml = escapeHtml;
 window.safeHeaderPercentEncode = safeHeaderPercentEncode;
+window.togglePasswordVisibility = togglePasswordVisibility;
 window.formatBytes = formatBytes;
 window.triggerDownload = triggerDownload;

@@ -74,6 +74,16 @@ def inline_handler_calls(text: str) -> list[tuple[str, str]]:
 
 
 class FrontendIntegrityTests(unittest.TestCase):
+    def test_admin_elevation_survives_page_and_tab_initialization_until_ttl(self):
+        api = read_text("web/static/js/api.js")
+
+        auth_start = api.index("async function ensureAuthenticatedBeforeAppStart()")
+        auth_end = api.index("function applyRoleBasedUiAccess()", auth_start)
+        auth_source = api[auth_start:auth_end]
+        self.assertIn("const status = await fetchAuthStatus();", auth_source)
+        self.assertNotIn("/api/auth/elevation/reset", api)
+        self.assertNotIn("resetElevationForNewBrowserTab", api)
+
     def test_cluster_dashboard_excludes_offline_devices_from_distribution(self):
         cluster_page = read_text("features/cluster/ui/page.js")
         names_start = cluster_page.index("const dashStateNames=")
@@ -96,7 +106,6 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_host_pages_share_short_lived_cluster_directory(self):
         shell = read_text("web/shell/shell.html")
-        navigation = read_text("web/static/js/navigation.js")
         workspace_devices = read_text("web/static/js/shell/workspace-devices.js")
         terminal_start = shell.index("async function loadTerminalClusterHosts()")
         terminal_end = shell.index("function applyTerminalHost", terminal_start)
@@ -117,7 +126,6 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_shell_stops_boot_when_navigation_bundle_is_unavailable(self):
         shell = read_text("web/shell/shell.html")
         navigation = read_text("web/static/js/navigation.js")
-        workspace_devices = read_text("web/static/js/shell/workspace-devices.js")
 
         self.assertIn("window.GmsNavigationReady !== true", shell)
         self.assertTrue(
@@ -149,7 +157,9 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("const clusterModeReady = initializeClusterMode()", navigation)
         self.assertIn("await Promise.all([clusterModeReady, configReady])", navigation)
         self.assertIn("test-reports.js?v=20260812-stable-surfaces", shell)
-        self.assertIn("navigation.js?v=20260827-user-lazy", shell)
+        self.assertIn("navigation.js?v=20260827-apts-gts-suite", shell)
+        self.assertIn("testTypeLower === 'apts'", navigation)
+        self.assertIn("APTS使用GTS测试套件", navigation)
 
     def test_server_file_browser_uses_resolved_suite_path(self):
         navigation_text = read_all_frontend_js()
@@ -294,6 +304,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("const uploadError = error instanceof Error", chunks)
         self.assertIn("formData.append('chunk_size', chunkSize)", chunks)
         self.assertIn("chunk-upload.js?v=20260813-firmware-content-id", shell)
+        self.assertNotIn("普通固件烧写需要 ADB 设备", firmware)
+        self.assertIn("firmware-burn.js?v=20260827-fastboot-flash", shell)
 
     def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
         navigation = read_all_frontend_js()
@@ -562,6 +574,16 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("managementGroupsForView", main_text)
         self.assertIn("currentPage === 'devices'", navigation_text)
         self.assertIn("loadDevicesManagement().catch", navigation_text)
+
+    def test_device_management_renders_fastboot_and_plural_usbip_ids(self):
+        main_text = read_text("web/shell/shell.html")
+        controls = read_text("web/static/js/pages/test-control.js")
+
+        self.assertIn("device.protocol === 'fastboot'", main_text)
+        self.assertIn("● Fastboot", main_text)
+        self.assertIn("config.usbip_vid_pids", controls)
+        self.assertIn("usbip_vid_pids: [...new Set(usbipVidPids)]", controls)
+        self.assertIn("test-control.js?v=20260827-usbip-vid-pids", main_text)
 
     def test_unselectable_devices_stay_selected_but_render_unchecked(self):
         navigation = read_text("web/static/js/navigation.js")

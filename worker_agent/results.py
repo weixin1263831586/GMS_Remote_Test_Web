@@ -14,6 +14,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+
 logger = logging.getLogger("gms-worker")
 
 _RESULT_DIR_RE = re.compile(r"RESULT DIRECTORY\s*:\s*(\S+)")

@@ -20,23 +20,34 @@ from foundation.ssh_security import configure_strict_host_keys
 from .physical_identity import resolve_physical_device_identity
 from .ssh_credentials import find_device_host_password
 from .usb import (
+    configured_usbip_vid_pids,
     parse_usbipd_android_busids,
+    parse_usbipd_busid_statuses,
 )
 from .usbip_identity import (
     query_usbipd_busid_instance_ids,
     query_windows_usb_identities,
 )
+from .usbip_readiness import wait_for_adb_serial_ready
 from .usbip_transaction import (
-    detach_ubuntu_usbip_ports as _detach_ports_impl,
-)
-from .usbip_transaction import (
+    USBIP_PORT_COMMAND,
     parse_usbip_port_entries,
     rollback_ubuntu_attachments,
     usbip_attached_ports,
     usbip_error,
 )
 from .usbip_transaction import (
+    detach_ubuntu_usbip_ports as _detach_ports_impl,
+)
+from .usbip_transaction import (
     rollback_windows_binds as _rollback_windows_binds_impl,
+)
+from .usbipd_setup import (
+    USBIPD_INSTALL_CMD,
+    USBIPD_INSTALL_GUIDE,
+    check_usbipd_installed,
+    install_usbipd,
+    usbipd_not_installed_error,
 )
 from .utils import DeviceUtils
 
@@ -44,6 +55,8 @@ from .utils import DeviceUtils
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "USBIPD_INSTALL_CMD",
+    "USBIPD_INSTALL_GUIDE",
     "USBIPManager",
     "detach_ubuntu_usbip_ports",
     "find_device_host_password",
@@ -66,52 +79,9 @@ def detach_ubuntu_usbip_ports(
         usbip_manager.ssh_manager, ssh, remote_host, detach_all, busids
     )
 
-# usbipd 安装命令常量
-USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
-
-USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
-{install_cmd}
-验证安装：usbipd --version'''
-
-
 def _usbip_attached_ports(ssh) -> set[str]:
     """Return the set of currently attached usbip port numbers (as strings)."""
     return usbip_attached_ports(usbip_manager.ssh_manager, ssh)
-
-
-def wait_for_adb_serial_ready(ssh, serial_no: str, timeout: int = 30) -> dict[str, Any]:
-    """Wait until a specific ADB serial is in device state and shell responds."""
-    quoted_serial = shlex.quote(serial_no)
-    deadline = time.time() + timeout
-    last_output = ''
-    last_error = ''
-
-    usbip_manager.ssh_manager.execute_command(ssh, 'adb start-server', timeout=10)
-    while time.time() < deadline:
-        state_out, state_err, state_code = usbip_manager.ssh_manager.execute_command(
-            ssh, f'adb -s {quoted_serial} get-state', timeout=8
-        )
-        state_text = (state_out or state_err or '').strip()
-        last_output = state_out or ''
-        last_error = state_err or ''
-
-        if state_code == 0 and state_text == 'device':
-            shell_out, shell_err, shell_code = usbip_manager.ssh_manager.execute_command(
-                ssh, f"adb -s {quoted_serial} shell echo ready", timeout=10
-            )
-            last_output = shell_out or ''
-            last_error = shell_err or ''
-            if shell_code == 0 and 'ready' in shell_out:
-                return {'ready': True}
-
-        time.sleep(2)
-
-    devices_out, devices_err, _ = usbip_manager.ssh_manager.execute_command(ssh, 'adb devices', timeout=8)
-    return {
-        'ready': False,
-        'state': (last_output or last_error or '').strip(),
-        'devices': (devices_out or devices_err or '').strip(),
-    }
 
 
 def parse_adb_device_states(output: str) -> dict[str, str]:
@@ -129,12 +99,7 @@ def parse_adb_device_states(output: str) -> dict[str, str]:
 
 def parse_fastboot_devices(output: str) -> list[str]:
     """Parse fastboot device serials."""
-    devices: list[str] = []
-    for raw_line in (output or "").splitlines():
-        parts = raw_line.strip().split()
-        if len(parts) >= 2 and parts[1].lower() in {"fastboot", "fastbootd"}:
-            devices.append(parts[0])
-    return devices
+    return DeviceUtils.parse_fastboot_devices(output)
 
 
 class USBIPManager:
@@ -153,6 +118,7 @@ class USBIPManager:
         usbip_attach_host: str | None = None,
         selected_busids: list[str] | None = None,
         adb_server_socket: str | None = None,
+        allow_transport_only: bool = False,
     ) -> dict[str, Any]:
         """Start USB/IP forwarding to the Ubuntu host over the given Windows device_host.
 
@@ -204,11 +170,7 @@ class USBIPManager:
                 # 检查usbipd是否已安装
                 installed, _version = self.check_usbipd_installed(win_ssh)
                 if not installed:
-                    return {
-                        'success': False,
-                        'error': 'usbipd未安装',
-                        'install_guide': USBIPD_INSTALL_GUIDE.format(install_cmd=USBIPD_INSTALL_CMD)
-                    }
+                    return usbipd_not_installed_error()
 
                 network_quality = probe_tcp_quality(usbip_attach_host, 3240)
                 if not network_quality["reachable"]:
@@ -231,8 +193,19 @@ class USBIPManager:
                 discovered_busids = self._find_android_devices(win_ssh, config)
                 requested = [str(item) for item in selected_busids or []]
                 busids = requested or discovered_busids
-                if requested and not set(requested).issubset(discovered_busids):
-                    return {'success': False, 'error': '选择的USB设备已不可用，请刷新后重试'}
+                if requested:
+                    allowed_busids = set(discovered_busids)
+                    if allow_transport_only:
+                        # During an intentional Fastboot/Loader transition the
+                        # USB PID and Windows label may be new to this release.
+                        # A persisted assignment identifies the physical port;
+                        # still require that BUSID to be currently connected.
+                        source_output = self._usbipd_list_output(win_ssh)
+                        allowed_busids.update(
+                            parse_usbipd_busid_statuses(source_output)
+                        )
+                    if not set(requested).issubset(allowed_busids):
+                        return {'success': False, 'error': '选择的USB设备已不可用，请刷新后重试'}
                 if not busids:
                     return {'success': False, 'error': '未找到Android设备'}
 
@@ -269,6 +242,7 @@ class USBIPManager:
                         usbip_attach_host,
                         busids,
                         adb_server_socket=adb_server_socket,
+                        allow_transport_only=allow_transport_only,
                     )
 
                     if not attached:
@@ -286,7 +260,7 @@ class USBIPManager:
                             "USBIP_ATTACH_FAILED",
                             'USB/IP attach 失败，未成功连接任何设备',
                             retryable=True,
-                            remediation="请重试连接；若持续失败请检查Ubuntu侧vhci驱动与usbip工具。",
+                            remediation="请重试连接；若持续失败请检查Windows usbipd导出/TCP 3240及Ubuntu vhci状态。",
                             rollback_complete=(
                                 target_rollback_complete
                                 and source_rollback_complete
@@ -381,9 +355,12 @@ class USBIPManager:
         try:
             if not self._is_windows_host(ssh):
                 return {"success": False, "error": "USB/IP仅支持Windows主机"}
+            installed, _version = self.check_usbipd_installed(ssh)
+            if not installed:
+                return usbipd_not_installed_error()
             output = self._usbipd_list_output(ssh)
             busids = parse_usbipd_android_busids(
-                output, config.get("usbip_vid_pid")
+                output, configured_usbip_vid_pids(config)
             )
             labels = {}
             vid_pid_by_busid: dict[str, str] = {}
@@ -766,7 +743,10 @@ class USBIPManager:
     def _find_android_devices(self, ssh, config: dict[str, Any]) -> list[str]:
         try:
             output = self._usbipd_list_output(ssh)
-            devices = parse_usbipd_android_busids(output, config.get('usbip_vid_pid'))
+            devices = parse_usbipd_android_busids(
+                output,
+                configured_usbip_vid_pids(config),
+            )
             logger.info(f"Found USB/IP devices: {devices}")
             return devices
 
@@ -956,6 +936,7 @@ class USBIPManager:
         device_ip: str,
         busids: list[str],
         adb_server_socket: str | None = None,
+        allow_transport_only: bool = False,
     ) -> tuple[list[str], list[str]]:
         """Attach the busids on Ubuntu, returning (attached_busids, newly-seen adb device ids)."""
         try:
@@ -988,30 +969,56 @@ class USBIPManager:
                     logger.info(f"Attach {busid} succeeded")
                     attached.append(busid)
 
-            if not attached:
-                protocol_status = self.probe_protocol_status(
-                    ssh,
-                    adb_server_socket=adb_server_socket,
-                )
-                visible_devices = protocol_status.get("adb_ready") or []
-                if visible_devices:
-                    logger.info(
-                        "USB/IP attach commands failed, but ADB devices are already visible: %s",
-                        visible_devices,
+            # ``usbip attach`` may exit with code 0 immediately before the
+            # vhci connection is closed (for example when a Windows export is
+            # stale).  Do not report transport success until the exact
+            # source/busid pair survives two target-side ``usbip port``
+            # snapshots.
+            expected_busids = set(busids)
+            for verification_index in range(2):
+                missing = set(expected_busids)
+                attempts = 6 if verification_index == 0 else 1
+                for attempt in range(attempts):
+                    if verification_index or attempt:
+                        time.sleep(1)
+                    port_out, port_err, port_code = self.ssh_manager.execute_command(
+                        ssh, USBIP_PORT_COMMAND, timeout=10,
                     )
-                    return list(busids), list(visible_devices)
-                for key in ("fastboot", "recovery", "sideload", "unauthorized", "offline"):
-                    if protocol_status.get(key):
-                        logger.info(
-                            "USB/IP attach commands failed, but protocol %s is visible: %s",
-                            key,
-                            protocol_status.get(key),
+                    if port_code != 0:
+                        logger.warning(
+                            "Unable to verify USB/IP attachments: code=%s detail=%s",
+                            port_code,
+                            (port_err or port_out or '').strip(),
                         )
-                        return list(busids), []
-                return [], []
+                        return [], []
+                    verified_busids = {
+                        entry['busid']
+                        for entry in parse_usbip_port_entries(port_out or '')
+                        if entry['host'] == str(device_ip)
+                    }
+                    missing = expected_busids - verified_busids
+                    if not missing:
+                        break
+                if missing:
+                    logger.warning(
+                        "USB/IP attach did not stabilize after enumeration: %s",
+                        ', '.join(sorted(missing)),
+                    )
+                    return [], []
+
+            # A repeated manual request can receive an "already attached"
+            # command error.  The verified target-side port is authoritative;
+            # unrelated ADB/Fastboot devices are never used as a substitute.
+            attached = list(busids)
 
             self.ssh_manager.execute_command(ssh, 'sudo udevadm trigger', timeout=8)
             self.ssh_manager.execute_command(ssh, 'sudo udevadm settle', timeout=8)
+
+            if allow_transport_only:
+                # RockUSB Loader has no ADB/Fastboot protocol endpoint. Once
+                # usbip attach and udev settle succeed, upgrade_tool is the
+                # authoritative readiness probe in the firmware workflow.
+                return attached, []
 
             devices_after = set()
             deadline = time.time() + 30
@@ -1177,58 +1184,11 @@ class USBIPManager:
 
     def check_usbipd_installed(self, ssh) -> tuple[bool, str]:
         """Check whether usbipd is installed on the Windows host; return (installed, version)."""
-        try:
-            stdout, _stderr, code = self.ssh_manager.execute_command(ssh, 'usbipd --version')
-            if code == 0 and stdout.strip():
-                return True, stdout.strip()
-            return False, ''
-        except Exception as e:
-            logger.error(f"Error checking usbipd: {e}")
-            return False, ''
+        return check_usbipd_installed(self.ssh_manager, ssh)
 
     def install_usbipd(self, ssh, config: dict[str, Any]) -> dict[str, Any]:
         """在 Windows 主机自动安装 usbipd。"""
-        try:
-            # 检查是否已经是管理员权限
-            check_admin_cmd = 'whoami /groups | findstr S-1-16-12288'
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, check_admin_cmd)
-
-            if code != 0 or 'S-1-16-12288' not in stdout:
-                return {
-                    'success': False,
-                    'error': f'需要管理员权限。请在 Windows 上以【管理员身份】运行 PowerShell，然后执行: {USBIPD_INSTALL_CMD}'
-                }
-
-            # 执行自动安装命令（添加自动接受参数）
-            install_cmd = f'{USBIPD_INSTALL_CMD} --accept-package-agreements --accept-source-agreements'
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, install_cmd, timeout=120)
-
-            if code == 0:
-                # 验证安装
-                installed, version = self.check_usbipd_installed(ssh)
-                if installed:
-                    return {
-                        'success': True,
-                        'message': f'usbipd 安装成功！版本: {version}',
-                        'version': version
-                    }
-                else:
-                    return {
-                        'success': True,
-                        'message': 'usbipd 安装完成，请验证版本'
-                    }
-            else:
-                return {
-                    'success': False,
-                    'error': f'安装失败: {stderr or stdout}'
-                }
-
-        except Exception as e:
-            logger.error(f"Error installing usbipd: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+        return install_usbipd(self.ssh_manager, ssh, config)
 
 
 # 全局USB/IP管理器实例

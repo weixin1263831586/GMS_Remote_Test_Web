@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
-import threading
 import time
 import uuid
 
@@ -48,6 +47,15 @@ from .usbip_operations import (
 from .usbip_operations import (
     usbip_error_fields as _usbip_error_fields,
 )
+from .usbip_persistence import (
+    persist_local_usbip_sources as _persist_local_usbip_sources,
+)
+from .usbip_persistence import (
+    record_usbip_network_quality as _record_usbip_network_quality,
+)
+from .usbip_persistence import (
+    usbip_assignment_lock as _usbip_assignment_lock,
+)
 from .utils import DeviceUtils
 
 
@@ -55,7 +63,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 router.include_router(adb_forward_router)
 router.include_router(usbip_install_router)
-_usbip_assignment_lock = threading.RLock()
 _USBIP_ATTACHING_STALE_SECONDS = 30 * 60
 _USBIP_ADB_ENUMERATION_GRACE_SECONDS = 45
 
@@ -170,35 +177,25 @@ def _save_usbip_assignments(assignments: dict[str, dict]) -> None:
     if not saved:
         raise RuntimeError("无法保存USB/IP集群分配状态")
 
-def _record_usbip_network_quality(
+def _prune_stale_unknown_usbip_assignments(
     device_host: str,
-    worker_id: str,
-    quality: dict[str, object],
-) -> None:
-    if not quality:
-        return
+    current_busids: set[str],
+) -> list[str]:
+    """Remove degraded assignments whose Windows BUSID no longer exists."""
     with _usbip_assignment_lock:
-        getter = getattr(runtime.config_manager, "get_runtime_config", None)
-        runtime_config = getter() if callable(getter) else {}
-        runtime_config = runtime_config or {}
-        history = runtime_config.get("usbip_network_quality_history") or []
-        if not isinstance(history, list):
-            history = []
-        history = [
-            *history[-99:],
-            {
-                **quality,
-                "device_host": device_host,
-                "worker_id": worker_id,
-                "timestamp": time.time(),
-            },
+        assignments = _usbip_assignments()
+        stale_keys = [
+            key
+            for key, item in assignments.items()
+            if str(item.get("device_host") or "") == device_host
+            and str(item.get("status") or "") == "unknown"
+            and str(item.get("busid") or "") not in current_busids
         ]
-        updater = getattr(runtime.config_manager, "update_runtime_config", None)
-        if callable(updater):
-            updater({"usbip_network_quality_history": history})
-        else:
-            runtime_config["usbip_network_quality_history"] = history
-            runtime.config_manager.save_runtime_config(runtime_config)
+        if stale_keys:
+            for key in stale_keys:
+                assignments.pop(key, None)
+            _save_usbip_assignments(assignments)
+    return stale_keys
 
 def _local_worker_id() -> str:
     try:
@@ -207,56 +204,6 @@ def _local_worker_id() -> str:
         return str(get_cluster_service().config.local_worker_id or "ats-worker-controller")
     except Exception:
         return "ats-worker-controller"
-
-def _persist_local_usbip_sources(device_host: str, serials: list[str]) -> None:
-    """Persist USB/IP source metadata used by local device-list endpoints."""
-    serials = list(dict.fromkeys(
-        str(serial or "").strip()
-        for serial in serials
-        if str(serial or "").strip()
-    ))
-    if not serials:
-        return
-
-    timestamp = time.time()
-    updates: dict[str, dict[str, object]] = {}
-    try:
-        runtime_config = runtime.config_manager.get_runtime_config() or {}
-        persisted = runtime_config.get("usbip_devices_source") or {}
-        if not isinstance(persisted, dict):
-            persisted = {}
-        persisted = dict(persisted)
-        for serial in serials:
-            existing_source = str(
-                (persisted.get(serial) or {}).get("source") or ""
-            ).strip()
-            if existing_source and existing_source != device_host:
-                logger.info(
-                    "[USB/IP] Keep existing source for %s: %s (new: %s)",
-                    serial,
-                    existing_source,
-                    device_host,
-                )
-                continue
-            updates[serial] = {"source": device_host, "timestamp": timestamp}
-        if updates:
-            persisted.update(updates)
-            updater = getattr(runtime.config_manager, "update_runtime_config", None)
-            if callable(updater):
-                saved = updater({"usbip_devices_source": persisted})
-            else:
-                runtime_config["usbip_devices_source"] = persisted
-                saved = runtime.config_manager.save_runtime_config(runtime_config)
-            if not saved:
-                raise RuntimeError("无法保存USB/IP设备来源")
-    except Exception as exc:
-        logger.warning("[USB/IP] Failed to persist local device sources: %s", exc)
-
-    if not updates:
-        return
-    with runtime.global_state.usbip_devices_source_lock:
-        runtime.global_state.usbip_devices_source.update(updates)
-    getattr(usbip_manager, "device_sources", {}).update(updates)
 
 def _reconcile_usbip_assignment_serials(
     device_host: str,
@@ -516,6 +463,7 @@ def _is_usbip_recoverable_attach_error(exc: Exception) -> bool:
         "busy (exported)" in detail
         or "残留usb/ip会话占用" in detail
         or "device in error state" in detail
+        or "usbip_attach_unstable" in detail
     )
 
 def _is_usbip_export_busy(exc: Exception) -> bool:
@@ -615,10 +563,13 @@ async def list_usbip_source_devices(
                 need_password=True, device_host=resolved,
             )
         message = result.get("error", "USB设备枚举失败")
+        error_fields = _usbip_error_fields(message)
+        if result.get("install_guide"):
+            error_fields["install_guide"] = str(result["install_guide"])
         return error_response(
             message,
             status_code=500,
-            **_usbip_error_fields(message),
+            **error_fields,
         )
     _reconcile_usbip_assignment_serials(
         resolved,
@@ -690,9 +641,18 @@ async def get_usbip_status(
             if busid:
                 grouped_item["busids"].append(busid)
                 grouped_item["device_serials_by_busid"][busid] = serials
-                grouped_item["statuses_by_busid"][busid] = str(
-                    item.get("status") or "unknown"
-                )
+                assignment_status = str(item.get("status") or "unknown")
+                if (
+                    assignment_status == "unknown"
+                    and state_info.get("transport_connected", False)
+                    and str(item.get("worker_id") or "") == _local_worker_id()
+                ):
+                    # The heartbeat reports protocol readiness, while the
+                    # exact local ``usbip port`` probe reports transport
+                    # readiness.  Keep the persisted diagnostic state but do
+                    # not present a confirmed local transport as disconnected.
+                    assignment_status = "attached"
+                grouped_item["statuses_by_busid"][busid] = assignment_status
                 grouped_item["generations_by_busid"][busid] = int(
                     item.get("generation") or 0
                 )
@@ -730,7 +690,10 @@ async def get_usbip_status(
         "cleanup_required" if "cleanup_required" in assignment_states
         else "detaching" if "detaching" in assignment_states
         else "attaching" if "attaching" in assignment_states
-        else "degraded" if "unknown" in assignment_states
+        else "degraded" if (
+            "unknown" in assignment_states
+            and not state_info.get("transport_connected", False)
+        )
         else "attached" if connected
         else "disconnected"
     )
@@ -852,22 +815,6 @@ async def start_usbip(
 
         worker_id = str(request_data.get("worker_id") or "")
         busids = [str(item) for item in request_data.get("busids") or []]
-        if busids:
-            active_siblings = [
-                item for item in _usbip_assignments().values()
-                if str(item.get("device_host") or "") == device_host
-                and str(item.get("busid") or "") not in set(busids)
-                and str(item.get("status") or "") in {
-                    "attaching", "attached", "unknown", "cleanup_required",
-                }
-            ]
-            if active_siblings:
-                return error_response(
-                    "该Windows来源仍有其他USB/IP设备处于活动状态；为避免停止全局ADB影响现有任务，本次接入已拒绝",
-                    status_code=409,
-                    error_code="USBIP_SOURCE_ADB_IN_USE",
-                    remediation="请先断开该来源上的其他USB/IP分配，或将新设备接入另一台Windows来源主机。",
-                )
         adb_proxy_routes: list[dict] = []
         proxy_serials: set[str] = set()
         source_devices: dict[str, str] = {}
@@ -913,6 +860,35 @@ async def start_usbip(
                     logger.info(
                         "[USB/IP] Source serial inventory unavailable: %s",
                         source_inventory.get("error") or "unknown error",
+                    )
+                if source_inventory.get("success"):
+                    # Windows can allocate a new BUSID after unplug/replug or
+                    # protocol re-enumeration.  An old degraded assignment
+                    # must not block the currently connected BUSID forever.
+                    stale_keys = _prune_stale_unknown_usbip_assignments(
+                        device_host,
+                        set(source_devices),
+                    )
+                    if stale_keys:
+                        logger.info(
+                            "[USB/IP] Removed stale BUSID assignments: %s",
+                            ", ".join(stale_keys),
+                        )
+            if busids:
+                active_siblings = [
+                    item for item in _usbip_assignments().values()
+                    if str(item.get("device_host") or "") == device_host
+                    and str(item.get("busid") or "") not in set(busids)
+                    and str(item.get("status") or "") in {
+                        "attaching", "attached", "unknown", "cleanup_required",
+                    }
+                ]
+                if active_siblings:
+                    return error_response(
+                        "该Windows来源仍有其他USB/IP设备处于活动状态；为避免停止全局ADB影响现有任务，本次接入已拒绝",
+                        status_code=409,
+                        error_code="USBIP_SOURCE_ADB_IN_USE",
+                        remediation="请先断开该来源上的其他USB/IP分配，或将新设备接入另一台Windows来源主机。",
                     )
             if adb_proxy_routes:
                 proxy_serials = {

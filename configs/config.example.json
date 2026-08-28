@@ -16,7 +16,11 @@
   },
   "use_key_auth": false,
   "private_key_path": "~/.ssh/id_rsa",
-  "usbip_vid_pid": "2207:0006",
+  "usbip_vid_pids": [
+    "2207:0006",
+    "18d1:4d00",
+    "2207:351a"
+  ],
   "wifi": {
     "ssid": "AndroidWifi",
     "password": "${GMS_WIFI_PASSWORD:}"

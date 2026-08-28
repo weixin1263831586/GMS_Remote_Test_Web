@@ -37,10 +37,12 @@ class SkillArchiveSigningTests(unittest.TestCase):
         public_key.verify(signature, b"archive")
 
     def test_signing_is_disabled_without_key(self):
-        with patch.dict("os.environ", {}, clear=False):
-            with patch.dict("os.environ", {"GMS_SKILL_SIGNING_KEY_FILE": ""}):
-                self.assertEqual(sign_skill_archive(b"archive"), "")
-                self.assertEqual(skill_verify_key_b64(), "")
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch.dict("os.environ", {"GMS_SKILL_SIGNING_KEY_FILE": ""}),
+        ):
+            self.assertEqual(sign_skill_archive(b"archive"), "")
+            self.assertEqual(skill_verify_key_b64(), "")
 
 
 if __name__ == "__main__":

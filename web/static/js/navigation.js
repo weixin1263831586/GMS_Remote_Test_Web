@@ -683,7 +683,7 @@ function onTestTypeChange() {
 // 自动选择测试套件的函数
 function autoSelectTestSuite(testType) {
     // 获取所有匹配的测试套件
-    // 特殊处理：GSI使用CTS的测试套件，GTS-ROOT使用GTS的测试套件
+    // 特殊处理：GSI使用CTS的测试套件，GTS-ROOT和APTS使用GTS的测试套件
     let matchingSuites;
     const testTypeLower = testType.toLowerCase();
 
@@ -699,6 +699,12 @@ function autoSelectTestSuite(testType) {
             suite.test_type.toLowerCase() === 'gts'
         );
         addLogEntry('GTS-ROOT使用GTS测试套件', 'info');
+    } else if (testTypeLower === 'apts') {
+        // APTS使用GTS套件（APTS测试通过gts-tradefed执行）
+        matchingSuites = testSuitesCache.filter(suite =>
+            suite.test_type.toLowerCase() === 'gts'
+        );
+        addLogEntry('APTS使用GTS测试套件', 'info');
     } else {
         matchingSuites = testSuitesCache.filter(suite =>
             suite.test_type.toLowerCase() === testTypeLower

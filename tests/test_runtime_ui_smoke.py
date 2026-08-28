@@ -8082,6 +8082,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(page.locator("#automation-test-suite")).to_have_value(
                 "/suite/android-gts-14.1-R1/tools"
             )
+            page.select_option("#automation-test-type", "APTS")
+            expect(page.locator("#automation-test-suite")).to_have_value(
+                "/suite/android-gts-14.1-R1/tools"
+            )
             create_layout_size = page.locator(".create-layout").evaluate(
                 "element => ({height: element.clientHeight, scrollHeight: element.scrollHeight})"
             )

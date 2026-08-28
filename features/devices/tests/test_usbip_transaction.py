@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from features.devices import usbip
+from features.devices import usbip, usbip_flash
 
 
 def _manager(config: dict, ssh_manager) -> usbip.USBIPManager:
@@ -67,6 +67,107 @@ class BindStateParsingTests(unittest.TestCase):
         self.assertEqual(track, [])
 
 
+class AttachStabilizationTests(unittest.TestCase):
+    def test_waits_until_usbip_port_appears(self):
+        class FakeSshManager:
+            def __init__(self):
+                self.port_calls = 0
+                self.adb_calls = 0
+
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                if cmd == "adb devices":
+                    self.adb_calls += 1
+                    if self.adb_calls == 1:
+                        return ("List of devices attached\n", "", 0)
+                    return ("List of devices attached\nUSBIP001\tdevice\n", "", 0)
+                if cmd.startswith("sudo usbip attach"):
+                    return ("attached", "", 0)
+                if cmd == "sudo -n /usr/bin/usbip port":
+                    self.port_calls += 1
+                    if self.port_calls == 1:
+                        return ("Imported USB devices\n", "", 0)
+                    return (
+                        "Port 00: <Port in Use>\n"
+                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                        "",
+                        0,
+                    )
+                return ("", "", 0)
+
+        manager = usbip.USBIPManager()
+        manager.ssh_manager = FakeSshManager()
+        with patch("features.devices.usbip.time.sleep", return_value=None):
+            attached, _devices = manager._attach_devices(
+                object(), "172.16.14.66", ["1-1"]
+            )
+        self.assertEqual(attached, ["1-1"])
+        self.assertGreaterEqual(manager.ssh_manager.port_calls, 3)
+
+
+class AutoBindPolicyTests(unittest.TestCase):
+    def test_firmware_policy_is_added_and_verified_for_assigned_busid(self):
+        ssh_manager = MagicMock()
+        manager = _manager(CONFIG, ssh_manager)
+        win_ssh = MagicMock()
+        policy_lists = iter([
+            ("GUID EFFECT OPERATION BUSID\n", "", 0),
+            ("abc Allow AutoBind 1-1\n", "", 0),
+        ])
+
+        def execute(_target, cmd, timeout=None, get_pty=False):
+            if cmd == "usbipd policy list":
+                return next(policy_lists)
+            if cmd.startswith("usbipd policy add"):
+                return "policy added", "", 0
+            raise AssertionError(cmd)
+
+        ssh_manager.execute_command.side_effect = execute
+        with patch.object(
+            usbip_flash, "usbip_manager", manager
+        ), patch.object(
+            manager, "_create_windows_ssh", return_value=win_ssh
+        ), patch.object(
+            manager, "_is_windows_host", return_value=True
+        ), patch.object(
+            manager, "check_usbipd_installed", return_value=(True, "5.2.0")
+        ):
+            result = usbip_flash.ensure_usbip_auto_bind_policies(
+                "hcq@172.16.14.66", ["1-1"], "pw"
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["added_busids"], ["1-1"])
+        ssh_manager.execute_command.assert_any_call(
+            win_ssh,
+            "usbipd policy add --effect allow --operation AutoBind --busid 1-1",
+            timeout=15,
+        )
+        win_ssh.close.assert_called_once()
+
+    def test_firmware_policy_requires_usbipd_policy_support(self):
+        ssh_manager = MagicMock()
+        manager = _manager(CONFIG, ssh_manager)
+        win_ssh = MagicMock()
+        ssh_manager.execute_command.return_value = (
+            "", "Unknown command 'policy'", 1
+        )
+        with patch.object(
+            usbip_flash, "usbip_manager", manager
+        ), patch.object(
+            manager, "_create_windows_ssh", return_value=win_ssh
+        ), patch.object(
+            manager, "_is_windows_host", return_value=True
+        ), patch.object(
+            manager, "check_usbipd_installed", return_value=(True, "4.1.0")
+        ):
+            result = usbip_flash.ensure_usbip_auto_bind_policies(
+                "hcq@172.16.14.66", ["1-1"], "pw"
+            )
+
+        self.assertFalse(result["success"])
+        self.assertIn("4.2.0", result["error"])
+
+
 class StartUsbipRollbackTests(unittest.TestCase):
     def setUp(self):
         self.ssh_manager = MagicMock()
@@ -104,7 +205,7 @@ class StartUsbipRollbackTests(unittest.TestCase):
                 }
                 return responses.get(cmd, ("", "", 0))
             # Ubuntu side (including vhci probe and usbip port listing).
-            if cmd == "usbip port":
+            if cmd == "sudo -n /usr/bin/usbip port":
                 return next(ubuntu_port_responses)
             if cmd.startswith("sudo usbip attach"):
                 return ("", "attach failed", 1)

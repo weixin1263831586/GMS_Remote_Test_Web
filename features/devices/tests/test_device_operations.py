@@ -108,9 +108,10 @@ class DeviceOperationsTests(unittest.TestCase):
         self.assertEqual(
             DeviceUtils.parse_fastboot_devices(
                 "FB001\tfastboot\nFB002 fastboot\nFB003 fastbootd\n"
+                "RK3572 Android Fastboot\n"
                 "malformed extra-value\n"
             ),
-            ["FB001", "FB002", "FB003"],
+            ["FB001", "FB002", "FB003", "RK3572"],
         )
         devices, protocols = management_api._merge_device_protocols(
             ["ADB001", "SWITCHING"],

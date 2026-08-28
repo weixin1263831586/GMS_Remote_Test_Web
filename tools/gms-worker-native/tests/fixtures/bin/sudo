@@ -1,7 +1,14 @@
 #!/bin/sh
 set -eu
 
+if [ "${2:-}" = "/usr/sbin/modprobe" ]; then
+    exit 0
+fi
 action="${3:-}"
+attach_busid="${5:-}"
+if [ "${2:-}" = "/usr/bin/usbip" ] && [ "${action}" = "attach" ]; then
+    attach_busid="${7:-}"
+fi
 mode="${GMS_TEST_USBIP_MODE:-success}"
 if [ "${mode}" = "port_fail" ] && [ "${action}" = "port" ]; then
     echo 'vhci driver unavailable' >&2
@@ -29,6 +36,46 @@ if [ "${mode}" = "detach_fail" ] && [ "${action}" = "detach" ]; then
     echo 'detach failed' >&2
     exit 1
 fi
+if [ "${mode}" = "unstable" ]; then
+    state_file="${GMS_TEST_USBIP_STATE_FILE:?missing fake USB/IP state file}"
+    if [ "${action}" = "port" ]; then
+        count=0
+        if [ -f "${state_file}" ]; then
+            count="$(cat "${state_file}")"
+        fi
+        count=$((count + 1))
+        printf '%s' "${count}" > "${state_file}"
+        if [ "${count}" -eq 2 ]; then
+            printf '%s\n' \
+                'Port 00: <Port in Use> at High Speed(480Mbps)' \
+                '       usbip://192.0.2.10:3240/1-2'
+        fi
+        exit 0
+    fi
+    if [ "${action}" = "attach" ]; then
+        exit 0
+    fi
+fi
+if [ "${mode}" = "delayed_port" ]; then
+    state_file="${GMS_TEST_USBIP_STATE_FILE:?missing fake USB/IP state file}"
+    if [ "${action}" = "port" ]; then
+        count=0
+        if [ -f "${state_file}" ]; then
+            count="$(cat "${state_file}")"
+        fi
+        count=$((count + 1))
+        printf '%s' "${count}" > "${state_file}"
+        if [ "${count}" -ge 3 ]; then
+            printf '%s\n' \
+                'Port 00: <Port in Use> at High Speed(480Mbps)' \
+                '       usbip://192.0.2.10:3240/1-2'
+        fi
+        exit 0
+    fi
+    if [ "${action}" = "attach" ]; then
+        exit 0
+    fi
+fi
 if [ "${mode}" = "partial" ] || [ "${mode}" = "rollback_fail" ]; then
     state_file="${GMS_TEST_USBIP_STATE_FILE:?missing fake USB/IP state file}"
     if [ "${action}" = "port" ]; then
@@ -39,7 +86,7 @@ if [ "${mode}" = "partial" ] || [ "${mode}" = "rollback_fail" ]; then
         fi
         exit 0
     fi
-    if [ "${action}" = "attach" ] && [ "${5:-}" = "1-2" ]; then
+    if [ "${action}" = "attach" ] && [ "${attach_busid}" = "1-2" ]; then
         : > "${state_file}"
         exit 0
     fi

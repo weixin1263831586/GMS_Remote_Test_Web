@@ -15,6 +15,7 @@ from typing import Any
 
 
 logger = logging.getLogger(__name__)
+USBIP_PORT_COMMAND = "sudo -n /usr/bin/usbip port"
 
 # usbip port 输出的设备行，例如：
 #     1-2 | 05ac:12a8 | Remix Mini | Remote USB/IP host 10.0.0.5
@@ -69,7 +70,9 @@ def parse_usbip_port_entries(output: str) -> list[dict[str, str]]:
 
 def usbip_attached_ports(ssh_manager, ssh) -> set[str]:
     """Return the set of currently attached usbip port numbers (as strings)."""
-    stdout, _, code = ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
+    stdout, _, code = ssh_manager.execute_command(
+        ssh, USBIP_PORT_COMMAND, timeout=10
+    )
     if code != 0:
         return set()
     # parse_usbip_port_entries keeps every Port header even when a future
@@ -93,7 +96,9 @@ def detach_ubuntu_usbip_ports(
     其他设备的端口。
     """
     detached: list[str] = []
-    stdout, stderr, code = ssh_manager.execute_command(ssh, 'usbip port', timeout=10)
+    stdout, stderr, code = ssh_manager.execute_command(
+        ssh, USBIP_PORT_COMMAND, timeout=10
+    )
     if code != 0:
         logger.info(f"[USB/IP] usbip port returned {code}: {stderr or stdout}")
         return detached
@@ -139,7 +144,7 @@ def rollback_ubuntu_attachments(
         busids=busids,
     )
     stdout, stderr, code = ssh_manager.execute_command(
-        ssh, 'usbip port', timeout=10
+        ssh, USBIP_PORT_COMMAND, timeout=10
     )
     if code != 0:
         logger.warning(

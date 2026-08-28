@@ -1,13 +1,59 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
+from typing import Any
 
 
-DEFAULT_ANDROID_USBIP_VID_PIDS = ('2207:0006',)
-ANDROID_USBIP_MARKERS = ('android', 'adb', 'rk356', 'rockchip')
+# Rockchip devices re-enumerate with different USB identities while crossing
+# ADB, bootloader Fastboot and Loader modes. Each mode has its own VID:PID:
+DEFAULT_ANDROID_USBIP_VID_PID_ADB = '2207:0006'        # ADB mode
+DEFAULT_ANDROID_USBIP_VID_PID_FASTBOOT = '18d1:4d00'   # Fastboot / download mode
+DEFAULT_ANDROID_USBIP_VID_PID_LOADER = '2207:351a'     # RockUSB Loader mode (RK3572)
+DEFAULT_ANDROID_USBIP_VID_PIDS = (
+    DEFAULT_ANDROID_USBIP_VID_PID_ADB,
+    DEFAULT_ANDROID_USBIP_VID_PID_FASTBOOT,
+    DEFAULT_ANDROID_USBIP_VID_PID_LOADER,
+)
+ANDROID_USBIP_MARKERS = (
+    'android',
+    'adb',
+    'fastboot',
+    'usb download gadget',
+    'rockusb',
+    'rk356',
+    'rockchip',
+)
 USBIPD_BUSID_RE = re.compile(r'^\d+(?:-\d+)+$')
 ANSI_ESCAPE_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+VID_PID_RE = re.compile(r'^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$')
+
+
+def normalize_usbip_vid_pids(value: str | Iterable[str] | None) -> tuple[str, ...]:
+    """Normalize one or more configured USB VID:PID values."""
+    if value is None:
+        return ()
+    raw_items = re.split(r'[,;\s]+', value) if isinstance(value, str) else value
+    normalized: list[str] = []
+    for item in raw_items:
+        candidate = str(item or '').strip().lower()
+        if VID_PID_RE.fullmatch(candidate) and candidate not in normalized:
+            normalized.append(candidate)
+    return tuple(normalized)
+
+
+def configured_usbip_vid_pids(config: dict[str, Any]) -> tuple[str, ...]:
+    """Resolve the plural config while retaining legacy single-value support.
+
+    ``usbip_vid_pids`` is authoritative when present. Deployments that still
+    have only ``usbip_vid_pid`` inherit the built-in Android mode defaults and
+    keep their optional custom value, so an upgrade does not lose Fastboot.
+    """
+    if 'usbip_vid_pids' in config:
+        configured = normalize_usbip_vid_pids(config.get('usbip_vid_pids'))
+        return configured or DEFAULT_ANDROID_USBIP_VID_PIDS
+    legacy = normalize_usbip_vid_pids(config.get('usbip_vid_pid'))
+    return tuple(dict.fromkeys((*DEFAULT_ANDROID_USBIP_VID_PIDS, *legacy)))
 
 
 def _strip_ansi(text: str) -> str:
@@ -38,17 +84,16 @@ def _looks_like_usbipd_device_line(line: str) -> bool:
 
 def parse_usbipd_android_busids(
     output: str,
-    vid_pid: str | None = None,
+    vid_pid: str | Iterable[str] | None = None,
 ) -> list[str]:
-    vid_pids = {pid.lower() for pid in DEFAULT_ANDROID_USBIP_VID_PIDS}
-    if vid_pid:
-        vid_pids.add(vid_pid.lower())
+    configured = normalize_usbip_vid_pids(vid_pid)
+    accepted_vid_pids = set(configured or DEFAULT_ANDROID_USBIP_VID_PIDS)
 
     busids: list[str] = []
     for stripped in _iter_connected_lines(output):
         lowered = stripped.lower()
         if (
-            any(pid in lowered for pid in vid_pids)
+            any(pid in lowered for pid in accepted_vid_pids)
             or any(marker in lowered for marker in ANDROID_USBIP_MARKERS)
         ):
             parts = stripped.split()

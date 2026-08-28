@@ -46,6 +46,9 @@ class FakeRunner:
         if command == ["reboot", "bootloader"]:
             self.mode = "bootloader"
             return CommandResult()
+        if command == ["reboot", "fastboot"]:
+            self.mode = "userspace"
+            return CommandResult()
         return CommandResult()
 
 
@@ -87,6 +90,47 @@ def test_python_preparation_moves_fastbootd_back_to_bootloader() -> None:
         "reboot",
         "bootloader",
     ] in runner.commands
+
+
+def test_fastboot_state_parser_accepts_android_fastboot_vendor_label() -> None:
+    assert FastbootPreparer._parse_fastboot_state(
+        "rk3572test\t Android Fastboot\n",
+        "rk3572test",
+    ) == "fastboot"
+
+
+def test_python_preparation_notifies_usbip_transport_after_mode_switch() -> None:
+    runner = FakeRunner()
+    transitions: list[tuple[str, str]] = []
+
+    FastbootPreparer(
+        runner,
+        sleep=lambda _seconds: None,
+        on_transport_reset=lambda serial, mode: transitions.append((serial, mode)),
+    ).prepare_bootloader(runner.serial)
+
+    assert transitions == [(runner.serial, "fastboot")]
+
+
+def test_gsi_preparation_transitions_bootloader_fastboot_to_fastbootd() -> None:
+    runner = FakeRunner(mode="bootloader")
+    transitions: list[tuple[str, str]] = []
+
+    prepared = FastbootPreparer(
+        runner,
+        sleep=lambda _seconds: None,
+        on_transport_reset=lambda serial, mode: transitions.append((serial, mode)),
+    ).prepare_gsi_fastbootd(runner.serial)
+
+    assert prepared.oem_argument("unlock") == "board:unlock"
+    assert [
+        "fastboot", "-s", runner.serial, "oem", "board:unlock",
+    ] in runner.commands
+    assert [
+        "fastboot", "-s", runner.serial, "reboot", "fastboot",
+    ] in runner.commands
+    assert transitions == [(runner.serial, "fastbootd")]
+    assert runner.mode == "userspace"
 
 
 def test_python_preparation_times_out_when_device_never_reenumerates() -> None:

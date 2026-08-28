@@ -181,6 +181,45 @@ def test_native_usbip_reports_attach_failure(monkeypatch):
     )
 
 
+def test_native_usbip_rejects_attachment_that_disappears_after_success(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("PATH", f"{FAKE_BIN}:{os.environ['PATH']}")
+    monkeypatch.setenv("GMS_TEST_USBIP_MODE", "unstable")
+    monkeypatch.setenv("GMS_TEST_USBIP_STATE_FILE", str(tmp_path / "port_calls"))
+    monkeypatch.setenv("GMS_USBIP_VERIFY_DELAY_MS", "0")
+
+    with pytest.raises(TransportOperationError) as raised:
+        execute_external_transport(
+            str(USBIP_BINARY),
+            transport="usbip",
+            action="attach",
+            payload={"source_host": "192.0.2.10", "busids": ["1-2"]},
+            timeout=10,
+        )
+
+    assert raised.value.code == "USBIP_ATTACH_UNSTABLE"
+    assert raised.value.retryable is True
+    assert raised.value.details["missing_busids"] == ["1-2"]
+
+
+def test_native_usbip_waits_for_delayed_port_visibility(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", f"{FAKE_BIN}:{os.environ['PATH']}")
+    monkeypatch.setenv("GMS_TEST_USBIP_MODE", "delayed_port")
+    monkeypatch.setenv("GMS_TEST_USBIP_STATE_FILE", str(tmp_path / "port_calls"))
+    monkeypatch.setenv("GMS_USBIP_VERIFY_DELAY_MS", "0")
+
+    result = execute_external_transport(
+        str(USBIP_BINARY),
+        transport="usbip",
+        action="attach",
+        payload={"source_host": "192.0.2.10", "busids": ["1-2"]},
+        timeout=30,
+    )
+
+    assert result["attached_busids"] == ["1-2"]
+
+
 def test_native_usbip_reports_partial_detach(monkeypatch):
     monkeypatch.setenv("PATH", f"{FAKE_BIN}:{os.environ['PATH']}")
     monkeypatch.setenv("GMS_TEST_USBIP_MODE", "detach_fail")

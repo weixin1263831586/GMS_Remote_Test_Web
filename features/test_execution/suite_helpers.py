@@ -294,7 +294,7 @@ def _score_suite_artifact_candidate(candidate: dict[str, Any], search_terms: lis
     return scored
 
 
-_SUITE_TYPE_ALIASES: dict[str, set] = {"cts": {"cts", "cts-v"}, "gts-root": {"gts"}}
+_SUITE_TYPE_ALIASES: dict[str, set] = {"cts": {"cts", "cts-v"}, "gts-root": {"gts"}, "apts": {"gts"}}
 
 
 def _canonical_suite_types(test_type: str) -> set:

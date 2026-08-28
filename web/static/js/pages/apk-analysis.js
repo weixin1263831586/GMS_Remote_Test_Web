@@ -859,7 +859,7 @@ function switchApkTab(tabName, {persist = true} = {}) {
         btn.classList.toggle('active', btn.dataset.apkTab === target);
     });
 
-    $('apk-tab-manifest').style.display = target === 'manifest' ? 'block' : 'none';
+    $('apk-tab-manifest').style.display = target === 'manifest' ? 'flex' : 'none';
     $('apk-tab-permissions').style.display = target === 'permissions' ? 'block' : 'none';
     $('apk-tab-source').style.display = target === 'source' ? 'block' : 'none';
 
