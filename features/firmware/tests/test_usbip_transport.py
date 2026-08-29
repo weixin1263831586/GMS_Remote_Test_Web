@@ -12,6 +12,10 @@ class FakeSshManager:
         self.commands = []
 
     def execute_command(self, _ssh, cmd, timeout=None):
+        # Legacy watcher fixtures below drive human-readable list snapshots.
+        # Do not consume their Linux attach responses for the JSON-state probe.
+        if cmd == "usbipd state":
+            return ("", "structured state not configured", 1)
         self.commands.append((cmd, timeout))
         try:
             return next(self.responses)
@@ -332,7 +336,8 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
             snapshot, ["1-1"],
         )
         self.assertIn("USB 设备描述符", diagnosis)
-        self.assertIn("枚举层故障", diagnosis)
+        self.assertIn("驱动切换/端口复位", diagnosis)
+        self.assertIn("A/B 验证", diagnosis)
         self.assertIn("Shared (forced)", diagnosis)
 
     def test_maskrom_diagnosis_detects_new_busid_and_unshared(self):
@@ -431,7 +436,7 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
             "source_host": "172.16.14.66",
             "busids": ["1-1"],
         }]
-        listings = iter([
+        listings = [
             (
                 "Connected:\n"
                 "BUSID  VID:PID    DEVICE              STATE\n"
@@ -450,7 +455,25 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
                 "1-1    2207:350b  Maskrom Device      Not shared\n",
                 "",
             ),
-        ])
+            (
+                "Connected:\n"
+                "BUSID  VID:PID    DEVICE              STATE\n"
+                "1-1    2207:350b  Maskrom Device      Shared\n",
+                "",
+            ),
+            (
+                "Connected:\n"
+                "BUSID  VID:PID    DEVICE              STATE\n"
+                "1-1    2207:350b  Maskrom Device      Shared\n",
+                "",
+            ),
+        ]
+
+        def next_listing(_ssh):
+            if len(listings) > 1:
+                return listings.pop(0)
+            return listings[0]
+
         with patch.object(
             usbip_transport, "open_usbip_source_ssh",
             return_value=(windows_ssh, ""),
@@ -458,14 +481,18 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
             usbip_transport, "bind_usbip_busid_via_ssh",
             return_value={"success": True, "detail": "shared"},
         ) as bind, patch.object(
+            usbip_transport, "query_usbipd_device_states", return_value={},
+        ), patch.object(
             usbip_transport, "usbipd_list_via_ssh",
-            side_effect=lambda _ssh: next(listings),
+            side_effect=next_listing,
         ), patch.object(
             usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
         ), patch.object(
-            usbip_transport, "ROCKUSB_REENUMERATION_SETTLE_SECONDS", 0,
+            usbip_transport, "ROCKUSB_STABLE_SAMPLE_COUNT", 2,
         ), patch.object(
             usbip_transport, "ROCKUSB_ATTACH_VERIFY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_SETTLE_SECONDS", 0,
         ):
             result = asyncio.run(usbip_transport.reattach_usbip_after_rockusb_reset(
                 object(), route, timeout=2, interval=0.01,
@@ -485,6 +512,150 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
             command.startswith("usbipd detach")
             for command, _timeout in manager.commands
         ))
+        self.assertTrue(windows_ssh.closed)
+
+    def test_force_probe_rebinds_before_attach_and_restarts_stability(self):
+        manager = FakeSshManager([
+            ("", "", 0),
+            ("", "", 0),
+            (
+                "Imported USB devices\n"
+                "Port 00: <Port in Use>\n"
+                "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                "",
+                0,
+            ),
+        ])
+        runtime.configure_runtime(ssh_manager=manager)
+        windows_ssh = SimpleNamespace(closed=False)
+        windows_ssh.close = lambda: setattr(windows_ssh, "closed", True)
+        route = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+        }]
+        other = {
+            "1-13": {
+                "busid": "1-13", "vid_pid": "0403:6001",
+                "instance_id": "USB\\VID_0403&PID_6001\\A",
+                "device": "USB Serial Converter", "state": "Not shared",
+                "is_forced": False,
+            },
+        }
+        normal = {
+            "1-1": {
+                "busid": "1-1", "vid_pid": "2207:351a",
+                "instance_id": "USB\\VID_2207&PID_351A\\NEW",
+                "device": "Rockusb Device", "state": "Shared",
+                "is_forced": False,
+            },
+        }
+        forced = {
+            "1-1": {
+                **normal["1-1"], "state": "Shared (forced)",
+                "is_forced": True,
+            },
+        }
+        states = [other, normal, normal, forced, forced]
+
+        def next_state(_manager, _ssh):
+            if len(states) > 1:
+                return states.pop(0)
+            return states[0]
+
+        with patch.object(
+            usbip_transport, "open_usbip_source_ssh",
+            return_value=(windows_ssh, ""),
+        ), patch.object(
+            usbip_transport, "query_usbipd_device_states",
+            side_effect=next_state,
+        ), patch.object(
+            usbip_transport, "bind_usbip_busid_via_ssh",
+            return_value={"success": True, "detail": "forced"},
+        ) as bind, patch.object(
+            usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_STABLE_SAMPLE_COUNT", 2,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_VERIFY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_SETTLE_SECONDS", 0,
+        ):
+            result = asyncio.run(
+                usbip_transport.reattach_usbip_after_rockusb_reset(
+                    object(), route, timeout=2, interval=0.01,
+                    baseline={
+                        ("172.16.14.66", "1-1"): {
+                            "instance_id": "USB\\VID_2207&PID_351A\\OLD",
+                            "vid_pid": "2207:351a",
+                        }
+                    },
+                    force_bind=True,
+                )
+            )
+
+        self.assertTrue(result["success"])
+        bind.assert_called_once_with(windows_ssh, "1-1", force=True)
+        self.assertTrue(windows_ssh.closed)
+
+    def test_require_forced_probe_never_binds_or_attaches_unforced_instance(self):
+        manager = FakeSshManager([])
+        runtime.configure_runtime(ssh_manager=manager)
+        windows_ssh = SimpleNamespace(closed=False)
+        windows_ssh.close = lambda: setattr(windows_ssh, "closed", True)
+        route = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+        }]
+        state = {
+            "1-1": {
+                "busid": "1-1", "vid_pid": "2207:351a",
+                "instance_id": "USB\\VID_2207&PID_351A\\NEW",
+                "device": "Rockusb Device", "state": "Shared",
+                "is_forced": False,
+            },
+        }
+        with patch.object(
+            usbip_transport, "open_usbip_source_ssh",
+            return_value=(windows_ssh, ""),
+        ), patch.object(
+            usbip_transport, "query_usbipd_device_states",
+            return_value=state,
+        ), patch.object(
+            usbip_transport, "bind_usbip_busid_via_ssh",
+        ) as bind, patch.object(
+            usbip_transport, "usbipd_list_via_ssh",
+            return_value=(
+                "Connected:\nBUSID VID:PID DEVICE STATE\n"
+                "1-1 2207:351a Rockusb Device Shared",
+                "",
+            ),
+        ), patch.object(
+            usbip_transport, "usbipd_policy_list_via_ssh", return_value="",
+        ), patch.object(
+            usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_SNAPSHOT_WAIT_SECONDS", 0,
+        ):
+            result = asyncio.run(
+                usbip_transport.reattach_usbip_after_rockusb_reset(
+                    object(), route, timeout=0.1, interval=0.01,
+                    baseline={
+                        ("172.16.14.66", "1-1"): {
+                            "instance_id": "USB\\VID_2207&PID_351A\\OLD",
+                            "vid_pid": "2207:351a",
+                        }
+                    },
+                    allow_identity_transition=True,
+                    require_forced=True,
+                )
+            )
+
+        self.assertFalse(result["success"])
+        self.assertIn("尚未预绑定", result["errors"]["172.16.14.66/1-1"])
+        bind.assert_not_called()
+        self.assertFalse(any("usbip attach" in cmd for cmd, _ in manager.commands))
         self.assertTrue(windows_ssh.closed)
 
     def test_maskrom_watch_does_not_accept_old_loader_attachment(self):
@@ -561,9 +732,11 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
         ) as list_via_ssh, patch.object(
             usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
         ), patch.object(
-            usbip_transport, "ROCKUSB_REENUMERATION_SETTLE_SECONDS", 0,
+            usbip_transport, "ROCKUSB_STABLE_SAMPLE_COUNT", 2,
         ), patch.object(
             usbip_transport, "ROCKUSB_ATTACH_VERIFY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_SETTLE_SECONDS", 0,
         ):
             result = asyncio.run(
                 usbip_transport.reattach_usbip_after_rockusb_reset(
@@ -634,6 +807,354 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
             command.startswith("sudo usbip attach") for command in commands
         ))
 
+    def test_download_boot_event_arms_same_busid_without_absence_sample(self):
+        manager = FakeSshManager([
+            ("", "", 0),
+            ("", "", 0),
+            (
+                "Imported USB devices\n"
+                "Port 00: <Port in Use>\n"
+                "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                "",
+                0,
+            ),
+        ])
+        runtime.configure_runtime(ssh_manager=manager)
+        windows_ssh = SimpleNamespace(close=lambda: None)
+        route = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+        }]
+        state = {
+            "1-1": {
+                "busid": "1-1",
+                "instance_id": "USB\\VID_2207&PID_351A\\SAME",
+                "vid_pid": "2207:351a",
+                "device": "Rockusb Device",
+                "state": "Shared",
+                "is_attached": False,
+            }
+        }
+
+        async def scenario():
+            transition_event = asyncio.Event()
+            ready_event = asyncio.Event()
+            task = asyncio.create_task(
+                usbip_transport.reattach_usbip_after_rockusb_reset(
+                    object(), route, timeout=1, interval=0.01,
+                    baseline={
+                        ("172.16.14.66", "1-1"): {
+                            "instance_id": "USB\\VID_2207&PID_351A\\SAME",
+                            "vid_pid": "2207:351a",
+                        }
+                    },
+                    transition_event=transition_event,
+                    ready_event=ready_event,
+                )
+            )
+            await asyncio.wait_for(ready_event.wait(), timeout=1)
+            self.assertFalse(any(
+                command.startswith("sudo usbip attach")
+                for command, _timeout in manager.commands
+            ))
+            transition_event.set()
+            return await task
+
+        with patch.object(
+            usbip_transport, "open_usbip_source_ssh",
+            return_value=(windows_ssh, ""),
+        ), patch.object(
+            usbip_transport, "query_usbipd_device_states",
+            return_value=state,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_RETRY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_VERIFY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_SETTLE_SECONDS", 0,
+        ):
+            result = asyncio.run(scenario())
+
+        self.assertTrue(result["success"])
+        self.assertTrue(any(
+            command.startswith("sudo usbip attach")
+            for command, _timeout in manager.commands
+        ))
+
+    def test_structured_state_absence_never_attaches_missing_busid(self):
+        """结构化 usbipd state 模式下目标行缺失 = 物理缺席，不得 attach。
+
+        旧实现仅在人类可读 list（listing 非空）时识别缺席；结构化模式下
+        listing 恒为空，缺席分支被跳过并对已消失的 BUSID 连发 claim。实机
+        上每次 claim 都撞击正在重新枚举的 PnP 节点，触发 VBoxUsb 崩溃并
+        把端口锁死为 0000:0002（Code 43）。
+        """
+        manager = FakeSshManager([])
+        runtime.configure_runtime(ssh_manager=manager)
+        windows_ssh = SimpleNamespace(close=lambda: None)
+        route = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+        }]
+        state = {
+            "1-9": {
+                "busid": "1-9",
+                "instance_id": "USB\\VID_03F0&PID_134A\\5&1",
+                "vid_pid": "03f0:134a",
+                "device": "USB Input Device",
+                "state": "Not shared",
+                "is_attached": False,
+            },
+        }
+
+        async def scenario():
+            transition_event = asyncio.Event()
+            ready_event = asyncio.Event()
+            task = asyncio.create_task(
+                usbip_transport.reattach_usbip_after_rockusb_reset(
+                    object(), route, timeout=0.5, interval=0.02,
+                    baseline={
+                        ("172.16.14.66", "1-1"): {
+                            "instance_id": "USB\\VID_2207&PID_351A\\OLD",
+                            "vid_pid": "2207:351a",
+                        }
+                    },
+                    transition_event=transition_event,
+                    ready_event=ready_event,
+                )
+            )
+            await asyncio.wait_for(ready_event.wait(), timeout=1)
+            transition_event.set()
+            return await task
+
+        with patch.object(
+            usbip_transport, "open_usbip_source_ssh",
+            return_value=(windows_ssh, ""),
+        ), patch.object(
+            usbip_transport, "query_usbipd_device_states",
+            return_value=state,
+        ), patch.object(
+            usbip_transport, "usbipd_list_via_ssh",
+            return_value=("", ""),
+        ), patch.object(
+            usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
+        ):
+            result = asyncio.run(scenario())
+
+        self.assertFalse(result["success"])
+        self.assertIn("尚未重新枚举", str(result["errors"]))
+        attach_commands = [
+            command for command, _timeout in manager.commands
+            if command.startswith("sudo usbip attach")
+        ]
+        self.assertEqual(attach_commands, [])
+
+    def test_transitional_attach_failure_reapplies_settle_dwell(self):
+        """被拒的 attach（Device not found）必须重置稳定跟踪并重新落定。
+
+        秒级间隔连发 claim 会持续撞击过渡态 PnP 节点（正在到达或离开），
+        实机上每次撞击都可能把端口锁死为 0000:0002；重置后落定等待重新
+        生效，第二次 attach 只在等待期满后发生。
+        """
+        manager = FakeSshManager([
+            ("", "", 0),
+            (
+                "",
+                "usbip: error: Attach Request for 1-1 failed - Device not found",
+                1,
+            ),
+            ("", "", 0),
+            (
+                "Imported USB devices\nPort 00: <Port in Use>\n"
+                "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                "",
+                0,
+            ),
+        ])
+        runtime.configure_runtime(ssh_manager=manager)
+        windows_ssh = SimpleNamespace(close=lambda: None)
+        route = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+        }]
+        state = {
+            "1-1": {
+                "busid": "1-1",
+                "instance_id": "USB\\VID_2207&PID_351A\\NEW",
+                "vid_pid": "2207:351a",
+                "device": "Rockusb Device",
+                "state": "Shared",
+                "is_attached": False,
+            },
+        }
+
+        async def scenario():
+            transition_event = asyncio.Event()
+            ready_event = asyncio.Event()
+            task = asyncio.create_task(
+                usbip_transport.reattach_usbip_after_rockusb_reset(
+                    object(), route, timeout=4, interval=0.02,
+                    baseline={
+                        ("172.16.14.66", "1-1"): {
+                            "instance_id": "USB\\VID_2207&PID_351A\\OLD",
+                            "vid_pid": "2207:351a",
+                        }
+                    },
+                    transition_event=transition_event,
+                    ready_event=ready_event,
+                )
+            )
+            await asyncio.wait_for(ready_event.wait(), timeout=1)
+            transition_event.set()
+            return await task
+
+        with patch.object(
+            usbip_transport, "open_usbip_source_ssh",
+            return_value=(windows_ssh, ""),
+        ), patch.object(
+            usbip_transport, "query_usbipd_device_states",
+            return_value=state,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_RETRY_SECONDS", 0.05,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_VERIFY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_SETTLE_SECONDS", 0.5,
+        ):
+            result = asyncio.run(scenario())
+
+        self.assertTrue(result["success"], result)
+        attach_commands = [
+            command for command, _timeout in manager.commands
+            if command.startswith("sudo usbip attach")
+        ]
+        self.assertEqual(len(attach_commands), 2)
+        self.assertGreaterEqual(result["elapsed_seconds"], 0.5)
+
+    def test_adb_to_loader_watch_accepts_identity_change_without_gap(self):
+        """ADB→Loader 行替换可能发生在两次轮询之间，缺席采样不到。
+
+        allow_identity_transition=True 时，PnP 实例/VID 相对基线变化且
+        稳定后即视为转换，不必等 BUSID 完整消失；同实例同 VID 的旧行
+        残留仍不构成转换。
+        """
+        manager = FakeSshManager([
+            (
+                "Exportable USB devices\n"
+                " - 172.16.14.66\n"
+                "      1-1: Rockchip Rockusb Device\n",
+                "",
+                0,
+            ),
+            ("", "", 0),
+            (
+                "Imported USB devices\n"
+                "Port 00: <Port in Use>\n"
+                "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                "",
+                0,
+            ),
+        ])
+        runtime.configure_runtime(ssh_manager=manager)
+        windows_ssh = SimpleNamespace(close=lambda: None)
+        listing = (
+            "Connected:\n"
+            "BUSID  VID:PID    DEVICE              STATE\n"
+            "1-1    2207:351a  Rockusb Device      Shared\n"
+        )
+        route = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+        }]
+        with patch.object(
+            usbip_transport, "open_usbip_source_ssh",
+            return_value=(windows_ssh, ""),
+        ), patch.object(
+            usbip_transport, "usbipd_list_via_ssh",
+            return_value=(listing, ""),
+        ), patch.object(
+            usbip_transport, "query_usbipd_busid_instance_ids",
+            return_value={"1-1": "USB\\VID_2207&PID_351A\\LOADER"},
+        ), patch.object(
+            usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_STABLE_SAMPLE_COUNT", 2,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_RETRY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_VERIFY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_SETTLE_SECONDS", 0,
+        ):
+            result = asyncio.run(usbip_transport.reattach_usbip_after_rockusb_reset(
+                object(), route, timeout=2, interval=0.01,
+                baseline={
+                    ("172.16.14.66", "1-1"): {
+                        "instance_id": "USB\\VID_2207&PID_0006\\D1",
+                        "vid_pid": "2207:0006",
+                    }
+                },
+                allow_identity_transition=True,
+            ))
+        self.assertTrue(result["success"])
+        self.assertTrue(any(
+            command.startswith("sudo usbip attach") for command, _ in manager.commands
+        ))
+
+    def test_identity_change_requires_flag_even_with_different_vid(self):
+        """默认（uf/MaskROM 路径）不接受仅凭 VID 变化的转换。"""
+        manager = FakeSshManager([])
+        runtime.configure_runtime(ssh_manager=manager)
+        windows_ssh = SimpleNamespace(close=lambda: None)
+        listing = (
+            "Connected:\n"
+            "BUSID  VID:PID    DEVICE              STATE\n"
+            "1-1    2207:351a  Rockusb Device      Shared\n"
+        )
+        route = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+        }]
+        with patch.object(
+            usbip_transport, "open_usbip_source_ssh",
+            return_value=(windows_ssh, ""),
+        ), patch.object(
+            usbip_transport, "usbipd_list_via_ssh",
+            return_value=(listing, ""),
+        ), patch.object(
+            usbip_transport, "query_usbipd_busid_instance_ids",
+            return_value={"1-1": "USB\\VID_2207&PID_351A\\LOADER"},
+        ), patch.object(
+            usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_SNAPSHOT_WAIT_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "usbipd_policy_list_via_ssh", return_value="",
+        ):
+            result = asyncio.run(usbip_transport.reattach_usbip_after_rockusb_reset(
+                object(), route, timeout=0.05, interval=0.01,
+                baseline={
+                    ("172.16.14.66", "1-1"): {
+                        "instance_id": "USB\\VID_2207&PID_0006\\D1",
+                        "vid_pid": "2207:0006",
+                    }
+                },
+            ))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["attempts"], 0)
+        self.assertFalse(any(
+            command.startswith("sudo usbip attach") for command, _ in manager.commands
+        ))
+
     def test_maskrom_watch_ignores_intermediate_pid_until_full_gap(self):
         manager = FakeSshManager([
             ("", "", 0),
@@ -699,9 +1220,11 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
         ), patch.object(
             usbip_transport, "ROCKUSB_SOURCE_POLL_SECONDS", 0,
         ), patch.object(
-            usbip_transport, "ROCKUSB_REENUMERATION_SETTLE_SECONDS", 0,
+            usbip_transport, "ROCKUSB_STABLE_SAMPLE_COUNT", 2,
         ), patch.object(
             usbip_transport, "ROCKUSB_ATTACH_VERIFY_SECONDS", 0,
+        ), patch.object(
+            usbip_transport, "ROCKUSB_ATTACH_SETTLE_SECONDS", 0,
         ):
             result = asyncio.run(
                 usbip_transport.reattach_usbip_after_rockusb_reset(
@@ -805,7 +1328,7 @@ class UsbipFirmwareTransportTests(unittest.TestCase):
             usbip_transport, "usbipd_policy_list_via_ssh",
             return_value="GUID EFFECT OPERATION BUSID\nabc Allow AutoBind 1-1",
         ), patch.object(
-            usbip_transport, "ROCKUSB_REENUMERATION_SETTLE_SECONDS", 0,
+            usbip_transport, "ROCKUSB_STABLE_SAMPLE_COUNT", 2,
         ):
             result = asyncio.run(usbip_transport.reattach_usbip_after_rockusb_reset(
                 object(), route, timeout=0.5, interval=0.01,

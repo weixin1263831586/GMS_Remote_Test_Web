@@ -4,6 +4,7 @@ import json
 
 from features.devices.physical_identity import resolve_physical_device_identity
 from features.devices.usbip_identity import (
+    parse_usbipd_state,
     query_usbipd_busid_instance_ids,
     query_windows_usb_identities,
 )
@@ -64,6 +65,39 @@ def test_usbipd_state_maps_same_vid_pid_devices_by_busid():
         "1-2": "USB\\VID_2207&PID_0006\\SERIAL-A",
         "1-3": "USB\\VID_2207&PID_0006\\SERIAL-B",
     }
+
+
+def test_usbipd_state_normalizes_transport_flags_and_vid_pid():
+    states = parse_usbipd_state(json.dumps({
+        "Devices": [
+            {
+                "BusId": "1-1",
+                "ClientIPAddress": "172.16.14.20",
+                "Description": "Rockusb Device",
+                "InstanceId": "USB\\VID_2207&PID_351A\\SERIAL-A",
+                "IsForced": False,
+                "PersistedGuid": "a6b27e9c-5471-4131-a9a2-a4dc57129bad",
+                "StubInstanceId": "USBIP\\STUB\\1",
+            },
+            {
+                "BusId": "1-2",
+                "ClientIPAddress": None,
+                "Description": "Rockusb Device",
+                "HardwareId": ["USB\\VID_2207&PID_350B"],
+                "InstanceId": "USB\\UNKNOWN\\SERIAL-B",
+                "IsForced": True,
+                "PersistedGuid": "bc3b2d9d-f81e-4e44-a42e-edd3399f5d30",
+                "StubInstanceId": None,
+            },
+        ]
+    }))
+
+    assert states["1-1"]["vid_pid"] == "2207:351a"
+    assert states["1-1"]["is_attached"] is True
+    assert states["1-1"]["state"] == "Attached"
+    assert states["1-2"]["vid_pid"] == "2207:350b"
+    assert states["1-2"]["is_forced"] is True
+    assert states["1-2"]["state"] == "Shared (forced)"
 
 
 def test_duplicate_vid_pid_pnp_details_remain_addressable_by_instance_id():

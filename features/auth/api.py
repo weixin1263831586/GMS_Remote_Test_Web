@@ -227,7 +227,7 @@ async def auth_elevate(request: Request, req: dict):
         issued_session = True
     if not token:
         return error_response("当前会话无效，请重新登录", status_code=401)
-    # 二次认证状态绑定当前认证会话；固定 10 分钟 TTL（可配置）。
+    # 二次认证状态绑定当前认证会话；固定 30 分钟 TTL（可配置）。
     if not auth_service.elevate_session(token, admin):
         return error_response("无法提权当前会话", status_code=400)
 
