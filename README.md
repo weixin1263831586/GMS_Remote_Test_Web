@@ -285,13 +285,48 @@ Loader 枚举为 `2207:351a / Rockusb Device`。部署可在 `configs/config.jso
 
 固件烧写还包含 Loader → MaskROM 的二次枚举。普通 `usbipd bind` 绑定的是
 Windows 设备实例；如果新实例显示为 `Not shared`，`upgrade_tool` 会停在
-`Wait For Maskrom Start`。平台在烧写预检时会针对已分配的物理 BUSID 创建
-usbipd-win 4.2+ `AutoBind` 策略。烧写前还会记录 Loader 的 PnP
-InstanceId 和 VID:PID。Loader 就绪后，固件任务会暂停目标设备的通用后台
-重连并等待已有重连线程退出，保证同一物理 BUSID 只由固件状态机操作；只有
-观察到旧 Loader 的 BUSID 从 Windows `Connected` 表完整消失，并且 MaskROM
-新实例稳定后才重新 attach。单纯的 VID:PID/InstanceId 变化可能只是 Rockchip
-中间枚举阶段，不会触发 attach。这避免后台 30 次重连循环或过早的 Windows
+`Wait For Maskrom Start`。实测该二次枚举在 usbipd-win 来源端口上会间歇性
+失败为 `0000:0002 Device Descriptor Request Failed`（Windows Problem
+Code 43），且故障发生在 Windows USB 枚举层、先于任何 USB/IP 导出动作，
+客户端侧重试无法修复。因此 USB/IP 设备的固件烧写按 `burn_mode` 分流：
+`auto`（默认）与 `fastboot` 走 **Fastboot/Fastbootd 兼容烧写**——复用 GSI
+的 ADB → Bootloader Fastboot → Fastbootd 模式切换，解包 `update.img` 后只
+写入设备 Fastboot 明确暴露的 Android 分区（super、boot、vendor_boot、
+init_boot 等），写入前逐分区做存在性与容量预检；uboot、parameter/GPT、
+misc、resource、baseparameter 等底层分区不属于该路径，仍需本地
+`upgrade_tool`。`partition` 走 **同会话 DI 分区烧写**：进入
+ADB→Loader 后依次执行 `SFI`（解析镜像头）、`EXF`（解包，按镜像名缓存）、
+`RID`（探测当前会话的存储访问能力；成功即跳过 DB）。RID 失败时普通
+USB/IP 会话在 DB 前安全停止（DB 重枚举即上述 Code 43 窗口）；只有管理员
+`transport-probe-force` 在目标 PnP 实例预绑定为 Shared (forced) 后才执行
+DB 验证。随后执行 `RL`（读回设备 GPT 并与 parameter.txt
+比对，布局不一致即拒绝写入）、`UL -noreset`（重写 Loader，不触发设备
+复位）、逐分区 `DI -分区名 镜像`（双槽 `_a/_b` 一并覆盖；DI 原生解析
+Android sparse 并校验展开容量，平台在任何写入前还会按 sparse 头预检
+展开尺寸与分区容量）、最后 `RD` 复位重启
+交由既有 ADB 重连机制恢复。已具备存储访问能力的 Loader 路径除进场和收尾外
+不再发生 USB 身份切换。`burn_mode=uf` 显式要求 Ubuntu 本地
+`upgrade_tool uf` 整包路径；USB/IP 设备选择 `uf` 会被拒绝（直连/本地
+设备始终使用 `uf`），混合选择 Windows USB/IP 与本地设备同样被拒绝。
+回退路径（`uf`）的防护逻辑仍完整保留：平台在烧写预检时会针对已分配的
+物理 BUSID 创建 usbipd-win 4.2+ `AutoBind` 策略；烧写前记录 Loader 的
+PnP InstanceId 和 VID:PID；Loader 就绪后暂停目标设备的通用后台重连并等待
+已有重连线程退出，保证同一物理 BUSID 只由固件状态机操作。进场 ADB→Loader
+转换接受"BUSID 完整消失"或"PnP 实例/VID:PID 相对基线变化且已稳定"任一
+证据（`2207:0006→2207:351a` 的行替换可能发生在两次轮询之间，缺席采样
+不到）；uf/DB 路径则由 `Download Boot Success` 解锁，不再把“必须采到
+BUSID 消失”作为硬条件。状态机以 `usbipd state` JSON 为主状态源，同一
+BUSID 的合法 `2207:*` 非 Attached 状态连续稳定两个独立样本、且身份稳定
+满最小落定时间（`ROCKUSB_ATTACH_SETTLE_SECONDS`）后才重新 attach；结构化
+状态下目标行缺失同样按物理缺席处理，绝不对已消失的 BUSID 发起 attach。
+被 Windows 拒绝的 attach（`Device not found`/`Device in error state` 等）
+会重置稳定跟踪并重新等待落定，避免秒级间隔连发 claim。实机验证
+（usbipd-win 5.3.0-54 + Rockchip `351a`）：结构化状态行出现远早于 PnP
+节点可 claim，转换窗口内的 VBoxUsb claim 会崩溃并把端口锁死为
+`0000:0002`（Code 43）；只要让新实例落定后再 attach，DB 复位本身可以
+干净存活（新 DRAM Loader 实例约 2 秒内出现，空闲窗口约 45 秒）。恢复
+结果以 `upgrade_tool ld` 决定 uf 是否自动重试。这避免后台 30 次
+重连循环或过早的 Windows
 USB 端口 cycle 导致 `0000:0002 Device Descriptor Request Failed`。若已经发生
 描述符失败，通用重连会冷却 5 分钟，避免请求结束后继续复位端口；手动连接及
 冷却到期后可再次恢复。平台不会在转换窗口内自动执行 `usbipd detach` 或撤销

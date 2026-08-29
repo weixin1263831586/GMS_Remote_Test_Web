@@ -20,7 +20,10 @@ from features.devices import (
     usbipd_policy_list_via_ssh,
 )
 from features.devices import reconnect as usbip_reconnect
-from features.devices.usbip_identity import query_usbipd_busid_instance_ids
+from features.devices.usbip_identity import (
+    query_usbipd_busid_instance_ids,
+    query_usbipd_device_states,
+)
 from features.devices.usbip_transaction import (
     USBIP_PORT_COMMAND,
     parse_usbip_port_entries,
@@ -94,10 +97,13 @@ def diagnose_maskrom_reattach_failure(
     if descriptor_failed:
         forced = any("forced" in row["state"].lower() for row in descriptor_failed)
         return (
-            "Windows 在 Loader→MaskROM 二次枚举时未能读取 USB 设备描述符"
-            "（0000:0002 Unknown USB Device），这是 Windows USB 枚举层故障，"
-            "与 AutoBind/TCP 3240 无关。请优先检查 USB 线材、Hub、供电以及"
-            "固件内的 Loader；建议给设备断电重上电后重试。"
+            "Loader切换期间 Windows 最终未能读取 USB 设备描述符"
+            "（0000:0002 Unknown USB Device）；该状态发生在设备重新导出"
+            "之前，所以此刻 bind/attach 均无法恢复。若同一 BUSID 此前曾正常"
+            "显示 2207:* Shared/Attached，优先排查 usbipd 普通 attach 引起的"
+            "驱动切换/端口复位与 Rockchip 重枚举冲突，并在维护窗口人工使用"
+            " Shared (forced) 做 A/B 验证；同时仍需检查线材、Hub、供电和"
+            "固件 Loader。当前设备请先断电重上电。"
             + (
                 "检测到该 BUSID 处于 Shared (forced) 状态；AutoBind 无法自动"
                 "重建 forced binding，但该状态本身不能证明是描述符失败的根因。"
@@ -204,6 +210,16 @@ async def pause_usbip_firmware_reconnects(
         return [], "USB/IP固件路由缺少目标设备标识，无法建立独占重连保护"
 
     usbip_reconnect.pause_usbip_reconnect(device_ids=devices)
+    logger.info(
+        "USB/IP firmware reconnect ownership acquired before mode transition: "
+        "devices=%s routes=%s",
+        devices,
+        [
+            f"{route.get('device_host')}/"
+            f"{','.join(str(busid) for busid in route.get('busids') or [])}"
+            for route in routes or []
+        ],
+    )
     for device_host in device_hosts:
         await asyncio.to_thread(
             usbip_reconnect.stop_usbip_reconnect_for_host,
@@ -406,13 +422,18 @@ def _attach_may_have_succeeded(error_text: str) -> bool:
 # 猜测源端状态，更不在转换窗口内执行 Windows detach。
 ROCKUSB_BIND_RETRY_SECONDS = 2.0
 ROCKUSB_SOURCE_POLL_SECONDS = 0.25
-# usbipd-win attaches by cycling the Windows USB port.  Do not issue that
-# cycle as soon as the new row first appears: let PnP finish the MaskROM
-# descriptor/driver path first.  A missed upgrade_tool window is recovered by
-# the bounded second attempt after transport restoration.
-ROCKUSB_REENUMERATION_SETTLE_SECONDS = 2.0
+# Two distinct ``usbipd state`` samples are enough to reject a transient row
+# without spending a fixed two-second delay from upgrade_tool's short MaskROM
+# window.  Cached reads do not count as additional samples.
+ROCKUSB_STABLE_SAMPLE_COUNT = 2
 ROCKUSB_ATTACH_RETRY_SECONDS = 1.0
 ROCKUSB_ATTACH_VERIFY_SECONDS = 0.35
+# 实机（usbipd-win 5.3.0-54 + Rockchip 351a）验证：刚完成重新枚举的 PnP
+# 节点尚未可 claim；在节点到达/离开窗口内发起的 VBoxUsb claim 会崩溃并
+# 把端口锁死为 0000:0002（Code 43），此后任何 bind/attach 都无法恢复。
+# 身份稳定后仍需等待最短落定时间，才允许第一次 attach。DB 后的 DRAM
+# Loader 空闲窗口约 45 秒，6 秒落定 + 2 次采样仍留有充足裕量。
+ROCKUSB_ATTACH_SETTLE_SECONDS = 6.0
 # watcher 截止后 MaskROM 二次枚举可能仍未完成（生产日志里 0000:0002
 # 描述符失败行在超时后才出现）。快照轮询等待目标 BUSID 出现，避免单次
 # 抓拍拍在枚举完成前、把枚举失败误报成通用 AutoBind/TCP 3240 提示。
@@ -420,10 +441,16 @@ ROCKUSB_SNAPSHOT_WAIT_SECONDS = 10.0
 ROCKUSB_SNAPSHOT_INTERVAL_SECONDS = 1.0
 
 
-async def _poll_usbipd_snapshot(ssh_win, busids: set[str]) -> tuple[str, str]:
+async def _poll_usbipd_snapshot(
+    ssh_win, busids: set[str], *, wait_seconds: float | None = None,
+) -> tuple[str, str]:
     """Poll `usbipd list` until every target BUSID shows up or window ends."""
     wanted = {str(busid or "").strip() for busid in busids or ()}
-    deadline = time.monotonic() + ROCKUSB_SNAPSHOT_WAIT_SECONDS
+    snapshot_wait = (
+        ROCKUSB_SNAPSHOT_WAIT_SECONDS
+        if wait_seconds is None else max(0.0, wait_seconds)
+    )
+    deadline = time.monotonic() + snapshot_wait
     listing, list_err = "", ""
     while True:
         listing, list_err = await asyncio.to_thread(usbipd_list_via_ssh, ssh_win)
@@ -501,27 +528,46 @@ async def capture_rockusb_route_baseline(
                 + (ssh_error or "Windows SSH不可用")
             )
         try:
-            listing, list_error = await asyncio.to_thread(
-                usbipd_list_via_ssh, ssh_win,
-            )
-            if list_error:
-                return {}, (
-                    f"无法在烧写前读取 {device_host} 的 usbipd 状态: "
-                    + list_error
-                )
-            rows = parse_usbipd_connected_rows(listing or "")
             try:
-                instance_ids = await asyncio.to_thread(
-                    query_usbipd_busid_instance_ids,
+                states = await asyncio.to_thread(
+                    query_usbipd_device_states,
                     runtime.ssh_manager,
                     ssh_win,
                 )
             except Exception as exc:
                 logger.warning(
-                    "Unable to capture usbipd PnP instances on %s: %s",
+                    "Unable to capture structured usbipd state on %s: %s",
                     device_host, exc,
                 )
-                instance_ids = {}
+                states = {}
+
+            # usbipd-win >=2.2 exposes JSON state and all supported production
+            # versions should take this path.  Retain the list fallback for an
+            # actionable preflight error on older/misconfigured sources.
+            if states:
+                rows = list(states.values())
+                instance_ids = {
+                    busid: str(state.get("instance_id") or "")
+                    for busid, state in states.items()
+                }
+            else:
+                listing, list_error = await asyncio.to_thread(
+                    usbipd_list_via_ssh, ssh_win,
+                )
+                if list_error:
+                    return {}, (
+                        f"无法在烧写前读取 {device_host} 的 usbipd state: "
+                        + list_error
+                    )
+                rows = parse_usbipd_connected_rows(listing or "")
+                try:
+                    instance_ids = await asyncio.to_thread(
+                        query_usbipd_busid_instance_ids,
+                        runtime.ssh_manager,
+                        ssh_win,
+                    )
+                except Exception:
+                    instance_ids = {}
             for source_host, busid in pairs:
                 row = next(
                     (item for item in rows if item.get("busid") == busid),
@@ -548,7 +594,11 @@ async def capture_rockusb_route_baseline(
                         f"（当前 {vid_pid or '未知'}）"
                     )
                 state = str(row.get("state") or "").lower()
-                if not state.startswith("attached"):
+                is_attached = row.get("is_attached")
+                if not (
+                    is_attached is True
+                    or (is_attached is None and state.startswith("attached"))
+                ):
                     return {}, (
                         f"烧写前 {device_host}/{busid} 的 Loader USB/IP 会话"
                         f"已不在 Attached 状态（当前 {row.get('state') or '未知'}），"
@@ -568,6 +618,11 @@ async def reattach_usbip_after_rockusb_reset(
     ssh, routes: list[dict], *, timeout: float = 30, interval: float = 0.15,
     attach_command_timeout: float = 4,
     baseline: dict[tuple[str, str], dict[str, str]] | None = None,
+    allow_identity_transition: bool = False,
+    transition_event: asyncio.Event | None = None,
+    ready_event: asyncio.Event | None = None,
+    force_bind: bool = False,
+    require_forced: bool = False,
 ) -> dict:
     """Reattach Loader ports while upgrade_tool waits for MaskROM.
 
@@ -579,14 +634,21 @@ async def reattach_usbip_after_rockusb_reset(
     （常规连接流程为 15s；被拒绝的请求会立即返回，超时上限只保护慢速
     成功路径，避免 1s 截断杀死即将成功的挂载）。
 
-    watcher 以烧写前的 Loader PnP 实例/VID:PID 为基线。usbipd-win
-    在旧客户端退出时会先把旧 Loader 从 ``Attached`` 改成 ``Shared``，
-    Rockchip 还可能在同一 BUSID 上短暂出现另一 VID:PID；这些都不是可安全
-    attach 的 MaskROM 终态。必须先观察到目标 BUSID 从 Windows Connected
-    表中真实消失，再等重新出现的有效实例稳定后才允许 attach，避免过早的
-    端口 cycle 把 Windows 枚举打成 ``0000:0002``。目标实例为
-    ``Not shared`` 时才执行普通 ``usbipd bind``；远端已导出后才发起
-    Linux attach。绝不自动执行 Windows ``usbipd detach``。
+    watcher 以烧写前的 Loader PnP 实例/VID:PID 为基线，并以结构化
+    ``usbipd state`` 为主状态源。Loader→MaskROM/DB 路径应传入
+    ``transition_event``：watcher 会提前建立 Windows SSH，调用方在启动
+    会触发重枚举的命令前解除等待；基线和稳定身份变化负责防止旧实例误挂。
+    ``ready_event`` 会在这些源端 SSH 会话均已预建后置位，供调用方确保
+    watcher 布防完成再启动工具。
+    ARMED 后同一 BUSID 出现非 Attached 的合法 ``2207:*`` 即构成转换证据，
+    不再要求轮询必须碰巧采到 BUSID 消失。合法状态连续出现两个独立样本、
+    且身份稳定满 ``ROCKUSB_ATTACH_SETTLE_SECONDS`` 后才允许 attach：结构
+    化状态行出现远早于 PnP 节点真正可 claim，过早的 VBoxUsb claim 会崩溃
+    并把端口锁死为 0000:0002。结构化模式下目标行缺失同样按物理缺席处理
+    （旧实现仅识别人类可读 list 的缺席，会对已消失的 BUSID 连发 claim）。
+    未传事件的 ADB→Loader 路径仍以物理缺席为强证据，并可通过
+    ``allow_identity_transition=True`` 接受稳定的 PnP/VID 变化。绝不自动
+    执行 Windows ``usbipd detach``。
     窗口耗尽仍失败则轮询抓取 ``usbipd list`` 快照（等待目标 BUSID 完成
     二次枚举，最长 10 秒）并附 ``usbipd policy list`` 用于定位。即使
     attach 晚于工具退出才完成，设备也会留在 MaskROM 传输上，直接重试
@@ -621,12 +683,26 @@ async def reattach_usbip_after_rockusb_reset(
     absence_seen: set[tuple[str, str]] = set()
     transition_seen: set[tuple[str, str]] = set()
     stable_fingerprints: dict[tuple[str, str], tuple[str, str, str]] = {}
-    stable_since: dict[tuple[str, str], float] = {}
+    stable_samples: dict[tuple[str, str], int] = {}
+    stable_observed_at: dict[tuple[str, str], float] = {}
+    stable_since_at: dict[tuple[str, str], float] = {}
+
+    def _reset_stability(pair: tuple[str, str]) -> None:
+        """Drop stable-sample progress so the settle dwell re-applies."""
+        stable_fingerprints.pop(pair, None)
+        stable_samples.pop(pair, None)
+        stable_observed_at.pop(pair, None)
+        stable_since_at.pop(pair, None)
     windows_state_cache: dict[
-        str, tuple[float, list[dict[str, str]], str, str, dict[str, str]]
+        str, tuple[float, list[dict[str, object]], str, str, dict[str, str]]
     ] = {}
     started = time.monotonic()
-    deadline = started + max(0.5, timeout)
+    # Event-driven watchers spend their timeout budget only after the caller
+    # arms the transition event immediately before the reset-causing command.
+    deadline = (
+        None if transition_event is not None
+        else started + max(0.5, timeout)
+    )
 
     windows_ssh_locks: dict[str, asyncio.Lock] = {}
 
@@ -648,43 +724,71 @@ async def reattach_usbip_after_rockusb_reset(
             return ssh_win, ssh_err
 
     async def _windows_rows(device_host: str):
-        """Poll one Windows source at most four times per second."""
+        """Poll one Windows source at most four times per second.
+
+        Returns the monotonic timestamp of the real source probe as the last
+        value, so repeated cache hits cannot masquerade as stable samples.
+        """
         ssh_win, ssh_err = await _windows_session(device_host)
         if ssh_win is None:
-            return [], "", ssh_err, {}
+            return [], "", ssh_err, {}, 0.0
         lock = windows_ssh_locks.setdefault(device_host, asyncio.Lock())
         async with lock:
             cached = windows_state_cache.get(device_host)
             now = time.monotonic()
             if cached and now - cached[0] < ROCKUSB_SOURCE_POLL_SECONDS:
-                return cached[1], cached[2], cached[3], cached[4]
-            listing, list_err = await asyncio.to_thread(
-                usbipd_list_via_ssh, ssh_win,
-            )
-            rows = parse_usbipd_connected_rows(listing or "")
-            instance_ids: dict[str, str] = {}
-            if any(
-                identity.get("instance_id")
-                for identity in baseline_by_pair.values()
-            ):
-                try:
-                    instance_ids = await asyncio.to_thread(
-                        query_usbipd_busid_instance_ids,
-                        runtime.ssh_manager,
-                        ssh_win,
-                    )
-                except Exception as exc:
-                    logger.debug(
-                        "usbipd instance probe unavailable on %s: %s",
-                        device_host, exc,
-                    )
+                return cached[1], cached[2], cached[3], cached[4], cached[0]
+            try:
+                states = await asyncio.to_thread(
+                    query_usbipd_device_states,
+                    runtime.ssh_manager,
+                    ssh_win,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "usbipd state probe unavailable on %s: %s",
+                    device_host, exc,
+                )
+                states = {}
+            if states:
+                rows = list(states.values())
+                instance_ids = {
+                    busid: str(state.get("instance_id") or "")
+                    for busid, state in states.items()
+                }
+                listing, list_err = "", ""
+            else:
+                # Diagnostic compatibility fallback only.  Production
+                # automation uses the JSON branch above.
+                listing, list_err = await asyncio.to_thread(
+                    usbipd_list_via_ssh, ssh_win,
+                )
+                rows = parse_usbipd_connected_rows(listing or "")
+                instance_ids = {}
+                if any(
+                    identity.get("instance_id")
+                    for identity in baseline_by_pair.values()
+                ):
+                    try:
+                        instance_ids = await asyncio.to_thread(
+                            query_usbipd_busid_instance_ids,
+                            runtime.ssh_manager,
+                            ssh_win,
+                        )
+                    except Exception as exc:
+                        logger.debug(
+                            "usbipd instance probe unavailable on %s: %s",
+                            device_host, exc,
+                        )
             windows_state_cache[device_host] = (
                 now, rows, listing or "", list_err or "", instance_ids,
             )
-            return rows, listing or "", list_err or "", instance_ids
+            return (
+                rows, listing or "", list_err or "", instance_ids, now,
+            )
 
-    async def _bind_unshared_instance(
-        source_host: str, busid: str, device_host: str,
+    async def _bind_instance(
+        source_host: str, busid: str, device_host: str, *, force: bool = False,
     ) -> bool:
         key = (source_host, busid)
         if (
@@ -703,16 +807,18 @@ async def reattach_usbip_after_rockusb_reset(
                 last_bind_at[key] = time.monotonic()
                 bind_result = await asyncio.to_thread(
                     bind_usbip_busid_via_ssh, ssh_win, busid,
+                    force=force,
                 )
                 logger.info(
-                    "RockUSB USB/IP source bind for %s/%s: %s",
-                    source_host, busid, bind_result,
+                    "RockUSB USB/IP source %sbind for %s/%s: %s",
+                    "forced " if force else "", source_host, busid, bind_result,
                 )
                 # bind changes the state table; force a fresh list next time.
                 windows_state_cache.pop(device_host, None)
             if not bind_result.get("success"):
                 errors[f"{source_host}/{busid}"] = (
-                    "Windows目标实例为Not shared，普通bind失败: "
+                    ("Windows目标实例forced bind失败: " if force else
+                     "Windows目标实例为Not shared，普通bind失败: ")
                     + str(bind_result.get("detail") or bind_result.get("error") or "未知错误")
                 )
                 return False
@@ -728,22 +834,38 @@ async def reattach_usbip_after_rockusb_reset(
     async def _attempt_pair(source_host: str, busid: str) -> None:
         nonlocal attempts
         key = (source_host, busid)
+        bound_now = False
         device_host = str(
             (route_by_pair.get(key) or {}).get("device_host") or ""
         ).strip()
 
         if device_host:
-            rows, listing, list_err, instance_ids = await _windows_rows(
+            (
+                rows,
+                listing,
+                list_err,
+                instance_ids,
+                observed_at,
+            ) = await _windows_rows(
                 device_host
             )
             target_row = next(
                 (row for row in rows if row.get("busid") == busid), None,
             )
-            if listing and target_row is None:
+            # 结构化 ``usbipd state`` 模式下 ``listing`` 恒为空：目标行缺失
+            # 即物理 BUSID 尚未重新枚举（或已离开），绝不能落入下方的
+            # attach 分支——对着消失的 BUSID 连发 claim 会在 Windows 枚举
+            # 窗口内触发 VBoxUsb 崩溃并把端口锁死为 0000:0002。
+            if target_row is None and (listing or rows):
                 absence_seen.add(key)
-                stable_fingerprints.pop(key, None)
-                stable_since.pop(key, None)
-                if key not in cleaned_local_pairs:
+                _reset_stability(key)
+                if (
+                    key not in cleaned_local_pairs
+                    and (
+                        transition_event is not None
+                        or key in absence_seen
+                    )
+                ):
                     cleaned_local_pairs.add(key)
                     await _detach_stale_local_usbip_pair(
                         ssh, source_host, busid,
@@ -756,6 +878,7 @@ async def reattach_usbip_after_rockusb_reset(
                 vid_pid = str(target_row.get("vid_pid") or "").lower()
                 device_label = str(target_row.get("device") or "")
                 state = str(target_row.get("state") or "").lower()
+                is_forced = bool(target_row.get("is_forced"))
                 if (
                     vid_pid == "0000:0002"
                     or "descriptor request failed" in device_label.lower()
@@ -779,11 +902,33 @@ async def reattach_usbip_after_rockusb_reset(
                         "已锁定Loader基线，等待MaskROM重新枚举"
                     )
                     return
-                if key not in absence_seen:
-                    errors[f"{source_host}/{busid}"] = (
-                        "等待Loader物理BUSID完整消失；忽略中间VID/PnP身份变化"
-                    )
-                    return
+                initial_instance = str(initial.get("instance_id") or "")
+                initial_vid = str(initial.get("vid_pid") or "")
+                identity_changed = bool(
+                    (current_instance and current_instance != initial_instance)
+                    or (vid_pid and vid_pid != initial_vid)
+                )
+                if transition_event is not None:
+                    # The caller's Download Boot phase marker is the
+                    # authoritative phase edge.
+                    # The old Loader may still be Attached for a few samples;
+                    # wait until the transport is released (or a genuinely new
+                    # identity is already attached) before accepting the row.
+                    if state.startswith("attached") and not identity_changed:
+                        errors[f"{source_host}/{busid}"] = (
+                            "Download Boot已完成，等待旧Loader传输释放"
+                        )
+                        return
+                elif key not in absence_seen:
+                    # 缺席是最强证据；ADB→Loader 的行替换可能发生在两次
+                    # 轮询之间（2207:0006→2207:351a 原子换行），此时以
+                    # PnP 实例/VID 相对基线的变化 + 稳定窗口作为转换判据。
+                    # 同实例同 VID 的旧行残留（拆除期 Shared）不构成转换。
+                    if not allow_identity_transition or not identity_changed:
+                        errors[f"{source_host}/{busid}"] = (
+                            "等待Loader物理BUSID消失或PnP身份变化"
+                        )
+                        return
                 transition_seen.add(key)
                 if state.startswith("attached"):
                     if await _usbip_pair_already_attached(
@@ -799,31 +944,81 @@ async def reattach_usbip_after_rockusb_reset(
                             "Windows目标BUSID仍被旧客户端占用(Attached)"
                         )
                     return
+                if require_forced and not is_forced:
+                    _reset_stability(key)
+                    errors[f"{source_host}/{busid}"] = (
+                        "目标RockUSB实例尚未预绑定为Shared (forced)；"
+                        "为避免在重枚举窗口切换Windows驱动，本次不会执行bind/attach"
+                    )
+                    return
+                if (
+                    key not in cleaned_local_pairs
+                    and (
+                        transition_event is not None
+                        or key in absence_seen
+                    )
+                ):
+                    # Source-side transport is no longer Attached, so any
+                    # exact local vhci pair can only represent the old USB
+                    # instance.  Clean that pair before attaching the new one.
+                    cleaned_local_pairs.add(key)
+                    await _detach_stale_local_usbip_pair(
+                        ssh, source_host, busid,
+                    )
                 fingerprint = (
                     current_instance.casefold(),
                     vid_pid,
-                    device_label.casefold(),
+                    state,
                 )
                 if stable_fingerprints.get(key) != fingerprint:
                     stable_fingerprints[key] = fingerprint
-                    stable_since[key] = time.monotonic()
+                    stable_samples[key] = 1
+                    stable_observed_at[key] = observed_at
+                    stable_since_at[key] = time.monotonic()
                     errors[f"{source_host}/{busid}"] = (
                         "MaskROM已出现，等待Windows PnP枚举稳定"
                     )
                     return
-                settle_elapsed = time.monotonic() - stable_since.get(
-                    key, time.monotonic()
+                if observed_at != stable_observed_at.get(key):
+                    stable_observed_at[key] = observed_at
+                    stable_samples[key] = stable_samples.get(key, 1) + 1
+                if stable_samples.get(key, 0) < ROCKUSB_STABLE_SAMPLE_COUNT:
+                    errors[f"{source_host}/{busid}"] = (
+                        "MaskROM已出现，等待Windows PnP枚举稳定"
+                    )
+                    return
+                settle_waited = (
+                    time.monotonic() - stable_since_at.get(key, 0.0)
                 )
-                if settle_elapsed < ROCKUSB_REENUMERATION_SETTLE_SECONDS:
+                if settle_waited < ROCKUSB_ATTACH_SETTLE_SECONDS:
+                    # 身份稳定 ≠ PnP/驱动落定：立即 claim 会撞上仍在安装
+                    # 驱动的节点（VBoxUsb could-not-claim/433），并可能把
+                    # 端口打进描述符失败状态。
                     errors[f"{source_host}/{busid}"] = (
-                        "MaskROM已出现，等待Windows PnP枚举稳定"
+                        "新USB实例已稳定，等待PnP落定"
+                        f"（{settle_waited:.1f}s/"
+                        f"{ROCKUSB_ATTACH_SETTLE_SECONDS:.0f}s）"
                     )
                     return
-                if "not shared" in state:
-                    if not await _bind_unshared_instance(
+                needs_force_bind = force_bind and not is_forced
+                needs_normal_bind = not force_bind and "not shared" in state
+                if needs_force_bind or needs_normal_bind:
+                    if not await _bind_instance(
                         source_host, busid, device_host,
+                        force=needs_force_bind,
                     ):
                         return
+                    # A forced bind deliberately switches the Windows driver;
+                    # even a normal bind changes the source state table. Never
+                    # attach from the pre-bind sample. Re-observe the instance
+                    # and apply the complete stability dwell again.
+                    _reset_stability(key)
+                    errors[f"{source_host}/{busid}"] = (
+                        "forced bind已完成，等待USB实例重新稳定"
+                        if needs_force_bind else
+                        "普通bind已完成，等待USB实例重新稳定"
+                    )
+                    return
             elif list_err:
                 errors[f"{source_host}/{busid}"] = (
                     f"Windows usbipd list不可用: {list_err}"
@@ -837,7 +1032,11 @@ async def reattach_usbip_after_rockusb_reset(
             < ROCKUSB_ATTACH_RETRY_SECONDS
         ):
             return
-        if device_host:
+        # When structured `usbipd state` is available, Shared is the
+        # authoritative source-side export state; `usbip list -r` may be
+        # unavailable on usbipd-win even though attach is valid. Keep the
+        # discovery guard for the legacy human-readable fallback.
+        if device_host and listing and not bound_now:
             exported = await _remote_usbip_exports_busid(
                 ssh, source_host, busid,
             )
@@ -887,6 +1086,9 @@ async def reattach_usbip_after_rockusb_reset(
                     errors[f"{source_host}/{busid}"] = (
                         "USB/IP attach返回成功，但vhci会话未稳定"
                     )
+                    # attach 成功即节点随后消失：目标正在离开总线，
+                    # 同样需要重新等待落定后再试。
+                    _reset_stability(key)
                     return
             pending.remove((source_host, busid))
             attached.append({"source_host": source_host, "busid": busid})
@@ -918,9 +1120,48 @@ async def reattach_usbip_after_rockusb_reset(
             )
         else:
             errors[f"{source_host}/{busid}"] = failure_text
+            lowered_failure = failure_text.lower()
+            if any(
+                marker in lowered_failure
+                for marker in (
+                    "device not found",
+                    "error state",
+                    "could not claim",
+                    "file not found",
+                    "no such device",
+                )
+            ):
+                # claim 撞上了过渡态 PnP 节点（正在到达或离开）。重置稳定
+                # 跟踪，让落定等待重新生效；按秒级间隔继续轰击只会继续
+                # 触发 VBoxUsb 崩溃并锁死端口（0000:0002）。
+                _reset_stability(key)
 
     try:
-        while pending and time.monotonic() < deadline:
+        if transition_event is not None:
+            device_hosts = sorted({
+                str(route.get("device_host") or "").strip()
+                for route in routes
+                if str(route.get("device_host") or "").strip()
+            })
+            # Pre-open source sessions without touching the USB device.  This
+            # removes SSH setup latency from the post-Download-Boot window.
+            await asyncio.gather(
+                *(_windows_session(device_host) for device_host in device_hosts)
+            )
+            if ready_event is not None:
+                ready_event.set()
+            for source_host, busid in pending:
+                errors[f"{source_host}/{busid}"] = (
+                    "watcher已就绪，等待Download Boot阶段标记"
+                )
+            await transition_event.wait()
+            deadline = time.monotonic() + max(0.5, timeout)
+
+        while (
+            pending
+            and deadline is not None
+            and time.monotonic() < deadline
+        ):
             # 多 BUSID 并行尝试：串行时单条 attach 最坏占满 4 秒超时，
             # 多设备场景第一轮就会耗尽 MaskROM 等待窗口。
             await asyncio.gather(
@@ -955,7 +1196,14 @@ async def reattach_usbip_after_rockusb_reset(
                 continue
             try:
                 listing, list_err = await _poll_usbipd_snapshot(
-                    ssh_win, host_busids,
+                    ssh_win,
+                    host_busids,
+                    # Event-driven callers have already spent their complete
+                    # post-transition budget.  Take one immediate diagnostic
+                    # snapshot so `upgrade_tool ld` gets the next 15 seconds.
+                    wait_seconds=(
+                        0 if transition_event is not None else None
+                    ),
                 )
                 snapshot_parts.append(f"[{device_host}]\n{listing or list_err}")
                 # AutoBind 规则命中情况一并入快照：一次失败日志就能判断

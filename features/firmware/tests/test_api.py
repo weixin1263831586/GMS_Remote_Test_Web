@@ -143,7 +143,7 @@ class FirmwareApiTests(unittest.TestCase):
         )
         self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
 
-    def test_maskrom_race_loss_retries_burn_once_and_succeeds(self):
+    def test_usbip_explicit_uf_is_rejected_before_loader_transition(self):
         notifications = []
         watcher_started = {"count": 0}
         reconnect_lifecycle = []
@@ -175,9 +175,14 @@ class FirmwareApiTests(unittest.TestCase):
                 super().__init__("__GMS_REMOTE_FILE_FOUND__\n")
                 self.burn_runs = []
                 self.watcher_armed_before_burn = []
+                self.pause_seen_at_loader_reboot = []
 
             def execute_command(self, _ssh, cmd, timeout=None):
                 self.commands.append((cmd, timeout))
+                if cmd == "adb -s D1 reboot loader":
+                    self.pause_seen_at_loader_reboot.append(
+                        reconnect_lifecycle == ["pause"]
+                    )
                 if "test -f" in cmd:
                     return self.file_check_output, "", 0
                 if " SFI " in cmd:
@@ -229,6 +234,9 @@ class FirmwareApiTests(unittest.TestCase):
 
         async def reattach_succeeds(_ssh, _routes, **_kwargs):
             watcher_started["count"] += 1
+            ready_event = _kwargs.get("ready_event")
+            if ready_event is not None:
+                ready_event.set()
             return {"success": True, "attached": [{"busid": "1-1"}]}
 
         async def pause_reconnects(_routes):
@@ -260,22 +268,239 @@ class FirmwareApiTests(unittest.TestCase):
         ):
             response = self.client.post(
                 "/api/burn/firmware?devices=D1",
+                data={"firmware_path": "/srv/update.img", "burn_mode": "uf"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("禁止进入upgrade_tool", response.json()["error"])
+        self.assertEqual(fake_ssh.burn_runs, [])
+        self.assertEqual(fake_ssh.pause_seen_at_loader_reboot, [])
+        self.assertEqual(reconnect_lifecycle, [])
+        self.assertFalse(notifications)
+
+    def test_usbip_routes_default_to_fastboot_firmware_backend(self):
+        fastboot_calls = []
+
+        class RecordingSsh(FakeSshManager):
+            def __init__(self):
+                super().__init__("__GMS_REMOTE_FILE_FOUND__\n")
+            def execute_command(self, _ssh, cmd, timeout=None):
+                self.commands.append((cmd, timeout))
+                if "test -f" in cmd:
+                    return self.file_check_output, "", 0
+                if " SFI " in cmd:
+                    return "loading firmware\n", "", 0
+                if "adb devices" in cmd:
+                    return "List of devices attached\nD1\tdevice\n", "", 0
+                return "", "", 0
+
+        fake_ssh = RecordingSsh()
+        runtime.configure_runtime(
+            ssh_manager=fake_ssh,
+            store_notification=lambda *_args, **_kwargs: None,
+        )
+        from features.firmware import usbip_transport
+
+        routes = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+            "device_ids": ["D1"],
+        }]
+
+        async def prepare_routes(_devices):
+            return routes, ""
+
+        async def fastboot_burn(_ssh, **kwargs):
+            fastboot_calls.append(kwargs)
+            return {
+                "backend": "usbip-fastboot",
+                "results": [{
+                    "device": "D1",
+                    "success": True,
+                    "partitions": ["super", "boot_a", "vbmeta_a"],
+                }],
+                "skipped": ["uboot.img(uboot_a 仅支持本地upgrade_tool烧写)"],
+            }
+
+        with patch("scp.SCPClient"), patch.object(
+            usbip_transport.usbip_reconnect,
+            "usbip_source_host_for_device",
+            return_value="",
+        ), patch.object(
+            firmware_api, "_prepare_usbip_firmware_routes",
+            side_effect=prepare_routes,
+        ), patch.object(
+            firmware_api, "_run_usbip_fastboot_firmware",
+            side_effect=fastboot_burn,
+        ), patch.object(
+            firmware_api, "_run_partition_burn",
+            side_effect=AssertionError("USB/IP auto mode must not enter Loader"),
+        ):
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
                 data={"firmware_path": "/srv/update.img"},
             )
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["success"])
-        # 第一次输给 MaskROM 竞态后必须自动重跑第二次。
-        self.assertEqual(len(fake_ssh.burn_runs), 2)
-        # watcher 必须在每次 upgrade_tool 启动前已进入运行。
-        self.assertEqual(fake_ssh.watcher_armed_before_burn, [1, 2])
-        self.assertEqual(
-            reconnect_lifecycle,
-            ["pause", ("resume", ("D1",))],
-        )
-        self.assertTrue(any("Firmware burn complete" in str(item) for item in notifications))
+        self.assertEqual(response.json()["data"]["backend"], "usbip-fastboot")
+        self.assertEqual(len(fastboot_calls), 1)
+        self.assertEqual(fastboot_calls[0]["remote_firmware"], "/srv/update.img")
+        self.assertEqual(fastboot_calls[0]["devices"], ["D1"])
+        commands = [command for command, _timeout in fake_ssh.commands]
+        self.assertFalse(any("reboot loader" in command for command in commands))
+        self.assertFalse(any(" uf " in command for command in commands))
 
-    def test_descriptor_failure_defers_generic_reconnect(self):
+    def test_usbip_partition_mode_runs_loader_di_partition_burn(self):
+        partition_calls = []
+
+        class RecordingSsh(FakeSshManager):
+            def __init__(self):
+                super().__init__("__GMS_REMOTE_FILE_FOUND__\n")
+
+            def execute_command(self, _ssh, cmd, timeout=None):
+                self.commands.append((cmd, timeout))
+                if "test -f" in cmd:
+                    return self.file_check_output, "", 0
+                if " SFI " in cmd:
+                    return "loading firmware\n", "", 0
+                if "adb devices" in cmd:
+                    return "List of devices attached\nD1\tdevice\n", "", 0
+                return "", "", 0
+
+        fake_ssh = RecordingSsh()
+        runtime.configure_runtime(
+            ssh_manager=fake_ssh,
+            store_notification=lambda *_args, **_kwargs: None,
+        )
+        from features.firmware import usbip_transport
+
+        routes = [{
+            "device_host": "hcq@172.16.14.66",
+            "source_host": "172.16.14.66",
+            "busids": ["1-1"],
+            "device_ids": ["D1"],
+        }]
+
+        async def prepare_routes(_devices):
+            return routes, ""
+
+        async def partition_burn(_ssh, **kwargs):
+            partition_calls.append(kwargs)
+            return {
+                "written": [{"partition": "super", "image": "super.img"}],
+                "skipped": [],
+                "total_bytes": 4096,
+            }
+
+        async def capture_baseline(_routes):
+            return {
+                ("172.16.14.66", "1-1"): {
+                    "instance_id": "USB\\VID_2207&PID_0006\\D1",
+                    "vid_pid": "2207:0006",
+                }
+            }, ""
+
+        async def reattach_succeeds(_ssh, _routes, **_kwargs):
+            ready_event = _kwargs.get("ready_event")
+            if ready_event is not None:
+                ready_event.set()
+            return {"success": True, "attached": [{"busid": "1-1"}]}
+
+        async def pause_reconnects(_routes):
+            return ["D1"], ""
+
+        async def loader_ready(_ssh, _cmd, _count, **_kwargs):
+            return True, "List of rockusb connected(1)"
+
+        with patch("scp.SCPClient"), patch.object(
+            usbip_transport.usbip_reconnect,
+            "usbip_source_host_for_device",
+            return_value="",
+        ), patch.object(
+            firmware_api, "_prepare_usbip_firmware_routes",
+            side_effect=prepare_routes,
+        ), patch.object(
+            firmware_api, "_capture_rockusb_route_baseline",
+            side_effect=capture_baseline,
+        ), patch.object(
+            firmware_api, "_pause_usbip_reconnects",
+            side_effect=pause_reconnects,
+        ), patch.object(
+            firmware_api, "_reattach_usbip_after_rockusb_reset",
+            side_effect=reattach_succeeds,
+        ), patch.object(
+            firmware_api, "_wait_for_rockusb_loaders",
+            side_effect=loader_ready,
+        ), patch.object(
+            firmware_api, "_resume_usbip_reconnects", lambda _devices: None,
+        ), patch.object(
+            firmware_api, "_run_usbip_fastboot_firmware",
+            side_effect=AssertionError("partition mode must not use Fastboot"),
+        ), patch.object(
+            firmware_api, "_run_partition_burn",
+            side_effect=partition_burn,
+        ):
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={"firmware_path": "/srv/update.img", "burn_mode": "partition"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(len(partition_calls), 1)
+        self.assertFalse(partition_calls[0]["transport_probe"])
+        self.assertEqual(partition_calls[0]["remote_firmware"], "/srv/update.img")
+        commands = [command for command, _timeout in fake_ssh.commands]
+        # partition 模式显式进入 Loader，但绝不执行 uf 整包路径。
+        self.assertTrue(any("reboot loader" in command for command in commands))
+        self.assertFalse(any(" uf " in command for command in commands))
+
+    def test_local_device_partition_mode_is_rejected(self):
+        class RecordingSsh(FakeSshManager):
+            def __init__(self):
+                super().__init__("__GMS_REMOTE_FILE_FOUND__\n")
+
+            def execute_command(self, _ssh, cmd, timeout=None):
+                self.commands.append((cmd, timeout))
+                if "test -f" in cmd:
+                    return self.file_check_output, "", 0
+                if " SFI " in cmd:
+                    return "loading firmware\n", "", 0
+                if "adb devices" in cmd:
+                    return "List of devices attached\nD1\tdevice\n", "", 0
+                return "", "", 0
+
+        fake_ssh = RecordingSsh()
+        runtime.configure_runtime(
+            ssh_manager=fake_ssh,
+            store_notification=lambda *_args, **_kwargs: None,
+        )
+        from features.firmware import usbip_transport
+
+        async def prepare_routes(_devices):
+            return [], ""
+
+        with patch("scp.SCPClient"), patch.object(
+            usbip_transport.usbip_reconnect,
+            "usbip_source_host_for_device",
+            return_value="",
+        ), patch.object(
+            firmware_api, "_prepare_usbip_firmware_routes",
+            side_effect=prepare_routes,
+        ):
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={"firmware_path": "/srv/update.img", "burn_mode": "partition"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("partition固件模式仅用于", response.json()["error"])
+        commands = [command for command, _timeout in fake_ssh.commands]
+        self.assertFalse(any("reboot loader" in command for command in commands))
+
+    def test_usbip_uf_rejection_does_not_start_descriptor_watcher(self):
         reconnect_lifecycle = []
 
         class FailedBurnChannel:
@@ -347,7 +572,15 @@ class FirmwareApiTests(unittest.TestCase):
             reconnect_lifecycle.append("pause")
             return ["D1"], ""
 
+        watcher_calls = {"count": 0}
+
         async def descriptor_failure(_ssh, _routes, **_kwargs):
+            watcher_calls["count"] += 1
+            ready_event = _kwargs.get("ready_event")
+            if ready_event is not None:
+                ready_event.set()
+            if watcher_calls["count"] == 1:
+                return {"success": True, "attached": [{"busid": "1-1"}]}
             return {
                 "success": False,
                 "attached": [],
@@ -363,6 +596,14 @@ class FirmwareApiTests(unittest.TestCase):
                     "(Device Descriptor Request Failed)    Allowed\n"
                 ),
             }
+
+        loader_checks = {"count": 0}
+
+        async def loader_state(_ssh, _cmd, _count, **_kwargs):
+            loader_checks["count"] += 1
+            if loader_checks["count"] == 1:
+                return True, "List of rockusb connected(1)"
+            return False, "List of rockusb connected(0)"
 
         with patch("scp.SCPClient"), patch.object(
             usbip_transport.usbip_reconnect,
@@ -381,6 +622,9 @@ class FirmwareApiTests(unittest.TestCase):
             firmware_api, "_reattach_usbip_after_rockusb_reset",
             side_effect=descriptor_failure,
         ), patch.object(
+            firmware_api, "_wait_for_rockusb_loaders",
+            side_effect=loader_state,
+        ), patch.object(
             firmware_api, "_defer_usbip_reconnects",
             side_effect=lambda devices: reconnect_lifecycle.append(
                 ("defer", tuple(devices))
@@ -393,15 +637,13 @@ class FirmwareApiTests(unittest.TestCase):
         ):
             response = self.client.post(
                 "/api/burn/firmware?devices=D1",
-                data={"firmware_path": "/srv/update.img"},
+                data={"firmware_path": "/srv/update.img", "burn_mode": "uf"},
             )
 
-        self.assertEqual(response.status_code, 422)
-        self.assertIn("0000:0002", response.json()["error"])
-        self.assertEqual(
-            reconnect_lifecycle,
-            ["pause", ("defer", ("D1",))],
-        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("禁止进入upgrade_tool", response.json()["error"])
+        self.assertEqual(watcher_calls["count"], 0)
+        self.assertEqual(reconnect_lifecycle, [])
 
     def test_unexpected_error_after_lock_releases_devices(self):
         released = []

@@ -296,7 +296,9 @@ api_call() {
 
 gms-rt-auth-status() {
     check_jq || return 1
-    api_call "/auth/status" | jq '.'
+    local response
+    response=$(api_call "/auth/status") || return $?
+    format_elevated_until "$response" | jq '.'
 }
 
 gms-rt-auth-login() {
@@ -416,7 +418,7 @@ gms-rt-auth-elevate() {
     [ "$call_status" -eq 0 ] || return "$call_status"
     if echo "$response" | jq -e '.success == true and .elevated == true' >/dev/null 2>&1; then
         success "Administrator elevation active"
-        echo "$response" | jq '.'
+        format_elevated_until "$response" | jq '.'
         return 0
     fi
     error "Elevation failed: $(extract_api_error "$response")"
@@ -440,6 +442,28 @@ gms-rt-auth-elevation-reset() {
 extract_api_error() {
     local response="$1"
     echo "$response" | jq -r '.detail // .error // .message // "Unknown error"' 2>/dev/null || echo "Unknown error"
+}
+
+# Render an ISO-8601 UTC timestamp in the local timezone for human reading;
+# falls back to the original string when the conversion is not supported.
+iso_to_local_time() {
+    local iso="$1"
+    if [ -n "$iso" ] && [ "$iso" != "null" ]; then
+        date -d "$iso" '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null && return 0
+    fi
+    printf '%s' "$iso"
+}
+
+# Rewrite .elevated_until (when present) as a local-time string for display.
+format_elevated_until() {
+    local response="$1" iso until_local
+    iso=$(echo "$response" | jq -r '.elevated_until // empty')
+    if [ -n "$iso" ]; then
+        until_local=$(iso_to_local_time "$iso")
+        echo "$response" | jq --arg until "$until_local" '.elevated_until = $until'
+    else
+        echo "$response"
+    fi
 }
 
 # Check HTTP response status and extract body

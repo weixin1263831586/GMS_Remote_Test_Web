@@ -147,13 +147,18 @@ def _valid_usbip_busid(busid: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,64}", str(busid or "").strip()))
 
 
-def bind_usbip_busid_via_ssh(ssh, busid: str) -> dict[str, Any]:
-    """Actively share a present-but-unshared instance when AutoBind did not fire."""
+def bind_usbip_busid_via_ssh(
+    ssh, busid: str, *, force: bool = False,
+) -> dict[str, Any]:
+    """Share one present instance, optionally keeping the VBox stub resident."""
     busid = str(busid or "").strip()
     if not _valid_usbip_busid(busid):
         return {"success": False, "error": "无效的USB/IP BUSID"}
+    command = f"usbipd bind --busid {busid}"
+    if force:
+        command += " --force"
     out, err, code = usbip_manager.ssh_manager.execute_command(
-        ssh, f"usbipd bind --busid {busid}", timeout=15,
+        ssh, command, timeout=15,
     )
     detail = (err or out or "").strip()
     return {"success": code == 0, "code": code, "detail": detail}
