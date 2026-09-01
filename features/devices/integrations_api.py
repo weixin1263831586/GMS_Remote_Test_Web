@@ -56,6 +56,7 @@ from .usbip_persistence import (
 from .usbip_persistence import (
     usbip_assignment_lock as _usbip_assignment_lock,
 )
+from .usbip_transport_probe import probe_existing_local_usbip_transport
 from .utils import DeviceUtils
 
 
@@ -545,6 +546,80 @@ def _wait_for_adb_devices_removed(
 
 # ==================== USB/IP Status ====================
 
+async def _reconcile_local_usbip_status(
+    device_host: str,
+    assignments: list[dict],
+    state_info: dict,
+    config: dict,
+) -> tuple[dict, bool]:
+    """Replace persisted local attach claims with the exact current transport."""
+    local_worker_id = _local_worker_id()
+    local_assignments = [
+        item for item in assignments
+        if str(item.get("worker_id") or "") == local_worker_id
+        and str(item.get("status") or "") in {
+            "attaching", "attached", "unknown", "cleanup_required",
+        }
+    ]
+    if not local_assignments:
+        return dict(state_info), False
+
+    expected_devices = {
+        str(serial or "").strip()
+        for item in local_assignments
+        for serial in item.get("device_serials") or []
+        if str(serial or "").strip()
+    }
+    observed = await asyncio.to_thread(
+        probe_existing_local_usbip_transport,
+        device_host,
+        expected_devices,
+        config,
+        local_worker_id=local_worker_id,
+    )
+    if observed is not None:
+        device_list = list(observed.get("device_list") or [])
+        refreshed = {
+            "connected": True,
+            "timestamp": time.time(),
+            "transport_connected": True,
+            "adb_ready": bool(device_list),
+            "reconnecting": False,
+            "protocol_status": observed.get("protocol_status") or {},
+        }
+        with runtime.global_state.usbip_states_lock:
+            runtime.global_state.usbip_states[device_host] = refreshed
+        return refreshed, False
+
+    stale = {
+        "connected": True,
+        "timestamp": time.time(),
+        "transport_connected": False,
+        "adb_ready": False,
+        "reconnecting": True,
+        "expected_devices": sorted(expected_devices),
+        "reason": "persisted USB/IP assignment missing from local usbip port",
+        "protocol_status": {"mode": "reconnecting"},
+    }
+    with runtime.global_state.usbip_states_lock:
+        runtime.global_state.usbip_states[device_host] = stale
+    with runtime.global_state.device_cache_lock:
+        runtime.global_state.device_cache = {"devices": [], "timestamp": 0}
+
+    if expected_devices:
+        reconnect.schedule_usbip_reconnect(
+            device_host,
+            reason="USB/IP status detected stale local attached assignment",
+            expected_devices=sorted(expected_devices),
+        )
+    logger.warning(
+        "[USB/IP Status] stale local assignment detected for %s; "
+        "expected_devices=%s",
+        device_host,
+        sorted(expected_devices),
+    )
+    return stale, True
+
 @router.get("/api/usbip/source-devices")
 async def list_usbip_source_devices(
     request: Request,
@@ -592,6 +667,25 @@ async def get_usbip_status(
         state_info = runtime.global_state.usbip_states.get(client_id, {"connected": False, "timestamp": 0})
         connected = state_info["connected"]
 
+    assignments = [
+        item for item in _usbip_assignments().values()
+        if str(item.get("device_host") or "") == client_id
+    ]
+    state_info, local_transport_mismatch = await _reconcile_local_usbip_status(
+        client_id,
+        assignments,
+        state_info,
+        config,
+    )
+    connected = bool(state_info.get("connected", False))
+
+    # 远端 Worker 的 unknown 分配在这里触发后台核对（幂等 attach），
+    # 与本地 `_reconcile_local_usbip_status` 的自动探测语义对齐；核对
+    # 不阻塞本次响应，下一次轮询即可看到升级结果。
+    from .usbip_status_reconcile import schedule_remote_usbip_verify
+
+    schedule_remote_usbip_verify(client_id, assignments)
+
     if state_info.get("reconnecting"):
         current_devices = await asyncio.to_thread(
             device_manager.get_connected_devices,
@@ -611,15 +705,23 @@ async def get_usbip_status(
             if has_devices_from_host:
                 connected = True
 
-    assignments = [
-        item for item in _usbip_assignments().values()
-        if str(item.get("device_host") or "") == client_id
+    status_assignments = [
+        {
+            **item,
+            "status": "unknown",
+        }
+        if (
+            local_transport_mismatch
+            and str(item.get("worker_id") or "") == _local_worker_id()
+        )
+        else item
+        for item in assignments
     ]
     cluster_selections = []
-    if assignments:
+    if status_assignments:
         connected = True
         grouped: dict[tuple[str, str], dict[str, object]] = {}
-        for item in assignments:
+        for item in status_assignments:
             group = (
                 str(item.get("worker_id") or ""),
                 str(item.get("source_host") or ""),
@@ -683,11 +785,12 @@ async def get_usbip_status(
 
     logger.info(f"[USB/IP Status] device_host={client_id}, connected={connected}, device_count={len(runtime.global_state.usbip_devices_source)}")
     assignment_states = {
-        str(item.get("status") or "unknown") for item in assignments
+        str(item.get("status") or "unknown") for item in status_assignments
     }
     protocol_state = str((state_info.get("protocol_status") or {}).get("mode") or "unknown")
     transport_state = (
-        "cleanup_required" if "cleanup_required" in assignment_states
+        "degraded" if local_transport_mismatch
+        else "cleanup_required" if "cleanup_required" in assignment_states
         else "detaching" if "detaching" in assignment_states
         else "attaching" if "attaching" in assignment_states
         else "degraded" if (
@@ -698,8 +801,11 @@ async def get_usbip_status(
         else "disconnected"
     )
     readiness = (
-        "test_ready" if protocol_state in {"adb", "fastboot", "recovery"}
-        else "protocol_ready" if protocol_state not in {"unknown", "offline", "unauthorized"}
+        "not_ready" if local_transport_mismatch
+        else "test_ready" if protocol_state in {"adb", "fastboot", "recovery"}
+        else "protocol_ready" if protocol_state not in {
+            "unknown", "offline", "unauthorized", "reconnecting",
+        }
         else "transport_ready" if connected
         else "not_ready"
     )
@@ -719,6 +825,7 @@ async def get_usbip_status(
         "transport_connected": bool(state_info.get("transport_connected", False)),
         "adb_ready": bool(state_info.get("adb_ready", False)),
         "reconnecting": bool(state_info.get("reconnecting", False)),
+        "transport_mismatch": local_transport_mismatch,
         "protocol_status": state_info.get("protocol_status") or {},
         "transport_state": transport_state,
         "protocol_state": protocol_state,
@@ -728,7 +835,7 @@ async def get_usbip_status(
         "transport_records": build_transport_records(
             usbip_assignments=[
                 {**item, "protocol_state": protocol_state}
-                for item in assignments
+                for item in status_assignments
             ]
         ),
         "network_quality_history": quality_history,

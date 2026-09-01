@@ -159,6 +159,9 @@ sudo visudo -cf /etc/sudoers.d/gms-worker-usbip >/dev/null
 rsync -a --delete "${PROJECT_ROOT}/worker_agent/" "${INSTALL_ROOT}/worker_agent/"
 rsync -a --delete "${PROJECT_ROOT}/foundation/" "${INSTALL_ROOT}/foundation/"
 mkdir -p "${INSTALL_ROOT}/bin" "${INSTALL_ROOT}/scripts" "${INSTALL_ROOT}/tools"
+# Older deployment bundles placed Build-Tools commands in this directory.
+# Remove those stale copies so aapt/aapt2 now come only from separate config.
+rm -f "${INSTALL_ROOT}/tools/aapt" "${INSTALL_ROOT}/tools/aapt2"
 "${PROJECT_ROOT}/scripts/install_gms_worker_native.sh" "${INSTALL_ROOT}/bin"
 install -m 755 "${PROJECT_ROOT}/scripts/run_GSI_Burn.sh" \
     "${INSTALL_ROOT}/scripts/run_GSI_Burn.sh"
@@ -170,7 +173,7 @@ install -m 644 "${PROJECT_ROOT}/tools/misc.img" \
     "${INSTALL_ROOT}/tools/misc.img"
 rsync -a --delete "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4/" \
     "${INSTALL_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4/"
-for platform_tool in adb fastboot aapt aapt2; do
+for platform_tool in adb fastboot; do
     install -m 755 "${SOFTWARE_ROOT}/platform-tools/${platform_tool}" \
         "${INSTALL_ROOT}/tools/${platform_tool}"
 done
@@ -245,7 +248,6 @@ Environment=PYTHONPYCACHEPREFIX=${HOME}/.cache/gms-worker/pycache
 Environment=JAVA_HOME=${SOFTWARE_ROOT}/jdk-11
 Environment=JRE_HOME=${SOFTWARE_ROOT}/jdk-11
 Environment=APE_API_KEY=${SOFTWARE_ROOT}/gts-rockchip.json
-Environment=GMS_WORKER_AAPT2_PATH=${SOFTWARE_ROOT}/platform-tools/aapt2
 Environment=GMS_ADB_PROXY_BIN_DIR=${HOME}/.local/bin
 Environment=GMS_PROCESS_INVENTORY_BIN=${INSTALL_ROOT}/bin/gms-process-inventory
 Environment=GMS_USBIP_CONTROL_BIN=${INSTALL_ROOT}/bin/gms-usbip-control

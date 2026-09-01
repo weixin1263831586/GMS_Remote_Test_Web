@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.auth import require_elevated_admin_when_auth_required
+from features.devices import migrate_local_usbip_serial
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
@@ -142,8 +143,41 @@ def _usbip_routes_for_devices(
         filtered = dict(route)
         filtered["device_ids"] = [device for device, _busid in pairs]
         filtered["busids"] = [busid for _device, busid in pairs]
+        bindings = route.get("bindings") or []
+        if bindings:
+            filtered["bindings"] = [
+                dict(binding)
+                for binding in bindings
+                if str(binding.get("device_id") or "").strip() in selected
+            ]
         subset.append(filtered)
     return subset
+
+
+def _usbip_device_route_map(routes: list[dict]) -> dict[str, dict]:
+    """Return the immutable physical route captured for each burn device."""
+    mapped: dict[str, dict] = {}
+    for route in routes or []:
+        route_base = {
+            "device_host": str(route.get("device_host") or "").strip(),
+            "source_host": str(route.get("source_host") or "").strip(),
+        }
+        bindings = route.get("bindings") or []
+        if bindings:
+            for binding in bindings:
+                device_id = str(binding.get("device_id") or "").strip()
+                busid = str(binding.get("busid") or "").strip()
+                if device_id and busid:
+                    mapped[device_id] = {**route_base, **dict(binding)}
+            continue
+        for device_id, busid in zip(
+            route.get("device_ids") or [], route.get("busids") or [],
+        ):
+            device_id = str(device_id or "").strip()
+            busid = str(busid or "").strip()
+            if device_id and busid:
+                mapped[device_id] = {**route_base, "busid": busid}
+    return mapped
 
 
 def strip_ansi_codes(text: str) -> str:
@@ -314,7 +348,7 @@ async def burn_firmware(
 
         firmware_file = form.get("firmware_file")
         firmware_path = form.get("firmware_path", "").strip()
-        # 烧写传输：auto（默认：Windows USB/IP 走 Fastboot，Ubuntu 本地 USB
+        # 烧写传输：auto（默认：Windows USB/IP 走 GPT + 两阶段 Fastboot，Ubuntu 本地 USB
         # 走 upgrade_tool uf）/ fastboot（显式要求 USB/IP Fastboot）/
         # partition（显式要求 USB/IP upgrade_tool DI 同会话分区烧写；
         # 要求 RID 存储就绪，RID 失败在 DB 前安全停止）/
@@ -543,9 +577,9 @@ async def burn_firmware(
                     )
 
                 # Windows USB/IP firmware is deliberately isolated from the
-                # local RockUSB backend.  It reuses the proven GSI transition
-                # (ADB -> bootloader Fastboot -> Fastbootd) and never issues
-                # adb reboot loader / upgrade_tool DB/WL/uf.
+                # local RockUSB backend.  It updates GPT and physical images
+                # in bootloader Fastboot, then writes dynamic images in
+                # Fastbootd; it never enters RockUSB Loader/DB/MaskROM.
                 if usbip_flash_routes and burn_mode in {"auto", "fastboot"}:
                     rockusb_devices = [
                         device for device in devices
@@ -576,8 +610,35 @@ async def burn_firmware(
                                     "percentage": round(float(percentage), 2),
                                 })
 
+                    usbip_device_routes = _usbip_device_route_map(
+                        usbip_flash_routes
+                    )
+
+                    async def _migrate_flashed_serial(
+                        old_serial: str, new_serial: str, route: dict,
+                    ) -> None:
+                        migrated, migration_error = await asyncio.to_thread(
+                            migrate_local_usbip_serial,
+                            device_host=str(route.get("device_host") or ""),
+                            busid=str(route.get("busid") or ""),
+                            old_serial=old_serial,
+                            new_serial=new_serial,
+                            expected_generation=(
+                                int(route["generation"])
+                                if route.get("generation") is not None else None
+                            ),
+                            expected_operation_id=str(
+                                route.get("operation_id") or ""
+                            ),
+                        )
+                        if not migrated:
+                            raise _FastbootFirmwareError(
+                                "固件已启动，但USB/IP序列号迁移失败: "
+                                + (migration_error or "unknown error")
+                            )
+
                     await _fastboot_log(
-                        "Starting USB/IP firmware burn (Fastboot compatibility mode)..."
+                        "Starting USB/IP firmware burn (GPT + two-stage Fastboot mode)..."
                     )
                     try:
                         fastboot_result = await _run_usbip_fastboot_firmware(
@@ -586,7 +647,9 @@ async def burn_firmware(
                             remote_tool=remote_tool,
                             remote_firmware=remote_firmware,
                             devices=devices,
+                            usbip_device_routes=usbip_device_routes,
                             on_transport_reset=_schedule_usbip_mode_reconnect,
+                            on_android_serial_changed=_migrate_flashed_serial,
                             on_log=_fastboot_log,
                             on_progress=_fastboot_progress,
                         )
@@ -603,15 +666,20 @@ async def burn_firmware(
                             str(exc), status_code=exc.status_code,
                         )
 
+                    completed_devices = [
+                        str(item.get("device") or "")
+                        for item in fastboot_result.get("results") or []
+                        if str(item.get("device") or "")
+                    ] or devices
                     await _fastboot_log("USB/IP Fastboot firmware burn complete!")
                     runtime.store_notification(
                         client_id,
                         "USB/IP Fastboot firmware burn complete",
-                        f"Devices: {', '.join(devices)}",
+                        f"Devices: {', '.join(completed_devices)}",
                         "success",
                         "firmware",
                         {
-                            "devices": devices,
+                            "devices": completed_devices,
                             "firmware": firmware_name,
                             "backend": "usbip-fastboot",
                         },
@@ -620,7 +688,7 @@ async def burn_firmware(
                         with contextlib.suppress(Exception):
                             await runtime.safe_websocket_send(client_id, {
                                 "type": "firmware_burn_complete",
-                                "devices": devices,
+                                "devices": completed_devices,
                                 "success": True,
                                 "backend": "usbip-fastboot",
                             })

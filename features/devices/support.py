@@ -201,23 +201,33 @@ async def broadcast_device_change(devices: list[str], disconnected: list[str] | 
         notification_title = 'USB设备已连接'
         notification_message = '连接：' + ', '.join(connected)
 
+    # 同一浏览器的多个 WebSocket 连接（terminal workspace 以
+    # ``<client_id>:terminal_workspace_...`` 后缀区分）共享同一通知中心。
+    # 通知按基础 client_id 只落一份，避免广播循环里逐连接重复入库。
+    base_client_id = next(
+        (cid.split(':', 1)[0] for cid, _ in clients if cid), '',
+    )
+    shared_notification = None
+    if notification_title and base_client_id:
+        shared_notification = runtime.store_notification(
+            base_client_id,
+            notification_title,
+            notification_message,
+            notification_level,
+            'device',
+            {
+                'connected': connected or [],
+                'disconnected': disconnected or [],
+                'source': source,
+            }
+        )
+
     async def _send_device_change(client_id, ws):
         try:
             if ws.client_state == WebSocketState.CONNECTED:
                 client_message = dict(message)
-                if notification_title:
-                    client_message['notification'] = runtime.store_notification(
-                        client_id,
-                        notification_title,
-                        notification_message,
-                        notification_level,
-                        'device',
-                        {
-                            'connected': connected or [],
-                            'disconnected': disconnected or [],
-                            'source': source,
-                        }
-                    )
+                if shared_notification is not None:
+                    client_message['notification'] = shared_notification
                 await ws.send_json(client_message)
         except Exception as e:
             logger.debug(f"Failed to broadcast to {client_id}: {e}")

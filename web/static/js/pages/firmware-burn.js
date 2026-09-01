@@ -678,10 +678,13 @@ async function submitFirmwareBurn() {
 
         const result = uploadResult;
         if (!result.success) {
-            notifyOperationResult('固件烧写失败', result.error, 'error', 'firmware-burn');
+            // 后端对烧写失败已通过 WebSocket 推送通知（如
+            // "USB/IP Fastboot firmware burn failed"）；这里只写页面日志，
+            // 不再回存通知中心，避免同一故障出现两条重复通知。
             addLogEntry(`固件烧写失败: ${result.error}`, 'error');
         }
     } catch (error) {
+        // 网络层异常（后端不可达等）后端无法自行通知，保留本地通知。
         notifyOperationResult('固件烧写失败', error.message, 'error', 'firmware-burn');
         addLogEntry(`固件烧写异常: ${error.message}`, 'error');
         loadDevices(true).catch(refreshError => {
@@ -1834,7 +1837,7 @@ async function loadUsbipAssignments() {
             disconnect.type = 'button';
             disconnect.className = 'btn-xxs btn-danger';
             const idleLabel = assignmentStatus === 'cleanup_required'
-                ? '清理' : assignmentStatus === 'unknown' ? '核对并断开' : '断开';
+                ? '清理' : assignmentStatus === 'unknown' ? '强制断开' : '断开';
             disconnect.textContent = idleLabel;
             disconnect.dataset.usbipOperationKey = usbipAssignmentOperationKey(selection);
             disconnect.dataset.usbipIdleLabel = idleLabel;
@@ -2535,9 +2538,8 @@ function isUsbipAdbReady(result) {
 }
 
 function isUsbipProtocolVisible(status) {
-    if (!status || !status.protocol_status) return false;
-    const mode = status.protocol_status.mode;
-    return ['adb', 'fastboot', 'recovery', 'unauthorized', 'offline', 'adb_non_device'].includes(mode);
+    return !!(status?.transport_connected &&
+        ['fastboot', 'recovery', 'unauthorized', 'adb_non_device'].includes(status.protocol_status?.mode));
 }
 
 async function attemptUsbipReconnect() {

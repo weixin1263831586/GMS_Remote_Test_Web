@@ -280,6 +280,7 @@ class FirmwareApiTests(unittest.TestCase):
 
     def test_usbip_routes_default_to_fastboot_firmware_backend(self):
         fastboot_calls = []
+        migration_calls = []
 
         class RecordingSsh(FakeSshManager):
             def __init__(self):
@@ -306,6 +307,12 @@ class FirmwareApiTests(unittest.TestCase):
             "source_host": "172.16.14.66",
             "busids": ["1-1"],
             "device_ids": ["D1"],
+            "bindings": [{
+                "device_id": "D1",
+                "busid": "1-1",
+                "generation": 7,
+                "operation_id": "attach-7",
+            }],
         }]
 
         async def prepare_routes(_devices):
@@ -313,10 +320,15 @@ class FirmwareApiTests(unittest.TestCase):
 
         async def fastboot_burn(_ssh, **kwargs):
             fastboot_calls.append(kwargs)
+            await kwargs["on_android_serial_changed"](
+                "D1", "NEW", kwargs["usbip_device_routes"]["D1"],
+            )
             return {
                 "backend": "usbip-fastboot",
                 "results": [{
-                    "device": "D1",
+                    "device": "NEW",
+                    "original_device": "D1",
+                    "serial_changed": True,
                     "success": True,
                     "partitions": ["super", "boot_a", "vbmeta_a"],
                 }],
@@ -336,6 +348,10 @@ class FirmwareApiTests(unittest.TestCase):
         ), patch.object(
             firmware_api, "_run_partition_burn",
             side_effect=AssertionError("USB/IP auto mode must not enter Loader"),
+        ), patch.object(
+            firmware_api,
+            "migrate_local_usbip_serial",
+            side_effect=lambda **kwargs: (migration_calls.append(kwargs) or (True, "")),
         ):
             response = self.client.post(
                 "/api/burn/firmware?devices=D1",
@@ -348,6 +364,25 @@ class FirmwareApiTests(unittest.TestCase):
         self.assertEqual(len(fastboot_calls), 1)
         self.assertEqual(fastboot_calls[0]["remote_firmware"], "/srv/update.img")
         self.assertEqual(fastboot_calls[0]["devices"], ["D1"])
+        self.assertEqual(fastboot_calls[0]["usbip_device_routes"], {
+            "D1": {
+                "device_host": "hcq@172.16.14.66",
+                "source_host": "172.16.14.66",
+                "device_id": "D1",
+                "busid": "1-1",
+                "generation": 7,
+                "operation_id": "attach-7",
+            },
+        })
+        self.assertEqual(migration_calls, [{
+            "device_host": "hcq@172.16.14.66",
+            "busid": "1-1",
+            "old_serial": "D1",
+            "new_serial": "NEW",
+            "expected_generation": 7,
+            "expected_operation_id": "attach-7",
+        }])
+        self.assertEqual(response.json()["data"]["results"][0]["device"], "NEW")
         commands = [command for command, _timeout in fake_ssh.commands]
         self.assertFalse(any("reboot loader" in command for command in commands))
         self.assertFalse(any(" uf " in command for command in commands))

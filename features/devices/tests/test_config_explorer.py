@@ -9,6 +9,16 @@ from features.devices import config_explorer
 
 
 class ConfigExplorerTests(unittest.TestCase):
+    def test_aapt2_path_accepts_separate_build_tools_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "aapt2"
+            binary.write_text("#!/bin/sh\n", encoding="utf-8")
+            binary.chmod(0o755)
+            with patch.dict(
+                "os.environ", {"GMS_AAPT2_PATH": str(binary)}, clear=False
+            ):
+                self.assertEqual(config_explorer._aapt2_path(), str(binary))
+
     def test_resource_parse_cache_returns_independent_entries(self):
         output = """
 resource 0x01040000 bool/config_example

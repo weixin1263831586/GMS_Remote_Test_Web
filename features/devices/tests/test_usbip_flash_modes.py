@@ -3,7 +3,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.devices import reconnect, usbip_flash, usbip_transport_probe
+from features.devices import (
+    reconnect,
+    usbip_flash,
+    usbip_persistence,
+    usbip_transport_probe,
+)
 from features.devices.usb import configured_usbip_vid_pids
 from features.devices.usbip import (
     USBIPManager,
@@ -83,6 +88,8 @@ abc                                   Android ADB Interface
                     "busid": "1-1",
                     "device_serials": ["rk3572test"],
                     "status": "attached",
+                    "generation": 7,
+                    "operation_id": "attach-local",
                 },
                 "remote|2-1": {
                     "device_host": "hjf@172.16.14.188",
@@ -113,6 +120,12 @@ abc                                   Android ADB Interface
             "source_host": "172.16.14.66",
             "busids": ["1-1"],
             "device_ids": ["rk3572test"],
+            "bindings": [{
+                "device_id": "rk3572test",
+                "busid": "1-1",
+                "generation": 7,
+                "operation_id": "attach-local",
+            }],
         }])
 
     def test_loader_transport_is_accepted_without_second_detach(self):
@@ -256,6 +269,138 @@ abc                                   Android ADB Interface
         self.assertIn(
             "missing persistent BUSID assignment",
             state.usbip_states["hcq@172.16.14.66"]["reason"],
+        )
+
+    def test_reconnect_migrates_exact_serial_to_reenumerated_busid(self):
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "hcq@172.16.14.66|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "ats-worker-controller",
+                    "busid": "1-1",
+                    "device_serials": ["rk3572test"],
+                    "status": "unknown",
+                    "generation": 7,
+                    "operation_id": "old-attach",
+                },
+            },
+            "usbip_devices_source": {
+                "rk3572test": {"source": "hcq@172.16.14.66"},
+            },
+        }
+
+        class Config:
+            def load_config(self, force_reload=False):
+                return {"device_pswd": "secret"}
+
+            def get_runtime_config(self):
+                return runtime_config
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
+
+            def save_runtime_config(self, data):
+                data = dict(data)
+                runtime_config.clear()
+                runtime_config.update(data)
+                return True
+
+        class Usbip:
+            def __init__(self):
+                self.start_kwargs = None
+                self.device_sources = {}
+
+            def list_source_devices(self, device_host, device_password):
+                return {
+                    "success": True,
+                    "devices": [{
+                        "busid": "1-8",
+                        "serial": "rk3572test",
+                        "physical_device_id": "physical-stable",
+                        "identity_stable": True,
+                    }],
+                }
+
+            def start_usbip(self, device_host, device_password, **kwargs):
+                self.start_kwargs = kwargs
+                return {
+                    "success": True,
+                    "transport_connected": True,
+                    "device_list": ["rk3572test"],
+                    "protocol_status": {"mode": "adb"},
+                }
+
+        manager = Usbip()
+        state = SimpleNamespace(
+            usbip_states={},
+            usbip_states_lock=threading.RLock(),
+            usbip_devices_source={},
+            usbip_devices_source_lock=threading.RLock(),
+            device_cache={"devices": [], "timestamp": 0},
+            device_cache_lock=threading.RLock(),
+        )
+        with patch.object(reconnect.runtime, "config_manager", Config()), \
+                patch.object(reconnect.runtime, "global_state", state), \
+                patch.object(reconnect, "usbip_manager", manager), \
+                patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
+                patch.object(reconnect, "_local_worker_id", return_value="ats-worker-controller"), \
+                patch.object(reconnect, "probe_existing_local_usbip_transport", return_value=None), \
+                patch.object(reconnect, "_resolved_busids_for_devices", return_value=["1-1"]), \
+                patch.object(reconnect, "_usbip_devices_stable", return_value=True):
+            reconnect._reconnect_worker(
+                "hcq@172.16.14.66", "device reappeared", threading.Event(),
+                ("rk3572test",),
+            )
+
+        self.assertEqual(manager.start_kwargs["selected_busids"], ["1-8"])
+        self.assertNotIn(
+            "hcq@172.16.14.66|1-1",
+            runtime_config["usbip_cluster_assignments"],
+        )
+        migrated = runtime_config["usbip_cluster_assignments"][
+            "hcq@172.16.14.66|1-8"
+        ]
+        self.assertEqual(migrated["device_serials"], ["rk3572test"])
+        self.assertEqual(migrated["physical_device_id"], "physical-stable")
+        self.assertGreater(migrated["generation"], 7)
+
+    def test_reconnect_does_not_guess_reenumerated_busid_without_serial(self):
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "hcq@172.16.14.66|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "busid": "1-1",
+                    "device_serials": ["rk3572test"],
+                    "status": "unknown",
+                },
+            },
+        }
+
+        class Config:
+            def get_runtime_config(self):
+                return runtime_config
+
+        manager = SimpleNamespace(
+            list_source_devices=lambda *_args: {
+                "success": True,
+                "devices": [{"busid": "1-8", "serial": ""}],
+            },
+        )
+        with patch.object(reconnect.runtime, "config_manager", Config()), \
+                patch.object(reconnect, "usbip_manager", manager):
+            selected = reconnect._refresh_reenumerated_busids(
+                "hcq@172.16.14.66",
+                {"rk3572test"},
+                ["1-1"],
+                "secret",
+            )
+
+        self.assertEqual(selected, ["1-1"])
+        self.assertIn(
+            "hcq@172.16.14.66|1-1",
+            runtime_config["usbip_cluster_assignments"],
         )
 
     def test_reconnect_preserves_existing_transport_when_adb_is_offline(self):
@@ -468,6 +613,140 @@ class UsbipAttachVerificationTests(unittest.TestCase):
         self.assertEqual(scoped["adb"], {})
         # 原始全局探测保留在 unscoped，供诊断展示。
         self.assertEqual(scoped["unscoped"]["adb_ready"], ["RK3562GMS7"])
+
+
+class UsbipSerialMigrationTests(unittest.TestCase):
+    def test_migration_updates_exact_assignment_and_preserves_sibling_state(self):
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "host|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "ats-worker-controller",
+                    "busid": "1-1",
+                    "device_serials": ["OLD"],
+                    "status": "attached",
+                    "generation": 7,
+                    "operation_id": "attach-7",
+                },
+                "host|1-2": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "ats-worker-controller",
+                    "busid": "1-2",
+                    "device_serials": ["SIBLING"],
+                    "status": "attached",
+                },
+            },
+            "usbip_devices_source": {
+                "OLD": {"source": "hcq@172.16.14.66", "timestamp": 1},
+                "SIBLING": {"source": "hcq@172.16.14.66", "timestamp": 1},
+            },
+        }
+
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return dict(runtime_config)
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
+
+        state = SimpleNamespace(
+            usbip_devices_source={
+                "OLD": {"source": "hcq@172.16.14.66"},
+                "SIBLING": {"source": "hcq@172.16.14.66"},
+            },
+            usbip_devices_source_lock=threading.RLock(),
+            usbip_states={
+                "hcq@172.16.14.66": {
+                    "expected_devices": ["OLD", "SIBLING"],
+                    "protocol_status": {
+                        "mode": "adb",
+                        "adb": {"OLD": "device", "SIBLING": "device"},
+                        "adb_ready": ["OLD", "SIBLING"],
+                    },
+                },
+            },
+            usbip_states_lock=threading.RLock(),
+            device_cache={"devices": [{"device_id": "OLD"}], "timestamp": 1},
+            device_cache_lock=threading.RLock(),
+        )
+        with patch.object(
+            usbip_persistence.runtime, "config_manager", FakeConfigManager(),
+        ), patch.object(
+            usbip_persistence.runtime, "global_state", state,
+        ), patch.object(
+            usbip_persistence.usbip_manager,
+            "device_sources",
+            {"OLD": {"source": "hcq@172.16.14.66"}},
+        ):
+            migrated, error = usbip_persistence.migrate_local_usbip_serial(
+                device_host="hcq@172.16.14.66",
+                busid="1-1",
+                old_serial="OLD",
+                new_serial="NEW",
+                expected_generation=7,
+                expected_operation_id="attach-7",
+            )
+
+        self.assertTrue(migrated, error)
+        self.assertEqual(
+            runtime_config["usbip_cluster_assignments"]["host|1-1"][
+                "device_serials"
+            ],
+            ["NEW"],
+        )
+        self.assertNotIn("OLD", runtime_config["usbip_devices_source"])
+        self.assertIn("NEW", runtime_config["usbip_devices_source"])
+        usbip_state = state.usbip_states["hcq@172.16.14.66"]
+        self.assertEqual(
+            usbip_state["expected_devices"], ["SIBLING", "NEW"],
+        )
+        self.assertEqual(
+            usbip_state["protocol_status"]["adb_ready"], ["SIBLING", "NEW"],
+        )
+        self.assertEqual(state.device_cache, {"devices": [], "timestamp": 0})
+
+    def test_migration_rejects_serial_owned_by_another_physical_route(self):
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "host|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "busid": "1-1",
+                    "device_serials": ["OLD"],
+                    "status": "attached",
+                    "generation": 7,
+                },
+                "other|2-1": {
+                    "device_host": "hjf@172.16.14.188",
+                    "busid": "2-1",
+                    "device_serials": ["NEW"],
+                    "status": "attached",
+                },
+            },
+        }
+
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return dict(runtime_config)
+
+            def update_runtime_config(self, _updates):
+                raise AssertionError("conflicting migration must not be persisted")
+
+        with patch.object(
+            usbip_persistence.runtime, "config_manager", FakeConfigManager(),
+        ):
+            migrated, error = usbip_persistence.migrate_local_usbip_serial(
+                device_host="hcq@172.16.14.66",
+                busid="1-1",
+                old_serial="OLD",
+                new_serial="NEW",
+                expected_generation=7,
+            )
+
+        self.assertFalse(migrated)
+        self.assertIn("其他USB/IP物理分配", error)
 
 
 class UsbipAssignmentPruningTests(unittest.TestCase):

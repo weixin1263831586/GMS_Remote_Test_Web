@@ -426,6 +426,14 @@ function isSelectableWorkspaceDevice(device) {
     return !device.locked && ['online', 'available'].includes(status);
 }
 
+function isSelectableRebootDevice(device) {
+    if (isSelectableTestDevice(device)) return true;
+    // 停在 Fastboot/Fastbootd 的设备也支持重启：本机走 fastboot reboot；
+    // 远端 Worker 设备仍需回到 ADB 状态后发起。
+    const status = device.status || device.state || 'online';
+    return status === 'fastboot' && !device.locked && !device.cluster_worker_id;
+}
+
 function selectedDeviceIdsMatching(predicate) {
     return Array.from(state.selectedDevices).filter(deviceId => {
         const device = state.devices.find(item => (

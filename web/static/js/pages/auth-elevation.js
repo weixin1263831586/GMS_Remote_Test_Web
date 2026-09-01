@@ -124,9 +124,12 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限', opti
     if (userEl) userEl.value = '';
     if (pwdEl) pwdEl.value = '';
     if (msgEl) msgEl.textContent = '';
-    // Prefill the current username for convenience.
-    if (userEl && state.currentUser?.role === 'admin' && state.currentUser.username) {
-        userEl.value = state.currentUser.username;
+    // Prefill the current username for convenience.  SSH-identified client
+    // identities look like "user@host" and are not browser credentials, so
+    // only plain platform account names are prefilled.
+    const prefillName = String(state.currentUser?.username || '');
+    if (userEl && prefillName && !prefillName.includes('@')) {
+        userEl.value = prefillName;
     }
 
     _elevationRequestPromise = new Promise(resolve => {
@@ -148,7 +151,14 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限', opti
             }
         });
         ModalManager.open('elevate-modal');
-        setTimeout(() => pwdEl && pwdEl.focus(), 0);
+        // 默认聚焦账号输入框；账号已预填时才直接聚焦密码框。
+        setTimeout(() => {
+            if (userEl && userEl.value) {
+                pwdEl && pwdEl.focus();
+            } else {
+                userEl && userEl.focus();
+            }
+        }, 0);
     });
     try {
         return await _elevationRequestPromise;

@@ -54,7 +54,13 @@ def test_prepare_host_tools_fetches_verified_artifacts(tmp_path):
 
     platform_archive = source / "platform-tools.zip"
     with zipfile.ZipFile(platform_archive, "w") as archive:
-        archive.writestr("platform-tools/NOTICE.txt", "fixture")
+        archive.writestr(
+            "platform-tools/source.properties",
+            "Pkg.UserSrc=false\nPkg.Revision=fixture\n",
+        )
+        archive.writestr("platform-tools/adb", "adb")
+        archive.writestr("platform-tools/fastboot", "fastboot")
+        archive.writestr("platform-tools/lib64/libc++.so", "libc++")
 
     project = tmp_path / "project"
     (project / "tools/GMS-Host-Tools").mkdir(parents=True)
@@ -117,12 +123,12 @@ def test_host_tools_archives_contain_every_required_runtime(tmp_path):
         "jdk-11/bin/java",
         "platform-tools/adb",
         "platform-tools/fastboot",
-        "platform-tools/aapt",
-        "platform-tools/aapt2",
         "platform-tools/lib64/libc++.so",
     )
     assert all((tmp_path / name).is_file() for name in required)
     assert all((tmp_path / name).stat().st_mode & 0o111 for name in required[:-1])
+    assert not (tmp_path / "platform-tools/aapt").exists()
+    assert not (tmp_path / "platform-tools/aapt2").exists()
 
 
 def test_bashrc_configuration_replaces_legacy_paths_and_is_idempotent(tmp_path):

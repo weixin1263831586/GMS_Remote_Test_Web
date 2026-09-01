@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 
 AdbRunner = Callable[[str | None, str, int], tuple[str, int]]
+FastbootRunner = Callable[[str, int], tuple[str, int]]
 
 
 @dataclass
@@ -73,6 +74,26 @@ def root_and_remount(
     )
 
 
+def _wait_for_adb_online(
+    run_adb: AdbRunner,
+    device_id: str | None,
+    wait_timeout: float,
+    poll_interval: float,
+) -> tuple[bool, float]:
+    """轮询 ``adb get-state`` 直到设备回到 ``device`` 状态。
+
+    精确匹配 ``device``：设备未枚举时 adb 的报错文本也含 "device"
+    字样，子串匹配会误判为已上线。
+    """
+    start_time = time.time()
+    while time.time() - start_time < wait_timeout:
+        state_output, _state_code = run_adb(device_id, 'get-state', 10)
+        if state_output.strip().lower() == 'device':
+            return True, round(time.time() - start_time, 1)
+        time.sleep(poll_interval)
+    return False, round(wait_timeout, 1)
+
+
 def reboot_with_runner(
     run_adb: AdbRunner,
     device_id: str | None,
@@ -87,23 +108,36 @@ def reboot_with_runner(
     if not wait_for_online:
         return RebootResult(True, output=output)
 
-    start_time = time.time()
-    while time.time() - start_time < wait_timeout:
-        state_output, _state_code = run_adb(device_id, 'get-state', 10)
-        if 'device' in state_output.lower():
-            return RebootResult(
-                True,
-                output=output,
-                back_online=True,
-                wait_time=round(time.time() - start_time, 1),
-            )
-        time.sleep(poll_interval)
-    return RebootResult(
-        True,
-        output=output,
-        back_online=False,
-        wait_time=round(wait_timeout, 1),
+    back_online, wait_time = _wait_for_adb_online(
+        run_adb, device_id, wait_timeout, poll_interval,
     )
+    return RebootResult(True, output=output, back_online=back_online, wait_time=wait_time)
+
+
+def fastboot_reboot_with_runner(
+    run_fastboot: FastbootRunner,
+    run_adb: AdbRunner,
+    device_id: str | None,
+    *,
+    wait_for_online: bool = False,
+    wait_timeout: float = 120.0,
+    poll_interval: float = 2.0,
+) -> RebootResult:
+    """重启停在 Fastboot/Fastbootd 的设备并等待回到 ADB 在线。
+
+    Fastbootd（userspace fastboot）实现了 reboot 命令；部分 U-Boot
+    bootloader fastboot 未实现，会超时或返回非零退出码，按失败处理。
+    """
+    output, code = run_fastboot('reboot', 30)
+    if code != 0:
+        return RebootResult(False, output=output)
+    if not wait_for_online:
+        return RebootResult(True, output=output)
+
+    back_online, wait_time = _wait_for_adb_online(
+        run_adb, device_id, wait_timeout, poll_interval,
+    )
+    return RebootResult(True, output=output, back_online=back_online, wait_time=wait_time)
 
 
 def mount_point_is_rw(mount_output: str, mount_point: str) -> bool | None:

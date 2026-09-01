@@ -72,6 +72,8 @@ def resolve_usbip_flash_routes(
             "source_host": str(info.get("source_host") or "").strip()
             or _normalize_host(device_host),
             "busid": busid,
+            "generation": int(info.get("generation") or 0),
+            "operation_id": str(info.get("operation_id") or ""),
             "device_serials": {
                 str(value or "").strip()
                 for value in info.get("device_serials") or []
@@ -106,11 +108,18 @@ def resolve_usbip_flash_routes(
                 "source_host": item["source_host"],
                 "busids": [],
                 "device_ids": [],
+                "bindings": [],
             })
             if item["busid"] not in route["busids"]:
                 route["busids"].append(item["busid"])
             if device_id not in route["device_ids"]:
                 route["device_ids"].append(device_id)
+                route["bindings"].append({
+                    "device_id": device_id,
+                    "busid": item["busid"],
+                    "generation": item["generation"],
+                    "operation_id": item["operation_id"],
+                })
     return list(routes.values())
 
 

@@ -1630,6 +1630,18 @@ BUSID  VID:PID    DEVICE                                                        
             return_value="hcq@172.16.14.66",
         ), patch.object(
             integrations.runtime, "resolve_tailscale_device_host", None
+        ), patch.object(
+            integrations,
+            "probe_existing_local_usbip_transport",
+            return_value={
+                "transport_connected": True,
+                "device_list": ["RK3576GMS6"],
+                "protocol_status": {
+                    "mode": "adb",
+                    "adb": {"RK3576GMS6": "device"},
+                    "adb_ready": ["RK3576GMS6"],
+                },
+            },
         ):
             response = asyncio.run(
                 integrations.get_usbip_status(request=request)
@@ -1646,6 +1658,105 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertEqual(
             selection["statuses_by_busid"],
             {"1-8": "attached"},
+        )
+
+    def test_usbip_status_repairs_stale_local_attached_state(self):
+        import features.devices.integrations_api as integrations
+
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "hcq@172.16.14.66|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "ats-worker-controller",
+                    "busid": "1-1",
+                    "device_serials": ["rk3572test"],
+                    "status": "attached",
+                },
+            },
+        }
+
+        class FakeConfigManager:
+            def load_config(self):
+                return {"device_host": "hcq@172.16.14.66"}
+
+            def get_runtime_config(self):
+                return runtime_config
+
+        request = SimpleNamespace(
+            headers={}, client=SimpleNamespace(host="127.0.0.1")
+        )
+        with global_state.usbip_states_lock:
+            old_states = dict(global_state.usbip_states)
+            global_state.usbip_states.clear()
+            global_state.usbip_states["hcq@172.16.14.66"] = {
+                "connected": True,
+                "timestamp": 1,
+                "transport_connected": True,
+                "adb_ready": True,
+                "reconnecting": False,
+                "protocol_status": {
+                    "mode": "adb",
+                    "adb_ready": ["rk3572test"],
+                },
+            }
+        with global_state.device_cache_lock:
+            old_cache = dict(global_state.device_cache)
+            global_state.device_cache = {
+                "devices": [{"device_id": "rk3572test"}],
+                "timestamp": 1,
+            }
+        try:
+            with patch.object(
+                integrations.runtime, "config_manager", FakeConfigManager()
+            ), patch.object(
+                integrations.runtime,
+                "get_client_id_from_request",
+                return_value="hcq@172.16.14.66",
+            ), patch.object(
+                integrations.runtime, "resolve_tailscale_device_host", None
+            ), patch.object(
+                integrations,
+                "probe_existing_local_usbip_transport",
+                return_value=None,
+            ), patch.object(
+                integrations, "_local_worker_id",
+                return_value="ats-worker-controller",
+            ), patch.object(
+                integrations.device_manager,
+                "get_connected_devices",
+                return_value=[],
+            ), patch.object(
+                integrations.reconnect,
+                "schedule_usbip_reconnect",
+                return_value=True,
+            ) as schedule:
+                response = asyncio.run(
+                    integrations.get_usbip_status(request=request)
+                )
+        finally:
+            with global_state.usbip_states_lock:
+                global_state.usbip_states.clear()
+                global_state.usbip_states.update(old_states)
+            with global_state.device_cache_lock:
+                global_state.device_cache = old_cache
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["connected"])
+        self.assertFalse(body["transport_connected"])
+        self.assertFalse(body["adb_ready"])
+        self.assertTrue(body["reconnecting"])
+        self.assertTrue(body["transport_mismatch"])
+        self.assertEqual(body["transport_state"], "degraded")
+        self.assertEqual(body["readiness"], "not_ready")
+        self.assertEqual(
+            body["cluster_selections"][0]["statuses_by_busid"],
+            {"1-1": "unknown"},
+        )
+        schedule.assert_called_once_with(
+            "hcq@172.16.14.66",
+            reason="USB/IP status detected stale local attached assignment",
+            expected_devices=["rk3572test"],
         )
 
     def test_usbip_status_source_record_does_not_imply_transport_restored(self):

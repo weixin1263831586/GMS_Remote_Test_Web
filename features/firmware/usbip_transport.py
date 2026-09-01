@@ -10,24 +10,20 @@ import shlex
 import time
 
 from features.devices import (
+    USBIP_PORT_COMMAND,
     DeviceUtils,
     bind_usbip_busid_via_ssh,
     ensure_usbip_auto_bind_policies,
     open_usbip_source_ssh,
     parse_adb_device_states,
+    parse_usbip_port_entries,
+    query_usbipd_busid_instance_ids,
+    query_usbipd_device_states,
     resolve_usbip_flash_routes,
     usbipd_list_via_ssh,
     usbipd_policy_list_via_ssh,
 )
 from features.devices import reconnect as usbip_reconnect
-from features.devices.usbip_identity import (
-    query_usbipd_busid_instance_ids,
-    query_usbipd_device_states,
-)
-from features.devices.usbip_transaction import (
-    USBIP_PORT_COMMAND,
-    parse_usbip_port_entries,
-)
 
 from . import runtime
 

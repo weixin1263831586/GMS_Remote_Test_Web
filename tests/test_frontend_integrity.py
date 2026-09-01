@@ -305,7 +305,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("formData.append('chunk_size', chunkSize)", chunks)
         self.assertIn("chunk-upload.js?v=20260813-firmware-content-id", shell)
         self.assertNotIn("普通固件烧写需要 ADB 设备", firmware)
-        self.assertIn("firmware-burn.js?v=20260827-fastboot-flash", shell)
+        self.assertIn("firmware-burn.js?v=20260902-notify-dedup", shell)
 
     def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
         navigation = read_all_frontend_js()
