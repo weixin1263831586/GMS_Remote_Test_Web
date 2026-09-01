@@ -3,13 +3,14 @@
 """
 import logging
 import re
+import shlex
 import subprocess
 import threading
 from typing import Any
 
 from foundation.networking import is_local_host
 
-from .adb_ops import reboot_with_runner, root_and_remount
+from .adb_ops import fastboot_reboot_with_runner, reboot_with_runner, root_and_remount
 from .utils import DeviceUtils
 
 
@@ -275,13 +276,33 @@ class DeviceManager:
                 )
                 return (output or error or ''), code
 
-            reboot = reboot_with_runner(
-                run_adb,
-                device_id,
-                wait_for_online=wait_for_online,
-                wait_timeout=60,
-                poll_interval=2,
-            )
+            def run_fastboot(args: str, timeout: int) -> tuple[str, int]:
+                output, error, code = self.ssh_manager.execute_command(
+                    ssh,
+                    f"fastboot -s {shlex.quote(device_id)} {args}",
+                    timeout=timeout,
+                )
+                return (output or error or ''), code
+
+            # 停在 Fastboot/Fastbootd（如烧写后等待人工处理）的设备没有
+            # ADB 通道，改用 fastboot reboot 重启。
+            if device_id in self.get_fastboot_devices(ssh):
+                reboot = fastboot_reboot_with_runner(
+                    run_fastboot,
+                    run_adb,
+                    device_id,
+                    wait_for_online=wait_for_online,
+                    wait_timeout=120,
+                    poll_interval=2,
+                )
+            else:
+                reboot = reboot_with_runner(
+                    run_adb,
+                    device_id,
+                    wait_for_online=wait_for_online,
+                    wait_timeout=60,
+                    poll_interval=2,
+                )
             if not reboot.success:
                 return {'success': False, 'error': reboot.output or '重启命令执行失败'}
             if not wait_for_online:

@@ -44,8 +44,13 @@ _LAZY_API_EXPORTS = {
     'reconcile_cluster_usbip_heartbeat': '.integrations_api',
     'resolve_usbip_flash_routes': '.usbip_flash',
     'open_usbip_source_ssh': '.usbip_flash',
+    'migrate_local_usbip_serial': '.usbip_persistence',
     'usbipd_list_via_ssh': '.usbip_flash',
     'usbipd_policy_list_via_ssh': '.usbip_flash',
+    'query_usbipd_busid_instance_ids': '.usbip_identity',
+    'query_usbipd_device_states': '.usbip_identity',
+    'USBIP_PORT_COMMAND': '.usbip_transaction',
+    'parse_usbip_port_entries': '.usbip_transaction',
     'validate_pair_grant': '.adb_proxy_security',
 }
 
@@ -67,6 +72,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "USBIP_PORT_COMMAND",
     "ADBForwardStartRequest",
     "ADBForwardStopRequest",
     "ADBProxyPairCodeRequest",
@@ -98,9 +104,13 @@ __all__ = [
     "get_usb_monitor",
     "incompatible_test_devices",
     "local_proxy_secret",
+    "migrate_local_usbip_serial",
     "open_usbip_source_ssh",
     "pair_code_for_worker",
     "parse_adb_device_states",
+    "parse_usbip_port_entries",
+    "query_usbipd_busid_instance_ids",
+    "query_usbipd_device_states",
     "reconcile_cluster_usbip_command",
     "reconcile_cluster_usbip_heartbeat",
     "release_device_locks",

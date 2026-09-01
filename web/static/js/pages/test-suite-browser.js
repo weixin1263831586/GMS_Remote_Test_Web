@@ -2500,7 +2500,7 @@ function buildDeviceItemEl({
         : isLocked
         ? `已被 ${lockedBy} 占用`
         : status === 'fastboot'
-        ? 'Fastboot/Fastbootd 设备仅可用于 GSI 烧写'
+        ? 'Fastboot/Fastbootd 设备可用于 GSI 烧写和重启'
         : selectable ? '点击选择设备' : `设备当前处于 ${status} 状态`;
 
     const checkbox = document.createElement('input');
@@ -2664,7 +2664,7 @@ function selectAllDevices() {
 }
 
 async function rebootDevices() {
-    if (!validateDeviceSelection()) return;
+    if (!validateRebootDeviceSelection()) return;
 
     // 获取选中设备的序列号
     const selectedDeviceSerials = Array.from(state.selectedDevices).map(deviceId => {

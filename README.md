@@ -289,12 +289,29 @@ Windows 设备实例；如果新实例显示为 `Not shared`，`upgrade_tool` �
 失败为 `0000:0002 Device Descriptor Request Failed`（Windows Problem
 Code 43），且故障发生在 Windows USB 枚举层、先于任何 USB/IP 导出动作，
 客户端侧重试无法修复。因此 USB/IP 设备的固件烧写按 `burn_mode` 分流：
-`auto`（默认）与 `fastboot` 走 **Fastboot/Fastbootd 兼容烧写**——复用 GSI
-的 ADB → Bootloader Fastboot → Fastbootd 模式切换，解包 `update.img` 后只
-写入设备 Fastboot 明确暴露的 Android 分区（super、boot、vendor_boot、
-init_boot 等），写入前逐分区做存在性与容量预检；uboot、parameter/GPT、
-misc、resource、baseparameter 等底层分区不属于该路径，仍需本地
-`upgrade_tool`。`partition` 走 **同会话 DI 分区烧写**：进入
+`auto`（默认）与 `fastboot` 走 **GPT + 两阶段 Fastboot 完整烧写**：平台以
+固件大小和 SHA-256 校验解包缓存，执行 `SFI`/`EXF` 后解析 `parameter.txt`。
+其中 Linux `upgrade_tool EXF` 直接生成 Windows RKDevTool 先执行
+`RKImageMaker -unpack`、再执行 `AFPTool -unpack` 后的最终 Android 文件集合，
+服务端不依赖 Wine 或未跟踪的 Windows 可执行文件。平台随后
+读取目标 UFS/eMMC 的真实扇区数，用 `upgrade_tool GPT` 生成并修正主 GPT、
+grow 分区、PMBR 与 CRC。随后先在 Bootloader Fastboot 写入 GPT 和固件包内
+所有物理分区镜像（包括 uboot、misc、resource、vendor_boot、init_boot、
+dtbo、vbmeta、boot、baseparameter），再进入 Fastbootd。写入 sparse
+`super.img` 前先擦除旧 super，并生成一个很小的 sparse 零写入补丁：原镜像
+所有 `DONT_CARE` 空洞在补丁中转换为零值 `FILL`，其余数据段保持跳过；先写
+补丁、再写原镜像，避免不同固件间遗留块触发 AVB/dm-verity。任一固件镜像
+无法映射、分区未暴露或容量不符都会报错，不再静默保留
+旧版 dtbo/vbmeta。即使 `pvmfw_a/b` 等新分区没有独立 payload，也会由新 GPT
+正确创建，从而支持分区布局发生变化的跨版本固件。为避免旧文件系统在 GPT
+偏移变化后落入错误分区，写完动态分区会执行 Fastbootd `-w` 重建
+metadata/cache/userdata，**该模式会清除用户数据**。重启后必须等待 ADB 且
+`sys.boot_completed=1` 才返回成功；如果新固件改变 USB/ADB 序列号，平台仅
+通过烧写前锁定的来源主机和物理 BUSID 接受新身份，并原子迁移持久分配，
+不会把同一测试主机上的其他 ADB 设备误认成目标。由于 MiniLoader/IDBlock 只能经 RockUSB
+Loader/MaskROM 机制生成和写入，该路径保留设备现有 MiniLoader；同一 SoC 的
+Android 整包跨版本更新不再依赖不稳定的 Windows 二次枚举。`partition` 走
+**同会话 DI 分区烧写**：进入
 ADB→Loader 后依次执行 `SFI`（解析镜像头）、`EXF`（解包，按镜像名缓存）、
 `RID`（探测当前会话的存储访问能力；成功即跳过 DB）。RID 失败时普通
 USB/IP 会话在 DB 前安全停止（DB 重枚举即上述 Code 43 窗口）；只有管理员

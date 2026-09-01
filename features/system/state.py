@@ -23,6 +23,7 @@ from foundation.config import (
     UPLOAD_PROGRESS_MAX_AGE_SECONDS,
     USBIP_STATE_MAX_AGE_SECONDS,
     USER_STATE_MAX_AGE_HOURS,
+    USER_STATE_STALE_RUNNING_HOURS,
 )
 from foundation.networking import split_host_port
 from foundation.ssh_security import configure_strict_host_keys
@@ -91,16 +92,27 @@ class GlobalState:
             to_remove = []
             now = datetime.now()
 
-            # 收集需要清理的client_id（在锁内快速遍历）
+            # 收集需要清理的client_id（在锁内快速遍历）。
+            # 普通条目按 USER_STATE_MAX_AGE_HOURS 回收；running=True 的条目
+            # 正常测试会持续刷新 last_seen（日志/轮询），超过
+            # USER_STATE_STALE_RUNNING_HOURS 仍无心跳即为僵死会话，
+            # 提前回收以免 /api/users/list 长期显示无法移除的"测试中"。
             with self.user_states_lock:
                 for client_id, state in self.user_states.items():
-                    if 'last_seen' in state:
-                        try:
-                            last_seen = datetime.fromisoformat(state['last_seen'])
-                            if (now - last_seen) > timedelta(hours=USER_STATE_MAX_AGE_HOURS):
-                                to_remove.append(client_id)
-                        except (ValueError, TypeError):
+                    if 'last_seen' not in state:
+                        continue
+                    try:
+                        last_seen = datetime.fromisoformat(state['last_seen'])
+                        idle = now - last_seen
+                        max_age = (
+                            USER_STATE_STALE_RUNNING_HOURS
+                            if state.get('running')
+                            else USER_STATE_MAX_AGE_HOURS
+                        )
+                        if idle > timedelta(hours=max_age):
                             to_remove.append(client_id)
+                    except (ValueError, TypeError):
+                        to_remove.append(client_id)
 
                 # 删除用户状态
                 for client_id in to_remove:

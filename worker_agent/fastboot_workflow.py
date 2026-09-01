@@ -177,6 +177,35 @@ class FastbootPreparer:
             identity=f"{serial} {board} {product}",
         )
 
+    def unlock_bootloader(
+        self, prepared: PreparedFastbootDevice,
+    ) -> None:
+        """Unlock writes while the device is in bootloader Fastboot."""
+        self._execute(
+            [
+                "fastboot",
+                "-s",
+                prepared.serial,
+                "oem",
+                prepared.oem_argument("unlock"),
+            ],
+            timeout=30,
+        )
+
+    def enter_fastbootd(
+        self, prepared: PreparedFastbootDevice,
+    ) -> None:
+        """Switch an unlocked bootloader-Fastboot device to Fastbootd."""
+        # Some fastboot builds report a transport error after the reboot was
+        # already accepted.  The subsequent mode wait is the source of truth.
+        self._execute(
+            ["fastboot", "-s", prepared.serial, "reboot", "fastboot"],
+            timeout=30,
+            required=False,
+        )
+        self._notify_transport_reset(prepared.serial, "fastbootd")
+        self._wait_for_fastbootd(prepared.serial)
+
     def prepare_gsi_fastbootd(self, serial: str) -> PreparedFastbootDevice:
         """Prepare a device for dynamic-partition flashing in Fastbootd.
 
@@ -185,25 +214,8 @@ class FastbootPreparer:
         re-bind the new USB identity before the thin flashing script starts.
         """
         prepared = self.prepare_bootloader(serial)
-        self._execute(
-            [
-                "fastboot",
-                "-s",
-                serial,
-                "oem",
-                prepared.oem_argument("unlock"),
-            ],
-            timeout=30,
-        )
-        # Some fastboot builds report a transport error after the reboot was
-        # already accepted.  The subsequent mode wait is the source of truth.
-        self._execute(
-            ["fastboot", "-s", serial, "reboot", "fastboot"],
-            timeout=30,
-            required=False,
-        )
-        self._notify_transport_reset(serial, "fastbootd")
-        self._wait_for_fastbootd(serial)
+        self.unlock_bootloader(prepared)
+        self.enter_fastbootd(prepared)
         return prepared
 
 

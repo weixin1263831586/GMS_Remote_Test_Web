@@ -10,6 +10,7 @@ This powers the "配置资源查看器" tool card on the 常用工具 page.
 
 import hashlib
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -17,6 +18,7 @@ import subprocess
 import uuid
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 
 from foundation.config import settings
 
@@ -77,9 +79,27 @@ def _adb_path() -> str:
 
 
 def _aapt2_path() -> str:
-    p = _find_binary("aapt2")
+    configured = os.getenv("GMS_AAPT2_PATH", "").strip()
+    candidates = [configured, _find_binary("aapt2") or ""]
+    candidates.extend(
+        str(path)
+        for path in sorted(
+            Path("/usr/lib/android-sdk/build-tools").glob("*/aapt2"),
+            reverse=True,
+        )
+    )
+    p = next(
+        (
+            value
+            for value in candidates
+            if value and os.path.isfile(value) and os.access(value, os.X_OK)
+        ),
+        "",
+    )
     if not p:
-        raise RuntimeError("aapt2 not found on PATH (需要 Android platform-tools)")
+        raise RuntimeError(
+            "aapt2 not found (需要单独安装 Android Build-Tools 或配置 GMS_AAPT2_PATH)"
+        )
     return p
 
 

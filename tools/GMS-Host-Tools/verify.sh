@@ -8,8 +8,6 @@ required=(
     "${JAVA_HOME}/bin/java"
     "${GMS_SOFTWARE_ROOT}/platform-tools/adb"
     "${GMS_SOFTWARE_ROOT}/platform-tools/fastboot"
-    "${GMS_SOFTWARE_ROOT}/platform-tools/aapt"
-    "${GMS_SOFTWARE_ROOT}/platform-tools/aapt2"
 )
 for executable in "${required[@]}"; do
     if [[ ! -x "${executable}" ]]; then
@@ -30,7 +28,13 @@ fi
 python3 --version
 "${GMS_SOFTWARE_ROOT}/platform-tools/adb" version
 "${GMS_SOFTWARE_ROOT}/platform-tools/fastboot" --version
-"${GMS_SOFTWARE_ROOT}/platform-tools/aapt" version
-"${GMS_SOFTWARE_ROOT}/platform-tools/aapt2" version
+
+for optional_tool in aapt aapt2; do
+    if optional_path="$(command -v "${optional_tool}" 2>/dev/null)"; then
+        "${optional_path}" version
+    else
+        echo "Optional Android Build-Tools command not configured: ${optional_tool}"
+    fi
+done
 
 echo "GMS host tools verified under ${GMS_SOFTWARE_ROOT}"

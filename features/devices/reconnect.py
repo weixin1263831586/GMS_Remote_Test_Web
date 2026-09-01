@@ -10,6 +10,7 @@ from . import runtime
 from .manager import device_manager, has_blocked_adb_process
 from .usbip import find_device_host_password, usbip_manager
 from .usbip_flash import resolve_usbip_flash_routes
+from .usbip_persistence import migrate_local_usbip_busid
 from .usbip_transport_probe import probe_existing_local_usbip_transport
 
 
@@ -195,6 +196,83 @@ def _resolved_busids_for_devices(device_ids: set[str]) -> list[str]:
             if busid and busid not in busids:
                 busids.append(busid)
     return busids
+
+
+def _refresh_reenumerated_busids(
+    device_host: str,
+    expected_devices: set[str],
+    selected_busids: list[str],
+    device_password: str,
+) -> list[str]:
+    """Replace vanished BUSIDs only when source serial identity is exact."""
+    if not expected_devices or not selected_busids:
+        return selected_busids
+    list_source_devices = getattr(usbip_manager, "list_source_devices", None)
+    if not callable(list_source_devices):
+        return selected_busids
+    inventory = list_source_devices(device_host, device_password)
+    if not isinstance(inventory, dict) or not inventory.get("success"):
+        return selected_busids
+    source_devices = [
+        item for item in inventory.get("devices") or []
+        if isinstance(item, dict) and str(item.get("busid") or "").strip()
+    ]
+    current_busids = {
+        str(item.get("busid") or "").strip() for item in source_devices
+    }
+    missing_busids = [
+        busid for busid in selected_busids if busid not in current_busids
+    ]
+    if not missing_busids:
+        return selected_busids
+
+    runtime_config = runtime.config_manager.get_runtime_config() or {}
+    assignments = runtime_config.get("usbip_cluster_assignments") or {}
+    if not isinstance(assignments, dict):
+        return selected_busids
+    refreshed = list(selected_busids)
+    claimed_new_busids: set[str] = set()
+    for old_busid in missing_busids:
+        assignment = assignments.get(f"{device_host}|{old_busid}") or {}
+        assigned_serials = {
+            str(serial or "").strip()
+            for serial in assignment.get("device_serials") or []
+            if str(serial or "").strip()
+        }
+        if not assigned_serials or not assigned_serials.issubset(expected_devices):
+            continue
+        matches = [
+            item for item in source_devices
+            if str(item.get("serial") or "").strip() in assigned_serials
+            and str(item.get("busid") or "").strip() not in claimed_new_busids
+        ]
+        if len(matches) != 1:
+            continue
+        source_device = matches[0]
+        new_busid = str(source_device.get("busid") or "").strip()
+        if new_busid in selected_busids:
+            continue
+        migrated, error = migrate_local_usbip_busid(
+            device_host=device_host,
+            old_busid=old_busid,
+            new_busid=new_busid,
+            expected_serials=assigned_serials,
+            source_device=source_device,
+        )
+        if not migrated:
+            logger.warning(
+                "[USB/IP Reconnect] BUSID migration refused for %s/%s -> %s: %s",
+                device_host, old_busid, new_busid, error,
+            )
+            continue
+        refreshed[refreshed.index(old_busid)] = new_busid
+        claimed_new_busids.add(new_busid)
+        logger.info(
+            "[USB/IP Reconnect] migrated re-enumerated BUSID for %s: %s -> %s (%s)",
+            device_host, old_busid, new_busid,
+            ", ".join(sorted(assigned_serials)),
+        )
+    return refreshed
 
 
 def _device_host_has_remote_assignment(device_host: str) -> bool:
@@ -563,6 +641,12 @@ def _reconnect_worker(
             # 用户重新选择设备建立映射，不能拿同主机其他设备冒险兜底。
             selected_busids = _resolved_busids_for_devices(expected_set)
             if selected_busids:
+                selected_busids = _refresh_reenumerated_busids(
+                    device_host,
+                    expected_set,
+                    selected_busids,
+                    device_password,
+                )
                 start_kwargs["selected_busids"] = selected_busids
             elif expected_set:
                 detail = (

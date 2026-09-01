@@ -7,6 +7,13 @@ export JAVA_HOME="${GMS_SOFTWARE_ROOT}/jdk-11"
 export JRE_HOME="${JAVA_HOME}"
 export PATH="${GMS_SOFTWARE_ROOT}/platform-tools:${JAVA_HOME}/bin:${PATH}"
 
+# aapt/aapt2 belong to Android Build-Tools, not Platform-Tools. Operators can
+# expose an independently installed Build-Tools directory when needed.
+if [[ -n "${GMS_ANDROID_BUILD_TOOLS_DIR:-}" && \
+        -d "${GMS_ANDROID_BUILD_TOOLS_DIR}" ]]; then
+    export PATH="${GMS_ANDROID_BUILD_TOOLS_DIR}:${PATH}"
+fi
+
 # Google/APE credentials never live in the repository or this bundle.
 # The Worker installer copies the operator-supplied service-account file to
 # ${SOFTWARE_ROOT}/gts-rockchip.json (mode 0600); APE_API_KEY only points at

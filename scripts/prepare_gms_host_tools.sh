@@ -10,6 +10,9 @@ PROJECT_ROOT="$(readlink -f "$1")"
 HOST_TOOLS="${PROJECT_ROOT}/tools/GMS-Host-Tools"
 JDK_ROOT="${HOST_TOOLS}/jdk-11"
 PLATFORM_ARCHIVE="${HOST_TOOLS}/platform-tools-gms-linux.zip"
+GOOGLE_PLATFORM_TOOLS_VERSION="37.0.1"
+GOOGLE_PLATFORM_TOOLS_URL="https://dl.google.com/android/repository/platform-tools_r${GOOGLE_PLATFORM_TOOLS_VERSION}-linux.zip"
+GOOGLE_PLATFORM_TOOLS_SHA256="d230f13842f60f782a8645f9c813f8f845bf36089ea7289f28c48f17979313f1"
 
 valid_sha256() {
     [[ "$1" =~ ^[0-9a-fA-F]{64}$ ]]
@@ -51,6 +54,33 @@ download_verified() {
     }
 }
 
+sha256_matches() {
+    local path="$1" expected="$2"
+    [[ -f "${path}" ]] || return 1
+    printf '%s  %s\n' "${expected,,}" "${path}" \
+        | sha256sum --check --status
+}
+
+validate_platform_tools_archive() {
+    local archive="$1" member
+    unzip -tq "${archive}" >/dev/null
+    for member in \
+        platform-tools/source.properties \
+        platform-tools/adb \
+        platform-tools/fastboot \
+        platform-tools/lib64/libc++.so; do
+        unzip -Z1 "${archive}" | grep -Fxq "${member}" || {
+            echo "Android platform-tools artifact is missing ${member}" >&2
+            return 1
+        }
+    done
+    if unzip -Z1 "${archive}" \
+        | grep -Eq '^platform-tools/(aapt|aapt2)$'; then
+        echo "Android platform-tools artifact must remain the original Google package; configure aapt/aapt2 separately" >&2
+        return 1
+    fi
+}
+
 mkdir -p "${HOST_TOOLS}"
 WORK_DIR="$(mktemp -d "${HOST_TOOLS}/.prepare.XXXXXX")"
 trap 'rm -rf "${WORK_DIR}"' EXIT
@@ -79,15 +109,34 @@ if [[ ! -x "${JDK_ROOT}/bin/java" ]]; then
     rsync -a --delete "${extracted_jdk}/" "${JDK_ROOT}/"
 fi
 
-if [[ ! -f "${PLATFORM_ARCHIVE}" ]]; then
+if [[ -n "${GMS_HOST_TOOLS_PLATFORM_URL:-}" || \
+        -n "${GMS_HOST_TOOLS_PLATFORM_SHA256:-}" ]]; then
+    platform_url="${GMS_HOST_TOOLS_PLATFORM_URL:-}"
+    platform_sha256="${GMS_HOST_TOOLS_PLATFORM_SHA256:-}"
+    [[ -n "${platform_url}" ]] || {
+        echo "Android platform-tools override requires both URL and SHA256" >&2
+        exit 1
+    }
+else
+    platform_url="${GOOGLE_PLATFORM_TOOLS_URL}"
+    platform_sha256="${GOOGLE_PLATFORM_TOOLS_SHA256}"
+fi
+valid_sha256 "${platform_sha256}" || {
+    echo "Android platform-tools artifact requires an exact 64-character SHA256" >&2
+    exit 1
+}
+
+if ! sha256_matches "${PLATFORM_ARCHIVE}" "${platform_sha256}"; then
     downloaded_platform="${WORK_DIR}/platform-tools.zip"
     download_verified \
         "Android platform-tools artifact" \
-        "${GMS_HOST_TOOLS_PLATFORM_URL:-}" \
-        "${GMS_HOST_TOOLS_PLATFORM_SHA256:-}" \
+        "${platform_url}" \
+        "${platform_sha256}" \
         "${downloaded_platform}"
-    unzip -tq "${downloaded_platform}" >/dev/null
+    validate_platform_tools_archive "${downloaded_platform}"
     install -m 0644 "${downloaded_platform}" "${PLATFORM_ARCHIVE}"
+else
+    validate_platform_tools_archive "${PLATFORM_ARCHIVE}"
 fi
 
 echo "GMS Host Tools artifacts are ready."

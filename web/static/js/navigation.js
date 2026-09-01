@@ -174,6 +174,25 @@ function validateDeviceSelection() {
     return true;
 }
 
+function validateRebootDeviceSelection() {
+    if (state.selectedDevices.size === 0) {
+        showToast('请先选择设备', 'warning');
+        return false;
+    }
+    const unavailable = Array.from(state.selectedDevices).filter(deviceId => {
+        const device = state.devices.find(item => {
+            const id = typeof item === 'string' ? item : item.device_id;
+            return id === deviceId;
+        });
+        return device && !isSelectableRebootDevice(device);
+    });
+    if (unavailable.length > 0) {
+        showToast(`所选设备当前不可执行重启操作: ${unavailable.join(', ')}`, 'warning');
+        return false;
+    }
+    return true;
+}
+
 function validateBootloaderDeviceSelection() {
     if (state.selectedDevices.size === 0) {
         showToast('请先选择设备', 'warning');
