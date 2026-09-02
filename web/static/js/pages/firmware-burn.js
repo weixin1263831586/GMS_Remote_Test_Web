@@ -636,6 +636,13 @@ async function submitFirmwareBurn() {
                     'POST',
                     finalizeForm
                 );
+                if (!uploadResult.success) {
+                    // finalize 阶段失败（如管理员提权过期、设备被占用）时
+                    // 立即中止，不再进入后续的烧写结果处理。
+                    addLogEntry(`固件烧写失败: ${uploadResult.error || '未知错误'}`, 'error');
+                    unlockDevicesInUI(devices);
+                    return;
+                }
             }
         } else {
             const formData = new FormData();

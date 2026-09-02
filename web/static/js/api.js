@@ -140,8 +140,22 @@ async function _apiCallOnce(url, method, data, opts) {
                 || result.message
                 || 'Request failed'
             );
+            // 后端某些校验错误（如 FastAPI 422）的 detail 是数组/对象；
+            // 直接 String() 会变成 "[object Object]"，必须先做结构化提取。
+            const friendlyMessage = typeof rawMessage === 'string'
+                ? rawMessage
+                : (() => {
+                    try {
+                        if (Array.isArray(rawMessage)) {
+                            return rawMessage.map(item => item?.msg || JSON.stringify(item)).join('; ');
+                        }
+                        return rawMessage?.message || JSON.stringify(rawMessage);
+                    } catch (e) {
+                        return 'Request failed';
+                    }
+                })();
             const error = new Error(
-                normalizeApiErrorMessage(rawMessage, response.status)
+                normalizeApiErrorMessage(friendlyMessage, response.status)
             );
             error.status = response.status;
             const structured = detail && typeof detail === 'object' ? detail : result;

@@ -25,7 +25,7 @@
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/api.js?v=20260827-elevation-ttl" defer></script>
+    <script src="/static/js/api.js?v=20260902-error-serialize" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20260828-device-catchup" defer></script>
     <script src="/static/js/shell/workspace-devices.js?v=20260826-shell-split-2" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
@@ -927,11 +927,11 @@
                                 </div>
                                 <div class="form-row">
                                     <label>测试模块:</label>
-                                    <input type="text" id="test-module" class="entry-field" />
+                                    <input type="text" id="test-module" class="entry-field" spellcheck="false" autocomplete="off" />
                                 </div>
                                 <div class="form-row">
                                     <label>测试用例:</label>
-                                    <input type="text" id="test-case" class="entry-field" />
+                                    <input type="text" id="test-case" class="entry-field" spellcheck="false" autocomplete="off" />
                                 </div>
                             </div>
                         </td>
