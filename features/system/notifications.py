@@ -24,6 +24,11 @@ from foundation.events import event_bus
 
 
 logger = logging.getLogger(__name__)
+
+# 同一 owner 相同消息文本的去重窗口：覆盖“后端推送 + 前端回存”双写的
+# 秒级间隔，同时不会把间隔很久的真实重复事件（如反复断连）合并。
+_DUPLICATE_WINDOW_SECONDS = 120
+
 _event_loop: asyncio.AbstractEventLoop | None = None
 
 
@@ -92,8 +97,40 @@ class NotificationStore:
             "data": json.loads(str(row["data_json"])),
         }
 
+    def _recent_duplicate_id(
+        self, conn: sqlite3.Connection, owner_id: str, message: str,
+    ) -> str | None:
+        """同一 owner 短窗口内相同消息文本的通知视为同一事件的双写。
+
+        前后端（如固件烧写失败）或页面与 terminal workspace 连接都可能
+        对同一事实各写一条，标题不同但消息一致。合并为一条（保留首个
+        ID）可让未刷新的旧页面也无法制造重复。空消息不参与去重。
+        """
+        text = str(message or "").strip()
+        if not text:
+            return None
+        row = conn.execute(
+            """SELECT notification_id, timestamp FROM notifications
+               WHERE owner_id=? AND message=? AND title<>?
+               ORDER BY sequence DESC LIMIT 1""",
+            (owner_id, text, ""),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            seen_at = datetime.fromisoformat(str(row["timestamp"]))
+        except ValueError:
+            return None
+        if (datetime.now() - seen_at).total_seconds() > _DUPLICATE_WINDOW_SECONDS:
+            return None
+        return str(row["notification_id"])
+
     def upsert(self, owner_id: str, record: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as conn:
+            duplicate_id = self._recent_duplicate_id(
+                conn, owner_id, record["message"],
+            )
+            record_id = duplicate_id or record["id"]
             conn.execute(
                 """INSERT INTO notifications (
                        notification_id, owner_id, timestamp, title, message,
@@ -108,7 +145,7 @@ class NotificationStore:
                        is_read=excluded.is_read,
                        data_json=excluded.data_json""",
                 (
-                    record["id"],
+                    record_id,
                     owner_id,
                     record["timestamp"],
                     record["title"],
@@ -131,7 +168,7 @@ class NotificationStore:
                    )""",
                 (owner_id, owner_id, MAX_NOTIFICATIONS_PER_CLIENT),
             )
-        return record
+        return {**record, "id": record_id}
 
     def list(self, owner_id: str, limit: int) -> dict[str, Any]:
         with self._connect() as conn:

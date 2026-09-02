@@ -29,12 +29,6 @@ from .api_helpers import (
 from .api_helpers import (
     resolve_gsi_remote_image as _resolve_gsi_remote_image,
 )
-from .fastboot_firmware import (
-    FastbootFirmwareError as _FastbootFirmwareError,
-)
-from .fastboot_firmware import (
-    run_usbip_fastboot_firmware as _run_usbip_fastboot_firmware,
-)
 from .firmware_validation import (
     FirmwareValidationResult,
     validate_local_update_image,
@@ -43,23 +37,13 @@ from .firmware_validation import (
 from .gsi_diagnostics import diagnose_gsi_burn_failure
 from .gsi_transport import prepare_gsi_command, upload_gsi_assets
 from .models import SNBurnRequest
-from .partition_burn import PartitionBurnError as _PartitionBurnError
-from .partition_burn import run_partition_burn as _run_partition_burn
+from .source_flash import (
+    SourceFlashError,
+    run_source_flash,
+)
 from .upload_transport import upload_firmware_to_test_host as _upload_firmware_to_test_host
 from .usbip_transport import (
-    accept_direct_rockusb_loaders as _accept_direct_rockusb_loaders,
-)
-from .usbip_transport import (
-    capture_rockusb_route_baseline as _capture_rockusb_route_baseline,
-)
-from .usbip_transport import (
-    defer_usbip_firmware_reconnects_after_failure as _defer_usbip_reconnects,
-)
-from .usbip_transport import (
     device_flash_protocols as _device_flash_protocols,
-)
-from .usbip_transport import (
-    diagnose_maskrom_reattach_failure as _diagnose_maskrom_reattach_failure,
 )
 from .usbip_transport import (
     notify_skipped_devices as _notify_skip,
@@ -68,16 +52,7 @@ from .usbip_transport import (
     partition_devices_by_flash_state as _partition_devices_by_flash_state,
 )
 from .usbip_transport import (
-    pause_usbip_firmware_reconnects as _pause_usbip_reconnects,
-)
-from .usbip_transport import (
     prepare_usbip_firmware_routes as _prepare_usbip_firmware_routes,
-)
-from .usbip_transport import (
-    reattach_usbip_after_rockusb_reset as _reattach_usbip_after_rockusb_reset,
-)
-from .usbip_transport import (
-    resume_usbip_firmware_reconnects as _resume_usbip_reconnects,
 )
 from .usbip_transport import (
     schedule_usbip_mode_reconnect as _schedule_usbip_mode_reconnect,
@@ -91,10 +66,6 @@ from .usbip_transport import (
 
 
 logger = logging.getLogger(__name__)
-
-# Loader→MaskROM 竞态输掉后（工具超时但传输已挂回）在同一请求内的自动
-# 重跑次数上限；第二次工具从 MaskROM 起步，不再经历二次枚举竞态。
-FIRMWARE_BURN_MAX_ATTEMPTS = 2
 
 router = APIRouter()
 
@@ -293,10 +264,7 @@ async def burn_firmware(
     burn_succeeded = False
     locked_devices: list[str] = []
     usbip_flash_routes: list[dict] = []
-    usbip_reconnect_paused_devices: list[str] = []
-    keep_usbip_reconnect_paused = False
     usbip_reconnect_after_finish = False
-    loader_reattach_task = None
     try:
         client_id = runtime.get_client_id_from_request(request)
 
@@ -348,19 +316,14 @@ async def burn_firmware(
 
         firmware_file = form.get("firmware_file")
         firmware_path = form.get("firmware_path", "").strip()
-        # 烧写传输：auto（默认：Windows USB/IP 走 GPT + 两阶段 Fastboot，Ubuntu 本地 USB
-        # 走 upgrade_tool uf）/ fastboot（显式要求 USB/IP Fastboot）/
-        # partition（显式要求 USB/IP upgrade_tool DI 同会话分区烧写；
-        # 要求 RID 存储就绪，RID 失败在 DB 前安全停止）/
-        # uf（显式要求 Ubuntu 本地 upgrade_tool）/ transport-probe-force
-        # （管理员诊断：只验证旧 RockUSB DB 重枚举，不写分区）。
+        # 烧写传输：auto（默认）/ uf（本地 upgrade_tool）。旧的
+        # fastboot/partition/transport-probe-force USB/IP 后端已按 15.txt
+        # 重构移除——USB/IP 设备统一路由到源端（Controller 本机直连）
+        # upgrade_tool uf 执行。
         burn_mode = str(form.get("burn_mode", "auto")).strip().lower() or "auto"
-        if burn_mode not in {
-            "auto", "fastboot", "partition", "uf", "transport-probe-force",
-        }:
+        if burn_mode not in {"auto", "uf"}:
             return error_response(
-                "Invalid burn_mode, expected 'auto', 'fastboot', 'partition', "
-                "'uf', or 'transport-probe-force'"
+                "Invalid burn_mode, expected 'auto' or 'uf'"
             )
         if merged_firmware:
             firmware_file = None
@@ -500,14 +463,6 @@ async def burn_firmware(
                 )
                 if usbip_route_error:
                     return error_response(usbip_route_error, status_code=409)
-                transport_probe = burn_mode == "transport-probe-force"
-                if transport_probe and (
-                    len(devices) != 1 or not usbip_flash_routes
-                ):
-                    return error_response(
-                        "transport-probe-force 仅支持单台已分配的 USB/IP 设备",
-                        status_code=409,
-                    )
 
                 protocols = await asyncio.to_thread(
                     _device_flash_protocols,
@@ -517,28 +472,9 @@ async def burn_firmware(
                 unavailable = [
                     device for device in devices if not protocols.get(device)
                 ]
-                if unavailable and usbip_flash_routes:
-                    direct_loader_cmd = (
-                        f"cd {shlex.quote(gms_suite_dir)} && "
-                        f"{shlex.quote(remote_tool)} ld"
-                    )
-                    loader_out, loader_err, _loader_code = await asyncio.to_thread(
-                        runtime.ssh_manager.execute_command,
-                        ssh,
-                        direct_loader_cmd,
-                        timeout=5,
-                    )
-                    protocols = _accept_direct_rockusb_loaders(
-                        protocols,
-                        usbip_flash_routes,
-                        loader_out or loader_err,
-                    )
-                    unavailable = [
-                        device for device in devices if not protocols.get(device)
-                    ]
                 if unavailable:
                     return error_response(
-                        "设备未处于可烧写的 ADB/Fastboot/USB-IP RockUSB Loader 状态: "
+                        "设备未处于可烧写的 ADB/Fastboot 状态: "
                         + ", ".join(unavailable),
                         status_code=409,
                     )
@@ -552,48 +488,31 @@ async def burn_firmware(
                 if usbip_flash_routes and routed_usbip_devices != set(devices):
                     return error_response(
                         "不能在同一次固件任务中混合Windows USB/IP设备与Ubuntu"
-                        "本地USB设备；请分开选择后重试。USB/IP设备使用Fastboot"
-                        "后端，本地设备使用upgrade_tool后端。",
-                        status_code=409,
-                    )
-                if burn_mode == "fastboot" and not usbip_flash_routes:
-                    return error_response(
-                        "fastboot固件模式仅用于已从Windows挂载到Controller的"
-                        "USB/IP设备；Ubuntu本地USB设备请使用auto或uf。",
-                        status_code=409,
-                    )
-                if burn_mode == "partition" and not usbip_flash_routes:
-                    return error_response(
-                        "partition固件模式仅用于已从Windows挂载到Controller的"
-                        "USB/IP设备（upgrade_tool DI 同会话分区烧写）；"
-                        "Ubuntu本地USB设备请使用auto或uf。",
-                        status_code=409,
-                    )
-                if burn_mode == "uf" and usbip_flash_routes:
-                    return error_response(
-                        "Windows USB/IP设备禁止进入upgrade_tool Loader/DB烧写；"
-                        "请使用auto或fastboot模式。Ubuntu本地USB设备仍使用uf。",
+                        "本地USB设备；请分开选择后重试。",
                         status_code=409,
                     )
 
-                # Windows USB/IP firmware is deliberately isolated from the
-                # local RockUSB backend.  It updates GPT and physical images
-                # in bootloader Fastboot, then writes dynamic images in
-                # Fastbootd; it never enters RockUSB Loader/DB/MaskROM.
-                if usbip_flash_routes and burn_mode in {"auto", "fastboot"}:
-                    rockusb_devices = [
-                        device for device in devices
-                        if protocols.get(device) == "rockusb-loader"
-                    ]
-                    if rockusb_devices:
+                # ---- 15.txt 重构：USB/IP 设备的完整固件烧写改由设备
+                # 物理源端（Controller 本机直连 USB）执行 upgrade_tool uf。
+                # USB/IP 链路上的 Rockchip 多次重枚举（ADB→Loader→MaskROM）
+                # 无法维持会话，历次 Ubuntu 端方案（fastboot 分区/DI 同会话/
+                # uf+watcher）实测均不可靠，全部移除。
+                if usbip_flash_routes:
+                    routed_set = {
+                        str(dev or "").strip()
+                        for route in usbip_flash_routes
+                        for dev in route.get("device_ids") or []
+                        if str(dev or "").strip()
+                    }
+                    if routed_set != set(devices):
                         return error_response(
-                            "USB/IP Fastboot固件模式要求设备从ADB、Fastboot或"
-                            "Fastbootd开始；当前设备已在RockUSB Loader，无法"
-                            "安全自动返回Android: " + ", ".join(rockusb_devices),
+                            "USB/IP固件路由与所选设备不一致，请刷新设备列表后重试",
                             status_code=409,
                         )
 
-                    async def _fastboot_log(message: str) -> None:
+                    route_map = _usbip_device_route_map(usbip_flash_routes)
+
+                    async def _source_log(message: str) -> None:
                         if client_id in runtime.global_state.websocket_connections:
                             with contextlib.suppress(Exception):
                                 await runtime.safe_websocket_send(client_id, {
@@ -602,7 +521,7 @@ async def burn_firmware(
                                     "log_type": "info",
                                 })
 
-                    async def _fastboot_progress(percentage: float) -> None:
+                    async def _source_progress(percentage: float) -> None:
                         if client_id in runtime.global_state.websocket_connections:
                             with contextlib.suppress(Exception):
                                 await runtime.safe_websocket_send(client_id, {
@@ -610,98 +529,85 @@ async def burn_firmware(
                                     "percentage": round(float(percentage), 2),
                                 })
 
-                    usbip_device_routes = _usbip_device_route_map(
-                        usbip_flash_routes
+                    await _source_log(
+                        "Starting source-side firmware burn "
+                        "(Windows Source Agent + RKDevTool)..."
                     )
-
-                    async def _migrate_flashed_serial(
-                        old_serial: str, new_serial: str, route: dict,
-                    ) -> None:
-                        migrated, migration_error = await asyncio.to_thread(
-                            migrate_local_usbip_serial,
-                            device_host=str(route.get("device_host") or ""),
-                            busid=str(route.get("busid") or ""),
-                            old_serial=old_serial,
-                            new_serial=new_serial,
-                            expected_generation=(
-                                int(route["generation"])
-                                if route.get("generation") is not None else None
-                            ),
-                            expected_operation_id=str(
-                                route.get("operation_id") or ""
-                            ),
-                        )
-                        if not migrated:
-                            raise _FastbootFirmwareError(
-                                "固件已启动，但USB/IP序列号迁移失败: "
-                                + (migration_error or "unknown error")
-                            )
-
-                    await _fastboot_log(
-                        "Starting USB/IP firmware burn (GPT + two-stage Fastboot mode)..."
-                    )
+                    results = []
                     try:
-                        fastboot_result = await _run_usbip_fastboot_firmware(
-                            ssh,
-                            suite_dir=gms_suite_dir,
-                            remote_tool=remote_tool,
-                            remote_firmware=remote_firmware,
-                            devices=devices,
-                            usbip_device_routes=usbip_device_routes,
-                            on_transport_reset=_schedule_usbip_mode_reconnect,
-                            on_android_serial_changed=_migrate_flashed_serial,
-                            on_log=_fastboot_log,
-                            on_progress=_fastboot_progress,
-                        )
-                    except _FastbootFirmwareError as exc:
+                        for device in devices:
+                            route = route_map.get(device) or {}
+                            device_host = str(
+                                route.get("device_host") or ""
+                            ).strip()
+                            if not device_host:
+                                raise SourceFlashError(
+                                    f"设备 {device} 缺少 Windows 源主机路由",
+                                    status_code=409, stage="DISPATCH",
+                                )
+                            report = await run_source_flash(
+                                device=device,
+                                device_host=device_host,
+                                firmware_path=remote_firmware,
+                                on_log=_source_log,
+                            )
+                            results.append({
+                                "device": report.device,
+                                "success": report.success,
+                                "stage": report.stage,
+                                "status": report.status,
+                                "elapsed_seconds": round(
+                                    report.elapsed_seconds, 1,
+                                ),
+                            })
+                    except SourceFlashError as exc:
                         runtime.store_notification(
                             client_id,
-                            "USB/IP Fastboot firmware burn failed",
+                            "Source-side firmware burn failed",
                             str(exc)[:300],
                             "error",
                             "firmware",
                             {"devices": devices, "firmware": firmware_name},
                         )
+                        # 烧写失败：调度 USB/IP 重连，让设备回到平台管理。
+                        usbip_reconnect_after_finish = True
                         return error_response(
-                            str(exc), status_code=exc.status_code,
+                            f"源端烧写失败（{exc.stage}）: {exc}",
+                            status_code=exc.status_code,
                         )
 
-                    completed_devices = [
-                        str(item.get("device") or "")
-                        for item in fastboot_result.get("results") or []
-                        if str(item.get("device") or "")
-                    ] or devices
-                    await _fastboot_log("USB/IP Fastboot firmware burn complete!")
                     runtime.store_notification(
                         client_id,
-                        "USB/IP Fastboot firmware burn complete",
-                        f"Devices: {', '.join(completed_devices)}",
+                        "Source-side firmware burn complete",
+                        f"Devices: {', '.join(devices)}",
                         "success",
                         "firmware",
                         {
-                            "devices": completed_devices,
+                            "devices": devices,
                             "firmware": firmware_name,
-                            "backend": "usbip-fastboot",
+                            "backend": "source-agent",
                         },
                     )
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
                             await runtime.safe_websocket_send(client_id, {
                                 "type": "firmware_burn_complete",
-                                "devices": completed_devices,
+                                "devices": devices,
                                 "success": True,
-                                "backend": "usbip-fastboot",
+                                "backend": "source-agent",
                             })
                     burn_succeeded = True
+                    # 成功后按原物理路由重新导出 USB/IP。
+                    usbip_reconnect_after_finish = True
                     return success_response(
-                        data=fastboot_result,
-                        message="USB/IP Fastboot firmware burn completed successfully",
+                        data={"results": results},
+                        message="Source-side firmware burn completed successfully",
                     )
 
+                # ---- 以下为 Ubuntu 本地 USB 设备（非 USB/IP）的传统链路 ----
                 # Rockchip update.img is written by upgrade_tool in Loader
                 # mode. A device selected in Fastboot first returns to Android
                 # so the established `adb reboot loader` path remains valid.
-                # Both USB identity changes are coordinated with USB/IP.
                 fastboot_devices = [
                     device
                     for device, protocol in protocols.items()
@@ -715,7 +621,6 @@ async def burn_firmware(
                         cmd,
                         timeout=15,
                     )
-                    _schedule_usbip_mode_reconnect(device, "adb")
 
                 if fastboot_devices:
                     adb_ready, observed = await _wait_for_adb_devices(
@@ -731,100 +636,17 @@ async def burn_firmware(
                             status_code=409,
                         )
 
-                # Firmware owns the selected routes before issuing the reboot.
-                # The generic disappearance monitor otherwise starts its own
-                # usbip attach loop as soon as ADB vanishes, racing the
-                # Loader→MaskROM re-enumeration on the same Windows BUSID.
-                loader_transition_devices = {
-                    device for device in devices
-                    if protocols.get(device) != "rockusb-loader"
-                }
-                loader_transition_routes = _usbip_routes_for_devices(
-                    usbip_flash_routes,
-                    loader_transition_devices,
-                )
-                loader_transition_baseline = {}
-                if usbip_flash_routes:
-                    (
-                        usbip_reconnect_paused_devices,
-                        reconnect_pause_error,
-                    ) = await _pause_usbip_reconnects(
-                        usbip_flash_routes
+                # Enter Loader mode (local devices: plain adb reboot loader).
+                for device in devices:
+                    if protocols.get(device) == "rockusb-loader":
+                        continue
+                    cmd = f"adb -s {shlex.quote(device)} reboot loader"
+                    await asyncio.to_thread(
+                        runtime.ssh_manager.execute_command,
+                        ssh,
+                        cmd,
+                        timeout=5,
                     )
-                    if reconnect_pause_error:
-                        return error_response(
-                            reconnect_pause_error,
-                            status_code=409,
-                        )
-                    if loader_transition_routes:
-                        (
-                            loader_transition_baseline,
-                            baseline_error,
-                        ) = await _capture_rockusb_route_baseline(
-                            loader_transition_routes
-                        )
-                        if baseline_error:
-                            return error_response(
-                                baseline_error,
-                                status_code=409,
-                            )
-                        # Arm the firmware-owned watcher before ADB is told to
-                        # reboot. The ADB row (2207:0006) can be atomically
-                        # replaced by the Loader row (2207:351a) between two
-                        # polls, so absence alone is not a reliable signal
-                        # here; a stable PnP identity change also counts.
-                        loader_reattach_task = asyncio.create_task(
-                            _reattach_usbip_after_rockusb_reset(
-                                ssh,
-                                loader_transition_routes,
-                                timeout=120,
-                                baseline=loader_transition_baseline,
-                                allow_identity_transition=True,
-                                require_forced=transport_probe,
-                            )
-                        )
-                        await asyncio.sleep(0)
-
-                # Enter Loader mode. During this transition the watcher above
-                # is the only component allowed to reattach the USB/IP route.
-                try:
-                    for device in devices:
-                        if protocols.get(device) == "rockusb-loader":
-                            continue
-                        cmd = f"adb -s {shlex.quote(device)} reboot loader"
-                        await asyncio.to_thread(
-                            runtime.ssh_manager.execute_command,
-                            ssh,
-                            cmd,
-                            timeout=5,
-                        )
-                    if loader_reattach_task is not None:
-                        loader_transition_result = await loader_reattach_task
-                        loader_reattach_task = None
-                        if not loader_transition_result.get("success"):
-                            transition_errors = loader_transition_result.get(
-                                "errors"
-                            ) or {}
-                            transition_detail = "; ".join(
-                                f"{key}: {str(value).strip()[:160]}"
-                                for key, value in transition_errors.items()
-                            )
-                            return error_response(
-                                "ADB→Loader 后 USB/IP 未能重新挂载"
-                                + (
-                                    f"（{transition_detail}）"
-                                    if transition_detail else ""
-                                )
-                                + "，烧写已停止，请检查 Windows USB 枚举状态后重试。",
-                                status_code=409,
-                            )
-                except BaseException:
-                    if loader_reattach_task is not None:
-                        loader_reattach_task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await loader_reattach_task
-                        loader_reattach_task = None
-                    raise
 
                 # Check Loader devices
                 quoted_suite_dir = shlex.quote(gms_suite_dir)
@@ -835,68 +657,75 @@ async def burn_firmware(
                     check_cmd,
                     len(devices),
                 )
-
                 if not loader_ready:
-                    return error_response(f"No Loader devices detected. Output:\n{output}", status_code=409)
+                    return error_response(
+                        f"No Loader devices detected. Output:\n{output}",
+                        status_code=409,
+                    )
 
-                # USB/IP 设备显式 partition 模式改走同会话分区烧写：uf 在
-                # Download Boot 后强制 Loader→MaskROM 二次枚举，该窗口在
-                # usbipd-win 来源端口上实测不可依赖（0000:0002 描述符失败），
-                # 且故障发生在 Windows 枚举层、任何 USB/IP 重试都无法触及。
-                # 分区烧写全程停留在当前 Loader 会话，中途不再发生 USB 身份
-                # 切换（RID 失败时在 DB 前安全停止）。
-                if usbip_flash_routes and burn_mode in {
-                    "partition", "transport-probe-force",
-                }:
-                    async def _partition_log(message: str) -> None:
+                # Burn firmware
+                burn_cmd = (
+                    f"cd {quoted_suite_dir} && {quoted_remote_tool} uf "
+                    f"{shlex.quote(remote_firmware)}"
+                )
+
+                if client_id in runtime.global_state.websocket_connections:
+                    with contextlib.suppress(Exception):
+                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Starting firmware burn...", "log_type": "info"})
+
+                _stdin, stdout, stderr = await asyncio.to_thread(
+                    lambda: ssh.exec_command(
+                        burn_cmd, get_pty=True, timeout=300,
+                    )
+                )
+                output_buffer = []
+                firmware_burn_start = False
+                current_progress = 0
+                last_progress_time = 0
+                while not stdout.channel.exit_status_ready():
+                    current_time = asyncio.get_event_loop().time()
+                    if stdout.channel.recv_ready():
+                        chunk = (await asyncio.to_thread(stdout.channel.recv, 1024)).decode("utf-8", errors="ignore")
+                        output_buffer.append(chunk)
+                        clean_chunk = strip_ansi_codes(chunk)
+                        if "Download Firmware Start" in clean_chunk and not firmware_burn_start:
+                            firmware_burn_start = True
+                            current_progress = 0
+                            last_progress_time = current_time
+                        if client_id in runtime.global_state.websocket_connections:
+                            try:
+                                for line in clean_chunk.split("\n"):
+                                    line = line.strip()
+                                    if line:
+                                        if firmware_burn_start:
+                                            if any(kw in line.lower() for kw in ["error", "failed", "fail"]):
+                                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "error"})
+                                            continue
+                                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "info"})
+                            except Exception as e:
+                                logger.error(f"[Firmware Burn] Log send failed: {e}")
+                    if firmware_burn_start and (current_time - last_progress_time > runtime.gsi_progress_poll_interval):
+                        current_progress = min(current_progress + runtime.gsi_progress_increment, runtime.gsi_progress_max)
+                        last_progress_time = current_time
                         if client_id in runtime.global_state.websocket_connections:
                             with contextlib.suppress(Exception):
-                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": message, "log_type": "info"})
+                                await runtime.safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": current_progress})
+                    await asyncio.sleep(0.1)
 
-                    async def _partition_progress(percentage: float) -> None:
-                        if client_id in runtime.global_state.websocket_connections:
-                            with contextlib.suppress(Exception):
-                                await runtime.safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": round(float(percentage), 2)})
-
+                # drain tail output before reading exit status
+                while stdout.channel.recv_ready():
+                    chunk = (await asyncio.to_thread(stdout.channel.recv, 1024)).decode("utf-8", errors="ignore")
+                    output_buffer.append(chunk)
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
-                            await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Starting firmware burn (partition mode)...", "log_type": "info"})
+                            for drain_line in strip_ansi_codes(chunk).split("\n"):
+                                drain_line = drain_line.strip()
+                                if drain_line:
+                                    await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": drain_line, "log_type": "info"})
 
-                    try:
-                        _partition_result = await _run_partition_burn(
-                            ssh,
-                            suite_dir=gms_suite_dir,
-                            remote_tool=remote_tool,
-                            remote_firmware=remote_firmware,
-                            usbip_routes=usbip_flash_routes,
-                            on_log=_partition_log,
-                            on_progress=_partition_progress,
-                            transport_probe=transport_probe,
-                            force_usbip_bind=transport_probe,
-                        )
-                    except _PartitionBurnError as exc:
-                        runtime.store_notification(
-                            client_id,
-                            "Firmware burn failed",
-                            str(exc)[:300],
-                            "error",
-                            "firmware",
-                            {"devices": devices, "firmware": firmware_name},
-                        )
-                        detail = str(exc)
-                        logger.warning(
-                            "[Firmware Burn] partition burn failed: %s", detail,
-                        )
-                        return error_response(detail, status_code=exc.status_code)
-                    usbip_reconnect_after_finish = True
-                    if transport_probe:
-                        burn_succeeded = True
-                        return success_response(
-                            message=(
-                                "USB/IP DB transport probe completed successfully; "
-                                "no partitions were written"
-                            )
-                        )
+                final_output = "".join(output_buffer)
+                exit_status = stdout.channel.recv_exit_status()
+                if exit_status == 0:
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
                             await runtime.safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": 100})
@@ -908,369 +737,35 @@ async def burn_firmware(
                     burn_succeeded = True
                     return success_response(message="Firmware burn completed successfully")
 
-                rockusb_baseline = {}
-                if usbip_flash_routes:
-                    rockusb_baseline, baseline_error = (
-                        await _capture_rockusb_route_baseline(
-                            usbip_flash_routes
-                        )
-                    )
-                    if baseline_error:
-                        return error_response(baseline_error, status_code=409)
-
-                # Burn firmware
-                burn_cmd = f"cd {quoted_suite_dir} && {quoted_remote_tool} uf {shlex.quote(remote_firmware)}"
-
+                stderr_output = (
+                    await asyncio.to_thread(stderr.read)
+                ).decode("utf-8", errors="ignore")
+                error_output = "\n".join(
+                    part for part in (final_output, stderr_output) if part
+                )
+                clean_output = strip_ansi_codes(error_output).strip()
                 if client_id in runtime.global_state.websocket_connections:
                     with contextlib.suppress(Exception):
-                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Starting firmware burn...", "log_type": "info"})
-
-                # upgrade_tool 自身的 MaskROM 等待窗口实测仅 6~14 秒，可能短于
-                # 设备在 Windows 侧重新可导出的耗时。若工具输给该竞态但 USB/IP
-                # 传输随后已挂回（设备停留在 MaskROM），在同一请求内自动重跑
-                # 一次：第二次工具直接从 MaskROM 起步，不再经历 Loader→MaskROM
-                # 的二次枚举竞态（实测第二击即成功）。
-                for burn_attempt in range(1, FIRMWARE_BURN_MAX_ATTEMPTS + 1):
-                    # 必须在启动 upgrade_tool 之前布防 watcher。等 stdout
-                    # 出现 "Download Boot Start" 后再建 Windows SSH，会白白
-                    # 消耗工具仅数秒的 MaskROM 等待窗口。watcher 先完成 SSH
-                    # 布防，直到 Download Boot Success 才进入 ARMED，因此
-                    # 不会把旧 Loader 会话提前当成 MaskROM。
-                    rockusb_reattach_task = None
-                    maskrom_transition_event = asyncio.Event()
-                    maskrom_watcher_ready = asyncio.Event()
-                    if usbip_flash_routes:
-                        rockusb_reattach_task = asyncio.create_task(
-                            _reattach_usbip_after_rockusb_reset(
-                                ssh,
-                                usbip_flash_routes,
-                                timeout=15,
-                                baseline=rockusb_baseline,
-                                transition_event=maskrom_transition_event,
-                                ready_event=maskrom_watcher_ready,
-                            )
-                        )
-                        try:
-                            await asyncio.wait_for(
-                                maskrom_watcher_ready.wait(), timeout=15,
-                            )
-                        except TimeoutError:
-                            rockusb_reattach_task.cancel()
-                            with contextlib.suppress(
-                                asyncio.CancelledError
-                            ):
-                                await rockusb_reattach_task
-                            return error_response(
-                                "USB/IP MaskROM watcher 未能在烧写前完成 "
-                                "Windows SSH 布防",
-                                status_code=504,
-                            )
-                    try:
-                        _stdin, stdout, stderr = await asyncio.to_thread(
-                            lambda: ssh.exec_command(
-                                burn_cmd, get_pty=True, timeout=300,
-                            )
-                        )
-                    except BaseException:
-                        if rockusb_reattach_task is not None:
-                            rockusb_reattach_task.cancel()
-                            with contextlib.suppress(asyncio.CancelledError):
-                                await rockusb_reattach_task
-                        raise
-                    output_buffer = []
-
-                    firmware_burn_start = False
-                    current_progress = 0
-                    last_progress_time = 0
-                    transition_output_tail = ""
-
-                    while not stdout.channel.exit_status_ready():
-                        current_time = asyncio.get_event_loop().time()
-
-                        if stdout.channel.recv_ready():
-                            chunk = (await asyncio.to_thread(stdout.channel.recv, 1024)).decode("utf-8", errors="ignore")
-                            output_buffer.append(chunk)
-                            clean_chunk = strip_ansi_codes(chunk)
-                            transition_output_tail = (
-                                transition_output_tail + clean_chunk
-                            )[-512:]
-                            if (
-                                "Download Boot Success"
-                                in transition_output_tail
-                                or "Wait For Maskrom Start"
-                                in transition_output_tail
-                            ):
-                                maskrom_transition_event.set()
-
-                            if "Download Firmware Start" in clean_chunk and not firmware_burn_start:
-                                firmware_burn_start = True
-                                current_progress = 0
-                                last_progress_time = current_time
-
-                            if client_id in runtime.global_state.websocket_connections:
-                                try:
-                                    for line in clean_chunk.split("\n"):
-                                        line = line.strip()
-                                        if line:
-                                            if firmware_burn_start:
-                                                if any(kw in line.lower() for kw in ["error", "failed", "fail"]):
-                                                    await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "error"})
-                                                continue
-                                            await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": line, "log_type": "info"})
-                                except Exception as e:
-                                    logger.error(f"[Firmware Burn] Log send failed: {e}")
-
-                        if firmware_burn_start and (current_time - last_progress_time > runtime.gsi_progress_poll_interval):
-                            current_progress = min(current_progress + runtime.gsi_progress_increment, runtime.gsi_progress_max)
-                            last_progress_time = current_time
-
-                            if client_id in runtime.global_state.websocket_connections:
-                                with contextlib.suppress(Exception):
-                                    await runtime.safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": current_progress})
-
-                        await asyncio.sleep(0.1)
-
-                    # exit_status_ready 置位时，进程最后一段输出可能仍在 channel
-                    # 缓冲中未被 recv_ready 消费（失败诊断恰好依赖末尾输出，例如
-                    # "Download Boot Fail"）。补一次 drain 保证 final_output 完整。
-                    while stdout.channel.recv_ready():
-                        chunk = (await asyncio.to_thread(stdout.channel.recv, 1024)).decode("utf-8", errors="ignore")
-                        output_buffer.append(chunk)
-                        transition_output_tail = (
-                            transition_output_tail + strip_ansi_codes(chunk)
-                        )[-512:]
-                        if (
-                            "Download Boot Success" in transition_output_tail
-                            or "Wait For Maskrom Start" in transition_output_tail
-                        ):
-                            maskrom_transition_event.set()
-                        if client_id in runtime.global_state.websocket_connections:
-                            with contextlib.suppress(Exception):
-                                for drain_line in strip_ansi_codes(chunk).split("\n"):
-                                    drain_line = drain_line.strip()
-                                    if drain_line:
-                                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": drain_line, "log_type": "info"})
-
-                    final_output = "".join(output_buffer)
-                    exit_status = stdout.channel.recv_exit_status()
-                    if exit_status == 0:
-                        error_output = ""
-                        stderr_output = ""
-                    else:
-                        # 失败诊断不能只看 stdout：upgrade_tool 的真实错误（如
-                        # loader 下载失败）常在 stderr，与 GSI 路径一致合并两者。
-                        stderr_output = (
-                            await asyncio.to_thread(stderr.read)
-                        ).decode("utf-8", errors="ignore")
-                        error_output = "\n".join(
-                            part for part in (final_output, stderr_output) if part
-                        )
-                    clean_output = strip_ansi_codes(error_output).strip()
-                    clean_final_output = strip_ansi_codes(final_output)
-                    if (
-                        "Download Boot Success" in clean_final_output
-                        or "Wait For Maskrom Start" in clean_final_output
-                    ):
-                        maskrom_transition_event.set()
-                    rockusb_reattach_result = {
-                        "success": not usbip_flash_routes,
-                        "attached": [],
-                    }
-                    if rockusb_reattach_task is not None:
-                        try:
-                            if (
-                                exit_status != 0
-                                and "Wait For Maskrom Start" in clean_output
-                            ):
-                                # upgrade_tool may lose its short MaskROM
-                                # window before Windows PnP is safe to attach.
-                                # Let the watcher finish so a bounded retry can
-                                # start directly from the restored transport.
-                                rockusb_reattach_result = (
-                                    await rockusb_reattach_task
-                                )
-                            else:
-                                # A successful burn (or an unrelated failure)
-                                # must not wait for a transition that never
-                                # occurred, especially on the retry path.
-                                rockusb_reattach_task.cancel()
-                                with contextlib.suppress(
-                                    asyncio.CancelledError
-                                ):
-                                    await rockusb_reattach_task
-                        except Exception as exc:
-                            logger.warning(
-                                "[Firmware Burn] RockUSB USB/IP reattach failed: %s",
-                                exc,
-                            )
-                            rockusb_reattach_result = {
-                                "success": False,
-                                "attached": [],
-                                "errors": {"watcher": str(exc)},
-                            }
-
-                    if exit_status == 0:
-                        usbip_reconnect_after_finish = bool(
-                            usbip_flash_routes
-                        )
-                        if client_id in runtime.global_state.websocket_connections:
-                            with contextlib.suppress(Exception):
-                                await runtime.safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": 100})
-                            with contextlib.suppress(Exception):
-                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Firmware burn complete!", "log_type": "success"})
-
-                        runtime.store_notification(client_id, "Firmware burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "firmware": firmware_name})
-                        # 通知前端刷新 ADB 设备状态；设备锁由 finally 统一释放。
-                        if client_id in runtime.global_state.websocket_connections:
-                            with contextlib.suppress(Exception):
-                                await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": devices, "success": True})
-                        burn_succeeded = True
-                        return success_response(message="Firmware burn completed successfully")
-
-                    # ---- 失败路径 ----
-                    if (
-                        burn_attempt < FIRMWARE_BURN_MAX_ATTEMPTS
-                        and usbip_flash_routes
-                        and "Wait For Maskrom Fail" in clean_output
-                    ):
-                        # watcher.success 只说明 USB/IP 传输层看起来已挂载；
-                        # upgrade_tool ld 能发现 RockUSB 才是第二次 uf 是否
-                        # 可执行的权威判据。
-                        retry_loader_ready, retry_loader_output = (
-                            await _wait_for_rockusb_loaders(
-                                ssh,
-                                check_cmd,
-                                len(devices),
-                                timeout=15,
-                                interval=1,
-                            )
-                        )
-                        if retry_loader_ready:
-                            logger.info(
-                                "[Firmware Burn] RockUSB confirmed by ld after "
-                                "MaskROM timeout; retrying burn (attempt %s)",
-                                burn_attempt + 1,
-                            )
-                            if client_id in runtime.global_state.websocket_connections:
-                                with contextlib.suppress(Exception):
-                                    await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "upgrade_tool ld 已确认 MaskROM 传输恢复，自动重试烧写...", "log_type": "info"})
-                            continue
-                        logger.warning(
-                            "[Firmware Burn] USB/IP watcher result was %s, but "
-                            "upgrade_tool ld did not find RockUSB: %s",
-                            rockusb_reattach_result,
-                            retry_loader_output,
-                        )
-
-                    if client_id in runtime.global_state.websocket_connections:
-                        try:
-                            await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Firmware burn failed (exit code: {exit_status})", "log_type": "error"})
-                            if error_output and len(error_output) < 500:
-                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Error: {error_output[:200]}", "log_type": "error"})
-                        except Exception:
-                            pass
-
-                    runtime.store_notification(client_id, "Firmware burn failed", (error_output or "Burn failed")[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name, "exit_status": exit_status})
-                    burn_error_msg = f"Firmware burn failed (exit code: {exit_status})"
-                    if clean_output:
-                        burn_error_msg += f": {clean_output[:300]}"
-                    descriptor_enumeration_failed = False
-                    if (
-                        "Wait For Maskrom Start" in clean_output
-                        and not rockusb_reattach_result.get("success")
-                    ):
-                        logger.warning(
-                            "[Firmware Burn] MaskROM USB/IP reattach result: %s",
-                            rockusb_reattach_result,
-                        )
-                        attach_errors = rockusb_reattach_result.get("errors") or {}
-                        attach_detail = "; ".join(
-                            f"{key}: {str(value).strip()[:120]}"
-                            for key, value in attach_errors.items()
-                        )
-                        descriptor_enumeration_failed = any(
-                            "descriptor enumeration failed" in str(value).lower()
-                            or "0000:0002" in str(value).lower()
-                            for value in attach_errors.values()
-                        )
-                        if descriptor_enumeration_failed:
-                            # Keep generic disappearance monitoring quiet after
-                            # this request returns.  Otherwise its 30-attempt
-                            # worker keeps cycling the same failed Windows port
-                            # for roughly 15 minutes, preventing recovery.
-                            keep_usbip_reconnect_paused = True
-                        # 现场快照：Windows 侧 usbipd 设备表能直接回答
-                        # "MaskROM 实例是否到达、是否被共享、是否枚举失败"。
-                        source_snapshot = str(
-                            rockusb_reattach_result.get("source_list") or ""
-                        ).strip()
-                        pending_busids = [
-                            str(item.get("busid") or "")
-                            for item in rockusb_reattach_result.get("pending") or []
-                        ]
-                        precise_diagnosis = _diagnose_maskrom_reattach_failure(
-                            source_snapshot, pending_busids,
-                        )
-                        burn_error_msg += (
-                            "；Loader切换MaskROM时USB/IP未能在等待窗口内重新挂载"
-                            + (f"（{attach_detail[:300]}）" if attach_detail else "")
-                            + "。"
-                        )
-                        if precise_diagnosis:
-                            # 快照能定位到具体层面（Windows 枚举失败 / RockUSB
-                            # 换了新 BUSID / 未共享）时给出精确结论，避免误导
-                            # 性的 AutoBind/TCP 3240 通用提示。
-                            burn_error_msg += f"诊断：{precise_diagnosis}"
-                        else:
-                            burn_error_msg += (
-                                "请确认Windows usbipd-win>=4.2、来源BUSID的AutoBind策略"
-                                "以及TCP 3240连接正常。"
-                            )
-                        # 快照明细完整保留（仅截断长度），不做行过滤——过滤会
-                        # 漏掉枚举在其他 BUSID 上的设备，导致误判。
-                        if source_snapshot:
-                            excerpt = " / ".join(
-                                line.strip()
-                                for line in source_snapshot.splitlines()
-                                if line.strip()
-                            )[:500]
-                            if excerpt:
-                                burn_error_msg += f"；Windows usbipd现场: {excerpt}"
-                    if usbip_flash_routes and not descriptor_enumeration_failed:
-                        # 烧写失败后设备可能停留在 Loader/MaskROM 传输上；
-                        # 在 finally 释放固件独占保护后再调度重连，避免该任务
-                        # 与仍在收尾的 MaskROM watcher 竞争同一 BUSID。
-                        usbip_reconnect_after_finish = True
-                    return error_response(burn_error_msg, status_code=422)
+                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Firmware burn failed (exit code: {exit_status})", "log_type": "error"})
+                        if error_output and len(error_output) < 500:
+                            await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Error: {error_output[:200]}", "log_type": "error"})
+                runtime.store_notification(client_id, "Firmware burn failed", (error_output or "Burn failed")[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name, "exit_status": exit_status})
+                burn_error_msg = f"Firmware burn failed (exit code: {exit_status})"
+                if clean_output:
+                    burn_error_msg += f": {clean_output[:300]}"
+                return error_response(burn_error_msg, status_code=422)
 
             except Exception as e:
-                if usbip_reconnect_paused_devices:
-                    keep_usbip_reconnect_paused = True
                 runtime.store_notification(client_id, "Firmware burn error", str(e)[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name if 'firmware_name' in dir() else ""})
                 return error_response(str(e))
 
     except Exception as e:
-        if usbip_reconnect_paused_devices:
-            keep_usbip_reconnect_paused = True
         import traceback
         logger.error(f"Error in burn_firmware: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return error_response(str(e), 500)
     finally:
-        if loader_reattach_task is not None and not loader_reattach_task.done():
-            loader_reattach_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await loader_reattach_task
-        if usbip_reconnect_paused_devices:
-            if keep_usbip_reconnect_paused:
-                _defer_usbip_reconnects(
-                    usbip_reconnect_paused_devices
-                )
-            else:
-                _resume_usbip_reconnects(
-                    usbip_reconnect_paused_devices
-                )
-        if usbip_reconnect_after_finish and not keep_usbip_reconnect_paused:
+        if usbip_reconnect_after_finish:
             for device in devices:
                 _schedule_usbip_mode_reconnect(device, "adb")
         if merged_firmware and client_id:
