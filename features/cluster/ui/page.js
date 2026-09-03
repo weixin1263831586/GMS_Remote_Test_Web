@@ -429,9 +429,8 @@ async function checkWorkerVpn(){
  const localId=localWorkerId();
  const promises=state.workers.filter(w=>w.status!=='offline').map(async w=>{
   try{const d=await api(`/api/cluster/workers/${encodeURIComponent(w.id)}/vpn-status`);workerVpnCache[w.id]=d.connected}catch(e){
-   // 2026-09-03：403 elevation 不再静默吞掉。自动刷新周期里会反复
-   // 命中，弹框必须节流（3 分钟一次），否则提权框会轮询死循环；
-   // 节流窗口内的后续失败保持旧行为（VPN 状态显示未知）。
+   // 403 elevation 需弹提权框，但自动刷新周期会反复命中：
+   // 节流为 3 分钟一次，窗口内的后续失败保持 VPN 状态未知。
    if(e?.elevationRequired&&Date.now()-vpnElevationPromptAt>180000){
     vpnElevationPromptAt=Date.now();
     if(typeof window.parent?.requestElevatedAccess==='function'){

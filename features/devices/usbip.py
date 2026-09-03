@@ -260,24 +260,31 @@ class USBIPManager:
                     discovered_busids = [item['busid'] for item in inventory]
                     requested = [str(item) for item in selected_busids or []]
                     busids = requested or discovered_busids
+                    all_inventory = inventory
                     if requested:
                         allowed_busids = set(discovered_busids)
                         if allow_transport_only:
                             # Loader/MaskROM 等协议态可能更换 VID:PID，允许
                             # 当前主机上任意存在的 BUSID（含非 Android 过滤项）。
+                            all_inventory = self._find_android_devices_linux(
+                                source_ssh, config, include_all=True,
+                            )
                             allowed_busids.update(
-                                item['busid']
-                                for item in self._find_android_devices_linux(
-                                    source_ssh, config, include_all=True,
-                                )
+                                item['busid'] for item in all_inventory
                             )
                         if not set(requested).issubset(allowed_busids):
                             return {'success': False, 'error': '选择的USB设备已不可用，请刷新后重试'}
                     if not busids:
                         return {'success': False, 'error': '未找到Android设备'}
 
+                    # transport-only 时设备可能处于 Loader/MaskROM，不在
+                    # Android 过滤清单里：选择集必须从全量清单（all_inventory）
+                    # 取，否则 serial/vid 过滤器全空，usbipd 冷启动直接失败。
+                    # 总线 ID 过滤器缺失时直接报错，不做 VID 扩大匹配
+                    # （会把源主机上所有 Rockchip 设备一起导出）。
                     selected_inventory = [
-                        item for item in inventory if item['busid'] in set(busids)
+                        item for item in all_inventory
+                        if item['busid'] in set(busids)
                     ]
                     export_serials = [
                         item['serial'] for item in selected_inventory

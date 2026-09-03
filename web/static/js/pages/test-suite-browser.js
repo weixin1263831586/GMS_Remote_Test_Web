@@ -102,8 +102,7 @@ function getSuiteBrowserRouteParams() {
     const suitePath = params.get('suite_path') || params.get('suite') || '';
     const filePath = params.get('file') || '';
     const directoryPath = params.get('path') || (filePath ? getParentSuitePath(filePath) : '');
-    // 旧实现只有 Controller 本机分享链接会省略 Worker ID，因此缺省值
-    // 可以明确归属本机；远端 Worker 分享链接始终包含 worker_id。
+    // 缺省值归属本机 Worker；远端 Worker 分享链接始终包含 worker_id。
     const workerId = params.get('worker_id') || params.get('host') || workspaceLocalWorkerId();
 
     if (!suitePath) {

@@ -55,14 +55,26 @@ class SftpMkdirChainTests(unittest.TestCase):
 
 
 class EnqueueTaskTests(unittest.TestCase):
-    def test_writes_task_json(self) -> None:
+    def test_writes_task_json_with_device(self) -> None:
         ssh = MagicMock()
         sftp = MagicMock()
         sftp.stat.return_value = None  # queue dir exists
         ssh.open_sftp.return_value = sftp
-        enqueue_task(ssh, "flash-D1-1", r"C:\gms-flash\t1\u.img")
+        queue_dir = source_flash.windows_queue_dir("hcq@172.16.14.66")
+        self.assertEqual(queue_dir, r"C:\Users\hcq\gms-flash-queue")
+        enqueue_task(ssh, queue_dir, "flash-D1-1",
+                     r"C:\gms-flash\t1\u.img", device="RK3576GMS1")
         handle = sftp.open.call_args[0][0]
         self.assertIn("flash-D1-1.json", handle)
+        # 任务 JSON 必须携带目标设备。
+        written = sftp.open.return_value.__enter__.return_value
+        self.assertIn('"device"', written.write.call_args[0][0])
+
+    def test_queue_dir_follows_ssh_user(self) -> None:
+        self.assertEqual(
+            source_flash.windows_queue_dir("wlq@10.0.0.5"),
+            r"C:\Users\wlq\gms-flash-queue",
+        )
 
 
 class WaitResultTests(unittest.TestCase):
@@ -80,8 +92,9 @@ class WaitResultTests(unittest.TestCase):
         with patch.object(
             source_flash.time, "sleep", new=lambda _s: None,
         ):
-            result = wait_result(ssh, "flash-D1-1")
-        self.assertEqual(result["status"], "SUCCESS")
+            result = wait_result(ssh, r"C:\Users\hcq\gms-flash-queue",
+                                 "flash-D1-1")
+        self.assertEqual(result["status"]  , "SUCCESS")
 
     def test_raises_on_timeout(self) -> None:
         ssh = MagicMock()
@@ -102,7 +115,7 @@ class WaitResultTests(unittest.TestCase):
         with patch.object(
             source_flash.time, "sleep", side_effect=fake_sleep,
         ), self.assertRaises(KeyboardInterrupt):
-            wait_result(ssh, "flash-D1-1")
+            wait_result(ssh, r"C:\Users\hcq\gms-flash-queue", "flash-D1-1")
 
 
 class RunSourceFlashTests(unittest.TestCase):

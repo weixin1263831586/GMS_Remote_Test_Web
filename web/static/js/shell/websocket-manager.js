@@ -255,13 +255,12 @@ function initWebSocket() {
                             }
 
                             // USB/IP 设备重启时优先自动重连。
-                            // 2026-09-03 修复：本地物理直连设备烧写进入
-                            // Loader 时也会出现在 disconnected 里，但那
-                            // 不是 USB/IP 重枚举。只有断开设备属于当前
-                            // 记录的 USB/IP 接入（设备列表带 is_usbip，
-                            // 或归属当前 pendingUsbipDeviceHost 的接入
-                            // 选择）才触发自动重连，避免本地烧写空转
-                            // 重连等待循环。
+                            // 只有断开设备属于当前记录的 USB/IP 接入
+                            // （设备列表带 is_usbip，或归属当前
+                            // pendingUsbipDeviceHost 的接入选择）才触发
+                            // 自动重连；本地物理直连设备烧写进入 Loader
+                            // 时也会出现在 disconnected 里，但不属于
+                            // USB/IP 重枚举。
                             const usbipSerials = new Set(
                                 (state.devices || [])
                                     .filter(device => device && device.is_usbip)

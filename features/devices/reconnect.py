@@ -482,13 +482,10 @@ def active_usbip_reconnect_hosts() -> list[str]:
 def reconcile_observed_usbip_devices(current_devices: Iterable[str]) -> dict[str, list[str]]:
     """Promote reconnecting USB/IP devices when they reappear in ADB output.
 
-    2026-09-03 事故修复：提升前必须验证设备确实经由本机 vhci 导入。
-    仅凭 ADB 串号出现就提升，会把物理直连在 Controller 上的同名串号
-    误标成 USB/IP 远端设备，导致固件烧写被错误路由到 Windows Source
-    Agent。``adb devices -l`` 的 ``usb:X-Y`` 总线路径在 sysfs 下的
-    realpath 含 ``vhci`` 即导入设备；落在真实控制器（如 xHCI）下则是
-    物理直连——物理直连的串号绝不提升，且清掉陈旧的 reconnecting
-    状态，终止重连循环。
+    提升前必须验证设备确实经由本机 vhci 导入：``adb devices -l`` 的
+    ``usb:X-Y`` 总线路径在 sysfs 下的 realpath 含 ``vhci`` 即导入设备，
+    落在真实控制器（如 xHCI）下则是物理直连。物理直连的串号绝不提升，
+    且清掉陈旧的 reconnecting 状态，终止重连循环。
     """
     current_set = {str(device_id) for device_id in current_devices or [] if str(device_id)}
     if not current_set:

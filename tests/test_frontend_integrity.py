@@ -453,6 +453,28 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("mountTerminalWorkspacePane(i,pane", body)
         self.assertNotIn("renderTerminalWorkspace()", body)
 
+    def test_terminal_workspace_deduplicates_pending_pane_mounts(self):
+        main_text = read_text("web/shell/shell.html")
+
+        self.assertIn("mountingPanes:new Map()", main_text)
+        self.assertIn("!terminalWorkspace.mountingPanes.has(index)", main_text)
+        self.assertIn("terminalWorkspace.mountingPanes.set(index,mountToken)", main_text)
+        self.assertIn("terminalWorkspace.mountingPanes.get(index)===mountToken", main_text)
+        self.assertIn("terminalWorkspace.mountingPanes.clear()", main_text)
+
+    def test_notification_toggle_waits_for_notification_script(self):
+        shell = read_text("web/shell/shell.html")
+        notifications = read_text("web/static/js/notifications.js")
+
+        self.assertIn("notifications.js?v=20260903-toggle-ready", shell)
+        self.assertNotIn('onclick="toggleNotificationPanel()"', shell)
+        self.assertIn('id="notification-toggle" class="notification-toggle" title="消息通知" disabled', shell)
+        self.assertIn(
+            "notificationToggle.addEventListener('click', toggleNotificationPanel)",
+            notifications,
+        )
+        self.assertIn("notificationToggle.disabled = false", notifications)
+
     def test_device_shell_uses_visible_adb_workspace_without_timer_injection(self):
         main_text = read_text("web/shell/shell.html")
 

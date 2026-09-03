@@ -202,11 +202,9 @@ async def list_users(
     local_addresses = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
     vpn_gateway_addresses = set(config.get('vpn_gateways', []))
 
-    # 2026-09-03 自死锁修复：锁内只取快照，遍历放在锁外。遍历体中的
+    # user_states 在此循环中只读，锁内仅取快照：遍历体中的
     # resolve_client_display_id 会再次申请 user_states_lock（非重入锁），
-    # 原先"锁内循环"在遇到无 @ 的平台 user_id 状态时会同线程自死锁，
-    # 卡死整个事件循环（16:43 重启后健康检查失败的原因，看门狗线程
-    # dump 实锤）。user_states 在此循环中只读，快照足够。
+    # 锁内遍历会同线程死锁，卡死整个事件循环。
     with runtime.global_state.user_states_lock:
         state_items = list(runtime.global_state.user_states.items())
 

@@ -34,6 +34,9 @@ class LocalBridgeTests(unittest.TestCase):
         self.assertEqual(worker["name"], "ats-worker-controller")
         self.assertEqual(worker["status"], "online")
         self.assertIn("adb", worker["capabilities"])
+        self.assertEqual(worker["session_id"], bridge.session_id)
+        self.assertEqual(worker["connection_generation"], bridge.connection_generation)
+        self.assertTrue(worker["session_id"].startswith("controller-bridge-session-"))
 
     def test_bridge_heartbeat_updates_devices_and_metrics(self):
         from features.cluster.local_bridge import LocalWorkerBridge
@@ -53,6 +56,37 @@ class LocalBridgeTests(unittest.TestCase):
         self.assertIsNotNone(worker)
         self.assertGreaterEqual(worker["disk_free_gb"], 0)
         recover.assert_called_once_with(secret=b"x" * 32)
+
+    def test_bridge_takes_over_stale_worker_session_before_heartbeat(self):
+        from features.cluster.local_bridge import LocalWorkerBridge
+
+        worker_id = "ats-worker-controller"
+        self.repo.register_worker({
+            "worker_id": worker_id,
+            "name": worker_id,
+            "agent_version": "0.5.1",
+            "session_id": "worker-session-stale",
+        })
+        self.repo.mark_worker_offline(worker_id)
+
+        bridge = LocalWorkerBridge(
+            self.repo,
+            ClusterConfig(enabled=False, local_worker_id=worker_id),
+        )
+        bridge._register()
+
+        worker = self.repo.get_worker(worker_id)
+        self.assertEqual(worker["session_id"], bridge.session_id)
+        self.assertEqual(worker["connection_generation"], 2)
+        self.assertEqual(bridge.connection_generation, 2)
+        with patch.object(bridge, "_real_agent_active", return_value=False), patch(
+            "worker_agent.adb_proxy.recover_managed_state",
+            return_value={"recovered": [], "errors": []},
+        ), patch(
+            "features.devices.local_proxy_secret",
+            return_value=b"x" * 32,
+        ):
+            bridge._heartbeat()
 
     def test_bridge_re_registers_after_offline(self):
         from features.cluster.local_bridge import LocalWorkerBridge

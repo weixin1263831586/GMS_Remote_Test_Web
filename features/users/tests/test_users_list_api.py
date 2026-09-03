@@ -351,7 +351,7 @@ class UsersListLockSafetyTests(unittest.TestCase):
             lock_held_during_resolve.append(not acquired)
             if acquired:
                 users_api.runtime.global_state.user_states_lock.release()
-            return f"resolved@1.2.3.4" if client_id else ""
+            return "resolved@1.2.3.4" if client_id else ""
 
         try:
             with patch(

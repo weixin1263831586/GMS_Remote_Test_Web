@@ -1755,7 +1755,7 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertEqual(hjf["transport_state_by_busid"], {"1-5": "unknown"})
 
     def test_usbip_assignments_verify_matches_source_host(self):
-        """复审第七节回归：attach 用 Tailscale source_host 时按它核对。
+        """attach 用 Tailscale source_host 时按它核对。
 
         device_host 是 SSH 地址（hcq@172.16.14.66），source_host 是
         usbip attach 的地址（100.x.x.x）；usbip port 里看到的是
@@ -2885,7 +2885,7 @@ BUSID  VID:PID    DEVICE                                                        
                 global_state.usbip_states.update(old_states)
 
     def test_reconcile_does_not_promote_physically_local_device(self):
-        """2026-09-03 事故：物理直连串号不得被提升为 USB/IP 来源。"""
+        """物理直连串号不得被提升为 USB/IP 来源。"""
         import features.devices.reconnect as reconnect
 
         old_sources = dict(global_state.usbip_devices_source)
@@ -2932,7 +2932,6 @@ BUSID  VID:PID    DEVICE                                                        
     def test_classify_local_usb_attachment_distinguishes_vhci_from_physical(self):
         import features.devices.reconnect as reconnect
 
-        bus_paths = {"PHYS001": "1-13", "VHCI001": "4-1"}
         # realpath 模拟：physical 落在 xHCI 控制器，vhci 落在 vhci_hcd。
         real_paths = {
             os.path.join("/sys/bus/usb/devices", "1-13"):
@@ -2978,7 +2977,7 @@ BUSID  VID:PID    DEVICE                                                        
 
 
 class StaleAssignmentRetirementTests(unittest.TestCase):
-    """2026-09-03 事故回归：物理挪插到本机的设备，其过期 USB/IP 分配
+    """物理挪插到本机的设备，其过期 USB/IP 分配
     应被 retire（持久化+内存双清），固件烧写路由立即回落本地链路。"""
 
     def setUp(self):
