@@ -218,6 +218,47 @@ class UsersListApiTests(unittest.TestCase):
         self.assertFalse(temporary["removable"])
         self.assertIn("临时在线会话", temporary["removal_reason"])
 
+    def test_local_devices_attached_for_user_hosts(self):
+        import features.users.users_api as users_api
+
+        old_config_manager = users_api.runtime.config_manager
+        old_global_state = users_api.runtime.global_state
+        users_api.runtime.config_manager = SimpleNamespace(
+            load_config=lambda: {
+                "client_hosts": {"172.16.14.65": "cp2-share"},
+                "vpn_gateways": [],
+            }
+        )
+        users_api.runtime.global_state = SimpleNamespace(
+            user_states={}, user_states_lock=threading.Lock(),
+        )
+        inventory = {
+            "devices": ["SERIAL1"],
+            "source_os": "windows",
+            "available": True,
+            "error": "",
+        }
+        try:
+            with patch(
+                "features.users.cluster_access.get_cluster_service",
+                side_effect=RuntimeError("cluster not configured in unit test"),
+            ), patch.object(
+                users_api,
+                "host_local_device_inventory",
+                return_value=inventory,
+            ) as mock_inventory:
+                resp = asyncio.run(users_api.list_users())
+        finally:
+            users_api.runtime.config_manager = old_config_manager
+            users_api.runtime.global_state = old_global_state
+
+        body = json.loads(resp.body.decode("utf-8"))
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(
+            body["users"][0]["local_devices"], inventory,
+        )
+        mock_inventory.assert_called_once_with("cp2-share@172.16.14.65")
+
 
 if __name__ == "__main__":
     unittest.main()

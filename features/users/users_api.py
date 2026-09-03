@@ -12,6 +12,7 @@ from features.auth import (
     require_elevated_admin,
     require_elevated_admin_when_auth_required,
 )
+from foundation.devices_port import host_local_device_inventory
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
 
@@ -35,6 +36,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 USER_ONLINE_WINDOW = timedelta(minutes=5)
+
+
+def _is_loopback_device_host(device_host: str) -> bool:
+    """本地回环主机（如本机浏览器写入的 hcq@127.0.0.1）不参与直连设备枚举。"""
+    host = str(device_host or "").rsplit("@", 1)[-1].strip().strip("[]")
+    if host.lower() == "::1":
+        return True
+    return host.split(":", 1)[0].strip().lower() in {
+        "127.0.0.1", "localhost", "::1",
+    }
 
 
 @router.get("/api/users/current")
@@ -371,6 +382,17 @@ async def list_users(
         else:
             user_info["removable"] = False
             user_info["removal_reason"] = "临时在线会话没有持久配置，断开后会自动清理"
+
+    # 用户主机本地直连设备：物理直连的全部设备（含已通过 USB/IP /
+    # ADB Proxy 共享出去的，设备仍接在该主机上）；是否被测试操作
+    # 占用由"占用设备"列（devices，来自会话状态与集群租约）表达。
+    # 枚举由 devices 特性经 foundation 端口提供（TTL 缓存 + 后台刷新），
+    # 未接线或首次枚举未完成时为 None，前端显示 '-'。
+    for user_info in users:
+        host = str(user_info.get("client_id") or "")
+        if "@" not in host or _is_loopback_device_host(host):
+            continue
+        user_info["local_devices"] = host_local_device_inventory(host)
 
     return JSONResponse(content={
         'total': len(users),

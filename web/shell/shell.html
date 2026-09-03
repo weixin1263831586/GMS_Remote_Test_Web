@@ -1173,16 +1173,17 @@
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">用户标识</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">IP地址</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 120px;">来源</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">直连设备</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">状态</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">连接时间</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">最后活跃</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
                             <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 112px;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="users-table-body">
                         <tr>
-                            <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                                 加载中...
                             </td>
                         </tr>
@@ -2219,7 +2220,10 @@
                 <form id="adb-proxy-form" onsubmit="event.preventDefault(); submitAdbProxyConnect();" autocomplete="off">
                     <div class="adb-proxy-section-head">
                         <div class="adb-proxy-section-title">新建接入</div>
-                        <button class="btn-xxs" id="adb-proxy-add-ubuntu-toggle" type="button" onclick="toggleAdbProxyUbuntuSource()">＋ 添加Ubuntu设备来源</button>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button class="btn-xxs" id="adb-proxy-add-ubuntu-toggle" type="button" onclick="toggleAdbProxyUbuntuSource()">＋ 添加Ubuntu设备来源</button>
+                            <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" onclick="refreshAdbProxyAssignments()">🔄 刷新</button>
+                        </div>
                     </div>
                     <div id="adb-proxy-ubuntu-source-panel" class="adb-proxy-ubuntu-source-panel" hidden>
                         <div class="adb-proxy-host-grid">
@@ -2256,7 +2260,7 @@
                 </form>
                 <div class="adb-proxy-section-head">
                     <div class="adb-proxy-section-title">当前接入</div>
-                    <button class="btn-xxs" type="button" onclick="refreshAdbProxyAssignments()">🔄 刷新</button>
+                    <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" onclick="refreshAdbProxyAssignments()">🔄 刷新</button>
                 </div>
                 <div id="adb-proxy-assignments" class="adb-proxy-assignments">
                     正在读取接入状态...
@@ -2284,11 +2288,14 @@
             </div>
             <div class="modal-body">
                 <form id="usbip-attach-form" onsubmit="event.preventDefault(); submitUsbipAttach();" autocomplete="off">
-                    <div class="adb-proxy-section-title">新建接入</div>
+                    <div class="adb-proxy-section-head">
+                        <div class="adb-proxy-section-title">新建接入</div>
+                        <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" onclick="refreshUsbipSourceDevices()">🔄 刷新</button>
+                    </div>
                     <div class="device-routing-fields">
                         <div class="modal-form-row">
                             <label for="usbip-source-host">设备来源</label>
-                            <select id="usbip-source-host" onchange="loadUsbipSourceDevices()"></select>
+                            <select id="usbip-source-host" onchange="loadUsbipSourceDevices(); loadUsbipAssignments();"></select>
                         </div>
                         <div class="modal-form-row">
                             <label for="usbip-target-worker">接入主机</label>
@@ -2304,7 +2311,13 @@
                 </form>
                 <div class="adb-proxy-section-head">
                     <div class="adb-proxy-section-title">当前接入</div>
-                    <button class="btn-xxs" type="button" onclick="refreshUsbipAssignments()">🔄 刷新</button>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label class="btn-xxs" for="usbip-show-all-assignments" style="min-width: 0; padding: 4px 8px; user-select: none;">
+                            <input type="checkbox" id="usbip-show-all-assignments" onchange="loadUsbipAssignments()" style="margin: 0 4px 0 0; vertical-align: middle;">
+                            显示全部
+                        </label>
+                        <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" onclick="refreshUsbipAssignments()">🔄 刷新</button>
+                    </div>
                 </div>
                 <div id="usbip-assignments" class="adb-proxy-assignments">
                     正在读取接入状态...
@@ -4326,6 +4339,7 @@
         // ==================== 用户管理功能 ====================
         let usersRefreshInterval = null;
         let usersHasLoaded = false;
+        let usersLocalDevicesReloadTimer = null;
 
         async function loadUsersList(elevationRetried = false) {
             const tbody = document.getElementById('users-table-body');
@@ -4366,7 +4380,7 @@
         function displayUsersListAccessMessage(message) {
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
-            tbody.innerHTML = `<tr><td colspan="8" class="users-empty-message">${escapeHtml(message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" class="users-empty-message">${escapeHtml(message)}</td></tr>`;
         }
 
         // 移除配置型用户（从 config_runtime.client_hosts 删除）。二次确认后调 DELETE。
@@ -4426,7 +4440,7 @@
             if (users.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                             暂无用户
                         </td>
                     </tr>
@@ -4454,6 +4468,21 @@
                 const lastSeen = user.last_seen ? formatTime(user.last_seen) : '-';
                 const createdAt = user.created_at ? formatTime(user.created_at) : '-';
                 const devices = user.devices && user.devices.length > 0 ? user.devices.join(', ') : '-';
+                const localInventory = user.local_devices || null;
+                // local_devices 为 null 表示后台 SSH 枚举尚未完成（首次查看
+                // 需数秒），显示"枚举中…"而非"-"；枚举完成后显示设备清单。
+                const localDevicesPending = localInventory === null;
+                const localDevices = localDevicesPending
+                    ? '枚举中…'
+                    : (localInventory.devices && localInventory.devices.length > 0
+                        ? localInventory.devices.join(', ')
+                        : '-');
+                const localDevicesStyle = localDevicesPending
+                    ? ' color: var(--text-secondary); font-style: italic;'
+                    : '';
+                const localDevicesTitle = localInventory && localInventory.available === false && localInventory.error
+                    ? `title="${escapeHtml(localInventory.error)}"`
+                    : '';
                 const sourceLabel = user.source_label || '-';
                 const sourceColor = user.source === 'internal' ? 'var(--primary-color)' : (user.source === 'public' ? 'var(--warning-color)' : 'var(--text-secondary)');
                 const removeCell = renderUserRemoveCell(user, normalizedStatus);
@@ -4472,6 +4501,12 @@
                         <td style="padding: 4px 6px; text-align: center; font-size: 12px; color: ${sourceColor}; font-weight: 600;">
                             ${escapeHtml(sourceLabel)}
                         </td>
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;${localDevicesStyle}" ${localDevicesTitle}>
+                            ${escapeHtml(localDevices)}
+                        </td>
+                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
+                            ${escapeHtml(devices)}
+                        </td>
                         <td style="padding: 4px 6px; text-align: center;">
                             <span style="color: ${statusColor}; font-weight: 600; font-size: 12px;">●</span>
                             <span style="margin-left: 6px; font-size: 12px;">${escapeHtml(statusText)}</span>
@@ -4481,9 +4516,6 @@
                         </td>
                         <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
                             ${lastSeen}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
-                            ${escapeHtml(devices)}
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">
                             <div class="user-actions-grid">
@@ -4509,6 +4541,18 @@
                 ));
             });
             usersHasLoaded = true;
+
+            // 有用户直连设备仍在后台 SSH 枚举（显示"枚举中…"）时，
+            // 3 秒后补一次加载，不等 10 秒轮询。
+            if (currentPage === 'users'
+                && users.some(user => user.local_devices === null)) {
+                clearTimeout(usersLocalDevicesReloadTimer);
+                usersLocalDevicesReloadTimer = setTimeout(() => {
+                    if (currentPage === 'users' && !document.hidden) {
+                        loadUsersList();
+                    }
+                }, 3000);
+            }
         }
 
         function formatTime(isoString) {

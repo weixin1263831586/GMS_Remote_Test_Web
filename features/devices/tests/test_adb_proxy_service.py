@@ -252,6 +252,45 @@ async def test_connect_refuses_same_serial_already_attached_over_usbip():
 
 
 @pytest.mark.asyncio
+async def test_connect_ignores_offline_history_serial_on_target():
+    """接入主机残留的 offline 历史设备记录（如之前 USB/IP 接入后
+    拔线留下的）不占用序列号，不应阻止 ADB 接入。"""
+    repository = _Repository()
+    repository.devices["worker-target"] = [{
+        "serial": "RK3572GMS1",
+        "state": "offline",
+        "transport": "local_usb",
+        "properties": {"model": "RK3572"},
+    }]
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
+        effective_enabled=True,
+    )
+    service = ADBProxyService()
+    service.config_manager = _ConfigManager()
+    run = AsyncMock(side_effect=[{"running": True}, {"connected": True}])
+
+    with patch(
+        "features.cluster.get_cluster_service", return_value=cluster
+    ), patch(
+        "features.cluster.api._require_cluster_enabled"
+    ), patch(
+        "features.cluster.api._run_worker_command", run
+    ), patch(
+        "features.devices.adb_proxy_service.create_pair_grant",
+        return_value="short-lived-grant",
+    ):
+        result = await service.connect(
+            "worker-source",
+            "worker-target",
+            ["RK3572GMS1"],
+        )
+
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
 async def test_connect_refuses_same_serial_from_another_proxy_source():
     repository = _Repository()
     cluster = SimpleNamespace(

@@ -729,6 +729,81 @@ async def list_usbip_source_devices(
         _record_usbip_source_os(resolved, str(result["source_os"]))
     return JSONResponse(content=result)
 
+@router.get("/api/usbip/assignments")
+async def list_usbip_assignments(
+    _elevated=Depends(require_elevated_admin),
+):
+    """List all USB/IP assignments grouped by source host (read-only).
+
+    供接入弹框"显示全部"视图使用：一次返回所有来源主机的当前接入
+    （按 device_host + worker 分组），纯读持久化分配，不做 SSH 枚举，
+    可被弹框轮询安全调用。断开仍走既有 /api/usbip/disconnect。
+    """
+    grouped: dict[tuple[str, str, str], dict[str, object]] = {}
+    for item in _usbip_assignments().values():
+        if not isinstance(item, dict):
+            continue
+        device_host = str(item.get("device_host") or "").strip()
+        if not device_host:
+            continue
+        key = (
+            device_host,
+            str(item.get("worker_id") or ""),
+            str(item.get("source_host") or ""),
+        )
+        group = grouped.setdefault(key, {
+            "device_host": device_host,
+            "worker_id": key[1],
+            "source_host": key[2],
+            "busids": [],
+            "device_serials": [],
+            "device_serials_by_busid": {},
+            "statuses_by_busid": {},
+            "generations_by_busid": {},
+            "network_quality_by_busid": {},
+            "source_os": "",
+            "status": item.get("status") or "",
+        })
+        if not group["source_os"]:
+            group["source_os"] = str(item.get("source_os") or "").strip()
+        busid = str(item.get("busid") or "")
+        serials = list(dict.fromkeys(
+            str(serial or "").strip()
+            for serial in item.get("device_serials") or []
+            if str(serial or "").strip()
+        ))
+        if busid:
+            group["busids"].append(busid)
+            group["device_serials_by_busid"][busid] = serials
+            group["statuses_by_busid"][busid] = str(item.get("status") or "unknown")
+            group["generations_by_busid"][busid] = int(item.get("generation") or 0)
+            group["network_quality_by_busid"][busid] = item.get("network_quality") or {}
+        for serial in serials:
+            if serial not in group["device_serials"]:
+                group["device_serials"].append(serial)
+
+    selections = [
+        {
+            **group,
+            "busids": sorted(group["busids"]),
+        }
+        for group in grouped.values()
+    ]
+    for group in selections:
+        # 序列号跟随排序后的 busid 顺序，保证输出稳定可读。
+        ordered = list(dict.fromkeys(
+            serial
+            for busid in group["busids"]
+            for serial in group["device_serials_by_busid"].get(busid) or []
+        ))
+        group["device_serials"] = ordered
+    selections.sort(key=lambda group: (group["device_host"], group["worker_id"]))
+    return JSONResponse(content={
+        "success": True,
+        "cluster_selections": selections,
+        "total": len(selections),
+    })
+
 @router.get("/api/usbip/status")
 async def get_usbip_status(
     request: Request,

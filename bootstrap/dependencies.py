@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from features.assistant.universal_ai import UniversalAIAnalyzer
 from features.automation import register_worker_status_port
 from features.cluster import register_cluster_port
+from features.devices.host_inventory import register_devices_port
 from features.devices.locks import devices_display_name_resolver
 from features.email import configure_manager_provider
 from features.redmine import (
@@ -38,6 +39,7 @@ def _wire_cross_feature_services() -> None:
     """
     register_cluster_port()
     register_worker_status_port()
+    register_devices_port()
     configure_manager_provider(get_redmine_config_for_request)
     configure_agent_factories(
         report_analyzer_factory=ReportAnalyzer,
