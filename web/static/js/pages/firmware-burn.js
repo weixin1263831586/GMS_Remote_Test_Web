@@ -1820,8 +1820,9 @@ async function loadUsbipAssignments() {
         let connected = false;
         let statusSource = '';
         if (showAll) {
-            // 显示全部：聚合所有来源主机的接入，纯读配置，不做 SSH 枚举。
-            const data = await apiCall('/api/usbip/assignments', 'GET');
+            // 显示全部：聚合所有来源主机的接入，并做一次本地 usbip port
+            // 实时核对（区分"已记录分配"与"当前已连接"）。
+            const data = await apiCall('/api/usbip/assignments?verify=true', 'GET');
             (data.cluster_selections || []).forEach(group => {
                 (group.busids || []).forEach(busid => {
                     rows.push({
@@ -1875,9 +1876,27 @@ async function loadUsbipAssignments() {
             if (['attaching', 'attached', 'unknown', 'cleanup_required', 'detaching'].includes(assignmentStatus)) {
                 row.classList.add(`routing-status-${assignmentStatus}`);
             }
+            const transportState = selection?.transport_state_by_busid?.[busid] || '';
+            if (transportState === 'detached') {
+                // 已记录分配但本机 usbip port 已无该 (host, busid) 会话。
+                row.classList.add('routing-status-cleanup_required');
+            }
             const info = document.createElement('div');
             info.className = 'adb-proxy-assignment-info';
             info.textContent = usbipAssignmentLabel(selection, busid);
+            if (transportState) {
+                const transportBadge = document.createElement('span');
+                transportBadge.className = 'usbip-transport-state';
+                const transportLabels = {
+                    attached: '✓ 已连接',
+                    detached: '⚠ 已断开（记录残留）',
+                    unknown: '实时状态未知',
+                };
+                transportBadge.textContent = `［${transportLabels[transportState] || transportState}］`;
+                transportBadge.title = '已记录分配与本机 usbip port 实时核对结果；'
+                    + '记录残留表示分配仍在但传输已不在（如 Worker 重启或手工 detach）';
+                info.append(transportBadge);
+            }
             const actions = document.createElement('div');
             actions.className = 'device-routing-actions';
             if (['unknown', 'cleanup_required'].includes(assignmentStatus)) {

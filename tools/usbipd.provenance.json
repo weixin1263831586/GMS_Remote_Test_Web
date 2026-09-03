@@ -1,0 +1,13 @@
+{
+  "artifact": "tools/usbipd",
+  "description": "用户态 USB/IP 服务端（fork 自 jiegec/usbip），随平台分发给 Ubuntu 来源主机自动部署",
+  "source_repo": "weixin1263831586/usbip",
+  "commit": "9131f29389c40cc7a7bb5227602210aacd644ab5",
+  "version": "0.9.3",
+  "target": "x86_64-unknown-linux-gnu",
+  "sha256": "9e75f2b72de298f65ff1d0c55141a496c2b8471110657b7b8212a51f98b03beb",
+  "cargo_lock_sha256": "00ffd2659f73fdc456e3919d09aa4166e1f677f470a903df537e26a1795c14c6",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "build": "cargo build --release --bin usbipd",
+  "notes": "0.9.3 新增：--listen 显式绑定地址（默认 127.0.0.1:3240）、--allow-client 客户端 IP 白名单、transfer/ISO 分配上限、连接数/URB 限制、--device VID:PID 精确配对过滤器。升级流程：在 usbip 仓库对应 commit 上完成 release 构建，用 sha256sum 记录二进制与 Cargo.lock，替换 tools/usbipd 并同步更新本清单。后续应改为 usbip 仓库 CI Release 产物直出（见 2026-09-03 联合审计 P1-5）。"
+}

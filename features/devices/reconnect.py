@@ -10,6 +10,7 @@ from . import runtime
 from .manager import device_manager, has_blocked_adb_process
 from .usbip import find_device_host_password, usbip_manager
 from .usbip_flash import resolve_usbip_flash_routes
+from .usbip_operations import usbip_operation_gate
 from .usbip_persistence import migrate_local_usbip_busid
 from .usbip_transport_probe import probe_existing_local_usbip_transport
 
@@ -661,11 +662,23 @@ def _reconnect_worker(
                     device_host, detail,
                 )
                 return
-            result = usbip_manager.start_usbip(
-                device_host,
-                device_password,
-                **start_kwargs,
-            )
+            # 与 HTTP API 共用同一 operation gate：后台重连也是一次
+            # transport mutation，不能绕开跨线程/跨进程的 owner 判定，
+            # 否则可能与用户点击 Connect 对同一 source 并发 stop/restart。
+            if not usbip_operation_gate.try_acquire(device_host):
+                logger.info(
+                    "[USB/IP Reconnect] operation gate held for %s, retry next attempt",
+                    device_host,
+                )
+                continue
+            try:
+                result = usbip_manager.start_usbip(
+                    device_host,
+                    device_password,
+                    **start_kwargs,
+                )
+            finally:
+                usbip_operation_gate.release(device_host)
             if (
                 is_usbip_reconnect_suppressed(device_host)
                 or _reconnect_paused_for_devices(device_host, expected_set)

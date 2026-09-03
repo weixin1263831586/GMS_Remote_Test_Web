@@ -339,6 +339,216 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertTrue(result["stopped"])
 
+    def test_running_cmdline_requires_usbipd_binary(self):
+        # pgrep 输出中恰好包含 "usbipd bind" 字样的无关进程（如编辑器
+        # 打开的日志）不能被误判为运行中的 usbipd。
+        info = usbip_linux_source.parse_usbip_running_cmdline(
+            "999 vim /tmp/usbipd bind notes",
+        )
+        self.assertFalse(info["running"])
+        info = usbip_linux_source.parse_usbip_running_cmdline(
+            "123 /usr/local/bin/usbipd bind --stop-adb --serial S1",
+        )
+        self.assertTrue(info["running"])
+        self.assertEqual(info["pid"], "123")
+        self.assertEqual(info["serials"], ["S1"])
+
+    def test_start_writes_pid_file_and_quotes_serial(self):
+        # USB serial 是外部输入：包含 shell 元字符时必须被 shlex.quote，
+        # 且启动命令要写 PID 文件供后续按 PID 停止。
+        responses = {
+            "for b in": ("/usr/local/bin/usbipd\n", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.2", "", 0),
+            "pgrep -af": ("", "", 1),
+        }
+        ssh_manager = _fake_ssh_manager(responses)
+        evil_serial = 'RK1; rm -rf /'
+
+        def execute(target, cmd, timeout=None, get_pty=False):
+            ssh_manager.calls.append(cmd)
+            if cmd.startswith("pgrep"):
+                if any(
+                    "usbipd bind" in cmd_item and "RK1;" not in cmd_item
+                    for cmd_item in ssh_manager.calls
+                    if cmd_item.startswith("/usr/local/bin/usbipd")
+                ):
+                    return ("", "", 1)
+                if any(
+                    cmd_item.startswith("/usr/local/bin/usbipd bind")
+                    for cmd_item in ssh_manager.calls
+                ):
+                    return ("123 /usr/local/bin/usbipd bind", "", 0)
+                return ("", "", 1)
+            for key, value in responses.items():
+                if cmd.startswith(key) or cmd == key:
+                    return value
+            return ("", "", 0)
+
+        ssh_manager.execute_command.side_effect = execute
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=[evil_serial],
+        )
+        self.assertTrue(result["success"])
+        start_cmd = next(
+            cmd for cmd in ssh_manager.calls
+            if cmd.startswith("/usr/local/bin/usbipd bind")
+        )
+        self.assertIn("--serial 'RK1; rm -rf /'", start_cmd)
+        self.assertIn("gms-usbipd.pid", start_cmd)
+        self.assertIn("echo $!", start_cmd)
+
+    def test_vid_only_request_not_reused_from_serial_only_instance(self):
+        # P1-4 回归：旧实例带 --serial S1，请求追加 --vid 18d1 时，
+        # serial-only 实例只导出串号命中的设备，不能声称已覆盖 VID。
+        responses = {
+            "for b in": ("/usr/local/bin/usbipd\n", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.2", "", 0),
+            "pkill": ("", "", 0),
+        }
+        ssh_manager = _fake_ssh_manager(responses)
+        pgrep_results = [
+            ("9 /usr/local/bin/usbipd bind --stop-adb --serial S1", "", 0),
+            ("9 /usr/local/bin/usbipd bind --stop-adb --serial S1", "", 0),
+            ("", "", 1),
+            ("10 /usr/local/bin/usbipd bind --stop-adb --serial S1 --vid 18d1", "", 0),
+        ]
+        pgrep_index = {"i": 0}
+
+        def execute(target, cmd, timeout=None, get_pty=False):
+            ssh_manager.calls.append(cmd)
+            if cmd.startswith("pgrep"):
+                result = pgrep_results[min(pgrep_index["i"], len(pgrep_results) - 1)]
+                pgrep_index["i"] += 1
+                return result
+            for key, value in responses.items():
+                if cmd.startswith(key) or cmd == key:
+                    return value
+            return ("", "", 0)
+
+        ssh_manager.execute_command.side_effect = execute
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=[], vids=["18d1"],
+        )
+        self.assertTrue(result["success"])
+        self.assertTrue(result["started"])
+        start_cmd = next(
+            cmd for cmd in ssh_manager.calls
+            if cmd.startswith("/usr/local/bin/usbipd bind")
+        )
+        self.assertIn("--vid 18d1", start_cmd)
+
+    def test_vid_addition_merges_and_restarts(self):
+        # P1-4 主用例：旧实例 --vid 2207，请求 --vid 18d1，必须判定为
+        # 覆盖不足并合并重启，而不是错误复用。
+        responses = {
+            "for b in": ("/usr/local/bin/usbipd\n", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.2", "", 0),
+            "pkill": ("", "", 0),
+        }
+        ssh_manager = _fake_ssh_manager(responses)
+        pgrep_results = [
+            ("7 /usr/local/bin/usbipd bind --vid 2207", "", 0),
+            ("7 /usr/local/bin/usbipd bind --vid 2207", "", 0),
+            ("", "", 1),
+            ("8 /usr/local/bin/usbipd bind --vid 2207 --vid 18d1", "", 0),
+        ]
+        pgrep_index = {"i": 0}
+
+        def execute(target, cmd, timeout=None, get_pty=False):
+            ssh_manager.calls.append(cmd)
+            if cmd.startswith("pgrep"):
+                result = pgrep_results[min(pgrep_index["i"], len(pgrep_results) - 1)]
+                pgrep_index["i"] += 1
+                return result
+            for key, value in responses.items():
+                if cmd.startswith(key) or cmd == key:
+                    return value
+            return ("", "", 0)
+
+        ssh_manager.execute_command.side_effect = execute
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=[], vids=["18d1"],
+        )
+        self.assertTrue(result["success"])
+        self.assertTrue(result["started"])
+        self.assertEqual(result["vids"], ["18d1", "2207"])
+        start_cmd = next(
+            cmd for cmd in ssh_manager.calls
+            if cmd.startswith("/usr/local/bin/usbipd bind")
+        )
+        self.assertIn("--vid 2207", start_cmd)
+        self.assertIn("--vid 18d1", start_cmd)
+
+    def test_start_passes_listen_for_new_usbipd(self):
+        # usbipd 0.9.3+ 默认只监听回环；平台启动时必须显式传
+        # --listen <SSH可达IP>:3240，否则 Worker 无法 attach。
+        responses = {
+            "for b in": ("/usr/local/bin/usbipd\n", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "echo $SSH_CONNECTION": ("10.0.0.9 54321 10.0.0.5 22\n", "", 0),
+            "pgrep -af": ("", "", 1),
+        }
+        ssh_manager = _fake_ssh_manager(responses)
+
+        def execute(target, cmd, timeout=None, get_pty=False):
+            ssh_manager.calls.append(cmd)
+            if cmd.startswith("pgrep"):
+                if any(
+                    cmd_item.startswith("/usr/local/bin/usbipd bind")
+                    for cmd_item in ssh_manager.calls
+                ):
+                    return ("77 /usr/local/bin/usbipd bind", "", 0)
+                return ("", "", 1)
+            for key, value in responses.items():
+                if cmd.startswith(key) or cmd == key:
+                    return value
+            return ("", "", 0)
+
+        ssh_manager.execute_command.side_effect = execute
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=["S1"],
+        )
+        self.assertTrue(result["success"])
+        start_cmd = next(
+            cmd for cmd in ssh_manager.calls
+            if cmd.startswith("/usr/local/bin/usbipd bind")
+        )
+        self.assertIn("--listen 10.0.0.5:3240", start_cmd)
+
+    def test_start_skips_listen_for_old_usbipd(self):
+        # 0.9.2 无 --listen 选项：不传，保持旧行为（部署环境由防火墙兜底）。
+        responses = {
+            "for b in": ("/usr/local/bin/usbipd\n", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.2", "", 0),
+            "pgrep -af": ("", "", 1),
+        }
+        ssh_manager = _fake_ssh_manager(responses)
+
+        def execute(target, cmd, timeout=None, get_pty=False):
+            ssh_manager.calls.append(cmd)
+            if cmd.startswith("pgrep"):
+                if any(
+                    cmd_item.startswith("/usr/local/bin/usbipd bind")
+                    for cmd_item in ssh_manager.calls
+                ):
+                    return ("77 /usr/local/bin/usbipd bind", "", 0)
+                return ("", "", 1)
+            for key, value in responses.items():
+                if cmd.startswith(key) or cmd == key:
+                    return value
+            return ("", "", 0)
+
+        ssh_manager.execute_command.side_effect = execute
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=["S1"],
+        )
+        self.assertTrue(result["success"])
+        start_cmd = next(
+            cmd for cmd in ssh_manager.calls
+            if cmd.startswith("/usr/local/bin/usbipd bind")
+        )
+        self.assertNotIn("--listen", start_cmd)
+
 
 class ManagerOsBranchTests(unittest.TestCase):
     def _manager(self, ssh_manager) -> usbip.USBIPManager:

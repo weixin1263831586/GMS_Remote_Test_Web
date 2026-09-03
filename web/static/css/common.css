@@ -1987,6 +1987,18 @@ select option {
     overflow-wrap: anywhere;
 }
 
+.usbip-transport-state {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: nowrap;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
 .device-routing-actions {
     display: grid;
     grid-auto-flow: column;

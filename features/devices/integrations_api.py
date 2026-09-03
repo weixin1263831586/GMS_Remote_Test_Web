@@ -172,6 +172,72 @@ def _usbip_assignments() -> dict[str, dict]:
     assignments = runtime_config.get("usbip_cluster_assignments") or {}
     return dict(assignments) if isinstance(assignments, dict) else {}
 
+
+def _verify_local_usbip_transport(
+    assignments: dict[str, dict],
+) -> dict[str, dict[str, object]]:
+    """Cross-check persisted (device_host, busid) pairs against ``usbip port``.
+
+    持久化 assignment 是"已记录分配"，与本机实际 attach 状态可能脱节
+    （Controller crash、worker reboot、手工 usbip detach）。本函数用
+    ``usbip port`` 的实时输出对本地 Worker 名下的分配逐条核对，返回
+    ``{(device_host, busid): {"transport_state": ..., "checked_at": ...}}``；
+    远端 Worker 的分配不核对（transport_state 留空），由既有
+    schedule_remote_usbip_verify 后台机制负责。
+    """
+    from .usbip_transaction import USBIP_PORT_COMMAND, parse_usbip_port_entries
+
+    local_worker_id = _local_worker_id()
+    targets: set[tuple[str, str]] = set()
+    for item in assignments.values():
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("worker_id") or "") != local_worker_id:
+            continue
+        if str(item.get("status") or "") not in {
+            "attaching", "attached", "unknown", "cleanup_required",
+        }:
+            continue
+        device_host = str(item.get("device_host") or "").strip()
+        busid = str(item.get("busid") or "").strip()
+        if device_host and busid:
+            targets.add((device_host, busid))
+    if not targets:
+        return {}
+
+    config = runtime.config_manager.load_config()
+    ssh = runtime.ssh_manager.get_connection(config)
+    if not ssh:
+        return {}
+    try:
+        stdout, _stderr, code = runtime.ssh_manager.execute_command(
+            ssh, USBIP_PORT_COMMAND, timeout=10,
+        )
+        if code != 0:
+            return {}
+        attached = {
+            (str(entry.get("host") or "").strip(), str(entry.get("busid") or "").strip())
+            for entry in parse_usbip_port_entries(stdout or "")
+        }
+    except Exception as exc:
+        logger.warning(
+            "[USB/IP Assignments] transport verification failed: %s", exc,
+        )
+        return {}
+    finally:
+        runtime.ssh_manager.return_connection(ssh)
+
+    checked_at = time.time()
+    result: dict[str, dict[str, object]] = {}
+    for device_host, busid in targets:
+        host_key = device_host.split("@", 1)[-1]
+        attached_now = (host_key, busid) in attached or (device_host, busid) in attached
+        result[f"{device_host}|{busid}"] = {
+            "transport_state": "attached" if attached_now else "detached",
+            "checked_at": checked_at,
+        }
+    return result
+
 def _save_usbip_assignments(assignments: dict[str, dict]) -> None:
     updater = getattr(runtime.config_manager, "update_runtime_config", None)
     if callable(updater):
@@ -731,6 +797,7 @@ async def list_usbip_source_devices(
 
 @router.get("/api/usbip/assignments")
 async def list_usbip_assignments(
+    verify: bool = False,
     _elevated=Depends(require_elevated_admin),
 ):
     """List all USB/IP assignments grouped by source host (read-only).
@@ -738,6 +805,12 @@ async def list_usbip_assignments(
     供接入弹框"显示全部"视图使用：一次返回所有来源主机的当前接入
     （按 device_host + worker 分组），纯读持久化分配，不做 SSH 枚举，
     可被弹框轮询安全调用。断开仍走既有 /api/usbip/disconnect。
+
+    ``?verify=true``：对本地 Worker 名下的分配额外执行一次
+    ``usbip port`` 实时核对，响应中带 ``transport_state_by_busid``
+    （attached/detached/unknown）与 ``verified: true``。持久化分配
+    表示"已记录分配"，实时核对才是"当前已连接"；两者可能因
+    Controller/Worker 重启或手工 detach 而短暂不一致。
     """
     grouped: dict[tuple[str, str, str], dict[str, object]] = {}
     for item in _usbip_assignments().values():
@@ -798,10 +871,33 @@ async def list_usbip_assignments(
         ))
         group["device_serials"] = ordered
     selections.sort(key=lambda group: (group["device_host"], group["worker_id"]))
+
+    transport_state_by_busid: dict[str, dict[str, str]] = {}
+    verified = False
+    if verify:
+        verified_states = await asyncio.to_thread(
+            _verify_local_usbip_transport,
+            _usbip_assignments(),
+        )
+        verified = True
+        for group in selections:
+            group_states: dict[str, str] = {}
+            for busid in group["busids"]:
+                key = f"{group['device_host']}|{busid}"
+                state = verified_states.get(key) or {}
+                group_states[busid] = str(state.get("transport_state") or "unknown")
+            group["transport_state_by_busid"] = group_states
+        for key, state in verified_states.items():
+            device_host, _sep, busid = key.rpartition("|")
+            transport_state_by_busid.setdefault(device_host, {})[busid] = (
+                str(state.get("transport_state") or "unknown")
+            )
     return JSONResponse(content={
         "success": True,
         "cluster_selections": selections,
         "total": len(selections),
+        "verified": verified,
+        "transport_state_by_busid": transport_state_by_busid,
     })
 
 @router.get("/api/usbip/status")
