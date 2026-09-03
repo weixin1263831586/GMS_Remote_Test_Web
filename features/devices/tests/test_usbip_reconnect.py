@@ -1598,6 +1598,88 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertEqual(body["device_host"], "hcq@172.16.14.66")
         self.assertFalse(body["transport_connected"])
 
+    def test_usbip_assignments_aggregates_all_hosts(self):
+        """显示全部：一次返回所有来源主机的接入，按主机+Worker分组。"""
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return {
+                    "usbip_cluster_assignments": {
+                        "wlq@172.16.14.246|2-2": {
+                            "device_host": "wlq@172.16.14.246",
+                            "source_host": "172.16.14.246",
+                            "worker_id": "ats-worker-controller",
+                            "busid": "2-2",
+                            "device_serials": ["ATS357629"],
+                            "status": "attached",
+                            "generation": 3,
+                        },
+                        "wlq@172.16.14.246|2-1": {
+                            "device_host": "wlq@172.16.14.246",
+                            "source_host": "172.16.14.246",
+                            "worker_id": "ats-worker-controller",
+                            "busid": "2-1",
+                            "device_serials": ["RK3576GMS1"],
+                            "status": "attached",
+                            "generation": 4,
+                        },
+                        "hjf@172.16.14.188|1-5": {
+                            "device_host": "hjf@172.16.14.188",
+                            "source_host": "172.16.14.188",
+                            "worker_id": "ats-worker-246",
+                            "busid": "1-5",
+                            "device_serials": [],
+                            "status": "unknown",
+                        },
+                        "detached-host|9-9": {
+                            "device_host": "",
+                            "busid": "9-9",
+                            "status": "attached",
+                        },
+                    },
+                }
+
+        with patch.object(
+            integrations.runtime, "config_manager", FakeConfigManager()
+        ):
+            response = asyncio.run(integrations.list_usbip_assignments())
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["success"])
+        self.assertEqual(body["total"], 2)
+        by_host = {
+            group["device_host"]: group
+            for group in body["cluster_selections"]
+        }
+        wlq = by_host["wlq@172.16.14.246"]
+        # 同一来源+Worker 的多个 BUSID 聚合为一组，busid 升序。
+        self.assertEqual(wlq["busids"], ["2-1", "2-2"])
+        self.assertEqual(wlq["device_serials"], ["RK3576GMS1", "ATS357629"])
+        self.assertEqual(wlq["statuses_by_busid"], {"2-1": "attached", "2-2": "attached"})
+        self.assertEqual(wlq["generations_by_busid"], {"2-1": 4, "2-2": 3})
+        hjf = by_host["hjf@172.16.14.188"]
+        self.assertEqual(hjf["busids"], ["1-5"])
+        self.assertEqual(hjf["worker_id"], "ats-worker-246")
+        self.assertEqual(hjf["statuses_by_busid"], {"1-5": "unknown"})
+
+    def test_usbip_assignments_empty(self):
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return {}
+
+        with patch.object(
+            integrations.runtime, "config_manager", FakeConfigManager()
+        ):
+            response = asyncio.run(integrations.list_usbip_assignments())
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["success"])
+        self.assertEqual(body["cluster_selections"], [])
+        self.assertEqual(body["total"], 0)
+
     def test_usbip_status_includes_serials_for_each_disconnect_item(self):
         import features.devices.integrations_api as integrations
 

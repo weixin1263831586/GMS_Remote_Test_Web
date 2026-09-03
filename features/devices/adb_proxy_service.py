@@ -421,6 +421,9 @@ class ADBProxyService:
             str(item.get("serial") or "")
             for item in cluster.repository.list_devices(target_worker_id)
             if str(item.get("transport") or "") != "adb_proxy"
+            # 接入主机的设备清单保留已消失设备的 offline 历史记录，
+            # 这些记录不占用 ADB 序列号；仅当前在线记录才算冲突。
+            and str(item.get("state") or "available") != "offline"
         }
         conflicts = sorted(set(additions) & target_serials)
         if conflicts:

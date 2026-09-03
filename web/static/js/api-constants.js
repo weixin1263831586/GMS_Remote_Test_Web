@@ -318,8 +318,8 @@ const API_DETAILS_MAP = {
         title: '获取在线用户',
         description: '获取所有在线用户列表',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "users": [{ "client_id": "user@192.168.1.100", "username": "user", "running": false }] }',
-        usage: '查看当前在线用户及其设备使用情况'
+        response: '{ "users": [{ "client_id": "user@192.168.1.100", "username": "user", "running": false, "local_devices": { "devices": ["serial1"], "source_os": "windows", "available": true } }] }',
+        usage: '查看当前在线用户及其设备使用情况；local_devices 为用户主机物理直连且未通过USB/IP或ADB Proxy共享的设备'
     },
     '/api/devices/list': {
         title: '获取设备列表',

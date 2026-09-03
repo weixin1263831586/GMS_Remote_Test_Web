@@ -1793,6 +1793,21 @@ async function refreshUsbipAssignments() {
     await loadUsbipAssignments();
 }
 
+// 新建接入区：强制重新枚举当前选中来源主机的USB设备（绕过5秒缓存）
+// 并同步来源系统标识。
+async function refreshUsbipSourceDevices() {
+    const source = document.getElementById('usbip-source-host')?.value || '';
+    if (!source) {
+        showToast('请先选择设备来源', 'warning');
+        return;
+    }
+    usbipSourceDeviceCache.delete(source);
+    await Promise.all([
+        loadUsbipSourceDevices(true),
+        refreshUsbipSourceOsLabels([source]),
+    ]);
+}
+
 async function loadUsbipAssignments() {
     const container = document.getElementById('usbip-assignments');
     if (!container) return;
@@ -1800,32 +1815,54 @@ async function loadUsbipAssignments() {
     container.setAttribute('aria-busy', 'true');
     if (!hadRenderedAssignments) container.textContent = '正在读取接入状态...';
     try {
-        const statusPath = pendingUsbipDeviceHost
-            ? '/api/usbip/status?device_host=' + encodeURIComponent(pendingUsbipDeviceHost)
-            : '/api/usbip/status';
-        const status = await apiCall(statusPath, 'GET');
-        const selections = status.cluster_selections || [];
-        const statusSource = status.device_host || pendingUsbipDeviceHost || '';
-        if (statusSource) usbipAssignedBusidsBySource.set(statusSource, new Set());
-        const rows = [];
-        selections.forEach(group => {
-            const assignedBusids = usbipAssignedBusidsBySource.get(group.device_host)
-                || new Set();
-            (group.busids || []).forEach(busid => {
-                assignedBusids.add(busid);
-                const deviceSerials = usbipSelectionSerials(group, busid);
-                rows.push({
-                    ...group,
-                    busids: [busid],
-                    device_serials: deviceSerials,
+        const showAll = document.getElementById('usbip-show-all-assignments')?.checked;
+        let rows = [];
+        let connected = false;
+        let statusSource = '';
+        if (showAll) {
+            // 显示全部：聚合所有来源主机的接入，纯读配置，不做 SSH 枚举。
+            const data = await apiCall('/api/usbip/assignments', 'GET');
+            (data.cluster_selections || []).forEach(group => {
+                (group.busids || []).forEach(busid => {
+                    rows.push({
+                        ...group,
+                        busids: [busid],
+                        device_serials: usbipSelectionSerials(group, busid),
+                    });
                 });
             });
-            usbipAssignedBusidsBySource.set(group.device_host, assignedBusids);
-        });
-        if (!rows.length && activeUsbipSelection?.busids?.length) {
-            activeUsbipSelection.busids.forEach(busid => {
-                rows.push({...activeUsbipSelection, busids: [busid]});
+            connected = rows.length > 0;
+        } else {
+            // 默认：跟随弹框中选中的设备来源；未选择来源时回退到
+            // 本会话最近接入的主机，避免查询成操作者自身主机而显示为空。
+            const modalSource = document.getElementById('usbip-source-host')?.value || '';
+            const statusHost = modalSource || pendingUsbipDeviceHost;
+            const statusPath = statusHost
+                ? '/api/usbip/status?device_host=' + encodeURIComponent(statusHost)
+                : '/api/usbip/status';
+            const status = await apiCall(statusPath, 'GET');
+            const selections = status.cluster_selections || [];
+            statusSource = status.device_host || statusHost || '';
+            connected = Boolean(status.connected);
+            if (statusSource) usbipAssignedBusidsBySource.set(statusSource, new Set());
+            selections.forEach(group => {
+                const assignedBusids = usbipAssignedBusidsBySource.get(group.device_host)
+                    || new Set();
+                (group.busids || []).forEach(busid => {
+                    assignedBusids.add(busid);
+                    rows.push({
+                        ...group,
+                        busids: [busid],
+                        device_serials: usbipSelectionSerials(group, busid),
+                    });
+                });
+                usbipAssignedBusidsBySource.set(group.device_host, assignedBusids);
             });
+            if (!rows.length && status.connected && activeUsbipSelection?.busids?.length) {
+                activeUsbipSelection.busids.forEach(busid => {
+                    rows.push({...activeUsbipSelection, busids: [busid]});
+                });
+            }
         }
         container.replaceChildren();
         rows.forEach(selection => {
@@ -1867,9 +1904,9 @@ async function loadUsbipAssignments() {
             row.append(info, actions);
             container.append(row);
         });
-        if (!rows.length && status.connected) {
+        if (!rows.length && !showAll && connected) {
             const legacy = {
-                device_host: status.device_host || pendingUsbipDeviceHost,
+                device_host: statusSource || pendingUsbipDeviceHost,
                 worker_id: workspaceLocalWorkerId(),
             };
             const row = document.createElement('div');
@@ -1891,10 +1928,12 @@ async function loadUsbipAssignments() {
             container.append(row);
         }
         if (!container.children.length) {
-            container.textContent = '当前没有通过USB/IP接入的设备。';
+            container.textContent = showAll
+                ? '当前没有任何通过USB/IP接入的设备。'
+                : '当前来源没有通过USB/IP接入的设备。';
         }
         container.dataset.loaded = 'true';
-        state.usbipConnected = Boolean(rows.length || status.connected);
+        state.usbipConnected = Boolean(rows.length || connected);
         updateUsbipButtonStatus(state.usbipConnected);
         updateUsbipAssignmentOperationButtons();
     } catch (error) {
