@@ -1680,6 +1680,120 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertEqual(body["cluster_selections"], [])
         self.assertEqual(body["total"], 0)
 
+    def test_usbip_assignments_verify_reports_live_transport_state(self):
+        """verify=true：本地分配按 usbip port 实时核对，区分已记录/已连接。"""
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return {
+                    "usbip_cluster_assignments": {
+                        "wlq@172.16.14.246|2-2": {
+                            "device_host": "wlq@172.16.14.246",
+                            "worker_id": "ats-worker-controller",
+                            "busid": "2-2",
+                            "device_serials": ["ATS357629"],
+                            "status": "attached",
+                        },
+                        "wlq@172.16.14.246|2-1": {
+                            "device_host": "wlq@172.16.14.246",
+                            "worker_id": "ats-worker-controller",
+                            "busid": "2-1",
+                            "device_serials": ["RK3576GMS1"],
+                            "status": "attached",
+                        },
+                        "hjf@172.16.14.188|1-5": {
+                            "device_host": "hjf@172.16.14.188",
+                            "worker_id": "ats-worker-246",
+                            "busid": "1-5",
+                            "status": "unknown",
+                        },
+                    },
+                }
+
+            def load_config(self):
+                return {}
+
+        fake_ssh = MagicMock()
+        fake_ssh_manager = MagicMock()
+        fake_ssh_manager.get_connection.return_value = fake_ssh
+        # usbip port: 2-1 仍在，2-2 已消失（如手工 detach / worker 重启）。
+        fake_ssh_manager.execute_command.return_value = (
+            "Port 00:\n"
+            "Port 01:\n"
+            "       2-1 | 2207:0006 | RK3576GMS1 | Remote USB/IP host 172.16.14.246\n"
+            "Port 02:\n"
+            "       2-2 | 2207:0006 | ATS357629 | Remote USB/IP host 172.16.14.99\n",
+            "",
+            0,
+        )
+
+        with patch.object(
+            integrations.runtime, "config_manager", FakeConfigManager()
+        ), patch.object(
+            integrations.runtime, "ssh_manager", fake_ssh_manager,
+        ):
+            response = asyncio.run(
+                integrations.list_usbip_assignments(verify=True)
+            )
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["success"])
+        self.assertTrue(body["verified"])
+        by_host = {
+            group["device_host"]: group
+            for group in body["cluster_selections"]
+        }
+        wlq = by_host["wlq@172.16.14.246"]
+        self.assertEqual(
+            wlq["transport_state_by_busid"],
+            {"2-1": "attached", "2-2": "detached"},
+        )
+        # 远端 Worker 分配不本地核对，状态为 unknown。
+        hjf = by_host["hjf@172.16.14.188"]
+        self.assertEqual(hjf["transport_state_by_busid"], {"1-5": "unknown"})
+
+    def test_usbip_assignments_verify_falls_back_to_unknown_on_ssh_error(self):
+        """SSH 核对失败：不阻塞响应，实时状态降级为 unknown。"""
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return {
+                    "usbip_cluster_assignments": {
+                        "wlq@172.16.14.246|2-2": {
+                            "device_host": "wlq@172.16.14.246",
+                            "worker_id": "ats-worker-controller",
+                            "busid": "2-2",
+                            "status": "attached",
+                        },
+                    },
+                }
+
+            def load_config(self):
+                return {}
+
+        fake_ssh_manager = MagicMock()
+        fake_ssh_manager.get_connection.return_value = MagicMock()
+        fake_ssh_manager.execute_command.return_value = ("", "boom", 1)
+
+        with patch.object(
+            integrations.runtime, "config_manager", FakeConfigManager()
+        ), patch.object(
+            integrations.runtime, "ssh_manager", fake_ssh_manager,
+        ):
+            response = asyncio.run(
+                integrations.list_usbip_assignments(verify=True)
+            )
+
+        body = json.loads(response.body.decode("utf-8"))
+        self.assertTrue(body["success"])
+        self.assertTrue(body["verified"])
+        group = body["cluster_selections"][0]
+        self.assertEqual(
+            group["transport_state_by_busid"], {"2-2": "unknown"},
+        )
+
     def test_usbip_status_includes_serials_for_each_disconnect_item(self):
         import features.devices.integrations_api as integrations
 

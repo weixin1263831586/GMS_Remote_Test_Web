@@ -19,6 +19,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Gitleaks 需要 parent^..HEAD 的完整历史；fetch-depth: 1 会导致
+          # "fatal: ambiguous argument" 并连锁跳过 Ruff/pytest 等后续步骤。
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

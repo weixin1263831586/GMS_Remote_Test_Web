@@ -428,6 +428,10 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
             len(backends)
         )
         while missing and time.monotonic() < deadline:
+            if not _managed_running(root / "hub.pid", "adb-hub"):
+                raise RuntimeError(
+                    "adb-hub 在等待来源设备时退出，请查看 Worker 日志"
+                )
             visible = {
                 item["serial"] for item in _adb_devices()
                 if item.get("state") == "device"
@@ -570,26 +574,43 @@ def _status() -> dict[str, Any]:
 def _restart_hub(config_path: Path) -> None:
     root = _state_root()
     config = _read_hub_config(config_path)
-    _stop_managed(root / "hub.pid", "adb-hub")
     # Kill any ADB server that may still own :5037 or :5039. A leftover
     # fork-server on either port prevents the new adb-hub (and its side
     # ADB on local_adb_port=5039) from binding cleanly, which surfaces as
     # "protocol fault (couldn't read status): Connection reset by peer".
-    _force_kill_adb_port(5037)
-    _force_kill_adb_port(5039)
-    process = subprocess.Popen(
-        [
-            _binary("adb-hub"),
-            "--config", str(config_path),
-            "--daemon",
-            "--single-user",
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=_process_log("hub"),
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    _write_pid(root / "hub.pid", process.pid)
+    for attempt in range(2):
+        _stop_managed(root / "hub.pid", "adb-hub")
+        _force_kill_adb_port(5037)
+        _force_kill_adb_port(5039)
+        process = subprocess.Popen(
+            [
+                _binary("adb-hub"),
+                "--config", str(config_path),
+                "--daemon",
+                "--single-user",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=_process_log("hub"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        _write_pid(root / "hub.pid", process.pid)
+        # A port conflict makes adb-hub exit with rc=1 within ~1s. Detect
+        # that immediately instead of probing whoever is squatting :5037 —
+        # an arbitrary listener accepts TCP but resets the ADB handshake,
+        # which otherwise only surfaces as "protocol fault: Connection
+        # reset by peer".
+        exited, early_detail = _hub_startup_exited(process)
+        if not exited:
+            break
+        _stop_managed(root / "hub.pid", "adb-hub")
+        if attempt == 0 and _is_port_race(early_detail):
+            # A concurrent `adb` client (e.g. CTS tooling) re-spawned a
+            # server on :5037 between the kill and the hub bind; clear it
+            # and retry once before giving up.
+            time.sleep(1.0)
+            continue
+        raise RuntimeError(f"adb-hub 启动失败: {early_detail}")
     tcp_ready = _wait_tcp("127.0.0.1", 5037)
     adb_ready, adb_error = (
         _wait_adb_server(
@@ -603,8 +624,38 @@ def _restart_hub(config_path: Path) -> None:
     )
     if not adb_ready or process.poll() is not None:
         _stop_managed(root / "hub.pid", "adb-hub")
-        detail = f": {adb_error}" if adb_error else ""
+        detail = adb_error or _hub_log_error()
+        detail = f": {detail}" if detail else ""
         raise RuntimeError(f"adb-hub 未能在5037端口完成ADB协议初始化{detail}")
+
+
+def _hub_startup_exited(process: Any, timeout: float = 3.0) -> tuple[bool, str]:
+    """Catch an adb-hub that dies during startup (e.g. bind conflict)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        code = process.poll()
+        if code is not None:
+            if code == 0:
+                # Detached cleanly; the daemon child keeps serving :5037.
+                return False, ""
+            return True, _hub_log_error() or f"adb-hub 进程已退出 (rc={code})"
+        time.sleep(0.1)
+    return False, ""
+
+
+def _hub_log_error() -> str:
+    for line in reversed(_tail_log("hub", 50)):
+        if "error" in line.lower():
+            return line[-500:]
+    return ""
+
+
+def _is_port_race(detail: str) -> bool:
+    lowered = str(detail).lower()
+    return any(
+        marker in lowered
+        for marker in ("bind", "address in use", "os error 98")
+    )
 
 
 def _log_path(name: str) -> Path:

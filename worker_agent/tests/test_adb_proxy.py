@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from worker_agent.adb_proxy import (
+    _restart_hub,
     _sanitize_log_line,
     execute_adb_proxy_action,
     imported_device_for_serial,
@@ -241,6 +242,75 @@ def test_recovery_restarts_persisted_target_after_host_reboot(tmp_path):
 
     assert result == {"recovered": ["target"], "errors": []}
     restart.assert_called_once_with(tmp_path / "hub.toml")
+
+
+def test_restart_hub_retries_once_on_bind_port_race(tmp_path):
+    """Bind 失败（端口被并发拉起的 adb server 抢占）时清理端口重试一次。"""
+    healthy = MagicMock(pid=101)
+    healthy.poll.return_value = None
+    crashed = MagicMock(pid=102)
+    crashed.poll.return_value = 1
+    processes = iter([crashed, healthy])
+    with patch.dict(
+        "os.environ",
+        {"GMS_ADB_PROXY_STATE_ROOT": str(tmp_path)},
+    ), patch(
+        "worker_agent.adb_proxy._read_hub_config",
+        return_value={"backend": [{"name": "b", "addr": "a", "pair_code": "p"}]},
+    ), patch(
+        "worker_agent.adb_proxy._stop_managed", return_value=False
+    ), patch(
+        "worker_agent.adb_proxy._force_kill_adb_port"
+    ), patch(
+        "worker_agent.adb_proxy._binary", return_value="/bin/adb-hub"
+    ), patch(
+        "worker_agent.adb_proxy._process_log", return_value=None
+    ), patch(
+        "worker_agent.adb_proxy.subprocess.Popen",
+        side_effect=lambda *a, **k: next(processes),
+    ) as popen, patch(
+        "worker_agent.adb_proxy._tail_log",
+        return_value=["adb-hub error: failed to bind 127.0.0.1:5037: Address in use"],
+    ), patch(
+        "worker_agent.adb_proxy.time.sleep"
+    ), patch(
+        "worker_agent.adb_proxy._wait_tcp", return_value=True
+    ), patch(
+        "worker_agent.adb_proxy._wait_adb_server", return_value=(True, "")
+    ):
+        _restart_hub(tmp_path / "hub.toml")
+
+    assert popen.call_count == 2
+
+
+def test_restart_hub_reports_bind_failure_without_long_wait(tmp_path):
+    """非端口竞争的启动失败应立即报出，并携带 hub 日志中的真实错误。"""
+    crashed = MagicMock(pid=103)
+    crashed.poll.return_value = 1
+    with patch.dict(
+        "os.environ",
+        {"GMS_ADB_PROXY_STATE_ROOT": str(tmp_path)},
+    ), patch(
+        "worker_agent.adb_proxy._read_hub_config",
+        return_value={"backend": [{"name": "b", "addr": "a", "pair_code": "p"}]},
+    ), patch(
+        "worker_agent.adb_proxy._stop_managed", return_value=False
+    ), patch(
+        "worker_agent.adb_proxy._force_kill_adb_port"
+    ), patch(
+        "worker_agent.adb_proxy._binary", return_value="/bin/adb-hub"
+    ), patch(
+        "worker_agent.adb_proxy._process_log", return_value=None
+    ), patch(
+        "worker_agent.adb_proxy.subprocess.Popen", return_value=crashed
+    ), patch(
+        "worker_agent.adb_proxy._tail_log",
+        return_value=["adb-hub error: local adb server error: start-server failed"],
+    ), pytest.raises(
+        RuntimeError,
+        match=r"adb-hub 启动失败.*local adb server error",
+    ):
+        _restart_hub(tmp_path / "hub.toml")
 
 
 def test_worker_source_command_derives_code_without_returning_it(tmp_path):
