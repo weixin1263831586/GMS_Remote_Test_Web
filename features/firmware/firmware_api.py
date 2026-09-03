@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.auth import require_elevated_admin_when_auth_required
-from features.devices import migrate_local_usbip_serial
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
@@ -550,6 +549,11 @@ async def burn_firmware(
                                 device_host=device_host,
                                 firmware_path=remote_firmware,
                                 on_log=_source_log,
+                                keepalive=(
+                                    lambda: chunk_uploads.refresh_burn_lock(
+                                        burn_lock_path
+                                    )
+                                ),
                             )
                             results.append({
                                 "device": report.device,

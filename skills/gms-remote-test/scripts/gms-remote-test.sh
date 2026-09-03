@@ -86,18 +86,10 @@ CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
 # Local deployments commonly use a self-signed HTTPS certificate. Fail
 # closed by default; provide GMS_CURL_CA_CERT for a real CA bundle or set
 # GMS_CURL_INSECURE=1 only for a controlled self-signed deployment.
-CURL_TLS_ARGS=()
-if [[ "$SERVER_URL" == https://* ]]; then
-    if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
-        CURL_TLS_ARGS=(--cacert "$GMS_CURL_CA_CERT")
-    elif [ "${GMS_CURL_INSECURE:-0}" = "1" ]; then
-        CURL_TLS_ARGS=(-k)
-    fi
-fi
-
-_refresh_transport_config() {
-    SERVER_URL="${SERVER_URL%/}"
-    API_BASE="${SERVER_URL}/api"
+# Recomputed before every curl call: when this script is sourced (function
+# mode), GMS_CURL_* may be exported after the source line, and a value
+# frozen at source time would silently drop --cacert/-k.
+_refresh_tls_args() {
     CURL_TLS_ARGS=()
     if [[ "$SERVER_URL" == https://* ]]; then
         if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
@@ -106,6 +98,13 @@ _refresh_transport_config() {
             CURL_TLS_ARGS=(-k)
         fi
     fi
+}
+_refresh_tls_args
+
+_refresh_transport_config() {
+    SERVER_URL="${SERVER_URL%/}"
+    API_BASE="${SERVER_URL}/api"
+    _refresh_tls_args
 }
 
 _validate_server_url() {
@@ -236,6 +235,7 @@ api_call() {
     local extra_args=("$@")
     local response body http_status exit_code curl_exit_code
 
+    _refresh_tls_args
     _ensure_auth_cookie_jar || {
         _record_api_exit_code "$GMS_RT_EXIT_OPERATION"
         return "$GMS_RT_EXIT_OPERATION"
@@ -561,6 +561,7 @@ _post_firmware_burn_path() {
     local device_list
     device_list=$(echo "$devices" | tr ' ' ',')
 
+    _refresh_tls_args
     _ensure_auth_cookie_jar || return 1
     curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
@@ -579,6 +580,7 @@ _post_firmware_burn_upload() {
     device_list=$(echo "$devices" | tr ' ' ',')
     device_query=$(_urlencode "$device_list")
 
+    _refresh_tls_args
     _ensure_auth_cookie_jar || return 1
     curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
@@ -2206,6 +2208,7 @@ gms-rt-system-skills() {
     echo "📁 Downloading skills directory as ZIP..."
     echo "URL: ${API_BASE}/system/skills?skill_name=${encoded_skill}"
     echo "Saving to: ${target}"
+    _refresh_tls_args
     _ensure_auth_cookie_jar || return 1
     http_status=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
         -o "$temporary" -w '%{http_code}' --max-time "$CURL_TIMEOUT" \
@@ -2238,6 +2241,13 @@ gms-rt-system-update() {
         error "Skill installer not found: $installer"
         return "$GMS_RT_EXIT_OPERATION"
     }
+    # Dispatcher 安装由 wrapper export GMS_REMOTE_TEST_SERVER/GMS_SKILL_DOWNLOAD_URL；
+    # source 模式（.bashrc 直接 source 本脚本）没有 wrapper，且仓库里的 install.sh
+    # 是未渲染模板（__GMS_* 占位符）。这里把当前绑定的 Controller 注入为默认值，
+    # 保证两种安装模式下更新命令都能自举；TLS 配置与当前会话保持一致。
+    GMS_REMOTE_TEST_SERVER="${GMS_REMOTE_TEST_SERVER:-${SERVER_URL%/}}" \
+    GMS_SKILL_DOWNLOAD_URL="${GMS_SKILL_DOWNLOAD_URL:-${SERVER_URL%/}/api/system/skills?skill_name=gms-remote-test}" \
+    GMS_INSTALL_CA_CERT="${GMS_INSTALL_CA_CERT:-${GMS_CURL_CA_CERT:-}}" \
     GMS_INSTALL_INSECURE="${GMS_CURL_INSECURE:-${GMS_INSTALL_INSECURE:-0}}" \
         bash "$installer"
 }
@@ -2545,6 +2555,7 @@ gms-rt-test-clean() {
 # Stream test logs
 gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
+    _refresh_tls_args
     _ensure_auth_cookie_jar || return 1
     curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -N "${API_BASE}/test/logs/stream"
 }

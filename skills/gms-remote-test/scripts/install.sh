@@ -285,12 +285,15 @@ fi
     printf 'export GMS_RUNTIME_BIN_DIR=%q\n' "$RUNTIME_BIN_DIR"
     printf 'export PATH=%q:"$PATH"\n' "$RUNTIME_BIN_DIR"
     printf 'export GMS_INSTALL_INSECURE=%q\n' "${GMS_INSTALL_INSECURE:-0}"
-    printf 'export GMS_CURL_INSECURE=%q\n' "${GMS_INSTALL_INSECURE:-0}"
+    # 运行期环境变量必须能覆盖安装期默认值：错误提示让用户
+    # export GMS_CURL_INSECURE=1 / GMS_CURL_CA_CERT，若此处无条件
+    # export 会把用户的设置清掉，导致 -k/--cacert 永远不生效。
+    printf 'export GMS_CURL_INSECURE="${GMS_CURL_INSECURE:-%q}"\n' "${GMS_INSTALL_INSECURE:-0}"
     printf 'export GMS_INSTALL_VERIFY_KEY_B64=%q\n' "$VERIFY_KEY_B64"
     printf 'export GMS_INSTALL_REQUIRE_SIGNATURE=%q\n' "$SIGNATURE_REQUIRED"
     if [ -n "${GMS_INSTALL_CA_CERT:-}" ]; then
         printf 'export GMS_INSTALL_CA_CERT=%q\n' "$GMS_INSTALL_CA_CERT"
-        printf 'export GMS_CURL_CA_CERT=%q\n' "$GMS_INSTALL_CA_CERT"
+        printf 'export GMS_CURL_CA_CERT="${GMS_CURL_CA_CERT:-%q}"\n' "$GMS_INSTALL_CA_CERT"
     fi
     cat <<'WRAPPER'
 invoked_name=${0##*/}

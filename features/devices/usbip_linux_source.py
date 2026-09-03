@@ -35,7 +35,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 LINUX_USBIPD_BIN = "/usr/local/bin/usbipd"
-LINUX_USBIPD_MIN_VERSION = (0, 9, 2)  # 支持可重复 --serial/--vid
+# 0.9.3 起才具备安全默认（loopback 监听）、--listen/--allow-client、
+# 协议分配上限与连接/URB 限制。0.9.2 默认 0.0.0.0 且无 --listen，会
+# 把网络暴露问题带回来（2026-09-03 复审第八节），不再兼容。
+LINUX_USBIPD_MIN_VERSION = (0, 9, 3)
 LINUX_USBIPD_LOG = "/tmp/usbipd-gms.log"
 LINUX_USBIPD_UPLOAD = "/tmp/usbipd-gms-upload"
 LINUX_USBIPD_BIND_PATTERN = "usbipd bind"
@@ -125,21 +128,51 @@ def predict_linux_usbip_busid(busnum: str | int, devnum: str | int, devpath: str
 def parse_usbip_running_cmdline(cmdline: str) -> dict[str, Any]:
     """Extract pid/serial/vid filters from a running ``usbipd bind`` command line.
 
-    ``cmdline`` 形如 ``1234 /usr/local/bin/usbipd bind --serial S1``；
-    仅当第一个非 PID 的 argv 是 ``usbipd``（二进制名精确匹配）且第二个
-    argv 是 ``bind`` 时才算运行中，避免把恰好包含该字符串的其他进程
-    （如编辑器、grep）误判为 usbipd。
+    ``cmdline`` 形如 ``1234 /usr/local/bin/usbipd bind --serial S1``。
+    解析用 ``shlex.split``：启动参数由 ``shlex.join(argv)`` 生成（serial
+    可能含空格/元字符，经 quote 后是单个 argv），按 token 序列解析
+    ``--serial/--vid 的下一个 token``，保证与启动参数使用同一套 argv
+    语义；``text.split()``/regex 会把被引号包裹的 serial 拆碎，导致
+    复用判断（coverage）不准。
+
+    仅当 argv0 的二进制名精确是 ``usbipd`` 且下一个 argv 是 ``bind``
+    时才算运行中，避免把恰好包含该字符串的其他进程误判为 usbipd。
     """
     text = str(cmdline or "").strip()
-    tokens = text.split()
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        # 引号不配对等畸形 cmdline：保守按空白切分，仅判断归属。
+        tokens = text.split()
     pid = ""
     if tokens and tokens[0].isdigit():
         pid = tokens[0]
         tokens = tokens[1:]
     binary_name = Path(tokens[0]).name if tokens else ""
     running = binary_name == "usbipd" and len(tokens) >= 2 and tokens[1] == "bind"
-    serials = re.findall(r"--serial[= ](\S+)", text)
-    vids = re.findall(r"--vid[= ]([0-9A-Fa-f]+)", text)
+
+    serials: list[str] = []
+    vids: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--serial" and index + 1 < len(tokens):
+            serials.append(tokens[index + 1])
+            index += 2
+            continue
+        if token.startswith("--serial="):
+            serials.append(token.split("=", 1)[1])
+            index += 1
+            continue
+        if token == "--vid" and index + 1 < len(tokens):
+            vids.append(tokens[index + 1])
+            index += 2
+            continue
+        if token.startswith("--vid="):
+            vids.append(token.split("=", 1)[1])
+            index += 1
+            continue
+        index += 1
     return {
         "running": running,
         "pid": pid if running else "",
@@ -176,11 +209,40 @@ def _proc_pid_matches(ssh_manager, ssh, pid: str) -> bool:
     ) and " bind" in f" {argv} "
 
 
+def _enumerate_usbipd_bind_pids(ssh_manager, ssh) -> list[tuple[str, str]]:
+    """Enumerate candidate usbipd bind PIDs via pgrep, verifying ownership.
+
+    返回 ``[(pid, cmdline), ...]``：pgrep 仅用于枚举候选（诊断用途），
+    每个 PID 必须再通过 ``/proc/<pid>/cmdline`` 的 argv 归属校验
+    （argv0 二进制名为 usbipd 且含 bind 子命令）才算数。
+    """
+    stdout, _stderr, code = ssh_manager.execute_command(
+        ssh, f"pgrep -f {shlex.quote(LINUX_USBIPD_BIND_PATTERN)}", timeout=10,
+    )
+    if code != 0:
+        return []
+    verified: list[tuple[str, str]] = []
+    for line in (stdout or "").splitlines():
+        pid = line.strip()
+        if not pid.isdigit():
+            continue
+        stdout_argv, _stderr_argv, _code_argv = ssh_manager.execute_command(
+            ssh,
+            f"tr '\\0' ' ' < /proc/{pid}/cmdline 2>/dev/null",
+            timeout=5,
+        )
+        cmdline = (stdout_argv or "").strip()
+        info = parse_usbip_running_cmdline(f"{pid} {cmdline}".strip())
+        if info["running"]:
+            verified.append((pid, f"{pid} {cmdline}".strip()))
+    return verified
+
+
 def query_ubuntu_running_usbipd(ssh_manager, ssh) -> dict[str, Any]:
     """Inspect a running ``usbipd bind`` process on the Ubuntu source.
 
     优先读取 PID 文件并用 /proc/<pid>/cmdline 校验归属；PID 文件缺失或
-    指向的进程已退出时，回退到严格匹配 argv 的 ``pgrep -af``。
+    指向的进程已退出时，枚举候选 PID 并逐个做 /proc argv 归属校验。
     """
     pid = _read_usbipd_pid_file(ssh_manager, ssh)
     if pid:
@@ -193,37 +255,39 @@ def query_ubuntu_running_usbipd(ssh_manager, ssh) -> dict[str, Any]:
         info = parse_usbip_running_cmdline(f"{pid} {cmdline}".strip())
         if info["running"]:
             return info
-    stdout, _stderr, code = ssh_manager.execute_command(
-        ssh, f"pgrep -af {shlex.quote(LINUX_USBIPD_BIND_PATTERN)}", timeout=10,
-    )
-    cmdline = ""
-    if code == 0:
-        lines = [
-            line.strip() for line in (stdout or "").splitlines()
-            if parse_usbip_running_cmdline(line.strip())["running"]
-        ]
-        if lines:
-            cmdline = lines[0]
-    return parse_usbip_running_cmdline(cmdline)
+    verified = _enumerate_usbipd_bind_pids(ssh_manager, ssh)
+    if verified:
+        return parse_usbip_running_cmdline(verified[0][1])
+    return parse_usbip_running_cmdline("")
 
 
-def _stop_linux_usbipd(ssh_manager, ssh, signal_flag: str = "") -> bool:
-    """Stop the owned usbipd process; PID-file ownership first, pkill fallback.
+def _stop_linux_usbipd(
+    ssh_manager,
+    ssh,
+    signal_flag: str = "",
+    known_pids: list[str] | tuple[str, ...] = (),
+) -> bool:
+    """Stop the owned usbipd process by verified PID ownership only.
 
     返回 True 表示目标进程已不存在（从未运行或已停止）。
+    不再使用 ``pkill -f`` 执行停止动作：它按 substring 匹配整条命令行，
+    会把恰好包含 ``usbipd bind`` 的无关进程一起杀掉（复审第十节）。
+    ``known_pids`` 是调用方查询阶段已经通过 /proc argv 校验的 PID，
+    直接复用；不足时再枚举候选并逐个校验。
     """
-    pid = _read_usbipd_pid_file(ssh_manager, ssh)
-    if pid and _proc_pid_matches(ssh_manager, ssh, pid):
-        # 精确归属：只杀 PID 文件记录且 argv 校验通过的那个实例。
-        stdout, _stderr, _code = ssh_manager.execute_command(
-            ssh, f"kill {signal_flag} {pid} 2>/dev/null; true", timeout=10,
-        )
-        return not (stdout or "").strip()
-    # 回退：严格匹配 argv（限定二进制名 usbipd + bind 子命令），
-    # 避免 pkill -f 误杀命令行中恰好包含该字符串的无关进程。
-    pattern = "[u]sbipd bind"
+    pids = [str(pid) for pid in known_pids if str(pid).strip().isdigit()]
+    if not pids:
+        pid_file_pid = _read_usbipd_pid_file(ssh_manager, ssh)
+        if pid_file_pid and _proc_pid_matches(ssh_manager, ssh, pid_file_pid):
+            pids.append(pid_file_pid)
+    for candidate, _cmdline in _enumerate_usbipd_bind_pids(ssh_manager, ssh):
+        if candidate not in pids:
+            pids.append(candidate)
+    if not pids:
+        return True
+    pid_list = " ".join(pids)
     stdout, _stderr, _code = ssh_manager.execute_command(
-        ssh, f"pkill {signal_flag} -f {shlex.quote(pattern)}; true", timeout=10,
+        ssh, f"kill {signal_flag} {pid_list} 2>/dev/null; true", timeout=10,
     )
     return not (stdout or "").strip()
 
@@ -365,12 +429,14 @@ def stop_ubuntu_usbip_server(ssh_manager, ssh) -> dict[str, Any]:
     running = query_ubuntu_running_usbipd(ssh_manager, ssh)
     if not running["running"]:
         return {"success": True, "stopped": False, "detail": "usbipd未运行"}
-    _stop_linux_usbipd(ssh_manager, ssh)
+    # 复用查询阶段已通过 /proc argv 校验的 PID，停止时不再重复枚举。
+    known_pids = [running["pid"]] if running.get("pid") else []
+    _stop_linux_usbipd(ssh_manager, ssh, known_pids=known_pids)
     for _ in range(5):
         time.sleep(0.5)
         if not query_ubuntu_running_usbipd(ssh_manager, ssh)["running"]:
             return {"success": True, "stopped": True}
-    _stop_linux_usbipd(ssh_manager, ssh, signal_flag="-9")
+    _stop_linux_usbipd(ssh_manager, ssh, signal_flag="-9", known_pids=known_pids)
     time.sleep(1)
     still_running = query_ubuntu_running_usbipd(ssh_manager, ssh)["running"]
     return {
@@ -385,17 +451,6 @@ def _read_log_tail(ssh_manager, ssh, lines: int = 20) -> str:
         ssh, f"tail -n {lines} {shlex.quote(LINUX_USBIPD_LOG)} 2>/dev/null", timeout=10,
     )
     return (stdout or "").strip()
-
-
-def _usbipd_supports_listen(ssh_manager, ssh, binary: str) -> bool:
-    """Probe whether the deployed usbipd accepts a --listen option."""
-    stdout, _stderr, _code = ssh_manager.execute_command(
-        ssh, f"{shlex.quote(binary)} --version", timeout=5,
-    )
-    # 0.9.3+ 内置 --listen；更低版本无该选项（usage/版本输出无从判断时
-    # 保守返回 False，保持旧版 0.0.0.0 行为，由网络层防火墙兜底）。
-    parsed = usbipd_version_tuple(stdout or "")
-    return parsed >= (0, 9, 3)
 
 
 def _resolve_listen_address(ssh_manager, ssh) -> str:
@@ -420,11 +475,16 @@ def ensure_ubuntu_usbip_server(
     serials: list[str] | tuple[str, ...] = (),
     vids: list[str] | tuple[str, ...] = (),
     stop_adb: bool = True,
+    allow_worker_hosts: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Start (or reuse) the usbipd server exporting the requested devices.
 
     已有实例按串号覆盖请求时直接复用；串号不足时合并新旧过滤器重启，
     避免杀掉其他设备正在使用的导出进程。串号为空时退化为按 VID 导出。
+
+    ``allow_worker_hosts``：允许连接 TCP 3240 的 Worker/Controller 地址
+    列表（user@ip 或纯 ip），转成 ``--allow-client`` 白名单；为空时不
+    限制客户端（由网络层防火墙兜底）。
 
     来源缺少可用 usbipd（未安装/版本过低）时，先自动部署随平台分发的
     ``tools/usbipd``（见 :func:`install_ubuntu_usbipd`），部署成功后继续。
@@ -511,15 +571,16 @@ def ensure_ubuntu_usbip_server(
             "success": False,
             "error": "缺少USB/IP导出过滤器（serial或vid）",
         }
-    # usbipd 0.9.2+ 默认只监听 127.0.0.1（安全默认）。Worker 从外部
-    # attach，必须显式绑定来源主机的对外地址（SSH 目标地址即来源可达 IP）。
-    # 旧版本 usbipd 没有 --listen 选项时保持旧行为（0.0.0.0）。
-    listen_addr = ""
-    supports_listen = parsed >= (0, 9, 3) or _usbipd_supports_listen(
-        ssh_manager, ssh, binary,
-    )
-    if supports_listen:
-        listen_addr = _resolve_listen_address(ssh_manager, ssh)
+    # 最低版本已是 0.9.3：默认 loopback + --listen/--allow-client 必然可用。
+    # Worker 从外部 attach，必须显式绑定来源主机的对外地址（SSH 目标地址
+    # 即来源可达 IP），并把允许连接的 Worker IP 传入 --allow-client，
+    # 避免 0.0.0.0 把内网/管理接口一并暴露（复审 P0-1 / 第九节）。
+    listen_addr = _resolve_listen_address(ssh_manager, ssh)
+    allow_clients = sorted({
+        str(item or "").strip().split("@", 1)[-1]
+        for item in allow_worker_hosts or ()
+        if str(item or "").strip()
+    } - {"", listen_addr.rsplit(":", 1)[0]})
 
     # 全部参数走 argv 形式并 shlex.quote：USB serial 是外部设备输入，
     # 二进制路径可能包含用户目录，禁止直接拼进 shell 字符串。
@@ -528,6 +589,8 @@ def ensure_ubuntu_usbip_server(
         argv.append("--stop-adb")
     if listen_addr:
         argv += ["--listen", listen_addr]
+    for client_ip in allow_clients:
+        argv += ["--allow-client", client_ip]
     for serial in needed_serials:
         argv += ["--serial", serial]
     for vid in needed_vids:

@@ -202,96 +202,116 @@ async def list_users(
     local_addresses = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
     vpn_gateway_addresses = set(config.get('vpn_gateways', []))
 
+    # 2026-09-03 自死锁修复：锁内只取快照，遍历放在锁外。遍历体中的
+    # resolve_client_display_id 会再次申请 user_states_lock（非重入锁），
+    # 原先"锁内循环"在遇到无 @ 的平台 user_id 状态时会同线程自死锁，
+    # 卡死整个事件循环（16:43 重启后健康检查失败的原因，看门狗线程
+    # dump 实锤）。user_states 在此循环中只读，快照足够。
     with runtime.global_state.user_states_lock:
-        temp_users = {}
-        for ip, username in configured_client_hosts.items():
-            ip = str(ip or '').strip()
-            username = str(username or '').strip() or 'unknown'
-            if not ip or ip in local_addresses or ip in vpn_gateway_addresses:
-                continue
-            display_client_id = format_client_display_id(username, ip)
-            temp_users[f"configured:{display_client_id}"] = {
-                'client_id': display_client_id,
-                'user_id': '',
-                'username': username,
-                'ip': ip,
-                **get_client_source(ip),
-                'running': False,
-                'status': 'offline',
-                'devices': [],
-                'last_seen': '',
-                'created_at': '',
-                'configured': True,
-            }
+        state_items = list(runtime.global_state.user_states.items())
 
-        for client_id, state in runtime.global_state.user_states.items():
-            # 检查会话是否活跃（最近24小时内有活动）
-            is_online = False
-            if 'last_seen' in state:
-                try:
-                    last_seen = datetime.fromisoformat(state['last_seen'])
-                    if (now - last_seen) > timedelta(hours=24):
-                        continue
-                    is_online = (now - last_seen) <= USER_ONLINE_WINDOW
-                except (ValueError, TypeError):
+    temp_users = {}
+    for ip, username in configured_client_hosts.items():
+        ip = str(ip or '').strip()
+        username = str(username or '').strip() or 'unknown'
+        if not ip or ip in local_addresses or ip in vpn_gateway_addresses:
+            continue
+        display_client_id = format_client_display_id(username, ip)
+        temp_users[f"configured:{display_client_id}"] = {
+            'client_id': display_client_id,
+            'user_id': '',
+            'username': username,
+            'ip': ip,
+            **get_client_source(ip),
+            'running': False,
+            'status': 'offline',
+            'devices': [],
+            'last_seen': '',
+            'created_at': '',
+            'configured': True,
+        }
+
+    for client_id, state in state_items:
+        # 检查会话是否活跃（最近24小时内有活动）
+        is_online = False
+        if 'last_seen' in state:
+            try:
+                last_seen = datetime.fromisoformat(state['last_seen'])
+                if (now - last_seen) > timedelta(hours=24):
                     continue
-
-            username_from_id, ip_from_id = parse_client_id(client_id)
-
-            # 优先使用state中存储的username（更准确）
-            username = state.get('client_username', username_from_id)
-            if username == 'unknown':
-                username = username_from_id
-            ip = state.get('client_ip') or ip_from_id
-            display_client_id = format_client_display_id(
-                state.get('display_client_id') or username,
-                ip,
-            ) or client_id
-
-            # 过滤本地地址和VPN网关地址
-            if ip in local_addresses or ip in vpn_gateway_addresses:
+                is_online = (now - last_seen) <= USER_ONLINE_WINDOW
+            except (ValueError, TypeError):
                 continue
 
-            configured_username = str(configured_client_hosts.get(ip) or '').strip()
-            is_configured = bool(configured_username)
-            if is_configured and (
-                not username
-                or username == 'unknown'
-                or (configured_username and username != configured_username)
-            ):
-                username = configured_username
-                display_client_id = format_client_display_id(username, ip)
+        username_from_id, ip_from_id = parse_client_id(client_id)
 
-            user_info = {
-                'client_id': display_client_id,
-                'user_id': client_id,
-                'username': username,
-                'ip': ip,
-                **get_client_source(ip),
-                'running': state.get('running', False),
-                'status': 'testing' if state.get('running', False) else (
-                    'online' if is_online else 'offline'
-                ),
-                'devices': state.get('devices', []),
-                'last_seen': state.get('last_seen', ''),
-                'created_at': state.get('created_at', ''),
-                'configured': is_configured,
-            }
+        # 会话 key 可能是平台账号的内部 user_id（认证后的 API/CLI 会话，
+        # 如 gms-rt-* 命令轮询产生的状态）。这类 key 不含 @ip，状态里也
+        # 没有 client_username/client_ip，直接展示会把裸 token 当用户名、
+        # IP 显示 unknown。这里解析回平台账号的用户管理身份，让它并入
+        # 同一个人的用户行，而不是多出一行"陌生用户"。
+        if '@' not in str(client_id or ''):
+            resolved_display = resolve_client_display_id(
+                client_id,
+                state.get('display_client_id') or '',
+            )
+            if resolved_display and '@' in resolved_display:
+                username_from_id, ip_from_id = parse_client_id(resolved_display)
 
-            # 平台登录用户是状态隔离边界。多用户可能经同一个反向代理或
-            # Tailscale 出口访问，不能按 IP 折叠，否则谁刷新就只剩谁。
-            user_key = f"host:{display_client_id}" if display_client_id else (client_id or ip)
-            temp_users.pop(f"configured:{display_client_id}", None)
-            if is_configured and configured_username:
-                temp_users.pop(
-                    f"configured:{format_client_display_id(configured_username, ip)}",
-                    None,
-                )
-            existing = temp_users.get(user_key)
-            if existing is None or (existing['username'] == 'unknown' and username != 'unknown'):
-                temp_users[user_key] = user_info
+        # 优先使用state中存储的username（更准确）
+        username = state.get('client_username', username_from_id)
+        if username == 'unknown':
+            username = username_from_id
+        ip = state.get('client_ip') or ip_from_id
+        display_client_id = format_client_display_id(
+            state.get('display_client_id') or username,
+            ip,
+        ) or client_id
 
-        users = list(temp_users.values())
+        # 过滤本地地址和VPN网关地址
+        if ip in local_addresses or ip in vpn_gateway_addresses:
+            continue
+
+        configured_username = str(configured_client_hosts.get(ip) or '').strip()
+        is_configured = bool(configured_username)
+        if is_configured and (
+            not username
+            or username == 'unknown'
+            or (configured_username and username != configured_username)
+        ):
+            username = configured_username
+            display_client_id = format_client_display_id(username, ip)
+
+        user_info = {
+            'client_id': display_client_id,
+            'user_id': client_id,
+            'username': username,
+            'ip': ip,
+            **get_client_source(ip),
+            'running': state.get('running', False),
+            'status': 'testing' if state.get('running', False) else (
+                'online' if is_online else 'offline'
+            ),
+            'devices': state.get('devices', []),
+            'last_seen': state.get('last_seen', ''),
+            'created_at': state.get('created_at', ''),
+            'configured': is_configured,
+        }
+
+        # 平台登录用户是状态隔离边界。多用户可能经同一个反向代理或
+        # Tailscale 出口访问，不能按 IP 折叠，否则谁刷新就只剩谁。
+        user_key = f"host:{display_client_id}" if display_client_id else (client_id or ip)
+        temp_users.pop(f"configured:{display_client_id}", None)
+        if is_configured and configured_username:
+            temp_users.pop(
+                f"configured:{format_client_display_id(configured_username, ip)}",
+                None,
+            )
+        existing = temp_users.get(user_key)
+        if existing is None or (existing['username'] == 'unknown' and username != 'unknown'):
+            temp_users[user_key] = user_info
+
+    users = list(temp_users.values())
 
     # 合并持久化 Worker 任务的所有者和设备租约。
     try:

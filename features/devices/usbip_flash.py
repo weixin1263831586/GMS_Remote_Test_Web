@@ -275,6 +275,11 @@ def _ensure_ubuntu_export(
         ssh,
         serials=export_serials,
         vids=export_vids if not export_serials else (),
+        # attach 走 usbip_attach_host（可能是 Tailscale 地址），加入白名单。
+        allow_worker_hosts=[
+            usbip_manager.config_manager.load_config().get("usbip_attach_host")
+            or str(device_host).split("@", 1)[-1]
+        ],
     )
     if not server.get("success"):
         return {

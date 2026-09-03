@@ -25,6 +25,7 @@ import time
 import uuid
 from typing import Any
 
+
 logger = logging.getLogger(__name__)
 
 # 状态接口会被前端在弹窗打开期间高频轮询；同一来源+Worker 的远端核对
@@ -45,7 +46,7 @@ def _normalize_host(host: str) -> str:
 
 
 def _throttle_key(device_host: str, worker_id: str) -> str:
-    return f"{str(device_host or '')}|{str(worker_id or '')}"
+    return f"{device_host or ''!s}|{worker_id or ''!s}"
 
 
 async def _acquire_verify_slot(device_host: str, worker_id: str) -> bool:

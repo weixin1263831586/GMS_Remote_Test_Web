@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import shlex
 import time
@@ -176,7 +177,7 @@ def _usbip_assignments() -> dict[str, dict]:
 def _verify_local_usbip_transport(
     assignments: dict[str, dict],
 ) -> dict[str, dict[str, object]]:
-    """Cross-check persisted (device_host, busid) pairs against ``usbip port``.
+    """Cross-check persisted assignments against ``usbip port``.
 
     持久化 assignment 是"已记录分配"，与本机实际 attach 状态可能脱节
     （Controller crash、worker reboot、手工 usbip detach）。本函数用
@@ -184,11 +185,17 @@ def _verify_local_usbip_transport(
     ``{(device_host, busid): {"transport_state": ..., "checked_at": ...}}``；
     远端 Worker 的分配不核对（transport_state 留空），由既有
     schedule_remote_usbip_verify 后台机制负责。
+
+    host identity：``usbip attach`` 用的是 source/attach 地址（可能是
+    Tailscale IP 等非 SSH 地址），``usbip port`` 显示的 host 是 attach 时
+    的 remote host。因此核对必须用 assignment 的 ``source_host``（优先）
+    或归一化后的 ``device_host``，直接拿 SSH 形式的 device_host 会在
+    双地址主机上误报 detached（2026-09-03 复审第七节）。
     """
     from .usbip_transaction import USBIP_PORT_COMMAND, parse_usbip_port_entries
 
     local_worker_id = _local_worker_id()
-    targets: set[tuple[str, str]] = set()
+    targets: dict[tuple[str, str, str], tuple[str, str]] = {}
     for item in assignments.values():
         if not isinstance(item, dict):
             continue
@@ -200,8 +207,16 @@ def _verify_local_usbip_transport(
             continue
         device_host = str(item.get("device_host") or "").strip()
         busid = str(item.get("busid") or "").strip()
-        if device_host and busid:
-            targets.add((device_host, busid))
+        if not device_host or not busid:
+            continue
+        device_key = device_host.split("@", 1)[-1]
+        # usbip attach 的 remote host：source_host（如 Tailscale attach
+        # 地址）优先，否则用去用户名的 device_host。
+        source_host = str(item.get("source_host") or "").strip().split("@", 1)[-1]
+        verify_hosts = {
+            host for host in (source_host, device_key) if host
+        }
+        targets[(device_host, busid)] = (frozenset(verify_hosts), busid)
     if not targets:
         return {}
 
@@ -229,9 +244,8 @@ def _verify_local_usbip_transport(
 
     checked_at = time.time()
     result: dict[str, dict[str, object]] = {}
-    for device_host, busid in targets:
-        host_key = device_host.split("@", 1)[-1]
-        attached_now = (host_key, busid) in attached or (device_host, busid) in attached
+    for (device_host, busid), (verify_hosts, _) in targets.items():
+        attached_now = any((host, busid) in attached for host in verify_hosts)
         result[f"{device_host}|{busid}"] = {
             "transport_state": "attached" if attached_now else "detached",
             "checked_at": checked_at,
@@ -624,6 +638,76 @@ def _wait_for_adb_devices_removed(
 
 # ==================== USB/IP Status ====================
 
+async def _retire_assignments_for_physically_local_devices(
+    device_host: str,
+    local_assignments: list[dict],
+    expected_devices: set[str],
+    physically_local: dict[str, str],
+) -> tuple[dict, bool]:
+    """清除已被物理挪插到本机的设备的过期 USB/IP 分配。
+
+    只移除"序列号全部物理直连在本机"的分配；同一源主机上其他仍有效
+    的分配保持不动。内存中的设备来源记录（含 usbip_manager 缓存）一并
+    清理，让固件烧写路由立即回落到本地传统链路，无需重启服务。
+    """
+    retired_serials: set[str] = set()
+    stale_busids: list[str] = []
+    for item in local_assignments:
+        serials = {
+            str(serial or "").strip()
+            for serial in item.get("device_serials") or []
+            if str(serial or "").strip()
+        }
+        if serials and all(
+            physically_local.get(serial) == "physical" for serial in serials
+        ):
+            stale_busids.append(str(item.get("busid") or "").strip())
+            retired_serials |= serials
+
+    if stale_busids:
+        assignments_map = _usbip_assignments()
+        for busid in stale_busids:
+            assignments_map.pop(f"{device_host}|{busid}", None)
+        if not _save_usbip_assignments(assignments_map):
+            logger.error(
+                "[USB/IP Status] failed to persist removal of stale "
+                "assignments for %s: %s",
+                device_host,
+                stale_busids,
+            )
+
+    with runtime.global_state.usbip_devices_source_lock:
+        for serial in retired_serials:
+            runtime.global_state.usbip_devices_source.pop(serial, None)
+    for serial in retired_serials:
+        with contextlib.suppress(Exception):
+            usbip_manager.device_sources.pop(serial, None)
+
+    retired_state = {
+        "connected": False,
+        "timestamp": time.time(),
+        "transport_connected": False,
+        "adb_ready": False,
+        "reconnecting": False,
+        "expected_devices": sorted(expected_devices),
+        "reason": (
+            "devices physically attached to the controller; stale USB/IP "
+            f"assignment retired ({device_host}|{'/'.join(stale_busids)})"
+        ),
+        "protocol_status": {"mode": "disconnected"},
+    }
+    with runtime.global_state.usbip_states_lock:
+        runtime.global_state.usbip_states[device_host] = retired_state
+    logger.warning(
+        "[USB/IP Status] stale assignment for %s retired: devices %s are "
+        "physically attached to the controller (non-vhci); removed "
+        "assignments %s",
+        device_host,
+        sorted(retired_serials),
+        [f"{device_host}|{busid}" for busid in stale_busids],
+    )
+    return retired_state, False
+
 async def _reconcile_local_usbip_status(
     device_host: str,
     assignments: list[dict],
@@ -668,6 +752,28 @@ async def _reconcile_local_usbip_status(
         with runtime.global_state.usbip_states_lock:
             runtime.global_state.usbip_states[device_host] = refreshed
         return refreshed, False
+
+    # 2026-09-03 事故修复：stale 分支先判定设备是否物理直连在本机。
+    # 设备从源主机挪插到 Controller 物理 USB 后，持久化 assignment 残留，
+    # 旧逻辑会反复调度重连，且 reconcile 凭同名 ADB 串号把本地设备
+    # 误提升为 USB/IP 来源，导致固件烧写错误路由到 Windows Source
+    # Agent。sysfs realpath 含 vhci 才是真正的导入设备；全部期望设备
+    # 都落在真实控制器（physical）时，说明分配已过期：清除持久化分配
+    # 与内存来源记录，状态置为最终 disconnected，不再调度重连。
+    physically_local = await asyncio.to_thread(
+        reconnect.classify_local_usb_attachment,
+        expected_devices,
+    )
+    if expected_devices and all(
+        physically_local.get(serial) == "physical"
+        for serial in expected_devices
+    ):
+        return await _retire_assignments_for_physically_local_devices(
+            device_host,
+            local_assignments,
+            expected_devices,
+            physically_local,
+        )
 
     stale = {
         "connected": True,

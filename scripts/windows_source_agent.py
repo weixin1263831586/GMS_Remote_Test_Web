@@ -30,6 +30,7 @@ from pathlib import Path
 
 from pywinauto import Desktop
 
+
 RKDEVTOOL_EXE = r"D:\RKDevTool_v3.41_for_window\RKDevTool.exe"
 RKDEVTOOL_LOG_DIR = r"D:\RKDevTool_v3.41_for_window\Log"
 QUEUE_DIR = r"C:\Users\hcq\gms-flash-queue"
@@ -122,8 +123,8 @@ def _send_text_to_edit(edit_wrapper, text: str) -> None:
     MFC Tab 页中非激活页的 Edit 控件句柄有效但 IsWindowVisible=False，
     pywinauto 的 set_edit_text 会抛 ElementNotVisible；窗口消息不受此限。
     """
-    import win32gui
     import win32con
+    import win32gui
     hwnd = edit_wrapper.handle
     win32gui.SendMessage(
         hwnd, win32con.WM_SETTEXT, 0, text,
@@ -132,8 +133,8 @@ def _send_text_to_edit(edit_wrapper, text: str) -> None:
 
 def _click_button(button_wrapper) -> None:
     """Click a button via BM_CLICK, bypassing visibility checks."""
-    import win32gui
     import win32con
+    import win32gui
     hwnd = button_wrapper.handle
     win32gui.SendMessage(
         hwnd, win32con.BM_CLICK, 0, 0,
@@ -147,7 +148,6 @@ def _select_firmware_tab(win) -> None:
     WM_NOTIFY(TCN_SELCHANGING/TCN_SELCHANGE) 让 MFC 感知页切换。
     不使用任何鼠标/键盘模拟。
     """
-    import win32api
     import win32gui
 
     tabs = list(win.descendants(class_name="SysTabControl32"))
@@ -190,7 +190,6 @@ def find_flash_controls(win):
         try:
             cls = c.element_info.class_name or ""
             text = (c.window_text() or "").replace("&", "").strip()
-            visible = c.is_visible()
         except Exception:
             continue
         if cls == "Button":
@@ -207,13 +206,14 @@ def find_flash_controls(win):
                 pass
     if not upgrade_buttons:
         try:
-            diag = [
+            # 诊断输出：仅文本，供 btn-diag 文件排查按钮匹配。
+            diag_texts = [
                 (b.window_text() or "") for b in win.descendants(
                     control_type="Button")
             ]
             with open(r"C:\Users\hcq\gms-flash-queue\.btn-diag.txt",
                       "w", encoding="utf-8") as f:
-                f.write("\n".join(button_labels))
+                f.write("\n".join(diag_texts))
         except Exception:
             pass
     return long_edits, upgrade_buttons
@@ -228,7 +228,7 @@ def poll_flash_log(start_size: int) -> dict:
     while time.time() < deadline:
         time.sleep(5)
         try:
-            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
                 f.seek(max(0, start_size - 4096))
                 content = f.read()
         except OSError:
@@ -256,7 +256,6 @@ def _wait_device_not_adb(win, timeout: int = 120) -> bool:
     RKDevTool 的「升级」只在 Loader/Maskrom 模式下生效；设备为 ADB 时
     必须先 `adb reboot loader`。检测方式：主窗口 ComboBox 文本含 "ADB"。
     """
-    import re as _re
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -309,7 +308,7 @@ def process_task(task_path: str) -> None:
     result_path = str(task_path).rsplit(".", 1)[0] + ".result.json"
     result = {"status": "FAILED", "log_tail": "", "error": ""}
     try:
-        with open(task_path, "r", encoding="utf-8") as f:
+        with open(task_path, encoding="utf-8") as f:
             task = json.load(f)
         firmware = str(task.get("firmware") or "")
         if not firmware or not os.path.isfile(firmware):

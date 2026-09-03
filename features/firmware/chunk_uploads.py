@@ -181,17 +181,63 @@ def remove_staged_upload(staged: dict) -> None:
             shutil.rmtree(session_dir)
 
 
+def _pid_alive(pid: int) -> bool:
+    """POSIX 进程存活探测；权限拒绝视为存活（保守），其他错误同。"""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _read_lock_holder(lock_path: str) -> int | None:
+    try:
+        with open(lock_path, encoding="ascii") as handle:
+            return int(handle.read().strip() or 0) or None
+    except (OSError, ValueError):
+        return None
+
+
 def acquire_burn_lock(staged: dict) -> str | None:
     lock_path = os.path.join(staged["session_dir"], ".burn.lock")
+    # 过期接管规则（崩溃/重启不锁死后续重试）：
+    # - 持有者 PID 已死（如烧写中服务被重启）→ 立即接管；
+    # - 旧格式空锁（无 PID）→ 沿用 mtime TTL 兜底；
+    # - PID 存活且 mtime 新鲜 → 拒绝并发 finalize。
+    # 注意：真实烧写可长达 RESULT_TIMEOUT_SECONDS(5400s)，超过
+    # MERGE_LOCK_STALE_SECONDS(1h)，存活持有者的锁**不能**仅凭
+    # mtime 过期被抢占，由 refresh_burn_lock 在烧写轮询中续期。
     with contextlib.suppress(OSError):
         if time.time() - os.path.getmtime(lock_path) > MERGE_LOCK_STALE_SECONDS:
-            os.remove(lock_path)
-    try:
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.close(descriptor)
+            holder = _read_lock_holder(lock_path)
+            if holder is None or not _pid_alive(holder):
+                os.remove(lock_path)
+    while True:
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            holder = _read_lock_holder(lock_path)
+            if holder is not None and not _pid_alive(holder):
+                # 死进程孤儿锁：立即抢占，避免等满 1 小时 TTL。
+                with contextlib.suppress(OSError):
+                    os.remove(lock_path)
+                continue
+            return None
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(str(os.getpid()))
         return lock_path
-    except FileExistsError:
-        return None
+
+
+def refresh_burn_lock(lock_path: str | None) -> None:
+    """长烧写期间刷新锁 mtime，防止 TTL 兜底误抢存活持有者的锁。"""
+    if not lock_path:
+        return
+    with contextlib.suppress(OSError):
+        os.utime(lock_path, None)
 
 
 def release_burn_lock(lock_path: str | None) -> None:

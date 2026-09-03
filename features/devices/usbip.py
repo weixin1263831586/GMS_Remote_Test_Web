@@ -293,6 +293,8 @@ class USBIPManager:
                         source_ssh,
                         serials=export_serials,
                         vids=export_vids if not export_serials else (),
+                        # USB/IP 的数据面 attach 来自该地址，加入 3240 白名单。
+                        allow_worker_hosts=[usbip_attach_host],
                     )
                     source_txn['started'] = bool(server.get('started'))
                     if not server.get('success'):
@@ -771,6 +773,9 @@ class USBIPManager:
                     item["vid_pid"].split(":", 1)[0]
                     for item in selected if item.get("vid_pid")
                 }),
+                allow_worker_hosts=[
+                    config.get('usbip_attach_host') or ssh_hostname
+                ],
             )
             return {
                 "success": bool(server.get("success")),
@@ -842,6 +847,9 @@ class USBIPManager:
                         for item in selected_inventory
                         if item.get("vid_pid")
                     }),
+                    allow_worker_hosts=[
+                        config.get("usbip_attach_host") or ssh_hostname
+                    ],
                 )
                 if not server.get("success"):
                     return {

@@ -31,6 +31,7 @@ from features.system.notifications import bind_event_bus_loop, unbind_event_bus_
 from features.system.state import global_state
 from foundation.config import CLEANUP_INTERVAL_SECONDS
 from foundation.controller_lock import controller_process_lock
+from foundation.loop_watchdog import start_loop_watchdog, stop_loop_watchdog
 
 
 logger = logging.getLogger(__name__)
@@ -221,6 +222,10 @@ def create_lifespan(services: AppServices):
             event_loop = bind_event_bus_loop()
             cleanup_task = asyncio.create_task(_periodic_cleanup())
             app.state.cleanup_task = cleanup_task
+            # 事件循环卡死观测：卡死 >30s 时由 C 级定时器 dump 全部线程栈
+            # （见 foundation/loop_watchdog.py 的模块注释）。
+            loop_watchdog_task = await start_loop_watchdog()
+            app.state.loop_watchdog_task = loop_watchdog_task
             redmine_task = start_redmine_agent_scheduler(services.redmine)
             app.state.redmine_scheduler_task = redmine_task
             from features.system.desktop import create_novnc_client_session
@@ -254,6 +259,7 @@ def create_lifespan(services: AppServices):
             try:
                 yield
             finally:
+                await stop_loop_watchdog(loop_watchdog_task)
                 unbind_event_bus_loop(event_loop)
                 background_tasks = list(global_state.background_tasks)
                 for task in background_tasks:

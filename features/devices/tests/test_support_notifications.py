@@ -45,7 +45,6 @@ class BroadcastDeviceChangeTests(unittest.TestCase):
             "user-a": page_ws,
             "user-a:terminal_workspace_0_123_abc": terminal_ws,
         }
-        locks = SimpleNamespace(websocket_connections_lock=None)
         runtime_stub = _runtime_with_notification_store(stored)
         # connections_lock used via `with`, emulate no-op context manager.
         class _NullLock:

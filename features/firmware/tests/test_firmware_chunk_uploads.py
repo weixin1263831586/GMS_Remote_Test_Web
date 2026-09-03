@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import subprocess
 import threading
 import time
 from io import BytesIO
@@ -206,6 +207,86 @@ def test_burn_lock_prevents_parallel_finalize_and_can_be_released():
 
         chunk_uploads.release_burn_lock(first)
         assert chunk_uploads.acquire_burn_lock(staged)
+
+
+def test_burn_lock_records_live_holder_pid():
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-2"))
+        session.mkdir(parents=True)
+        staged = {"session_dir": str(session)}
+
+        lock = chunk_uploads.acquire_burn_lock(staged)
+        try:
+            holder = chunk_uploads._read_lock_holder(lock)
+            assert holder == os.getpid()
+            # 存活持有者：即便 mtime 被人为拨到 TTL 之外也不可抢占。
+            stale_time = time.time() - chunk_uploads.MERGE_LOCK_STALE_SECONDS - 10
+            os.utime(lock, (stale_time, stale_time))
+            assert chunk_uploads.acquire_burn_lock(staged) is None
+        finally:
+            chunk_uploads.release_burn_lock(lock)
+
+
+def test_orphan_burn_lock_from_dead_process_is_stolen_immediately():
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-3"))
+        session.mkdir(parents=True)
+        staged = {"session_dir": str(session)}
+
+        # 模拟烧写中服务崩溃/重启：锁文件带一个已死 PID（fresh mtime）。
+        dead_pid = _spawn_exiting_process()
+        lock_path = Path(session) / ".burn.lock"
+        lock_path.write_text(str(dead_pid), encoding="ascii")
+
+        stolen = chunk_uploads.acquire_burn_lock(staged)
+        try:
+            assert stolen
+            assert chunk_uploads._read_lock_holder(stolen) == os.getpid()
+        finally:
+            chunk_uploads.release_burn_lock(stolen)
+
+
+def test_stale_empty_legacy_lock_expires_via_ttl():
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-4"))
+        session.mkdir(parents=True)
+        staged = {"session_dir": str(session)}
+
+        # 旧格式空锁（无 PID）：沿用 mtime TTL 兜底。
+        lock_path = Path(session) / ".burn.lock"
+        lock_path.write_text("", encoding="ascii")
+        assert chunk_uploads.acquire_burn_lock(staged) is None
+
+        stale_time = time.time() - chunk_uploads.MERGE_LOCK_STALE_SECONDS - 10
+        os.utime(lock_path, (stale_time, stale_time))
+        reclaimed = chunk_uploads.acquire_burn_lock(staged)
+        try:
+            assert reclaimed
+        finally:
+            chunk_uploads.release_burn_lock(reclaimed)
+
+
+def test_refresh_burn_lock_renew_mtime():
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, "alice", "upload-5"))
+        session.mkdir(parents=True)
+        staged = {"session_dir": str(session)}
+
+        lock = chunk_uploads.acquire_burn_lock(staged)
+        try:
+            stale_time = time.time() - chunk_uploads.MERGE_LOCK_STALE_SECONDS - 10
+            os.utime(lock, (stale_time, stale_time))
+            chunk_uploads.refresh_burn_lock(lock)
+            assert time.time() - os.path.getmtime(lock) < 60
+        finally:
+            chunk_uploads.release_burn_lock(lock)
+
+
+def _spawn_exiting_process() -> int:
+    """启动一个立即退出的子进程，返回一个确定已死的 PID。"""
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
 
 
 def test_upload_tokens_do_not_collide_after_sanitizing():

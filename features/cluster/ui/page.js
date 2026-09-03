@@ -48,7 +48,7 @@ syncClusterModalState();
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const oneDecimal=value=>(Number(value)||0).toFixed(1);
 const relativeTime=value=>{const timestamp=Date.parse(value||'');if(!Number.isFinite(timestamp))return '-';const seconds=Math.max(0,Math.floor((Date.now()-timestamp)/1000));if(seconds<60)return `${seconds}秒前`;if(seconds<3600)return `${Math.floor(seconds/60)}分钟前`;if(seconds<86400)return `${Math.floor(seconds/3600)}小时前`;return `${Math.floor(seconds/86400)}天前`};
-async function api(path,options,retried=false){const r=await fetch(path,options),text=await r.text();let d={};try{d=text?JSON.parse(text):{}}catch(_){d={detail:text||r.statusText}}const detail=d.detail;if(r.status===403&&!retried&&detail&&typeof detail==='object'&&detail.elevation_required&&typeof window.parent?.requestElevatedAccess==='function'){const granted=await window.parent.requestElevatedAccess('执行集群敏感操作');if(granted)return api(path,options,true)}if(!r.ok||d.success===false){const message=typeof detail==='object'?(detail.message||JSON.stringify(detail)):(detail||d.error||`HTTP ${r.status}`);throw new Error(message)}return d}
+async function api(path,options,retried=false){const r=await fetch(path,options),text=await r.text();let d={};try{d=text?JSON.parse(text):{}}catch(_){d={detail:text||r.statusText}}const detail=d.detail;if(r.status===403&&!retried&&detail&&typeof detail==='object'&&detail.elevation_required&&typeof window.parent?.requestElevatedAccess==='function'){const granted=await window.parent.requestElevatedAccess('执行集群敏感操作');if(granted)return api(path,options,true)}if(!r.ok||d.success===false){const message=typeof detail==='object'?(detail.message||JSON.stringify(detail)):(detail||d.error||`HTTP ${r.status}`);const error=new Error(message);if(r.status===403&&detail&&typeof detail==='object'&&detail.elevation_required)error.elevationRequired=true;throw error}return d}
 function toast(message){const el=document.querySelector('#toast');el.textContent=message;el.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.style.display='none',3000);if(message.startsWith('Worker 已安装并成功注册：'))notifyCompletion('测试主机部署完成',message);else if(message.includes(' 已部署到 '))notifyCompletion('测试套件部署完成',message)}
 async function confirmAction(title,message){if(typeof window.parent?.showConfirmDialog==='function')return window.parent.showConfirmDialog(title,message);return window.confirm(message)}
 function notifyCompletion(title,message){window.parent.postMessage({type:'cluster-notification',title,message,level:'success'},location.origin)}
@@ -424,10 +424,25 @@ async function applyClusterWorkspace(next,navigate=false){
  try{renderModeStatus();renderJobForm();const worker=document.querySelector('#job-worker');if(clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id&&Array.from(worker.options).some(o=>o.value===clusterWorkspace.worker_id)){worker.value=clusterWorkspace.worker_id;updateJobOptions()}const suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(clusterWorkspace.suite_key&&Array.from(suite.options).some(o=>o.value===clusterWorkspace.suite_key))suite.value=clusterWorkspace.suite_key;const wanted=clusterDeviceId(worker.value,(clusterWorkspace.device_ids||[])[0]);if(wanted&&Array.from(device.options).some(o=>o.value===wanted))device.value=wanted;if(navigate&&clusterWorkspace.cluster_job_id&&state.jobs.some(j=>j.id===clusterWorkspace.cluster_job_id))await showJob(clusterWorkspace.cluster_job_id,false)}finally{applyingClusterWorkspace=false}
 }
 async function checkLocalVpn(){try{const d=await api('/api/vpn/status');localVpnConnected=Boolean(d.connected)}catch(e){localVpnConnected=null}}
+let vpnElevationPromptAt=0;
 async function checkWorkerVpn(){
  const localId=localWorkerId();
  const promises=state.workers.filter(w=>w.status!=='offline').map(async w=>{
-  try{const d=await api(`/api/cluster/workers/${encodeURIComponent(w.id)}/vpn-status`);workerVpnCache[w.id]=d.connected}catch(e){workerVpnCache[w.id]=null}
+  try{const d=await api(`/api/cluster/workers/${encodeURIComponent(w.id)}/vpn-status`);workerVpnCache[w.id]=d.connected}catch(e){
+   // 2026-09-03：403 elevation 不再静默吞掉。自动刷新周期里会反复
+   // 命中，弹框必须节流（3 分钟一次），否则提权框会轮询死循环；
+   // 节流窗口内的后续失败保持旧行为（VPN 状态显示未知）。
+   if(e?.elevationRequired&&Date.now()-vpnElevationPromptAt>180000){
+    vpnElevationPromptAt=Date.now();
+    if(typeof window.parent?.requestElevatedAccess==='function'){
+     try{
+      const granted=await window.parent.requestElevatedAccess('查看 Worker VPN 状态');
+      if(granted){workerVpnCache[w.id]=await api(`/api/cluster/workers/${encodeURIComponent(w.id)}/vpn-status`).then(d=>d.connected).catch(()=>null);return}
+     }catch(_){/* 弹框失败保持静默降级 */}
+    }
+   }
+   workerVpnCache[w.id]=null
+  }
  });
  await Promise.all(promises);
 }
