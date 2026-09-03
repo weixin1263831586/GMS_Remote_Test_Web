@@ -10,6 +10,7 @@ from foundation.networking import parse_host_address, split_host_port
 
 from . import runtime
 from .usbip import usbip_manager
+from .usbip_linux_source import ensure_ubuntu_usbip_server
 
 
 def _normalize_host(host: str) -> str:
@@ -127,7 +128,7 @@ def open_usbip_source_ssh(
     device_host: str,
     device_password: str | None = None,
 ) -> tuple[Any | None, str]:
-    """Open an SSH session to a Windows usbipd source host."""
+    """Open an SSH session to a USB/IP source host (Windows or Ubuntu)."""
     host = str(device_host or "").strip()
     if not host:
         return None, "缺少设备主机地址"
@@ -214,12 +215,95 @@ def usbipd_policy_line_covers_busid(output: str, busid: str) -> bool:
     return False
 
 
+def _assigned_serials_for_busids(
+    device_host: str,
+    busids: list[str],
+) -> set[str]:
+    """Return ADB serials recorded for these BUSIDs in persistent assignments."""
+    runtime_config = runtime.config_manager.get_runtime_config() or {}
+    assignments = runtime_config.get("usbip_cluster_assignments") or {}
+    if not isinstance(assignments, dict):
+        return set()
+    selected = {str(item or "").strip() for item in busids}
+    serials: set[str] = set()
+    for info in assignments.values():
+        if not isinstance(info, dict):
+            continue
+        if (
+            str(info.get("device_host") or "").strip() == device_host
+            and str(info.get("busid") or "").strip() in selected
+        ):
+            serials.update(
+                str(serial or "").strip()
+                for serial in info.get("device_serials") or []
+                if str(serial or "").strip()
+            )
+    return serials
+
+
+def _ensure_ubuntu_export(
+    ssh,
+    device_host: str,
+    selected: list[str],
+) -> dict[str, Any]:
+    """Keep the Ubuntu usbipd server exporting the assigned devices.
+
+    Windows 来源靠 usbipd-win AutoBind 策略在设备重枚举后自动重新共享；
+    Ubuntu 来源的等价物是用户态 usbipd 进程：它按序列号过滤导出，并在
+    设备以相同序列号重新枚举时自动重连。这里确保进程存活且过滤器覆盖
+    持久分配的序列号。
+    """
+    config = usbip_manager.config_manager.load_config()
+    inventory = usbip_manager._find_android_devices_linux(ssh, config)
+    selected_busids = set(selected)
+    assigned_serials = _assigned_serials_for_busids(device_host, selected)
+    export_serials = sorted(
+        assigned_serials
+        or {
+            item["serial"]
+            for item in inventory
+            if item["busid"] in selected_busids and item.get("serial")
+        }
+    )
+    export_vids = sorted({
+        item["vid_pid"].split(":", 1)[0]
+        for item in inventory
+        if item["busid"] in selected_busids and item.get("vid_pid")
+    })
+    server = ensure_ubuntu_usbip_server(
+        usbip_manager.ssh_manager,
+        ssh,
+        serials=export_serials,
+        vids=export_vids if not export_serials else (),
+    )
+    if not server.get("success"):
+        return {
+            "success": False,
+            "error": f"Ubuntu来源USB/IP导出服务不可用: {server.get('error')}",
+            "install_guide": server.get("install_guide"),
+        }
+    return {
+        "success": True,
+        "busids": selected,
+        "source_os": "ubuntu",
+        "reused": bool(server.get("reused")),
+        "detail": (
+            "usbipd导出进程已在运行并覆盖分配序列号"
+            if server.get("reused") else "已启动usbipd导出进程"
+        ),
+    }
+
+
 def ensure_usbip_auto_bind_policies(
     device_host: str,
     busids: list[str],
     device_password: str | None = None,
 ) -> dict[str, Any]:
-    """Create usbipd-win AutoBind rules for explicitly assigned ports."""
+    """Ensure rebind-after-reenumeration works for assigned ports.
+
+    Windows 来源创建 usbipd-win AutoBind 规则；Ubuntu 来源确保用户态
+    usbipd 导出进程存活并覆盖分配的序列号。
+    """
     selected = list(dict.fromkeys(
         str(item or "").strip() for item in busids or []
         if str(item or "").strip()
@@ -232,8 +316,11 @@ def ensure_usbip_auto_bind_policies(
         return {"success": False, "error": ssh_error}
 
     try:
-        if not usbip_manager._is_windows_host(ssh):
-            return {"success": False, "error": "USB/IP仅支持Windows主机"}
+        source_os = usbip_manager._detect_source_os(ssh)
+        if source_os == "linux":
+            return _ensure_ubuntu_export(ssh, device_host, selected)
+        if source_os != "windows":
+            return {"success": False, "error": "USB/IP仅支持Windows或Ubuntu主机"}
         installed, version = usbip_manager.check_usbipd_installed(ssh)
         if not installed:
             return {"success": False, "error": "usbipd未安装"}

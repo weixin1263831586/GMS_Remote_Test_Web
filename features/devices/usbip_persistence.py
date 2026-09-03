@@ -112,6 +112,64 @@ def migrate_local_usbip_busid(
     return True, ""
 
 
+USBIP_SOURCE_OS_TTL_SECONDS = 7 * 24 * 3600
+
+
+def get_usbip_source_os_cache() -> dict[str, dict[str, object]]:
+    """Return the persisted host -> source OS map ({host: {"os","timestamp"}})."""
+    getter = getattr(runtime.config_manager, "get_runtime_config", None)
+    runtime_config = getter() if callable(getter) else {}
+    cached = (runtime_config or {}).get("usbip_source_os") or {}
+    return dict(cached) if isinstance(cached, dict) else {}
+
+
+def lookup_usbip_source_os(device_host: str) -> str:
+    """Return the cached source OS for a host ('' when absent/expired)."""
+    entry = get_usbip_source_os_cache().get(str(device_host or "").strip()) or {}
+    if not isinstance(entry, dict):
+        return ""
+    timestamp = float(entry.get("timestamp") or 0)
+    if timestamp and time.time() - timestamp > USBIP_SOURCE_OS_TTL_SECONDS:
+        return ""
+    return str(entry.get("os") or "").strip()
+
+
+def record_usbip_source_os(device_host: str, source_os: str) -> None:
+    """Persist a detected source host OS so the UI can label hosts offline."""
+    host = str(device_host or "").strip()
+    os_value = {
+        "windows": "windows",
+        # API 对外用 "ubuntu"，内部记录统一为 "linux"。
+        "linux": "linux",
+        "ubuntu": "linux",
+    }.get(str(source_os or "").strip(), "")
+    if not host or not os_value:
+        return
+    with usbip_assignment_lock:
+        getter = getattr(runtime.config_manager, "get_runtime_config", None)
+        runtime_config = getter() if callable(getter) else {}
+        runtime_config = runtime_config or {}
+        cached = runtime_config.get("usbip_source_os") or {}
+        if not isinstance(cached, dict):
+            cached = {}
+        cached = dict(cached)
+        previous = cached.get(host)
+        if (
+            isinstance(previous, dict)
+            and str(previous.get("os") or "") == os_value
+            and time.time() - float(previous.get("timestamp") or 0)
+            < USBIP_SOURCE_OS_TTL_SECONDS / 24
+        ):
+            return
+        cached[host] = {"os": os_value, "timestamp": time.time()}
+        updater = getattr(runtime.config_manager, "update_runtime_config", None)
+        if callable(updater):
+            updater({"usbip_source_os": cached})
+        else:
+            runtime_config["usbip_source_os"] = cached
+            runtime.config_manager.save_runtime_config(runtime_config)
+
+
 def record_usbip_network_quality(
     device_host: str,
     worker_id: str,
@@ -143,7 +201,11 @@ def record_usbip_network_quality(
             runtime.config_manager.save_runtime_config(runtime_config)
 
 
-def persist_local_usbip_sources(device_host: str, serials: list[str]) -> None:
+def persist_local_usbip_sources(
+    device_host: str,
+    serials: list[str],
+    source_os: str = "",
+) -> None:
     """Persist USB/IP source metadata used by local device-list endpoints."""
     serials = list(dict.fromkeys(
         str(serial or "").strip()
@@ -162,9 +224,8 @@ def persist_local_usbip_sources(device_host: str, serials: list[str]) -> None:
             persisted = {}
         persisted = dict(persisted)
         for serial in serials:
-            existing_source = str(
-                (persisted.get(serial) or {}).get("source") or ""
-            ).strip()
+            existing = persisted.get(serial) or {}
+            existing_source = str(existing.get("source") or "").strip()
             if existing_source and existing_source != device_host:
                 logger.info(
                     "[USB/IP] Keep existing source for %s: %s (new: %s)",
@@ -173,7 +234,13 @@ def persist_local_usbip_sources(device_host: str, serials: list[str]) -> None:
                     device_host,
                 )
                 continue
-            updates[serial] = {"source": device_host, "timestamp": timestamp}
+            record = {"source": device_host, "timestamp": timestamp}
+            resolved_os = str(source_os or "").strip() or str(
+                existing.get("source_os") or ""
+            ).strip()
+            if resolved_os:
+                record["source_os"] = resolved_os
+            updates[serial] = record
         if updates:
             persisted.update(updates)
             updater = getattr(runtime.config_manager, "update_runtime_config", None)

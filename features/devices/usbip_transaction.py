@@ -38,13 +38,15 @@ USBIP_PORT_COMMAND = f"sudo -n {_resolve_usbip_command()} port"
 
 # usbip port 输出的设备行，例如：
 #     1-2 | 05ac:12a8 | Remix Mini | Remote USB/IP host 10.0.0.5
+# BUSID 组件：usbipd-win 为 hub 路径（1-2 / 2-1.4），用户态 usbipd
+# 服务端为 busnum-address-port（1-17-13），统一接受多段数字。
 _USBIP_PORT_DEVICE_RE = re.compile(
-    r'^\s*(?P<busid>\d+-\d+(?:\.\d+)*)\s*\|[^|]*\|[^|]*\|\s*Remote USB/IP host (?P<host>[^\s]+)\s*$'
+    r'^\s*(?P<busid>\d+(?:[-.]\d+)+)\s*\|[^|]*\|[^|]*\|\s*Remote USB/IP host (?P<host>[^\s]+)\s*$'
 )
 _USBIP_PORT_URL_RE = re.compile(
-    r"\b(?P<local_busid>\d+-\d+(?:\.\d+)*)\s*->\s*"
+    r"\b(?P<local_busid>\d+(?:[-.]\d+)+)\s*->\s*"
     r"usbip://(?P<host>\[[0-9A-Fa-f:]+\]|[^/:\s]+)(?::\d+)?/"
-    r"(?P<busid>\d+-\d+(?:\.\d+)*)\b",
+    r"(?P<busid>\d+(?:[-.]\d+)+)\b",
     re.IGNORECASE,
 )
 

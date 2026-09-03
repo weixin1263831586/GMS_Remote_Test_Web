@@ -1220,7 +1220,12 @@ function startAdbProxyDeviceRefresh() {
         adbProxyDeviceRefreshRunning = true;
         const selection = adbProxySelectionSnapshot();
         try {
-            adbProxyStatus = await apiCall('/api/adb-forward/status', 'GET');
+            adbProxyStatus = await apiCall(
+                '/api/adb-forward/status',
+                'GET',
+                null,
+                {background: true, silentToast: true}
+            );
             state.adbForwardRunning = Boolean(adbProxyStatus.connected);
             renderAdbProxyAssignments();
             renderAdbProxyHosts(selection);
@@ -1735,6 +1740,10 @@ function usbipSelectionSerials(group, busid) {
     return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)));
 }
 
+function usbipSourceOsLabel(sourceOs) {
+    return {windows: 'Windows', ubuntu: 'Ubuntu'}[String(sourceOs || '').trim()] || '';
+}
+
 function usbipAssignmentLabel(selection, busid) {
     const serials = usbipSelectionSerials(selection, busid);
     const rawStatus = selection?.statuses_by_busid?.[busid]
@@ -1747,9 +1756,11 @@ function usbipAssignmentLabel(selection, busid) {
         cleanup_required: '需断开清理',
         detaching: '正在断开',
     };
+    const osLabel = usbipSourceOsLabel(selection?.source_os);
     return (
         `${selection.device_host} → ${selection.worker_id || 'Controller'} · ${busid}`
         + `｜设备：${serials.join('、') || '尚未识别'}`
+        + (osLabel ? `｜来源：${osLabel}` : '')
         + `｜${statusLabels[rawStatus] || rawStatus}`
     );
 }
@@ -2153,6 +2164,11 @@ async function openUsbipAttachModal() {
         sourceSelect.append(new Option('未配置设备来源', ''));
     } else {
         sources.forEach(value => sourceSelect.append(new Option(value, value)));
+        // 打开弹窗即显示已缓存的来源系统标识，未知的后台探测补齐。
+        usbipSourceOsByHost.forEach((osValue, host) => {
+            applyUsbipSourceOsLabel(host, osValue);
+        });
+        void refreshUsbipSourceOsLabels([...sources]);
     }
 
     const localWorkerId = workspaceLocalWorkerId();
@@ -2199,10 +2215,16 @@ function closeUsbipAttachModal() {
 }
 
 function stopUsbipSourceRefresh() {
-    if (usbipSourceRefreshTimer) clearInterval(usbipSourceRefreshTimer);
+    if (usbipSourceRefreshTimer) clearTimeout(usbipSourceRefreshTimer);
     usbipSourceRefreshTimer = null;
     usbipSourceRefreshRunning = false;
+    usbipSourceUnauthorizedStreak = 0;
 }
+
+// 来源主机连续未授权（缺 SSH 凭据）时拉长静默轮询间隔，避免控制台 401 刷屏。
+const USBIP_SOURCE_REFRESH_BACKOFF_MS = 30000;
+const USBIP_SOURCE_REFRESH_BACKOFF_STREAK = 3;
+let usbipSourceUnauthorizedStreak = 0;
 
 function startUsbipSourceRefresh() {
     stopUsbipSourceRefresh();
@@ -2224,10 +2246,19 @@ function startUsbipSourceRefresh() {
             usbipSourceRefreshRunning = false;
         }
     };
-    usbipSourceRefreshTimer = setInterval(
-        () => void refresh(),
-        DEVICE_ROUTING_REFRESH_INTERVAL_MS
-    );
+    // 自调度循环替代固定 setInterval：来源连续未授权时退避到长间隔，
+    // 避免 3 秒一次的 401 刷屏；凭据补齐后自动恢复正常节奏。
+    const scheduleNext = () => {
+        if (!ModalManager.isOpen('usbip-attach-modal')) return;
+        const delay = usbipSourceUnauthorizedStreak >= USBIP_SOURCE_REFRESH_BACKOFF_STREAK
+            ? USBIP_SOURCE_REFRESH_BACKOFF_MS
+            : DEVICE_ROUTING_REFRESH_INTERVAL_MS;
+        usbipSourceRefreshTimer = setTimeout(async () => {
+            await refresh();
+            scheduleNext();
+        }, delay);
+    };
+    scheduleNext();
     ModalManager.onClose('usbip-attach-modal', stopUsbipSourceRefresh);
 }
 
@@ -2293,6 +2324,7 @@ async function loadUsbipSourceDevices(force = false, options = {}) {
             ...options,
             knownBusids,
             selectedBusids,
+            sourceOs: cached.sourceOs,
         });
         return;
     }
@@ -2302,30 +2334,42 @@ async function loadUsbipSourceDevices(force = false, options = {}) {
     }
     const request = apiCall(
         '/api/usbip/source-devices?device_host=' + encodeURIComponent(source),
-        'GET'
+        'GET',
+        null,
+        // 静默轮询按后台请求处理：会话/提权失效时不弹登录层或提权框。
+        options.silent ? {background: true, silentToast: true} : {}
     );
     usbipSourceLoadPromise = {source, promise: request};
     try {
         const result = await request;
         const devices = result.devices || [];
-        usbipSourceDeviceCache.set(source, {timestamp: Date.now(), devices});
+        const sourceOs = String(result.source_os || '').trim();
+        usbipSourceDeviceCache.set(source, {timestamp: Date.now(), devices, sourceOs});
+        usbipSourceUnauthorizedStreak = 0;
         renderUsbipSourceDevices(source, devices, {
             ...options,
             knownBusids,
             selectedBusids,
+            sourceOs,
         });
     } catch (error) {
         if (options.silent) {
+            // 静默轮询：连续未授权（平台会话或来源凭据缺失）时递增连败
+            // 计数，驱动 startUsbipSourceRefresh 的退避调度；成功后清零。
+            if (error.status === 401) {
+                usbipSourceUnauthorizedStreak += 1;
+            }
             debugLog('[USB/IP] source device polling failed:', error.message);
+        } else if (error.needPassword || error.need_password) {
+            // 来源未配置SSH密码：不自动弹密码框打断操作，改为内联提示
+            // + 主动按钮（见 showUsbipSourceCredentialPrompt）。
+            showUsbipSourceCredentialPrompt(source);
         } else {
             select.innerHTML = '<option value="">USB设备加载失败</option>';
             if (message) message.textContent = `USB设备加载失败：${error.message}`;
             if (error.installGuide) {
                 showInstallGuide('usbipd 安装指南', error.installGuide);
             }
-        }
-        if (!options.silent && (error.needPassword || error.need_password)) {
-            showDevicePasswordModal(source, 'usbip-list', loadUsbipSourceDevices);
         }
     } finally {
         if (usbipSourceLoadPromise?.promise === request) {
@@ -2334,11 +2378,77 @@ async function loadUsbipSourceDevices(force = false, options = {}) {
     }
 }
 
+function showUsbipSourceCredentialPrompt(source) {
+    const select = document.getElementById('usbip-source-device');
+    const message = document.getElementById('usbip-attach-message');
+    if (select) {
+        select.innerHTML = '<option value="">该来源需要SSH密码后才能列出USB设备</option>';
+        select.disabled = true;
+    }
+    const submit = document.getElementById('usbip-attach-submit');
+    if (submit) submit.disabled = true;
+    if (!message) return;
+    message.replaceChildren();
+    const hint = document.createElement('span');
+    hint.textContent = `${source} 尚未配置SSH密码。`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-xxs btn-primary';
+    button.style.marginLeft = '8px';
+    button.textContent = '输入SSH密码';
+    button.addEventListener('click', () => {
+        showDevicePasswordModal(source, 'usbip-list', loadUsbipSourceDevices);
+    });
+    message.append(hint, button);
+}
+
+function applyUsbipSourceOsLabel(source, sourceOs) {
+    const label = usbipSourceOsLabel(sourceOs);
+    if (!source || !label) return;
+    usbipSourceOsByHost.set(String(source), String(sourceOs).trim());
+    const sourceSelect = document.getElementById('usbip-source-host');
+    if (!sourceSelect) return;
+    const option = sourceSelect.querySelector(
+        `option[value="${CSS.escape(String(source))}"]`
+    );
+    if (!option) return;
+    if (!option.dataset.baseLabel) {
+        option.dataset.baseLabel = String(option.textContent)
+            .replace(/\s*·\s*(Windows|Ubuntu)$/, '');
+    }
+    option.textContent = `${option.dataset.baseLabel} · ${label}`;
+}
+
+async function refreshUsbipSourceOsLabels(sources) {
+    const targets = Array.from(new Set(
+        (sources || []).map(value => String(value || '').trim()).filter(Boolean)
+    ));
+    if (!targets.length) return;
+    try {
+        const result = await apiCall(
+            '/api/usbip/source-os?hosts=' + encodeURIComponent(targets.join(',')),
+            'GET',
+            null,
+            // 标识刷新是辅助信息：任何失败都不弹登录层、不弹错误提示。
+            {background: true, silentToast: true}
+        );
+        Object.entries(result.sources || {}).forEach(([host, info]) => {
+            applyUsbipSourceOsLabel(host, info?.source_os);
+        });
+    } catch (error) {
+        debugLog('[USB/IP] source OS label refresh failed:', error.message);
+    }
+}
+
 function renderUsbipSourceDevices(source, devices, options = {}) {
     if (document.getElementById('usbip-source-host')?.value !== source) return;
     const select = document.getElementById('usbip-source-device');
     const message = document.getElementById('usbip-attach-message');
     if (!select) return;
+    applyUsbipSourceOsLabel(source, options.sourceOs);
+    const osLabel = usbipSourceOsLabel(
+        options.sourceOs || usbipSourceOsByHost.get(source)
+    );
     select.innerHTML = '';
     const assignedBusids = usbipAssignedBusidsBySource.get(source) || new Set();
     const availableDevices = devices.filter(device => !assignedBusids.has(device.busid));
@@ -2365,7 +2475,7 @@ function renderUsbipSourceDevices(source, devices, options = {}) {
         );
     }
     if (message) message.textContent = availableDevices.length
-        ? `发现 ${availableDevices.length} 个可接入 USB 设备。多选时，Windows/Linux 按住 Ctrl，macOS 按住 Command。`
+        ? `发现 ${availableDevices.length} 个可接入 USB 设备${osLabel ? `（来源系统：${osLabel}）` : ''}。多选时，Windows/Linux 按住 Ctrl，macOS 按住 Command。`
         : devices.length
         ? '该来源当前没有剩余可接入的Android USB设备。'
         : '设备源未发现可接入的Android USB设备。';

@@ -94,16 +94,20 @@ async function resolveClusterHost(workerId) {
 
 function updateTestHostScopedControls(workerId = workspaceWorkerId()) {
     const remoteSelected = Boolean(workerId && !isLocalWorkspaceWorker(workerId));
-    const controllerOnly = {
-        'check-sshd-btn': 'SSHD 检查面向 Controller 连接的设备主机',
+    // 诊断类按钮（SSHD/路由/VPN）作用于平台网络（Controller/设备源主机），
+    // 与所选测试 Worker 无关：远端 Worker 模式下保持可点击，仅提示作用域。
+    const controllerScoped = {
+        'check-sshd-btn': 'SSHD 检查面向设备源主机（Controller 执行）',
         'check-routing-btn': '路由检查面向 Controller 与浏览器客户端',
         'vpn-connect-btn': 'VPN 连接由 Controller 测试主机管理',
     };
-    Object.entries(controllerOnly).forEach(([id, message]) => {
+    Object.entries(controllerScoped).forEach(([id, message]) => {
         const control = document.getElementById(id);
         if (!control) return;
-        control.disabled = remoteSelected;
-        control.title = remoteSelected ? `${message}；当前已选择远端 Worker` : '';
+        control.disabled = false;
+        control.title = remoteSelected
+            ? `${message}；当前已选择远端 Worker`
+            : '';
     });
     const usbip = document.getElementById('usbip-btn');
     if (usbip) {

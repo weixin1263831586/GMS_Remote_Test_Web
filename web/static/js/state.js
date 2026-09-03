@@ -58,6 +58,12 @@ const state = {
 
 const DEBUG = false;
 
+// ADB Proxy 操作互斥标志。
+// 注意：workspace-devices.js / firmware-burn.js 在 navigation.js 之前加载并
+// 会读写该变量，声明必须放在更早加载的 state.js，否则页面切换时引用
+// 尚未初始化的全局词法绑定会抛 ReferenceError。
+let adbProxyOperationRunning = false;
+
 function $(id) {
     const cached = state.domCache[id];
     if (cached) {

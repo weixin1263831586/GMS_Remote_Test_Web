@@ -2,7 +2,7 @@
 
 from fastapi import HTTPException
 
-from features.auth import get_authenticated_user
+from features.auth import get_authenticated_user, is_elevated
 
 
 def usbip_request_user(request):
@@ -18,9 +18,15 @@ def enforce_usbip_host_access(
     request_host: str,
 ) -> None:
     user = usbip_request_user(request)
+    if user is None:
+        return
+    # 已通过管理员验证（提权）的会话视同管理员：烧写等高危操作走的是
+    # require_elevated_admin，若此处仍按 role 拦截会出现"能烧写却不能
+    # 连接 USB/IP 主机"的策略矛盾。
+    if is_elevated(request):
+        return
     if (
-        user
-        and user.role != "admin"
+        user.role != "admin"
         and explicit_host
         and explicit_host != request_host
     ):
