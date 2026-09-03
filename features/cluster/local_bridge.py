@@ -9,6 +9,7 @@ import shutil
 import socket
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,8 @@ class LocalWorkerBridge:
         self._heartbeat_interval = 15.0
         self._initial_heartbeat_delay = 1.0
         self._registered = False
+        self.session_id = f"controller-bridge-session-{uuid.uuid4().hex}"
+        self.connection_generation = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lifecycle_lock = threading.Lock()
@@ -139,6 +142,7 @@ class LocalWorkerBridge:
             "hostname": socket.gethostname(),
             "address": ubuntu_host,
             "agent_version": AGENT_VERSION,
+            "session_id": self.session_id,
             "max_jobs": int(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", str(ClusterConfig.load().default_max_jobs))),
             "capabilities": {
                 "adb": True, "fastboot": True, "tradefed": True,
@@ -155,13 +159,17 @@ class LocalWorkerBridge:
         if self._real_agent_active():
             return
         data = self._registration()
-        self.repository.register_worker(data)
+        worker = self.repository.register_worker(data)
+        self.session_id = str(worker.get("session_id") or self.session_id)
+        self.connection_generation = int(worker.get("connection_generation") or 0)
         self._registered = True
         logger.info("Local worker bridge registered as %s", self.worker_id)
 
     def _real_agent_active(self) -> bool:
         worker = self.repository.get_worker(self.worker_id)
         if not worker or str(worker.get("agent_version", "")).startswith("controller-"):
+            return False
+        if str(worker.get("status") or "").lower() == "offline":
             return False
         try:
             heartbeat = datetime.fromisoformat(
@@ -209,6 +217,8 @@ class LocalWorkerBridge:
             }
         payload: dict[str, Any] = {
             "agent_version": AGENT_VERSION,
+            "session_id": self.session_id,
+            "connection_generation": self.connection_generation,
             **_host_metrics(),
             "running_jobs": discover_tradefed_processes(),
             "devices": _probe_devices(),

@@ -196,6 +196,11 @@ function dismissNotificationPanelFromPointer(event) {
     closeNotificationPanel();
 }
 
+const notificationToggle = $('notification-toggle');
+if (notificationToggle) {
+    notificationToggle.addEventListener('click', toggleNotificationPanel);
+    notificationToggle.disabled = false;
+}
 document.addEventListener('click', dismissNotificationPanelFromPointer);
 document.addEventListener('auxclick', dismissNotificationPanelFromPointer);
 document.addEventListener('contextmenu', dismissNotificationPanelFromPointer);

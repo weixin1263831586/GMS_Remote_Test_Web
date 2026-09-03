@@ -160,7 +160,7 @@ class ServerLifecycleTests(unittest.TestCase):
         # sudo 安装成功后 resolve 能找到新二进制并继续启动。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
         # 部署前没有任何 usbipd 进程；启动命令执行后进程出现。
@@ -202,20 +202,20 @@ class ServerLifecycleTests(unittest.TestCase):
                 "/usr/bin/usbipd\n/home/wlq/.local/bin/usbipd\n", "", 0,
             ),
             "/usr/bin/usbipd --version": ("usbipd 0.9.0", "", 0),
-            "/home/wlq/.local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/home/wlq/.local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
         })
         binary, version = usbip_linux_source.resolve_linux_usbipd_bin(
             ssh_manager, MagicMock(),
         )
         self.assertEqual(binary, "/home/wlq/.local/bin/usbipd")
-        self.assertEqual(version, "usbipd 0.9.3")
+        self.assertEqual(version, "usbipd 0.9.4")
 
     def test_install_falls_back_to_user_local_without_sudo(self):
         # sudo 需要密码的主机上，安装必须回退到用户目录并验证可用。
         responses = {
             "sudo -n install": ("", "sudo: a password is required", 1),
             "mkdir -p": ("", "", 0),
-            "/home/wlq/.local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/home/wlq/.local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
 
@@ -239,7 +239,7 @@ class ServerLifecycleTests(unittest.TestCase):
         )
         self.assertTrue(result["success"])
         self.assertTrue(result["user_local"])
-        self.assertEqual(result["version"], "usbipd 0.9.3")
+        self.assertEqual(result["version"], "usbipd 0.9.4")
         self.assertTrue(any(
             cmd.startswith("sudo -n install") for cmd in ssh_manager.calls
         ))
@@ -264,7 +264,7 @@ class ServerLifecycleTests(unittest.TestCase):
     def test_start_new_server_with_serial_filters(self):
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
         # 启动命令执行后进程出现。
@@ -298,7 +298,7 @@ class ServerLifecycleTests(unittest.TestCase):
     def test_reuse_running_server_covering_requested_serials(self):
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
         state = _pgrep_protocol_state([
@@ -319,7 +319,7 @@ class ServerLifecycleTests(unittest.TestCase):
     def test_restart_merges_serial_filters(self):
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
             "kill": ("", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
@@ -409,9 +409,7 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertEqual(info["serials"], ["S1"])
 
     def test_running_cmdline_parses_quoted_serial_as_single_argv(self):
-        # 复审第十一节回归：shlex.quote 包裹的 serial（含空格/元字符）
-        # 必须解析为单个 serial，text.split/regex 会把它拆碎导致
-        # coverage 复用判断不准。
+        # shlex.quote 包裹的 serial（含空格/元字符）必须解析为单个 serial。
         info = usbip_linux_source.parse_usbip_running_cmdline(
             "123 /usr/local/bin/usbipd bind --serial 'RK1; rm -rf /' --vid 2207",
         )
@@ -430,7 +428,7 @@ class ServerLifecycleTests(unittest.TestCase):
         # 且启动命令要写 PID 文件供后续按 PID 停止。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
         state = _pgrep_protocol_state([])
@@ -465,7 +463,7 @@ class ServerLifecycleTests(unittest.TestCase):
         # serial-only 实例只导出串号命中的设备，不能声称已覆盖 VID。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
             "kill": ("", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
@@ -508,7 +506,7 @@ class ServerLifecycleTests(unittest.TestCase):
         # 覆盖不足并合并重启，而不是错误复用。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
             "kill": ("", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
@@ -550,7 +548,7 @@ class ServerLifecycleTests(unittest.TestCase):
         # --listen <SSH可达IP>:3240，否则 Worker 无法 attach。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
             "echo $SSH_CONNECTION": ("10.0.0.9 54321 10.0.0.5 22\n", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
@@ -582,7 +580,7 @@ class ServerLifecycleTests(unittest.TestCase):
         # 不依赖 usbipd 默认值）；配合 --allow-client 白名单兜底。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
             "echo $SSH_CONNECTION": ("", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
@@ -699,7 +697,7 @@ class AutoBindUbuntuTests(unittest.TestCase):
     def test_ensure_ubuntu_export_uses_assignment_serials(self):
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.3", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
         state = _pgrep_protocol_state([

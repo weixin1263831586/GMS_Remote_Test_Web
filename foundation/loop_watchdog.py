@@ -1,16 +1,11 @@
 """Event-loop stall watchdog.
 
-2026-09-03 事故复盘：源端固件烧写（SFTP 上传 4.6GB 固件到 Windows 源主机）
-期间，Controller 的 asyncio 事件循环被未知同步调用阻塞约 5 分钟，全部
-HTTP 请求（含其他机器的集群轮询）超时，最终靠重启服务恢复。静态审计中
-烧写/重连路径均已正确使用 ``asyncio.to_thread`` / 独立线程，无法定位
-卡死点。
-
-本模块提供下次复发的现场捕获能力：``faulthandler.dump_traceback_later``
-由 C 级定时器线程驱动，不依赖 Python 事件循环调度——即使循环完全卡死，
-超时后仍会把**全部线程栈** dump 到 stderr（journald 收集），其中事件循环
-线程的栈顶即卡死现场。健康循环每 ``REARM_INTERVAL_SECONDS`` 秒取消并
-重新武装定时器，正常运行时永不触发。
+事件循环被同步调用阻塞时，HTTP 请求会全部超时且难以定位卡死点。
+本模块在循环卡死时捕获现场：``faulthandler.dump_traceback_later``
+由 C 级定时器线程驱动，不依赖事件循环调度——即使循环完全卡死，
+超时后仍会把全部线程栈 dump 到 stderr（journald 收集），事件循环
+线程的栈顶即卡死现场。健康循环每 ``REARM_INTERVAL_SECONDS`` 秒
+取消并重新武装定时器，正常运行时永不触发。
 """
 
 from __future__ import annotations

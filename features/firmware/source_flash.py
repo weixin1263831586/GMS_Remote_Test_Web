@@ -21,6 +21,7 @@ Controller 直接自动化。因此采用「文件队列式 Source Agent」：
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -28,16 +29,30 @@ import time
 from dataclasses import dataclass
 
 from features.devices.ssh_credentials import find_device_host_password
+from foundation.ssh_security import configure_strict_host_keys
 
 from . import runtime
 
 
 logger = logging.getLogger(__name__)
 
-WINDOWS_QUEUE_DIR = r"C:\Users\hcq\gms-flash-queue"
+# 队列目录跟随 SSH 登录用户（%USERPROFILE%\gms-flash-queue），
+# 与 Agent 端 Path.home() 推导一致。
 WINDOWS_FIRMWARE_DIR = r"C:\gms-flash"
 RESULT_POLL_INTERVAL_SECONDS = 10.0
 RESULT_TIMEOUT_SECONDS = 5400
+
+
+def windows_queue_dir(device_host: str) -> str:
+    """Return the Windows flash queue dir for the SSH login user.
+
+    Agent 用 Path.home()/gms-flash-queue（%USERPROFILE%），SSH 登录用户
+    与运行 Agent 的桌面账户一致时，等价于 C:\\Users\\<user>\\gms-flash-queue。
+    """
+    username = str(device_host or "").split("@", 1)[0].strip()
+    if not username:
+        return r"C:\Users\hcq\gms-flash-queue"
+    return rf"C:\Users\{username}\gms-flash-queue"
 
 
 class SourceFlashError(RuntimeError):
@@ -86,7 +101,8 @@ def open_windows_ssh(device_host: str):
     import paramiko
 
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # 固件烧写是高风险链路，必须走严格主机密钥校验（known_hosts + Reject）。
+    configure_strict_host_keys(client)
     try:
         client.connect(
             hostname, username=username, password=password, timeout=15,
@@ -130,22 +146,25 @@ def sftp_upload(ssh, local_path: str, remote_path: str,
         sftp.close()
 
 
-def enqueue_task(ssh, task_id: str, firmware: str) -> None:
+def enqueue_task(ssh, queue_dir: str, task_id: str, firmware: str,
+                 device: str = "") -> None:
     sftp = ssh.open_sftp()
     try:
         try:
-            sftp.stat(WINDOWS_QUEUE_DIR)
+            sftp.stat(queue_dir)
         except FileNotFoundError:
-            sftp.mkdir(WINDOWS_QUEUE_DIR)
-        task_spec = {"firmware": firmware}
-        with sftp.open(f"{WINDOWS_QUEUE_DIR}\\{task_id}.json", "w") as f:
+            sftp.mkdir(queue_dir)
+        # 任务必须携带目标设备：Agent 端用 adb -s <device> reboot loader，
+        # 多设备在线时才能烧对目标。
+        task_spec = {"firmware": firmware, "device": device}
+        with sftp.open(f"{queue_dir}\\{task_id}.json", "w") as f:
             f.write(json.dumps(task_spec, ensure_ascii=False))
     finally:
         sftp.close()
 
 
-def wait_result(ssh, task_id: str, keepalive=None) -> dict:
-    result_path = f"{WINDOWS_QUEUE_DIR}\\{task_id}.result.json"
+def wait_result(ssh, queue_dir: str, task_id: str, keepalive=None) -> dict:
+    result_path = f"{queue_dir}\\{task_id}.result.json"
     deadline = time.time() + RESULT_TIMEOUT_SECONDS
     while time.time() < deadline:
         time.sleep(RESULT_POLL_INTERVAL_SECONDS)
@@ -189,14 +208,15 @@ def _sync_flash_flow(
         task_id = f"flash-{device}-{int(time.time())}"
         remote_dir = f"{WINDOWS_FIRMWARE_DIR}\\{task_id}"
         remote_firmware = f"{remote_dir}\\{os.path.basename(firmware_path)}"
+        queue_dir = windows_queue_dir(device_host)
 
         log(f"上传固件到 Windows 源主机: {remote_firmware}")
         sftp_upload(ssh, firmware_path, remote_firmware, remote_dir)
 
-        log(f"投递烧写任务 {task_id} 到 Source Agent")
-        enqueue_task(ssh, task_id, remote_firmware)
+        log(f"投递烧写任务 {task_id} 到 Source Agent（目标设备 {device}）")
+        enqueue_task(ssh, queue_dir, task_id, remote_firmware, device=device)
 
-        result = wait_result(ssh, task_id, keepalive=keepalive)
+        result = wait_result(ssh, queue_dir, task_id, keepalive=keepalive)
         report = SourceFlashReport(
             device=device,
             success=result.get("status") == "SUCCESS",

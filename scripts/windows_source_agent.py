@@ -33,7 +33,9 @@ from pywinauto import Desktop
 
 RKDEVTOOL_EXE = r"D:\RKDevTool_v3.41_for_window\RKDevTool.exe"
 RKDEVTOOL_LOG_DIR = r"D:\RKDevTool_v3.41_for_window\Log"
-QUEUE_DIR = r"C:\Users\hcq\gms-flash-queue"
+# 队列目录跟随运行 Agent 的 Windows 账户（Controller 端按 SSH 用户名
+# 推导同一目录）。
+QUEUE_DIR = str(Path.home() / "gms-flash-queue")
 POLL_INTERVAL_SECONDS = 2.0
 FLASH_TIMEOUT_SECONDS = 3600
 WINDOW_CLASS = "#32770"
@@ -86,7 +88,9 @@ def _wait_rkdevtool_idle(win) -> None:
     """Ensure the device is in Loader/Maskrom before clicking 升级.
 
     当 RKDevTool 显示 ADB 设备时，先 adb reboot loader 并等待ComboBox
-    不再含 "ADB"（Loader 枚举后 RKDevTool 会自动刷新）。
+    明确出现 Loader/Maskrom（不再以「无 ADB」作为判定，见
+    _wait_for_loader_mode）。设备既不在 ADB 也看不到 Loader/Maskrom
+    文本时（空设备列表等），视为目标不明确并终止烧写。
     """
     try:
         combo_texts = [
@@ -95,14 +99,29 @@ def _wait_rkdevtool_idle(win) -> None:
             if (c.element_info.class_name or "") == "ComboBox"
         ]
     except Exception:
-        return
-    if not any("ADB" in t for t in combo_texts):
-        return
-    _adb_reboot_loader()
-    _wait_for_loader_mode(win)
+        combo_texts = []
+    for text in combo_texts:
+        if "ADB" in text:
+            _adb_reboot_loader()
+            _wait_for_loader_mode(win)
+            return
+    # 未显示 ADB：必须已处于 Loader/Maskrom 才允许继续。
+    for text in combo_texts:
+        lowered = (text or "").casefold()
+        if "loader" in lowered or "maskrom" in lowered or "rockusb" in lowered:
+            return
+    raise RuntimeError(
+        "RKDevTool 未显示可确认的 Loader/Maskrom 设备，目标不明确，已终止烧写"
+    )
 
 
 def _wait_for_loader_mode(win, timeout: int = 120) -> None:
+    """Wait until RKDevTool explicitly shows Loader/Maskrom.
+
+    设备重新枚举期间 RKDevTool 可能一个设备都看不到，不能以「不再含
+    ADB」判断；必须看到明确的 Loader/Maskrom/Rockusb 文本才放行，
+    超时抛错终止烧写。
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(2)
@@ -112,10 +131,15 @@ def _wait_for_loader_mode(win, timeout: int = 120) -> None:
                 for c in win.descendants()
                 if (c.element_info.class_name or "") == "ComboBox"
             ]
-            if not any("ADB" in t for t in combo_texts):
-                return
         except Exception:
             continue
+        for text in combo_texts:
+            lowered = text.casefold()
+            if "loader" in lowered or "maskrom" in lowered or "rockusb" in lowered:
+                return
+    raise RuntimeError(
+        f"等待设备进入 Loader/Maskrom 模式超时（{timeout}s），已终止烧写"
+    )
 
 def _send_text_to_edit(edit_wrapper, text: str) -> None:
     """Set Edit text via WM_SETTEXT, bypassing pywinauto visibility checks.
@@ -211,43 +235,12 @@ def find_flash_controls(win):
                 (b.window_text() or "") for b in win.descendants(
                     control_type="Button")
             ]
-            with open(r"C:\Users\hcq\gms-flash-queue\.btn-diag.txt",
+            with open(os.path.join(QUEUE_DIR, ".btn-diag.txt"),
                       "w", encoding="utf-8") as f:
                 f.write("\n".join(diag_texts))
         except Exception:
             pass
     return long_edits, upgrade_buttons
-
-
-def poll_flash_log(start_size: int) -> dict:
-    """Poll today's RKDevTool log until success/failure/timeout."""
-    today = datetime.now().strftime("Log%Y-%m-%d.txt")
-    log_path = os.path.join(RKDEVTOOL_LOG_DIR, today)
-    tail = ""
-    deadline = time.time() + FLASH_TIMEOUT_SECONDS
-    while time.time() < deadline:
-        time.sleep(5)
-        try:
-            with open(log_path, encoding="utf-8", errors="replace") as f:
-                f.seek(max(0, start_size - 4096))
-                content = f.read()
-        except OSError:
-            continue
-        tail = content[-4000:]
-        if "Download Firmware Success" in content:
-            return {"status": "SUCCESS", "log_tail": tail[-2000:]}
-        if (
-            "Start to download image" in content
-            and any(
-                marker in content
-                for marker in (
-                    "Download Firmware Fail",
-                    "Test Device Fail",
-                )
-            )
-        ):
-            return {"status": "FAILED", "log_tail": tail[-2000:]}
-    return {"status": "TIMEOUT", "log_tail": tail[-2000:]}
 
 
 def _wait_device_not_adb(win, timeout: int = 120) -> bool:
@@ -269,14 +262,78 @@ def _wait_device_not_adb(win, timeout: int = 120) -> bool:
     return False
 
 
-def _adb_reboot_loader() -> None:
-    subprocess.run(
-        ["adb", "reboot", "loader"],
-        capture_output=True, timeout=30, check=False,
+def _adb_reboot_loader(device: str = "") -> None:
+    """Reboot the target device into loader via ADB.
+
+    必须带 `-s <serial>`：多设备同时在线时裸 `adb reboot loader`
+    会报 more than one device。失败抛错终止烧写。
+    """
+    command = ["adb"]
+    if device:
+        command += ["-s", device]
+    command += ["reboot", "loader"]
+    completed = subprocess.run(
+        command, capture_output=True, timeout=30, check=False,
     )
+    if completed.returncode != 0:
+        detail = (
+            completed.stderr.decode("utf-8", errors="replace").strip()
+            or completed.stdout.decode("utf-8", errors="replace").strip()
+        )
+        raise RuntimeError(
+            f"adb reboot loader 失败 ({device or 'no -s'}): {detail}"
+        )
 
 
-def run_flash(firmware_path: str) -> dict:
+def _current_log_size(log_path: str) -> int:
+    """Record the log offset BEFORE clicking 升级。
+
+    RKDevTool 日志是按天滚动的纯追加文件；点击前取当前大小，
+    之后只分析增量，避免把上一轮残留的 "Download Firmware Success"
+    误判为本轮结果。
+    """
+    try:
+        return os.path.getsize(log_path)
+    except OSError:
+        return 0
+
+
+def poll_flash_log(start_size: int) -> dict:
+    """Poll today's RKDevTool log until success/failure/timeout.
+
+    只分析 start_size 之后的增量日志；同一窗口内先查失败标记再查
+    成功标记，防止异常残页同时包含两种标记时误报成功。
+    """
+    today = datetime.now().strftime("Log%Y-%m-%d.txt")
+    log_path = os.path.join(RKDEVTOOL_LOG_DIR, today)
+    tail = ""
+    deadline = time.time() + FLASH_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        time.sleep(5)
+        try:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
+                f.seek(max(0, start_size))
+                content = f.read()
+        except OSError:
+            continue
+        tail = content[-4000:]
+        if (
+            "Start to download image" in content
+            and any(
+                marker in content
+                for marker in (
+                    "Download Firmware Fail",
+                    "Test Device Fail",
+                )
+            )
+        ):
+            return {"status": "FAILED", "log_tail": tail[-2000:]}
+        if "Download Firmware Success" in content:
+            return {"status": "SUCCESS", "log_tail": tail[-2000:]}
+    return {"status": "TIMEOUT", "log_tail": tail[-2000:]}
+
+
+def run_flash(firmware_path: str, device: str = "") -> dict:
     # 只在找不到可用主窗口时才冷启动；已有实例直接复用。
     win = find_main_window()
     if win is None:
@@ -295,26 +352,28 @@ def run_flash(firmware_path: str) -> dict:
     firmware_edit = edits[1] if len(edits) > 1 else edits[0]
     _send_text_to_edit(firmware_edit, firmware_path)
     time.sleep(1)
-    # 升级按钮同样可能处于"逻辑存在但未激活Tab"状态，用 BM_CLICK 消息
-    _click_button(upgrade_buttons[0])
-
     today = datetime.now().strftime("Log%Y-%m-%d.txt")
     log_path = os.path.join(RKDEVTOOL_LOG_DIR, today)
-    start_size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
+    # 必须在点击升级之前记录日志偏移。
+    start_size = _current_log_size(log_path)
+    # 升级按钮同样可能处于"逻辑存在但未激活Tab"状态，用 BM_CLICK 消息
+    _click_button(upgrade_buttons[0])
     return poll_flash_log(start_size)
 
 
 def process_task(task_path: str) -> None:
     result_path = str(task_path).rsplit(".", 1)[0] + ".result.json"
     result = {"status": "FAILED", "log_tail": "", "error": ""}
+    device = ""
     try:
         with open(task_path, encoding="utf-8") as f:
             task = json.load(f)
         firmware = str(task.get("firmware") or "")
+        device = str(task.get("device") or "").strip()
         if not firmware or not os.path.isfile(firmware):
             result["error"] = f"固件不存在: {firmware}"
         else:
-            outcome = run_flash(firmware)
+            outcome = run_flash(firmware, device=device)
             result.update({
                 "status": outcome["status"],
                 "log_tail": outcome["log_tail"],
@@ -322,8 +381,43 @@ def process_task(task_path: str) -> None:
     except Exception:
         result["error"] = traceback.format_exc()[-1500:]
     finally:
-        with open(result_path, "w", encoding="utf-8") as f:
+        tmp_path = result_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False)
+        os.replace(tmp_path, result_path)
+
+
+def _claim_task(task_path: str) -> bool:
+    """Atomically claim a task file (P0-1, exactly-once).
+
+    os.replace 同一目录下是原子操作：两个 Agent 实例同时扫描时只有一个
+    能把 <task>.json 改名为 <task>.claim，另一个必然抛 FileNotFoundError。
+    已 claim 的任务不重复执行——这是阻止同一固件被无限重复烧写的关键。
+    """
+    claim_path = task_path[:-len(".json")] + ".claim"
+    try:
+        os.replace(task_path, claim_path)
+    except OSError:
+        return False
+    return True
+
+
+def _archive_claim(claim_path: str, result: dict) -> None:
+    """Archive a processed claim next to its result (kept for auditing)."""
+    try:
+        if result.get("status") == "SUCCESS":
+            os.remove(claim_path)
+        else:
+            failed_dir = os.path.join(QUEUE_DIR, "failed")
+            os.makedirs(failed_dir, exist_ok=True)
+            os.replace(
+                claim_path,
+                os.path.join(
+                    failed_dir, os.path.basename(claim_path)
+                ),
+            )
+    except OSError:
+        pass
 
 
 def main() -> int:
@@ -334,14 +428,28 @@ def main() -> int:
         try:
             heartbeat.write_text(str(time.time()), encoding="ascii")
             for name in sorted(os.listdir(QUEUE_DIR)):
-                if not name.endswith(".json") or name.endswith(".result.json"):
+                if not name.endswith(".json") or name.endswith(
+                    ".result.json"
+                ) or name.endswith(".claim"):
                     continue
                 task_path = os.path.join(QUEUE_DIR, name)
+                # 原子认领：改名成功者才能执行，未认领的任务下轮再处理。
+                # 认领失败（被其他实例抢先或文件已消失）直接跳过。
+                if not _claim_task(task_path):
+                    continue
                 print(f"processing {name}", flush=True)
+                claim_path = task_path[:-len(".json")] + ".claim"
                 try:
-                    process_task(task_path)
+                    process_task(claim_path)
                 except Exception:
                     traceback.print_exc()
+                finally:
+                    result_path = claim_path[:-len(".json")] + ".result.json"
+                    try:
+                        with open(result_path, encoding="utf-8") as f:
+                            _archive_claim(claim_path, json.load(f))
+                    except Exception:
+                        traceback.print_exc()
         except Exception:
             traceback.print_exc()
         time.sleep(POLL_INTERVAL_SECONDS)

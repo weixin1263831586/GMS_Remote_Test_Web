@@ -29,7 +29,7 @@
     <script src="/static/js/shell/websocket-manager.js?v=20260903-usbip-reconnect-scope" defer></script>
     <script src="/static/js/shell/workspace-devices.js?v=20260902-diagnostics-scope" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
-    <script src="/static/js/notifications.js?v=20260812-click-dismiss" defer></script>
+    <script src="/static/js/notifications.js?v=20260903-toggle-ready" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
     <script src="/static/js/pages/test-suite-browser.js?v=20260827-user-lazy" defer></script>
     <script src="/static/js/pages/firmware-burn.js?v=20260902-source-refresh-backoff" defer></script>
@@ -660,7 +660,7 @@
             <div class="client-info-panel">
                 <div class="client-info-header">
                     <span>👤 客户端</span>
-                    <button id="notification-toggle" class="notification-toggle" onclick="toggleNotificationPanel()" title="消息通知">
+                    <button id="notification-toggle" class="notification-toggle" title="消息通知" disabled>
                         🔔
                         <span id="notification-badge" class="notification-badge" style="display: none;">0</span>
                     </button>
@@ -4006,7 +4006,7 @@
         window.maximizeHostWorkspacePane = maximizeHostWorkspacePane;
 
         // ==================== 多主机终端工作区 ====================
-        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), paneGenerations:new Map(), maximized:null, generation:0, clusterState:null};
+        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), mountingPanes:new Map(), paneGenerations:new Map(), maximized:null, generation:0, clusterState:null};
         function snapshotTerminalClusterState() {
             return {
                 layout: terminalWorkspace.layout,
@@ -4097,6 +4097,7 @@
         function disposeTerminalWorkspace() {
             terminalWorkspace.generation+=1;
             [...terminalWorkspace.instances.keys()].forEach(disposeTerminalWorkspaceInstance);
+            terminalWorkspace.mountingPanes.clear();
             terminalWorkspace.paneGenerations.clear();
         }
         function renderTerminalWorkspace() {
@@ -4113,7 +4114,7 @@
                 // mount so duplicate WebSockets cannot be created.
                 if(currentPage==='terminal') terminalWorkspace.panes.forEach((pane,index)=>{
                     const status=document.getElementById(`terminal-workspace-status-${index}`)?.textContent;
-                    if(!terminalWorkspace.instances.has(index)&&(status==='准备中'||status==='正在加载终端…')) {
+                    if(!terminalWorkspace.instances.has(index)&&!terminalWorkspace.mountingPanes.has(index)&&(status==='准备中'||status==='正在加载终端…')) {
                         refreshTerminalWorkspacePane(index);
                     }
                 });
@@ -4161,8 +4162,13 @@
             if(host.offline){body.innerHTML='<div class="host-workspace-empty">主机已离线</div>';terminalWorkspaceStatus(index,'离线');return;}
             const terminalMode=pane.mode==='adb'?'adb':'ssh',serialNo=String(pane.serialNo||'').trim();
             if(terminalMode==='adb'&&!serialNo){body.innerHTML='<div class="host-workspace-empty">设备序列号无效</div>';terminalWorkspaceStatus(index,'连接失败');return;}
+            const mountToken={generation,paneGeneration};
+            const pendingMount=terminalWorkspace.mountingPanes.get(index);
+            if(pendingMount&&pendingMount.generation===generation&&pendingMount.paneGeneration===paneGeneration)return;
+            terminalWorkspace.mountingPanes.set(index,mountToken);
             terminalWorkspaceStatus(index,terminalMode==='adb'?'正在打开 ADB Shell…':'正在加载终端…');
-            try{await loadXTermScripts();}catch(error){console.error('[Terminal workspace] xterm.js load failed:',error);if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';terminalWorkspaceStatus(index,'加载失败');return;}
+            try{await loadXTermScripts();}catch(error){if(terminalWorkspace.mountingPanes.get(index)===mountToken)terminalWorkspace.mountingPanes.delete(index);console.error('[Terminal workspace] xterm.js load failed:',error);if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';terminalWorkspaceStatus(index,'加载失败');return;}
+            if(terminalWorkspace.mountingPanes.get(index)===mountToken)terminalWorkspace.mountingPanes.delete(index);
             if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;
             const el=document.createElement('div');el.className='host-workspace-terminal';body.replaceChildren(el);
             const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:createTerminalTheme(),scrollback:2000,termName:'xterm-256color'});

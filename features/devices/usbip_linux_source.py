@@ -35,10 +35,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 LINUX_USBIPD_BIN = "/usr/local/bin/usbipd"
-# 0.9.3 起才具备安全默认（loopback 监听）、--listen/--allow-client、
-# 协议分配上限与连接/URB 限制。0.9.2 默认 0.0.0.0 且无 --listen，会
-# 把网络暴露问题带回来（2026-09-03 复审第八节），不再兼容。
-LINUX_USBIPD_MIN_VERSION = (0, 9, 3)
+# 0.9.3 起才有安全默认：loopback 监听、--listen/--allow-client、
+# 协议分配上限与连接/URB 限制。0.9.4 新增协议校验（拒绝 devid 不匹配
+# 的 SUBMIT、拒绝非零 OP_REQ status）。bundled binary 已同步到 0.9.4，
+# 来源机上的 0.9.3 会被自动升级。
+LINUX_USBIPD_MIN_VERSION = (0, 9, 4)
 LINUX_USBIPD_LOG = "/tmp/usbipd-gms.log"
 LINUX_USBIPD_UPLOAD = "/tmp/usbipd-gms-upload"
 LINUX_USBIPD_BIND_PATTERN = "usbipd bind"
@@ -129,11 +130,9 @@ def parse_usbip_running_cmdline(cmdline: str) -> dict[str, Any]:
     """Extract pid/serial/vid filters from a running ``usbipd bind`` command line.
 
     ``cmdline`` 形如 ``1234 /usr/local/bin/usbipd bind --serial S1``。
-    解析用 ``shlex.split``：启动参数由 ``shlex.join(argv)`` 生成（serial
-    可能含空格/元字符，经 quote 后是单个 argv），按 token 序列解析
-    ``--serial/--vid 的下一个 token``，保证与启动参数使用同一套 argv
-    语义；``text.split()``/regex 会把被引号包裹的 serial 拆碎，导致
-    复用判断（coverage）不准。
+    用 ``shlex.split`` 按 token 解析 ``--serial/--vid`` 的下一个参数，
+    与启动参数（``shlex.join(argv)`` 生成）保持同一套 argv 语义，
+    serial 含空格/引号时也能正确解析。
 
     仅当 argv0 的二进制名精确是 ``usbipd`` 且下一个 argv 是 ``bind``
     时才算运行中，避免把恰好包含该字符串的其他进程误判为 usbipd。
@@ -270,8 +269,8 @@ def _stop_linux_usbipd(
     """Stop the owned usbipd process by verified PID ownership only.
 
     返回 True 表示目标进程已不存在（从未运行或已停止）。
-    不再使用 ``pkill -f`` 执行停止动作：它按 substring 匹配整条命令行，
-    会把恰好包含 ``usbipd bind`` 的无关进程一起杀掉（复审第十节）。
+    停止动作按已验证的 PID 执行，不用 ``pkill -f``：它按 substring
+    匹配整条命令行，会误杀恰好包含 ``usbipd bind`` 的无关进程。
     ``known_pids`` 是调用方查询阶段已经通过 /proc argv 校验的 PID，
     直接复用；不足时再枚举候选并逐个校验。
     """
@@ -469,6 +468,48 @@ def _resolve_listen_address(ssh_manager, ssh) -> str:
     return "0.0.0.0:3240"
 
 
+def resolve_worker_egress_ips(
+    ssh_manager,
+    ssh,
+    worker_hosts: list[str] | tuple[str, ...],
+) -> list[str]:
+    """Resolve the source-visible egress IP of each attaching worker.
+
+    ``--allow-client`` 匹配的是 TCP 对端地址，即 Worker 访问来源主机时
+    的出口 IP，不是来源主机自己的地址——白名单里放来源 IP 会导致
+    Worker attach 被拒绝。
+
+    通过在每个 Worker 上执行 ``ip route get <source_ip>`` 取 ``src`` 字段；
+    多网卡/Tailscale/VPN 场景下不能用 hostname 简单推导。解析失败的条目
+    保留原始 IP 作为兜底（宁可白名单偏宽也不阻断 attach）。
+    """
+    source_ip = ""
+    stdout, _stderr, _code = ssh_manager.execute_command(
+        ssh, "echo $SSH_CONNECTION", timeout=5,
+    )
+    fields = (stdout or "").split()
+    if len(fields) >= 3:
+        source_ip = fields[2]
+
+    resolved: list[str] = []
+    for item in worker_hosts or ():
+        host = str(item or "").strip().split("@", 1)[-1]
+        if not host:
+            continue
+        if source_ip:
+            stdout, _stderr, code = ssh_manager.execute_command(
+                ssh,
+                f"ip route get {shlex.quote(source_ip)} 2>/dev/null | head -1",
+                timeout=5,
+            )
+            match = re.search(r"\bsrc\s+(\S+)", stdout or "")
+            if code == 0 and match:
+                resolved.append(match.group(1))
+                continue
+        resolved.append(host)
+    return sorted(set(resolved) - {"", source_ip})
+
+
 def ensure_ubuntu_usbip_server(
     ssh_manager,
     ssh,
@@ -571,16 +612,20 @@ def ensure_ubuntu_usbip_server(
             "success": False,
             "error": "缺少USB/IP导出过滤器（serial或vid）",
         }
-    # 最低版本已是 0.9.3：默认 loopback + --listen/--allow-client 必然可用。
-    # Worker 从外部 attach，必须显式绑定来源主机的对外地址（SSH 目标地址
-    # 即来源可达 IP），并把允许连接的 Worker IP 传入 --allow-client，
-    # 避免 0.0.0.0 把内网/管理接口一并暴露（复审 P0-1 / 第九节）。
+    # Worker 从外部 attach，必须显式绑定来源主机的对外地址，并把允许
+    # 连接的 Worker 出口 IP 传入 --allow-client，不能用 0.0.0.0。
     listen_addr = _resolve_listen_address(ssh_manager, ssh)
+    # 白名单是「来源主机看到的 Worker 出口 IP」，不是传入的
+    # usbip_attach_host（那是来源自己的地址，会被 client_allowed 拒绝）。
+    # 逐 Worker 用 ip route get 解析；失败时退回原 IP。
     allow_clients = sorted({
         str(item or "").strip().split("@", 1)[-1]
         for item in allow_worker_hosts or ()
         if str(item or "").strip()
     } - {"", listen_addr.rsplit(":", 1)[0]})
+    resolved_clients = resolve_worker_egress_ips(
+        ssh_manager, ssh, allow_clients,
+    ) or allow_clients
 
     # 全部参数走 argv 形式并 shlex.quote：USB serial 是外部设备输入，
     # 二进制路径可能包含用户目录，禁止直接拼进 shell 字符串。
@@ -589,7 +634,7 @@ def ensure_ubuntu_usbip_server(
         argv.append("--stop-adb")
     if listen_addr:
         argv += ["--listen", listen_addr]
-    for client_ip in allow_clients:
+    for client_ip in resolved_clients:
         argv += ["--allow-client", client_ip]
     for serial in needed_serials:
         argv += ["--serial", serial]

@@ -2176,7 +2176,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         try:
             page.goto(self.base_url, wait_until="domcontentloaded")
             page.wait_for_selector(".sidebar-item[data-page]")
-            # 旧实现延迟 100ms 后预取；多等一会确保断言覆盖到该窗口。
+            # 预取在页面加载后 100ms 内发生；多等一会确保断言覆盖到该窗口。
             page.wait_for_timeout(800)
             expect(page.locator("#elevate-modal")).not_to_have_class(
                 re.compile(r"\bshow\b")
@@ -6093,6 +6093,80 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertTrue(after["same"])
             self.assertEqual(after["line"], before)
             self.assertEqual(len(terminal_websockets), 1)
+        finally:
+            page.close()
+
+    def test_terminal_render_does_not_duplicate_mount_while_xterm_loads(self):
+        page = self.new_page()
+        terminal_websockets = []
+        page.on(
+            "websocket",
+            lambda websocket: terminal_websockets.append(websocket.url)
+            if "/api/system/websocket/terminal_workspace_" in websocket.url
+            else None,
+        )
+        try:
+            self.goto_shell(page)
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                },
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            pending = page.evaluate(
+                """() => {
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
+                  const originalLoad = loadXTermScripts;
+                  let releaseLoad;
+                  const gate = new Promise(resolve => { releaseLoad = resolve; });
+                  window.__terminalLoadCalls = 0;
+                  window.__releaseTerminalLoad = releaseLoad;
+                  window.__restoreTerminalLoad = () => { loadXTermScripts = originalLoad; };
+                  loadXTermScripts = async () => {
+                    window.__terminalLoadCalls += 1;
+                    await gate;
+                    return originalLoad();
+                  };
+                  desktopHosts = [{
+                    id: 'default',
+                    worker_id: 'ats-worker-controller',
+                    name: 'Local',
+                    connection: 'local@127.0.0.1',
+                    offline: false,
+                  }];
+                  currentHost = desktopHosts[0];
+                  currentPage = 'terminal';
+                  terminalWorkspace.layout = 'single';
+                  terminalWorkspace.panes = [{hostId: 'default'}];
+                  terminalWorkspace.instances.clear();
+                  terminalWorkspace.mountingPanes.clear();
+                  terminalWorkspace.paneGenerations.clear();
+                  terminalWorkspace.renderedSignature = null;
+                  document.getElementById('terminal-workspace-grid').replaceChildren();
+                  renderTerminalWorkspace();
+                  renderTerminalWorkspace();
+                  renderTerminalWorkspace();
+                  return {
+                    loadCalls: window.__terminalLoadCalls,
+                    pendingMounts: terminalWorkspace.mountingPanes.size,
+                    paneGeneration: terminalWorkspace.paneGenerations.get(0) || 0,
+                  };
+                }"""
+            )
+            self.assertEqual(pending["loadCalls"], 1)
+            self.assertEqual(pending["pendingMounts"], 1)
+            self.assertEqual(pending["paneGeneration"], 0)
+
+            page.evaluate("window.__releaseTerminalLoad()")
+            page.wait_for_function("terminalWorkspace.instances.has(0)")
+            page.wait_for_timeout(250)
+            self.assertEqual(page.evaluate("window.__terminalLoadCalls"), 1)
+            self.assertEqual(page.evaluate("terminalWorkspace.mountingPanes.size"), 0)
+            self.assertEqual(len(terminal_websockets), 1)
+            page.evaluate("window.__restoreTerminalLoad()")
         finally:
             page.close()
 

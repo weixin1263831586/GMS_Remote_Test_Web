@@ -190,7 +190,7 @@ def _verify_local_usbip_transport(
     Tailscale IP 等非 SSH 地址），``usbip port`` 显示的 host 是 attach 时
     的 remote host。因此核对必须用 assignment 的 ``source_host``（优先）
     或归一化后的 ``device_host``，直接拿 SSH 形式的 device_host 会在
-    双地址主机上误报 detached（2026-09-03 复审第七节）。
+    双地址主机上误报 detached。
     """
     from .usbip_transaction import USBIP_PORT_COMMAND, parse_usbip_port_entries
 
@@ -252,7 +252,7 @@ def _verify_local_usbip_transport(
         }
     return result
 
-def _save_usbip_assignments(assignments: dict[str, dict]) -> None:
+def _save_usbip_assignments(assignments: dict[str, dict]) -> bool:
     updater = getattr(runtime.config_manager, "update_runtime_config", None)
     if callable(updater):
         saved = updater({"usbip_cluster_assignments": assignments})
@@ -264,6 +264,8 @@ def _save_usbip_assignments(assignments: dict[str, dict]) -> None:
         saved = runtime.config_manager.save_runtime_config(runtime_config)
     if not saved:
         raise RuntimeError("无法保存USB/IP集群分配状态")
+    # 成功路径必须显式返回 True，调用方以真值判断保存是否成功。
+    return True
 
 def _prune_stale_unknown_usbip_assignments(
     device_host: str,
@@ -753,13 +755,10 @@ async def _reconcile_local_usbip_status(
             runtime.global_state.usbip_states[device_host] = refreshed
         return refreshed, False
 
-    # 2026-09-03 事故修复：stale 分支先判定设备是否物理直连在本机。
-    # 设备从源主机挪插到 Controller 物理 USB 后，持久化 assignment 残留，
-    # 旧逻辑会反复调度重连，且 reconcile 凭同名 ADB 串号把本地设备
-    # 误提升为 USB/IP 来源，导致固件烧写错误路由到 Windows Source
-    # Agent。sysfs realpath 含 vhci 才是真正的导入设备；全部期望设备
-    # 都落在真实控制器（physical）时，说明分配已过期：清除持久化分配
-    # 与内存来源记录，状态置为最终 disconnected，不再调度重连。
+    # 期望设备全部物理直连在本机（sysfs realpath 不含 vhci）时，说明
+    # USB/IP 分配已过期（设备从源主机挪插到了 Controller）：清除持久化
+    # 分配与内存来源记录，状态置为最终 disconnected，不再调度重连，
+    # 避免固件烧写被误路由到 Windows Source Agent。
     physically_local = await asyncio.to_thread(
         reconnect.classify_local_usb_attachment,
         expected_devices,

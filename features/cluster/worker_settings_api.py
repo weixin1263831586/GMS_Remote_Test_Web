@@ -89,10 +89,8 @@ async def check_worker_vpn(
 ):
     """Check whether a VPN connection is active on the worker host.
 
-    只读状态查询，登录用户即可访问，与本机 /api/vpn/status 的权限保持一致；
-    集群页自动刷新会周期性调用，若要求 admin 提权，普通用户会反复收到
-    403/elevation_required 并被提权弹框打扰（2026-09-05）。连接/断开等
-    敏感操作仍由 vpn-connect 等接口的 admin 依赖把关。
+    只读状态查询，登录用户即可访问，与本机 /api/vpn/status 权限一致；
+    连接/断开等敏感操作仍由 vpn-connect 等接口的 admin 依赖把关。
     """
     worker = service().repository.get_worker(worker_id)
     if worker is None:
