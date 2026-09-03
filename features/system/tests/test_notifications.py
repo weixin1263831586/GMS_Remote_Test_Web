@@ -3,7 +3,6 @@ import shutil
 import threading
 from datetime import datetime
 
-
 from features.system import notifications
 from features.system.notifications import NotificationStore
 from features.system.state import global_state

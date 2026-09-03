@@ -414,5 +414,64 @@ class SkillCliTests(unittest.TestCase):
         self.assertEqual(request["devices"], ["SERIAL-1"])
 
 
+class SkillUpdateEnvTests(unittest.TestCase):
+    """gms-rt-system-update 必须向 install.sh 注入绑定 Controller 的默认值。
+
+    source 模式（.bashrc 直接 source helper）没有 dispatcher wrapper 提供
+    GMS_REMOTE_TEST_SERVER/GMS_SKILL_DOWNLOAD_URL，仓库里的 install.sh 又是
+    未渲染模板（__GMS_* 占位符），缺失注入时更新命令必然失败。
+    """
+
+    def test_update_passes_server_and_tls_defaults_to_installer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            scripts_dir = Path(temporary) / "scripts"
+            scripts_dir.mkdir()
+            helper_copy = scripts_dir / "gms-remote-test.sh"
+            helper_copy.write_bytes(HELPER.read_bytes())
+            env_dump = Path(temporary) / "installer-env.json"
+            # Stub install.sh：记录收到的关键环境变量后成功退出。
+            (scripts_dir / "install.sh").write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"${GMS_REMOTE_TEST_SERVER:-}\" \\\n"
+                "  \"${GMS_SKILL_DOWNLOAD_URL:-}\" \\\n"
+                "  \"${GMS_INSTALL_CA_CERT:-}\" \\\n"
+                "  \"${GMS_INSTALL_INSECURE:-}\" > \"" + str(env_dump) + "\"\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            (scripts_dir / "install.sh").chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HOME": temporary,
+                    "GMS_REMOTE_TEST_SERVER": "https://controller.example:5001",
+                    "GMS_CURL_CA_CERT": "/tmp/trusted-ca.pem",
+                    "NO_COLOR": "1",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(helper_copy), "gms-rt-system-update"],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            lines = env_dump.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        server_url, download_url, ca_cert, insecure = lines[:4]
+        self.assertEqual(server_url, "https://controller.example:5001")
+        self.assertEqual(
+            download_url,
+            "https://controller.example:5001/api/system/skills"
+            "?skill_name=gms-remote-test",
+        )
+        # 当前会话的 TLS 配置必须传导给安装器（CA 优先，未配置时回退 0）。
+        self.assertEqual(ca_cert, "/tmp/trusted-ca.pem")
+        self.assertEqual(insecure, "0")
+
+
 if __name__ == "__main__":
     unittest.main()

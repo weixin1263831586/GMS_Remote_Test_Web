@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -1753,6 +1754,61 @@ BUSID  VID:PID    DEVICE                                                        
         hjf = by_host["hjf@172.16.14.188"]
         self.assertEqual(hjf["transport_state_by_busid"], {"1-5": "unknown"})
 
+    def test_usbip_assignments_verify_matches_source_host(self):
+        """复审第七节回归：attach 用 Tailscale source_host 时按它核对。
+
+        device_host 是 SSH 地址（hcq@172.16.14.66），source_host 是
+        usbip attach 的地址（100.x.x.x）；usbip port 里看到的是
+        source_host。用 device_host 核对会误报 detached。
+        """
+        import features.devices.integrations_api as integrations
+
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return {
+                    "usbip_cluster_assignments": {
+                        "hcq@172.16.14.66|1-12-3": {
+                            "device_host": "hcq@172.16.14.66",
+                            "source_host": "100.97.1.2",
+                            "worker_id": "ats-worker-controller",
+                            "busid": "1-12-3",
+                            "device_serials": ["RK3576GMS1"],
+                            "status": "attached",
+                        },
+                    },
+                }
+
+            def load_config(self):
+                return {}
+
+        fake_ssh = MagicMock()
+        fake_ssh_manager = MagicMock()
+        fake_ssh_manager.get_connection.return_value = fake_ssh
+        # usbip port 显示的是 attach 用的 Tailscale 地址。
+        fake_ssh_manager.execute_command.return_value = (
+            "Port 00:\n"
+            "Port 01:\n"
+            "       1-12-3 | 2207:0006 | RK3576GMS1 | Remote USB/IP host 100.97.1.2\n",
+            "",
+            0,
+        )
+
+        with patch.object(
+            integrations.runtime, "config_manager", FakeConfigManager()
+        ), patch.object(
+            integrations.runtime, "ssh_manager", fake_ssh_manager,
+        ):
+            response = asyncio.run(
+                integrations.list_usbip_assignments(verify=True)
+            )
+
+        body = json.loads(response.body.decode("utf-8"))
+        group = body["cluster_selections"][0]
+        # source_host 命中 → attached（按 device_host 核对会误报 detached）。
+        self.assertEqual(
+            group["transport_state_by_busid"], {"1-12-3": "attached"},
+        )
+
     def test_usbip_assignments_verify_falls_back_to_unknown_on_ssh_error(self):
         """SSH 核对失败：不阻塞响应，实时状态降级为 unknown。"""
         import features.devices.integrations_api as integrations
@@ -2806,7 +2862,11 @@ BUSID  VID:PID    DEVICE                                                        
                     "expected_devices": ["USBIP001"],
                     "protocol_status": {"mode": "reconnecting"},
                 }
-            with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()):
+            with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+                 patch.object(
+                     reconnect, "classify_local_usb_attachment",
+                     return_value={},
+                 ):
                 restored = reconnect.reconcile_observed_usbip_devices(["LOCAL001", "USBIP001"])
 
             self.assertEqual(restored, {"hcq@172.16.14.66": ["USBIP001"]})
@@ -2823,6 +2883,76 @@ BUSID  VID:PID    DEVICE                                                        
             with global_state.usbip_states_lock:
                 global_state.usbip_states.clear()
                 global_state.usbip_states.update(old_states)
+
+    def test_reconcile_does_not_promote_physically_local_device(self):
+        """2026-09-03 事故：物理直连串号不得被提升为 USB/IP 来源。"""
+        import features.devices.reconnect as reconnect
+
+        old_sources = dict(global_state.usbip_devices_source)
+        old_states = dict(global_state.usbip_states)
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return {}
+
+            def save_runtime_config(self, data):
+                return True
+
+        try:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+            with global_state.usbip_states_lock:
+                global_state.usbip_states.clear()
+                global_state.usbip_states["hcq@172.16.14.66"] = {
+                    "connected": True,
+                    "transport_connected": False,
+                    "adb_ready": False,
+                    "reconnecting": True,
+                    "expected_devices": ["RK3562GMS7"],
+                    "protocol_status": {"mode": "reconnecting"},
+                }
+            with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+                 patch.object(
+                     reconnect, "classify_local_usb_attachment",
+                     return_value={"RK3562GMS7": "physical"},
+                 ):
+                restored = reconnect.reconcile_observed_usbip_devices(["RK3562GMS7"])
+
+            self.assertEqual(restored, {})
+            self.assertNotIn("RK3562GMS7", global_state.usbip_devices_source)
+            state = global_state.usbip_states["hcq@172.16.14.66"]
+            self.assertFalse(state["reconnecting"])
+        finally:
+            with global_state.usbip_devices_source_lock:
+                global_state.usbip_devices_source.clear()
+                global_state.usbip_devices_source.update(old_sources)
+            with global_state.usbip_states_lock:
+                global_state.usbip_states.clear()
+                global_state.usbip_states.update(old_states)
+
+    def test_classify_local_usb_attachment_distinguishes_vhci_from_physical(self):
+        import features.devices.reconnect as reconnect
+
+        bus_paths = {"PHYS001": "1-13", "VHCI001": "4-1"}
+        # realpath 模拟：physical 落在 xHCI 控制器，vhci 落在 vhci_hcd。
+        real_paths = {
+            os.path.join("/sys/bus/usb/devices", "1-13"):
+                "/sys/devices/pci0000:00/0000:00:14.0/usb1/1-13",
+            os.path.join("/sys/bus/usb/devices", "4-1"):
+                "/sys/devices/platform/vhci_hcd.0/usb4/4-1",
+        }
+
+        def fake_realpath(path):
+            return real_paths.get(path, path)
+
+        with patch.object(reconnect.os.path, "realpath", side_effect=fake_realpath):
+            result = reconnect.classify_local_usb_attachment(
+                ["PHYS001", "VHCI001", "UNKNOWN001"],
+                bus_paths={"PHYS001": "1-13", "VHCI001": "4-1"},
+            )
+
+        self.assertEqual(result, {"PHYS001": "physical", "VHCI001": "vhci"})
+        # 判定不了的串号不出现在结果里（fail-open）。
+        self.assertNotIn("UNKNOWN001", result)
 
     def test_frontend_waits_for_backend_autoreconnects_usbip_disconnects(self):
         # 2026-08 shell 拆分后，USB/IP 前端重连逻辑分布在 pages/ 与 shell/websocket-manager.js。
@@ -2845,3 +2975,148 @@ BUSID  VID:PID    DEVICE                                                        
         self.assertNotIn("const result = await apiCall('/api/usbip/connect', 'POST', payload);", text)
         self.assertNotIn("result.success || result.devices", text)
         self.assertNotIn("Button reset due to device disconnect", text)
+
+
+class StaleAssignmentRetirementTests(unittest.TestCase):
+    """2026-09-03 事故回归：物理挪插到本机的设备，其过期 USB/IP 分配
+    应被 retire（持久化+内存双清），固件烧写路由立即回落本地链路。"""
+
+    def setUp(self):
+        import features.devices.integrations_api as integrations
+
+        self.integrations = integrations
+        self.old_sources = dict(global_state.usbip_devices_source)
+        self.old_states = dict(global_state.usbip_states)
+        self.old_manager_sources = dict(
+            getattr(integrations.usbip_manager, "device_sources", {}) or {}
+        )
+        with global_state.usbip_devices_source_lock:
+            global_state.usbip_devices_source.clear()
+        with global_state.usbip_states_lock:
+            global_state.usbip_states.clear()
+
+    def tearDown(self):
+        integrations = self.integrations
+        with global_state.usbip_devices_source_lock:
+            global_state.usbip_devices_source.clear()
+            global_state.usbip_devices_source.update(self.old_sources)
+        with global_state.usbip_states_lock:
+            global_state.usbip_states.clear()
+            global_state.usbip_states.update(self.old_states)
+        integrations.usbip_manager.device_sources.clear()
+        integrations.usbip_manager.device_sources.update(self.old_manager_sources)
+
+    def _make_config_manager(self, runtime_config: dict):
+        class FakeConfigManager:
+            def get_runtime_config(self):
+                return dict(runtime_config)
+
+            def load_config(self):
+                return {}
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
+
+            def save_runtime_config(self, data):
+                runtime_config.clear()
+                runtime_config.update(data)
+                return True
+
+        return FakeConfigManager()
+
+    def test_stale_assignment_retired_when_device_is_physical_local(self):
+        integrations = self.integrations
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "hcq@172.16.14.66|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "source_host": "172.16.14.66",
+                    "worker_id": "ats-worker-controller",
+                    "busid": "1-1",
+                    "device_serials": ["RK3562GMS7"],
+                    "status": "attached",
+                },
+                # 同主机其他分配不受影响。
+                "hcq@172.16.14.66|1-2": {
+                    "device_host": "hcq@172.16.14.66",
+                    "worker_id": "ats-worker-controller",
+                    "busid": "1-2",
+                    "device_serials": ["USBIP-KEEP"],
+                    "status": "attached",
+                },
+            },
+        }
+        local_assignments = list(
+            runtime_config["usbip_cluster_assignments"].values()
+        )
+        global_state.usbip_devices_source["RK3562GMS7"] = {
+            "source": "hcq@172.16.14.66",
+            "timestamp": 1,
+        }
+        integrations.usbip_manager.device_sources["RK3562GMS7"] = {
+            "source": "hcq@172.16.14.66",
+        }
+
+        with patch.object(
+            integrations.runtime,
+            "config_manager",
+            self._make_config_manager(runtime_config),
+        ):
+            state, _changed = asyncio.run(
+                integrations._retire_assignments_for_physically_local_devices(
+                    "hcq@172.16.14.66",
+                    local_assignments,
+                    {"RK3562GMS7"},
+                    {"RK3562GMS7": "physical"},
+                )
+            )
+
+        # 持久化分配被清除，其他分配保留。
+        self.assertNotIn("hcq@172.16.14.66|1-1", runtime_config["usbip_cluster_assignments"])
+        self.assertIn("hcq@172.16.14.66|1-2", runtime_config["usbip_cluster_assignments"])
+        # 内存来源记录（全局 + manager 缓存）被清理。
+        self.assertNotIn("RK3562GMS7", global_state.usbip_devices_source)
+        self.assertNotIn("RK3562GMS7", integrations.usbip_manager.device_sources)
+        # 状态置为最终 disconnected，不调度重连。
+        self.assertFalse(state["reconnecting"])
+        self.assertFalse(state["connected"])
+        self.assertIn("retired", state["reason"])
+
+    def test_stale_assignment_kept_when_device_classification_unknown(self):
+        """fail-open：分类不出来（如 sysfs 不可用）时不删除任何分配。"""
+        integrations = self.integrations
+        runtime_config = {
+            "usbip_cluster_assignments": {
+                "hcq@172.16.14.66|1-1": {
+                    "device_host": "hcq@172.16.14.66",
+                    "worker_id": "ats-worker-controller",
+                    "busid": "1-1",
+                    "device_serials": ["USBIP001"],
+                    "status": "attached",
+                },
+            },
+        }
+        local_assignments = list(
+            runtime_config["usbip_cluster_assignments"].values()
+        )
+
+        with patch.object(
+            integrations.runtime,
+            "config_manager",
+            self._make_config_manager(runtime_config),
+        ):
+            state, _changed = asyncio.run(
+                integrations._retire_assignments_for_physically_local_devices(
+                    "hcq@172.16.14.66",
+                    local_assignments,
+                    {"USBIP001"},
+                    {},  # 分类失败：无任何 physical 判定
+                )
+            )
+
+        # 分类为空时不满足 all(physical)，但直接调用 retire 时按 assignment
+        # 自身序列号判定——空分类下判定不成立，stale_busids 为空，
+        # 分配原样保留（fail-open）。
+        self.assertIn("hcq@172.16.14.66|1-1", runtime_config["usbip_cluster_assignments"])
+        self.assertFalse(state["reconnecting"])

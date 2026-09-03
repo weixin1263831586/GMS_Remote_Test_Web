@@ -1,6 +1,8 @@
 """Background USB/IP reconnect coordination."""
 
 import logging
+import os
+import subprocess
 import threading
 import time
 from collections.abc import Iterable
@@ -478,7 +480,16 @@ def active_usbip_reconnect_hosts() -> list[str]:
 
 
 def reconcile_observed_usbip_devices(current_devices: Iterable[str]) -> dict[str, list[str]]:
-    """Promote reconnecting USB/IP devices when they reappear in ADB output."""
+    """Promote reconnecting USB/IP devices when they reappear in ADB output.
+
+    2026-09-03 事故修复：提升前必须验证设备确实经由本机 vhci 导入。
+    仅凭 ADB 串号出现就提升，会把物理直连在 Controller 上的同名串号
+    误标成 USB/IP 远端设备，导致固件烧写被错误路由到 Windows Source
+    Agent。``adb devices -l`` 的 ``usb:X-Y`` 总线路径在 sysfs 下的
+    realpath 含 ``vhci`` 即导入设备；落在真实控制器（如 xHCI）下则是
+    物理直连——物理直连的串号绝不提升，且清掉陈旧的 reconnecting
+    状态，终止重连循环。
+    """
     current_set = {str(device_id) for device_id in current_devices or [] if str(device_id)}
     if not current_set:
         return {}
@@ -486,6 +497,8 @@ def reconcile_observed_usbip_devices(current_devices: Iterable[str]) -> dict[str
     restored: dict[str, list[str]] = {}
     with runtime.global_state.usbip_states_lock:
         state_items = list(runtime.global_state.usbip_states.items())
+
+    attachment_class = classify_local_usb_attachment(current_set)
 
     for device_host, state_info in state_items:
         if not isinstance(state_info, dict) or not state_info.get("reconnecting"):
@@ -497,6 +510,32 @@ def reconcile_observed_usbip_devices(current_devices: Iterable[str]) -> dict[str
         }
         observed = sorted(expected & current_set)
         if not observed:
+            continue
+        physical_local = [
+            device_id for device_id in observed
+            if attachment_class.get(device_id) == "physical"
+        ]
+        if physical_local:
+            logger.warning(
+                "[USB/IP Reconnect] %s appears physically attached to the "
+                "controller (non-vhci bus); not promoting as USB/IP: %s",
+                device_host,
+                physical_local,
+            )
+            if observed and all(
+                attachment_class.get(device_id) == "physical"
+                for device_id in observed
+            ):
+                with runtime.global_state.usbip_states_lock:
+                    stale_state = runtime.global_state.usbip_states.get(device_host)
+                    if isinstance(stale_state, dict) and stale_state.get("reconnecting"):
+                        stale_state["reconnecting"] = False
+                        stale_state["transport_connected"] = False
+                        stale_state["adb_ready"] = False
+                        stale_state["reason"] = (
+                            "expected devices are physically attached to the "
+                            "controller; stale USB/IP assignment suspected"
+                        )
             continue
         _record_reconnected_devices(
             device_host,
@@ -512,6 +551,61 @@ def reconcile_observed_usbip_devices(current_devices: Iterable[str]) -> dict[str
         restored[device_host] = observed
 
     return restored
+
+
+def classify_local_usb_attachment(
+    serials: Iterable[str],
+    *,
+    bus_paths: dict[str, str] | None = None,
+    sysfs_root: str = "/sys/bus/usb/devices",
+) -> dict[str, str]:
+    """Classify serials by local USB attachment: ``vhci`` or ``physical``.
+
+    仅返回可判定的串号（``adb devices -l`` 带 ``usb:X-Y`` 且 sysfs 可读）。
+    判定不了的串号不出现在结果里，调用方据此回退既有行为（fail-open）。
+    ``bus_paths``/``sysfs_root`` 供测试注入。
+    """
+    wanted = {str(serial or "").strip() for serial in serials or set()}
+    wanted.discard("")
+    if not wanted:
+        return {}
+    if bus_paths is None:
+        bus_paths = _adb_serial_bus_paths()
+    classification: dict[str, str] = {}
+    for serial in wanted:
+        busid = bus_paths.get(serial)
+        if not busid:
+            continue
+        try:
+            real_path = os.path.realpath(os.path.join(sysfs_root, busid))
+        except OSError:
+            continue
+        if not real_path or real_path == os.path.join(sysfs_root, busid):
+            # sysfs 路径不存在（设备刚拔出等）：保持不可判定。
+            continue
+        classification[serial] = "vhci" if "vhci" in real_path.lower() else "physical"
+    return classification
+
+
+def _adb_serial_bus_paths() -> dict[str, str]:
+    """Map ADB serial -> local USB bus id (``usb:X-Y``) via ``adb devices -l``."""
+    try:
+        result = subprocess.run(
+            ["adb", "devices", "-l"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    bus_paths: dict[str, str] = {}
+    for line in (result.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) < 3 or parts[1] != "device":
+            continue
+        for token in parts[2:]:
+            if token.startswith("usb:"):
+                bus_paths[parts[0]] = token[4:].strip()
+                break
+    return bus_paths
 
 
 def stop_usbip_reconnect_tasks(timeout: float = 5) -> None:

@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 from features.firmware import source_flash
 from features.firmware.source_flash import (
     SourceFlashError,
-    SourceFlashReport,
     enqueue_task,
     run_source_flash,
     sftp_mkdir_chain,
@@ -64,9 +63,6 @@ class EnqueueTaskTests(unittest.TestCase):
         enqueue_task(ssh, "flash-D1-1", r"C:\gms-flash\t1\u.img")
         handle = sftp.open.call_args[0][0]
         self.assertIn("flash-D1-1.json", handle)
-        written = handle.write.call_args[0][0] if hasattr(
-            sftp.open.return_value.__enter__ if False else handle, "write",
-        ) else None
 
 
 class WaitResultTests(unittest.TestCase):
@@ -105,9 +101,8 @@ class WaitResultTests(unittest.TestCase):
 
         with patch.object(
             source_flash.time, "sleep", side_effect=fake_sleep,
-        ):
-            with self.assertRaises(KeyboardInterrupt):
-                wait_result(ssh, "flash-D1-1")
+        ), self.assertRaises(KeyboardInterrupt):
+            wait_result(ssh, "flash-D1-1")
 
 
 class RunSourceFlashTests(unittest.TestCase):
@@ -163,15 +158,14 @@ class RunSourceFlashTests(unittest.TestCase):
 
         with (
             patch.object(source_flash, "open_windows_ssh", return_value=ssh),
-            patch.object(source_flash.time, "sleep", new=lambda _s: None),
+            patch.object(source_flash.time, "sleep", new=lambda _s: None),self.assertRaises(SourceFlashError) as ctx
         ):
-            with self.assertRaises(SourceFlashError) as ctx:
-                asyncio.run(run_source_flash(
-                    device="D1",
-                    device_host="hcq@172.16.14.66",
-                    firmware_path="/suite/update.img",
-                    on_log=None,
-                ))
+            asyncio.run(run_source_flash(
+                device="D1",
+                device_host="hcq@172.16.14.66",
+                firmware_path="/suite/update.img",
+                on_log=None,
+            ))
         self.assertEqual(ctx.exception.stage, "FLASHING")
 
     def test_ssh_failure_raises(self) -> None:
@@ -181,13 +175,12 @@ class RunSourceFlashTests(unittest.TestCase):
             side_effect=SourceFlashError(
                 "SSH fail", status_code=502, stage="SSH",
             ),
-        ):
-            with self.assertRaises(SourceFlashError) as ctx:
-                asyncio.run(run_source_flash(
-                    device="D1",
-                    device_host="hcq@172.16.14.66",
-                    firmware_path="/suite/update.img",
-                ))
+        ), self.assertRaises(SourceFlashError) as ctx:
+            asyncio.run(run_source_flash(
+                device="D1",
+                device_host="hcq@172.16.14.66",
+                firmware_path="/suite/update.img",
+            ))
         self.assertEqual(ctx.exception.stage, "SSH")
 
 

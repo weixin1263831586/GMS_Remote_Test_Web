@@ -122,8 +122,7 @@ def run_cli(
             argv,
             cwd=os.getcwd(),
             input=stdin_text,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             timeout=effective_timeout,
             check=False,
@@ -227,10 +226,73 @@ def describe_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return _run_with_json("gms-rt-system-command-describe", [command])
 
 
+def _command_safety(command: str) -> dict[str, Any] | None:
+    """Query the CLI's authoritative safety descriptor for one command.
+
+    返回 describe JSON 中的 command 条目；CLI 不可用或解析失败时返回
+    None（调用方决定失败策略）。
+    """
+    import json as _json
+
+    text, is_error = run_cli(
+        "gms-rt-system-command-describe", [normalize_command(command)]
+    )
+    if is_error:
+        return None
+    try:
+        payload = _json.loads(text)
+    except ValueError:
+        return None
+    wanted = normalize_command(command)
+    # describe 输出两种形态：单命令对象 {name, mode, ...}，或
+    # {commands: [...]} 列表（system-commands 目录）。
+    if isinstance(payload, dict):
+        commands = payload.get("commands")
+        if payload.get("name") == wanted:
+            return payload
+        if isinstance(commands, list):
+            for item in commands:
+                if isinstance(item, dict) and item.get("name") == wanted:
+                    return item
+        if isinstance(commands, dict):
+            return commands.get(wanted)
+    return None
+
+
 def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     command = str(arguments.get("command") or "").strip()
     if not command:
         return "Missing required argument: command", True
+    normalized = normalize_command(command)
+    if normalized in _DENIED_COMMANDS:
+        return (
+            f"denied: {normalized} opens an interactive session and is not "
+            "available through this MCP tool",
+            True,
+        )
+    # Security boundary (2026-09-03 audit §13): the generic runner only
+    # executes commands the CLI itself marks agent_safe_unattended.
+    # Mutating/high-risk operations must go through the dedicated typed
+    # tools (gms_rt_test_start, ...) or a human-run CLI, never prompt text.
+    descriptor = _command_safety(normalized)
+    if descriptor is None:
+        return (
+            f"denied: unable to verify safety metadata for {normalized} "
+            "(CLI describe failed). Falling back to read-only policy: "
+            "only read-only commands are executable; use a typed tool for "
+            "mutating operations.",
+            True,
+        )
+    if not descriptor.get("agent_safe_unattended"):
+        return (
+            f"denied: {normalized} is not agent-safe for unattended "
+            f"execution (mode={descriptor.get('mode')}, "
+            f"requires_explicit_authorization="
+            f"{descriptor.get('requires_explicit_authorization')}). "
+            "Use the dedicated typed MCP tool with explicit confirmation, "
+            "or run it manually via the gms-rt CLI.",
+            True,
+        )
     args = arguments.get("args")
     stdin_text = arguments.get("password_stdin")
     if stdin_text is not None and not isinstance(stdin_text, str):
@@ -247,12 +309,16 @@ def tools() -> list[dict[str, Any]]:
         {
             "name": "gms_rt_run",
             "description": (
-                "Run any gms-rt-* CLI command of the GMS Remote Test platform "
-                "and return its JSON envelope (ok, exit_code, data). Use "
-                "gms_rt_describe first to learn a command's usage, risk mode, "
-                "and auth requirements. Passwords must be passed through "
-                "password_stdin (never in args). Interactive commands "
-                "(terminal-open, terminal-push, devices-scrcpy) are denied."
+                "Run gms-rt-* CLI commands of the GMS Remote Test platform "
+                "that are agent-safe for unattended execution (read-only "
+                "queries); returns the JSON envelope (ok, exit_code, data). "
+                "Mutating/high-risk commands (firmware burn, reboot, USB/IP "
+                "connect/disconnect, config changes, ...) are rejected by "
+                "the server's agent_safe_unattended enforcement — use the "
+                "dedicated typed tools or run them manually. Use "
+                "gms_rt_describe to inspect a command's risk mode. "
+                "Passwords must be passed through password_stdin (never in "
+                "args)."
             ),
             "inputSchema": {
                 "type": "object",

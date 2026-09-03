@@ -14,7 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PLUGIN_DIR / "scripts"))
@@ -96,7 +96,7 @@ class RunCliTests(unittest.TestCase):
         original = mcp_server.subprocess.run
         mcp_server.subprocess.run = fake_run
         try:
-            text, is_error = mcp_server.run_cli(
+            _text, is_error = mcp_server.run_cli(
                 "gms-rt-auth-login", ["hcq"], stdin_text="secret\n"
             )
         finally:
@@ -112,8 +112,7 @@ class JsonRpcLoopTests(unittest.TestCase):
         completed = subprocess.run(
             [sys.executable, str(PLUGIN_DIR / "scripts" / "mcp_server.py")],
             input=stdin_lines,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             timeout=30,
         )

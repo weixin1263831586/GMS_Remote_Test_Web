@@ -31,6 +31,7 @@ from features.devices.ssh_credentials import find_device_host_password
 
 from . import runtime
 
+
 logger = logging.getLogger(__name__)
 
 WINDOWS_QUEUE_DIR = r"C:\Users\hcq\gms-flash-queue"
@@ -99,7 +100,7 @@ def open_windows_ssh(device_host: str):
 
 
 def windows_exec(ssh, command: str, timeout: int = 30) -> tuple[str, int]:
-    stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
+    _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
     out = stdout.read().decode("utf-8", errors="replace")
     err = stderr.read().decode("utf-8", errors="replace")
     code = stdout.channel.recv_exit_status()
@@ -143,11 +144,14 @@ def enqueue_task(ssh, task_id: str, firmware: str) -> None:
         sftp.close()
 
 
-def wait_result(ssh, task_id: str) -> dict:
+def wait_result(ssh, task_id: str, keepalive=None) -> dict:
     result_path = f"{WINDOWS_QUEUE_DIR}\\{task_id}.result.json"
     deadline = time.time() + RESULT_TIMEOUT_SECONDS
     while time.time() < deadline:
         time.sleep(RESULT_POLL_INTERVAL_SECONDS)
+        if keepalive is not None:
+            with contextlib.suppress(Exception):
+                keepalive()
         out, code = windows_exec(
             ssh, f'type "{result_path}" 2>nul', timeout=15,
         )
@@ -172,6 +176,7 @@ def _sync_flash_flow(
     firmware_path: str,
     loop: asyncio.AbstractEventLoop,
     on_log,
+    keepalive=None,
 ) -> SourceFlashReport:
     started = time.time()
 
@@ -191,7 +196,7 @@ def _sync_flash_flow(
         log(f"投递烧写任务 {task_id} 到 Source Agent")
         enqueue_task(ssh, task_id, remote_firmware)
 
-        result = wait_result(ssh, task_id)
+        result = wait_result(ssh, task_id, keepalive=keepalive)
         report = SourceFlashReport(
             device=device,
             success=result.get("status") == "SUCCESS",
@@ -223,12 +228,15 @@ async def run_source_flash(
     device_host: str,
     firmware_path: str,
     on_log=None,
+    keepalive=None,
 ) -> SourceFlashReport:
     """Dispatch a complete-firmware flash to the Windows source agent.
 
     ``device_host`` is the Windows source host (e.g. hcq@172.16.14.66).
     ``firmware_path`` is the firmware already present on the Controller
     (Linux) filesystem; it is SFTP-uploaded to the source host first.
+    ``keepalive`` is an optional no-argument callback invoked during the
+    result polling loop so callers can refresh long-held locks.
     """
     loop = asyncio.get_running_loop()
     return await asyncio.to_thread(
@@ -238,4 +246,5 @@ async def run_source_flash(
         firmware_path=firmware_path,
         loop=loop,
         on_log=on_log,
+        keepalive=keepalive,
     )

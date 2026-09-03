@@ -90,9 +90,29 @@ class SkillInstallerTests(unittest.TestCase):
             self.assertTrue(dispatcher.stat().st_mode & stat.S_IXUSR)
             self.assertTrue((target / "scripts" / "install.sh").stat().st_mode & stat.S_IXUSR)
             self.assertIn(
-                "export GMS_CURL_INSECURE=0",
+                'export GMS_CURL_INSECURE="${GMS_CURL_INSECURE:-0}"',
                 dispatcher.read_text(encoding="utf-8"),
             )
+
+            # 安装期默认值不得覆盖用户运行期 export（GMS_CURL_INSECURE=1 /
+            # GMS_CURL_CA_CERT 是错误提示承诺给用户的自救方式）。
+            insecure_export = re.search(
+                r"^export GMS_CURL_INSECURE=.*$",
+                dispatcher.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+            self.assertIsNotNone(insecure_export)
+            probe = f'{insecure_export.group(0)}; printf "%s" "$GMS_CURL_INSECURE"'
+            default_value = subprocess.run(
+                ["bash", "-c", probe], env=env, capture_output=True, text=True
+            )
+            self.assertEqual(default_value.stdout, "0")
+            overridden = dict(env)
+            overridden["GMS_CURL_INSECURE"] = "1"
+            override_value = subprocess.run(
+                ["bash", "-c", probe], env=overridden, capture_output=True, text=True
+            )
+            self.assertEqual(override_value.stdout, "1")
 
             helper_text = (target / "scripts" / "gms-remote-test.sh").read_text(
                 encoding="utf-8"
