@@ -92,3 +92,51 @@ async def check_worker_vpn(
         return {"connected": result.get("connected")}
     except HTTPException:
         return {"connected": None}
+
+
+@router.get("/workers/{worker_id}/vpn-connections")
+async def list_worker_vpn_connections(
+    worker_id: str,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """List VPN connections preconfigured in the worker host's NetworkManager."""
+    worker = service().repository.get_worker(worker_id)
+    if worker is None:
+        raise HTTPException(404, "worker not found")
+    if worker.get("status") not in {"online", "busy"}:
+        return {"success": False, "connections": [], "error": "worker is not online"}
+    try:
+        result = await _run_worker_command(
+            worker_id, "list_vpn_connections", {}, timeout=10,
+        )
+    except HTTPException as exc:
+        return {"success": False, "connections": [], "error": str(exc.detail)}
+    return {"success": True, "connections": result.get("connections") or []}
+
+
+@router.post("/workers/{worker_id}/vpn-connect")
+async def connect_worker_vpn(
+    worker_id: str,
+    payload: dict,
+    _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
+):
+    """Activate a preconfigured VPN connection on the worker host."""
+    vpn_name = str(payload.get("vpn_name") or "").strip()
+    if not vpn_name:
+        raise HTTPException(400, "vpn_name is required")
+    worker = service().repository.get_worker(worker_id)
+    if worker is None:
+        raise HTTPException(404, "worker not found")
+    if worker.get("status") not in {"online", "busy"}:
+        raise HTTPException(409, "worker is not online")
+    try:
+        result = await _run_worker_command(
+            worker_id, "connect_vpn", {"vpn_name": vpn_name}, timeout=70,
+        )
+    except HTTPException:
+        raise
+    return {
+        "success": True,
+        "connected": bool(result.get("connected")),
+        "message": f"VPN 已在 {worker_id} 连接: {vpn_name}",
+    }

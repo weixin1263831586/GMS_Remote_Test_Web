@@ -85,6 +85,7 @@ let pendingUsbipDeviceHost = '';
 let activeUsbipSelection = null;
 let usbipSourceLoadPromise = null;
 const usbipSourceDeviceCache = new Map();
+const usbipSourceOsByHost = new Map();
 const usbipAssignedBusidsBySource = new Map();
 let pendingDevicePasswordAction = 'usbip';
 let pendingDevicePasswordRetry = null;
@@ -94,7 +95,7 @@ let usbipManualDisconnectUntil = 0;
 let usbipReconnectWaiting = false;
 let usbipOperationGeneration = 0;
 let adbProxyStatus = null;
-let adbProxyOperationRunning = false;
+// adbProxyOperationRunning 已迁移到 state.js（先于本文件加载）声明。
 let adbProxyDeviceRefreshTimer = null;
 let adbProxyDeviceRefreshRunning = false;
 let usbipSourceRefreshTimer = null;

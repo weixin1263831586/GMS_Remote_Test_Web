@@ -123,7 +123,13 @@ async function _apiCallOnce(url, method, data, opts) {
             const needsElevation = response.status === 403
                 && detail
                 && (detail.elevation_required || (typeof detail === 'object' && detail.elevation_required));
-            if (needsElevation && !opts._elevationRetried) {
+            // 后台轮询（options.background）不允许触发提权弹框：否则轮询
+            // 周期性 403 会在用户关闭后立刻再次弹出，形成死循环。
+            if (
+                needsElevation
+                && !opts._elevationRetried
+                && !opts.background
+            ) {
                 debugLog('[apiCall] 403 elevation_required — prompting for admin credentials');
                 const granted = await (window.requestElevatedAccess
                     ? window.requestElevatedAccess('需要管理员权限执行此操作')
@@ -167,7 +173,13 @@ async function _apiCallOnce(url, method, data, opts) {
                 error.suppressToast = true;
                 // 用户主动发起的请求失败才重新弹出登录层；后台轮询
                 // （options.background）保持静默，尊重用户手动关闭的选择。
-                if (state.authRequired && !opts.background) {
+                // need_password 表示是来源主机缺少 SSH 凭据（调用方会弹
+                // 设备密码框），不是平台会话失效，不应弹全局登录层。
+                if (
+                    state.authRequired
+                    && !opts.background
+                    && !result.need_password
+                ) {
                     state.authGateDismissed = false;
                     showAuthGate(false);
                 }
@@ -185,7 +197,7 @@ async function _apiCallOnce(url, method, data, opts) {
         return result;
     } catch (error) {
         debugLog('API Error:', error);
-        if (!error.suppressToast) {
+        if (!error.suppressToast && !opts.silentToast) {
             showToast(error.message, 'error');
         }
         throw error;

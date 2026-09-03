@@ -127,7 +127,7 @@ def usbip_error_fields(message: str) -> dict[str, object]:
     lowered = detail.lower()
     rules = (
         (("ssh", "凭据"), "USBIP_SOURCE_SSH_FAILED", "请检查来源主机SSH地址、凭据和sshd服务。"),
-        (("usbipd未安装",), "USBIPD_NOT_INSTALLED", "请先在Windows来源主机安装usbipd-win。"),
+        (("usbipd未安装",), "USBIPD_NOT_INSTALLED", "请先在来源主机安装usbipd（Windows用usbipd-win，Ubuntu用用户态usbipd）。"),
         (("未找到android设备", "未找到android usb", "设备已不可用"), "USBIP_SOURCE_DEVICE_NOT_FOUND", "请刷新USB设备列表并确认设备仍连接来源主机。"),
         (("绑定失败", "bind failed"), "USBIP_BIND_FAILED", "请检查usbipd共享状态和Windows管理员权限。"),
         (("vhci",), "VHCI_LOAD_FAILED", "请在目标Linux主机安装USB/IP工具并加载vhci_hcd。"),

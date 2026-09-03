@@ -39,6 +39,7 @@ from .usbip import detach_ubuntu_usbip_ports, find_device_host_password, usbip_m
 from .usbip_access import enforce_usbip_host_access, usbip_request_user
 from .usbip_install_api import install_usbipd
 from .usbip_install_api import router as usbip_install_router
+from .usbip_linux_source import stop_ubuntu_usbip_server
 from .usbip_operations import (
     has_remaining_usbip_assignments,
     selected_usbip_serials,
@@ -48,10 +49,16 @@ from .usbip_operations import (
     usbip_error_fields as _usbip_error_fields,
 )
 from .usbip_persistence import (
+    lookup_usbip_source_os as _lookup_usbip_source_os,
+)
+from .usbip_persistence import (
     persist_local_usbip_sources as _persist_local_usbip_sources,
 )
 from .usbip_persistence import (
     record_usbip_network_quality as _record_usbip_network_quality,
+)
+from .usbip_persistence import (
+    record_usbip_source_os as _record_usbip_source_os,
 )
 from .usbip_persistence import (
     usbip_assignment_lock as _usbip_assignment_lock,
@@ -209,6 +216,7 @@ def _local_worker_id() -> str:
 def _reconcile_usbip_assignment_serials(
     device_host: str,
     source_devices: list[dict],
+    source_os: str = "",
 ) -> bool:
     """Backfill assignment serials from the authoritative source busid list."""
     serial_by_busid = {
@@ -219,6 +227,7 @@ def _reconcile_usbip_assignment_serials(
     if not serial_by_busid:
         return False
 
+    resolved_os = str(source_os or "").strip()
     local_serials: list[str] = []
     changed = False
     with _usbip_assignment_lock:
@@ -229,14 +238,17 @@ def _reconcile_usbip_assignment_serials(
             serial = serial_by_busid.get(str(assignment.get("busid") or ""))
             if not serial:
                 continue
-            if assignment.get("device_serials") != [serial]:
-                assignments[key] = {**assignment, "device_serials": [serial]}
+            updated = {**assignment, "device_serials": [serial]}
+            if resolved_os and not str(assignment.get("source_os") or "").strip():
+                updated["source_os"] = resolved_os
+            if updated != assignment:
+                assignments[key] = updated
                 changed = True
             if str(assignment.get("worker_id") or "") == _local_worker_id():
                 local_serials.append(serial)
         if changed:
             _save_usbip_assignments(assignments)
-    _persist_local_usbip_sources(device_host, local_serials)
+    _persist_local_usbip_sources(device_host, local_serials, source_os=resolved_os)
     return changed
 
 def _adb_proxy_target_assignments(worker_id: str) -> list[dict]:
@@ -620,6 +632,68 @@ async def _reconcile_local_usbip_status(
     )
     return stale, True
 
+@router.get("/api/usbip/source-os")
+async def get_usbip_source_os(
+    request: Request,
+    hosts: str = "",
+    _elevated=Depends(require_elevated_admin),
+):
+    """Resolve Windows/Ubuntu labels for source hosts.
+
+    先读持久化缓存（无网络开销），未知来源并行 SSH 探测后写回缓存，
+    供"设备来源"下拉框在未选择主机时即可显示系统标识。
+    """
+    requested = list(dict.fromkeys(
+        str(item or "").strip()
+        for item in (hosts or "").split(",")
+        if str(item or "").strip()
+    ))
+    if not requested:
+        config = runtime.config_manager.load_config()
+        resolved = _resolve_usbip_device_host(request, config)
+        requested = [resolved] if resolved else []
+
+    results: dict[str, dict] = {}
+    to_probe: list[str] = []
+    for host in requested:
+        enforce_usbip_host_access(request, host, host)
+        cached_os = _lookup_usbip_source_os(host)
+        if cached_os:
+            results[host] = {
+                "source_os": "windows" if cached_os == "windows" else "ubuntu",
+                "probed": False,
+                "error": "",
+            }
+        else:
+            to_probe.append(host)
+
+    async def _probe_one(host: str) -> tuple[str, dict]:
+        probe = await asyncio.to_thread(usbip_manager.probe_source_os, host)
+        source_os = str(probe.get("source_os") or "").strip()
+        if source_os:
+            _record_usbip_source_os(host, source_os)
+            return host, {
+                "source_os": (
+                    "windows" if source_os == "windows" else "ubuntu"
+                ),
+                "probed": True,
+                "error": "",
+            }
+        return host, {
+            "source_os": "",
+            "probed": True,
+            "error": str(probe.get("error") or ""),
+        }
+
+    if to_probe:
+        probed = await asyncio.gather(*(_probe_one(host) for host in to_probe))
+        results.update(dict(probed))
+
+    return JSONResponse(content={
+        "success": True,
+        "sources": {host: results.get(host, {"source_os": "", "error": ""}) for host in requested},
+    })
+
 @router.get("/api/usbip/source-devices")
 async def list_usbip_source_devices(
     request: Request,
@@ -649,7 +723,10 @@ async def list_usbip_source_devices(
     _reconcile_usbip_assignment_serials(
         resolved,
         result.get("devices") or [],
+        source_os=result.get("source_os") or "",
     )
+    if result.get("source_os"):
+        _record_usbip_source_os(resolved, str(result["source_os"]))
     return JSONResponse(content=result)
 
 @router.get("/api/usbip/status")
@@ -733,7 +810,10 @@ async def get_usbip_status(
                 "statuses_by_busid": {},
                 "generations_by_busid": {},
                 "network_quality_by_busid": {},
+                "source_os": "",
             })
+            if not grouped_item["source_os"]:
+                grouped_item["source_os"] = str(item.get("source_os") or "").strip()
             busid = str(item.get("busid") or "")
             serials = list(dict.fromkeys(
                 str(serial or "").strip()
@@ -770,6 +850,7 @@ async def get_usbip_status(
                 "source_host": source_host,
                 "worker_id": worker_id,
                 "busids": sorted(grouped_item["busids"]),
+                "source_os": grouped_item["source_os"],
                 "device_serials": grouped_item["device_serials"],
                 "device_serials_by_busid": (
                     grouped_item["device_serials_by_busid"]
@@ -992,10 +1073,10 @@ async def start_usbip(
                 ]
                 if active_siblings:
                     return error_response(
-                        "该Windows来源仍有其他USB/IP设备处于活动状态；为避免停止全局ADB影响现有任务，本次接入已拒绝",
+                        "该来源主机仍有其他USB/IP设备处于活动状态；为避免停止全局ADB或重启USB/IP导出影响现有任务，本次接入已拒绝",
                         status_code=409,
                         error_code="USBIP_SOURCE_ADB_IN_USE",
-                        remediation="请先断开该来源上的其他USB/IP分配，或将新设备接入另一台Windows来源主机。",
+                        remediation="请先断开该来源上的其他USB/IP分配，或将新设备接入其他来源主机。",
                     )
             if adb_proxy_routes:
                 proxy_serials = {
@@ -1056,12 +1137,60 @@ async def start_usbip(
                         device_host, worker_id, network_quality
                     )
                     if not network_quality.get("reachable"):
-                        return error_response(
-                            f"{worker_id} 无法连接USB/IP来源TCP 3240",
-                            status_code=409,
-                            error_code="USBIP_TCP_UNREACHABLE",
-                            retryable=True,
-                            remediation="请检查usbipd服务、TCP 3240防火墙和来源到Worker的网络路由。",
+                        # Ubuntu 来源的 usbipd 导出进程按需启动；Windows
+                        # usbipd 常驻服务不可达才是网络问题。先尝试启动
+                        # 来源侧导出进程并重试一次探测。
+                        prep = await asyncio.to_thread(
+                            usbip_manager.ensure_source_export_ready,
+                            device_host,
+                            busids,
+                            device_password,
+                        )
+                        if not prep.get("success"):
+                            logger.warning(
+                                "[USB/IP] Source export ensure failed for %s: %s",
+                                device_host,
+                                prep.get("detail") or "unknown error",
+                            )
+                        if prep.get("started"):
+                            preflight = await _run_worker_command(
+                                worker_id,
+                                "usbip_preflight",
+                                {"source_host": _usbip_remote_host(device_host)},
+                                timeout=20,
+                            )
+                            network_quality = preflight.get("network_quality") or {}
+                            _record_usbip_network_quality(
+                                device_host, worker_id, network_quality
+                            )
+                        if not network_quality.get("reachable"):
+                            export_detail = str(
+                                prep.get("detail") or prep.get("error") or ""
+                            ).strip()
+                            if not prep.get("success") and export_detail:
+                                # 来源侧导出进程启动/校验失败（版本过低、未安装、
+                                # 启动失败）时 TCP 预检必然失败；返回真实原因，
+                                # 而不是误导性的防火墙/路由建议。
+                                error_fields = {
+                                    "error_code": "USBIP_TCP_UNREACHABLE",
+                                    "retryable": True,
+                                    "network_quality": network_quality,
+                                }
+                                if prep.get("install_guide"):
+                                    error_fields["install_guide"] = str(
+                                        prep["install_guide"]
+                                    )
+                                return error_response(
+                                    f"{worker_id} 无法连接USB/IP来源TCP 3240：{export_detail}",
+                                    status_code=409,
+                                    **error_fields,
+                                )
+                            return error_response(
+                                f"{worker_id} 无法连接USB/IP来源TCP 3240",
+                                status_code=409,
+                                error_code="USBIP_TCP_UNREACHABLE",
+                                retryable=True,
+                                remediation="请检查usbipd服务、TCP 3240防火墙和来源到Worker的网络路由。",
                             network_quality=network_quality,
                         )
                 with _usbip_assignment_lock:
@@ -1145,6 +1274,8 @@ async def start_usbip(
                             "USB/IP设备未全部完成绑定: " + ", ".join(missing)
                         )
                     prepared["busids"] = prepared_busids
+                    if prepared.get("source_os"):
+                        _record_usbip_source_os(device_host, str(prepared["source_os"]))
                     attach_payload = {
                         "device_host": device_host,
                         "source_host": prepared["source_host"],
@@ -1340,6 +1471,7 @@ async def start_usbip(
                         assignments[_usbip_assignment_key(device_host, busid)] = {
                             "device_host": device_host,
                             "source_host": prepared["source_host"],
+                            "source_os": prepared.get("source_os") or "windows",
                             "worker_id": worker_id,
                             "busid": busid,
                             "device_serials": busid_serials,
@@ -1488,6 +1620,7 @@ async def start_usbip(
                             "source_host": _usbip_remote_host(
                                 device_host, usbip_attach_host
                             ),
+                            "source_os": result.get("source_os") or "windows",
                             "worker_id": worker_id,
                             "busid": busid,
                             "device_serials": busid_serials,
@@ -1500,6 +1633,8 @@ async def start_usbip(
                     _save_usbip_assignments(assignments)
             result["transport_connected"] = bool(result.get("transport_connected") or result.get("devices"))
             result["adb_ready"] = bool(device_list)
+            if result.get("source_os"):
+                _record_usbip_source_os(device_host, str(result["source_os"]))
             result["device_serials"] = reported_serials
             result["message"] = (
                 "✅ USB/IP传输已连接，设备："
@@ -1511,7 +1646,11 @@ async def start_usbip(
                 )
             )
             if not worker_id or worker_id == _local_worker_id():
-                _persist_local_usbip_sources(device_host, reported_serials)
+                _persist_local_usbip_sources(
+                    device_host,
+                    reported_serials,
+                    source_os=result.get("source_os") or "",
+                )
 
             if request_data.get("manual_connect"):
                 try:
@@ -1578,6 +1717,7 @@ async def start_usbip(
                         continue
                     source_updates[device_id] = {
                         "source": windows_device_host,
+                        "source_os": result.get("source_os") or "windows",
                         "timestamp": time.time(),
                     }
 
@@ -1987,23 +2127,43 @@ async def stop_usbip(
                 logger.warning(f"[USB/IP Stop] detach Ubuntu usbip ports failed: {e}")
 
         if tailscale_mode:
-            logger.info("[USB/IP Stop] Public mode keeps Windows usbipd bindings; only Ubuntu attach is detached")
+            logger.info("[USB/IP Stop] Public mode keeps source-side usbipd bindings; only local attach is detached")
             await asyncio.sleep(1)
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)
         else:
-            with DeviceSSHConnection(config) as win_ssh:
+            with DeviceSSHConnection(config) as source_ssh:
                 selected_busids = list(req.busids) if req and req.busids else []
-                if selected_busids:
-                    for busid in selected_busids:
-                        runtime.ssh_manager.execute_command(
-                            win_ssh,
-                            f"usbipd detach --busid {shlex.quote(busid)}",
-                            timeout=10,
+                source_os = usbip_manager._detect_source_os(source_ssh)
+                if source_os == "linux":
+                    # Ubuntu 来源的"绑定"即 usbipd 导出进程；同来源仍有其他
+                    # 活动分配时保留进程，只由上面的 vhci detach 释放本机端口。
+                    if selected_busids and has_remaining_assignments:
+                        logger.info(
+                            "[USB/IP Stop] Ubuntu source %s still exports devices for other assignments; usbipd kept running",
+                            config["device_host"],
                         )
+                    else:
+                        stop_result = stop_ubuntu_usbip_server(
+                            runtime.ssh_manager, source_ssh,
+                        )
+                        if not stop_result.get("success"):
+                            logger.warning(
+                                "[USB/IP Stop] Failed to stop Ubuntu usbipd on %s: %s",
+                                config["device_host"],
+                                stop_result.get("detail"),
+                            )
                 else:
-                    runtime.ssh_manager.execute_command(
-                        win_ssh, "usbipd unbind --all", timeout=10
-                    )
+                    if selected_busids:
+                        for busid in selected_busids:
+                            runtime.ssh_manager.execute_command(
+                                source_ssh,
+                                f"usbipd detach --busid {shlex.quote(busid)}",
+                                timeout=10,
+                            )
+                    else:
+                        runtime.ssh_manager.execute_command(
+                            source_ssh, "usbipd unbind --all", timeout=10
+                        )
                 await asyncio.sleep(2)
 
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)

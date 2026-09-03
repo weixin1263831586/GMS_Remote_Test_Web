@@ -402,6 +402,48 @@ class WorkerAgent:
                     result = {"connected": connected}
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     raise RuntimeError("nmcli status check failed") from exc
+            elif kind == "list_vpn_connections":
+                # 列出本机 NetworkManager 中预配置的全部 VPN 连接（含未激活），
+                # 供控制台"连接VPN"弹框按所选 Worker 主机展示账号。
+                try:
+                    proc = subprocess.run(
+                        ['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if proc.returncode != 0:
+                        raise RuntimeError(
+                            (proc.stderr or proc.stdout or "nmcli connection listing failed").strip()
+                        )
+                    connections = [
+                        line.split(':', 1)[0].strip()
+                        for line in proc.stdout.splitlines()
+                        if len(line.split(':', 1)) == 2
+                        and line.split(':', 1)[1].strip().lower() == 'vpn'
+                        and line.split(':', 1)[0].strip()
+                    ]
+                    result = {"connections": connections}
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    raise RuntimeError("nmcli connection listing failed") from exc
+            elif kind == "connect_vpn":
+                # 在本机 NetworkManager 上激活指定 VPN 连接（凭据由
+                # NetworkManager 保存，无需回传密码）。
+                vpn_name = str((command.get("payload") or {}).get("vpn_name") or "").strip()
+                if not vpn_name:
+                    raise ValueError("vpn_name is required")
+                try:
+                    proc = subprocess.run(
+                        ['nmcli', 'connection', 'up', vpn_name],
+                        capture_output=True, text=True, timeout=60,
+                    )
+                    if proc.returncode != 0:
+                        raise RuntimeError(
+                            (proc.stderr or proc.stdout or "nmcli connect failed").strip()
+                        )
+                    result = {"connected": True, "vpn_connection_name": vpn_name}
+                except subprocess.TimeoutExpired as exc:
+                    raise RuntimeError(f"nmcli connect timed out: {vpn_name}") from exc
+                except OSError as exc:
+                    raise RuntimeError("nmcli connect failed") from exc
             elif kind == "uninstall_agent":
                 # 先确认回执，再停止服务，确保 Controller 能移除注册记录。
                 result = {"stopping": True, "removed_data": False}

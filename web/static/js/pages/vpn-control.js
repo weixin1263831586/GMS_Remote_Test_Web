@@ -1,6 +1,5 @@
 // ==================== VPN Control ====================
 async function checkSshd() {
-    if (!requireControllerHostAction('SSHD 检查')) return;
     try {
         const result = await apiCall('/api/ssh/sshd', 'GET');
 
@@ -43,7 +42,6 @@ async function checkSshd() {
 }
 
 async function checkRouting(targetHost) {
-    if (!requireControllerHostAction('路由检查')) return;
     // 创建弹框
     const dialog = document.createElement('div');
     dialog.id = 'route-check-dialog';
@@ -304,7 +302,6 @@ async function checkRouting(targetHost) {
 }
 
 async function connectVpn() {
-    if (!requireControllerHostAction('VPN 连接')) return;
     if (state.vpnConnected) {
         await checkVpnStatus();
         return;
@@ -315,10 +312,35 @@ async function connectVpn() {
 }
 
 async function checkVpnStatus() {
+    // 按当前测试主机路由：远端 Worker 查询该 Worker 主机的 VPN 状态
+    // （后端经 check_vpn 命令下发到 Worker Agent），本机/未启用集群时
+    // 保持原有 Controller/配置主机语义。
+    const workerId = (typeof workspaceWorkerId === 'function')
+        ? workspaceWorkerId() : '';
+    const remote = workerId && !(typeof isLocalWorkspaceWorker === 'function'
+        ? isLocalWorkspaceWorker(workerId) : false);
     try {
-        const result = await apiCall('/api/vpn/status', 'GET');
-        updateVpnStatus(result.connected);
-        addLogEntry(`VPN 状态: ${result.connected ? '已连接' : '未连接'}`, result.connected ? 'success' : 'warning');
+        let connected;
+        if (remote) {
+            const result = await apiCall(
+                `/api/cluster/workers/${encodeURIComponent(workerId)}/vpn-status`,
+                'GET'
+            );
+            if (result.connected === null || result.connected === undefined) {
+                updateVpnStatus(null);
+                addLogEntry(`${workerId} 的 VPN 状态未知（主机离线或 Worker Agent 未响应）`, 'warning');
+                return;
+            }
+            connected = result.connected;
+        } else {
+            const result = await apiCall('/api/vpn/status', 'GET');
+            connected = result.connected;
+        }
+        updateVpnStatus(connected);
+        addLogEntry(
+            `${remote ? workerId + ' ' : ''}VPN 状态: ${connected ? '已连接' : '未连接'}`,
+            connected ? 'success' : 'warning'
+        );
     } catch (error) {
         addLogEntry('检查 VPN 状态失败: ' + error.message, 'error');
     }
@@ -329,6 +351,15 @@ function updateVpnStatus(connected) {
     const btn = document.getElementById('vpn-connect-btn');
     const previous = state.vpnConnected;
 
+    if (connected === null || connected === undefined) {
+        label.textContent = '状态: 未知';
+        label.className = 'vpn-status-label disconnected';
+        // 状态未知时按钮回到"连接"文案，与 connectVpn() 对 null 状态
+        // 弹出连接框的行为保持一致。
+        if (btn) btn.textContent = '🔌 连接VPN';
+        state.vpnConnected = null;
+        return;
+    }
     if (connected) {
         label.textContent = '状态: 已连接';
         label.className = 'vpn-status-label connected';
@@ -346,12 +377,40 @@ function updateVpnStatus(connected) {
     }
 }
 
+// ==================== Worker 切换联动 ====================
+// VPN 状态属于单台测试主机（本地或远端 Worker 各自维护）。切换测试主机后
+// 旧状态不再有效：先重置为"未知"避免误导，再按新主机重新查询。
+window.addEventListener('gms:workspace-context', event => {
+    const context = event.detail?.context || {};
+    const previous = event.detail?.previous || {};
+    const workerId = String(context.worker_id || '');
+    const previousWorkerId = String(previous.worker_id || '');
+    // 初次加载（previous 无 worker）或主机未变化时无需处理。
+    if (!previousWorkerId || workerId === previousWorkerId) return;
+    updateVpnStatus(null);
+    checkVpnStatus().catch(() => {});
+});
+
 // ==================== VPN Credential Modal ====================
+function _currentVpnTargetWorkerId() {
+    // 远端 Worker 模式返回该 worker id，否则空串表示 Controller/配置主机。
+    const workerId = (typeof workspaceWorkerId === 'function')
+        ? workspaceWorkerId() : '';
+    if (!workerId) return '';
+    if (typeof isLocalWorkspaceWorker === 'function'
+        && isLocalWorkspaceWorker(workerId)) return '';
+    return workerId;
+}
+
 async function showVpnCredentialModal() {
     const select = document.getElementById('vpn-credential-name');
+    const hint = document.querySelector('#vpn-credential-modal .modal-ssh-info small');
+    const workerId = _currentVpnTargetWorkerId();
 
     try {
-        const result = await apiCall('/api/vpn/connections', 'GET');
+        const result = workerId
+            ? await apiCall(`/api/cluster/workers/${encodeURIComponent(workerId)}/vpn-connections`, 'GET')
+            : await apiCall('/api/vpn/connections', 'GET');
         select.innerHTML = '';
         (result.connections || []).forEach(name => {
             const opt = document.createElement('option');
@@ -359,8 +418,17 @@ async function showVpnCredentialModal() {
             opt.textContent = name;
             select.appendChild(opt);
         });
+        if (!result.connections?.length) {
+            select.innerHTML = `<option value="">${workerId ? '该 Worker 主机' : 'Controller 主机'}未配置VPN连接</option>`;
+        }
+        if (hint) {
+            hint.textContent = workerId
+                ? `VPN 账号在 Worker 主机 ${workerId} 的 NetworkManager 中预先配置。`
+                : 'VPN 账号在 Controller 主机 NetworkManager 中预先配置。';
+        }
     } catch (e) {
         select.innerHTML = '<option value="">加载失败</option>';
+        if (hint) hint.textContent = 'VPN 连接列表加载失败。';
     }
 
     const modal = document.getElementById('vpn-credential-modal');
@@ -387,13 +455,20 @@ async function submitVpnCredential() {
 
     const submitBtn = document.querySelector('#vpn-credential-modal .btn-primary');
     const originalText = submitBtn.textContent;
+    const workerId = _currentVpnTargetWorkerId();
     try {
         submitBtn.textContent = '连接中...';
         submitBtn.disabled = true;
 
-        const result = await apiCall('/api/vpn/connect', 'POST', {
-            vpn_name: vpnName
-        });
+        const result = workerId
+            ? await apiCall(
+                `/api/cluster/workers/${encodeURIComponent(workerId)}/vpn-connect`,
+                'POST',
+                {vpn_name: vpnName}
+            )
+            : await apiCall('/api/vpn/connect', 'POST', {
+                vpn_name: vpnName
+            });
 
         if (result.connected) {
             updateVpnStatus(true);

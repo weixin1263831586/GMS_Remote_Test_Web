@@ -14,7 +14,7 @@
     <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
     <script src="/static/js/utils.js?v=20260828-password-toggle-icons" defer></script>
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/state.js?v=20260826-bootstrap-setup" defer></script>
+    <script src="/static/js/state.js?v=20260902-adbproxy-state" defer></script>
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
     <script src="/static/js/workspace-context.js?v=20260826-auth-ready" defer></script>
     <!-- Shell 模块（navigation.js 第二轮拆分）：日志/轮询/通用 UI 反馈，
@@ -27,14 +27,14 @@
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/api.js?v=20260902-error-serialize" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20260828-device-catchup" defer></script>
-    <script src="/static/js/shell/workspace-devices.js?v=20260826-shell-split-2" defer></script>
+    <script src="/static/js/shell/workspace-devices.js?v=20260902-diagnostics-scope" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260812-click-dismiss" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
     <script src="/static/js/pages/test-suite-browser.js?v=20260827-user-lazy" defer></script>
-    <script src="/static/js/pages/firmware-burn.js?v=20260902-notify-dedup" defer></script>
+    <script src="/static/js/pages/firmware-burn.js?v=20260902-source-refresh-backoff" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20260810-modular-split" defer></script>
-    <script src="/static/js/pages/vpn-control.js?v=20260810-modular-split" defer></script>
+    <script src="/static/js/pages/vpn-control.js?v=20260902-vpn-per-worker" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260813-firmware-content-id" defer></script>
     <script src="/static/js/pages/test-control.js?v=20260827-usbip-vid-pids" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
@@ -44,7 +44,7 @@
     <script src="/static/js/pages/apk-analysis.js?v=20260828-apk-scroll-containers" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260826-auth-ready" defer></script>
     <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260827-apts-gts-suite" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20260902-adbproxy-state" defer crossorigin="anonymous"></script>
     <!-- xterm.js 延迟加载（仅终端页面需要）-->
     <script>
     // 动态加载 xterm.js（仅在访问终端页面时）
@@ -787,8 +787,8 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="本地设备：USB/IP 精确接入" data-guide-caption="选择 Windows 来源、Controller 或远端 Worker 目标及 BUSID；当前接入按端口显示，可单独断开且不会清理同来源其他设备。" onclick="openGuideImageLightbox(this)">
-                                        <img src="/static/images/guide/usbip-local-device.png" alt="USB/IP 接入标注：Windows 来源、目标 Worker、BUSID 多选、当前接入和服务端操作保护" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="本地设备：USB/IP 精确接入" data-guide-caption="选择 Windows/Ubuntu 来源、Controller 或远端 Worker 目标及 BUSID；当前接入按端口显示，可单独断开且不会清理同来源其他设备。" onclick="openGuideImageLightbox(this)">
+                                        <img src="/static/images/guide/usbip-local-device.png" alt="USB/IP 接入标注：Windows/Ubuntu 来源、目标 Worker、BUSID 多选、当前接入和服务端操作保护" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -2310,7 +2310,7 @@
                     正在读取接入状态...
                 </div>
                 <div id="usbip-attach-message" class="modal-info-text">
-                    可多选USB设备；同一设备同一时间只能接入一台主机。来源需 Windows usbipd + SSH，目标需 Linux USB/IP；网络中断可使分配进入待确认/待清理。
+                    可多选USB设备；同一设备同一时间只能接入一台主机。来源支持 Windows（usbipd-win）或 Ubuntu/Linux（用户态 usbipd）+ SSH，目标需 Linux USB/IP；网络中断可使分配进入待确认/待清理。
                 </div>
             </div>
             <div class="modal-buttons device-routing-modal-buttons">

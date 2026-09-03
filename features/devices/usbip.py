@@ -3,7 +3,7 @@ USB/IP - 核心业务逻辑
 
 特性：
 - USB/IP设备转发
-- Windows主机支持
+- Windows来源主机（usbipd-win）与Ubuntu/Linux来源主机（用户态usbipd）支持
 - 设备绑定/解绑
 """
 
@@ -20,6 +20,7 @@ from foundation.ssh_security import configure_strict_host_keys
 from .physical_identity import resolve_physical_device_identity
 from .ssh_credentials import find_device_host_password
 from .usb import (
+    ANDROID_USBIP_MARKERS,
     configured_usbip_vid_pids,
     parse_usbipd_android_busids,
     parse_usbipd_busid_statuses,
@@ -27,6 +28,13 @@ from .usb import (
 from .usbip_identity import (
     query_usbipd_busid_instance_ids,
     query_windows_usb_identities,
+)
+from .usbip_linux_source import (
+    ensure_ubuntu_usbip_server,
+    install_ubuntu_usbipd,
+    list_ubuntu_usb_devices,
+    source_os_label,
+    stop_ubuntu_usbip_server,
 )
 from .usbip_readiness import wait_for_adb_serial_ready
 from .usbip_transaction import (
@@ -118,6 +126,25 @@ class USBIPManager:
         self.active_connections: dict[str, Any] = {}  # {client_id: connection_info}
         self.device_sources: dict[str, dict[str, Any]] = {}  # {device_id: source_info}
 
+    @staticmethod
+    def _source_os_public(source_os: str) -> str:
+        """Map internal OS kind to the public source_os API value."""
+        return {"windows": "windows", "linux": "ubuntu"}.get(source_os, "")
+
+    def _detect_source_os(self, ssh) -> str:
+        """Classify a source host: 'windows', 'linux' or '' (unsupported)."""
+        if self._is_windows_host(ssh):
+            return "windows"
+        try:
+            stdout, _stderr, code = self.ssh_manager.execute_command(
+                ssh, "uname -s", timeout=8,
+            )
+        except Exception:
+            return ""
+        if code == 0 and "linux" in (stdout or "").strip().lower():
+            return "linux"
+        return ""
+
     def start_usbip(
         self,
         device_host: str,
@@ -159,76 +186,144 @@ class USBIPManager:
                     'instructions': '请先在登录页面输入SSH密码'
                 }
 
-            # 连接Windows主机
+            # 连接来源主机（Windows 或 Ubuntu/Linux）
             username, hostname = parse_host_address(device_host)
             ssh_hostname, ssh_port = split_host_port(hostname)
             usbip_attach_host = usbip_attach_host or config.get('usbip_attach_host') or ssh_hostname
-            win_ssh = self._create_windows_ssh(ssh_hostname, username, device_password, ssh_port)
+            source_ssh = self._create_windows_ssh(ssh_hostname, username, device_password, ssh_port)
 
-            if not win_ssh:
+            if not source_ssh:
                 return {'success': False, 'error': f'SSH连接失败到 {device_host}'}
 
             try:
-                # 检查系统类型
-                is_windows = self._is_windows_host(win_ssh)
-                if not is_windows:
-                    return {'success': False, 'error': 'USB/IP仅支持Windows主机'}
+                # 检查系统类型：Windows（usbipd-win）或 Ubuntu/Linux（用户态 usbipd）
+                source_os = self._detect_source_os(source_ssh)
+                if source_os not in ('windows', 'linux'):
+                    return {'success': False, 'error': 'USB/IP仅支持Windows或Ubuntu主机'}
 
-                # 检查usbipd是否已安装
-                installed, _version = self.check_usbipd_installed(win_ssh)
-                if not installed:
-                    return usbipd_not_installed_error()
+                if source_os == 'windows':
+                    installed, _version = self.check_usbipd_installed(source_ssh)
+                    if not installed:
+                        return usbipd_not_installed_error()
 
                 network_quality = probe_tcp_quality(usbip_attach_host, 3240)
-                if not network_quality["reachable"]:
-                    return usbip_error(
-                        "USBIP_TCP_UNREACHABLE",
-                        f"无法连接USB/IP来源 {usbip_attach_host}:3240",
-                        retryable=True,
-                        remediation="请检查usbipd服务、TCP 3240防火墙和网络路由。",
-                        network_quality=network_quality,
-                    )
+                source_txn: dict[str, Any] = {'kind': source_os}
 
-                adb_release = self._stop_windows_adb(win_ssh)
-                if not adb_release.get("success"):
-                    return usbip_error(
-                        "USBIP_ADB_RELEASE_FAILED",
-                        f"释放Windows ADB占用失败: {adb_release.get('error')}",
-                        remediation="请关闭占用设备的Android Studio、scrcpy或其他ADB任务后重试。",
-                    )
-
-                discovered_busids = self._find_android_devices(win_ssh, config)
-                requested = [str(item) for item in selected_busids or []]
-                busids = requested or discovered_busids
-                if requested:
-                    allowed_busids = set(discovered_busids)
-                    if allow_transport_only:
-                        # During an intentional Fastboot/Loader transition the
-                        # USB PID and Windows label may be new to this release.
-                        # A persisted assignment identifies the physical port;
-                        # still require that BUSID to be currently connected.
-                        source_output = self._usbipd_list_output(win_ssh)
-                        allowed_busids.update(
-                            parse_usbipd_busid_statuses(source_output)
+                if source_os == 'windows':
+                    if not network_quality["reachable"]:
+                        return usbip_error(
+                            "USBIP_TCP_UNREACHABLE",
+                            f"无法连接USB/IP来源 {usbip_attach_host}:3240",
+                            retryable=True,
+                            remediation="请检查usbipd服务、TCP 3240防火墙和网络路由。",
+                            network_quality=network_quality,
                         )
-                    if not set(requested).issubset(allowed_busids):
-                        return {'success': False, 'error': '选择的USB设备已不可用，请刷新后重试'}
-                if not busids:
-                    return {'success': False, 'error': '未找到Android设备'}
 
-                newly_bound: list[str] = []
-                bound = self._bind_devices(
-                    win_ssh, busids, track_newly_bound=newly_bound
-                )
+                    adb_release = self._stop_windows_adb(source_ssh)
+                    if not adb_release.get("success"):
+                        return usbip_error(
+                            "USBIP_ADB_RELEASE_FAILED",
+                            f"释放Windows ADB占用失败: {adb_release.get('error')}",
+                            remediation="请关闭占用设备的Android Studio、scrcpy或其他ADB任务后重试。",
+                        )
 
-                if not bound:
-                    return {'success': False, 'error': '设备绑定失败'}
+                    discovered_busids = self._find_android_devices(source_ssh, config)
+                    requested = [str(item) for item in selected_busids or []]
+                    busids = requested or discovered_busids
+                    if requested:
+                        allowed_busids = set(discovered_busids)
+                        if allow_transport_only:
+                            # During an intentional Fastboot/Loader transition the
+                            # USB PID and Windows label may be new to this release.
+                            # A persisted assignment identifies the physical port;
+                            # still require that BUSID to be currently connected.
+                            source_output = self._usbipd_list_output(source_ssh)
+                            allowed_busids.update(
+                                parse_usbipd_busid_statuses(source_output)
+                            )
+                        if not set(requested).issubset(allowed_busids):
+                            return {'success': False, 'error': '选择的USB设备已不可用，请刷新后重试'}
+                    if not busids:
+                        return {'success': False, 'error': '未找到Android设备'}
+
+                    newly_bound: list[str] = []
+                    bound = self._bind_devices(
+                        source_ssh, busids, track_newly_bound=newly_bound
+                    )
+                    source_txn['newly_bound'] = newly_bound
+
+                    if not bound:
+                        return {'success': False, 'error': '设备绑定失败'}
+                else:
+                    # Ubuntu/Linux 来源：用户态 usbipd 服务端按 serial/vid 导出。
+                    inventory = self._find_android_devices_linux(source_ssh, config)
+                    discovered_busids = [item['busid'] for item in inventory]
+                    requested = [str(item) for item in selected_busids or []]
+                    busids = requested or discovered_busids
+                    if requested:
+                        allowed_busids = set(discovered_busids)
+                        if allow_transport_only:
+                            # Loader/MaskROM 等协议态可能更换 VID:PID，允许
+                            # 当前主机上任意存在的 BUSID（含非 Android 过滤项）。
+                            allowed_busids.update(
+                                item['busid']
+                                for item in self._find_android_devices_linux(
+                                    source_ssh, config, include_all=True,
+                                )
+                            )
+                        if not set(requested).issubset(allowed_busids):
+                            return {'success': False, 'error': '选择的USB设备已不可用，请刷新后重试'}
+                    if not busids:
+                        return {'success': False, 'error': '未找到Android设备'}
+
+                    selected_inventory = [
+                        item for item in inventory if item['busid'] in set(busids)
+                    ]
+                    export_serials = [
+                        item['serial'] for item in selected_inventory
+                        if item.get('serial')
+                    ]
+                    export_vids = sorted({
+                        item['vid_pid'].split(':', 1)[0]
+                        for item in selected_inventory
+                        if item.get('vid_pid')
+                    })
+                    server = ensure_ubuntu_usbip_server(
+                        self.ssh_manager,
+                        source_ssh,
+                        serials=export_serials,
+                        vids=export_vids if not export_serials else (),
+                    )
+                    source_txn['started'] = bool(server.get('started'))
+                    if not server.get('success'):
+                        return usbip_error(
+                            "USBIP_SOURCE_SERVER_FAILED",
+                            f"Ubuntu来源USB/IP服务启动失败: {server.get('error')}",
+                            retryable=True,
+                            remediation=(
+                                "请检查来源主机usbipd部署、/dev/bus/usb 权限"
+                                "及是否有ADB进程占用设备。"
+                            ),
+                            detail=server.get('detail') or server.get('install_guide') or '',
+                        )
+
+                    # 服务端就绪后重新探测 TCP 3240。
+                    network_quality = probe_tcp_quality(usbip_attach_host, 3240)
+                    if not network_quality["reachable"]:
+                        self._rollback_source_side(source_ssh, source_txn)
+                        return usbip_error(
+                            "USBIP_TCP_UNREACHABLE",
+                            f"无法连接USB/IP来源 {usbip_attach_host}:3240",
+                            retryable=True,
+                            remediation="请检查usbipd服务、TCP 3240防火墙和网络路由。",
+                            network_quality=network_quality,
+                        )
 
                 # 连接Ubuntu并attach设备
                 ubuntu_ssh = self.ssh_manager.get_connection(config)
                 if not ubuntu_ssh:
-                    rollback_complete = self._rollback_windows_binds(
-                        win_ssh, newly_bound
+                    rollback_complete = self._rollback_source_side(
+                        source_ssh, source_txn
                     )
                     return usbip_error(
                         "USBIP_ATTACH_FAILED",
@@ -266,8 +361,8 @@ class USBIPManager:
                             busids,
                         )
                         self.ssh_manager.return_connection(ubuntu_ssh)
-                        source_rollback_complete = self._rollback_windows_binds(
-                            win_ssh, newly_bound
+                        source_rollback_complete = self._rollback_source_side(
+                            source_ssh, source_txn
                         )
                         return usbip_error(
                             "USBIP_ATTACH_FAILED",
@@ -295,6 +390,7 @@ class USBIPManager:
                     for device_id in device_list:
                         self.device_sources[device_id] = {
                             'source': device_host,
+                            'source_os': self._source_os_public(source_os),
                             'timestamp': time.time()
                         }
 
@@ -308,6 +404,8 @@ class USBIPManager:
                         'transport_connected': True,
                         'transport_state': 'attached',
                         'protocol_state': protocol_status.get('mode') or 'unknown',
+                        'source_os': self._source_os_public(source_os),
+                        'source_os_label': source_os_label(source_os),
                         'readiness': (
                             'test_ready' if protocol_status.get('mode') in {'adb', 'fastboot', 'recovery'}
                             else 'protocol_ready' if protocol_status.get('mode') not in {'unknown', 'offline', 'unauthorized'}
@@ -326,8 +424,8 @@ class USBIPManager:
                     )
                     ubuntu_ssh.close()
                     logger.error(f"Error in Ubuntu attach: {e}")
-                    source_rollback_complete = self._rollback_windows_binds(
-                        win_ssh, newly_bound
+                    source_rollback_complete = self._rollback_source_side(
+                        source_ssh, source_txn
                     )
                     return usbip_error(
                         "USBIP_ATTACH_FAILED",
@@ -339,10 +437,10 @@ class USBIPManager:
                     )
 
             except Exception as e:
-                logger.error(f"Error in Windows side: {e}")
+                logger.error(f"Error in source side: {e}")
                 return {'success': False, 'error': str(e)}
             finally:
-                win_ssh.close()
+                source_ssh.close()
 
         except Exception as e:
             logger.error(f"Error in start_usbip: {e}")
@@ -366,8 +464,18 @@ class USBIPManager:
         if not ssh:
             return {"success": False, "error": f"SSH连接失败到 {device_host}"}
         try:
-            if not self._is_windows_host(ssh):
-                return {"success": False, "error": "USB/IP仅支持Windows主机"}
+            source_os = self._detect_source_os(ssh)
+            if source_os not in ("windows", "linux"):
+                return {"success": False, "error": "USB/IP仅支持Windows或Ubuntu主机"}
+            if source_os == "linux":
+                devices = self._list_ubuntu_source_devices(ssh, device_host, config)
+                return {
+                    "success": True,
+                    "device_host": device_host,
+                    "source_os": self._source_os_public(source_os),
+                    "devices": devices,
+                }
+
             installed, _version = self.check_usbipd_installed(ssh)
             if not installed:
                 return usbipd_not_installed_error()
@@ -464,10 +572,38 @@ class USBIPManager:
             return {
                 "success": True,
                 "device_host": device_host,
+                "source_os": self._source_os_public(source_os),
                 "devices": devices,
             }
         finally:
             ssh.close()
+
+    def _list_ubuntu_source_devices(
+        self, ssh, device_host: str, config: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Build the source-device inventory for an Ubuntu/Linux source host."""
+        items = self._find_android_devices_linux(ssh, config)
+        devices: list[dict[str, Any]] = []
+        for item in items:
+            android_serial = item.get("serial", "")
+            physical = resolve_physical_device_identity(
+                source_host=device_host,
+                current_usb_busid=item["busid"],
+                logical_android_serial=android_serial,
+                usb_serial=android_serial,
+                location_path=item.get("location_path", ""),
+                vid_pid=item.get("vid_pid", ""),
+            )
+            devices.append({
+                "busid": item["busid"],
+                "serial": android_serial,
+                "logical_device_id": android_serial or item["busid"],
+                **physical.to_dict(),
+                "vid_pid": item.get("vid_pid", ""),
+                "current_busid": item["busid"],
+                "label": self._append_serial(item.get("label", ""), android_serial),
+            })
+        return devices
 
     def _query_windows_usb_serials(
         self,
@@ -564,13 +700,45 @@ class USBIPManager:
             return label
         return f"{label}  [{serial}]"
 
-    def bind_source_devices(
+    def probe_source_os(
         self,
         device_host: str,
-        busids: list[str],
         device_password: str | None = None,
     ) -> dict[str, Any]:
-        """Bind selected Windows USB devices for a remote Worker attach."""
+        """Detect the OS of a source host via SSH; used for dropdown labels."""
+        host = str(device_host or "").strip()
+        if not host:
+            return {"source_os": "", "error": "缺少设备主机地址"}
+        config = self.config_manager.load_config()
+        password = (
+            device_password
+            or self.config_manager.find_device_host_password(host, config)
+            or config.get("device_pswd", "")
+        )
+        if not password:
+            return {"source_os": "", "error": f"未找到 {host} 的SSH凭据"}
+        username, hostname = parse_host_address(host)
+        ssh_hostname, ssh_port = split_host_port(hostname)
+        ssh = self._create_windows_ssh(ssh_hostname, username, password, ssh_port)
+        if not ssh:
+            return {"source_os": "", "error": f"SSH连接失败到 {host}"}
+        try:
+            return {"source_os": self._detect_source_os(ssh)}
+        finally:
+            ssh.close()
+
+    def ensure_source_export_ready(
+        self,
+        device_host: str,
+        busids: list[str] | None = None,
+        device_password: str | None = None,
+    ) -> dict[str, Any]:
+        """Start the on-demand usbipd server for Ubuntu sources.
+
+        Windows 来源的 usbipd-win 服务常驻，本方法为 no-op；Ubuntu 来源
+        的用户态 usbipd 进程按需启动，用于 attach 前的 TCP 3240 预检
+        补偿等场景。
+        """
         config = self.config_manager.load_config()
         password = (
             device_password
@@ -585,10 +753,58 @@ class USBIPManager:
         if not ssh:
             return {"success": False, "error": f"SSH连接失败到 {device_host}"}
         try:
-            if not self._is_windows_host(ssh):
-                return {"success": False, "error": "USB/IP仅支持Windows主机"}
-            if not self.check_usbipd_installed(ssh)[0]:
-                return {"success": False, "error": "usbipd未安装"}
+            if self._detect_source_os(ssh) != "linux":
+                return {"success": True, "started": False}
+            inventory = self._find_android_devices_linux(ssh, config)
+            selected_busids = {str(item or "") for item in busids or []}
+            selected = [
+                item for item in inventory
+                if not selected_busids or item["busid"] in selected_busids
+            ]
+            server = ensure_ubuntu_usbip_server(
+                self.ssh_manager,
+                ssh,
+                serials=[
+                    item["serial"] for item in selected if item.get("serial")
+                ],
+                vids=sorted({
+                    item["vid_pid"].split(":", 1)[0]
+                    for item in selected if item.get("vid_pid")
+                }),
+            )
+            return {
+                "success": bool(server.get("success")),
+                "started": bool(server.get("started")),
+                "detail": server.get("error") or server.get("detail") or "",
+                "install_guide": server.get("install_guide") or "",
+            }
+        finally:
+            ssh.close()
+
+    def bind_source_devices(
+        self,
+        device_host: str,
+        busids: list[str],
+        device_password: str | None = None,
+    ) -> dict[str, Any]:
+        """Bind selected source USB devices for a remote Worker attach."""
+        config = self.config_manager.load_config()
+        password = (
+            device_password
+            or self.config_manager.find_device_host_password(device_host, config)
+            or config.get("device_pswd", "")
+        )
+        if not password:
+            return {"success": False, "error": f"未找到 {device_host} 的SSH凭据"}
+        username, hostname = parse_host_address(device_host)
+        ssh_hostname, ssh_port = split_host_port(hostname)
+        ssh = self._create_windows_ssh(ssh_hostname, username, password, ssh_port)
+        if not ssh:
+            return {"success": False, "error": f"SSH连接失败到 {device_host}"}
+        try:
+            source_os = self._detect_source_os(ssh)
+            if source_os not in ("windows", "linux"):
+                return {"success": False, "error": "USB/IP仅支持Windows或Ubuntu主机"}
             selected = list(dict.fromkeys(
                 str(item or "").strip() for item in busids or []
             ))
@@ -597,6 +813,52 @@ class USBIPManager:
                 for item in selected
             ):
                 return {"success": False, "error": "无效的USB/IP BUSID"}
+            if source_os == "linux":
+                inventory = self._find_android_devices_linux(ssh, config)
+                unavailable = [
+                    item for item in selected
+                    if item not in {entry["busid"] for entry in inventory}
+                ]
+                if unavailable:
+                    return {
+                        "success": False,
+                        "error": (
+                            "选择的USB设备已不可用，请刷新后重试: "
+                            + ", ".join(unavailable)
+                        ),
+                    }
+                selected_inventory = [
+                    item for item in inventory if item["busid"] in set(selected)
+                ]
+                server = ensure_ubuntu_usbip_server(
+                    self.ssh_manager,
+                    ssh,
+                    serials=[
+                        item["serial"] for item in selected_inventory
+                        if item.get("serial")
+                    ],
+                    vids=sorted({
+                        item["vid_pid"].split(":", 1)[0]
+                        for item in selected_inventory
+                        if item.get("vid_pid")
+                    }),
+                )
+                if not server.get("success"):
+                    return {
+                        "success": False,
+                        "error": f"Ubuntu来源USB/IP服务启动失败: {server.get('error')}",
+                        "install_guide": server.get("install_guide"),
+                    }
+                return {
+                    "success": True,
+                    "device_host": device_host,
+                    "source_host": config.get("usbip_attach_host") or ssh_hostname,
+                    "source_os": self._source_os_public(source_os),
+                    "busids": selected,
+                }
+
+            if not self.check_usbipd_installed(ssh)[0]:
+                return {"success": False, "error": "usbipd未安装"}
             available = set(self._find_android_devices(ssh, config))
             unavailable = [item for item in selected if item not in available]
             if unavailable:
@@ -659,8 +921,18 @@ class USBIPManager:
             return {"success": False, "error": f"SSH连接失败到 {device_host}"}
 
         try:
-            if not self._is_windows_host(ssh):
-                return {"success": False, "error": "USB/IP仅支持Windows主机"}
+            source_os = self._detect_source_os(ssh)
+            if source_os not in ("windows", "linux"):
+                return {"success": False, "error": "USB/IP仅支持Windows或Ubuntu主机"}
+            if source_os == "linux":
+                # Ubuntu 来源无每设备 usbipd 会话；断开由接入主机侧 vhci
+                # detach 完成，来源侧只在整源断开时停止 usbipd 进程。
+                return {
+                    "success": True,
+                    "source_os": self._source_os_public(source_os),
+                    "detached_busids": [],
+                    "errors": {},
+                }
             if not self.check_usbipd_installed(ssh)[0]:
                 return {"success": False, "error": "usbipd未安装"}
 
@@ -752,6 +1024,21 @@ class USBIPManager:
             return 'microsoft' in stdout.lower() or 'windows' in stdout.lower()
         except Exception:
             return False
+
+    def _find_android_devices_linux(
+        self, ssh, config: dict[str, Any], include_all: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Enumerate USB devices on an Ubuntu/Linux source via udev."""
+        try:
+            return list_ubuntu_usb_devices(
+                self.ssh_manager,
+                ssh,
+                vid_pids=() if include_all else configured_usbip_vid_pids(config),
+                markers=() if include_all else ANDROID_USBIP_MARKERS,
+            )
+        except Exception as e:
+            logger.error(f"Error finding Android devices on Ubuntu source: {e}")
+            return []
 
     def _find_android_devices(self, ssh, config: dict[str, Any]) -> list[str]:
         try:
@@ -868,6 +1155,28 @@ class USBIPManager:
             win_ssh,
             newly_bound,
         )
+
+    def _rollback_source_side(self, source_ssh, source_txn: dict[str, Any]) -> bool:
+        """Undo source-side export state created by the current attempt.
+
+        Windows 只回滚本次新 bind 的 busid；Ubuntu 仅在本次全新启动了
+        usbipd 进程时才停止它，复用/重启自既有实例时不破坏原有导出。
+        """
+        if not source_txn:
+            return True
+        if source_txn.get('kind') == 'windows':
+            return self._rollback_windows_binds(
+                source_ssh, list(source_txn.get('newly_bound') or []),
+            )
+        if source_txn.get('kind') == 'linux' and source_txn.get('started'):
+            result = stop_ubuntu_usbip_server(self.ssh_manager, source_ssh)
+            if not result.get('success'):
+                logger.warning(
+                    "[USB/IP] Failed to stop Ubuntu usbipd after rollback: %s",
+                    result.get('detail'),
+                )
+            return bool(result.get('success'))
+        return True
 
     def _stop_windows_adb(self, ssh) -> dict[str, Any]:
         """Gracefully stop Windows ADB and force it only when still running."""
@@ -1265,7 +1574,13 @@ class USBIPManager:
         return check_usbipd_installed(self.ssh_manager, ssh)
 
     def install_usbipd(self, ssh, config: dict[str, Any]) -> dict[str, Any]:
-        """在 Windows 主机自动安装 usbipd。"""
+        """Install usbipd on the source host (winget on Windows, upload on Ubuntu)."""
+        if self._detect_source_os(ssh) == "linux":
+            return install_ubuntu_usbipd(
+                self.ssh_manager,
+                ssh,
+                local_binary=config.get("usbip_linux_server_bin"),
+            )
         return install_usbipd(self.ssh_manager, ssh, config)
 
 
