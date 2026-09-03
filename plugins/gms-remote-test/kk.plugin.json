@@ -1,0 +1,31 @@
+{
+  "name": "gms-remote-test",
+  "version": "0.1.0",
+  "description": "Operate the GMS Remote Test platform through the bundled gms-rt CLI: device inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware burn, USB/IP, VPN. Self-contained; requires GMS_REMOTE_TEST_SERVER (and credentials via stdin).",
+  "keywords": ["gms", "cts", "gts", "vts", "android-test", "cli", "mcp"],
+  "mcpServers": {
+    "gms": {
+      "transport": "stdio",
+      "command": "python3",
+      "args": ["./scripts/mcp_server.py"],
+      "cwd": "./"
+    }
+  },
+  "interface": {
+    "displayName": "GMS Remote Test",
+    "shortDescription": "Drive the GMS Remote Test Controller: devices, tests, jobs, reports, firmware",
+    "developerName": "GMS Remote Test"
+  },
+  "requiresEnv": [
+    {
+      "name": "GMS_REMOTE_TEST_SERVER",
+      "description": "Base URL of the GMS Remote Test Controller, e.g. https://CONTROLLER:5001",
+      "required": true
+    },
+    {
+      "name": "GMS_CURL_CA_CERT",
+      "description": "Path to a trusted CA bundle for the Controller's TLS certificate; set GMS_CURL_INSECURE=1 only for controlled self-signed deployments",
+      "required": false
+    }
+  ]
+}
