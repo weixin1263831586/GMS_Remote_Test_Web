@@ -1,5 +1,4 @@
 from __future__ import annotations
-from foundation.command_result import CommandResult
 
 import json
 
@@ -9,6 +8,7 @@ from features.devices.usbip_identity import (
     query_usbipd_busid_instance_ids,
     query_windows_usb_identities,
 )
+from foundation.command_result import CommandResult
 
 
 def test_android_serial_keeps_physical_id_stable_when_busid_changes():

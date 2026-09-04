@@ -113,7 +113,7 @@ class CompactEnvelopeTests(unittest.TestCase):
     def test_error_hint_covers_each_documented_exit_code(self):
         for code in (2, 3, 4, 5, 6, 7):
             text = mcp_server._compact_envelope(
-                '{"ok":false,"exit_code":%d,"data":{"error":"x"}}' % code
+                f'{{"ok":false,"exit_code":{code},"data":{{"error":"x"}}}}'
             )
             payload = json.loads(text)
             self.assertIn("hint", payload, f"exit_code {code} lacks a hint")
@@ -289,7 +289,7 @@ class CatalogCacheTests(unittest.TestCase):
     def test_run_tool_allows_agent_safe_command(self):
         self._write_catalog_stub()
         mcp_server._load_catalog(force=True)
-        text, is_error = mcp_server.run_tool({"command": "gms-rt-devices-list"})
+        _text, is_error = mcp_server.run_tool({"command": "gms-rt-devices-list"})
         self.assertFalse(is_error)
 
     def test_run_tool_suggests_close_commands_for_unknown(self):
@@ -319,7 +319,9 @@ class CatalogCacheTests(unittest.TestCase):
         )
         text, _is_error = mcp_server.commands_tool({})
         line = next(
-            l for l in text.splitlines() if l.startswith("gms-rt-devices-list")
+            line_text
+            for line_text in text.splitlines()
+            if line_text.startswith("gms-rt-devices-list")
         )
         self.assertEqual(line, "gms-rt-devices-list | read_only | -")
 

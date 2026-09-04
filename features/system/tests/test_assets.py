@@ -4,13 +4,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-
-from foundation.command_result import CommandResult
 from unittest.mock import patch
 
 from features.system import assets
 from features.system.favicon_security import FaviconResolver
 from features.system.icon_fetcher import IconFetcher
+from foundation.command_result import CommandResult
 from foundation.outbound import ResolvedOutboundTarget
 
 

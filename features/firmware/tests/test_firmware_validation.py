@@ -1,5 +1,4 @@
 import subprocess
-from foundation.command_result import CommandResult
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -8,6 +7,7 @@ from features.firmware.firmware_validation import (
     validate_local_update_image,
     validate_remote_update_image,
 )
+from foundation.command_result import CommandResult
 
 
 def test_firmware_device_ids_are_deduplicated_and_shell_safe():

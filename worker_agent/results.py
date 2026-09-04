@@ -100,9 +100,10 @@ def upload_tradefed_results(
     result_dir = find_tradefed_result_dir(stdout)
     if result_dir is None:
         # row 可能是 sqlite3.Row（无 .get）；用下标访问并容忍缺列。
+        # sqlite3.Row 的 __contains__ 匹配列值而非列名，必须用 .keys()。
         logger.info(
             "no tradefed result directory found in stdout for job %s",
-            row["job_id"] if "job_id" in row.keys() else "<unknown>",
+            row["job_id"] if "job_id" in row.keys() else "<unknown>",  # noqa: SIM118
         )
         return
     if not any(

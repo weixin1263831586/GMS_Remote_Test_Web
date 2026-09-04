@@ -47,7 +47,7 @@ LINUX_USBIPD_BIND_PATTERN = "usbipd bind"
 LINUX_USBIPD_PID_FILE = "$HOME/.local/state/gms-usbipd.pid"
 
 LINUX_USBIPD_INSTALL_GUIDE = (
-    "Ubuntu来源主机需要用户态usbipd服务端(v0.9.2+)。可由平台自动上传"
+    "Ubuntu来源主机需要用户态usbipd服务端(v0.9.5+)。可由平台自动上传"
     "（仓库 tools/usbipd），或手动执行：\n"
     "scp tools/usbipd USER@HOST:/tmp/usbipd\n"
     "ssh USER@HOST \"sudo install -m 0755 /tmp/usbipd /usr/local/bin/usbipd\"\n"

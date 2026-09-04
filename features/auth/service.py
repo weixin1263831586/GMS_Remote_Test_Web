@@ -200,7 +200,9 @@ class AuthService(AuthRateLimitMixin):
         if role not in {"admin", "device_operator", "user"}:
             raise ValueError("角色必须是 admin、device_operator 或 user")
         now = _to_iso(_utcnow())
-        user_id = secrets.token_urlsafe(16)
+        # 账号内部 id 直接使用用户名本身：用户管理页把它反解为
+        # username@ip 展示（不再出现随机 token 形式的"陌生用户"行）。
+        user_id = username
         with self._lock, self._connect() as conn:
             try:
                 conn.execute(
@@ -230,7 +232,8 @@ class AuthService(AuthRateLimitMixin):
         self._validate_password(password)
         cleaned_display_name = display_name.strip()
         now = _to_iso(_utcnow())
-        user_id = secrets.token_urlsafe(16)
+        # 与 create_user 一致：初始管理员的内部 id 也使用用户名本身。
+        user_id = username
         with self._lock, self._connect() as conn:
             # Serialize the emptiness check with the insert across processes.
             conn.execute('BEGIN IMMEDIATE')

@@ -8,8 +8,8 @@ from features.system.vnc import (
     novnc_url,
     vnc_password_temp_path,
 )
-from foundation.processes import command_reports_running
 from foundation.command_result import CommandResult
+from foundation.processes import command_reports_running
 
 
 class VNCManagerTests(unittest.TestCase):

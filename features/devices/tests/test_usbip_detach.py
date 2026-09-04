@@ -10,8 +10,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from foundation.command_result import CommandResult
 from features.devices import usbip
+from foundation.command_result import CommandResult
 
 
 def _fake_ssh_manager(commands: dict[str, tuple[str, str, int]]):
