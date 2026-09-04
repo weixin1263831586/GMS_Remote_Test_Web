@@ -31,6 +31,7 @@ from .navigation_preferences import (
     load_navigation_preferences,
     save_navigation_preferences,
 )
+from foundation.static_routes import apply_static_routes
 
 
 config_manager = runtime.config_manager
@@ -469,6 +470,112 @@ async def delete_client_ssh_credential(
     if config_manager.save_client_ssh_credentials(remaining):
         return success_response(message="凭据已删除")
     return error_response("删除凭据失败", status_code=500)
+
+
+# ==================== Static Routes ====================
+
+def _load_static_routes_config() -> dict:
+    """读取合并后的 static_routes 配置（config.json 默认值 + 运行时覆盖）。"""
+    config = config_manager.load_config()
+    routes_config = config.get('static_routes')
+    if not isinstance(routes_config, dict):
+        routes_config = {}
+    routes = routes_config.get('routes')
+    if not isinstance(routes, list):
+        routes = []
+    return {
+        'enabled': bool(routes_config.get('enabled', False)),
+        'routes': [entry for entry in routes if isinstance(entry, dict)],
+    }
+
+
+def _public_route(entry: dict) -> dict:
+    return {
+        'destination': str(entry.get('destination') or '').strip(),
+        'gateway': str(entry.get('gateway') or '').strip(),
+    }
+
+
+def _validate_static_routes_payload(routes: Any, enabled: Any) -> tuple[list[dict], bool, str | None]:
+    """校验前端提交的路由列表；返回 (规范化列表, enabled, 错误信息)。"""
+    if not isinstance(routes, list):
+        return [], False, 'routes 必须是数组'
+    normalized = []
+    seen = set()
+    for entry in routes:
+        if not isinstance(entry, dict):
+            return [], False, '路由条目格式错误'
+        route = _public_route(entry)
+        try:
+            import ipaddress
+
+            ipaddress.ip_network(route['destination'], strict=False)
+        except ValueError:
+            return [], False, f"无效的目标网段: {route['destination'] or '(空)'}"
+        try:
+            import ipaddress
+
+            ipaddress.ip_address(route['gateway'])
+        except ValueError:
+            return [], False, f"无效的网关地址: {route['gateway'] or '(空)'}"
+        key = (route['destination'], route['gateway'])
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(route)
+    return normalized, bool(enabled), None
+
+
+@router.get("/api/config/static-routes")
+async def get_static_routes_config(
+    _admin: CurrentUser = Depends(require_elevated_admin),
+):
+    """读取静态路由配置（系统配置弹框使用）。"""
+    config = _load_static_routes_config()
+    return success_response(config)
+
+
+@router.post("/api/config/static-routes")
+async def update_static_routes_config(
+    req: dict[str, Any],
+    _admin: CurrentUser = Depends(require_elevated_admin),
+):
+    """保存静态路由配置到运行时配置，并立即应用到本机路由表。
+
+    保存即生效：成功添加的路由立即进入内核路由表；单条失败不阻塞
+    其他路由，失败详情在返回的 results 中逐条给出。
+    """
+    enabled = req.get('enabled')
+    routes = req.get('routes')
+    if enabled is None and routes is None:
+        return error_response("缺少可保存的路由配置", status_code=400)
+
+    current = _load_static_routes_config()
+    next_enabled = bool(enabled) if enabled is not None else current['enabled']
+    if routes is None:
+        next_routes = current['routes']
+    else:
+        routes, next_enabled, error = _validate_static_routes_payload(routes, next_enabled)
+        if error:
+            return error_response(error, status_code=400)
+
+    payload = {'enabled': next_enabled, 'routes': routes}
+    if not _update_runtime_sections({'static_routes': payload}):
+        return error_response("保存路由配置失败", status_code=500)
+    config_manager.invalidate_cache()
+
+    applied = apply_static_routes({'static_routes': payload})
+    failed = [item for item in applied if item.get('status') == 'failed']
+    return success_response({
+        'static_routes': payload,
+        'applied': applied,
+        'success': not failed,
+        'error': (
+            '部分路由添加失败（需要 root/sudoers 免密权限）: '
+            + '; '.join(f"{item['destination']}: {item.get('error')}" for item in failed)
+            if failed else ''
+        ),
+    })
 
 
 @router.get("/api/sidebar-order")

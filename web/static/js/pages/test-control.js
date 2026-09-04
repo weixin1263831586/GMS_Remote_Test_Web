@@ -332,12 +332,42 @@ async function showConfig() {
             </div>
             <small style="color:var(--text-secondary);margin-top:4px;">填入已有主机的地址+新密码可覆盖更新；密码不会回显明文。</small>
         </div>
+
+        <!-- 静态路由管理（增删独立于上方静态配置，保存后立即应用到本机路由表） -->
+        <div class="modal-form-row" style="flex-direction:column;align-items:stretch;margin-top:14px;">
+            <label style="margin-bottom:6px;">静态路由（启动时与保存后自动应用）:</label>
+            <div class="modal-form-row" style="gap:8px;margin-bottom:6px;">
+                <label style="margin:0;">
+                    <input type="checkbox" id="config-static-routes-enabled" style="vertical-align:middle;" />
+                    启用静态路由
+                </label>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="background: var(--darker-bg);">
+                        <th style="padding:5px 6px;text-align:left;">目标网段</th>
+                        <th style="padding:5px 6px;text-align:left;">网关</th>
+                        <th style="padding:5px 6px;text-align:center;">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="static-routes-table-body">
+                    <tr><td colspan="3" style="padding:20px;text-align:center;">加载中...</td></tr>
+                </tbody>
+            </table>
+            <div class="modal-form-row" style="margin-top:8px;gap:6px;">
+                <input type="text" id="static-route-destination" placeholder="目标网段，例如 10.10.10.0/24 或 10.10.10.29/32" autocomplete="off" style="flex:2;" />
+                <input type="text" id="static-route-gateway" placeholder="网关，例如 172.16.14.1" autocomplete="off" style="flex:1.5;" />
+                <button class="btn-xxs btn-primary" onclick="addStaticRouteRow()">添加</button>
+            </div>
+            <small style="color:var(--text-secondary);margin-top:4px;">程序启动和每次保存时自动应用（幂等）。修改路由表需要 root；普通用户运行时需配置 sudoers 免密 ip route。</small>
+        </div>
     `;
 
     ModalManager.open('config-modal');
     const footer = document.getElementById('config-modal-footer');
     if (footer) footer.style.display = '';
     loadClientCredentials();
+    loadStaticRoutes();
 }
 
 async function showGmsAssistantConfig() {
@@ -478,6 +508,109 @@ async function deleteClientCredential(deviceHost) {
     }
 }
 
+// ==================== 静态路由管理 ====================
+// 配置保存在运行时配置（configs/config_runtime.json），保存后立即应用到本机路由表。
+
+function _readStaticRouteRows() {
+    const tbody = document.getElementById('static-routes-table-body');
+    if (!tbody) return [];
+    return Array.from(tbody.querySelectorAll('tr[data-destination]')).map(row => ({
+        destination: row.dataset.destination || '',
+        gateway: row.dataset.gateway || '',
+    }));
+}
+
+async function loadStaticRoutes() {
+    const tbody = document.getElementById('static-routes-table-body');
+    if (!tbody) return;
+    const enabledCheckbox = document.getElementById('config-static-routes-enabled');
+    let data = {};
+    try {
+        const result = await apiCall('/api/config/static-routes', 'GET');
+        data = (result && (result.data || result)) || {};
+    } catch (error) {
+        renderStaticRoutesMessage(`加载失败: ${error.message}`, 'var(--error-color)');
+        return;
+    }
+    if (enabledCheckbox) enabledCheckbox.checked = !!data.enabled;
+    renderStaticRoutesTable(Array.isArray(data.routes) ? data.routes : []);
+}
+
+function renderStaticRoutesMessage(message, color) {
+    const tbody = document.getElementById('static-routes-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="3" style="padding:20px;text-align:center;${color ? `color:${color};` : ''}">${escapeHtml(message)}</td></tr>`;
+}
+
+function renderStaticRoutesTable(routes) {
+    const tbody = document.getElementById('static-routes-table-body');
+    if (!tbody) return;
+    if (!routes.length) {
+        renderStaticRoutesMessage('暂无静态路由。在下方添加目标网段和网关。', 'var(--text-secondary)');
+        return;
+    }
+    tbody.innerHTML = routes.map(route => `
+        <tr data-destination="${escapeHtml(route.destination)}" data-gateway="${escapeHtml(route.gateway)}" style="border-bottom: 1px solid var(--border-color);">
+            <td style="padding:5px 6px;font-family:monospace;">${escapeHtml(route.destination)}</td>
+            <td style="padding:5px 6px;font-family:monospace;">${escapeHtml(route.gateway)}</td>
+            <td style="padding:5px 6px;text-align:center;">
+                <button class="btn-xxs" onclick="deleteStaticRouteRow(this)">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function addStaticRouteRow() {
+    const destInput = document.getElementById('static-route-destination');
+    const gwInput = document.getElementById('static-route-gateway');
+    const destination = (destInput?.value || '').trim();
+    const gateway = (gwInput?.value || '').trim();
+
+    if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(destination)) {
+        showToast('目标网段格式应为 a.b.c.d/掩码，例如 10.10.10.0/24', 'warning');
+        return;
+    }
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(gateway)) {
+        showToast('网关格式应为 IP 地址，例如 172.16.14.1', 'warning');
+        return;
+    }
+
+    const routes = _readStaticRouteRows();
+    if (routes.some(r => r.destination === destination && r.gateway === gateway)) {
+        showToast('该路由已存在', 'warning');
+        return;
+    }
+    routes.push({destination, gateway});
+    renderStaticRoutesTable(routes);
+    if (destInput) destInput.value = '';
+    if (gwInput) gwInput.value = '';
+}
+
+function deleteStaticRouteRow(button) {
+    const row = button?.closest('tr[data-destination]');
+    if (row) row.remove();
+}
+
+async function saveStaticRoutes() {
+    const enabledCheckbox = document.getElementById('config-static-routes-enabled');
+    const payload = {
+        enabled: !!(enabledCheckbox && enabledCheckbox.checked),
+        routes: _readStaticRouteRows(),
+    };
+    try {
+        const result = await apiCall('/api/config/static-routes', 'POST', payload);
+        const data = (result && (result.data || result)) || {};
+        if (data.success) {
+            showToast('静态路由已保存并应用', 'success');
+        } else {
+            showToast(data.error || '路由已保存，但应用失败（需要 root/sudoers 免密权限）', 'warning');
+        }
+        renderStaticRoutesTable(payload.routes);
+    } catch (error) {
+        showToast('保存静态路由失败: ' + error.message, 'error');
+    }
+}
+
 function closeModal(modalId) {
     const id = modalId || 'config-modal';
     const modal = document.getElementById(id);
@@ -541,6 +674,13 @@ async function saveConfig() {
         await apiCall('/api/config/update', 'POST', config);
         addLogEntry('配置已保存', 'success');
         showToast('配置保存成功', 'success');
+
+        // 静态路由独立保存（保存即应用到本机路由表），失败不阻塞主配置。
+        try {
+            await saveStaticRoutes();
+        } catch (routeError) {
+            addLogEntry('静态路由保存失败: ' + routeError.message, 'error');
+        }
 
         // Reload page to update config values
         setTimeout(() => location.reload(), 500);

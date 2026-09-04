@@ -31,6 +31,8 @@ from .android_inspection import _aapt2_path, prepare_device_export
 from .client import ControllerClient
 from .config import WorkerConfig
 from .inventory import (
+    browse_directory,
+    copy_image_into,
     execute_device_action,
     execute_suite_action,
     execute_usbip_action,
@@ -351,6 +353,23 @@ class WorkerAgent:
                 threading.Thread(target=self.run_suite_export,
                                  args=(command,), name=f"SuiteExport-{command['id']}", daemon=True).start()
                 return
+            elif kind == "file_transfer":
+                self.runtime.save_command(command["id"], "running", {})
+                self._ack_command(command["id"], "running", {})
+                threading.Thread(target=self.run_file_transfer,
+                                 args=(command,), name=f"FileTransfer-{command['id']}", daemon=True).start()
+                return
+            elif kind == "file_browse":
+                payload = command.get("payload") or {}
+                # 默认打开套件根目录（如 ~/GMS-Suite），未配置则回落主目录。
+                default_dir = next(
+                    (root for root in self.config.suite_roots
+                     if Path(root).expanduser().exists()),
+                    None,
+                )
+                result = browse_directory(
+                    str(payload.get("path") or ""), default_path=default_dir
+                )
             elif kind == "report_import":
                 self.runtime.save_command(command["id"], "running", {})
                 self._ack_command(command["id"], "running", {})
@@ -543,6 +562,21 @@ class WorkerAgent:
             error = "" if status in {"completed", "cancelled"} else f"process exited with {result['exit_code']}"
             if row:
                 work_dir = Path(row["work_dir"])
+                # P0-1：识别 tradefed "No matched tradefed modules"，把
+                # "process exited with N" 的误导性错误替换为结构化根因。
+                stdout_log = work_dir / "stdout.log"
+                if status == "failed" and stdout_log.is_file():
+                    try:
+                        tail = stdout_log.read_text(
+                            encoding="utf-8", errors="replace")[-256 * 1024:]
+                    except OSError:
+                        tail = ""
+                    from .module_validation import detect_no_matched_modules
+
+                    no_match_error = detect_no_matched_modules(tail)
+                    if no_match_error:
+                        error = no_match_error
+                        result = {**result, "error": no_match_error}
                 for log_name in ("stdout.log", "stderr.log"):
                     log_path = work_dir / log_name
                     if log_path.exists():
@@ -721,6 +755,27 @@ class WorkerAgent:
             if temporary and path is not None:
                 path.unlink(missing_ok=True)
 
+    def run_file_transfer(self, command: dict):
+        """Upload one Worker-local file to a Controller transfer (cross-Worker GSI pull)."""
+        try:
+            payload = command.get("payload", {})
+            source_path = Path(str(payload.get("source_path") or "")).expanduser()
+            transfer_id = str(payload.get("transfer_id") or "")
+            if not source_path.is_file():
+                raise ValueError("source file not found on Worker")
+            self.client.upload_transfer(transfer_id, source_path)
+            summary = {"transfer_id": transfer_id, "filename": source_path.name,
+                       "size_bytes": source_path.stat().st_size}
+            self.runtime.save_command(command["id"], "completed", summary)
+            self._retry(lambda: self._ack_command(command["id"], "completed", summary))
+        except Exception as exc:
+            logger.exception("file transfer %s failed", command.get("id"))
+            self.runtime.save_command(command["id"], "failed", error=str(exc))
+            try:
+                self._ack_command(command["id"], "failed", error=str(exc))
+            except Exception:
+                logger.exception("failed to acknowledge file transfer failure")
+
     def run_report_import(self, command: dict):
         directory = None
         try:
@@ -800,11 +855,28 @@ class WorkerAgent:
             directory.mkdir(parents=True, exist_ok=False)
             import hashlib
             from urllib.parse import quote, urlencode
-            specs = payload.get("files") or [{"filename": payload["filename"],
-                "size_bytes": payload["size_bytes"], "sha256": payload["sha256"], "kind": "firmware"}]
+            specs = list(payload.get("files") or [])
+            if not specs and "filename" in payload:
+                specs = [{"filename": payload["filename"],
+                          "size_bytes": payload["size_bytes"], "sha256": payload["sha256"],
+                          "kind": "firmware"}]
+            # local_sources: 镜像已在本 Worker 磁盘上（如集群模式从 Worker 目录
+            # 选择 GSI），拷贝进烧写 staging 并校验后直接使用，无需回传 Controller。
+            for source in payload.get("local_sources") or []:
+                kind = str(source.get("kind") or "")
+                if kind not in {"system", "vendor"}:
+                    raise ValueError("invalid local GSI source kind")
+                target = directory / f"{kind}.img"
+                max_bytes = int(os.getenv(
+                    "GMS_WORKER_GSI_STAGE_MAX_BYTES", str(20 * 1024 ** 3)))
+                staged = copy_image_into(str(source.get("path") or ""), target, max_bytes)
+                specs.append({"kind": kind, "filename": target.name, "local": True, **staged})
             downloaded = {}
             for spec in specs:
                 target = directory / Path(spec["filename"]).name
+                if spec.get("local"):
+                    downloaded[spec["kind"]] = target
+                    continue
                 endpoint = (f"/api/cluster/workers/{quote(self.config.worker_id)}/firmware/"
                             f"{quote(payload['stage_id'])}?{urlencode({'filename': spec['filename']})}")
                 self.client.download(endpoint, target)

@@ -27,10 +27,10 @@
   },
   "external_services": {
     "crm_icon_url": "str",
+    "gms_assistant_api_key": "str",
     "gms_assistant_url": "str",
     "grafana_url": "str",
-    "router_icon_url": "str",
-    "gms_assistant_api_key": "str"
+    "router_icon_url": "str"
   },
   "firmware_shares": {
     "default_host": "str",
@@ -170,6 +170,10 @@
   "sidebar_visible_pages": [
     "str"
   ],
+  "static_routes": {
+    "enabled": "bool",
+    "routes": []
+  },
   "suites_path": "str",
   "ubuntu_host": "str",
   "ubuntu_pswd": "str",

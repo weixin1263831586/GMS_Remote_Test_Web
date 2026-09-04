@@ -457,6 +457,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/files/browse"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/cluster/firmware/stage"
@@ -466,6 +472,18 @@
       "POST"
     ],
     "path": "/api/cluster/gsi/stage"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/gsi/stage-from-source"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/gsi/stage-from-transfer"
   },
   {
     "methods": [
@@ -811,6 +829,18 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/vpn-connect"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/vpn-connections"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/cluster/workers/{worker_id}/vpn-status"
@@ -982,6 +1012,18 @@
       "GET"
     ],
     "path": "/api/config/redmine"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/config/static-routes"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/config/static-routes"
   },
   {
     "methods": [
@@ -2256,6 +2298,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/usbip/assignments"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/usbip/connect"
@@ -2277,6 +2325,12 @@
       "GET"
     ],
     "path": "/api/usbip/source-devices"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/usbip/source-os"
   },
   {
     "methods": [

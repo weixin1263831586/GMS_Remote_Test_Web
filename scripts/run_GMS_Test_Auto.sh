@@ -441,6 +441,25 @@ copy_to_remote_server() {
 }
 
 ## 主函数
+# P2-5 前置校验：模块名在 testcases/ 下不存在时立即失败（精确/大小写
+# 不敏感），附相近候选；避免走完 tradefed 会话建立→清理流程后才报
+# "未找到 RESULT DIRECTORY"。
+validate_module() {
+    [[ -z "$Test_Module" || "$MODE" == "retry" ]] && return 0
+    local testcases_dir
+    testcases_dir="$(cd "$SUITE_PATH/.." && pwd)/testcases"
+    [[ -d "$testcases_dir" ]] && return 0
+    if [[ -d "$testcases_dir/$Test_Module" ]] || [[ -f "$testcases_dir/$Test_Module.config" ]]; then
+        return 0
+    fi
+    local match
+    match=$(ls "$testcases_dir" 2>/dev/null | grep -iF "$Test_Module" | head -5)
+    if [[ -n "$match" ]]; then
+        die "module not found in suite: $Test_Module. 相近候选模块: $(echo "$match" | tr '\n' ', ' | sed 's/,$//')"
+    fi
+    die "module not found in suite: $Test_Module（testcases/ 下无精确或大小写不敏感匹配）"
+}
+
 main() {
     parse_args "$@"
 
@@ -454,6 +473,8 @@ main() {
     fi
     log "📋 日志文件: $LOG_FILE"
     log "========================================"
+
+    validate_module
 
     if [[ "$MODE" == "retry" ]]; then
         run_tradefed "retry"
