@@ -68,8 +68,16 @@ local self-signed deployment. For one invocation, prefer `--server URL`,
 
 Read [references/api-catalog.md](references/api-catalog.md) for supported CLI
 commands and examples. Read
+[references/agent-workflows.md](references/agent-workflows.md) for
+end-to-end verified playbooks: session bootstrap, test lifecycle with
+incremental event polling, the elevation matrix, error recovery per exit
+code, and the plugin security gate. Read
 [references/agent-integration.md](references/agent-integration.md) when wiring
-the CLI into Codex, Claude Code, Kimi, or another terminal agent. For exact
+the CLI into Codex, Claude Code, Kimi, or another terminal agent. Inside
+kkagent, prefer the bundled MCP plugin (`gms_rt_*` tools in
+`plugins/gms-remote-test`) over raw CLI calls: it injects
+`--json --non-interactive`, compacts envelopes, caches the safety catalog,
+and gates mutating commands. For exact
 request or response fields, inspect the current route and its service call path.
 
 ## Handle failures

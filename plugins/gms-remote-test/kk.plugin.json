@@ -1,6 +1,6 @@
 {
   "name": "gms-remote-test",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Operate the GMS Remote Test platform through the bundled gms-rt CLI: device inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware burn, USB/IP, VPN. Self-contained; requires GMS_REMOTE_TEST_SERVER (and credentials via stdin).",
   "keywords": ["gms", "cts", "gts", "vts", "android-test", "cli", "mcp"],
   "mcpServers": {
