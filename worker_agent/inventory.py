@@ -10,6 +10,8 @@ inventory.py 在 2026-08 审核第七节拆分后仅保留稳定导入面：
 from __future__ import annotations
 
 from .device_actions import (  # noqa: F401 - re-export 保持既有导入路径稳定
+    browse_directory,
+    copy_image_into,
     execute_device_action,
     execute_usbip_action,
     flash_firmware,

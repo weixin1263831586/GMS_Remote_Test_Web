@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -538,6 +539,54 @@ def test_firmware_failure_cleans_worker_staging_directory(tmp_path):
     agent.client.ack.assert_called_once_with(
         "cmd-firmware", "failed", error="download failed"
     )
+
+
+def test_file_transfer_uploads_worker_local_file(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    source = tmp_path / "images" / "system.img"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"system-image")
+
+    agent.run_file_transfer({
+        "id": "cmd-transfer",
+        "payload": {"transfer_id": "transfer-1", "source_path": str(source)},
+    })
+
+    agent.client.upload_transfer.assert_called_once()
+    assert agent.client.upload_transfer.call_args.args[0] == "transfer-1"
+    saved = agent.runtime.previous_command("cmd-transfer")
+    assert saved["status"] == "completed"
+
+
+def test_firmware_flash_local_sources_copy_images_into_staging(tmp_path):
+    """Worker 目录来源的 GSI 镜像应拷贝进本机 staging 后直接烧写。"""
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    source = tmp_path / "images" / "gsi_arm64.img"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"system-image")
+    stage_id = "fw-" + "c" * 32
+    command = {
+        "id": "cmd-gsi",
+        "command_type": "flash_gsi",
+        "payload": {
+            "stage_id": stage_id,
+            "files": [],
+            "local_sources": [{"kind": "system", "path": str(source)}],
+            "devices": ["worker-test:ABC"],
+        },
+    }
+
+    with patch("worker_agent.app.flash_gsi", return_value={"success": True}) as flash:
+        agent.run_firmware_flash(command)
+
+    system_arg = Path(flash.call_args.args[1])
+    assert system_arg == agent.config.data_root / "firmware" / stage_id / "system.img"
+    saved = agent.runtime.previous_command("cmd-gsi")
+    assert saved["status"] == "completed"
+    # 烧写结束后 staging 目录被清理。
+    assert not system_arg.exists()
 
 
 def test_start_process_closes_parent_log_descriptors(tmp_path):

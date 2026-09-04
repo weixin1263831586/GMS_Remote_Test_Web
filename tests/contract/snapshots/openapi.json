@@ -343,6 +343,41 @@
         "title": "Body_analyze_suite_log_dir_api_reports_analyze_log_dir_post",
         "type": "object"
       },
+      "Body_finalize_worker_gsi_from_transfer_api_cluster_gsi_stage_from_transfer_post": {
+        "properties": {
+          "devices": {
+            "title": "Devices",
+            "type": "string"
+          },
+          "transfer_ids": {
+            "title": "Transfer Ids",
+            "type": "string"
+          },
+          "vendor_file": {
+            "anyOf": [
+              {
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor File"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "devices",
+          "transfer_ids"
+        ],
+        "title": "Body_finalize_worker_gsi_from_transfer_api_cluster_gsi_stage_from_transfer_post",
+        "type": "object"
+      },
       "Body_stage_worker_firmware_api_cluster_firmware_stage_post": {
         "properties": {
           "automation_run_id": {
@@ -417,6 +452,51 @@
           "devices"
         ],
         "title": "Body_stage_worker_gsi_api_cluster_gsi_stage_post",
+        "type": "object"
+      },
+      "Body_stage_worker_gsi_from_source_api_cluster_gsi_stage_from_source_post": {
+        "properties": {
+          "devices": {
+            "title": "Devices",
+            "type": "string"
+          },
+          "source_worker_id": {
+            "title": "Source Worker Id",
+            "type": "string"
+          },
+          "system_path": {
+            "default": "",
+            "title": "System Path",
+            "type": "string"
+          },
+          "vendor_file": {
+            "anyOf": [
+              {
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor File"
+          },
+          "vendor_path": {
+            "default": "",
+            "title": "Vendor Path",
+            "type": "string"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "devices",
+          "source_worker_id"
+        ],
+        "title": "Body_stage_worker_gsi_from_source_api_cluster_gsi_stage_from_source_post",
         "type": "object"
       },
       "Body_upload_apk_api_apk_upload_post": {
@@ -5392,6 +5472,56 @@
         ]
       }
     },
+    "/api/cluster/files/browse": {
+      "get": {
+        "description": "Browse one directory on a Worker host (admin elevation, same as /api/files/list).",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster File Browse",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/firmware/stage": {
       "post": {
         "requestBody": {
@@ -5463,6 +5593,84 @@
           }
         },
         "summary": "Stage Worker Gsi",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/gsi/stage-from-source": {
+      "post": {
+        "description": "Stage GSI images that already live on a Worker/Controller host.\n\n- source == target Worker: one flash_gsi command with local_sources\n  (the Worker copies the image into its own staging).\n- source == Controller local worker: images are staged on the Controller.\n- other remote Worker: creates per-image transfers + file_transfer\n  commands; the caller finishes with /gsi/stage-from-transfer.",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_stage_worker_gsi_from_source_api_cluster_gsi_stage_from_source_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stage Worker Gsi From Source",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/gsi/stage-from-transfer": {
+      "post": {
+        "description": "Stage pulled cross-Worker GSI images and create the flash command.",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_finalize_worker_gsi_from_transfer_api_cluster_gsi_stage_from_transfer_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finalize Worker Gsi From Transfer",
         "tags": [
           "cluster"
         ]
@@ -8442,9 +8650,101 @@
         ]
       }
     },
+    "/api/cluster/workers/{worker_id}/vpn-connect": {
+      "post": {
+        "description": "Activate a preconfigured VPN connection on the worker host.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connect Worker Vpn",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/workers/{worker_id}/vpn-connections": {
+      "get": {
+        "description": "List VPN connections preconfigured in the worker host's NetworkManager.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Worker Vpn Connections",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/workers/{worker_id}/vpn-status": {
       "get": {
-        "description": "Check whether a VPN connection is active on the worker host.",
+        "description": "Check whether a VPN connection is active on the worker host.\n\n只读状态查询，登录用户即可访问，与本机 /api/vpn/status 权限一致；\n连接/断开等敏感操作仍由 vpn-connect 等接口的 admin 依赖把关。",
         "parameters": [
           {
             "in": "path",
@@ -9601,6 +9901,58 @@
           }
         },
         "summary": "Get Redmine Config"
+      }
+    },
+    "/api/config/static-routes": {
+      "get": {
+        "description": "读取静态路由配置（系统配置弹框使用）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Static Routes Config"
+      },
+      "post": {
+        "description": "保存静态路由配置到运行时配置，并立即应用到本机路由表。\n\n保存即生效：成功添加的路由立即进入内核路由表；单条失败不阻塞\n其他路由，失败详情在返回的 results 中逐条给出。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Static Routes Config"
       }
     },
     "/api/config/update": {
@@ -17506,6 +17858,44 @@
         "summary": "List Utility Tools"
       }
     },
+    "/api/usbip/assignments": {
+      "get": {
+        "description": "List all USB/IP assignments grouped by source host (read-only).\n\n供接入弹框\"显示全部\"视图使用：一次返回所有来源主机的当前接入\n（按 device_host + worker 分组），纯读持久化分配，不做 SSH 枚举，\n可被弹框轮询安全调用。断开仍走既有 /api/usbip/disconnect。\n\n``?verify=true``：对本地 Worker 名下的分配额外执行一次\n``usbip port`` 实时核对，响应中带 ``transport_state_by_busid``\n（attached/detached/unknown）与 ``verified: true``。持久化分配\n表示\"已记录分配\"，实时核对才是\"当前已连接\"；两者可能因\nController/Worker 重启或手工 detach 而短暂不一致。",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "verify",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Verify",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Usbip Assignments"
+      }
+    },
     "/api/usbip/connect": {
       "post": {
         "parameters": [
@@ -17689,6 +18079,44 @@
           }
         },
         "summary": "List Usbip Source Devices"
+      }
+    },
+    "/api/usbip/source-os": {
+      "get": {
+        "description": "Resolve Windows/Ubuntu labels for source hosts.\n\n先读持久化缓存（无网络开销），未知来源并行 SSH 探测后写回缓存，\n供\"设备来源\"下拉框在未选择主机时即可显示系统标识。",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hosts",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Hosts",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Usbip Source Os"
       }
     },
     "/api/usbip/status": {

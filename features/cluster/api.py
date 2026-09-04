@@ -383,6 +383,15 @@ def _local_execute(command_type: str, payload: dict) -> dict:
         config = WorkerConfig.__new__(WorkerConfig)
         config.suite_roots = _suite_roots()
         return _exec_suite(config, payload)
+    if command_type == "file_browse":
+        from worker_agent.device_actions import browse_directory
+
+        # 默认打开套件根目录（如 ~/GMS-Suite），未配置则回落主目录。
+        default_dir = next(
+            (Path(root) for root in _suite_roots() if Path(root).expanduser().exists()),
+            None,
+        )
+        return browse_directory(str(payload.get("path") or ""), default_path=default_dir)
     if command_type == "get_config":
         return _read_local_worker_config()
     if command_type == "update_config":
@@ -490,6 +499,29 @@ async def cluster_suite_files(worker_id: str = Query(...), suite_path: str = Que
     result = await _run_worker_command(worker_id, "suite_action", {
         "action": "list", "suite_path": suite_path, "path": path,
     })
+    return {"success": True, "data": result}
+
+
+@router.get("/files/browse")
+async def cluster_file_browse(
+    worker_id: str = Query(...),
+    path: str = Query(default=""),
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
+):
+    """Browse one directory on a Worker host (admin elevation, same as /api/files/list)."""
+    _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
+    try:
+        result = await _run_worker_command(worker_id, "file_browse", {"path": path})
+    except HTTPException as exc:
+        detail = exc.detail
+        message = detail.get("message") if isinstance(detail, dict) else str(detail)
+        if "unsupported command type" in str(message) and "file_browse" in str(message):
+            raise HTTPException(
+                502,
+                f"Worker {worker_id} 的 agent 版本过旧，不支持目录浏览；"
+                "请在集群管理页重新部署该 Worker 后重试",
+            ) from exc
+        raise
     return {"success": True, "data": result}
 
 

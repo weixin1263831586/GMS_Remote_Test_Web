@@ -740,16 +740,13 @@ async function browseLocalFileForGsiScript() {
     await loadFileDirectory(getDefaultSuitesPath());
 }
 
-// Browse remote file for GSI system image
+// Browse file for GSI system image.
+// 集群模式默认浏览当前 Worker 主机的目录（可下拉切换其他 Worker）；
+// 单机模式浏览测试主机目录；"本机"按钮始终选择浏览器所在电脑的文件。
 async function browseLocalFileForGsiSystem() {
-    if (selectedClusterWorker()) {
-        const input = document.createElement('input');
-        input.type = 'file'; input.accept = '.img';
-        input.onchange = () => {
-            state.gsiSystemFile = input.files?.[0] || null;
-            if (state.gsiSystemFile) document.getElementById('gsi-system').value = state.gsiSystemFile.name;
-        };
-        input.click();
+    const workerId = selectedClusterWorker();
+    if (workerId) {
+        await browseWorkerFileForGsiSystem(workerId);
         return;
     }
     const title = '选择System镜像';
@@ -758,6 +755,8 @@ async function browseLocalFileForGsiSystem() {
     state.fileBrowser.mode = 'gsi-system';
     state.fileBrowser.targetInputId = 'gsi-system';
     state.fileBrowser.selectedFile = null;
+    state.gsiSystemFile = null;
+    state.gsiSystemWorkerSource = null;
 
     // Update modal title
     document.getElementById('file-browser-title').textContent = title;
@@ -767,6 +766,36 @@ async function browseLocalFileForGsiSystem() {
 
     // Load initial directory (GMS-Suite)
     await loadFileDirectory(getDefaultSuitesPath());
+}
+
+// 集群模式：打开 Worker 主机目录浏览器。
+async function browseWorkerFileForGsiSystem(workerId) {
+    state.fileBrowser.mode = 'gsi-system-worker';
+    state.fileBrowser.targetInputId = 'gsi-system';
+    state.fileBrowser.selectedFile = null;
+    state.fileBrowser.workerBrowseId = workerId;
+    state.gsiSystemFile = null;
+    state.gsiSystemWorkerSource = null;
+    document.getElementById('file-browser-title').textContent = '选择Worker主机上的System镜像';
+    ModalManager.open('file-browser-modal');
+    await populateFileBrowserWorkerSelect(workerId);
+    await loadFileDirectory('');
+}
+
+// 选择浏览器所在电脑上的 System 镜像文件（集群模式下经 Controller 分发）。
+function pickLocalGsiSystemFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.img';
+    input.onchange = () => {
+        state.gsiSystemFile = input.files?.[0] || null;
+        if (state.gsiSystemFile) {
+            document.getElementById('gsi-system').value = state.gsiSystemFile.name;
+            state.gsiSystemWorkerSource = null;
+            showToast(`已选择本机System镜像: ${state.gsiSystemFile.name}`, 'info');
+        }
+    };
+    input.click();
 }
 
 // Browse local file for GSI vendor image
@@ -856,6 +885,19 @@ async function uploadGsiVendorBootToTestHost(file) {
     });
 }
 
+// 轮询集群命令直至终结状态；completed 返回 result，failed/cancelled 抛错。
+async function pollClusterCommand(commandId, label) {
+    while (true) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(commandId)}`);
+        const command = status.command || {};
+        if (command.status === 'completed') return command.result || {};
+        if (['failed', 'cancelled'].includes(command.status)) {
+            throw new Error(command.error || `${label || '集群命令'}执行失败`);
+        }
+    }
+}
+
 async function submitGsiBurn() {
     const scriptPath = document.getElementById('gsi-script').value.trim();
     const systemImg = document.getElementById('gsi-system').value.trim();
@@ -877,8 +919,70 @@ async function submitGsiBurn() {
             : selectedWorkspaceDeviceIds();
         if (!devices.length) throw new Error('请重新选择要烧写GSI的设备');
         if (workerId) {
-            if (!state.gsiSystemFile && !state.gsiVendorFile) throw new Error('远端 GSI 烧写必须选择本机 System 或 Vendor Boot 镜像');
+            const systemSource = state.gsiSystemWorkerSource || null;
+            if (!systemSource && !state.gsiSystemFile && !state.gsiVendorFile) {
+                throw new Error('远端 GSI 烧写必须选择 System 或 Vendor Boot 镜像');
+            }
             if (devices.length !== 1) throw new Error('集群 GSI 烧写一次只允许一台设备');
+            lockDevicesInUI(devices);
+            if (systemSource) {
+                // System 镜像来自 Worker/Controller 主机目录，无需浏览器上传。
+                closeGsiModal();
+                addLogEntry(
+                    `System 镜像来源: ${systemSource.worker_id}:${systemSource.path}`,
+                    'info'
+                );
+                const form = new FormData();
+                form.append('worker_id', workerId);
+                form.append('devices', devices.join(','));
+                form.append('source_worker_id', systemSource.worker_id);
+                form.append('system_path', systemSource.path);
+                if (state.gsiVendorFile) {
+                    form.append('vendor_file', state.gsiVendorFile, state.gsiVendorFile.name);
+                }
+                const staged = await apiCall('/api/cluster/gsi/stage-from-source', 'POST', form);
+                let flashCommandId = staged.command_id || '';
+                if (Array.isArray(staged.pulls) && staged.pulls.length) {
+                    const sourceWorkers = Array.from(
+                        new Set(staged.pulls.map(item => item.worker_id))
+                    ).join(', ');
+                    addLogEntry(`正在从 ${sourceWorkers} 传输镜像到测试主机...`, 'info');
+                    for (const pull of staged.pulls) {
+                        await pollClusterCommand(
+                            pull.command_id,
+                            `从 ${pull.worker_id} 传输 ${pull.kind} 镜像`
+                        );
+                    }
+                    const finalizeForm = new FormData();
+                    finalizeForm.append('worker_id', workerId);
+                    finalizeForm.append('devices', devices.join(','));
+                    finalizeForm.append(
+                        'transfer_ids',
+                        staged.pulls.map(pull => pull.transfer_id).join(',')
+                    );
+                    if (state.gsiVendorFile) {
+                        finalizeForm.append('vendor_file', state.gsiVendorFile, state.gsiVendorFile.name);
+                    }
+                    const finalized = await apiCall(
+                        '/api/cluster/gsi/stage-from-transfer', 'POST', finalizeForm
+                    );
+                    flashCommandId = finalized.command_id;
+                }
+                state.gsiSystemFile = null;
+                state.gsiVendorFile = null;
+                state.gsiSystemWorkerSource = null;
+                while (true) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(flashCommandId)}`);
+                    if (status.command.status === 'completed') break;
+                    if (['failed', 'cancelled'].includes(status.command.status)) {
+                        throw new Error(status.command.error || 'GSI 烧写失败');
+                    }
+                }
+                showToast('远端 GSI 烧写完成', 'success');
+                await switchTestWorker();
+                return;
+            }
             const form = new FormData();
             form.append('worker_id', workerId);
             form.append('devices', devices.join(','));
@@ -893,7 +997,7 @@ async function submitGsiBurn() {
                 if (status.command.status === 'completed') break;
                 if (['failed', 'cancelled'].includes(status.command.status)) throw new Error(status.command.error || 'GSI 烧写失败');
             }
-            state.gsiSystemFile = null; state.gsiVendorFile = null;
+            state.gsiSystemFile = null; state.gsiVendorFile = null; state.gsiSystemWorkerSource = null;
             showToast('远端 GSI 烧写完成', 'success');
             await switchTestWorker();
             return;

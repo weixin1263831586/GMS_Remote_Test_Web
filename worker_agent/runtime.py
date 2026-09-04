@@ -406,6 +406,29 @@ class WorkerRuntime:
         except OSError:
             pass
 
+    def _validate_requested_module(self, argv: list[str]) -> None:
+        """P0-2 fail-fast：模块名不在套件 testcases/ 中时拒绝任务。
+
+        run_GMS_Test_Auto.sh argv 形如 ``[script, test_type, module?,
+        test_case?, ...]``；retry 模式（argv[2]=='retry'）与未指定模块时
+        跳过校验。套件路径从 --test-suite 参数解析。
+        """
+        if len(argv) < 3 or argv[2].lower() == "retry":
+            return
+        module = argv[2]
+        suite_tools_path = ""
+        for index, item in enumerate(argv):
+            if item == "--test-suite" and index + 1 < len(argv):
+                suite_tools_path = argv[index + 1]
+                break
+        if not suite_tools_path:
+            return
+        from .module_validation import validate_module_name
+
+        error = validate_module_name(module, suite_tools_path)
+        if error:
+            raise ValueError(error)
+
     def start_process(self, command: dict[str, Any]) -> dict[str, Any]:
         payload = command.get("payload", {})
         # execution_spec 是权威输入：Worker 用共享 builder 从 spec 重建 argv，
@@ -445,6 +468,9 @@ class WorkerRuntime:
                 f"test executable not found: {executable}. "
                 f"Ensure run_GMS_Test_Auto.sh is deployed to a suite root ({configured})."
             )
+        # P0-2 fail-fast：模块名错误时拒绝任务，避免占用设备租约走完
+        # tradefed 初始化约 4 秒才失败。argv[1]=test_type, argv[2]=module。
+        self._validate_requested_module(argv)
         worker_job_id = payload.get("worker_job_id") or f"wj-{command['id']}"
         work_dir = self.config.data_root / "jobs" / (command.get("job_id") or command["id"]) / (command.get("attempt_id") or "1")
         work_dir.mkdir(parents=True, exist_ok=True)

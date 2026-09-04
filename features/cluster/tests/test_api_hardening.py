@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -502,6 +503,136 @@ class ClusterApiHardeningTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertIsNotNone(self.repo.get_worker("worker-246"))
+
+    def _register_online_worker(self, worker_id: str) -> None:
+        self.repo.register_worker({
+            "worker_id": worker_id,
+            "name": worker_id,
+            "hostname": worker_id,
+            "address": "127.0.0.1",
+            "agent_version": "1",
+            "max_jobs": 1,
+            "capabilities": {"adb": True},
+        })
+        self.repo.heartbeat(worker_id, {
+            "agent_version": "1",
+            "running_jobs": [],
+            "devices": [],
+            "suites": [],
+        })
+
+    def test_gsi_stage_from_same_worker_creates_local_source_flash_command(self):
+        response = self.client.post(
+            "/api/cluster/gsi/stage-from-source",
+            data={
+                "worker_id": "worker-246",
+                "devices": "ABC",
+                "source_worker_id": "worker-246",
+                "system_path": "/home/user/images/system.img",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        command = self.repo.get_command(response.json()["command_id"])
+        self.assertEqual(command["command_type"], "flash_gsi")
+        self.assertEqual(
+            command["payload"]["local_sources"],
+            [{"kind": "system", "path": "/home/user/images/system.img"}],
+        )
+        self.assertIsNotNone(self.repo.claims.active_claim("worker-246:ABC"))
+
+    def test_gsi_stage_from_unknown_source_worker_is_rejected(self):
+        response = self.client.post(
+            "/api/cluster/gsi/stage-from-source",
+            data={
+                "worker_id": "worker-246",
+                "devices": "ABC",
+                "source_worker_id": "worker-unknown",
+                "system_path": "/srv/gsi/system.img",
+            },
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_cross_worker_gsi_pull_transfers_then_creates_flash_command(self):
+        self._register_online_worker("worker-src")
+        self.tokens_path.write_text(
+            json.dumps({"worker_tokens": {"worker-246": "token", "worker-src": "token"}}),
+            encoding="utf-8",
+        )
+        payload = b"system-image"
+
+        staged = self.client.post(
+            "/api/cluster/gsi/stage-from-source",
+            data={
+                "worker_id": "worker-246",
+                "devices": "ABC",
+                "source_worker_id": "worker-src",
+                "system_path": "/srv/gsi/system.img",
+            },
+        )
+        self.assertEqual(staged.status_code, 200, staged.text)
+        pulls = staged.json()["pulls"]
+        self.assertEqual(
+            [(item["kind"], item["worker_id"]) for item in pulls],
+            [("system", "worker-src")],
+        )
+        transfer_id = pulls[0]["transfer_id"]
+
+        upload = self.client.put(
+            f"/api/cluster/transfers/{transfer_id}/chunks/0",
+            headers={"Authorization": "Bearer token", "X-GMS-Worker-ID": "worker-src"},
+            content=payload,
+        )
+        self.assertEqual(upload.status_code, 200, upload.text)
+        completed = self.client.post(
+            f"/api/cluster/transfers/{transfer_id}/complete",
+            headers={"Authorization": "Bearer token", "X-GMS-Worker-ID": "worker-src"},
+            json={
+                "filename": "system.img",
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "chunk_count": 1,
+            },
+        )
+        self.assertEqual(completed.status_code, 200, completed.text)
+
+        finalized = self.client.post(
+            "/api/cluster/gsi/stage-from-transfer",
+            data={
+                "worker_id": "worker-246",
+                "devices": "ABC",
+                "transfer_ids": transfer_id,
+            },
+        )
+
+        self.assertEqual(finalized.status_code, 200, finalized.text)
+        command = self.repo.get_command(finalized.json()["command_id"])
+        self.assertEqual(command["command_type"], "flash_gsi")
+        self.assertEqual(
+            [item["kind"] for item in command["payload"]["files"]],
+            ["system"],
+        )
+        stage_dir = self.repo.db_path.parent / "firmware" / finalized.json()["stage_id"]
+        self.assertEqual((stage_dir / "system.img").read_bytes(), payload)
+        self.assertIsNotNone(self.repo.claims.active_claim("worker-246:ABC"))
+        self.assertFalse((self.repo.db_path.parent / "transfers" / transfer_id).exists())
+
+    def test_file_browse_lists_controller_local_directory(self):
+        browse_dir = Path(self.temp.name).resolve() / "browse-me"
+        browse_dir.mkdir()
+        (browse_dir / "gsi.img").write_bytes(b"img")
+        local_worker_id = cluster_api.service().config.local_worker_id
+        self._register_online_worker(local_worker_id)
+
+        response = self.client.get(
+            f"/api/cluster/files/browse?worker_id={local_worker_id}&path={browse_dir}"
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertEqual(data["path"], str(browse_dir))
+        self.assertEqual([item["name"] for item in data["files"]], ["gsi.img"])
 
 
 if __name__ == "__main__":

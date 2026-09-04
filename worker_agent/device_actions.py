@@ -7,9 +7,11 @@ GSI 烧写/主机指标。套件执行逻辑见 suite_actions.py。
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -516,3 +518,53 @@ def host_metrics(config: WorkerConfig) -> dict[str, float]:
             "load_1m": round(load if 'load' in locals() else 0.0, 2),
             "disk_free_gb": round(usage.free / 1024 ** 3, 2),
             "disk_total_gb": round(usage.total / 1024 ** 3, 2)}
+
+
+def browse_directory(path: str = "", default_path: Path | None = None) -> dict[str, Any]:
+    """List one directory on the Worker host for the remote file browser.
+
+    空路径时打开 default_path（通常为套件根目录 GMS-Suite），未配置则回落主目录。
+    """
+    if str(path or "").strip():
+        target = Path(path).expanduser()
+    else:
+        target = Path(default_path).expanduser() if default_path else Path.home()
+    target = target.resolve()
+    if not target.is_dir():
+        raise ValueError("path is not a directory on Worker")
+    files = []
+    with os.scandir(target) as entries:
+        for entry in entries:
+            try:
+                entry_stat = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            is_dir = entry.is_dir(follow_symlinks=True)
+            files.append({
+                "name": entry.name,
+                "type": "directory" if is_dir else "file",
+                "size": 0 if is_dir else entry_stat.st_size,
+                "permissions": stat.filemode(entry_stat.st_mode),
+                "modified": int(entry_stat.st_mtime),
+            })
+    files.sort(key=lambda item: (item["type"] != "directory", item["name"].lower()))
+    return {"path": str(target), "files": files}
+
+
+def copy_image_into(source: Path, target: Path, max_bytes: int) -> dict[str, Any]:
+    """Copy one GSI image into Worker staging, returning size and SHA-256."""
+    source = Path(source).expanduser().resolve()
+    if not source.is_file():
+        raise ValueError("GSI image source file not found on Worker")
+    digest = hashlib.sha256()
+    total = 0
+    with source.open("rb") as reader, Path(target).open("wb") as writer:
+        while block := reader.read(4 * 1024 * 1024):
+            total += len(block)
+            if total > max_bytes:
+                raise ValueError("GSI image exceeds Worker staging limit")
+            digest.update(block)
+            writer.write(block)
+    if not total:
+        raise ValueError("GSI image is empty")
+    return {"size_bytes": total, "sha256": digest.hexdigest()}

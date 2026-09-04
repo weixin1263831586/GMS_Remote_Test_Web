@@ -237,6 +237,12 @@ def create_lifespan(services: AppServices):
             except Exception:
                 logger.exception('Failed to auto-start local VNC')
             try:
+                from foundation.static_routes import apply_static_routes_async
+
+                apply_static_routes_async()
+            except Exception:
+                logger.exception('Failed to apply static routes')
+            try:
                 usb_dispatch_task = _start_usb_monitor(app)
             except Exception:
                 logger.exception('Failed to start USB monitor')

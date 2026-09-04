@@ -289,6 +289,10 @@ async function loadFileDirectory(path) {
             await loadFirmwareShareRemoteDirectory(path);
             return;
         }
+        if (state.fileBrowser.mode === 'gsi-system-worker') {
+            await loadWorkerFileDirectory(path);
+            return;
+        }
         if (state.fileBrowser.mode === 'retry' && state.fileBrowser.clusterWorkerId) {
             const params = new URLSearchParams({
                 worker_id: state.fileBrowser.clusterWorkerId,
@@ -311,6 +315,76 @@ async function loadFileDirectory(path) {
         }
     } catch (error) {
         showToast('加载文件列表失败: ' + error.message, 'error');
+    }
+}
+
+// ---- Worker 主机目录浏览（集群 GSI System 镜像选择） ----
+async function populateFileBrowserWorkerSelect(selectedWorkerId) {
+    const row = document.getElementById('file-browser-worker-row');
+    const select = document.getElementById('file-browser-worker-select');
+    if (!row || !select) return;
+    row.style.display = 'flex';
+    select.innerHTML = '';
+    let workers = [];
+    try {
+        if (typeof window.GmsWorkspace?.loadClusterWorkers === 'function') {
+            workers = await window.GmsWorkspace.loadClusterWorkers();
+        } else if (typeof window.loadClusterWorkers === 'function') {
+            workers = await window.loadClusterWorkers();
+        }
+    } catch (error) {
+        console.warn('[FileBrowser] Worker list unavailable:', error);
+    }
+    const localId = workspaceLocalWorkerId();
+    const options = [{value: localId, label: `${localId} (Controller)`}];
+    for (const worker of workers || []) {
+        if (worker.id === localId || worker.status === 'offline') continue;
+        options.push({value: worker.id, label: worker.status ? `${worker.id} (${worker.status})` : worker.id});
+    }
+    if (!options.some(option => option.value === selectedWorkerId)) {
+        options.unshift({value: selectedWorkerId, label: selectedWorkerId});
+    }
+    const fragment = document.createDocumentFragment();
+    for (const option of options) {
+        const element = document.createElement('option');
+        element.value = option.value;
+        element.textContent = option.label;
+        element.selected = option.value === selectedWorkerId;
+        fragment.appendChild(element);
+    }
+    select.replaceChildren(fragment);
+}
+
+async function onFileBrowserWorkerChange() {
+    const select = document.getElementById('file-browser-worker-select');
+    if (!select || !select.value) return;
+    state.fileBrowser.workerBrowseId = select.value;
+    state.fileBrowser.currentPath = '';
+    state.fileBrowser.selectedFile = null;
+    await loadFileDirectory('');
+}
+
+async function loadWorkerFileDirectory(path) {
+    const workerId = state.fileBrowser.workerBrowseId;
+    if (!workerId) {
+        showToast('未选择要浏览的 Worker 主机', 'warning');
+        return;
+    }
+    try {
+        if (isLocalWorkspaceWorker(workerId)) {
+            const result = await apiCall('/api/files/list', 'POST', { path });
+            if (!result.success) throw new Error(result.error || '加载目录失败');
+            state.fileBrowser.currentPath = result.path;
+            renderFileList(result.files || []);
+            return;
+        }
+        const params = new URLSearchParams({worker_id: workerId, path: path || ''});
+        const result = await apiCall(`/api/cluster/files/browse?${params.toString()}`);
+        const data = result.data || {};
+        state.fileBrowser.currentPath = data.path || '';
+        renderFileList(data.files || []);
+    } catch (error) {
+        showToast(`加载 Worker ${workerId} 目录失败: ` + error.message, 'error');
     }
 }
 
@@ -470,6 +544,10 @@ function selectFile(name, type, sourceEvent) {
 function closeFileBrowserModal() {
     ModalManager.close('file-browser-modal');
     state.fileBrowser.selectedFile = null;
+    const workerRow = document.getElementById('file-browser-worker-row');
+    if (workerRow) {
+        workerRow.style.display = 'none';
+    }
 }
 
 function confirmFileSelection() {
@@ -518,7 +596,26 @@ function confirmFileSelection() {
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
+            state.gsiSystemFile = null;
+            state.gsiSystemWorkerSource = null;
             addLogEntry(`已选择System镜像: ${fullPath}`, 'info');
+        }
+        closeFileBrowserModal();
+    } else if (state.fileBrowser.mode === 'gsi-system-worker') {
+        // 集群模式：选择 Worker 主机上的 System 镜像，记录来源 Worker。
+        if (isDirectory) {
+            showToast('请选择一个镜像文件，而非文件夹', 'warning');
+            return;
+        }
+        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
+        if (targetInput) {
+            targetInput.value = fullPath;
+            state.gsiSystemWorkerSource = {
+                worker_id: state.fileBrowser.workerBrowseId,
+                path: fullPath,
+            };
+            state.gsiSystemFile = null;
+            addLogEntry(`已选择 Worker ${state.fileBrowser.workerBrowseId} 上的System镜像: ${fullPath}`, 'info');
         }
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'gsi-script') {
@@ -634,6 +731,12 @@ function navigateToParent() {
 function navigateToRoot() {
     if (state.fileBrowser.mode === 'utility-tool') {
         ut_loadToolDir('');
+        return;
+    }
+
+    if (state.fileBrowser.mode === 'gsi-system-worker') {
+        loadFileDirectory('');
+        addLogEntry('导航到 Worker 套件目录 (GMS-Suite)', 'info');
         return;
     }
 

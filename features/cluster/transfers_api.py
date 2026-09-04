@@ -8,11 +8,13 @@ import re
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from features.auth import (
+    CurrentUser,
     principal_owner_id,
+    require_elevated_admin_when_auth_required,
     require_resource_owner,
 )
 
@@ -358,6 +360,309 @@ async def stage_worker_gsi(
             claim_payload["claim_source_id"], status="failed"
         )
         raise
+    return {"success": True, "stage_id": stage_id, "command_id": command["id"]}
+
+
+async def _write_staged_image(
+    upload: UploadFile, directory: Path, kind: str, limit: int
+) -> dict:
+    name = f"{kind}.img"
+    target = directory / name
+    digest = hashlib.sha256()
+    total = 0
+    with target.open("wb") as output:
+        while chunk := await upload.read(4 * 1024 * 1024):
+            total += len(chunk)
+            if total > limit:
+                raise HTTPException(413, "GSI images are too large")
+            digest.update(chunk)
+            output.write(chunk)
+    if not total:
+        raise HTTPException(400, f"{kind} image is empty")
+    return {
+        "kind": kind,
+        "filename": name,
+        "size_bytes": total,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def _copy_controller_file_into(source: Path, target: Path, limit: int) -> dict:
+    digest = hashlib.sha256()
+    total = 0
+    with source.open("rb") as reader, target.open("wb") as writer:
+        while block := reader.read(4 * 1024 * 1024):
+            total += len(block)
+            if total > limit:
+                raise HTTPException(413, "GSI images are too large")
+            digest.update(block)
+            writer.write(block)
+    if not total:
+        raise HTTPException(400, "GSI image is empty")
+    return {
+        "kind": Path(target).stem,
+        "filename": Path(target).name,
+        "size_bytes": total,
+        "sha256": digest.hexdigest(),
+    }
+
+
+@router.post("/gsi/stage-from-source")
+async def stage_worker_gsi_from_source(
+    request: Request,
+    worker_id: str = Form(...),
+    devices: str = Form(...),
+    source_worker_id: str = Form(...),
+    system_path: str = Form(default=""),
+    vendor_path: str = Form(default=""),
+    vendor_file: UploadFile | None = File(default=None),
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
+):
+    """Stage GSI images that already live on a Worker/Controller host.
+
+    - source == target Worker: one flash_gsi command with local_sources
+      (the Worker copies the image into its own staging).
+    - source == Controller local worker: images are staged on the Controller.
+    - other remote Worker: creates per-image transfers + file_transfer
+      commands; the caller finishes with /gsi/stage-from-transfer.
+    """
+    _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
+    _online_worker(worker_id)
+    source_worker_id = source_worker_id.strip()
+    system_path = system_path.strip()
+    vendor_path = vendor_path.strip()
+    if not system_path and not vendor_path and vendor_file is None:
+        raise HTTPException(400, "at least one GSI image path or file is required")
+    if (system_path or vendor_path) and source_worker_id != service().config.local_worker_id:
+        # Controller 本机文件由 Controller 直接读取，无需 Worker agent。
+        _online_worker(source_worker_id)
+    device_id = worker_device(
+        worker_id,
+        devices,
+        "GSI flashing",
+        require_local_usb=True,
+    )
+    local_worker_id = service().config.local_worker_id
+    if source_worker_id == worker_id:
+        return await _stage_gsi_from_local_sources(
+            request, worker_id, device_id, system_path, vendor_path, vendor_file
+        )
+    if source_worker_id == local_worker_id:
+        return await _stage_gsi_from_controller_files(
+            request, worker_id, device_id, system_path, vendor_path, vendor_file
+        )
+    return _stage_gsi_pull_from_worker(
+        request, worker_id, device_id, source_worker_id, system_path, vendor_path
+    )
+
+
+async def _stage_gsi_from_local_sources(
+    request: Request,
+    worker_id: str,
+    device_id: str,
+    system_path: str,
+    vendor_path: str,
+    vendor_file: UploadFile | None,
+):
+    limit = configured_max_bytes(
+        "GMS_CLUSTER_FIRMWARE_MAX_BYTES", service().config.firmware_max_bytes
+    )
+    stage_id = "fw-" + os.urandom(16).hex()
+    claim_payload = operation_claim_for_request(request, worker_id, device_id, stage_id)
+    directory = _firmware_root() / stage_id
+    directory.mkdir(parents=True, exist_ok=False)
+    try:
+        files = []
+        if vendor_file is not None:
+            files.append(await _write_staged_image(vendor_file, directory, "vendor", limit))
+        local_sources = [
+            {"kind": kind, "path": path_text}
+            for kind, path_text in (("system", system_path), ("vendor", vendor_path))
+            if path_text
+        ]
+        command = service().repository.create_command({
+            "worker_id": worker_id,
+            "command_type": "flash_gsi",
+            "payload": {
+                "stage_id": stage_id,
+                "files": files,
+                "local_sources": local_sources,
+                "devices": [device_id],
+                **claim_payload,
+            },
+        })
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        service().repository.claims.release(
+            claim_payload["claim_source_id"], status="failed"
+        )
+        raise
+    return {"success": True, "stage_id": stage_id, "command_id": command["id"]}
+
+
+async def _stage_gsi_from_controller_files(
+    request: Request,
+    worker_id: str,
+    device_id: str,
+    system_path: str,
+    vendor_path: str,
+    vendor_file: UploadFile | None,
+):
+    limit = configured_max_bytes(
+        "GMS_CLUSTER_FIRMWARE_MAX_BYTES", service().config.firmware_max_bytes
+    )
+    stage_id = "fw-" + os.urandom(16).hex()
+    claim_payload = operation_claim_for_request(request, worker_id, device_id, stage_id)
+    directory = _firmware_root() / stage_id
+    directory.mkdir(parents=True, exist_ok=False)
+    try:
+        files = []
+        if vendor_file is not None:
+            files.append(await _write_staged_image(vendor_file, directory, "vendor", limit))
+        for kind, path_text in (("system", system_path), ("vendor", vendor_path)):
+            if not path_text:
+                continue
+            if any(item["kind"] == kind for item in files):
+                raise HTTPException(409, f"duplicate {kind} image source")
+            source = Path(path_text).expanduser().resolve()
+            if not source.is_file():
+                raise HTTPException(400, f"file not found on Controller: {path_text}")
+            files.append(_copy_controller_file_into(source, directory / f"{kind}.img", limit))
+        command = service().repository.create_command({
+            "worker_id": worker_id,
+            "command_type": "flash_gsi",
+            "payload": {
+                "stage_id": stage_id,
+                "files": files,
+                "devices": [device_id],
+                **claim_payload,
+            },
+        })
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        service().repository.claims.release(
+            claim_payload["claim_source_id"], status="failed"
+        )
+        raise
+    return {"success": True, "stage_id": stage_id, "command_id": command["id"]}
+
+
+def _stage_gsi_pull_from_worker(
+    request: Request,
+    worker_id: str,
+    device_id: str,
+    source_worker_id: str,
+    system_path: str,
+    vendor_path: str,
+):
+    pulls = []
+    for kind, path_text in (("system", system_path), ("vendor", vendor_path)):
+        if not path_text:
+            continue
+        transfer = service().repository.create_transfer(
+            source_worker_id,
+            transfer_type="gsi_pull",
+            owner_id=principal_owner_id(request),
+            metadata={
+                "target_worker_id": worker_id,
+                "device_id": device_id,
+                "kind": kind,
+                "source_path": path_text,
+            },
+        )
+        command = service().repository.create_command({
+            "worker_id": source_worker_id,
+            "command_type": "file_transfer",
+            "payload": {
+                "transfer_id": transfer["id"],
+                "source_path": path_text,
+            },
+        })
+        pulls.append({
+            "kind": kind,
+            "worker_id": source_worker_id,
+            "transfer_id": transfer["id"],
+            "command_id": command["id"],
+        })
+    return {"success": True, "pulls": pulls}
+
+
+@router.post("/gsi/stage-from-transfer")
+async def finalize_worker_gsi_from_transfer(
+    request: Request,
+    worker_id: str = Form(...),
+    devices: str = Form(...),
+    transfer_ids: str = Form(...),
+    vendor_file: UploadFile | None = File(default=None),
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
+):
+    """Stage pulled cross-Worker GSI images and create the flash command."""
+    _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
+    _online_worker(worker_id)
+    requested_ids = [item.strip() for item in transfer_ids.split(",") if item.strip()]
+    if not requested_ids:
+        raise HTTPException(400, "no source transfers provided")
+    transfers = []
+    for transfer_id in requested_ids:
+        transfer = service().repository.get_transfer(transfer_id)
+        if not transfer or transfer.get("status") != "completed":
+            raise HTTPException(409, f"transfer {transfer_id} is not complete")
+        _require_transfer_access(request, transfer)
+        metadata = transfer.get("metadata") or {}
+        if metadata.get("target_worker_id") != worker_id:
+            raise HTTPException(409, "transfer does not target this worker")
+        transfers.append(transfer)
+    device_id = worker_device(
+        worker_id,
+        devices,
+        "GSI flashing",
+        require_local_usb=True,
+    )
+    limit = configured_max_bytes(
+        "GMS_CLUSTER_FIRMWARE_MAX_BYTES", service().config.firmware_max_bytes
+    )
+    stage_id = "fw-" + os.urandom(16).hex()
+    claim_payload = operation_claim_for_request(request, worker_id, device_id, stage_id)
+    directory = _firmware_root() / stage_id
+    directory.mkdir(parents=True, exist_ok=False)
+    transfer_root = _transfer_root().resolve()
+    files = []
+    try:
+        if vendor_file is not None:
+            files.append(await _write_staged_image(vendor_file, directory, "vendor", limit))
+        for transfer in transfers:
+            metadata = transfer.get("metadata") or {}
+            kind = str(metadata.get("kind") or "")
+            if kind not in {"system", "vendor"}:
+                raise HTTPException(400, "invalid GSI transfer kind")
+            if any(item["kind"] == kind for item in files):
+                raise HTTPException(409, f"duplicate {kind} image source")
+            source = (transfer_root / str(transfer.get("relative_path") or "")).resolve()
+            if not source.is_relative_to(transfer_root) or not source.is_file():
+                raise HTTPException(404, "transferred GSI image not found")
+            staged = _copy_controller_file_into(source, directory / f"{kind}.img", limit)
+            if staged["sha256"] != str(transfer.get("sha256") or ""):
+                raise HTTPException(409, "transferred GSI image checksum mismatch")
+            files.append(staged)
+        command = service().repository.create_command({
+            "worker_id": worker_id,
+            "command_type": "flash_gsi",
+            "payload": {
+                "stage_id": stage_id,
+                "files": files,
+                "devices": [device_id],
+                **claim_payload,
+            },
+        })
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        service().repository.claims.release(
+            claim_payload["claim_source_id"], status="failed"
+        )
+        raise
+    for transfer in transfers:
+        shutil.rmtree(_transfer_root() / str(transfer["id"]), ignore_errors=True)
+        service().repository.update_transfer(str(transfer["id"]), status="consumed")
     return {"success": True, "stage_id": stage_id, "command_id": command["id"]}
 
 

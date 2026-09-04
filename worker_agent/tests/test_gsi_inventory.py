@@ -1,12 +1,66 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from worker_agent.inventory import flash_gsi, scan_suites
+from worker_agent.inventory import browse_directory, copy_image_into, flash_gsi, scan_suites
 from worker_agent.suite_detection import suite_details
+
+
+def test_browse_directory_lists_entries_with_metadata(tmp_path: Path) -> None:
+    (tmp_path / "images" / "nested").mkdir(parents=True)
+    (tmp_path / "images" / "gsi.img").write_bytes(b"abc")
+
+    result = browse_directory(str(tmp_path / "images"))
+
+    assert result["path"] == str((tmp_path / "images").resolve())
+    assert [(item["name"], item["type"]) for item in result["files"]] == [
+        ("nested", "directory"),
+        ("gsi.img", "file"),
+    ]
+
+
+def test_browse_directory_defaults_to_suite_root(tmp_path: Path) -> None:
+    suite_root = tmp_path / "GMS-Suite"
+    suite_root.mkdir()
+    (suite_root / "android-cts").mkdir()
+
+    result = browse_directory("", default_path=suite_root)
+
+    assert result["path"] == str(suite_root.resolve())
+    assert [item["name"] for item in result["files"]] == ["android-cts"]
+
+
+def test_browse_directory_falls_back_to_home_without_default(tmp_path: Path) -> None:
+    with patch("worker_agent.device_actions.Path.home", return_value=tmp_path):
+        result = browse_directory("")
+
+    assert result["path"] == str(tmp_path.resolve())
+
+
+def test_copy_image_into_reports_size_and_sha256(tmp_path: Path) -> None:
+    source = tmp_path / "a.img"
+    source.write_bytes(b"12345")
+    target = tmp_path / "staging" / "system.img"
+    target.parent.mkdir(parents=True)
+
+    staged = copy_image_into(source, target, 1024)
+
+    assert staged["size_bytes"] == 5
+    assert staged["sha256"] == hashlib.sha256(b"12345").hexdigest()
+    assert target.read_bytes() == b"12345"
+
+
+def test_copy_image_into_enforces_size_limit(tmp_path: Path) -> None:
+    import pytest
+
+    source = tmp_path / "big.img"
+    source.write_bytes(b"0" * 16)
+    with pytest.raises(ValueError, match="staging limit"):
+        copy_image_into(source, tmp_path / "out.img", 8)
 
 
 def test_suite_detection_covers_verifier_launcher() -> None:

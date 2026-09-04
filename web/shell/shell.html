@@ -32,10 +32,10 @@
     <script src="/static/js/notifications.js?v=20260903-toggle-ready" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
     <script src="/static/js/pages/test-suite-browser.js?v=20260827-user-lazy" defer></script>
-    <script src="/static/js/pages/firmware-burn.js?v=20260902-source-refresh-backoff" defer></script>
+    <script src="/static/js/pages/firmware-burn.js?v=20260904-gsi-worker-source" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20260810-modular-split" defer></script>
     <script src="/static/js/pages/vpn-control.js?v=20260902-vpn-per-worker" defer></script>
-    <script src="/static/js/pages/file-browser.js?v=20260813-firmware-content-id" defer></script>
+    <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
     <script src="/static/js/pages/test-control.js?v=20260827-usbip-vid-pids" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20260813-upload-generation" defer></script>
@@ -2739,6 +2739,7 @@
                     <div class="input-with-btn">
                         <input type="text" id="gsi-system" placeholder="请选择System镜像" />
                         <button class="btn-small" onclick="browseLocalFileForGsiSystem()">📁</button>
+                        <button class="btn-small" onclick="pickLocalGsiSystemFile()">本机</button>
                     </div>
                 </div>
                 <div class="modal-form-row">
@@ -2825,6 +2826,10 @@
                 <span class="modal-close" onclick="closeFileBrowserModal()" style="color:#fff;">&times;</span>
             </div>
             <div class="modal-body" style="overflow: hidden; display: flex; flex-direction: column;">
+                <div id="file-browser-worker-row" style="display:none; align-items:center; gap:8px; margin-bottom:8px;">
+                    <label style="font-size:12px; color: var(--text-secondary); white-space:nowrap;">Worker 主机:</label>
+                    <select id="file-browser-worker-select" onchange="onFileBrowserWorkerChange()" style="flex:1; min-width:0; padding:4px 6px;"></select>
+                </div>
                 <div class="file-browser-path" id="file-browser-current-path" style="margin-bottom: 10px;"></div>
                 <div class="file-browser-header">
                     <span class="file-browser-icon"></span>
