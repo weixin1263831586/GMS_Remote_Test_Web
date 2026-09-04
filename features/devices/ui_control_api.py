@@ -19,6 +19,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from foundation.command_result import CommandResult
 from foundation.networking import is_local_host
 from foundation.responses import error_response
 
@@ -96,11 +97,13 @@ def _extract_json_object(text: str):
         return None
 
 
-def _run_remote(ssh, command: str, timeout: int = 30) -> tuple[str, str, int]:
+def _run_remote(ssh, command: str, timeout: int = 30) -> CommandResult:
     return runtime.ssh_manager.execute_command(ssh, command, timeout=timeout)
 
 
-def _run_remote_with_connection(config: dict, command: str, timeout: int) -> tuple[str, str, int]:
+def _run_remote_with_connection(
+    config: dict, command: str, timeout: int,
+) -> CommandResult:
     with SSHConnection(config) as ssh:
         if not ssh:
             raise ConnectionError("SSH connection failed")
@@ -169,9 +172,12 @@ def _center_from_bounds(bounds: str):
 def _capture_screenshot_sync(config: dict, capture_cmd: str, remote_png: str) -> bytes:
     if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
         try:
-            out, err, code = runtime.run_local_shell_command(capture_cmd, 30)
-            if code != 0 or not os.path.exists(remote_png):
-                raise RuntimeError(f"screencap failed: {(err or out).strip()}")
+            result = runtime.run_local_shell_command(capture_cmd, 30)
+            if not result.ok or not os.path.exists(remote_png):
+                raise RuntimeError(
+                    f"screencap failed: "
+                    f"{(result.stderr or result.stdout).strip()}"
+                )
             with open(remote_png, "rb") as handle:
                 return handle.read()
         finally:
@@ -184,8 +190,8 @@ def _capture_screenshot_sync(config: dict, capture_cmd: str, remote_png: str) ->
         try:
             _run_remote(ssh, capture_cmd, timeout=30)
             check = f"test -s {shlex.quote(remote_png)} && echo OK || echo EMPTY"
-            out, _, _ = _run_remote(ssh, check, timeout=5)
-            if "OK" not in out.split():
+            check_result = _run_remote(ssh, check, timeout=5)
+            if "OK" not in check_result.stdout.split():
                 raise RuntimeError("screencap produced no image (device offline or unauthorized?)")
             return _scp_read(ssh, remote_png)
         finally:
@@ -277,9 +283,11 @@ async def ui_layout(req: UiControlRequest, request: Request):
                 })
             except Exception as u2_exc:
                 logger.warning("[UI Control] uiautomator2 layout failed for %s: %s; falling back", serial, u2_exc)
-                out, err, _ = await asyncio.to_thread(runtime.run_local_shell_command, cmd, 30)
+                local = await asyncio.to_thread(runtime.run_local_shell_command, cmd, 30)
+                out, err = local.stdout, local.stderr
         else:
-            out, err, _ = await asyncio.to_thread(_run_remote_with_connection, config, cmd, 30)
+            remote = await asyncio.to_thread(_run_remote_with_connection, config, cmd, 30)
+            out, err = remote.stdout, remote.stderr
 
         err_msg = _looks_like_error(out) or _looks_like_error(err)
         if err_msg:
@@ -358,9 +366,11 @@ async def ui_tap(req: UiTapRequest, request: Request):
 
     try:
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
-            out, err, code = await asyncio.to_thread(runtime.run_local_shell_command, cmd, 10)
+            tap_result = await asyncio.to_thread(runtime.run_local_shell_command, cmd, 10)
+            out, err, code = tap_result.stdout, tap_result.stderr, tap_result.code
         else:
-            out, err, code = await asyncio.to_thread(_run_remote_with_connection, config, cmd, 10)
+            remote = await asyncio.to_thread(_run_remote_with_connection, config, cmd, 10)
+            out, err, code = remote.stdout, remote.stderr, remote.code
         if code != 0:
             return error_response(f"tap failed: {(err or out).strip()}", 502)
         return JSONResponse(content={"success": True, "serial": serial, "x": req.x, "y": req.y})

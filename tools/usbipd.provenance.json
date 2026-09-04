@@ -2,12 +2,14 @@
   "artifact": "tools/usbipd",
   "description": "用户态 USB/IP 服务端（fork 自 jiegec/usbip），随平台分发给 Ubuntu 来源主机自动部署",
   "source_repo": "weixin1263831586/usbip",
-  "commit": "864bff495caaf53b7c8eab8b1e3a6cebe4462839",
-  "version": "0.9.4",
+  "release_tag": "v0.9.6",
+  "commit": "d7c1a2974cb26f980dc23bbceeb1d743fdb4822a",
+  "version": "0.9.5 (tag v0.9.6; Cargo.toml 版本号在 c3d61b9 才升至 0.9.6)",
   "target": "x86_64-unknown-linux-gnu",
-  "sha256": "826109e22f93ff14077adb7bce3add147cdf0427db58c55552b4a9b6419320eb",
-  "cargo_lock_sha256": "846f6fdfc7a2d13c882a0e0b52df8a3f66ee8a8816f82ecde6c8f1f22cd74699",
+  "build_env": "GitHub Actions ubuntu-22.04（glibc 2.35，兼容 Ubuntu 22.04 来源主机）",
+  "sha256": "d238204e21a884769960ad1871db3b9c961263ee5daea4fe6d3b84f15edb0ca2",
+  "release_url": "https://github.com/weixin1263831586/usbip/releases/tag/v0.9.6",
   "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
-  "build": "cargo build --release --bin usbipd",
-  "notes": "0.9.4 新增（commit 864bff4）：拒绝 USBIP_CMD_SUBMIT devid 与已导入设备不匹配的请求；OP_REQ_DEVLIST/OP_REQ_IMPORT 的 status 字段从 debug_assert 改为运行时校验并拒绝非零值。0.9.3 新增：--listen 显式绑定地址（默认 127.0.0.1:3240）、--allow-client 客户端 IP 白名单、transfer/ISO 分配上限、连接数/URB 限制、--device VID:PID 精确配对过滤器。升级流程：在 usbip 仓库对应 commit 上完成 release 构建，用 sha256sum 记录二进制与 Cargo.lock，替换 tools/usbipd 并同步更新本清单。后续应改为 usbip 仓库 CI Release 产物直出（见 2026-09-03 联合审计 P1-5）。"
+  "build": "GitHub Actions release.yml（cargo build --release --bin usbipd）",
+  "notes": "v0.9.6 新增：客户端策略 fail-closed——非回环 --listen 且无 --allow-client 时拒绝启动，需显式 --allow-any-client 放行；loopback 对端始终放行。导入设备改为 handler 统一出口回收（协议错误/写失败/二次 import 不再软锁设备）；断链 URB drain 增加 10s teardown deadline；RET_SUBMIT 序列化校验升级为 write_to_socket 运行时校验。历史：0.9.4 拒绝 devid 不匹配的 SUBMIT 与非零 OP_REQ status；0.9.3 引入 --listen/--allow-client/分配上限。Release 产物必须以 ubuntu-22.04 构建（见 release.yml 固定 runner）；升级时下载 Release binary 并核对本清单 sha256。"
 }

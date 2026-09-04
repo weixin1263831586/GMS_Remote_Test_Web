@@ -336,9 +336,9 @@ class VNCManager:
 
             quoted_novnc_dir = shlex.quote(REMOTE_NOVNC_DIR)
             check_novnc_cmd = f"[ -d {quoted_novnc_dir} ] && echo 'exists' || echo 'missing'"
-            stdout, stderr, code = self.ssh_manager.execute_command(ssh, check_novnc_cmd)
+            novnc_check = self.ssh_manager.execute_command(ssh, check_novnc_cmd)
 
-            if "missing" in stdout:
+            if "missing" in novnc_check.stdout:
                 self.ssh_manager.return_connection(ssh)
                 return {
                     'success': False,
@@ -352,8 +352,8 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             display_ready = False
             for _ in range(30):
                 display_cmd = f"export DISPLAY={VNC_DISPLAY} && xprop -root &>/dev/null && echo 'ready'"
-                stdout, _, _ = self.ssh_manager.execute_command(ssh, display_cmd)
-                if "ready" in stdout:
+                display_result = self.ssh_manager.execute_command(ssh, display_cmd)
+                if "ready" in display_result.stdout:
                     display_ready = True
                     break
                 time.sleep(0.5)
@@ -375,16 +375,16 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 f"&& ss -ltn | grep -q ':{VNC_PORT} ' "
                 "&& echo 'RUNNING' || echo 'NOT_RUNNING'"
             )
-            stdout, _, _ = self.ssh_manager.execute_command(ssh, check_x11_cmd)
-            x11vnc_running = command_reports_running(stdout)
+            x11_check = self.ssh_manager.execute_command(ssh, check_x11_cmd)
+            x11vnc_running = command_reports_running(x11_check.stdout)
 
             # 如果x11vnc正在运行，检查是否使用了密码模式
             if x11vnc_running and not vnc_password:
                 # 免密模式，检查是否需要从密码模式重启
                 check_password_mode = "pgrep -f -- 'x11vnc.*-rfbauth' && echo 'PASSWORD' || echo 'NOPASSWORD'"
-                stdout, _, _ = self.ssh_manager.execute_command(ssh, check_password_mode)
+                password_mode = self.ssh_manager.execute_command(ssh, check_password_mode)
 
-                if 'PASSWORD' in stdout:
+                if 'PASSWORD' in password_mode.stdout:
                     # 当前是密码模式，需要重启为免密模式
                     logger.info("[VNC] Found x11vnc running with password, restarting without password...")
                     self.ssh_manager.execute_command(
@@ -404,11 +404,13 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     f"-rfbport {VNC_PORT} {auth_param} {X11VNC_PERF_ARGS} {X11VNC_KEYMAP_ARGS} "
                     f"-bg -o ~/logs/x11vnc.log"
                 )
-                _, x11_stderr, x11_code = self.ssh_manager.execute_command(
+                x11_result = self.ssh_manager.execute_command(
                     ssh, x11vnc_cmd, timeout=15
                 )
-                if x11_code != 0:
-                    logger.warning("[VNC] Remote x11vnc start failed: %s", x11_stderr)
+                if not x11_result.ok:
+                    logger.warning(
+                        "[VNC] Remote x11vnc start failed: %s", x11_result.stderr
+                    )
 
             # 检查并启动websockify
             check_ws_cmd = (
@@ -416,8 +418,8 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 f"&& ss -ltn | grep -q ':{NOVNC_WEB_PORT} ' "
                 "&& echo 'RUNNING' || echo 'NOT_RUNNING'"
             )
-            stdout, _, _ = self.ssh_manager.execute_command(ssh, check_ws_cmd)
-            websockify_running = command_reports_running(stdout)
+            ws_check = self.ssh_manager.execute_command(ssh, check_ws_cmd)
+            websockify_running = command_reports_running(ws_check.stdout)
 
             if not websockify_running:
                 novnc_cmd = (
@@ -426,11 +428,14 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     f"{NOVNC_WEB_PORT} localhost:{VNC_PORT} "
                     "> ~/logs/novnc.log 2>&1 &"
                 )
-                _, novnc_stderr, novnc_code = self.ssh_manager.execute_command(
+                novnc_result = self.ssh_manager.execute_command(
                     ssh, novnc_cmd, timeout=10
                 )
-                if novnc_code != 0:
-                    logger.warning("[VNC] Remote websockify start failed: %s", novnc_stderr)
+                if not novnc_result.ok:
+                    logger.warning(
+                        "[VNC] Remote websockify start failed: %s",
+                        novnc_result.stderr,
+                    )
 
             # 启动命令在后台执行，命令本身返回 0 不代表监听已经成功。只有
             # x11vnc 与 websockify 两个端口都就绪时才向前端返回成功。
@@ -444,7 +449,9 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
             novnc_ready = False
             # 后台进程在较慢主机上可能需要数秒才开始监听。
             for _ in range(10):
-                stdout, stderr, _ = self.ssh_manager.execute_command(ssh, verify_cmd, timeout=5)
+                verify_result = self.ssh_manager.execute_command(ssh, verify_cmd, timeout=5)
+                stdout = verify_result.stdout
+                stderr = verify_result.stderr
                 vnc_ready = 'VNC_READY' in stdout
                 novnc_ready = 'NOVNC_READY' in stdout
                 if vnc_ready and novnc_ready:
@@ -452,7 +459,7 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 time.sleep(0.3)
             if not vnc_ready or not novnc_ready:
                 log_cmd = "tail -n 12 ~/logs/x11vnc.log ~/logs/novnc.log 2>/dev/null"
-                logs, _, _ = self.ssh_manager.execute_command(ssh, log_cmd, timeout=5)
+                logs_result = self.ssh_manager.execute_command(ssh, log_cmd, timeout=5)
                 self.ssh_manager.return_connection(ssh)
                 failed = []
                 if not vnc_ready:
@@ -462,9 +469,9 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 command_errors = '\n'.join(
                     value.strip()
                     for value in (
-                        locals().get('x11_stderr', ''),
-                        locals().get('novnc_stderr', ''),
-                        logs,
+                        x11_result.stderr if not x11_result.ok else '',
+                        novnc_result.stderr if not novnc_result.ok else '',
+                        logs_result.stdout,
                         stderr,
                     )
                     if value and value.strip()
@@ -562,14 +569,18 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 return {'running': False, 'error': 'SSH连接失败'}
 
             check_cmd = "pgrep -f 'x11vnc' | wc -l"
-            stdout, _, code = self.ssh_manager.execute_command(ssh, check_cmd)
+            count_result = self.ssh_manager.execute_command(ssh, check_cmd)
 
-            vnc_count = int(stdout.strip()) if code == 0 else 0
+            vnc_count = (
+                int(count_result.stdout.strip()) if count_result.ok else 0
+            )
 
             port_check = f"netstat -tuln | grep {NOVNC_WEB_PORT}"
-            stdout, _, code = self.ssh_manager.execute_command(ssh, port_check)
+            port_result = self.ssh_manager.execute_command(ssh, port_check)
 
-            port_listening = code == 0 and str(NOVNC_WEB_PORT) in stdout
+            port_listening = (
+                port_result.ok and str(NOVNC_WEB_PORT) in port_result.stdout
+            )
 
             self.ssh_manager.return_connection(ssh)
 

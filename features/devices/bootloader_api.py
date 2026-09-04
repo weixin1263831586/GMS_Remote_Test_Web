@@ -117,68 +117,87 @@ async def _manage_bootloader_lock(
                 )
 
         config = runtime.config_manager.load_config()
-        with runtime.ssh_manager.connection(config) as ssh:
-            local_script = os.path.join(
-                runtime.project_root, "scripts", "run_Device_Lock.sh"
+        # P1-11：整个 SSH 块（SFTP 上传 + 脚本执行 + 60s 轮询）都是阻塞
+        # 调用，必须整体放进线程池执行，不能在 async 路由里直接跑。
+        return await asyncio.to_thread(
+            _run_bootloader_lock_block, config, devices, action,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Error managing device lock: %s", exc)
+        return _api_error(str(exc), status_code=500)
+
+
+def _run_bootloader_lock_block(
+    config: dict,
+    devices: list[str],
+    action: str,
+):
+    """Synchronous body of the bootloader lock/unlock flow (thread offload)."""
+    with runtime.ssh_manager.connection(config) as ssh:
+        local_script = os.path.join(
+            runtime.project_root, "scripts", "run_Device_Lock.sh"
+        )
+        remote_script = os.path.join(
+            default_suites_path(
+                config, runtime.config_manager.get_ubuntu_user(config)
+            ),
+            "run_Device_Lock.sh",
+        )
+        if not os.path.exists(local_script):
+            return _api_error(
+                f"Script file not found: {local_script}", status_code=404
             )
-            remote_script = os.path.join(
-                default_suites_path(
-                    config, runtime.config_manager.get_ubuntu_user(config)
-                ),
-                "run_Device_Lock.sh",
+        try:
+            with ssh.open_sftp() as sftp:
+                sftp.put(local_script, remote_script)
+            runtime.ssh_manager.execute_command(
+                ssh, f"chmod +x {shlex.quote(remote_script)}"
             )
-            if not os.path.exists(local_script):
-                return _api_error(
-                    f"Script file not found: {local_script}", status_code=404
-                )
+        except Exception as exc:
+            return _api_error(f"Script upload failed: {exc!s}", status_code=500)
+
+        results = []
+        for device_id in devices:
             try:
-                with ssh.open_sftp() as sftp:
-                    sftp.put(local_script, remote_script)
-                runtime.ssh_manager.execute_command(
-                    ssh, f"chmod +x {shlex.quote(remote_script)}"
-                )
-            except Exception as exc:
-                return _api_error(f"Script upload failed: {exc!s}", status_code=500)
-
-            results = []
-            for device_id in devices:
-                try:
-                    def remote_runner(argv: list[str], timeout: int) -> CommandResult:
-                        output, error, code = runtime.ssh_manager.execute_command(
-                            ssh,
-                            shlex.join(argv),
-                            timeout=timeout,
-                        )
-                        return CommandResult(output, error, code)
-
-                    prepared = await asyncio.to_thread(
-                        FastbootPreparer(remote_runner).prepare_bootloader,
-                        device_id,
+                def remote_runner(argv: list[str], timeout: int) -> CommandResult:
+                    return runtime.ssh_manager.execute_command(
+                        ssh,
+                        shlex.join(argv),
+                        timeout=timeout,
                     )
-                    cmd = shlex.join([
-                        "bash",
-                        remote_script,
-                        device_id,
-                        prepared.oem_argument(action),
-                    ])
-                    output, error, code = runtime.ssh_manager.execute_command(ssh, cmd)
-                    if code == 0:
-                        start_time = time.time()
-                        adb_ready = False
-                        while time.time() - start_time < 60:
-                            check_output, _, check_code = runtime.ssh_manager.execute_command(
-                                ssh, f"adb -s {device_id} get-state"
-                            )
-                            if _adb_state_is_ready(check_output, check_code):
-                                adb_ready = True
-                                break
-                            await asyncio.sleep(1)
-                        if not adb_ready:
-                            code = 1
-                            error = (
-                                f"{error}\n" if error else ""
-                            ) + "设备操作后未在 60 秒内返回 ADB device 状态"
-                    await asyncio.sleep(2)
+
+                prepared = FastbootPreparer(remote_runner).prepare_bootloader(
+                    device_id,
+                )
+
+                cmd = shlex.join([
+                    "bash",
+                    remote_script,
+                    device_id,
+                    prepared.oem_argument(action),
+                ])
+                result = runtime.ssh_manager.execute_command(ssh, cmd)
+                code = result.code
+                output, error = result.stdout, result.stderr
+                if code == 0:
+                    start_time = time.time()
+                    adb_ready = False
+                    while time.time() - start_time < 60:
+                        check_result = runtime.ssh_manager.execute_command(
+                            ssh, f"adb -s {device_id} get-state"
+                        )
+                        if _adb_state_is_ready(check_result.stdout, check_result.code):
+                            adb_ready = True
+                            break
+                        time.sleep(1)
+                    if not adb_ready:
+                        code = 1
+                        error = (
+                            f"{error}\n" if error else ""
+                        ) + "设备操作后未在 60 秒内返回 ADB device 状态"
+                    time.sleep(2)
                     result_output = "\n".join(
                         part.strip() for part in (output, error) if part and part.strip()
                     )
@@ -188,18 +207,13 @@ async def _manage_bootloader_lock(
                         "output": result_output[-500:],
                         **({"error": result_output[-500:]} if code != 0 else {}),
                     })
-                except Exception as exc:
-                    results.append({
-                        "device": device_id, "success": False, "error": str(exc),
-                    })
+            except Exception as exc:
+                results.append({
+                    "device": device_id, "success": False, "error": str(exc),
+                })
 
-            action_text = "unlock" if action == "unlock" else "lock"
-            return _bootloader_operation_response(results, action_text)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Error managing device lock: %s", exc)
-        return _api_error(str(exc), status_code=500)
+        action_text = "unlock" if action == "unlock" else "lock"
+        return _bootloader_operation_response(results, action_text)
 
 
 def _resolve_device_lock_devices(req: DeviceLockRequest | None) -> list[str]:
@@ -265,11 +279,11 @@ async def check_bootloader_status(
 
         with SSHConnection() as ssh:
             def check_single_device(device_id: str) -> dict:
-                output, _error, _code = runtime.ssh_manager.execute_command(
+                result = runtime.ssh_manager.execute_command(
                     ssh,
                     f"adb -s {device_id} shell getprop ro.boot.verifiedbootstate",
                 )
-                state = output.strip()
+                state = result.stdout.strip()
                 try:
                     boot_state = VerifiedBootState(state)
                     is_locked = boot_state.is_locked

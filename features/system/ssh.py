@@ -10,11 +10,12 @@ from typing import Any
 
 import paramiko
 
-from foundation.common_utils import CommonUtils
+from foundation.command_result import CommandResult
 from foundation.config import get_ubuntu_user
 from foundation.networking import split_host_port
 from foundation.ssh import SSHD_INSTALL_GUIDE
 from foundation.ssh_security import configure_strict_host_keys
+from features.system.ssh_executor import ssh_executor
 
 
 logger = logging.getLogger(__name__)
@@ -149,13 +150,19 @@ class SSHManager:
                     except Exception:
                         pass
                     continue
-                # 测试连接是否仍然有效（轻量级检查）
+                # 测试连接是否仍然有效（轻量级检查）。
+                # 注意：paramiko 的 recv_exit_status() 不接受 timeout 参数
+                # （历史 P1：MagicMock 测试掩盖了 TypeError，导致池内健康
+                # 连接被误判为死连接、复用路径永远走不到）。这里靠
+                # exec_command(timeout=2) 的 channel 读超时兜底。
                 try:
                     _stdin, stdout, _stderr = ssh.exec_command('true', timeout=2)
-                    exit_code = stdout.channel.recv_exit_status(timeout=2)
+                    stdout.channel.settimeout(2.0)
+                    exit_code = stdout.channel.recv_exit_status()
                     if exit_code == 0:
                         logger.debug("[SSH] Reused connection from pool")
                         return ssh
+                    logger.debug(f"[SSH] Pool health check exit_code={exit_code}")
                 except Exception as e:
                     logger.debug(f"[SSH] Connection {attempt+1}/{max_attempts} is dead: {e}")
                     try:
@@ -182,27 +189,22 @@ class SSHManager:
         command: str,
         timeout: int = 30,
         get_pty: bool = False
-    ) -> tuple[str, str, int]:
-        """执行 SSH 命令并返回标准输出、错误输出和退出码。"""
-        try:
-            _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=get_pty)
+    ) -> CommandResult:
+        """执行 SSH 命令，统一返回 :class:`CommandResult`。
 
-            stdout_text = CommonUtils.decode_ssh_output(stdout.read())
-            stderr_text = CommonUtils.decode_ssh_output(stderr.read())
-            exit_code = stdout.channel.recv_exit_status()
-
-            return stdout_text, stderr_text, exit_code
-
-        except Exception as e:
-            logger.error(f"[SSH] Command execution error: {e}")
-            return '', str(e), -1
+        4.txt 第 12 节重构：同步/异步执行收敛到
+        :class:`~features.system.ssh_executor.SSHExecutor` 唯一实现，
+        彻底废除 ``(stdout, stderr, exit_code)`` 裸 tuple（位置错用曾造成
+        真实功能 bug）。
+        """
+        return ssh_executor.run(ssh, command, timeout=timeout, get_pty=get_pty)
 
     def check_sshd_installed(self, ssh) -> tuple[bool, str]:
         """检查 Windows SSHD 是否已安装。"""
         try:
-            stdout, _stderr, code = self.execute_command(ssh, 'Get-Service sshd')
-            if code == 0 and stdout.strip():
-                return True, stdout.strip()
+            result = self.execute_command(ssh, 'Get-Service sshd')
+            if result.code == 0 and result.stdout.strip():
+                return True, result.stdout.strip()
             return False, ''
         except Exception as e:
             logger.error(f"Error checking sshd: {e}")
@@ -221,9 +223,9 @@ class SSHManager:
                 }
 
             # 尝试执行安装命令（会自动检查权限）
-            stdout, stderr, code = self.execute_command(ssh, SSHD_INSTALL_CMD, timeout=180)
+            install_result = self.execute_command(ssh, SSHD_INSTALL_CMD, timeout=180)
 
-            if code == 0:
+            if install_result.code == 0:
                 # 启动 SSHD 服务并设置开机自启（合并命令以提高效率）
                 combined_cmd = f'{SSHD_START_CMD}; {SSHD_ENABLE_CMD}'
                 self.execute_command(ssh, combined_cmd, timeout=60)
@@ -242,7 +244,7 @@ class SSHManager:
                         'message': 'SSHD 安装完成，请验证服务状态'
                     }
             else:
-                error_msg = stderr or stdout
+                error_msg = install_result.stderr or install_result.stdout
 
                 # 检查是否是权限问题
                 if 'Access denied' in error_msg or '管理员' in error_msg or 'administrator' in error_msg.lower():

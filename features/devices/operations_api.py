@@ -260,8 +260,8 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
                     f"adb -s {device_id} shell cmd wifi connect-network {ssid_q} wpa2 {password_q}"
                 )
                 full_cmd = f"{enable_cmd} && sleep 2 && {connect_cmd}"
-                _output, _error, code = runtime.ssh_manager.execute_command(ssh, full_cmd)
-                return {"device": device_id, "success": code == 0}
+                _result = runtime.ssh_manager.execute_command(ssh, full_cmd)
+                return {"device": device_id, "success": _result.ok}
 
             # Serial to_thread — frees the loop between devices and keeps the
             # shared ssh connection single-threaded (paramiko is not thread-safe).

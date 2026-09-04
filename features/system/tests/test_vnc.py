@@ -9,6 +9,7 @@ from features.system.vnc import (
     vnc_password_temp_path,
 )
 from foundation.processes import command_reports_running
+from foundation.command_result import CommandResult
 
 
 class VNCManagerTests(unittest.TestCase):
@@ -51,12 +52,12 @@ class VNCManagerTests(unittest.TestCase):
             def execute_command(self, _ssh, command, timeout=None):
                 commands.append(command)
                 if "xprop -root" in command:
-                    return "ready\n", "", 0
+                    return CommandResult(stdout="ready\n", stderr="", code=0)
                 if "pgrep" in command:
-                    return "NOT_RUNNING\n", "", 1
+                    return CommandResult(stdout="NOT_RUNNING\n", stderr="", code=1)
                 if "ss -ltn" in command:
-                    return "VNC_READY\nNOVNC_READY\n", "", 0
-                return "exists\n", "", 0
+                    return CommandResult(stdout="VNC_READY\nNOVNC_READY\n", stderr="", code=0)
+                return CommandResult(stdout="exists\n", stderr="", code=0)
 
         manager = VNCManager()
         manager.ssh_manager = FakeSshManager()

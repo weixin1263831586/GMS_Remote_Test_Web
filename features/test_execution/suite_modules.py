@@ -145,9 +145,9 @@ if os.path.isdir(root):
 emit()
 """
     cmd = f"python3 -c {shlex.quote(script)} {shlex.quote(testcases_path)} {shlex.quote(query_lower)} {shlex.quote(str(per_suite_limit))}"
-    output, _, _ = runtime.ssh_manager.execute_command(ssh, cmd, timeout=60)
+    search_result = runtime.ssh_manager.execute_command(ssh, cmd, timeout=60)
     try:
-        raw_items = json.loads(output or "[]")
+        raw_items = json.loads(search_result.stdout or "[]")
     except Exception:
         raw_items = []
     return [

@@ -61,7 +61,7 @@ def test_duplicate_message_within_window_merges_to_single_record(tmp_path):
 
     store = NotificationStore(tmp_path / "notifications.sqlite3")
     fake_now = datetime(2026, 9, 1, 14, 40, 30)
-    original_now = notifications_module.datetime.now
+    original_datetime = notifications_module.datetime
 
     class _FrozenDatetime(datetime):
         @classmethod
@@ -91,7 +91,7 @@ def test_duplicate_message_within_window_merges_to_single_record(tmp_path):
             "data": {},
         })
     finally:
-        notifications_module.datetime = original_now
+        notifications_module.datetime = original_datetime
 
     records = store.list("alice", 100)["records"]
     assert len(records) == 1

@@ -8,6 +8,7 @@ import re
 import subprocess
 from typing import Any
 
+from foundation.command_result import CommandResult
 from foundation.processes import run_local_shell_command
 
 
@@ -90,12 +91,19 @@ async def execute_config_host_command(
     ssh,
     command: str,
     timeout: int,
-) -> tuple[str, str, int]:
-    """在配置主机上执行命令（本地或远程）"""
+) -> CommandResult:
+    """在配置主机上执行命令（本地或远程），统一返回 :class:`CommandResult`。
+
+    本地与 SSH 两条路径在此汇合；本地侧 ``run_local_shell_command`` 与
+    SSH 侧 ``execute_command`` 重构后返回同一结果类型，调用方直接以
+    ``result.stdout`` / ``result.ok`` 消费。
+    """
     if _is_config_host_local(config):
         return await asyncio.to_thread(run_local_shell_command, command, timeout)
     # SSH 探测为阻塞调用，在线程中执行。
-    return await asyncio.to_thread(_ssh_manager.execute_command, ssh, command, timeout)
+    return await asyncio.to_thread(
+        _ssh_manager.execute_command, ssh, command, timeout,
+    )
 
 
 async def resolve_vpn_connection_name(
@@ -112,8 +120,8 @@ async def resolve_vpn_connection_name(
         cmd = "nmcli -t -f NAME,TYPE,STATE connection show --active 2>/dev/null"
     else:
         cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
-    output, _, _ = await execute_config_host_command(config, ssh, cmd, timeout=5)
-    names = parse_vpn_connection_names(output)
+    nmcli_result = await execute_config_host_command(config, ssh, cmd, timeout=5)
+    names = parse_vpn_connection_names(nmcli_result.stdout)
     return names[0] if names else ""
 
 

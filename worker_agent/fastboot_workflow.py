@@ -6,18 +6,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePath
 
+# Canonical CommandResult lives in foundation; re-exported here so the
+# existing `from worker_agent.fastboot_workflow import CommandResult`
+# call sites keep working (features/firmware, features/devices).
+from foundation.command_result import CommandResult  # noqa: F401
 
-@dataclass(frozen=True)
-class CommandResult:
-    stdout: str = ""
-    stderr: str = ""
-    code: int = 0
 
-    @property
-    def output(self) -> str:
-        return "\n".join(
-            value.strip() for value in (self.stdout, self.stderr) if value.strip()
-        )
+__all__ = [
+    "CommandResult",
+    "PreparedFastbootDevice",
+    "FastbootPreparationError",
+    "FastbootPreparer",
+    "Runner",
+]
 
 
 @dataclass(frozen=True)

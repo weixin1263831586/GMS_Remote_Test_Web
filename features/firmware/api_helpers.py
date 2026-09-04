@@ -30,9 +30,9 @@ def remote_file_exists(ssh, path: str) -> bool:
         f"test -f {shlex.quote(path)} && echo {_REMOTE_FILE_FOUND_MARKER} "
         f"|| echo {_REMOTE_FILE_MISSING_MARKER}"
     )
-    output, _, _ = runtime.ssh_manager.execute_command(ssh, command, timeout=5)
+    result = runtime.ssh_manager.execute_command(ssh, command, timeout=5)
     return _REMOTE_FILE_FOUND_MARKER in {
-        line.strip() for line in output.splitlines()
+        line.strip() for line in result.stdout.splitlines()
     }
 
 

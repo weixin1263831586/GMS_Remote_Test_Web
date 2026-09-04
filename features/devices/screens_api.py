@@ -61,18 +61,20 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
                     f"curl -s -o /dev/null -w '%{{http_code}}' "
                     f"{novnc_url(ubuntu_host, autoconnect=False)} --connect-timeout 3"
                 )
-                vnc_output, _, _ = runtime.ssh_manager.execute_command(ssh, vnc_check_cmd, timeout=5)
-                vnc_available = vnc_output.strip() == "200"
+                vnc_result = await asyncio.to_thread(
+                    runtime.ssh_manager.execute_command, ssh, vnc_check_cmd, timeout=5,
+                )
+                vnc_available = vnc_result.stdout.strip() == "200"
 
                 scrcpy_path = config.get("scrcpy_path", "")
                 if scrcpy_path:
                     scrcpy_path = scrcpy_path.replace("${ubuntu_user}", ubuntu_user)
                     scrcpy_check_cmd = f"test -f {shlex.quote(scrcpy_path)} && echo 'exists' || echo 'not_found'"
-                    scrcpy_output, _, scrcpy_code = runtime.ssh_manager.execute_command(
-                        ssh, scrcpy_check_cmd
+                    scrcpy_result = await asyncio.to_thread(
+                        runtime.ssh_manager.execute_command, ssh, scrcpy_check_cmd,
                     )
 
-                    if "not_found" in scrcpy_output:
+                    if "not_found" in scrcpy_result.stdout:
                         return JSONResponse(
                             content={
                                 "success": False,
@@ -83,11 +85,11 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
                         )
                 else:
                     scrcpy_check_cmd = "which scrcpy"
-                    scrcpy_output, _, scrcpy_code = runtime.ssh_manager.execute_command(
-                        ssh, scrcpy_check_cmd
+                    scrcpy_result = await asyncio.to_thread(
+                        runtime.ssh_manager.execute_command, ssh, scrcpy_check_cmd,
                     )
 
-                    if scrcpy_code != 0:
+                    if not scrcpy_result.ok:
                         return JSONResponse(
                             content={
                                 "success": False,
@@ -163,15 +165,17 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
                         background=True,
                     )
 
-                    runtime.ssh_manager.execute_command(ssh, cmd, timeout=10)
+                    await asyncio.to_thread(
+                        runtime.ssh_manager.execute_command, ssh, cmd, timeout=10,
+                    )
 
                     await asyncio.sleep(0.3)
                     pattern = DeviceUtils.scrcpy_process_pattern(device_id)
                     check_cmd = f"pgrep -f -- {shlex.quote(pattern)} && echo 'RUNNING' || echo 'NOT_RUNNING'"
-                    check_output, _, _ = runtime.ssh_manager.execute_command(
-                        ssh, check_cmd, timeout=5
+                    check_result = await asyncio.to_thread(
+                        runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=5,
                     )
-                    is_started = command_reports_running(check_output)
+                    is_started = command_reports_running(check_result.stdout)
 
                     results.append(
                         {

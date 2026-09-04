@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from features.test_execution import tradefed_results
+from foundation.command_result import CommandResult
 
 
 class TradefedResultCacheTests(unittest.TestCase):
@@ -63,7 +64,7 @@ class TradefedResultEnrichmentTests(unittest.TestCase):
             @staticmethod
             def execute_command(_ssh, command, timeout):
                 calls.append((command, timeout))
-                return "", "", 0
+                return CommandResult(stdout="", stderr="", code=0)
 
         original = tradefed_results.runtime.ssh_manager
         tradefed_results.runtime.ssh_manager = Manager()

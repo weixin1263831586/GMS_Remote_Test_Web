@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from features.test_execution.suite_modules import search_latest_suite_modules
+from foundation.command_result import CommandResult
 
 
 class _FakeSshManager:
@@ -24,8 +25,8 @@ class _FakeSshManager:
 
     def execute_command(self, ssh, command, timeout=60):
         self.command = command
-        return (
-            json.dumps([
+        return CommandResult(
+            stdout=json.dumps([
                 {
                     "module": "CtsCameraTestCases",
                     "file_name": "CtsCameraTestCases.apk",
@@ -33,8 +34,8 @@ class _FakeSshManager:
                     "relative_path": "CtsCameraTestCases.apk",
                 }
             ]),
-            "",
-            0,
+            stderr="",
+            code=0,
         )
 
 

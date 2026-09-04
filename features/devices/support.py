@@ -393,8 +393,8 @@ def get_device_properties_optimized(device_id: str, ssh) -> dict[str, str]:
     cat vendor/etc/fstab.rk30board 2>/dev/null | grep userdata || echo 'N/A'
 " """
 
-    stdout, _stderr, _code = runtime.ssh_manager.execute_command(ssh, cmd, timeout=15)
-    lines = stdout.strip().split('\n')
+    result = runtime.ssh_manager.execute_command(ssh, cmd, timeout=15)
+    lines = result.stdout.strip().split('\n')
 
     properties = {}
     for line in lines:

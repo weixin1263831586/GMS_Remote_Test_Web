@@ -131,17 +131,17 @@ def probe_existing_local_usbip_transport(
     if not ssh:
         return None
     try:
-        stdout, _stderr, code = runtime.ssh_manager.execute_command(
+        port_result = runtime.ssh_manager.execute_command(
             ssh,
             USBIP_PORT_COMMAND,
             timeout=10,
         )
-        if code != 0:
+        if not port_result.ok:
             return None
         source_host = _normalize_host(device_host)
         attached = {
             (str(entry.get("host") or ""), str(entry.get("busid") or ""))
-            for entry in parse_usbip_port_entries(stdout or "")
+            for entry in parse_usbip_port_entries(port_result.stdout or "")
         }
         if not all((source_host, busid) in attached for busid in busids):
             return None

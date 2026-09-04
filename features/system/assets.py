@@ -135,13 +135,12 @@ async def list_files(
         command_result = await asyncio.to_thread(_list_remote_files)
         if command_result is None:
             return ssh_connection_failed_response()
-        output, _error, code = command_result
 
-        if code != 0:
+        if not command_result.ok:
             return error_response('Failed to list directory', status_code=500)
 
         files = []
-        for line in output.split('\n'):
+        for line in command_result.stdout.split('\n'):
             if line.startswith('total') or not line.strip():
                 continue
 

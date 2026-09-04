@@ -100,20 +100,20 @@ class ADBForwardManager:
                     time.sleep(3)
 
                     # 测试连接
-                    test_output, _test_error, _test_code = self.ssh_manager.execute_command(
+                    adb_result = self.ssh_manager.execute_command(
                         ssh,
                         "adb devices",
                         timeout=10
                     )
 
                     # 使用 DeviceUtils 解析设备列表
-                    devices = DeviceUtils.parse_adb_devices(test_output)
+                    devices = DeviceUtils.parse_adb_devices(adb_result.stdout)
 
                     result = {
                         'success': True,
                         'devices': devices,
                         'device_count': len(devices),
-                        'adb_output': test_output[:500],
+                        'adb_output': adb_result.stdout[:500],
                         'message': f'✅ ADB端口转发成功! 设备: {", ".join(devices) if devices else "无"}'
                     }
 

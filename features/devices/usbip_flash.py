@@ -167,31 +167,37 @@ def bind_usbip_busid_via_ssh(
     command = f"usbipd bind --busid {busid}"
     if force:
         command += " --force"
-    out, err, code = usbip_manager.ssh_manager.execute_command(
+    result = usbip_manager.ssh_manager.execute_command(
         ssh, command, timeout=15,
     )
-    detail = (err or out or "").strip()
-    return {"success": code == 0, "code": code, "detail": detail}
+    detail = (result.stderr or result.stdout or "").strip()
+    return {"success": result.ok, "code": result.code, "detail": detail}
 
 
 def usbipd_list_via_ssh(ssh) -> tuple[str, str]:
     """Capture the usbipd device table for post-mortem diagnosis."""
-    out, err, code = usbip_manager.ssh_manager.execute_command(
+    result = usbip_manager.ssh_manager.execute_command(
         ssh, "usbipd list", timeout=15,
     )
-    if code != 0:
-        return "", (err or out or f"usbipd list exited with code {code}").strip()
-    return (out or "").strip(), ""
+    if not result.ok:
+        return "", (
+            result.stderr or result.stdout
+            or f"usbipd list exited with code {result.code}"
+        ).strip()
+    return (result.stdout or "").strip(), ""
 
 
 def usbipd_policy_list_via_ssh(ssh) -> str:
     """Capture `usbipd policy list` for post-mortem AutoBind diagnosis."""
-    out, err, code = usbip_manager.ssh_manager.execute_command(
+    result = usbip_manager.ssh_manager.execute_command(
         ssh, "usbipd policy list", timeout=15,
     )
-    if code != 0:
-        return (err or out or f"usbipd policy list exited with code {code}").strip()
-    return (out or "").strip(), ""
+    if not result.ok:
+        return (
+            result.stderr or result.stdout
+            or f"usbipd policy list exited with code {result.code}"
+        ).strip()
+    return (result.stdout or "").strip(), ""
 
 
 def usbipd_policy_line_covers_busid(output: str, busid: str) -> bool:
@@ -275,11 +281,16 @@ def _ensure_ubuntu_export(
         ssh,
         serials=export_serials,
         vids=export_vids if not export_serials else (),
-        # attach 走 usbip_attach_host（可能是 Tailscale 地址），加入白名单。
+        # attach 走 usbip_attach_host（可能是 Tailscale 地址）。白名单必须
+        # 解析为 Worker 出口 IP：在平台配置的 Ubuntu/Worker 主机上执行
+        # ip route get <来源IP>；解析失败按 fail-closed 拒绝启动。
         allow_worker_hosts=[
-            usbip_manager.config_manager.load_config().get("usbip_attach_host")
+            config.get("usbip_attach_host")
             or str(device_host).split("@", 1)[-1]
         ],
+        worker_ssh_factory=(
+            lambda _host: usbip_manager.ssh_manager.get_connection(config)
+        ),
     )
     if not server.get("success"):
         return {
@@ -329,13 +340,13 @@ def ensure_usbip_auto_bind_policies(
         installed, version = usbip_manager.check_usbipd_installed(ssh)
         if not installed:
             return {"success": False, "error": "usbipd未安装"}
-        policy_out, policy_err, policy_code = (
-            usbip_manager.ssh_manager.execute_command(
-                ssh, "usbipd policy list", timeout=15
-            )
+        policy_result = usbip_manager.ssh_manager.execute_command(
+            ssh, "usbipd policy list", timeout=15
         )
-        if policy_code != 0:
-            detail = (policy_err or policy_out or "").strip()
+        if not policy_result.ok:
+            detail = (
+                policy_result.stderr or policy_result.stdout or ""
+            ).strip()
             return {
                 "success": False,
                 "error": (
@@ -352,30 +363,28 @@ def ensure_usbip_auto_bind_policies(
 
         added, existing, errors = [], [], {}
         for busid in selected:
-            if covered(policy_out, busid):
+            if covered(policy_result.stdout, busid):
                 existing.append(busid)
                 continue
-            add_out, add_err, add_code = (
-                usbip_manager.ssh_manager.execute_command(
-                    ssh,
-                    "usbipd policy add --effect allow "
-                    f"--operation AutoBind --busid {busid}",
-                    timeout=15,
-                )
+            add_result = usbip_manager.ssh_manager.execute_command(
+                ssh,
+                "usbipd policy add --effect allow "
+                f"--operation AutoBind --busid {busid}",
+                timeout=15,
             )
-            if add_code == 0:
+            if add_result.ok:
                 added.append(busid)
             else:
-                errors[busid] = (add_err or add_out or str(add_code)).strip()
+                errors[busid] = (
+                    add_result.stderr or add_result.stdout or str(add_result.code)
+                ).strip()
 
-        verify_out, verify_err, verify_code = (
-            usbip_manager.ssh_manager.execute_command(
-                ssh, "usbipd policy list", timeout=15
-            )
+        verify_result = usbip_manager.ssh_manager.execute_command(
+            ssh, "usbipd policy list", timeout=15
         )
         verified = [
             busid for busid in selected
-            if verify_code == 0 and covered(verify_out, busid)
+            if verify_result.ok and covered(verify_result.stdout, busid)
         ]
         missing = [busid for busid in selected if busid not in verified]
         if missing:
@@ -383,7 +392,7 @@ def ensure_usbip_auto_bind_policies(
                 f"{busid}: {errors.get(busid, '')}".rstrip(": ")
                 for busid in missing
             )
-            verify_detail = (verify_err or "").strip()
+            verify_detail = (verify_result.stderr or "").strip()
             return {
                 "success": False,
                 "error": (

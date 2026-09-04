@@ -639,3 +639,23 @@ def test_start_process_rejects_invalid_execution_spec(tmp_path):
             "attempt_id": "attempt-1",
             "payload": {"argv": ["/bin/true"], "execution_spec": spec},
         })
+
+
+def test_upload_tradefed_results_tolerates_sqlite_row_without_result_dir(tmp_path):
+    """No-result stdout must not crash on sqlite3.Row (regression: row.get)."""
+    agent = WorkerAgent(worker_config(tmp_path))
+    with WorkerRuntime.connect(agent.runtime) as conn:
+        conn.execute(
+            """INSERT INTO jobs(worker_job_id,job_id,attempt_id,pid,pgid,
+               status,devices_json,work_dir,exit_code,error,command_id)
+               VALUES('wj-1','job-1','1',0,0,'completed','[]',?,0,'','')""",
+            (str(tmp_path),),
+        )
+        row = conn.execute(
+            "SELECT job_id,attempt_id,work_dir FROM jobs WHERE worker_job_id='wj-1'"
+        ).fetchone()
+    work_dir = tmp_path / "jobs" / "job-1" / "1"
+    work_dir.mkdir(parents=True)
+    # stdout without RESULT DIRECTORY -> upload path returns before row access
+    (work_dir / "stdout.log").write_text("No matched tradefed modules\n", encoding="utf-8")
+    agent._upload_tradefed_results(row, work_dir)

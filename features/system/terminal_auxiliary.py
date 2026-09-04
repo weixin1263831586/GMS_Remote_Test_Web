@@ -24,13 +24,13 @@ async def refresh_devices_websocket(
         if not ssh:
             return
         try:
-            stdout, _stderr, code = ssh_manager.execute_command(
+            devices_result = ssh_manager.execute_command(
                 ssh, "adb devices", timeout=5
             )
-            if code != 0:
+            if devices_result.code != 0:
                 return
             devices_info = []
-            for line in stdout.strip().split("\n")[1:]:
+            for line in devices_result.stdout.strip().split("\n")[1:]:
                 parts = line.split("\t")
                 if len(parts) < 2:
                     continue

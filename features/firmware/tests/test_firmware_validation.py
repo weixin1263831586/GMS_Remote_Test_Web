@@ -1,4 +1,5 @@
 import subprocess
+from foundation.command_result import CommandResult
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -59,7 +60,7 @@ def test_remote_preflight_quotes_paths_and_accepts_valid_image():
         def execute_command(self, _ssh, command, timeout=None):
             self.command = command
             assert timeout == 120
-            return "Type:Update Firmware\nEntry Count:20\n", "", 0
+            return CommandResult(stdout="Type:Update Firmware\nEntry Count:20\n", stderr="", code=0)
 
     manager = FakeSshManager()
     result = validate_remote_update_image(

@@ -136,12 +136,12 @@ class USBIPManager:
         if self._is_windows_host(ssh):
             return "windows"
         try:
-            stdout, _stderr, code = self.ssh_manager.execute_command(
+            result = self.ssh_manager.execute_command(
                 ssh, "uname -s", timeout=8,
             )
         except Exception:
             return ""
-        if code == 0 and "linux" in (stdout or "").strip().lower():
+        if result.ok and "linux" in (result.stdout or "").strip().lower():
             return "linux"
         return ""
 
@@ -300,8 +300,14 @@ class USBIPManager:
                         source_ssh,
                         serials=export_serials,
                         vids=export_vids if not export_serials else (),
-                        # USB/IP 的数据面 attach 来自该地址，加入 3240 白名单。
-                        allow_worker_hosts=[usbip_attach_host],
+                        # USB/IP 的数据面 attach 来自 Worker/平台 Ubuntu 侧，
+                        # 白名单需要逐 Worker 解析出口 IP（在 Worker 上执行
+                        # ip route get），不能拿来源地址充数。
+                        allow_worker_hosts=[
+                            usbip_attach_host,
+                            config.get('device_host') or '',
+                        ],
+                        worker_ssh_factory=lambda _host: self.ssh_manager.get_connection(config),
                     )
                     source_txn['started'] = bool(server.get('started'))
                     if not server.get('success'):
@@ -631,16 +637,16 @@ class USBIPManager:
             "ForEach-Object { $_.InstanceId }"
         )
         try:
-            stdout, _stderr, code = self.ssh_manager.execute_command(
+            result = self.ssh_manager.execute_command(
                 ssh, f'powershell -NoProfile -Command "{ps}"', timeout=15
             )
         except Exception:
             return {}
-        if code != 0 or not stdout:
+        if not result.ok or not result.stdout:
             return {}
         raw: dict[str, list[str]] = {}
         candidates: list[str] = []
-        for line in stdout.splitlines():
+        for line in result.stdout.splitlines():
             match = re.search(
                 r"USB\\VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})"
                 r"([^\\]*)\\(.+)",
@@ -677,20 +683,20 @@ class USBIPManager:
     def _query_windows_adb_serials(self, ssh) -> list[str]:
         """Return stable Android serials visible to Windows ADB."""
         try:
-            stdout, stderr, code = self.ssh_manager.execute_command(
+            result = self.ssh_manager.execute_command(
                 ssh,
                 "adb devices",
                 timeout=15,
             )
         except Exception:
             return []
-        if code != 0:
+        if not result.ok:
             logger.debug(
                 "[USB/IP] Windows adb inventory failed: %s",
-                (stderr or stdout or "").strip(),
+                (result.stderr or result.stdout or "").strip(),
             )
             return []
-        states = parse_adb_device_states(stdout)
+        states = parse_adb_device_states(result.stdout)
         return sorted({
             serial
             for serial, state in states.items()
@@ -783,6 +789,11 @@ class USBIPManager:
                 allow_worker_hosts=[
                     config.get('usbip_attach_host') or ssh_hostname
                 ],
+                # Worker 侧凭据：平台配置的 Ubuntu/Worker 主机（用于在其上
+                # 执行 ip route get 解析出口 IP）。
+                worker_ssh_factory=(
+                    lambda _host: self.ssh_manager.get_connection(config)
+                ),
             )
             return {
                 "success": bool(server.get("success")),
@@ -857,6 +868,11 @@ class USBIPManager:
                     allow_worker_hosts=[
                         config.get("usbip_attach_host") or ssh_hostname
                     ],
+                    # Worker 侧凭据：平台配置的 Ubuntu/Worker 主机（用于
+                    # 在其上执行 ip route get 解析出口 IP）。
+                    worker_ssh_factory=(
+                        lambda _host: self.ssh_manager.get_connection(config)
+                    ),
                 )
                 if not server.get("success"):
                     return {
@@ -954,14 +970,14 @@ class USBIPManager:
             detached = []
             errors = {}
             for busid in selected:
-                stdout, stderr, code = self.ssh_manager.execute_command(
+                detach_result = self.ssh_manager.execute_command(
                     ssh,
                     f"usbipd detach --busid {busid}",
                     timeout=15,
                 )
-                detail = (stderr or stdout or "").strip()
+                detail = (detach_result.stderr or detach_result.stdout or "").strip()
                 normalized_detail = detail.lower()
-                if code == 0 or any(
+                if detach_result.ok or any(
                     marker in normalized_detail
                     for marker in (
                         "already not attached",
@@ -972,7 +988,10 @@ class USBIPManager:
                 ):
                     detached.append(busid)
                 else:
-                    errors[busid] = detail or f"usbipd detach exited with code {code}"
+                    errors[busid] = (
+                        detail
+                        or f"usbipd detach exited with code {detach_result.code}"
+                    )
             return {
                 "success": not errors,
                 "detached_busids": detached,
@@ -1035,8 +1054,8 @@ class USBIPManager:
 
     def _is_windows_host(self, ssh) -> bool:
         try:
-            stdout, _stderr, _code = self.ssh_manager.execute_command(ssh, 'ver 2>&1')
-            return 'microsoft' in stdout.lower() or 'windows' in stdout.lower()
+            result = self.ssh_manager.execute_command(ssh, 'ver 2>&1')
+            return 'microsoft' in result.stdout.lower() or 'windows' in result.stdout.lower()
         except Exception:
             return False
 
@@ -1071,11 +1090,13 @@ class USBIPManager:
 
     def _usbipd_list_output(self, ssh) -> str:
         # usbipd list 需要 PTY 才会返回完整设备表。
-        stdout, stderr, code = self.ssh_manager.execute_command(
+        result = self.ssh_manager.execute_command(
             ssh, "usbipd list", timeout=15, get_pty=True
         )
-        output = "\n".join(part for part in (stdout, stderr) if part)
-        logger.info("USB/IP devices (code=%s):\n%s", code, output)
+        output = "\n".join(
+            part for part in (result.stdout, result.stderr) if part
+        )
+        logger.info("USB/IP devices (code=%s):\n%s", result.code, output)
         return output
 
     def _bind_devices(
@@ -1096,52 +1117,52 @@ class USBIPManager:
                 logger.error("Rejected invalid USB/IP busid: %r", busid)
                 continue
             try:
-                stdout, stderr, list_code = self.ssh_manager.execute_command(
+                list_result = self.ssh_manager.execute_command(
                     ssh, f"usbipd list | findstr {busid}"
                 )
-                if list_code not in {0, 1}:
+                if list_result.code not in {0, 1}:
                     logger.error(
                         "Failed to inspect USB/IP device %s: %s",
                         busid,
-                        (stderr or stdout).strip(),
+                        (list_result.stderr or list_result.stdout).strip(),
                     )
                     continue
 
                 # usbipd 状态是整词（STATE 列：Not Shared / Shared / Attached），
                 # "Not Shared" 含子串 "Shared"，必须按词边界判定而非 substring。
-                if re.search(r'\bShared\b', stdout) and not re.search(r'\bNot Shared\b', stdout):
+                if re.search(r'\bShared\b', list_result.stdout) and not re.search(
+                    r'\bNot Shared\b', list_result.stdout
+                ):
                     logger.info(f"Device {busid} already shared")
                     bound.append(busid)
                     continue
-                elif re.search(r'\bAttached\b', stdout):
+                elif re.search(r'\bAttached\b', list_result.stdout):
                     # Detach first
-                    detach_out, detach_err, detach_code = (
-                        self.ssh_manager.execute_command(
-                            ssh,
-                            f"usbipd detach --busid {busid}",
-                            timeout=15,
-                        )
+                    detach_result = self.ssh_manager.execute_command(
+                        ssh,
+                        f"usbipd detach --busid {busid}",
+                        timeout=15,
                     )
-                    if detach_code != 0:
+                    if not detach_result.ok:
                         logger.error(
                             "Failed to detach USB/IP device %s before bind: %s",
                             busid,
-                            (detach_err or detach_out).strip(),
+                            (detach_result.stderr or detach_result.stdout).strip(),
                         )
                         continue
                     time.sleep(1)
 
                 # Bind
-                bind_out, bind_err, bind_code = self.ssh_manager.execute_command(
+                bind_result = self.ssh_manager.execute_command(
                     ssh,
                     f"usbipd bind --busid {busid}",
                     timeout=15,
                 )
-                if bind_code != 0:
+                if not bind_result.ok:
                     logger.error(
                         "Failed to bind USB/IP device %s: %s",
                         busid,
-                        (bind_err or bind_out).strip(),
+                        (bind_result.stderr or bind_result.stdout).strip(),
                     )
                     continue
                 time.sleep(2)
@@ -1195,72 +1216,79 @@ class USBIPManager:
 
     def _stop_windows_adb(self, ssh) -> dict[str, Any]:
         """Gracefully stop Windows ADB and force it only when still running."""
-        list_out, list_err, list_code = self.ssh_manager.execute_command(
+        list_result = self.ssh_manager.execute_command(
             ssh,
             'tasklist /FI "IMAGENAME eq adb.exe" /NH',
             timeout=10,
         )
-        if list_code != 0:
+        if not list_result.ok:
             return {
                 "success": False,
-                "error": (list_err or list_out).strip() or "无法确认Windows ADB状态",
+                "error": (list_result.stderr or list_result.stdout).strip()
+                or "无法确认Windows ADB状态",
             }
-        if "adb.exe" not in (list_out or "").lower():
+        if "adb.exe" not in (list_result.stdout or "").lower():
             return {"success": True, "stopped": False, "forced": False}
 
-        stop_out, stop_err, stop_code = self.ssh_manager.execute_command(
+        stop_result = self.ssh_manager.execute_command(
             ssh,
             "adb kill-server",
             timeout=15,
         )
         time.sleep(1)
-        list_out, list_err, list_code = self.ssh_manager.execute_command(
+        list_result = self.ssh_manager.execute_command(
             ssh,
             'tasklist /FI "IMAGENAME eq adb.exe" /NH',
             timeout=10,
         )
-        if list_code != 0:
+        if not list_result.ok:
             return {
                 "success": False,
-                "error": (list_err or list_out).strip() or "无法确认Windows ADB状态",
+                "error": (list_result.stderr or list_result.stdout).strip()
+                or "无法确认Windows ADB状态",
             }
-        if "adb.exe" in (list_out or "").lower():
-            force_out, force_err, force_code = self.ssh_manager.execute_command(
+        if "adb.exe" in (list_result.stdout or "").lower():
+            force_result = self.ssh_manager.execute_command(
                 ssh,
                 "taskkill /F /IM adb.exe /T",
                 timeout=15,
             )
             time.sleep(1)
-            verify_out, verify_err, verify_code = self.ssh_manager.execute_command(
+            verify_result = self.ssh_manager.execute_command(
                 ssh,
                 'tasklist /FI "IMAGENAME eq adb.exe" /NH',
                 timeout=10,
             )
-            if verify_code != 0 or "adb.exe" in (verify_out or "").lower():
+            if not verify_result.ok or "adb.exe" in (verify_result.stdout or "").lower():
                 return {
                     "success": False,
                     "error": "Windows adb.exe 仍在运行，USB设备句柄未释放: " + (
-                        (verify_err or verify_out or force_err or force_out).strip()
+                        (
+                            verify_result.stderr or verify_result.stdout
+                            or force_result.stderr or force_result.stdout
+                        ).strip()
                         or "unknown process state"
                     ),
                 }
             logger.warning(
-                "Windows ADB required force stop before USB/IP export: code=%s detail=%s",
-                force_code,
-                (force_err or force_out).strip(),
+                "Windows ADB required force stop before USB/IP export: "
+                "code=%s detail=%s",
+                force_result.code,
+                (force_result.stderr or force_result.stdout).strip(),
             )
             return {"success": True, "stopped": True, "forced": True}
         logger.info(
-            "Windows ADB stopped gracefully before USB/IP export: code=%s detail=%s",
-            stop_code,
-            (stop_err or stop_out).strip(),
+            "Windows ADB stopped gracefully before USB/IP export: "
+            "code=%s detail=%s",
+            stop_result.code,
+            (stop_result.stderr or stop_result.stdout).strip(),
         )
         return {"success": True, "stopped": True, "forced": False}
 
     def _ensure_vhci_driver(self, ssh):
         try:
-            stdout, _, _ = self.ssh_manager.execute_command(ssh, 'lsmod | grep vhci_hcd')
-            if not stdout.strip():
+            lsmod_result = self.ssh_manager.execute_command(ssh, 'lsmod | grep vhci_hcd')
+            if not lsmod_result.stdout.strip():
                 logger.info("Loading vhci_hcd driver...")
                 self.ssh_manager.execute_command(ssh, 'sudo modprobe vhci_hcd')
                 time.sleep(1)
@@ -1280,18 +1308,21 @@ class USBIPManager:
             adb_devices_command = self._adb_devices_command(
                 adb_server_socket
             )
-            stdout_before, _, _ = self.ssh_manager.execute_command(
+            adb_before_result = self.ssh_manager.execute_command(
                 ssh,
                 adb_devices_command,
             )
-            devices_before = set(DeviceUtils.parse_adb_devices(stdout_before))
-            adb_states_before = parse_adb_device_states(stdout_before)
-            fastboot_before_out, fastboot_before_err, _ = self.ssh_manager.execute_command(
+            devices_before = set(DeviceUtils.parse_adb_devices(adb_before_result.stdout))
+            adb_states_before = parse_adb_device_states(adb_before_result.stdout)
+            fastboot_before_result = self.ssh_manager.execute_command(
                 ssh,
                 'fastboot devices',
                 timeout=5,
             )
-            fastboot_before = set(parse_fastboot_devices(fastboot_before_out or fastboot_before_err or ""))
+            fastboot_before = set(parse_fastboot_devices(
+                fastboot_before_result.stdout
+                or fastboot_before_result.stderr or ""
+            ))
             logger.info(f"Devices before attach: {devices_before}")
 
             expected_busids = set(busids)
@@ -1311,17 +1342,15 @@ class USBIPManager:
                         stabilization_attempt,
                         USBIP_ATTACH_STABILIZATION_ATTEMPTS,
                     )
-                    attach_out, attach_err, attach_code = (
-                        self.ssh_manager.execute_command(
-                            ssh, cmd, timeout=15,
-                        )
+                    attach_result = self.ssh_manager.execute_command(
+                        ssh, cmd, timeout=15,
                     )
-                    if attach_code != 0:
+                    if not attach_result.ok:
                         logger.warning(
                             "Attach %s failed (code=%s): %s",
                             busid,
-                            attach_code,
-                            attach_err or attach_out,
+                            attach_result.code,
+                            attach_result.stderr or attach_result.stdout,
                         )
                     else:
                         # 只有命令已成功、但稍后端口掉线的 BUSID
@@ -1337,42 +1366,40 @@ class USBIPManager:
                 for poll_attempt in range(USBIP_ATTACH_PORT_POLL_ATTEMPTS):
                     if poll_attempt:
                         time.sleep(1)
-                    port_out, port_err, port_code = (
-                        self.ssh_manager.execute_command(
-                            ssh, USBIP_PORT_COMMAND, timeout=10,
-                        )
+                    first_poll = self.ssh_manager.execute_command(
+                        ssh, USBIP_PORT_COMMAND, timeout=10,
                     )
-                    if port_code != 0:
+                    if not first_poll.ok:
                         logger.warning(
                             "Unable to verify USB/IP attachments: "
                             "code=%s detail=%s",
-                            port_code,
-                            (port_err or port_out or '').strip(),
+                            first_poll.code,
+                            (first_poll.stderr or first_poll.stdout or '').strip(),
                         )
                         return [], []
                     first_snapshot = {
                         entry['busid']
-                        for entry in parse_usbip_port_entries(port_out or '')
+                        for entry in parse_usbip_port_entries(first_poll.stdout or '')
                         if entry['host'] == str(device_ip)
                     } & expected_busids
                     if first_snapshot == expected_busids:
                         break
 
                 time.sleep(1)
-                port_out, port_err, port_code = self.ssh_manager.execute_command(
+                second_poll = self.ssh_manager.execute_command(
                     ssh, USBIP_PORT_COMMAND, timeout=10,
                 )
-                if port_code != 0:
+                if not second_poll.ok:
                     logger.warning(
                         "Unable to verify USB/IP attachment stability: "
                         "code=%s detail=%s",
-                        port_code,
-                        (port_err or port_out or '').strip(),
+                        second_poll.code,
+                        (second_poll.stderr or second_poll.stdout or '').strip(),
                     )
                     return [], []
                 second_snapshot = {
                     entry['busid']
-                    for entry in parse_usbip_port_entries(port_out or '')
+                    for entry in parse_usbip_port_entries(second_poll.stdout or '')
                     if entry['host'] == str(device_ip)
                 } & expected_busids
                 stable_busids = first_snapshot & second_snapshot
@@ -1413,13 +1440,13 @@ class USBIPManager:
             devices_after = set()
             deadline = time.time() + 30
             while time.time() < deadline:
-                stdout_after, _, _ = self.ssh_manager.execute_command(
+                adb_after_result = self.ssh_manager.execute_command(
                     ssh,
                     adb_devices_command,
                     timeout=8,
                 )
-                adb_states = parse_adb_device_states(stdout_after)
-                devices_after = set(DeviceUtils.parse_adb_devices(stdout_after))
+                adb_states = parse_adb_device_states(adb_after_result.stdout)
+                devices_after = set(DeviceUtils.parse_adb_devices(adb_after_result.stdout))
                 logger.info(f"Devices after attach: {devices_after}")
 
                 new_devices = list(devices_after - devices_before)
@@ -1436,12 +1463,15 @@ class USBIPManager:
                     logger.info(f"USB/IP protocol visible but not ADB device-ready: {non_device_adb}")
                     return attached, []
 
-                fastboot_out, fastboot_err, _ = self.ssh_manager.execute_command(
+                fastboot_after_result = self.ssh_manager.execute_command(
                     ssh,
                     'fastboot devices',
                     timeout=5,
                 )
-                fastboot_devices = parse_fastboot_devices(fastboot_out or fastboot_err or "")
+                fastboot_devices = parse_fastboot_devices(
+                    fastboot_after_result.stdout
+                    or fastboot_after_result.stderr or ""
+                )
                 new_fastboot_devices = sorted(set(fastboot_devices) - fastboot_before)
                 if new_fastboot_devices:
                     logger.info(f"USB/IP fastboot devices visible: {new_fastboot_devices}")
@@ -1499,12 +1529,14 @@ class USBIPManager:
             "mode": "unknown",
         }
         try:
-            adb_out, adb_err, _ = self.ssh_manager.execute_command(
+            adb_probe = self.ssh_manager.execute_command(
                 ssh,
                 self._adb_devices_command(adb_server_socket),
                 timeout=8,
             )
-            adb_states = parse_adb_device_states(adb_out or adb_err or "")
+            adb_states = parse_adb_device_states(
+                adb_probe.stdout or adb_probe.stderr or ""
+            )
             status["adb"] = adb_states
             status["adb_ready"] = [serial for serial, state in adb_states.items() if state == "device"]
             status["recovery"] = [serial for serial, state in adb_states.items() if state == "recovery"]
@@ -1515,8 +1547,10 @@ class USBIPManager:
             logger.debug("[USB/IP] adb protocol probe failed: %s", exc)
 
         try:
-            fastboot_out, fastboot_err, _ = self.ssh_manager.execute_command(ssh, "fastboot devices", timeout=8)
-            status["fastboot"] = parse_fastboot_devices(fastboot_out or fastboot_err or "")
+            fastboot_probe = self.ssh_manager.execute_command(ssh, "fastboot devices", timeout=8)
+            status["fastboot"] = parse_fastboot_devices(
+                fastboot_probe.stdout or fastboot_probe.stderr or ""
+            )
         except Exception as exc:
             logger.debug("[USB/IP] fastboot protocol probe failed: %s", exc)
 

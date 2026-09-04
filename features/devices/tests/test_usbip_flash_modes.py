@@ -1,5 +1,6 @@
 import threading
 import unittest
+from foundation.command_result import CommandResult
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -489,12 +490,11 @@ abc                                   Android ADB Interface
 
             def execute_command(self, ssh, command, timeout=None):
                 self.assert_command = command
-                return (
-                    "Port 00: <Port in Use>\n"
-                    "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
-                    "",
-                    0,
-                )
+                return CommandResult(
+                stdout="Port 00: <Port in Use>\n""  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                stderr="",
+                code=0,
+            )
 
             def return_connection(self, ssh):
                 self.returned = True
@@ -542,23 +542,22 @@ class UsbipAttachVerificationTests(unittest.TestCase):
 
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 if cmd == "adb devices":
-                    return ("List of devices attached\n", "", 0)
+                    return CommandResult(stdout="List of devices attached\n", stderr="", code=0)
                 if cmd == "fastboot devices":
-                    return ("", "", 0)
+                    return CommandResult(stdout="", stderr="", code=0)
                 if cmd.startswith("sudo usbip attach"):
                     self.attach_calls += 1
-                    return ("attached", "", 0)
+                    return CommandResult(stdout="attached", stderr="", code=0)
                 if cmd == "sudo -n /usr/bin/usbip port":
                     self.port_calls += 1
                     if self.port_calls == 1:
-                        return (
-                            "Port 00: <Port in Use>\n"
-                            "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
-                            "",
-                            0,
-                        )
-                    return ("Imported USB devices\n", "", 0)
-                return ("", "", 0)
+                        return CommandResult(
+                stdout="Port 00: <Port in Use>\n""  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                stderr="",
+                code=0,
+            )
+                    return CommandResult(stdout="Imported USB devices\n", stderr="", code=0)
+                return CommandResult(stdout="", stderr="", code=0)
 
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()

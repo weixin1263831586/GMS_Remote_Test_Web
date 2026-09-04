@@ -361,8 +361,8 @@ async def get_vpn_connections():
             return error_response("SSH连接失败", status_code=500)
 
         cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
-        output, _, _ = await execute_config_host_command(config, ssh, cmd, timeout=5)
-        vpn_names = parse_vpn_connection_names(output)
+        result = await execute_config_host_command(config, ssh, cmd, timeout=5)
+        vpn_names = parse_vpn_connection_names(result.stdout)
 
         if ssh:
             ssh_manager.return_connection(ssh)
@@ -412,25 +412,25 @@ async def get_vpn_status():
         # vpn_connection_name 时它会直接返回配置名而无视 active_only，导致
         # connected 恒为 True（即使 VPN 已断开）。
         active_cmd = "nmcli -t -f NAME,TYPE,STATE connection show --active 2>/dev/null"
-        active_output, _, _ = await execute_config_host_command(
+        active_result = await execute_config_host_command(
             config, ssh, active_cmd, timeout=5
         )
-        connected = has_active_vpn_connection(active_output)
-        active_vpn_names = parse_vpn_connection_names(active_output)
+        connected = has_active_vpn_connection(active_result.stdout)
+        active_vpn_names = parse_vpn_connection_names(active_result.stdout)
         active_vpn = active_vpn_names[0] if active_vpn_names else ""
 
         # 可达性补充：ping 目标是否可达（仅作信息，不单独决定 connected）。
         ping_reachable = False
         try:
-            output, _, _ = ssh_manager.execute_command(
+            ping_result = ssh_manager.execute_command(
                 ssh,
                 f"ping -c 1 -W 1 {vpn_target} 2>&1",
                 timeout=3
             )
             ping_reachable = (
-                '1 packets transmitted, 1 received' in output
-                or '1 received' in output
-                or 'bytes from' in output
+                '1 packets transmitted, 1 received' in ping_result.stdout
+                or '1 received' in ping_result.stdout
+                or 'bytes from' in ping_result.stdout
             )
         except Exception as e:
             logger.warning(f"[VPN Status] ping check failed: {e}")
@@ -483,7 +483,7 @@ async def connect_vpn(
             # administrator and grant this service account permission to
             # activate it through NetworkManager.
             vpn_cmd = f"nmcli connection up {shlex.quote(vpn_name)}"
-            output, error, code = await execute_config_host_command(
+            connect_result = await execute_config_host_command(
                 config,
                 ssh,
                 vpn_cmd,
@@ -496,16 +496,16 @@ async def connect_vpn(
             # accepted the request. Confirm that the selected VPN profile is
             # actually active before reporting a connected state.
             active_cmd = "nmcli -t -f NAME,TYPE,STATE connection show --active 2>/dev/null"
-            active_output, active_error, _ = await execute_config_host_command(
+            active_result = await execute_config_host_command(
                 config,
                 ssh,
                 active_cmd,
                 5,
             )
-            active_vpn_names = parse_vpn_connection_names(active_output)
+            active_vpn_names = parse_vpn_connection_names(active_result.stdout)
             is_connected = vpn_name in active_vpn_names
 
-            detail = error or output
+            detail = connect_result.stderr or connect_result.stdout
             if is_connected:
                 message = 'VPN 已连接' if 'already active' in detail.lower() else 'VPN 连接成功'
             elif 'unknown connection' in detail.lower():
@@ -527,8 +527,11 @@ async def connect_vpn(
                         'scripts/install_networkmanager_policy.sh '
                         f'{service_user} gms-web-app'
                     )
-                elif code == 0:
-                    detail = active_error or f'{vpn_name} 未出现在活动 VPN 列表中'
+                elif connect_result.ok:
+                    detail = (
+                        active_result.stderr
+                        or f'{vpn_name} 未出现在活动 VPN 列表中'
+                    )
                 message = f'VPN 连接失败: {detail or "未检测到活动连接"}'
 
             if ssh:
@@ -538,7 +541,7 @@ async def connect_vpn(
                 "connected": is_connected,
                 "message": message,
                 "vpn_connection_name": vpn_name,
-                "output": (output[:500] if output else '')
+                "output": (connect_result.stdout[:500] if connect_result.stdout else '')
             })
         except Exception:
             if ssh:
@@ -580,7 +583,7 @@ async def disconnect_vpn():
                 )
 
             disconnect_cmd = f"nmcli connection down {shlex.quote(vpn_name)}"
-            output, error, code = await execute_config_host_command(
+            disconnect_result = await execute_config_host_command(
                 config,
                 ssh,
                 disconnect_cmd,
@@ -590,8 +593,11 @@ async def disconnect_vpn():
             if ssh:
                 ssh_manager.return_connection(ssh)
             return JSONResponse(content={
-                "success": code == 0,
-                "message": "VPN 已断开" if code == 0 else f"VPN 断开失败: {error or output}",
+                "success": disconnect_result.ok,
+                "message": "VPN 已断开" if disconnect_result.ok else (
+                    f"VPN 断开失败: "
+                    f"{disconnect_result.stderr or disconnect_result.stdout}"
+                ),
                 "vpn_connection_name": vpn_name
             })
         except Exception:

@@ -7,6 +7,8 @@ import signal
 import subprocess
 import threading
 
+from foundation.command_result import CommandResult
+
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +20,14 @@ def command_reports_running(output: str | None) -> bool:
 
 def run_local_command(
     argv: list[str], timeout: int = 30
-) -> tuple[str, str, int]:
+) -> CommandResult:
     """Run a local command from an argv list (no shell interpretation).
 
     Preferred over :func:`run_local_shell_command`: argv form has no shell
     metacharacter surface, so callers cannot accidentally introduce injection
-    via unquoted dynamic values.
+    via unquoted dynamic values. 与 SSH 侧 ``SSHExecutor`` 一致，统一返回
+    :class:`CommandResult`，杜绝 ``(stdout, stderr, code)`` 裸 tuple 的
+    位置错用。
     """
     process = None
     try:
@@ -35,7 +39,9 @@ def run_local_command(
             start_new_session=True,
         )
         stdout, stderr = process.communicate(timeout=timeout)
-        return stdout, stderr, process.returncode
+        return CommandResult(
+            stdout=stdout, stderr=stderr, code=process.returncode,
+        )
     except subprocess.TimeoutExpired:
         if process is not None:
             try:
@@ -46,16 +52,18 @@ def run_local_command(
                 logger.warning("Failed to kill timed out command process group: %s", exc)
             with contextlib.suppress(Exception):
                 process.communicate(timeout=1)
-        return "", "Command timed out", -1
+        return CommandResult(stdout="", stderr="Command timed out", code=-1)
     except Exception as exc:
-        return "", str(exc), -1
+        return CommandResult(stdout="", stderr=str(exc), code=-1)
 
 
-def run_local_shell_command(command: str, timeout: int = 30) -> tuple[str, str, int]:
-    """Run a local shell command and return stdout, stderr, and exit code.
+def run_local_shell_command(command: str, timeout: int = 30) -> CommandResult:
+    """Run a local shell command and return a :class:`CommandResult`.
 
     Keep shell-string execution behind this helper so call sites can be audited
-    and migrated to argv-based subprocess calls incrementally.
+    and migrated to argv-based subprocess calls incrementally. 结果类型与
+    SSH 侧 ``SSHExecutor`` 一致（``result.stdout``/``result.ok``），本节
+    重构后本地与远程执行不再有第二套结果形态。
     """
     process = None
     try:
@@ -70,7 +78,9 @@ def run_local_shell_command(command: str, timeout: int = 30) -> tuple[str, str, 
             start_new_session=True,
         )
         stdout, stderr = process.communicate(timeout=timeout)
-        return stdout, stderr, process.returncode
+        return CommandResult(
+            stdout=stdout, stderr=stderr, code=process.returncode,
+        )
     except subprocess.TimeoutExpired:
         if process is not None:
             try:
@@ -81,9 +91,9 @@ def run_local_shell_command(command: str, timeout: int = 30) -> tuple[str, str, 
                 logger.warning("Failed to kill timed out command process group: %s", exc)
             with contextlib.suppress(Exception):
                 process.communicate(timeout=1)
-        return "", "Command timed out", -1
+        return CommandResult(stdout="", stderr="Command timed out", code=-1)
     except Exception as exc:
-        return "", str(exc), -1
+        return CommandResult(stdout="", stderr=str(exc), code=-1)
 
 
 def start_detached_process(

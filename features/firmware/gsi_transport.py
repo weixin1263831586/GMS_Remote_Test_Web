@@ -32,12 +32,15 @@ def upload_gsi_assets(
     with scp.SCPClient(ssh.get_transport()) as client:
         client.put(local_script, remote_script)
         client.put(local_misc, remote_misc)
-    _output, error, code = ssh_manager.execute_command(
+    chmod_result = ssh_manager.execute_command(
         ssh,
         f"chmod +x {shlex.quote(remote_script)}",
     )
-    if code != 0:
-        return None, None, error or "Failed to make GSI runner executable"
+    if not chmod_result.ok:
+        return (
+            None, None,
+            chmod_result.stderr or "Failed to make GSI runner executable",
+        )
     return remote_script, remote_misc, None
 
 
@@ -53,12 +56,11 @@ def prepare_gsi_command(
     on_transport_reset: Callable[[str, str], None] | None = None,
 ) -> str:
     def remote_runner(argv: list[str], timeout: int) -> CommandResult:
-        output, error, code = ssh_manager.execute_command(
+        return ssh_manager.execute_command(
             ssh,
             shlex.join(argv),
             timeout=timeout,
         )
-        return CommandResult(output, error, code)
 
     prepared = FastbootPreparer(
         remote_runner,
