@@ -10,14 +10,24 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
+from foundation.command_result import CommandResult
 from features.devices import usbip
 
 
 def _fake_ssh_manager(commands: dict[str, tuple[str, str, int]]):
-    """Return a usbip_manager-like stub answering fixed command results."""
+    """Return a usbip_manager-like stub answering fixed command results.
+
+    commands 的 value 仍按历史 ``(stdout, stderr, code)`` tuple 书写，
+    在此统一转成 :class:`CommandResult`。
+    """
+    results = {
+        cmd: CommandResult(stdout=out, stderr=err, code=code)
+        for cmd, (out, err, code) in commands.items()
+    }
+    _default = CommandResult(stdout="", stderr="", code=0)
     manager = MagicMock()
     manager.ssh_manager.execute_command.side_effect = (
-        lambda ssh, cmd, timeout=None: commands.get(cmd, ("", "", 0))
+        lambda ssh, cmd, timeout=None: results.get(cmd, _default)
     )
     return manager
 
@@ -161,14 +171,14 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
         })
         # The re-check listing after the failed detach shows no attached ports.
         listings = iter([
-            (PORT_LISTING, "", 0),
-            ("List of attached gadgets\n", "", 0),
-            ("List of attached gadgets\n", "", 0),
+            CommandResult(stdout=PORT_LISTING, stderr="", code=0),
+            CommandResult(stdout="List of attached gadgets\n", stderr="", code=0),
+            CommandResult(stdout="List of attached gadgets\n", stderr="", code=0),
         ])
         manager.ssh_manager.execute_command.side_effect = (
             lambda ssh, cmd, timeout=None: next(listings)
             if cmd == "sudo -n /usr/bin/usbip port"
-            else ("", "no such port", 1)
+            else CommandResult(stdout="", stderr="no such port", code=1)
         )
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
             "features.devices.usbip.time.sleep"

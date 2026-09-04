@@ -6,6 +6,7 @@ from features.devices.adb_ops import (
     reboot_with_runner,
 )
 from features.devices.manager import DeviceManager
+from foundation.command_result import CommandResult
 
 
 class RecordingRunner:
@@ -98,7 +99,12 @@ class _FakeSshManager:
 
     def execute_command(self, _ssh, command, timeout=None):
         self.commands.append(command)
-        return self.outputs.get(command, ('', '', 0))
+        default = CommandResult(stdout='', stderr='', code=0)
+        result = self.outputs.get(command, default)
+        if isinstance(result, tuple):
+            stdout, stderr, code = result
+            result = CommandResult(stdout=stdout, stderr=stderr, code=code)
+        return result
 
 
 class _FakeConfigManager:

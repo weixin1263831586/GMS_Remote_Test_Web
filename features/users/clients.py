@@ -264,10 +264,10 @@ async def run_windows_command_via_ssh(device_host: str, command: str, timeout: i
     if not username or not hostname:
         return {'returncode': -1, 'stdout': '', 'stderr': f'Invalid device_host: {device_host}'}
     try:
-        exit_code, stdout, stderr = await runtime.ssh_async_manager.execute_command_simple(
+        result = await runtime.ssh_async_manager.execute_command_simple(
             hostname, username, password, command, timeout=timeout
         )
-        return {'returncode': exit_code, 'stdout': stdout, 'stderr': stderr}
+        return {'returncode': result.code, 'stdout': result.stdout, 'stderr': result.stderr}
     except Exception as e:
         return {'returncode': -1, 'stdout': '', 'stderr': str(e)}
 

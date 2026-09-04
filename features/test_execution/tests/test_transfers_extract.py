@@ -9,16 +9,23 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from features.test_execution import transfers_api
-from features.test_execution.models import TestSuiteExtractRequest as SuiteExtractRequest
+from features.test_execution.models import (
+    TestSuiteDownloadRequest as SuiteDownloadRequest,
+)
+from features.test_execution.models import (
+    TestSuiteExtractRequest as SuiteExtractRequest,
+)
 from features.test_execution.transfers_api import (
     _curl_resolve_arguments,
     _extract_archive_local_with_progress,
     _path_within_suite_root,
     _resolve_suite_download_target,
     _validate_suite_download_url,
+    download_test_suite_from_url,
     extract_test_suite_archive,
 )
 from foundation.outbound import ResolvedOutboundTarget
+from foundation.command_result import CommandResult
 
 
 class SuiteExtractTests(unittest.TestCase):
@@ -110,8 +117,8 @@ class RemoteSuiteExtractTests(unittest.IsolatedAsyncioTestCase):
 
             def execute_command(self, _ssh, command, timeout=None):
                 if command.startswith("mkdir"):
-                    return "", "", 0
-                return "extracted", "", 0
+                    return CommandResult(stdout="", stderr="", code=0)
+                return CommandResult(stdout="extracted", stderr="", code=0)
 
         old_config = transfers_api.runtime.config_manager
         old_ssh = transfers_api.runtime.ssh_manager
@@ -145,6 +152,112 @@ class RemoteSuiteExtractTests(unittest.IsolatedAsyncioTestCase):
                 _extract_archive_local_with_progress(str(archive), str(root / "extract"), "")
 
             self.assertFalse((root / "escape.txt").exists())
+
+
+class RemoteSuiteDownloadTests(unittest.IsolatedAsyncioTestCase):
+    """P1-10/P1-11 回归：远程套件下载的退出码顺序与事件循环阻塞。"""
+
+    class _FakeRequest:
+        def __init__(self):
+            self.headers = {}
+
+    def _install_runtime(self, ssh_manager, suites_path="/srv/suites"):
+        class ConfigManager:
+            def load_config(self):
+                return {"ubuntu_host": "test-host", "ubuntu_user": "tester", "suites_path": suites_path}
+
+            def get_ubuntu_user(self, config):
+                return config["ubuntu_user"]
+
+            def is_config_host_local(self, _config):
+                return False
+
+        old = (
+            transfers_api.runtime.config_manager,
+            transfers_api.runtime.ssh_manager,
+            transfers_api.runtime.get_client_id_from_request,
+        )
+
+        # 类体里不能直接引用闭包参数（类作用域不做闭包查找），经中间
+        # 字典传递。
+        captured = {"ssh": ssh_manager}
+
+        class Runtime:
+            config_manager = ConfigManager()
+            ssh_manager = captured["ssh"]
+
+            @staticmethod
+            def get_client_id_from_request(_request):
+                return "tester-client"
+
+        transfers_api.runtime.config_manager = Runtime.config_manager
+        transfers_api.runtime.ssh_manager = Runtime.ssh_manager
+        transfers_api.runtime.get_client_id_from_request = (
+            Runtime.get_client_id_from_request
+        )
+        return old
+
+    async def test_remote_download_reads_third_tuple_element_as_exit_code(self):
+        # curl 成功但 stdout 非空（进度输出）：exit_code 必须取元组第三位。
+        # 历史代码解包 (output, exit_code, _) —— stderr 被当退出码，
+        # 导致成功下载被误判 Download failed。
+        class SshManager:
+            def __init__(self):
+                self.calls = []
+
+            @asynccontextmanager
+            async def async_optional_connection(self, _config):
+                yield object()
+
+            def execute_command(self, _ssh, command, timeout=None):
+                self.calls.append(command)
+                if command.startswith("curl"):
+                    # (stdout, stderr, exit_code)：stdout 带进度文本，
+                    # stderr 为空。旧解包会把 "" 当 exit_code != 0。
+                    return CommandResult(stdout="100% downloaded\n", stderr="", code=0)
+                return CommandResult(stdout="4096", stderr="", code=0)
+
+        ssh_manager = SshManager()
+        with TemporaryDirectory() as tmp:
+            old = self._install_runtime(ssh_manager, suites_path=tmp)
+            try:
+                response = await download_test_suite_from_url(
+                    self._FakeRequest(),
+                    SuiteDownloadRequest(url="https://example.com/suite.zip"),
+                )
+            finally:
+                transfers_api.runtime.config_manager, transfers_api.runtime.ssh_manager, \
+                transfers_api.runtime.get_client_id_from_request = old
+
+        payload = json.loads(response.body)
+        self.assertTrue(payload["success"], payload)
+        self.assertEqual(payload.get("download_method"), "ssh")
+
+    async def test_remote_download_failure_reports_stdout_detail(self):
+        class SshManager:
+            @asynccontextmanager
+            async def async_optional_connection(self, _config):
+                yield object()
+
+            def execute_command(self, _ssh, command, timeout=None):
+                if command.startswith("curl"):
+                    return CommandResult(stdout="", stderr="curl: (22) The requested URL returned error: 404", code=22)
+                return CommandResult(stdout="0", stderr="", code=0)
+
+        with TemporaryDirectory() as tmp:
+            old = self._install_runtime(SshManager(), suites_path=tmp)
+            try:
+                response = await download_test_suite_from_url(
+                    self._FakeRequest(),
+                    SuiteDownloadRequest(url="https://example.com/suite.zip"),
+                )
+            finally:
+                transfers_api.runtime.config_manager, transfers_api.runtime.ssh_manager, \
+                transfers_api.runtime.get_client_id_from_request = old
+
+        self.assertEqual(response.status_code, 500)
+        payload = json.loads(response.body)
+        self.assertIn("404", payload.get("error", ""))
 
 
 if __name__ == "__main__":

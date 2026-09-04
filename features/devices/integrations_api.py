@@ -225,14 +225,14 @@ def _verify_local_usbip_transport(
     if not ssh:
         return {}
     try:
-        stdout, _stderr, code = runtime.ssh_manager.execute_command(
+        port_result = runtime.ssh_manager.execute_command(
             ssh, USBIP_PORT_COMMAND, timeout=10,
         )
-        if code != 0:
+        if not port_result.ok:
             return {}
         attached = {
             (str(entry.get("host") or "").strip(), str(entry.get("busid") or "").strip())
-            for entry in parse_usbip_port_entries(stdout or "")
+            for entry in parse_usbip_port_entries(port_result.stdout or "")
         }
     except Exception as exc:
         logger.warning(
@@ -578,12 +578,12 @@ def _preserve_usbip_assignment_after_error(exc: Exception) -> str:
     return ""
 
 def _adb_devices_on_ssh(ssh) -> set[str]:
-    output, error, _code = runtime.ssh_manager.execute_command(
+    result = runtime.ssh_manager.execute_command(
         ssh,
         "adb devices",
         timeout=8,
     )
-    return set(DeviceUtils.parse_adb_devices(output or error or ""))
+    return set(DeviceUtils.parse_adb_devices(result.stdout or result.stderr or ""))
 
 def _detach_ubuntu_usbip_for_devices(
     ssh,
@@ -2407,18 +2407,19 @@ async def stop_usbip(
             await asyncio.sleep(1)
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)
         else:
-            with DeviceSSHConnection(config) as source_ssh:
-                selected_busids = list(req.busids) if req and req.busids else []
-                source_os = usbip_manager._detect_source_os(source_ssh)
-                if source_os == "linux":
-                    # Ubuntu 来源的"绑定"即 usbipd 导出进程；同来源仍有其他
-                    # 活动分配时保留进程，只由上面的 vhci detach 释放本机端口。
-                    if selected_busids and has_remaining_assignments:
-                        logger.info(
-                            "[USB/IP Stop] Ubuntu source %s still exports devices for other assignments; usbipd kept running",
-                            config["device_host"],
-                        )
-                    else:
+            # P1-11：usbipd detach/unbind 是同步 SSH 调用，放线程池避免
+            # 冻结事件循环（DeviceSSHConnection 的建立本身也是阻塞的）。
+            def _detach_source_bindings():
+                with DeviceSSHConnection(config) as source_ssh:
+                    if source_ssh is None:
+                        return
+                    if usbip_manager._detect_source_os(source_ssh) == "linux":
+                        if selected_busids and has_remaining_assignments:
+                            logger.info(
+                                "[USB/IP Stop] Ubuntu source %s still exports devices for other assignments; usbipd kept running",
+                                config["device_host"],
+                            )
+                            return
                         stop_result = stop_ubuntu_usbip_server(
                             runtime.ssh_manager, source_ssh,
                         )
@@ -2428,7 +2429,7 @@ async def stop_usbip(
                                 config["device_host"],
                                 stop_result.get("detail"),
                             )
-                else:
+                        return
                     if selected_busids:
                         for busid in selected_busids:
                             runtime.ssh_manager.execute_command(
@@ -2440,7 +2441,9 @@ async def stop_usbip(
                         runtime.ssh_manager.execute_command(
                             source_ssh, "usbipd unbind --all", timeout=10
                         )
-                await asyncio.sleep(2)
+
+            await asyncio.to_thread(_detach_source_bindings)
+            await asyncio.sleep(2)
 
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)
             if remaining_devices_after_detach:

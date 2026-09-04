@@ -21,6 +21,7 @@ Download Firmware Success / Fail。Controller 端会另做 SFTP 拉取复核。
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -84,13 +85,16 @@ def launch_and_connect():
     raise RuntimeError("RKDevTool 主窗口未能启动")
 
 
-def _wait_rkdevtool_idle(win) -> None:
+def _wait_rkdevtool_idle(win, device: str = "") -> None:
     """Ensure the device is in Loader/Maskrom before clicking 升级.
 
     当 RKDevTool 显示 ADB 设备时，先 adb reboot loader 并等待ComboBox
     明确出现 Loader/Maskrom（不再以「无 ADB」作为判定，见
     _wait_for_loader_mode）。设备既不在 ADB 也看不到 Loader/Maskrom
     文本时（空设备列表等），视为目标不明确并终止烧写。
+
+    ``device`` 是任务指定的 ADB serial：多设备在线时必须带 ``-s``，否则
+    adb 直接报 more than one device。
     """
     try:
         combo_texts = [
@@ -102,8 +106,8 @@ def _wait_rkdevtool_idle(win) -> None:
         combo_texts = []
     for text in combo_texts:
         if "ADB" in text:
-            _adb_reboot_loader()
-            _wait_for_loader_mode(win)
+            _adb_reboot_loader(device)
+            _wait_for_loader_mode(win, device=device)
             return
     # 未显示 ADB：必须已处于 Loader/Maskrom 才允许继续。
     for text in combo_texts:
@@ -115,12 +119,16 @@ def _wait_rkdevtool_idle(win) -> None:
     )
 
 
-def _wait_for_loader_mode(win, timeout: int = 120) -> None:
+def _wait_for_loader_mode(win, timeout: int = 120, device: str = "") -> None:
     """Wait until RKDevTool explicitly shows Loader/Maskrom.
 
     设备重新枚举期间 RKDevTool 可能一个设备都看不到，不能以「不再含
     ADB」判断；必须看到明确的 Loader/Maskrom/Rockusb 文本才放行，
     超时抛错终止烧写。
+
+    已知限制：GUI 自动化只能确认「有设备处于 Loader/Maskrom」，无法
+    直接把 ComboBox 文本绑定到目标 serial（RKDevTool 不暴露 USB 拓扑）。
+    多设备并发烧写仍应通过任务队列互斥保证同一时刻只有一台目标设备。
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -340,7 +348,13 @@ def run_flash(firmware_path: str, device: str = "") -> dict:
         kill_existing_rkdevtool()
         win = launch_and_connect()
     time.sleep(2)
-    _wait_rkdevtool_idle(win)
+    # device 贯通到 reboot loader 路径：任务未指定 serial 时拒绝盲烧，
+    # 防止多设备在线时 adb more than one device 或状态串台。
+    if not device:
+        raise RuntimeError(
+            "任务未指定目标设备 serial，无法安全执行 adb reboot loader，已终止烧写"
+        )
+    _wait_rkdevtool_idle(win, device)
 
     edits, upgrade_buttons = find_flash_controls(win)
     if not upgrade_buttons:
@@ -370,7 +384,11 @@ def process_task(task_path: str) -> None:
             task = json.load(f)
         firmware = str(task.get("firmware") or "")
         device = str(task.get("device") or "").strip()
-        if not firmware or not os.path.isfile(firmware):
+        # Android serial 是外部设备提供的数据，进入 shell/路径前必须校验。
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", device or ""):
+            result["error"] = f"任务缺少合法的 device serial: {device!r}"
+            device = ""
+        elif not firmware or not os.path.isfile(firmware):
             result["error"] = f"固件不存在: {firmware}"
         else:
             outcome = run_flash(firmware, device=device)
@@ -444,7 +462,9 @@ def main() -> int:
                 except Exception:
                     traceback.print_exc()
                 finally:
-                    result_path = claim_path[:-len(".json")] + ".result.json"
+                    # claim_path 以 ".claim" 结尾；历史上用 [:-len(".json")]
+                    # 计算出 "flash-A..result.json"，归档永远不会命中。
+                    result_path = claim_path[:-len(".claim")] + ".result.json"
                     try:
                         with open(result_path, encoding="utf-8") as f:
                             _archive_claim(claim_path, json.load(f))

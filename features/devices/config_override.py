@@ -480,10 +480,10 @@ def _run_adb(device_id: str | None, args: str, timeout: int = 15) -> tuple[str, 
     """Run an adb command on the host; return (combined output, return code)."""
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stdout, stderr, code = run_local_shell_command(
+    result = run_local_shell_command(
         f"{adb} {serial}{args}", timeout=timeout
     )
-    return ((stdout or "") + (stderr or "")), code
+    return ((result.stdout or "") + (result.stderr or "")), result.code
 
 
 def _run_adb_for_ops(device_id: str | None, args: str, timeout: int) -> tuple[str, int]:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from foundation.command_result import CommandResult
 
 import json
 
@@ -44,8 +45,8 @@ def test_usbipd_state_maps_same_vid_pid_devices_by_busid():
         @staticmethod
         def execute_command(_ssh, command, timeout=None, get_pty=False):
             assert command == "usbipd state"
-            return (
-                json.dumps({
+            return CommandResult(
+                stdout=json.dumps({
                     "Devices": [
                         {
                             "BusId": "1-2",
@@ -57,8 +58,8 @@ def test_usbipd_state_maps_same_vid_pid_devices_by_busid():
                         },
                     ]
                 }),
-                "",
-                0,
+                stderr="",
+                code=0,
             )
 
     assert query_usbipd_busid_instance_ids(FakeSshManager(), object()) == {
@@ -104,11 +105,10 @@ def test_duplicate_vid_pid_pnp_details_remain_addressable_by_instance_id():
     class FakeSshManager:
         @staticmethod
         def execute_command(_ssh, _command, timeout=None, get_pty=False):
-            return (
-                "USB\\VID_2207&PID_0006\\SERIAL-A|PCIROOT(0)#USBROOT(0)#USB(2)|CID-A\n"
-                "USB\\VID_2207&PID_0006\\SERIAL-B|PCIROOT(0)#USBROOT(0)#USB(3)|CID-B\n",
-                "",
-                0,
+            return CommandResult(
+                stdout="USB\\VID_2207&PID_0006\\SERIAL-A|PCIROOT(0)#USBROOT(0)#USB(2)|CID-A\n""USB\\VID_2207&PID_0006\\SERIAL-B|PCIROOT(0)#USBROOT(0)#USB(3)|CID-B\n",
+                stderr="",
+                code=0,
             )
 
     identities = query_windows_usb_identities(

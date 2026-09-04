@@ -19,7 +19,7 @@ from features.cluster import ClusterRepository
 from workflows.cluster_test_execution import start_cluster_test
 
 
-def _repository(tmp: Path) -> ClusterRepository:
+def _repository(tmp: Path, tools_path: str = "/srv/GMS-Suite/android-cts/tools") -> ClusterRepository:
     repository = ClusterRepository(tmp / "cluster.sqlite3")
     repository.register_worker({
         "worker_id": "worker-1", "agent_version": "1", "max_jobs": 2,
@@ -32,7 +32,7 @@ def _repository(tmp: Path) -> ClusterRepository:
             "serial": "DEF", "state": "available"}],
         "suites": [{
             "suite_type": "CTS", "suite_version": "17_r1", "suite_key": "CTS:17_r1",
-            "tools_path": "/srv/GMS-Suite/android-cts/tools", "available": True,
+            "tools_path": tools_path, "available": True,
         }],
     })
     return repository
@@ -116,6 +116,75 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
         self.assertIn(
             "test_case requires module", json.loads(result.body)["error"]
         )
+
+    @staticmethod
+    def _suite_with_testcases(directory: str) -> tuple[Path, str]:
+        tools = Path(directory) / "android-cts" / "tools"
+        testcases = tools.parent / "testcases"
+        testcases.mkdir(parents=True, exist_ok=True)
+        (testcases / "CtsHardwareTestCases.apk").write_bytes(b"apk")
+        (testcases / "CtsCameraTestCases.apk").write_bytes(b"apk")
+        return tools, str(tools)
+
+    def test_instrumentation_package_module_is_rejected_with_suggestion(self):
+        # android.hardware.cts 是 apk 内的 java 包名，不是 tradefed 模块名；
+        # 必须在建任务前被拒绝并给出可用的模块建议。
+        with tempfile.TemporaryDirectory() as directory:
+            _tools, tools_path = self._suite_with_testcases(directory)
+            repository = _repository(Path(directory), tools_path=tools_path)
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(
+                    repository=repository
+                )
+                result = start_cluster_test(
+                    _request(test_suite=tools_path, test_module="android.hardware.cts"),
+                    "alice",
+                )
+
+        self.assertEqual(result.status_code, 400, result.body)
+        error = json.loads(result.body)["error"]
+        self.assertIn("instrumentation", error)
+        self.assertIn("CtsHardwareTestCases", error)
+        # 未创建任何任务
+        self.assertEqual(repository.list_jobs(), [])
+
+    def test_unknown_module_is_rejected_when_testcases_dir_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _tools, tools_path = self._suite_with_testcases(directory)
+            repository = _repository(Path(directory), tools_path=tools_path)
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(
+                    repository=repository
+                )
+                result = start_cluster_test(
+                    _request(test_suite=tools_path, test_module="NoSuchModuleAnywhere"),
+                    "alice",
+                )
+
+        self.assertEqual(result.status_code, 400, result.body)
+        self.assertIn("testcases", json.loads(result.body)["error"])
+
+    def test_valid_module_passes_when_testcases_dir_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _tools, tools_path = self._suite_with_testcases(directory)
+            repository = _repository(Path(directory), tools_path=tools_path)
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(
+                    repository=repository
+                )
+                result = start_cluster_test(
+                    _request(test_suite=tools_path, test_module="CtsCameraTestCases"),
+                    "alice",
+                )
+
+        self.assertEqual(result.status_code, 200, result.body)
+        self.assertTrue(json.loads(result.body)["success"])
 
 
 if __name__ == "__main__":

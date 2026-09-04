@@ -96,7 +96,7 @@ def validate_remote_update_image(
 ) -> FirmwareValidationResult:
     command = f"{shlex.quote(tool_path)} SFI {shlex.quote(firmware_path)}"
     try:
-        output, error, return_code = ssh_manager.execute_command(
+        result = ssh_manager.execute_command(
             ssh,
             command,
             timeout=timeout,
@@ -106,4 +106,6 @@ def validate_remote_update_image(
             valid=False,
             message=f"远端固件预检执行失败，设备尚未重启：{exc}",
         )
-    return _result(return_code, "\n".join(part for part in (output, error) if part))
+    return _result(result.code, "\n".join(
+        part for part in (result.stdout, result.stderr) if part
+    ))

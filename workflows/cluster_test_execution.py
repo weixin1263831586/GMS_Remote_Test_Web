@@ -1,11 +1,100 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from features.cluster import get_cluster_service
 from features.cluster.execution_spec import build_argv_from_spec
 from foundation.responses import error_response, success_response
+
+
+# 与 features/test_execution/suite_modules.py 的 MODULE_EXTENSIONS 保持一致；
+# 这里独立复制以避免 workflow 层反向依赖 features.test_execution 的运行时。
+_MODULE_EXTENSIONS = (".apk", ".jar", ".config", ".xml")
+_INSTRUMENTATION_PACKAGE_RE = re.compile(
+    r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$"
+)
+
+
+def _suite_testcases_dir(tools_path: str) -> str:
+    root = str(tools_path or "").rstrip("/")
+    if root.endswith("/tools"):
+        root = root[: -len("/tools")]
+    return os.path.join(root, "testcases")
+
+
+def _list_suite_modules(testcases_dir: str) -> dict[str, str]:
+    """Map tradefed module name -> testcases file (bounded local walk)."""
+    modules: dict[str, str] = {}
+    for current, dirs, files in os.walk(testcases_dir):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in files:
+            lower = name.lower()
+            for ext in _MODULE_EXTENSIONS:
+                if lower.endswith(ext):
+                    modules.setdefault(name[: -len(ext)], os.path.join(current, name))
+                    break
+    return modules
+
+
+def _module_suggestions(requested: str, modules: dict[str, str]) -> list[str]:
+    tokens = [
+        token for token in re.split(r"[._\-]+", requested.lower())
+        if len(token) >= 3
+    ]
+
+    def score(name: str) -> int:
+        lowered = name.lower()
+        parts = set(re.split(r"[._\-]+", lowered))
+        total = 0
+        for token in tokens:
+            if token in parts:
+                total += 2
+            elif token in lowered:
+                total += 1
+        return total
+
+    ranked = sorted(
+        (name for name in modules if score(name) > 0),
+        key=lambda name: (-score(name), name),
+    )
+    return ranked[:5]
+
+
+def _resolve_test_module(tools_path: str, module: str) -> str:
+    """Validate test_module against the suite's local testcases directory.
+
+    Returns an error message ("" when the module is acceptable). Only runs
+    when the testcases directory exists on the local filesystem (local
+    Worker); remote Worker suites are passed through unchanged.
+    """
+    module = str(module or "").strip()
+    if not module:
+        return ""
+    testcases_dir = _suite_testcases_dir(tools_path)
+    if not os.path.isdir(testcases_dir):
+        return ""
+    modules = _list_suite_modules(testcases_dir)
+    if module in modules:
+        return ""
+    hint = ""
+    suggestions = _module_suggestions(module, modules)
+    if suggestions:
+        hint = "；最接近的 tradefed 模块: " + ", ".join(suggestions)
+    if _INSTRUMENTATION_PACKAGE_RE.match(module):
+        return (
+            f"test_module '{module}' 看起来是 instrumentation 包名"
+            f"（apk 内的 java package），不是 tradefed 模块名，"
+            f"套件 testcases 中没有同名模块{hint}。"
+            "请改用 tradefed 模块名（如 CtsHardwareTestCases）后重试；"
+            "可用 GET /api/test/suites/modules?query=<关键词> 查询模块名。"
+        )
+    return (
+        f"test_module '{module}' 在所选套件的 testcases 目录中不存在{hint}。"
+        "请确认模块名后重试；"
+        "可用 GET /api/test/suites/modules?query=<关键词> 查询模块名。"
+    )
 
 
 def start_cluster_test(request: Any, client_id: str):
@@ -40,6 +129,9 @@ def start_cluster_test(request: Any, client_id: str):
     if not selected_suite:
         return error_response("Selected suite is not available on the Worker", 409)
     tools_path = selected_suite["tools_path"]
+    module_error = _resolve_test_module(tools_path, request.test_module)
+    if module_error:
+        return error_response(module_error, 400)
     serials = [item.split(":", 1)[1] if item.startswith(f"{request.worker_id}:") else item
                for item in request.devices]
     # argv 只能从 ExecutionSpec 派生：这里与 API 路径共用同一个 builder，

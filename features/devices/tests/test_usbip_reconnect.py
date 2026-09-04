@@ -4,6 +4,8 @@ import os
 import tempfile
 import threading
 import unittest
+
+from foundation.command_result import CommandResult
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -123,13 +125,11 @@ BUSID  VID:PID    DEVICE                                                        
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 self.cmd = cmd
                 self.get_pty = get_pty
-                return (
-                    "",
-                    "Connected:\n"
-                    "BUSID  VID:PID    DEVICE                                                        STATE\n"
-                    "1-1    2207:0006  Android ADB Interface                                         Shared\n",
-                    0,
-                )
+                return CommandResult(
+            stdout="",
+            stderr="Connected:\n""BUSID  VID:PID    DEVICE                                                        STATE\n""1-1    2207:0006  Android ADB Interface                                         Shared\n",
+            code=0,
+        )
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
         self.assertEqual(manager._find_android_devices(object(), {}), ["1-1"])
@@ -137,12 +137,11 @@ BUSID  VID:PID    DEVICE                                                        
     def test_windows_usb_serial_fallback_handles_android_pid_mode_change(self):
         class FakeSshManager:
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
-                return (
-                    "USB\\VID_2207&PID_350E\\RK3576GMS1\n"
-                    "USB\\VID_03F0&PID_134A\\5&GENERATED&0&9\n",
-                    "",
-                    0,
-                )
+                return CommandResult(
+            stdout="USB\\VID_2207&PID_350E\\RK3576GMS1\n""USB\\VID_03F0&PID_134A\\5&GENERATED&0&9\n",
+            stderr="",
+            code=0,
+        )
 
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
@@ -158,11 +157,11 @@ BUSID  VID:PID    DEVICE                                                        
         class FakeSshManager:
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 self.command = cmd
-                return (
-                    "List of devices attached\nRK3576GMS1\tdevice\n",
-                    "",
-                    0,
-                )
+                return CommandResult(
+        stdout="List of devices attached\nRK3576GMS1\tdevice\n",
+        stderr="",
+        code=0,
+    )
 
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
@@ -191,8 +190,8 @@ BUSID  VID:PID    DEVICE                                                        
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 commands.append(cmd)
                 if cmd.startswith("tasklist "):
-                    return ("INFO: No tasks are running", "", 0)
-                return ("", "", 0)
+                    return CommandResult(stdout="INFO: No tasks are running", stderr="", code=0)
+                return CommandResult(stdout="", stderr="", code=0)
 
         manager = USBIPManager(FakeSshManager(), FakeConfigManager())
         manager._create_windows_ssh = lambda *args: FakeSsh()
@@ -243,8 +242,8 @@ BUSID  VID:PID    DEVICE                                                        
         class FakeSshManager:
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 if cmd.startswith("tasklist "):
-                    return ("adb.exe 123 Console", "", 0)
-                return ("SUCCESS", "", 0)
+                    return CommandResult(stdout="adb.exe 123 Console", stderr="", code=0)
+                return CommandResult(stdout="SUCCESS", stderr="", code=0)
 
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
@@ -267,20 +266,20 @@ BUSID  VID:PID    DEVICE                                                        
         class FakeSshManager:
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 if cmd == "ver 2>&1":
-                    return ("Microsoft Windows", "", 0)
+                    return CommandResult(stdout="Microsoft Windows", stderr="", code=0)
                 if cmd == "usbipd --version":
-                    return ("5.2.0", "", 0)
+                    return CommandResult(stdout="5.2.0", stderr="", code=0)
                 if cmd.startswith("taskkill "):
-                    return ("", "", 0)
+                    return CommandResult(stdout="", stderr="", code=0)
                 if cmd.startswith("tasklist "):
-                    return ("INFO: No tasks are running", "", 0)
+                    return CommandResult(stdout="INFO: No tasks are running", stderr="", code=0)
                 if cmd == "usbipd detach --busid 1-1":
-                    return (
-                        "",
-                        "usbipd: info: Device with busid '1-1' is not attached.",
-                        1,
-                    )
-                return ("", "", 0)
+                    return CommandResult(
+        stdout="",
+        stderr="usbipd: info: Device with busid '1-1' is not attached.",
+        code=1,
+    )
+                return CommandResult(stdout="", stderr="", code=0)
 
         class FakeSSH:
             def close(self):
@@ -955,10 +954,10 @@ BUSID  VID:PID    DEVICE                                                        
         class FakeSshManager:
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 if cmd == "adb devices":
-                    return ("List of devices attached\n", "", 0)
+                    return CommandResult(stdout="List of devices attached\n", stderr="", code=0)
                 if cmd.startswith("sudo usbip attach"):
-                    return ("", "failed to attach", 1)
-                return ("", "", 0)
+                    return CommandResult(stdout="", stderr="failed to attach", code=1)
+                return CommandResult(stdout="", stderr="", code=0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
         attached, devices = manager._attach_devices(object(), "172.16.14.66", ["85aba5e0-8dbc"])
@@ -969,17 +968,16 @@ BUSID  VID:PID    DEVICE                                                        
         class FakeSshManager:
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 if cmd == "adb devices":
-                    return ("List of devices attached\nUSBIP001\tdevice\n", "", 0)
+                    return CommandResult(stdout="List of devices attached\nUSBIP001\tdevice\n", stderr="", code=0)
                 if cmd.startswith("sudo usbip attach"):
-                    return ("", "device already attached", 1)
+                    return CommandResult(stdout="", stderr="device already attached", code=1)
                 if cmd == "sudo -n /usr/bin/usbip port":
-                    return (
-                        "Port 00: <Port in Use>\n"
-                        "  1-1 -> usbip://172.16.14.64:3240/1-1\n",
-                        "",
-                        0,
-                    )
-                return ("", "", 0)
+                    return CommandResult(
+            stdout="Port 00: <Port in Use>\n""  1-1 -> usbip://172.16.14.64:3240/1-1\n",
+            stderr="",
+            code=0,
+        )
+                return CommandResult(stdout="", stderr="", code=0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
         manager.device_sources["USBIP001"] = {"source": "host"}
@@ -999,18 +997,17 @@ BUSID  VID:PID    DEVICE                                                        
                 if cmd == "adb devices":
                     self.adb_calls += 1
                     if self.adb_calls < 4:
-                        return ("List of devices attached\nLOCAL001\tdevice\n", "", 0)
-                    return ("List of devices attached\nLOCAL001\tdevice\nUSBIP001\tdevice\n", "", 0)
+                        return CommandResult(stdout="List of devices attached\nLOCAL001\tdevice\n", stderr="", code=0)
+                    return CommandResult(stdout="List of devices attached\nLOCAL001\tdevice\nUSBIP001\tdevice\n", stderr="", code=0)
                 if cmd.startswith("sudo usbip attach"):
-                    return ("attached", "", 0)
+                    return CommandResult(stdout="attached", stderr="", code=0)
                 if cmd == "sudo -n /usr/bin/usbip port":
-                    return (
-                        "Port 00: <Port in Use>\n"
-                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
-                        "",
-                        0,
-                    )
-                return ("", "", 0)
+                    return CommandResult(
+            stdout="Port 00: <Port in Use>\n""  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+            stderr="",
+            code=0,
+        )
+                return CommandResult(stdout="", stderr="", code=0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
         with patch("features.devices.usbip.time.sleep", return_value=None):
@@ -1026,22 +1023,21 @@ BUSID  VID:PID    DEVICE                                                        
 
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 if cmd == "adb devices":
-                    return ("List of devices attached\n", "", 0)
+                    return CommandResult(stdout="List of devices attached\n", stderr="", code=0)
                 if cmd == "fastboot devices":
                     self.fastboot_calls += 1
                     if self.fastboot_calls < 2:
-                        return ("", "", 0)
-                    return ("FB001\tfastboot\n", "", 0)
+                        return CommandResult(stdout="", stderr="", code=0)
+                    return CommandResult(stdout="FB001\tfastboot\n", stderr="", code=0)
                 if cmd.startswith("sudo usbip attach"):
-                    return ("attached", "", 0)
+                    return CommandResult(stdout="attached", stderr="", code=0)
                 if cmd == "sudo -n /usr/bin/usbip port":
-                    return (
-                        "Port 00: <Port in Use>\n"
-                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
-                        "",
-                        0,
-                    )
-                return ("", "", 0)
+                    return CommandResult(
+            stdout="Port 00: <Port in Use>\n""  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+            stderr="",
+            code=0,
+        )
+                return CommandResult(stdout="", stderr="", code=0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
         with patch("features.devices.usbip.time.sleep", return_value=None):
@@ -1059,18 +1055,17 @@ BUSID  VID:PID    DEVICE                                                        
                 if cmd == "adb devices":
                     self.adb_calls += 1
                     if self.adb_calls < 2:
-                        return ("List of devices attached\n", "", 0)
-                    return ("List of devices attached\nREC001\trecovery\n", "", 0)
+                        return CommandResult(stdout="List of devices attached\n", stderr="", code=0)
+                    return CommandResult(stdout="List of devices attached\nREC001\trecovery\n", stderr="", code=0)
                 if cmd.startswith("sudo usbip attach"):
-                    return ("attached", "", 0)
+                    return CommandResult(stdout="attached", stderr="", code=0)
                 if cmd == "sudo -n /usr/bin/usbip port":
-                    return (
-                        "Port 00: <Port in Use>\n"
-                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
-                        "",
-                        0,
-                    )
-                return ("", "", 0)
+                    return CommandResult(
+            stdout="Port 00: <Port in Use>\n""  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+            stderr="",
+            code=0,
+        )
+                return CommandResult(stdout="", stderr="", code=0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
         with patch("features.devices.usbip.time.sleep", return_value=None):
@@ -1719,14 +1714,16 @@ BUSID  VID:PID    DEVICE                                                        
         fake_ssh_manager = MagicMock()
         fake_ssh_manager.get_connection.return_value = fake_ssh
         # usbip port: 2-1 仍在，2-2 已消失（如手工 detach / worker 重启）。
-        fake_ssh_manager.execute_command.return_value = (
-            "Port 00:\n"
-            "Port 01:\n"
-            "       2-1 | 2207:0006 | RK3576GMS1 | Remote USB/IP host 172.16.14.246\n"
-            "Port 02:\n"
-            "       2-2 | 2207:0006 | ATS357629 | Remote USB/IP host 172.16.14.99\n",
-            "",
-            0,
+        fake_ssh_manager.execute_command.return_value = CommandResult(
+            stdout=(
+                "Port 00:\n"
+                "Port 01:\n"
+                "       2-1 | 2207:0006 | RK3576GMS1 | Remote USB/IP host 172.16.14.246\n"
+                "Port 02:\n"
+                "       2-2 | 2207:0006 | ATS357629 | Remote USB/IP host 172.16.14.99\n"
+            ),
+            stderr="",
+            code=0,
         )
 
         with patch.object(
@@ -1785,12 +1782,14 @@ BUSID  VID:PID    DEVICE                                                        
         fake_ssh_manager = MagicMock()
         fake_ssh_manager.get_connection.return_value = fake_ssh
         # usbip port 显示的是 attach 用的 Tailscale 地址。
-        fake_ssh_manager.execute_command.return_value = (
-            "Port 00:\n"
-            "Port 01:\n"
-            "       1-12-3 | 2207:0006 | RK3576GMS1 | Remote USB/IP host 100.97.1.2\n",
-            "",
-            0,
+        fake_ssh_manager.execute_command.return_value = CommandResult(
+            stdout=(
+                "Port 00:\n"
+                "Port 01:\n"
+                "       1-12-3 | 2207:0006 | RK3576GMS1 | Remote USB/IP host 100.97.1.2\n"
+            ),
+            stderr="",
+            code=0,
         )
 
         with patch.object(
@@ -1831,7 +1830,9 @@ BUSID  VID:PID    DEVICE                                                        
 
         fake_ssh_manager = MagicMock()
         fake_ssh_manager.get_connection.return_value = MagicMock()
-        fake_ssh_manager.execute_command.return_value = ("", "boom", 1)
+        fake_ssh_manager.execute_command.return_value = CommandResult(
+            stdout="", stderr="boom", code=1,
+        )
 
         with patch.object(
             integrations.runtime, "config_manager", FakeConfigManager()
@@ -2303,7 +2304,7 @@ BUSID  VID:PID    DEVICE                                                        
 
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 calls.append(("exec", ssh, cmd))
-                return ("", "", 0)
+                return CommandResult(stdout="", stderr="", code=0)
 
         class FakeDeviceSSHConnection:
             def __init__(self, config):
@@ -2385,7 +2386,7 @@ BUSID  VID:PID    DEVICE                                                        
 
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 calls.append(("exec", ssh, cmd))
-                return ("", "", 0)
+                return CommandResult(stdout="", stderr="", code=0)
 
         class FakeDeviceSSHConnection:
             def __init__(self, config):
@@ -2486,7 +2487,7 @@ BUSID  VID:PID    DEVICE                                                        
                 pass
 
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
-                return ("", "", 0)
+                return CommandResult(stdout="", stderr="", code=0)
 
         class FakeDeviceSSHConnection:
             def __init__(self, config):
@@ -2529,9 +2530,9 @@ BUSID  VID:PID    DEVICE                                                        
                 if cmd == "adb devices":
                     adb_calls += 1
                     if adb_calls == 1:
-                        return ("List of devices attached\nUSBIP001\tdevice\n", "", 0)
-                    return ("List of devices attached\n", "", 0)
-                return ("", "", 0)
+                        return CommandResult(stdout="List of devices attached\nUSBIP001\tdevice\n", stderr="", code=0)
+                    return CommandResult(stdout="List of devices attached\n", stderr="", code=0)
+                return CommandResult(stdout="", stderr="", code=0)
 
         detach_calls = []
 
@@ -2559,12 +2560,12 @@ BUSID  VID:PID    DEVICE                                                        
         class FakeSshManager:
             def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
                 if cmd == "adb devices":
-                    return (
-                        "List of devices attached\nUSBIP001\tdevice\n",
-                        "",
-                        0,
-                    )
-                return ("", "", 0)
+                    return CommandResult(
+        stdout="List of devices attached\nUSBIP001\tdevice\n",
+        stderr="",
+        code=0,
+    )
+                return CommandResult(stdout="", stderr="", code=0)
 
         with patch.object(
             integrations.runtime, "ssh_manager", FakeSshManager()

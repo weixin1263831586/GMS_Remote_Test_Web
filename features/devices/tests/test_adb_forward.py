@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from features.devices.adb_forward import ADBForwardManager, _adb_tunnel_kill_command
+from foundation.command_result import CommandResult
 
 
 class ADBForwardManagerTests(unittest.TestCase):
@@ -27,8 +28,8 @@ class ADBForwardManagerTests(unittest.TestCase):
             def execute_command(self, _ssh, cmd, timeout=None):
                 commands.append(cmd)
                 if cmd == "adb devices":
-                    return "List of devices attached\nSERIAL01\tdevice\n", "", 0
-                return "", "", 0
+                    return CommandResult(stdout="List of devices attached\nSERIAL01\tdevice\n", stderr="", code=0)
+                return CommandResult(stdout="", stderr="", code=0)
 
             def return_connection(self, _ssh):
                 commands.append("__returned__")

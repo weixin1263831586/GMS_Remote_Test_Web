@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from features.auth import CurrentUser, require_authenticated_user_when_auth_required
+from foundation.command_result import CommandResult
 from foundation.networking import is_local_host
 
 from . import runtime
@@ -61,20 +62,20 @@ def _active_usbip_source_hosts(config: dict[str, Any]) -> set[str] | None:
     command = USBIP_PORT_COMMAND
     try:
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
-            output, _error, code = runtime.run_local_shell_command(command, 10)
+            result = runtime.run_local_shell_command(command, 10)
         else:
             with SSHConnection(config) as ssh:
-                output, _error, code = runtime.ssh_manager.execute_command(
+                result = runtime.ssh_manager.execute_command(
                     ssh, command, timeout=10
                 )
-        if code != 0:
+        if not result.ok:
             return None
     except Exception as exc:
         logger.info("[USB/IP] Failed to query active usbip ports: %s", exc)
         return None
 
     hosts: set[str] = set()
-    for line in (output or "").splitlines():
+    for line in (result.stdout or "").splitlines():
         match = re.search(r"\b(?:Remote|remote)\s+host\s*[:=]\s*([^\s]+)", line)
         if match:
             hosts.add(match.group(1).strip())
@@ -82,11 +83,17 @@ def _active_usbip_source_hosts(config: dict[str, Any]) -> set[str] | None:
     return hosts
 
 
-def _run_on_test_host(config: dict[str, Any], command: str, timeout: int = 10):
+def _run_on_test_host(
+    config: dict[str, Any], command: str, timeout: int = 10,
+) -> CommandResult:
+    """在测试主机上执行命令，本地与 SSH 两条路径统一返回
+    :class:`CommandResult`。"""
     if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
         return runtime.run_local_shell_command(command, timeout)
     with SSHConnection(config) as ssh:
-        return runtime.ssh_manager.execute_command(ssh, command, timeout=timeout)
+        return runtime.ssh_manager.execute_command(
+            ssh, command, timeout=timeout,
+        )
 
 
 def _active_usbip_serials(config: dict[str, Any]) -> set[str] | None:
@@ -98,13 +105,17 @@ def _active_usbip_serials(config: dict[str, Any]) -> set[str] | None:
         "done | sort -u"
     )
     try:
-        output, _error, code = _run_on_test_host(config, command, timeout=10)
-        if code != 0:
+        serials_result = _run_on_test_host(config, command, timeout=10)
+        if not serials_result.ok:
             return None
     except Exception as exc:
         logger.info("[USB/IP] Failed to query active usbip serials: %s", exc)
         return None
-    return {line.strip() for line in (output or "").splitlines() if line.strip()}
+    return {
+        line.strip()
+        for line in (serials_result.stdout or "").splitlines()
+        if line.strip()
+    }
 
 
 def _clear_usbip_source_record(
@@ -462,13 +473,12 @@ async def devices_management(request: Request):
         client_id = runtime.get_client_id_from_request(request)
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
             adb_blocked = await asyncio.to_thread(has_blocked_adb_process)
-            output = error = ""
-            code = 0
+            adb_result = CommandResult(stdout="", stderr="", code=0)
             if not adb_blocked:
-                output, error, code = await asyncio.to_thread(
+                adb_result = await asyncio.to_thread(
                     runtime.run_local_shell_command, "adb devices", 5
                 )
-            adb_devices = DeviceUtils.parse_adb_devices(output)
+            adb_devices = DeviceUtils.parse_adb_devices(adb_result.stdout)
             fastboot_devices = await asyncio.to_thread(
                 device_manager.get_fastboot_devices,
             )
@@ -481,22 +491,27 @@ async def devices_management(request: Request):
                 warning = (
                     "Local adb server is blocked; skipped adb scan"
                     if adb_blocked
-                    else error if code != 0 else ""
+                    else (
+                        adb_result.stderr if not adb_result.ok else ""
+                    )
                 )
                 return response(cached or {
                     "devices": [], "success": True, "source": "local",
                     "warning": warning,
                 })
-            props_output = props_error = ""
-            props_code = 0
+            props_output = ""
             if adb_devices:
-                props_output, props_error, props_code = await asyncio.to_thread(
+                props_result = await asyncio.to_thread(
                     runtime.run_local_shell_command,
                     _build_management_props_command(adb_devices),
                     15,
                 )
-            if props_code != 0:
-                logger.warning("[Device Management] property query failed: %s", props_error)
+                props_output = props_result.stdout
+                if not props_result.ok:
+                    logger.warning(
+                        "[Device Management] property query failed: %s",
+                        props_result.stderr,
+                    )
             payload = await asyncio.to_thread(
                 _build_devices_management_payload,
                 device_ids,
@@ -521,13 +536,13 @@ async def devices_management(request: Request):
                 "warning": "设备主机 SSH 连接失败，请检查主机、账号、密码或密钥配置。",
             })
         try:
-            output, _, _ = await asyncio.to_thread(
+            adb_result = await asyncio.to_thread(
                 runtime.ssh_manager.execute_command,
                 ssh,
                 "adb devices",
                 timeout=5,
             )
-            adb_devices = DeviceUtils.parse_adb_devices(output)
+            adb_devices = DeviceUtils.parse_adb_devices(adb_result.stdout)
             fastboot_devices = await asyncio.to_thread(
                 device_manager.get_fastboot_devices,
                 ssh,
@@ -540,12 +555,13 @@ async def devices_management(request: Request):
                 return response(_cached_management_payload(client_id) or {"devices": []})
             props_output = ""
             if adb_devices:
-                props_output, _, _ = await asyncio.to_thread(
+                props_result = await asyncio.to_thread(
                     runtime.ssh_manager.execute_command,
                     ssh,
                     _build_management_props_command(adb_devices),
                     timeout=15,
                 )
+                props_output = props_result.stdout
             payload = await asyncio.to_thread(
                 _build_devices_management_payload,
                 device_ids,

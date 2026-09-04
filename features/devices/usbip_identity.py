@@ -131,12 +131,12 @@ def query_usbipd_device_states(
 ) -> dict[str, dict[str, object]]:
     """Return normalized connected USB/IP state keyed by physical BUSID."""
     try:
-        stdout, _stderr, code = ssh_manager.execute_command(
+        result = ssh_manager.execute_command(
             ssh, "usbipd state", timeout=15
         )
     except Exception:
         return {}
-    return parse_usbipd_state(stdout or "") if code == 0 else {}
+    return parse_usbipd_state(result.stdout or "") if result.ok else {}
 
 
 def query_windows_usb_identities(
@@ -154,16 +154,16 @@ def query_windows_usb_identities(
         "Write-Output ($_.InstanceId + '|' + ($l -join ',') + '|' + $c) }"
     )
     try:
-        stdout, _stderr, code = ssh_manager.execute_command(
+        result = ssh_manager.execute_command(
             ssh, f'powershell -NoProfile -Command "{ps}"', timeout=20
         )
     except Exception:
         return {}
-    if code != 0 or not stdout:
+    if not result.ok or not result.stdout:
         return {}
     grouped: dict[str, list[dict[str, str]]] = {}
     by_instance: dict[str, dict[str, str]] = {}
-    for raw in stdout.splitlines():
+    for raw in result.stdout.splitlines():
         parts = raw.strip().split("|", 2)
         instance_id = parts[0]
         location = parts[1] if len(parts) > 1 else ""

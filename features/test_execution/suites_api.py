@@ -285,11 +285,14 @@ def _build_suite_remote_path(suite_path: str, path: str | None, config: dict[str
 
 def _run_suite_file_script(ssh, script: str, suite_root: str, remote_path: str, timeout: int = 20) -> dict[str, Any]:
     cmd = f"python3 -c {shlex.quote(script)} {shlex.quote(suite_root)} {shlex.quote(remote_path)}"
-    output, error, code = runtime.ssh_manager.execute_command(ssh, cmd, timeout=timeout)
-    if code != 0:
-        raise RuntimeError(error.strip() or output.strip() or "Remote file operation failed")
+    result = runtime.ssh_manager.execute_command(ssh, cmd, timeout=timeout)
+    if not result.ok:
+        raise RuntimeError(
+            result.stderr.strip() or result.stdout.strip()
+            or "Remote file operation failed"
+        )
     try:
-        return json.loads(output.strip())
+        return json.loads(result.stdout.strip())
     except json.JSONDecodeError as e:
         raise RuntimeError(
             f"Remote file response parse failed: {e}"
@@ -351,12 +354,15 @@ async def search_suite_files(
             f"python3 -c {shlex.quote(script)} {shlex.quote(suite_root)} {shlex.quote(suite_root)} "
             f"{shlex.quote(query.strip().lower())} {shlex.quote(str(limit))}"
         )
-        output, error, code = await asyncio.to_thread(
+        search_result = await asyncio.to_thread(
             runtime.ssh_manager.execute_command, ssh, cmd, timeout=60
         )
-        if code != 0:
-            raise RuntimeError(error.strip() or output.strip() or "Remote search failed")
-        payload = json.loads(output.strip() or "{}")
+        if not search_result.ok:
+            raise RuntimeError(
+                search_result.stderr.strip() or search_result.stdout.strip()
+                or "Remote search failed"
+            )
+        payload = json.loads(search_result.stdout.strip() or "{}")
         if not payload.get("success"):
             return ApiResponse.error(payload.get("error", "Search failed"), status_code=400)
         items = payload.get("items") or []

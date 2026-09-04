@@ -12,6 +12,7 @@ from features.auth import CurrentUser
 from features.devices import device_lock_manager, management_api, operations_api
 from features.devices.models import DeviceActionRequest, WifiConnectRequest
 from features.devices.utils import DeviceUtils
+from foundation.command_result import CommandResult
 
 
 class _ConfigManager:
@@ -51,7 +52,7 @@ class _SshManager:
 
     def execute_command(self, ssh, command):
         self.commands.append(command)
-        return "", "", 0
+        return CommandResult(stdout="", stderr="", code=0)
 
 
 class DeviceOperationsTests(unittest.TestCase):
@@ -146,12 +147,12 @@ class DeviceOperationsTests(unittest.TestCase):
     def test_management_endpoint_merges_adb_and_fastboot_inventory(self):
         def run_local(command, _timeout):
             if command == "adb devices":
-                return "List of devices attached\nADB001\tdevice\n", "", 0
+                return CommandResult(stdout="List of devices attached\nADB001\tdevice\n", stderr="", code=0)
             self.assertIn("adb -s ADB001 shell", command)
-            return (
-                "===DEVICE:ADB001===\nADB001\nModel\n14\n90\nSoC\n",
-                "",
-                0,
+            return CommandResult(
+                stdout="===DEVICE:ADB001===\nADB001\nModel\n14\n90\nSoC\n",
+                stderr="",
+                code=0,
             )
 
         with (

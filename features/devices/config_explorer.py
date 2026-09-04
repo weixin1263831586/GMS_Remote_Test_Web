@@ -107,14 +107,15 @@ def _resolve_package_apk(device_id: str | None, package: str) -> str:
     """Return the on-device APK path for ``package`` (first split if multiple)."""
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stdout, stderr, code = run_local_shell_command(
+    pm_path_result = run_local_shell_command(
         f"{adb} {serial}shell pm path {shlex.quote(package)}", timeout=20
     )
-    if code != 0 or not stdout.strip():
+    if not pm_path_result.ok or not pm_path_result.stdout.strip():
         raise RuntimeError(
-            f"无法获取包 {package} 的 apk 路径: {(stderr or stdout).strip() or 'device offline?'}"
+            f"无法获取包 {package} 的 apk 路径: "
+            f"{(pm_path_result.stderr or pm_path_result.stdout).strip() or 'device offline?'}"
         )
-    first = stdout.strip().splitlines()[0].strip()
+    first = pm_path_result.stdout.strip().splitlines()[0].strip()
     # Output looks like "package:/system/framework/framework-res.apk"
     if not first.startswith("package:"):
         raise RuntimeError(f"无法解析 pm path 输出: {first}")
@@ -134,13 +135,17 @@ def _pull_apk(device_id: str | None, on_device_path: str, package: str) -> str:
     os.makedirs(_APK_CACHE_DIR, exist_ok=True)
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    fingerprint, _, fingerprint_code = run_local_shell_command(
+    fingerprint_result = run_local_shell_command(
         f"{adb} {serial}shell getprop ro.build.fingerprint", timeout=10
     )
-    metadata, _, metadata_code = run_local_shell_command(
+    metadata_result = run_local_shell_command(
         f"{adb} {serial}shell stat -c %s:%Y {shlex.quote(on_device_path)}",
         timeout=10,
     )
+    fingerprint, fingerprint_code = (
+        fingerprint_result.stdout, fingerprint_result.code,
+    )
+    metadata, metadata_code = (metadata_result.stdout, metadata_result.code)
     identity = "\0".join(
         (
             device_id or "default",
@@ -161,17 +166,18 @@ def _pull_apk(device_id: str | None, on_device_path: str, package: str) -> str:
         _APK_CACHE_DIR, f".{cache_key}.{uuid.uuid4().hex}.part"
     )
     try:
-        stdout, stderr, code = run_local_shell_command(
+        pull_result = run_local_shell_command(
             f"{adb} {serial}pull {shlex.quote(on_device_path)} {shlex.quote(temp_path)}",
             timeout=120,
         )
         if (
-            code != 0
+            not pull_result.ok
             or not os.path.exists(temp_path)
             or os.path.getsize(temp_path) <= 0
         ):
             raise RuntimeError(
-                f"拉取 {on_device_path} 失败: {(stderr or stdout).strip()}"
+                f"拉取 {on_device_path} 失败: "
+                f"{(pull_result.stderr or pull_result.stdout).strip()}"
             )
         os.replace(temp_path, local_path)
     finally:
@@ -284,14 +290,14 @@ def _enabled_overlays_by_target(device_id: str | None) -> dict[str, list[str]] |
     """
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stdout, _stderr, code = run_local_shell_command(
+    overlay_list_result = run_local_shell_command(
         f"{adb} {serial}shell cmd overlay list", timeout=15
     )
-    if code != 0:
+    if not overlay_list_result.ok:
         return None
     by_target: dict[str, list[str]] = {}
     current_target = ""
-    for ln in stdout.splitlines():
+    for ln in overlay_list_result.stdout.splitlines():
         ln = ln.strip()
         if not ln:
             continue
@@ -329,13 +335,16 @@ def _lookup_effective(
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
     resource = f"{package}:{entry.type}/{entry.resname}"
     # 有效值写入 stdout，错误写入 stderr 并返回非零状态。
-    stdout, stderr, code = run_local_shell_command(
+    lookup_result = run_local_shell_command(
         f"{adb} {serial}shell cmd overlay lookup --verbose {shlex.quote(package)} {shlex.quote(resource)}",
         timeout=15,
     )
-    if code != 0:
-        entry.lookup_error = (stderr or stdout).strip() or "lookup failed"
+    if not lookup_result.ok:
+        entry.lookup_error = (
+            lookup_result.stderr or lookup_result.stdout
+        ).strip() or "lookup failed"
         return
+    stdout = lookup_result.stdout
     # 仅采集 Best matching 标记后的有效值行。
     source_pkg = None
     value_lines: list[str] = []
@@ -470,10 +479,10 @@ def list_packages(device_id: str | None = None) -> list[str]:
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
     valid: list[str] = []
     for pkg in candidates:
-        stdout, _, code = run_local_shell_command(
+        pm_result = run_local_shell_command(
             f"{adb} {serial}shell pm path {shlex.quote(pkg)}", timeout=10
         )
-        if code == 0 and stdout.strip().startswith("package:"):
+        if pm_result.ok and pm_result.stdout.strip().startswith("package:"):
             valid.append(pkg)
     return valid
 
@@ -486,13 +495,13 @@ def list_all_packages(device_id: str | None = None) -> list[str]:
     """
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stdout, _, code = run_local_shell_command(
+    pkgs_result = run_local_shell_command(
         f"{adb} {serial}shell pm list packages", timeout=30
     )
-    if code != 0:
+    if not pkgs_result.ok:
         return []
     pkgs: list[str] = []
-    for line in stdout.splitlines():
+    for line in pkgs_result.stdout.splitlines():
         line = line.strip()
         if line.startswith("package:"):
             pkgs.append(line[len("package:"):].strip())
@@ -513,22 +522,25 @@ def pull_device_file(
     os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stdout, stderr, code = run_local_shell_command(
+    pull_result = run_local_shell_command(
         f"{adb} {serial}pull {shlex.quote(on_device_path)} {shlex.quote(local_path)}",
         timeout=timeout,
     )
-    if code != 0 or not os.path.exists(local_path):
-        raise RuntimeError(f"拉取 {on_device_path} 失败: {(stderr or stdout).strip()}")
+    if not pull_result.ok or not os.path.exists(local_path):
+        raise RuntimeError(
+            f"拉取 {on_device_path} 失败: "
+            f"{(pull_result.stderr or pull_result.stdout).strip()}"
+        )
 
 
 def list_devices() -> list[dict[str, str]]:
     """Return currently attached adb devices as [{serial, state}]."""
     adb = _adb_path()
-    stdout, _, code = run_local_shell_command(f"{adb} devices", timeout=10)
+    devices_result = run_local_shell_command(f"{adb} devices", timeout=10)
     devices: list[dict[str, str]] = []
-    if code != 0:
+    if not devices_result.ok:
         return devices
-    for line in stdout.splitlines()[1:]:
+    for line in devices_result.stdout.splitlines()[1:]:
         line = line.strip()
         if not line or "\t" not in line:
             continue
@@ -543,12 +555,15 @@ def _pm_list(device_id: str | None, args: str, timeout: int = 60) -> str:
     """Run ``adb shell pm list <args>`` and return raw stdout."""
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stdout, stderr, code = run_local_shell_command(
+    pm_result = run_local_shell_command(
         f"{adb} {serial}shell pm list {args}", timeout=timeout
     )
-    if code != 0:
-        raise RuntimeError(f"pm list {args} 失败: {(stderr or stdout).strip() or 'device offline?'}")
-    return stdout
+    if not pm_result.ok:
+        raise RuntimeError(
+            f"pm list {args} 失败: "
+            f"{(pm_result.stderr or pm_result.stdout).strip() or 'device offline?'}"
+        )
+    return pm_result.stdout
 
 
 def list_packages_with_path(device_id: str | None = None) -> list[dict[str, str]]:
@@ -595,15 +610,18 @@ def list_props(device_id: str | None = None) -> list[dict[str, str]]:
     """
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stdout, stderr, code = run_local_shell_command(
+    getprop_result = run_local_shell_command(
         f"{adb} {serial}shell getprop", timeout=30
     )
-    if code != 0:
-        raise RuntimeError(f"getprop 失败: {(stderr or stdout).strip() or 'device offline?'}")
+    if not getprop_result.ok:
+        raise RuntimeError(
+            f"getprop 失败: "
+            f"{(getprop_result.stderr or getprop_result.stdout).strip() or 'device offline?'}"
+        )
     rows: list[dict[str, str]] = []
     # Match "[name]: [value]" — value may itself be empty "[name]: []".
     prop_re = re.compile(r"^\[([^\]]*)\]:\s*\[([^\]]*)\]\s*$")
-    for line in stdout.splitlines():
+    for line in getprop_result.stdout.splitlines():
         m = prop_re.match(line.strip())
         if m:
             name = m.group(1).strip()

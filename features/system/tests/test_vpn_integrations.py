@@ -4,13 +4,16 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from features.system.models import VPNConnectRequest
+from foundation.command_result import CommandResult
 
 
 class VpnIntegrationTests(unittest.TestCase):
     def _connect(
         self,
         active_output: str,
-        activation_result=("Connection successfully activated", "", 0),
+        activation_result=CommandResult(
+            stdout="Connection successfully activated", stderr="", code=0,
+        ),
     ):
         import features.system.integrations as integrations
 
@@ -26,7 +29,7 @@ class VpnIntegrationTests(unittest.TestCase):
 
         commands = AsyncMock(side_effect=[
             activation_result,
-            (active_output, "", 0),
+            CommandResult(stdout=active_output, stderr="", code=0),
         ])
         with patch.object(integrations, "config_manager", FakeConfigManager()), patch.object(
             integrations,
@@ -58,10 +61,10 @@ class VpnIntegrationTests(unittest.TestCase):
     def test_connect_permission_error_includes_policy_setup_command(self):
         body, _ = self._connect(
             "",
-            activation_result=(
-                "",
-                "Not authorized to control networking",
-                4,
+            activation_result=CommandResult(
+                stdout="",
+                stderr="Not authorized to control networking",
+                code=4,
             ),
         )
 

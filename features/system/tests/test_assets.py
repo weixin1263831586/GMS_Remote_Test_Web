@@ -4,6 +4,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+
+from foundation.command_result import CommandResult
 from unittest.mock import patch
 
 from features.system import assets
@@ -68,7 +70,7 @@ class FileListingTests(unittest.TestCase):
                 ), patch.object(
                     assets.ssh_manager,
                     "execute_command",
-                    return_value=(output, "", 0),
+                    return_value=CommandResult(stdout=output, stderr="", code=0),
                 ) as execute:
             response = asyncio.run(assets.list_files({"path": "~/GMS-Suite"}, None))
 

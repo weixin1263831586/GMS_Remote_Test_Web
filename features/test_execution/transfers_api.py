@@ -230,8 +230,10 @@ async def add_local_test_suite(req: TestSuiteAddLocalRequest):
                 f"[ -d {shlex.quote(req.path)} ] "
                 "&& echo exists || echo not_exists"
             )
-            output, _, _ = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=10)
-            if output.strip() != "exists":
+            check_result = await asyncio.to_thread(
+                runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=10,
+            )
+            if check_result.stdout.strip() != "exists":
                 return error_response(f"Path not found: {req.path}", 404)
 
     return JSONResponse(content={"success": True, "message": f"Added local path: {os.path.basename(req.path.rstrip('/'))}", "path": req.path})
@@ -367,12 +369,25 @@ async def download_test_suite_from_url(
                 download_url,
             ]
             cmd = f"{shlex.join(command_parts)} 2>&1"
-            output, exit_code, _ = runtime.ssh_manager.execute_command(ssh, cmd, timeout=600)
-            if exit_code != 0:
-                return error_response(f"Download failed: {output}", 500)
+            # P1-10 回归：统一 CommandResult 后属性访问消除位置错用——
+            # 历史解包成 (output, exit_code, _) 曾把 stderr 当退出码，
+            # curl 成功也被判 Download failed。
+            # P1-11：同步 execute_command 最长阻塞 600s，必须放入线程池，
+            # 否则整个 FastAPI 事件循环被冻结（loop_watchdog 只能检测、
+            # 不能消除卡顿）。
+            download_result = await asyncio.to_thread(
+                runtime.ssh_manager.execute_command, ssh, cmd, timeout=600,
+            )
+            if not download_result.ok:
+                detail = (
+                    download_result.stdout or download_result.stderr or ""
+                ).strip()
+                return error_response(f"Download failed: {detail}", 500)
             size_cmd = f"stat -c%s '{archive_path}' 2>/dev/null || stat -f%z '{archive_path}' 2>/dev/null || echo 0"
-            size_output, _, _ = runtime.ssh_manager.execute_command(ssh, size_cmd, timeout=10)
-            file_size = int(size_output.strip())
+            size_result = await asyncio.to_thread(
+                runtime.ssh_manager.execute_command, ssh, size_cmd, timeout=10,
+            )
+            file_size = int(size_result.stdout.strip())
             return JSONResponse(content={"success": True, "message": f"Download complete: {filename}", "archive_path": archive_path, "file_size": file_size, "download_method": "ssh"})
 
 
@@ -408,9 +423,9 @@ async def list_test_suite_archives():
         if not ssh:
             return ssh_connection_failed_response()
         find_cmd = f"find {shlex.quote(base_path)} -maxdepth 1 -type f \\( -name '*.zip' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.tar.bz2' -o -name '*.tar' \\) -printf '%T@\\t%s\\t%f\\t%p\\n' 2>/dev/null | sort -nr"
-        output, _, _ = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, find_cmd, timeout=20)
+        find_result = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, find_cmd, timeout=20)
         archives = []
-        for line in output.splitlines():
+        for line in find_result.stdout.splitlines():
             parts = line.split("\t", 3)
             if len(parts) == 4:
                 mtime, size, name, path = parts
@@ -584,10 +599,10 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
             mkdir_cmd = f"mkdir -p {shlex.quote(remote_extract_dir)}"
             await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, mkdir_cmd, timeout=20)
             cmd = f"tar -xf {shlex.quote(archive_path)} -C {shlex.quote(remote_extract_dir)} 2>&1"
-            output, _error, exit_code = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, cmd, timeout=300)
+            extract_result = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, cmd, timeout=300)
 
-            if exit_code != 0:
-                return error_response(f"Extraction failed: {output}", 500)
+            if not extract_result.ok:
+                return error_response(f"Extraction failed: {extract_result.stdout}", 500)
 
             extracted_name = target_dir_name or derive_suite_dir_name_from_archive(req.archive_path)
             extracted_path = os.path.join(extract_dir, extracted_name)

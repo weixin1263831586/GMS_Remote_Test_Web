@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from foundation.command_result import CommandResult
 
 from features.test_execution.tradefed import (
     find_tradefed_binary,
@@ -15,7 +16,7 @@ class FakeRuntimeSshManager:
 
     def execute_command(self, _ssh, command, timeout=None):
         self.commands.append(command)
-        return "/suite/tools/cts-tradefed\n", "", 0
+        return CommandResult(stdout="/suite/tools/cts-tradefed\n", stderr="", code=0)
 
 
 class TradefedTests(unittest.TestCase):

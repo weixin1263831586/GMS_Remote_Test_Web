@@ -158,6 +158,10 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
         '**报错信息**:\n' +
         '<pre>\n' + failureReason + '\n</pre>';
 
+    // DOM XSS 防护（审计 P1-8）：moduleName/testCaseName/failureReason/
+    // issueId 全部来自测试报告数据，绝不能拼进 innerHTML（value="..."/
+    // <textarea> 均可被 `</textarea><img onerror=...>` 逃逸）。模板只含
+    // 常量，报告数据在 DOM 构建后通过 .value 赋值。
     modal.innerHTML = `
         <div class="modal-content" style="max-width: 700px; max-height: 85vh; overflow-y: auto;">
             <div class="modal-header">
@@ -167,13 +171,13 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
             <div class="modal-body">
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">Redmine Issue ID</label>
-                    <input type="text" id="${issueInputId}" data-redmine-issue-input value="${issueIdFromReport}" placeholder="输入 Redmine Issue ID"
+                    <input type="text" id="${issueInputId}" data-redmine-issue-input placeholder="输入 Redmine Issue ID"
                            style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px; font-family: 'Courier New', monospace;">
                 </div>
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">回复内容</label>
                     <textarea id="${replyTextId}" data-redmine-reply-text rows="10" placeholder="输入回复内容..."
-                              style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 13px; font-family: 'Courier New', monospace; white-space: pre-wrap; resize: vertical;">${defaultReply}</textarea>
+                              style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 13px; font-family: 'Courier New', monospace; white-space: pre-wrap; resize: vertical;"></textarea>
                 </div>
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">📎 附件</label>
@@ -198,6 +202,15 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
     `;
 
     document.body.appendChild(modal);
+    // 报告来源数据经安全通道写入：DOM 属性赋值不做 HTML 解析。
+    const issueInputElement = document.getElementById(issueInputId);
+    if (issueInputElement) {
+        issueInputElement.value = issueIdFromReport || '';
+    }
+    const replyTextElement = document.getElementById(replyTextId);
+    if (replyTextElement) {
+        replyTextElement.value = defaultReply;
+    }
     ModalManager.open(modalId);
 
     // 绑定拖拽事件

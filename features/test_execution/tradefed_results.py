@@ -225,9 +225,9 @@ def _enrich_remote_results(results: list[dict], ssh, suite_path: str) -> None:
     )
     result_paths = [f"{results_root}/{dirname}" for dirname in dirnames]
     cmd = shlex.join(["bash", "-c", script, "gms-result-enrich", *result_paths])
-    output, _, _ = runtime.ssh_manager.execute_command(ssh, cmd, timeout=30)
+    enrich_result = runtime.ssh_manager.execute_command(ssh, cmd, timeout=30)
     mapping: dict[str, str] = {}
-    for line in (output or "").splitlines():
+    for line in (enrich_result.stdout or "").splitlines():
         parts = line.split("|", 1)
         if len(parts) != 2:
             continue

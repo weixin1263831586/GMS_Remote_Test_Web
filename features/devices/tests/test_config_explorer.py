@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from features.devices import config_explorer
+from foundation.command_result import CommandResult
 
 
 class ConfigExplorerTests(unittest.TestCase):
@@ -47,14 +48,14 @@ resource 0x01040000 bool/config_example
         def run_command(command, timeout):
             if "getprop ro.build.fingerprint" in command:
                 fingerprint = "build-a" if "device-a" in command else "build-b"
-                return fingerprint, "", 0
+                return CommandResult(stdout=fingerprint, stderr="", code=0)
             if "shell stat" in command:
-                return "4096:1700000000", "", 0
+                return CommandResult(stdout="4096:1700000000", stderr="", code=0)
             if " pull " in command:
                 destination = shlex.split(command)[-1]
                 Path(destination).write_bytes(b"apk")
                 pulls.append(command)
-                return "pulled", "", 0
+                return CommandResult(stdout="pulled", stderr="", code=0)
             raise AssertionError(command)
 
         with tempfile.TemporaryDirectory() as directory, patch.object(
@@ -82,9 +83,9 @@ resource 0x01040000 bool/config_example
         def run_command(command, timeout):
             nonlocal attempts
             if "getprop ro.build.fingerprint" in command:
-                return "build-a", "", 0
+                return CommandResult(stdout="build-a", stderr="", code=0)
             if "shell stat" in command:
-                return "4096:1700000000", "", 0
+                return CommandResult(stdout="4096:1700000000", stderr="", code=0)
             if " pull " in command:
                 attempts += 1
                 destination = shlex.split(command)[-1]
@@ -92,8 +93,8 @@ resource 0x01040000 bool/config_example
                     b"partial" if attempts == 1 else b"complete-apk"
                 )
                 return (
-                    ("", "transfer interrupted", 1)
-                    if attempts == 1 else ("pulled", "", 0)
+                    CommandResult(stdout="", stderr="transfer interrupted", code=1)
+                    if attempts == 1 else CommandResult(stdout="pulled", stderr="", code=0)
                 )
             raise AssertionError(command)
 
@@ -127,7 +128,8 @@ com.android.phone
 """
 
         with patch.object(config_explorer, "_adb_path", return_value="adb"), patch.object(
-            config_explorer, "run_local_shell_command", return_value=(overlay_output, "", 0)
+            config_explorer, "run_local_shell_command",
+            return_value=CommandResult(stdout=overlay_output, stderr="", code=0),
         ):
             grouped = config_explorer._enabled_overlays_by_target(None)
 

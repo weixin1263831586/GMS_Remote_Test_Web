@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
 from features.firmware import api, firmware_api, runtime, shares_api
+from foundation.command_result import CommandResult
 
 
 class FakeConfigManager:
@@ -49,8 +50,10 @@ class FakeSshManager:
     def execute_command(self, _ssh, cmd, timeout=None):
         self.commands.append((cmd, timeout))
         if "test -f" in cmd:
-            return self.file_check_output, "", 0
-        return "", "", 0
+            return CommandResult(
+                stdout=self.file_check_output, stderr="", code=0,
+            )
+        return CommandResult(stdout="", stderr="", code=0)
 
 
 async def fake_lock_firmware_devices(**_kwargs):

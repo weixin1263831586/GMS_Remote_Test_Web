@@ -30,9 +30,9 @@ def usbipd_not_installed_error() -> dict[str, Any]:
 def check_usbipd_installed(ssh_manager, ssh) -> tuple[bool, str]:
     """Check whether usbipd is installed on the Windows host; return (installed, version)."""
     try:
-        stdout, _stderr, code = ssh_manager.execute_command(ssh, 'usbipd --version')
-        if code == 0 and stdout.strip():
-            return True, stdout.strip()
+        result = ssh_manager.execute_command(ssh, 'usbipd --version')
+        if result.ok and result.stdout.strip():
+            return True, result.stdout.strip()
         return False, ''
     except Exception as e:
         logger.error(f"Error checking usbipd: {e}")
@@ -44,9 +44,9 @@ def install_usbipd(ssh_manager, ssh, config: dict[str, Any]) -> dict[str, Any]:
     try:
         # 检查是否已经是管理员权限
         check_admin_cmd = 'whoami /groups | findstr S-1-16-12288'
-        stdout, stderr, code = ssh_manager.execute_command(ssh, check_admin_cmd)
+        admin_result = ssh_manager.execute_command(ssh, check_admin_cmd)
 
-        if code != 0 or 'S-1-16-12288' not in stdout:
+        if not admin_result.ok or 'S-1-16-12288' not in admin_result.stdout:
             return {
                 'success': False,
                 'error': f'需要管理员权限。请在 Windows 上以【管理员身份】运行 PowerShell，然后执行: {USBIPD_INSTALL_CMD}'
@@ -54,9 +54,9 @@ def install_usbipd(ssh_manager, ssh, config: dict[str, Any]) -> dict[str, Any]:
 
         # 执行自动安装命令（添加自动接受参数）
         install_cmd = f'{USBIPD_INSTALL_CMD} --accept-package-agreements --accept-source-agreements'
-        stdout, stderr, code = ssh_manager.execute_command(ssh, install_cmd, timeout=120)
+        install_result = ssh_manager.execute_command(ssh, install_cmd, timeout=120)
 
-        if code == 0:
+        if install_result.ok:
             # 验证安装
             installed, version = check_usbipd_installed(ssh_manager, ssh)
             if installed:
@@ -73,7 +73,7 @@ def install_usbipd(ssh_manager, ssh, config: dict[str, Any]) -> dict[str, Any]:
         else:
             return {
                 'success': False,
-                'error': f'安装失败: {stderr or stdout}'
+                'error': f'安装失败: {install_result.stderr or install_result.stdout}'
             }
 
     except Exception as e:

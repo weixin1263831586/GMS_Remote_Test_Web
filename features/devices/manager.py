@@ -113,14 +113,14 @@ class DeviceManager:
             created_ssh = False
 
         try:
-            output, _error, _code = self.ssh_manager.execute_command(
+            result = self.ssh_manager.execute_command(
                 ssh,
                 "adb devices",
                 timeout=10
             )
 
             # 使用 DeviceUtils 解析设备列表
-            return DeviceUtils.parse_adb_devices(output)
+            return DeviceUtils.parse_adb_devices(result.stdout)
 
         except Exception as e:
             logger.error(f"[Device] Error getting devices: {e}")
@@ -165,15 +165,20 @@ class DeviceManager:
             created_ssh = False
 
         try:
-            output, error, code = self.ssh_manager.execute_command(
+            result = self.ssh_manager.execute_command(
                 ssh,
                 "fastboot devices",
                 timeout=10,
             )
-            if code != 0 and not output:
-                logger.warning("[Device] Remote fastboot devices failed: %s", error.strip())
+            if not result.ok and not result.stdout:
+                logger.warning(
+                    "[Device] Remote fastboot devices failed: %s",
+                    result.stderr.strip(),
+                )
                 return []
-            return DeviceUtils.parse_fastboot_devices(output or error)
+            return DeviceUtils.parse_fastboot_devices(
+                result.stdout or result.stderr
+            )
         except Exception as exc:
             logger.error("[Device] Error getting remote fastboot devices: %s", exc)
             return []
@@ -221,13 +226,13 @@ class DeviceManager:
             getprop_cmd = f"adb -s {device_id} shell getprop"
 
             try:
-                output, _, _ = self.ssh_manager.execute_command(
+                getprop_result = self.ssh_manager.execute_command(
                     ssh,
                     getprop_cmd,
                     timeout=15
                 )
                 # 解析 getprop 输出: [ro.serialno]: [value]
-                for line in output.strip().split('\n'):
+                for line in getprop_result.stdout.strip().split('\n'):
                     m = re.match(r'\[([\w.]+)\]:\s*\[(.*)\]', line)
                     if m:
                         prop_name, value = m.group(1), m.group(2)
@@ -269,20 +274,20 @@ class DeviceManager:
 
         try:
             def run_adb(_device_id: str | None, args: str, timeout: int) -> tuple[str, int]:
-                output, error, code = self.ssh_manager.execute_command(
+                result = self.ssh_manager.execute_command(
                     ssh,
                     f"adb -s {device_id} {args}",
                     timeout=timeout,
                 )
-                return (output or error or ''), code
+                return (result.stdout or result.stderr or ''), result.code
 
             def run_fastboot(args: str, timeout: int) -> tuple[str, int]:
-                output, error, code = self.ssh_manager.execute_command(
+                result = self.ssh_manager.execute_command(
                     ssh,
                     f"fastboot -s {shlex.quote(device_id)} {args}",
                     timeout=timeout,
                 )
-                return (output or error or ''), code
+                return (result.stdout or result.stderr or ''), result.code
 
             # 停在 Fastboot/Fastbootd（如烧写后等待人工处理）的设备没有
             # ADB 通道，改用 fastboot reboot 重启。
@@ -343,12 +348,12 @@ class DeviceManager:
 
         try:
             def run_adb(_device_id: str | None, args: str, timeout: int) -> tuple[str, int]:
-                output, error, code = self.ssh_manager.execute_command(
+                result = self.ssh_manager.execute_command(
                     ssh,
                     f"adb -s {device_id} {args}",
                     timeout=timeout,
                 )
-                return (output or error or ''), code
+                return (result.stdout or result.stderr or ''), result.code
 
             remount = root_and_remount(
                 run_adb,
@@ -359,12 +364,12 @@ class DeviceManager:
             remount_output = remount.remount_output
 
             # 检查 veritymode
-            verity_output, _, _ = self.ssh_manager.execute_command(
+            verity_result = self.ssh_manager.execute_command(
                 ssh,
                 f"adb -s {device_id} shell getprop ro.boot.veritymode",
                 timeout=10
             )
-            verity_mode = verity_output.strip()
+            verity_mode = verity_result.stdout.strip()
 
             needs_reboot = remount.needs_reboot
             overlayfs_enabled = remount.overlayfs_enabled

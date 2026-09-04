@@ -4346,11 +4346,42 @@
         let usersRefreshInterval = null;
         let usersHasLoaded = false;
         let usersLocalDevicesReloadTimer = null;
+        // 用户取消提权后置位：自动刷新不再每 10 秒重复探测/弹框；
+        // 提权成功或列表加载成功时清除。
+        let usersAccessDenied = false;
 
         async function loadUsersList(elevationRetried = false) {
             const tbody = document.getElementById('users-table-body');
             if (tbody) tbody.setAttribute('aria-busy', 'true');
             try {
+                // 本地提权状态已知为否时，先向服务端确认（新标签页可能
+                // 丢失本地标记），仍未提权则直接进入提权流程，避免发出
+                // 一次必然 403 的 /api/users/list 探测请求。
+                if (!elevationRetried && state.authRequired && !state.elevated) {
+                    let elevated = false;
+                    try {
+                        const status = await fetchAuthStatus();
+                        if (status.elevated) {
+                            _markElevated(status.elevated_until);
+                            elevated = true;
+                        }
+                    } catch (error) {
+                        debugLog('[Users] elevation status check failed; falling back to probe', error);
+                    }
+                    if (!elevated) {
+                        const granted = window.requestElevatedAccess
+                            ? await window.requestElevatedAccess('查看用户管理')
+                            : false;
+                        if (granted) {
+                            usersAccessDenied = false;
+                            return loadUsersList(true);
+                        }
+                        usersAccessDenied = true;
+                        displayUsersListAccessMessage('需要管理员提权后查看用户管理');
+                        return;
+                    }
+                }
+
                 const resp = await fetch('/api/users/list', { credentials: 'same-origin' });
                 const data = await resp.json();
 
@@ -4359,8 +4390,10 @@
                         ? await window.requestElevatedAccess('查看用户管理')
                         : false;
                     if (granted) {
+                        usersAccessDenied = false;
                         return loadUsersList(true);
                     }
+                    usersAccessDenied = true;
                     displayUsersListAccessMessage('需要管理员提权后查看用户管理');
                     return;
                 }
@@ -4371,6 +4404,7 @@
                         : data.detail;
                     throw new Error(detail || data.error || `HTTP ${resp.status}`);
                 }
+                usersAccessDenied = false;
                 if (data.users) {
                     displayUsersList(data.users);
                 }
@@ -4416,7 +4450,8 @@
         function startUsersAutoRefresh() {
             if (usersRefreshInterval) return;
             usersRefreshInterval = setInterval(() => {
-                if (currentPage === 'users' && !document.hidden) {
+                // 用户已取消提权时不再反复探测；重新进入页面会再次提示。
+                if (currentPage === 'users' && !document.hidden && !usersAccessDenied) {
                     loadUsersList();
                 }
             }, 10000);

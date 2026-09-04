@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from features.devices import usbip, usbip_flash, usbip_transaction
+from foundation.command_result import CommandResult
 
 
 def _manager(config: dict, ssh_manager) -> usbip.USBIPManager:
@@ -40,9 +41,9 @@ class BindStateParsingTests(unittest.TestCase):
         manager.ssh_manager = ssh_manager
         ssh_manager.execute_command.side_effect = (
             lambda target, cmd, timeout=None, get_pty=False: (
-                ("1-2 Not Shared", "", 0)
+                CommandResult(stdout="1-2 Not Shared", stderr="", code=0)
                 if cmd == "usbipd list | findstr 1-2"
-                else ("", "", 0)
+                else CommandResult(stdout="", stderr="", code=0)
             )
         )
         track: list[str] = []
@@ -56,9 +57,9 @@ class BindStateParsingTests(unittest.TestCase):
         manager.ssh_manager = ssh_manager
         ssh_manager.execute_command.side_effect = (
             lambda target, cmd, timeout=None, get_pty=False: (
-                ("1-2 Shared", "", 0)
+                CommandResult(stdout="1-2 Shared", stderr="", code=0)
                 if cmd == "usbipd list | findstr 1-2"
-                else ("", "", 0)
+                else CommandResult(stdout="", stderr="", code=0)
             )
         )
         track: list[str] = []
@@ -78,21 +79,20 @@ class AttachStabilizationTests(unittest.TestCase):
                 if cmd == "adb devices":
                     self.adb_calls += 1
                     if self.adb_calls == 1:
-                        return ("List of devices attached\n", "", 0)
-                    return ("List of devices attached\nUSBIP001\tdevice\n", "", 0)
+                        return CommandResult(stdout="List of devices attached\n", stderr="", code=0)
+                    return CommandResult(stdout="List of devices attached\nUSBIP001\tdevice\n", stderr="", code=0)
                 if cmd.startswith("sudo usbip attach"):
-                    return ("attached", "", 0)
+                    return CommandResult(stdout="attached", stderr="", code=0)
                 if cmd == "sudo -n /usr/bin/usbip port":
                     self.port_calls += 1
                     if self.port_calls == 1:
-                        return ("Imported USB devices\n", "", 0)
-                    return (
-                        "Port 00: <Port in Use>\n"
-                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
-                        "",
-                        0,
-                    )
-                return ("", "", 0)
+                        return CommandResult(stdout="Imported USB devices\n", stderr="", code=0)
+                    return CommandResult(
+                stdout="Port 00: <Port in Use>\n""  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                stderr="",
+                code=0,
+            )
+                return CommandResult(stdout="", stderr="", code=0)
 
         manager = usbip.USBIPManager()
         manager.ssh_manager = FakeSshManager()
@@ -114,31 +114,30 @@ class AttachStabilizationTests(unittest.TestCase):
                 if cmd == "adb devices":
                     self.adb_calls += 1
                     if self.adb_calls == 1:
-                        return ("List of devices attached\n", "", 0)
-                    return (
-                        "List of devices attached\nUSBIP001\tdevice\n",
-                        "",
-                        0,
-                    )
+                        return CommandResult(stdout="List of devices attached\n", stderr="", code=0)
+                    return CommandResult(
+                stdout="List of devices attached\nUSBIP001\tdevice\n",
+                stderr="",
+                code=0,
+            )
                 if cmd == "fastboot devices":
-                    return ("", "", 0)
+                    return CommandResult(stdout="", stderr="", code=0)
                 if cmd.startswith("sudo usbip attach"):
                     self.attach_calls += 1
-                    return ("", "", 0)
+                    return CommandResult(stdout="", stderr="", code=0)
                 if cmd == "sudo -n /usr/bin/usbip port":
                     self.port_calls += 1
                     # 前两次 attach 都在枚举前掉线：每轮包含
                     # 6 次首快照轮询 + 1 次稳定性快照。第三次
                     # attach 后连续两次都能观测到精确 BUSID。
                     if self.port_calls <= 14:
-                        return ("Imported USB devices\n", "", 0)
-                    return (
-                        "Port 00: <Port in Use>\n"
-                        "  1-1 -> usbip://172.16.14.66:3240/1-1\n",
-                        "",
-                        0,
-                    )
-                return ("", "", 0)
+                        return CommandResult(stdout="Imported USB devices\n", stderr="", code=0)
+                    return CommandResult(
+                stdout="Port 00: <Port in Use>\n""  1-1 -> usbip://172.16.14.66:3240/1-1\n",
+                stderr="",
+                code=0,
+            )
+                return CommandResult(stdout="", stderr="", code=0)
 
         manager = usbip.USBIPManager()
         manager.ssh_manager = FakeSshManager()
@@ -158,15 +157,15 @@ class AutoBindPolicyTests(unittest.TestCase):
         manager = _manager(CONFIG, ssh_manager)
         win_ssh = MagicMock()
         policy_lists = iter([
-            ("GUID EFFECT OPERATION BUSID\n", "", 0),
-            ("abc Allow AutoBind 1-1\n", "", 0),
+            CommandResult(stdout="GUID EFFECT OPERATION BUSID\n", stderr="", code=0),
+            CommandResult(stdout="abc Allow AutoBind 1-1\n", stderr="", code=0),
         ])
 
         def execute(_target, cmd, timeout=None, get_pty=False):
             if cmd == "usbipd policy list":
                 return next(policy_lists)
             if cmd.startswith("usbipd policy add"):
-                return "policy added", "", 0
+                return CommandResult(stdout="policy added", stderr="", code=0)
             raise AssertionError(cmd)
 
         ssh_manager.execute_command.side_effect = execute
@@ -196,9 +195,7 @@ class AutoBindPolicyTests(unittest.TestCase):
         ssh_manager = MagicMock()
         manager = _manager(CONFIG, ssh_manager)
         win_ssh = MagicMock()
-        ssh_manager.execute_command.return_value = (
-            "", "Unknown command 'policy'", 1
-        )
+        ssh_manager.execute_command.return_value = CommandResult(stdout="", stderr="Unknown command 'policy'", code=1)
         with patch.object(
             usbip_flash, "usbip_manager", manager
         ), patch.object(
@@ -226,38 +223,40 @@ class StartUsbipRollbackTests(unittest.TestCase):
         win_ssh = MagicMock()
         exec_calls: list[str] = []
         ubuntu_port_responses = iter([
-            ("List of attached gadgets\n", "", 0),
-            (
-                "Port 00: <Port in Use>\n"
-                "    1-2 | 05ac:12a8 | Device | "
-                "Remote USB/IP host 172.16.14.66\n",
-                "",
-                0,
+            CommandResult(stdout="List of attached gadgets\n", stderr="", code=0),
+            CommandResult(
+                stdout=(
+                    "Port 00: <Port in Use>\n"
+                    "    1-2 | 05ac:12a8 | Device | "
+                    "Remote USB/IP host 172.16.14.66\n"
+                ),
+                stderr="",
+                code=0,
             ),
-            ("List of attached gadgets\n", "", 0),
-            ("List of attached gadgets\n", "", 0),
+            CommandResult(stdout="List of attached gadgets\n", stderr="", code=0),
+            CommandResult(stdout="List of attached gadgets\n", stderr="", code=0),
         ])
 
         def execute(target, cmd, timeout=None, get_pty=False):
             exec_calls.append(cmd)
             if target is win_ssh:
                 responses = {
-                    "powershell -Command \"$env:OS\"": ("Windows_NT", "", 0),
-                    "usbipd --version": ("4.0.0", "", 0),
-                    'tasklist /FI "IMAGENAME eq adb.exe" /NH': ("", "", 0),
-                    "usbipd list | findstr 1-2": ("1-2 Not Shared", "", 0),
-                    "usbipd bind --busid 1-2": ("", "", 0),
+                    "powershell -Command \"$env:OS\"": CommandResult(stdout="Windows_NT", stderr="", code=0),
+                    "usbipd --version": CommandResult(stdout="4.0.0", stderr="", code=0),
+                    'tasklist /FI "IMAGENAME eq adb.exe" /NH': CommandResult(stdout="", stderr="", code=0),
+                    "usbipd list | findstr 1-2": CommandResult(stdout="1-2 Not Shared", stderr="", code=0),
+                    "usbipd bind --busid 1-2": CommandResult(stdout="", stderr="", code=0),
                     # Rollback commands on a fresh Windows connection:
-                    "usbipd detach --busid 1-2": ("", "", 0),
-                    "usbipd unbind --busid 1-2": ("", "", 0),
+                    "usbipd detach --busid 1-2": CommandResult(stdout="", stderr="", code=0),
+                    "usbipd unbind --busid 1-2": CommandResult(stdout="", stderr="", code=0),
                 }
-                return responses.get(cmd, ("", "", 0))
+                return responses.get(cmd, CommandResult(stdout="", stderr="", code=0))
             # Ubuntu side (including vhci probe and usbip port listing).
             if cmd == "sudo -n /usr/bin/usbip port":
                 return next(ubuntu_port_responses)
             if cmd.startswith("sudo usbip attach"):
-                return ("", "attach failed", 1)
-            return ("", "", 0)
+                return CommandResult(stdout="", stderr="attach failed", code=1)
+            return CommandResult(stdout="", stderr="", code=0)
 
         ubuntu_ssh = MagicMock()
         self.ssh_manager.execute_command.side_effect = execute
@@ -308,14 +307,14 @@ class StartUsbipRollbackTests(unittest.TestCase):
             exec_calls.append(cmd)
             if target is win_ssh:
                 responses = {
-                    "powershell -Command \"$env:OS\"": ("Windows_NT", "", 0),
-                    "usbipd --version": ("4.0.0", "", 0),
-                    'tasklist /FI "IMAGENAME eq adb.exe" /NH': ("", "", 0),
+                    "powershell -Command \"$env:OS\"": CommandResult(stdout="Windows_NT", stderr="", code=0),
+                    "usbipd --version": CommandResult(stdout="4.0.0", stderr="", code=0),
+                    'tasklist /FI "IMAGENAME eq adb.exe" /NH': CommandResult(stdout="", stderr="", code=0),
                     # Device already Shared before this transaction.
-                    "usbipd list | findstr 1-2": ("1-2 Shared", "", 0),
+                    "usbipd list | findstr 1-2": CommandResult(stdout="1-2 Shared", stderr="", code=0),
                 }
-                return responses.get(cmd, ("", "", 0))
-            return ("", "", 0)
+                return responses.get(cmd, CommandResult(stdout="", stderr="", code=0))
+            return CommandResult(stdout="", stderr="", code=0)
 
         self.ssh_manager.execute_command.side_effect = execute
         self.ssh_manager.get_connection.return_value = None  # Ubuntu unreachable
@@ -352,16 +351,16 @@ class StartUsbipRollbackTests(unittest.TestCase):
         def execute(target, cmd, timeout=None, get_pty=False):
             if target is win_ssh:
                 responses = {
-                    "powershell -Command \"$env:OS\"": ("Windows_NT", "", 0),
-                    "usbipd --version": ("4.0.0", "", 0),
-                    'tasklist /FI "IMAGENAME eq adb.exe" /NH': ("", "", 0),
-                    "usbipd list | findstr 1-2": ("1-2 Not Shared", "", 0),
-                    "usbipd bind --busid 1-2": ("", "", 0),
-                    "usbipd detach --busid 1-2": ("", "", 0),
-                    "usbipd unbind --busid 1-2": ("", "", 0),
+                    "powershell -Command \"$env:OS\"": CommandResult(stdout="Windows_NT", stderr="", code=0),
+                    "usbipd --version": CommandResult(stdout="4.0.0", stderr="", code=0),
+                    'tasklist /FI "IMAGENAME eq adb.exe" /NH': CommandResult(stdout="", stderr="", code=0),
+                    "usbipd list | findstr 1-2": CommandResult(stdout="1-2 Not Shared", stderr="", code=0),
+                    "usbipd bind --busid 1-2": CommandResult(stdout="", stderr="", code=0),
+                    "usbipd detach --busid 1-2": CommandResult(stdout="", stderr="", code=0),
+                    "usbipd unbind --busid 1-2": CommandResult(stdout="", stderr="", code=0),
                 }
-                return responses.get(cmd, ("", "", 0))
-            return ("", "", 0)
+                return responses.get(cmd, CommandResult(stdout="", stderr="", code=0))
+            return CommandResult(stdout="", stderr="", code=0)
 
         self.ssh_manager.execute_command.side_effect = execute
         self.ssh_manager.get_connection.return_value = None
@@ -424,25 +423,25 @@ class StartUsbipDetachScopingTests(unittest.TestCase):
         ssh_manager.get_connection.return_value = MagicMock()
         manager = _manager(CONFIG, ssh_manager)
         ubuntu_port_responses = iter([
-            ("Imported USB devices\n", "", 0),
-            ("Imported USB devices\n", "", 0),
+            CommandResult(stdout="Imported USB devices\n", stderr="", code=0),
+            CommandResult(stdout="Imported USB devices\n", stderr="", code=0),
         ])
 
         def execute(target, cmd, timeout=None, get_pty=False):
             if target is win_ssh:
                 responses = {
-                    "powershell -Command \"$env:OS\"": ("Windows_NT", "", 0),
-                    "usbipd --version": ("4.2.0", "", 0),
-                    'tasklist /FI "IMAGENAME eq adb.exe" /NH': ("", "", 0),
-                    "usbipd list | findstr 1-2": ("1-2 Not Shared", "", 0),
-                    "usbipd bind --busid 1-2": ("", "", 0),
-                    "usbipd detach --busid 1-2": ("", "", 0),
-                    "usbipd unbind --busid 1-2": ("", "", 0),
+                    "powershell -Command \"$env:OS\"": CommandResult(stdout="Windows_NT", stderr="", code=0),
+                    "usbipd --version": CommandResult(stdout="4.2.0", stderr="", code=0),
+                    'tasklist /FI "IMAGENAME eq adb.exe" /NH': CommandResult(stdout="", stderr="", code=0),
+                    "usbipd list | findstr 1-2": CommandResult(stdout="1-2 Not Shared", stderr="", code=0),
+                    "usbipd bind --busid 1-2": CommandResult(stdout="", stderr="", code=0),
+                    "usbipd detach --busid 1-2": CommandResult(stdout="", stderr="", code=0),
+                    "usbipd unbind --busid 1-2": CommandResult(stdout="", stderr="", code=0),
                 }
-                return responses.get(cmd, ("", "", 0))
+                return responses.get(cmd, CommandResult(stdout="", stderr="", code=0))
             if cmd == "sudo -n /usr/bin/usbip port":
                 return next(ubuntu_port_responses)
-            return ("", "", 0)
+            return CommandResult(stdout="", stderr="", code=0)
 
         ssh_manager.execute_command.side_effect = execute
         with patch.object(

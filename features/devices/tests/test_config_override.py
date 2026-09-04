@@ -9,6 +9,7 @@ import os
 import tempfile
 import unittest
 from unittest.mock import patch
+from foundation.command_result import CommandResult
 
 from features.devices import config_explorer as ce
 from features.devices import config_override as co
@@ -299,7 +300,7 @@ class TestProbeStatus(unittest.TestCase):
         store = OverrideStore(tempfile.mktemp())
         store.upsert("none", OverrideEntry("config_foo", "bool", "true"))
         with patch.object(co, "run_local_shell_command") as m:
-            m.return_value = ("", "", 1)  # getprop fails
+            m.return_value = CommandResult(stdout="", stderr="", code=1)  # getprop fails
             status = co.probe_status("none", store)
         self.assertFalse(status.reachable)
         self.assertIsNone(status.build_type)
@@ -312,16 +313,16 @@ class TestProbeStatus(unittest.TestCase):
         def matcher(cmd, timeout=15):
             seen_cmds.append(cmd)
             if "ro.build.type" in cmd:
-                return ("userdebug\n", "", 0)
+                return CommandResult(stdout="userdebug\n", stderr="", code=0)
             if "veritymode" in cmd:
-                return ("disabled\n", "", 0)
+                return CommandResult(stdout="disabled\n", stderr="", code=0)
             if "shell id" in cmd:
-                return ("uid=0(root) gid=0(root)\n", "", 0)
+                return CommandResult(stdout="uid=0(root) gid=0(root)\n", stderr="", code=0)
             if "shell mount" in cmd:
-                return ("/dev/block/dm-1 on /product type ext4 (rw,seclabel,relatime)\n", "", 0)
+                return CommandResult(stdout="/dev/block/dm-1 on /product type ext4 (rw,seclabel,relatime)\n", stderr="", code=0)
             if "ls " in cmd and OVERLAY_APK in cmd:
-                return ("/product/overlay/GmsConfigOverrides.apk\n", "", 0)
-            return ("", "", 0)
+                return CommandResult(stdout="/product/overlay/GmsConfigOverrides.apk\n", stderr="", code=0)
+            return CommandResult(stdout="", stderr="", code=0)
         with patch.object(co, "run_local_shell_command") as m:
             m.side_effect = matcher
             status = co.probe_status("dev")
@@ -340,7 +341,10 @@ OVERLAY_APK = co.OVERLAY_APK_NAME
 
 class TestVerity(unittest.TestCase):
     def _patch(self, output, code=0):
-        m = patch.object(co, "run_local_shell_command", return_value=(output, "", code))
+        m = patch.object(
+            co, "run_local_shell_command",
+            return_value=CommandResult(stdout=output, stderr="", code=code),
+        )
         m.start()
         self.addCleanup(m.stop)
 
@@ -411,22 +415,28 @@ class TestApply(unittest.TestCase):
             return apk
         def matcher(cmd, timeout=15):
             if "root" in cmd:
-                return ("restarting adbd as root\n", "", 0)
+                return CommandResult(stdout="restarting adbd as root\n", stderr="", code=0)
             if "remount /product" in cmd:
-                return ("Remount succeeded\n", "", 0)
+                return CommandResult(stdout="Remount succeeded\n", stderr="", code=0)
             if "mkdir" in cmd:
-                return ("", "", 0)
+                return CommandResult(stdout="", stderr="", code=0)
             if "push" in cmd:
-                return ("pushed\n", "", 0)
+                return CommandResult(stdout="pushed\n", stderr="", code=0)
             if "chcon" in cmd:
-                return ("", "", 0)
+                return CommandResult(stdout="", stderr="", code=0)
             if "ls -lZ" in cmd:
                 # SELinux context verification must see the expected label.
-                return ("-rw-r--r-- root root u:object_r:system_file:s0 "
-                        "/product/overlay/GmsConfigOverrides.apk\n", "", 0)
+                return CommandResult(
+                    stdout=(
+                        "-rw-r--r-- root root u:object_r:system_file:s0 "
+                        "/product/overlay/GmsConfigOverrides.apk\n"
+                    ),
+                    stderr="",
+                    code=0,
+                )
             if "reboot" in cmd:
-                return ("", "", 0)
-            return ("", "", 0)
+                return CommandResult(stdout="", stderr="", code=0)
+            return CommandResult(stdout="", stderr="", code=0)
         with patch.object(co, "resolve_symbol_apk", return_value=fw), \
              patch.object(co, "build_overlay_apk", side_effect=fake_build), \
              patch.object(co, "run_local_shell_command", side_effect=matcher), \
@@ -448,14 +458,14 @@ class TestApply(unittest.TestCase):
         self.addCleanup(os.unlink, fake_apk.name)
         def matcher(cmd, timeout=15):
             if "root" in cmd:
-                return ("restarting adbd as root\n", "", 0)
+                return CommandResult(stdout="restarting adbd as root\n", stderr="", code=0)
             if "remount /product" in cmd:
-                return ("Remount succeeded\n", "", 0)
+                return CommandResult(stdout="Remount succeeded\n", stderr="", code=0)
             if "chcon" in cmd:
-                return ("chcon: failed\n", "", 1)
+                return CommandResult(stdout="chcon: failed\n", stderr="", code=1)
             if "ls -lZ" in cmd:
-                return ("-rw-r--r-- root root u:object_r:system_data_file:s0 apk\n", "", 0)
-            return ("", "", 0)
+                return CommandResult(stdout="-rw-r--r-- root root u:object_r:system_data_file:s0 apk\n", stderr="", code=0)
+            return CommandResult(stdout="", stderr="", code=0)
         with patch.object(co, "resolve_symbol_apk", return_value=fake_apk.name), \
              patch.object(co, "build_overlay_apk", return_value=fake_apk.name), \
              patch.object(co, "run_local_shell_command", side_effect=matcher), \

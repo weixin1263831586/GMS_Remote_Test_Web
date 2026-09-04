@@ -960,7 +960,7 @@ async def burn_gsi(
                     error_output = (await asyncio.to_thread(stderr.read)).decode("utf-8", errors="ignore")
 
                     if exit_status == 0:
-                        reboot_output, reboot_error, reboot_code = await asyncio.to_thread(
+                        reboot_result = await asyncio.to_thread(
                             runtime.ssh_manager.execute_command,
                             ssh,
                             f"fastboot -s {shlex.quote(device)} reboot",
@@ -969,9 +969,11 @@ async def burn_gsi(
                         # Schedule even if fastboot reports a transport race:
                         # the device may already have accepted the reboot.
                         _schedule_usbip_mode_reconnect(device, "adb")
-                        if reboot_code != 0:
+                        if not reboot_result.ok:
                             detail = (
-                                reboot_error or reboot_output or "unknown error"
+                                reboot_result.stderr
+                                or reboot_result.stdout
+                                or "unknown error"
                             ).strip()
                             error_msg = f"镜像已写入，但设备重启失败: {detail}"
                             results.append({

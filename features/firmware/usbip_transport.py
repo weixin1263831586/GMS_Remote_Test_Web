@@ -48,10 +48,10 @@ async def wait_for_rockusb_loaders(
 ) -> tuple[bool, str]:
     deadline, last_detail = time.monotonic() + max(1, timeout), ""
     while True:
-        output, error, _code = await asyncio.to_thread(
+        probe = await asyncio.to_thread(
             runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=5
         )
-        last_detail = (output or error or "").strip()
+        last_detail = (probe.stdout or probe.stderr or "").strip()
         match = ROCKUSB_LOADER_COUNT_RE.search(last_detail)
         if match and int(match.group(1)) >= max(1, expected_count):
             return True, last_detail
@@ -68,10 +68,10 @@ async def wait_for_adb_devices(
     deadline = time.monotonic() + max(1, timeout)
     observed: list[str] = []
     while True:
-        output, _error, _code = await asyncio.to_thread(
+        adb_result = await asyncio.to_thread(
             runtime.ssh_manager.execute_command, ssh, "adb devices", timeout=8
         )
-        states = parse_adb_device_states(output)
+        states = parse_adb_device_states(adb_result.stdout)
         observed = sorted(
             serial for serial, state in states.items() if state == "device"
         )
@@ -115,15 +115,15 @@ async def prepare_usbip_firmware_routes(
 
 
 def device_flash_protocols(ssh, devices: list[str]) -> dict[str, str]:
-    adb_output, _error, _code = runtime.ssh_manager.execute_command(
-        ssh, "adb devices", timeout=8
-    )
-    adb_states = parse_adb_device_states(adb_output)
-    fastboot_output, fastboot_error, _code = runtime.ssh_manager.execute_command(
+    adb_result = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
+    adb_states = parse_adb_device_states(adb_result.stdout)
+    fastboot_result = runtime.ssh_manager.execute_command(
         ssh, "fastboot devices", timeout=8
     )
     fastboot_devices = set(
-        DeviceUtils.parse_fastboot_devices(fastboot_output or fastboot_error)
+        DeviceUtils.parse_fastboot_devices(
+            fastboot_result.stdout or fastboot_result.stderr
+        )
     )
     return {
         serial: (

@@ -7,6 +7,7 @@ from unittest.mock import patch
 from features.devices import screens_api
 from features.devices import support as device_support
 from features.devices.models import DeviceActionRequest
+from foundation.command_result import CommandResult
 
 
 class FakeConfigManager:
@@ -36,12 +37,12 @@ class FakeSshManager:
     def execute_command(self, _ssh, command, timeout=None):
         self.commands.append(command)
         if command.startswith("curl "):
-            return "200", "", 0
+            return CommandResult(stdout="200", stderr="", code=0)
         if command == "which scrcpy":
-            return "/usr/bin/scrcpy\n", "", 0
+            return CommandResult(stdout="/usr/bin/scrcpy\n", stderr="", code=0)
         if "pgrep -f" in command:
-            return "RUNNING\n", "", 0
-        return "", "", 0
+            return CommandResult(stdout="RUNNING\n", stderr="", code=0)
+        return CommandResult(stdout="", stderr="", code=0)
 
 
 class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):

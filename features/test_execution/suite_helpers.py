@@ -32,10 +32,10 @@ def get_available_test_suites(config: dict[str, Any], base_path: str | None = No
             raise RuntimeError("SSH connection failed")
 
         find_cmd = f"find {shlex.quote(base_path)} -maxdepth 5 -type f -executable -name '*-tradefed' 2>/dev/null | sort"
-        output, _, _ = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=30)
+        find_result = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=30)
         suites = []
-        if output.strip():
-            for line in output.strip().split("\n"):
+        if find_result.stdout.strip():
+            for line in find_result.stdout.strip().split("\n"):
                 suite = build_suite_info(line)
                 if suite:
                     suites.append(suite)
@@ -173,11 +173,11 @@ def _collect_suite_artifact_candidates_local(suite_root: str, max_results: int =
 
 def _collect_suite_artifact_candidates_remote(ssh, suite_root: str, max_results: int = 200) -> list[dict[str, Any]]:
     find_cmd = f"find {shlex.quote(suite_root)} -type f \\( -iname '*.apk' -o -iname '*.jar' \\) 2>/dev/null | sort"
-    output, _, _ = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=45)
+    find_result = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=45)
     candidates = []
-    if not output.strip():
+    if not find_result.stdout.strip():
         return candidates
-    for line in output.strip().split("\n"):
+    for line in find_result.stdout.strip().split("\n"):
         full_path = line.strip()
         if not full_path:
             continue
@@ -214,11 +214,11 @@ def _collect_preferred_suite_artifact_candidates_remote(ssh, suite_root: str, mo
     apk_name = shlex.quote(f"{module}.apk")
     jar_name = shlex.quote(f"{module}.jar")
     find_cmd = f"find {shlex.quote(suite_root)} -type f \\( -iname {apk_name} -o -iname {jar_name} \\) 2>/dev/null | sort"
-    output, _, _ = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=45)
-    if not output.strip():
+    find_result = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=45)
+    if not find_result.stdout.strip():
         return candidates
     seen = set()
-    for line in output.strip().split("\n"):
+    for line in find_result.stdout.strip().split("\n"):
         full_path = line.strip()
         if not full_path:
             continue

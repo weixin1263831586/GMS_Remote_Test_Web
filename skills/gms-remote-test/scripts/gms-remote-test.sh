@@ -2759,6 +2759,13 @@ Usage:
   gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName /path/to/suite
   gms-rt-test-start RK3572GMS4 CTS TestModuleName --wait --max-wait 3600
 
+模块名说明:
+  - MODULE 必须是 tradefed 模块名（即套件 testcases/ 下的文件名去掉扩展名，如 CtsHardwareTestCases），
+    不是 apk 里的 instrumentation/java 包名（如 android.hardware.cts）——包名不是模块名，tradefed 会报
+    "No matched tradefed modules"。
+  - 不确定模块名时，先查询: curl "$GMS_RT_BASE/test/suites/modules?query=<关键词>"，
+    或用 Web 端固件/套件页的模块搜索。
+
 Supported Test Types:
   CTS      - Compatibility Test Suite
   GTS      - Google Mobile Services Test Suite

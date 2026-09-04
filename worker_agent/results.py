@@ -99,7 +99,11 @@ def upload_tradefed_results(
         stdout = handle.read().decode("utf-8", errors="replace")
     result_dir = find_tradefed_result_dir(stdout)
     if result_dir is None:
-        logger.info("no tradefed result directory found in stdout for job %s", row.get("job_id"))
+        # row 可能是 sqlite3.Row（无 .get）；用下标访问并容忍缺列。
+        logger.info(
+            "no tradefed result directory found in stdout for job %s",
+            row["job_id"] if "job_id" in row.keys() else "<unknown>",
+        )
         return
     if not any(
         root.exists() and result_dir.is_relative_to(root.resolve())

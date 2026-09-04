@@ -48,9 +48,9 @@ def _android_build_tools_paths(platform_tools_path: str) -> list[str]:
 def find_tradefed_binary(ssh, suite_path: str) -> str | None:
     """在指定目录中查找 tradefed 二进制文件"""
     find_cmd = f"find {shlex.quote(suite_path)} -maxdepth 1 -type f -executable -name '*-tradefed' 2>/dev/null | head -1"
-    output, _, _ = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=10)
-    result = output.strip()
-    return result if result else None
+    result = runtime.ssh_manager.execute_command(ssh, find_cmd, timeout=10)
+    binary = result.stdout.strip()
+    return binary if binary else None
 
 
 def find_tradefed_binary_local(suite_path: str) -> str | None:

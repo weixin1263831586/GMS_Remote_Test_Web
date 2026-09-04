@@ -91,16 +91,16 @@ def parse_usbip_port_entries(output: str) -> list[dict[str, str]]:
 
 def usbip_attached_ports(ssh_manager, ssh) -> set[str]:
     """Return the set of currently attached usbip port numbers (as strings)."""
-    stdout, _, code = ssh_manager.execute_command(
+    result = ssh_manager.execute_command(
         ssh, USBIP_PORT_COMMAND, timeout=10
     )
-    if code != 0:
+    if not result.ok:
         return set()
     # parse_usbip_port_entries keeps every Port header even when a future
     # usbip version changes the detail-line format.  This makes the
     # post-detach confirmation fail closed: an unparsed-but-present port is
     # never mistaken for a successfully removed port.
-    return {entry['port'] for entry in parse_usbip_port_entries(stdout or '')}
+    return {entry['port'] for entry in parse_usbip_port_entries(result.stdout or '')}
 
 
 def detach_ubuntu_usbip_ports(
@@ -117,33 +117,37 @@ def detach_ubuntu_usbip_ports(
     其他设备的端口。
     """
     detached: list[str] = []
-    stdout, stderr, code = ssh_manager.execute_command(
+    port_result = ssh_manager.execute_command(
         ssh, USBIP_PORT_COMMAND, timeout=10
     )
-    if code != 0:
-        logger.info(f"[USB/IP] usbip port returned {code}: {stderr or stdout}")
+    if not port_result.ok:
+        logger.info(
+            f"[USB/IP] usbip port returned {port_result.code}: "
+            f"{port_result.stderr or port_result.stdout}"
+        )
         return detached
 
     target_busids = {str(item) for item in (busids or [])}
-    for entry in parse_usbip_port_entries(stdout or ''):
+    for entry in parse_usbip_port_entries(port_result.stdout or ''):
         current_port = entry['port']
         if not detach_all:
             host_matches = bool(remote_host) and entry['host'] == str(remote_host)
             busid_matches = not target_busids or entry['busid'] in target_busids
             if not (host_matches and busid_matches):
                 continue
-        detach_out, detach_err, detach_code = ssh_manager.execute_command(
+        detach_result = ssh_manager.execute_command(
             ssh, f'sudo usbip detach -p {current_port}', timeout=15
         )
         # 仅当 detach 命令成功或端口确实已消失时才计入 detached，
         # 否则调用方会误以为端口已释放并继续 attach。
         port_gone = current_port not in usbip_attached_ports(ssh_manager, ssh)
-        if detach_code == 0 or port_gone:
+        if detach_result.ok or port_gone:
             detached.append(current_port)
         else:
             logger.warning(
                 f"[USB/IP] Failed to detach Ubuntu usbip port {current_port}: "
-                f"code={detach_code} out={detach_out} err={detach_err}"
+                f"code={detach_result.code} out={detach_result.stdout} "
+                f"err={detach_result.stderr}"
             )
 
     if detached:
@@ -164,16 +168,16 @@ def rollback_ubuntu_attachments(
         remote_host=remote_host,
         busids=busids,
     )
-    stdout, stderr, code = ssh_manager.execute_command(
+    verify_result = ssh_manager.execute_command(
         ssh, USBIP_PORT_COMMAND, timeout=10
     )
-    if code != 0:
+    if not verify_result.ok:
         logger.warning(
             "[USB/IP] Cannot verify target rollback: %s",
-            (stderr or stdout or "").strip(),
+            (verify_result.stderr or verify_result.stdout or "").strip(),
         )
         return False
-    entries = parse_usbip_port_entries(stdout or '')
+    entries = parse_usbip_port_entries(verify_result.stdout or '')
     if any(not entry['host'] or not entry['busid'] for entry in entries):
         logger.warning(
             "[USB/IP] Cannot verify target rollback: unparsed attached port remains"
@@ -218,16 +222,16 @@ def rollback_windows_binds(
             ssh_manager.execute_command(
                 win_ssh, f"usbipd detach --busid {busid}", timeout=15
             )
-            _out, err, code = ssh_manager.execute_command(
+            unbind_result = ssh_manager.execute_command(
                 win_ssh, f"usbipd unbind --busid {busid}", timeout=15
             )
-            if code == 0:
+            if unbind_result.ok:
                 rolled_back.append(busid)
             else:
                 logger.warning(
                     "[USB/IP] Rollback unbind failed for %s: %s",
                     busid,
-                    (err or "").strip(),
+                    (unbind_result.stderr or "").strip(),
                 )
     except Exception as e:
         logger.warning(f"[USB/IP] Rollback of Windows binds failed: {e}")

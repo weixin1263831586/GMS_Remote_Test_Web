@@ -37,9 +37,10 @@ logger = logging.getLogger(__name__)
 LINUX_USBIPD_BIN = "/usr/local/bin/usbipd"
 # 0.9.3 起才有安全默认：loopback 监听、--listen/--allow-client、
 # 协议分配上限与连接/URB 限制。0.9.4 新增协议校验（拒绝 devid 不匹配
-# 的 SUBMIT、拒绝非零 OP_REQ status）。bundled binary 已同步到 0.9.4，
-# 来源机上的 0.9.3 会被自动升级。
-LINUX_USBIPD_MIN_VERSION = (0, 9, 4)
+# 的 SUBMIT、拒绝非零 OP_REQ status）。0.9.5 起客户端策略 fail-closed：
+# 非回环监听且无 --allow-client 时拒绝启动（--allow-any-client 显式放行）。
+# bundled binary 已同步到 0.9.5，来源机上的旧版本会被自动升级。
+LINUX_USBIPD_MIN_VERSION = (0, 9, 5)
 LINUX_USBIPD_LOG = "/tmp/usbipd-gms.log"
 LINUX_USBIPD_UPLOAD = "/tmp/usbipd-gms-upload"
 LINUX_USBIPD_BIND_PATTERN = "usbipd bind"
@@ -182,25 +183,25 @@ def parse_usbip_running_cmdline(cmdline: str) -> dict[str, Any]:
 
 
 def _read_usbipd_pid_file(ssh_manager, ssh) -> str:
-    stdout, _stderr, code = ssh_manager.execute_command(
+    result = ssh_manager.execute_command(
         ssh, f"cat {LINUX_USBIPD_PID_FILE} 2>/dev/null", timeout=5,
     )
-    if code != 0:
+    if not result.ok:
         return ""
-    pid = (stdout or "").strip().splitlines()
+    pid = (result.stdout or "").strip().splitlines()
     return pid[0].strip() if pid and pid[0].strip().isdigit() else ""
 
 
 def _proc_pid_matches(ssh_manager, ssh, pid: str) -> bool:
     """Verify /proc/<pid> exists and its argv matches ``usbipd bind``."""
-    stdout, _stderr, code = ssh_manager.execute_command(
+    result = ssh_manager.execute_command(
         ssh,
         f"[ -d /proc/{pid} ] && tr '\\0' ' ' < /proc/{pid}/cmdline 2>/dev/null",
         timeout=5,
     )
-    if code != 0:
+    if not result.ok:
         return False
-    argv = (stdout or "").strip()
+    argv = (result.stdout or "").strip()
     # argv0 末段必须是 usbipd，且 argv 包含 bind 子命令。
     argv0 = argv.split(None, 1)
     return bool(argv0) and (
@@ -215,22 +216,22 @@ def _enumerate_usbipd_bind_pids(ssh_manager, ssh) -> list[tuple[str, str]]:
     每个 PID 必须再通过 ``/proc/<pid>/cmdline`` 的 argv 归属校验
     （argv0 二进制名为 usbipd 且含 bind 子命令）才算数。
     """
-    stdout, _stderr, code = ssh_manager.execute_command(
+    pgrep_result = ssh_manager.execute_command(
         ssh, f"pgrep -f {shlex.quote(LINUX_USBIPD_BIND_PATTERN)}", timeout=10,
     )
-    if code != 0:
+    if not pgrep_result.ok:
         return []
     verified: list[tuple[str, str]] = []
-    for line in (stdout or "").splitlines():
+    for line in (pgrep_result.stdout or "").splitlines():
         pid = line.strip()
         if not pid.isdigit():
             continue
-        stdout_argv, _stderr_argv, _code_argv = ssh_manager.execute_command(
+        argv_result = ssh_manager.execute_command(
             ssh,
             f"tr '\\0' ' ' < /proc/{pid}/cmdline 2>/dev/null",
             timeout=5,
         )
-        cmdline = (stdout_argv or "").strip()
+        cmdline = (argv_result.stdout or "").strip()
         info = parse_usbip_running_cmdline(f"{pid} {cmdline}".strip())
         if info["running"]:
             verified.append((pid, f"{pid} {cmdline}".strip()))
@@ -245,12 +246,12 @@ def query_ubuntu_running_usbipd(ssh_manager, ssh) -> dict[str, Any]:
     """
     pid = _read_usbipd_pid_file(ssh_manager, ssh)
     if pid:
-        stdout, _stderr, _code = ssh_manager.execute_command(
+        pid_result = ssh_manager.execute_command(
             ssh,
             f"tr '\\0' ' ' < /proc/{pid}/cmdline 2>/dev/null",
             timeout=5,
         )
-        cmdline = (stdout or "").strip()
+        cmdline = (pid_result.stdout or "").strip()
         info = parse_usbip_running_cmdline(f"{pid} {cmdline}".strip())
         if info["running"]:
             return info
@@ -285,10 +286,10 @@ def _stop_linux_usbipd(
     if not pids:
         return True
     pid_list = " ".join(pids)
-    stdout, _stderr, _code = ssh_manager.execute_command(
+    kill_result = ssh_manager.execute_command(
         ssh, f"kill {signal_flag} {pid_list} 2>/dev/null; true", timeout=10,
     )
-    return not (stdout or "").strip()
+    return not (kill_result.stdout or "").strip()
 
 
 def _device_matches_android(
@@ -335,12 +336,12 @@ def list_ubuntu_usb_devices(
         'udevadm info --query=property --name="$d" 2>/dev/null; '
         "echo @@END; done"
     )
-    stdout, stderr, code = ssh_manager.execute_command(ssh, command, timeout=25)
-    output = stdout or ""
-    if code != 0 and not output:
+    inv_result = ssh_manager.execute_command(ssh, command, timeout=25)
+    output = inv_result.stdout or ""
+    if not inv_result.ok and not output:
         logger.warning(
             "[USB/IP] Ubuntu source inventory failed: %s",
-            (stderr or "").strip(),
+            (inv_result.stderr or "").strip(),
         )
         return []
     devices: list[dict[str, Any]] = []
@@ -393,21 +394,21 @@ def resolve_linux_usbipd_bin(ssh_manager, ssh) -> tuple[str, str]:
         '"$HOME/.local/bin/usbipd"; do '
         '[ -n "$b" ] && [ -x "$b" ] || continue; echo "$b"; done'
     )
-    stdout, _stderr, _code = ssh_manager.execute_command(ssh, command, timeout=10)
+    bins_result = ssh_manager.execute_command(ssh, command, timeout=10)
     best_binary, best_version = "", ""
     best_tuple: tuple[int, ...] = ()
     seen: set[str] = set()
-    for line in (stdout or "").splitlines():
+    for line in (bins_result.stdout or "").splitlines():
         binary = line.strip()
         if not binary or binary in seen:
             continue
         seen.add(binary)
-        version_out, _version_err, version_code = ssh_manager.execute_command(
+        version_result = ssh_manager.execute_command(
             ssh, f"{binary} --version", timeout=10,
         )
-        if version_code != 0:
+        if not version_result.ok:
             continue
-        version = (version_out or "").strip()
+        version = (version_result.stdout or "").strip()
         parsed = usbipd_version_tuple(version)
         if not parsed:
             continue
@@ -446,10 +447,10 @@ def stop_ubuntu_usbip_server(ssh_manager, ssh) -> dict[str, Any]:
 
 
 def _read_log_tail(ssh_manager, ssh, lines: int = 20) -> str:
-    stdout, _stderr, _code = ssh_manager.execute_command(
+    result = ssh_manager.execute_command(
         ssh, f"tail -n {lines} {shlex.quote(LINUX_USBIPD_LOG)} 2>/dev/null", timeout=10,
     )
-    return (stdout or "").strip()
+    return (result.stdout or "").strip()
 
 
 def _resolve_listen_address(ssh_manager, ssh) -> str:
@@ -459,10 +460,10 @@ def _resolve_listen_address(ssh_manager, ssh) -> str:
     Worker 实际访问来源主机所走的地址；只绑这个地址可避免 0.0.0.0 把
     内网/管理接口一并暴露。
     """
-    stdout, _stderr, _code = ssh_manager.execute_command(
+    listen_result = ssh_manager.execute_command(
         ssh, "echo $SSH_CONNECTION", timeout=5,
     )
-    fields = (stdout or "").split()
+    fields = (listen_result.stdout or "").split()
     if len(fields) >= 3:
         return f"{fields[2]}:3240"
     return "0.0.0.0:3240"
@@ -472,6 +473,7 @@ def resolve_worker_egress_ips(
     ssh_manager,
     ssh,
     worker_hosts: list[str] | tuple[str, ...],
+    worker_ssh_factory=None,
 ) -> list[str]:
     """Resolve the source-visible egress IP of each attaching worker.
 
@@ -479,35 +481,69 @@ def resolve_worker_egress_ips(
     的出口 IP，不是来源主机自己的地址——白名单里放来源 IP 会导致
     Worker attach 被拒绝。
 
-    通过在每个 Worker 上执行 ``ip route get <source_ip>`` 取 ``src`` 字段；
-    多网卡/Tailscale/VPN 场景下不能用 hostname 简单推导。解析失败的条目
-    保留原始 IP 作为兜底（宁可白名单偏宽也不阻断 attach）。
+    出口 IP 必须在每台 Worker 上执行 ``ip route get <source_ip>`` 取
+    ``src`` 字段；多网卡/Tailscale/VPN 场景下不能用 hostname 简单推导。
+    ``worker_ssh_factory`` 为 ``Callable[[host], paramiko.SSHClient | None]``，
+    按主机建立到 Worker 的 SSH 连接——在来源主机的 ssh 会话里执行
+    ``ip route get`` 只会得到来源自己的路由（历史 P0 契约错误）。
+
+    工厂缺省或某台 Worker 无法连接时该条目解析失败：返回空列表由调用
+    方走 fail-closed（usbipd 0.9.5+ 拒绝无白名单的非回环启动），绝不
+    把"解析失败"退化成 allow-all。
     """
     source_ip = ""
-    stdout, _stderr, _code = ssh_manager.execute_command(
+    conn_result = ssh_manager.execute_command(
         ssh, "echo $SSH_CONNECTION", timeout=5,
     )
-    fields = (stdout or "").split()
+    fields = (conn_result.stdout or "").split()
     if len(fields) >= 3:
         source_ip = fields[2]
+
+    if not source_ip:
+        logger.warning(
+            "[USB/IP] 无法从来源 SSH 会话解析来源地址，Worker 白名单解析失败"
+        )
+        return []
 
     resolved: list[str] = []
     for item in worker_hosts or ():
         host = str(item or "").strip().split("@", 1)[-1]
         if not host:
             continue
-        if source_ip:
-            stdout, _stderr, code = ssh_manager.execute_command(
-                ssh,
+        worker_ssh = None
+        if worker_ssh_factory is not None:
+            try:
+                worker_ssh = worker_ssh_factory(host)
+            except Exception as exc:
+                logger.warning(
+                    "[USB/IP] 连接 Worker %s 失败，无法解析其出口 IP: %s", host, exc,
+                )
+                worker_ssh = None
+        if worker_ssh is None:
+            logger.warning(
+                "[USB/IP] 无 Worker %s 的 SSH 连接，无法解析其出口 IP", host,
+            )
+            return []
+        try:
+            route_result = ssh_manager.execute_command(
+                worker_ssh,
                 f"ip route get {shlex.quote(source_ip)} 2>/dev/null | head -1",
                 timeout=5,
             )
-            match = re.search(r"\bsrc\s+(\S+)", stdout or "")
-            if code == 0 and match:
-                resolved.append(match.group(1))
-                continue
-        resolved.append(host)
-    return sorted(set(resolved) - {"", source_ip})
+            match = re.search(r"\bsrc\s+(\S+)", route_result.stdout or "")
+        finally:
+            try:
+                worker_ssh.close()
+            except Exception:
+                pass
+        if route_result.ok and match:
+            resolved.append(match.group(1))
+        else:
+            logger.warning(
+                "[USB/IP] Worker %s 上 ip route get %s 解析失败", host, source_ip,
+            )
+            return []
+    return sorted(set(resolved) - {""})
 
 
 def ensure_ubuntu_usbip_server(
@@ -517,6 +553,7 @@ def ensure_ubuntu_usbip_server(
     vids: list[str] | tuple[str, ...] = (),
     stop_adb: bool = True,
     allow_worker_hosts: list[str] | tuple[str, ...] = (),
+    worker_ssh_factory=None,
 ) -> dict[str, Any]:
     """Start (or reuse) the usbipd server exporting the requested devices.
 
@@ -524,11 +561,13 @@ def ensure_ubuntu_usbip_server(
     避免杀掉其他设备正在使用的导出进程。串号为空时退化为按 VID 导出。
 
     ``allow_worker_hosts``：允许连接 TCP 3240 的 Worker/Controller 地址
-    列表（user@ip 或纯 ip），转成 ``--allow-client`` 白名单；为空时不
-    限制客户端（由网络层防火墙兜底）。
+    列表（user@ip 或纯 ip），转成 ``--allow-client`` 白名单。
+    ``worker_ssh_factory``：``Callable[[host], ssh]``，用于在每台 Worker
+    上解析其访问来源时的出口 IP（见 resolve_worker_egress_ips）。
 
-    来源缺少可用 usbipd（未安装/版本过低）时，先自动部署随平台分发的
-    ``tools/usbipd``（见 :func:`install_ubuntu_usbipd`），部署成功后继续。
+    usbipd 0.9.5+ 客户端策略 fail-closed：非回环监听且无白名单时拒绝
+    启动。因此白名单解析失败（Worker 不可 SSH 等）直接返回错误，绝不
+    以"无 --allow-client"启动开放实例。
     """
     binary, version = resolve_linux_usbipd_bin(ssh_manager, ssh)
     parsed = usbipd_version_tuple(version)
@@ -615,17 +654,38 @@ def ensure_ubuntu_usbip_server(
     # Worker 从外部 attach，必须显式绑定来源主机的对外地址，并把允许
     # 连接的 Worker 出口 IP 传入 --allow-client，不能用 0.0.0.0。
     listen_addr = _resolve_listen_address(ssh_manager, ssh)
-    # 白名单是「来源主机看到的 Worker 出口 IP」，不是传入的
-    # usbip_attach_host（那是来源自己的地址，会被 client_allowed 拒绝）。
-    # 逐 Worker 用 ip route get 解析；失败时退回原 IP。
+    # 白名单是「来源主机看到的 Worker 出口 IP」。逐 Worker 通过其自身
+    # SSH 执行 ip route get 解析；解析失败（无凭据/不可达/无 SSH_CONNECTION）
+    # 一律 fail-closed 返回错误——usbipd 0.9.5+ 会拒绝无白名单的非回环
+    # 启动，绝不能把设备开放给整个网络。
     allow_clients = sorted({
         str(item or "").strip().split("@", 1)[-1]
         for item in allow_worker_hosts or ()
         if str(item or "").strip()
     } - {"", listen_addr.rsplit(":", 1)[0]})
-    resolved_clients = resolve_worker_egress_ips(
-        ssh_manager, ssh, allow_clients,
-    ) or allow_clients
+    resolved_clients = []
+    if allow_clients:
+        resolved_clients = resolve_worker_egress_ips(
+            ssh_manager, ssh, allow_clients,
+            worker_ssh_factory=worker_ssh_factory,
+        )
+        if not resolved_clients:
+            return {
+                "success": False,
+                "error": (
+                    "无法解析 Worker 出口 IP（需要 Worker SSH 凭据且 "
+                    "ip route get 可用）；已按 fail-closed 拒绝启动无白名单"
+                    "的 usbipd。请配置 Worker 主机凭据后重试。"
+                ),
+            }
+    else:
+        return {
+            "success": False,
+            "error": (
+                "缺少 allow_worker_hosts（Worker/Controller 地址），"
+                "已按 fail-closed 拒绝启动无白名单的 usbipd。"
+            ),
+        }
 
     # 全部参数走 argv 形式并 shlex.quote：USB serial 是外部设备输入，
     # 二进制路径可能包含用户目录，禁止直接拼进 shell 字符串。
@@ -721,22 +781,22 @@ def install_ubuntu_usbipd(
             **extra,
         }
 
-    _out, err, code = ssh_manager.execute_command(
+    sudo_result = ssh_manager.execute_command(
         ssh,
         f"sudo -n install -m 0755 {LINUX_USBIPD_UPLOAD} {LINUX_USBIPD_BIN}",
         timeout=30,
     )
-    if code == 0:
+    if sudo_result.ok:
         result = _verified("usbipd 安装成功！版本: {version}")
         if result.get("success"):
             return result
-    user_out, user_err, user_code = ssh_manager.execute_command(
+    user_result = ssh_manager.execute_command(
         ssh,
         f'mkdir -p "$HOME/.local/bin" '
         f'&& install -m 0755 {LINUX_USBIPD_UPLOAD} "$HOME/.local/bin/usbipd"',
         timeout=15,
     )
-    if user_code == 0:
+    if user_result.ok:
         result = _verified(
             "usbipd 已安装到用户目录 ~/.local/bin（系统目录安装需要sudo）"
             "！版本: {version}",
@@ -744,7 +804,10 @@ def install_ubuntu_usbipd(
         )
         if result.get("success"):
             return result
-    detail = (user_err or err or user_out or _out or "").strip()
+    detail = (
+        user_result.stderr or sudo_result.stderr
+        or user_result.stdout or sudo_result.stdout or ""
+    ).strip()
     return {
         "success": False,
         "error": (

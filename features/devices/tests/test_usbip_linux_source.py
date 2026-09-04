@@ -9,6 +9,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
+from foundation.command_result import CommandResult
 from features.devices import usbip, usbip_flash, usbip_linux_source
 
 
@@ -42,6 +43,14 @@ ID_MODEL=USB download gadget
 """
 
 
+def _cr(value) -> CommandResult:
+    """历史 tuple ``(stdout, stderr, code)`` → :class:`CommandResult`。"""
+    if isinstance(value, CommandResult):
+        return _cr(value)
+    stdout, stderr, code = value
+    return CommandResult(stdout=stdout, stderr=stderr, code=code)
+
+
 def _fake_ssh_manager(responses: dict[str, tuple[str, str, int]]):
     ssh_manager = MagicMock()
     calls: list[str] = []
@@ -50,8 +59,8 @@ def _fake_ssh_manager(responses: dict[str, tuple[str, str, int]]):
         calls.append(cmd)
         for key, value in responses.items():
             if cmd.startswith(key) or cmd == key:
-                return value
-        return ("", "", 0)
+                return _cr(value)
+        return CommandResult(stdout="", stderr="", code=0)
 
     ssh_manager.execute_command.side_effect = execute
     ssh_manager.calls = calls
@@ -75,24 +84,44 @@ def _execute_with_pgrep_protocol(state, ssh_manager, responses):
         ssh_manager.calls.append(cmd)
         if cmd.startswith("pgrep"):
             pids = "\n".join(pid for pid, _cmdline in state["candidates"])
-            return (pids + "\n" if pids else "", "", 0 if pids else 1)
+            return _cr((pids + "\n" if pids else "", "", 0 if pids else 1))
         if "/proc/" in cmd and "/cmdline" in cmd:
             pid = cmd.split("/proc/")[1].split("/")[0]
             for cpid, cmdline in state["candidates"]:
                 if cpid == pid:
-                    return (cmdline, "", 0)
-            return ("", "", 1)
+                    return _cr((cmdline, "", 0))
+            return CommandResult(stdout="", stderr="", code=1)
         if cmd.startswith("cat ") and "gms-usbipd.pid" in cmd:
             candidates = state["candidates"]
             if candidates:
-                return (candidates[0][0] + "\n", "", 0)
-            return ("", "", 1)
+                return _cr((candidates[0][0] + "\n", "", 0))
+            return CommandResult(stdout="", stderr="", code=1)
         for key, value in responses.items():
             if cmd.startswith(key) or cmd == key:
-                return value
-        return ("", "", 0)
+                return _cr(value)
+        return CommandResult(stdout="", stderr="", code=0)
 
     return execute
+
+
+# Worker 出口 IP 解析所需的通用响应：来源 SSH 会话可见地址 10.0.0.5，
+# Worker 访问该地址的出口 IP 为 172.16.10.20。
+WORKER_EGRESS_SETUP = {
+    "echo $SSH_CONNECTION": ("10.0.0.9 54321 10.0.0.5 22\n", "", 0),
+    "ip route get": ("10.0.0.5 dev eth0 src 172.16.10.20\n", "", 0),
+}
+
+
+def _worker_ssh_factory():
+    """Fake per-worker SSH factory recording hosts and returning mocks."""
+    opened: dict[str, object] = {}
+
+    def factory(host: str):
+        conn = MagicMock()
+        opened[host] = conn
+        return conn
+
+    return factory, opened
 
 
 class UdevInventoryTests(unittest.TestCase):
@@ -160,9 +189,11 @@ class ServerLifecycleTests(unittest.TestCase):
         # sudo 安装成功后 resolve 能找到新二进制并继续启动。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
+            **WORKER_EGRESS_SETUP,
         }
         ssh_manager = _fake_ssh_manager(responses)
+        worker_factory, _opened = _worker_ssh_factory()
         # 部署前没有任何 usbipd 进程；启动命令执行后进程出现。
         state = _pgrep_protocol_state([])
 
@@ -172,7 +203,7 @@ class ServerLifecycleTests(unittest.TestCase):
             if cmd.startswith("for b in") and not any(
                 item.startswith("sudo -n install") for item in ssh_manager.calls[:-1]
             ):
-                return ("", "", 0)
+                return _cr(("", "", 0))
             if any(
                 cmd_item.startswith("/usr/local/bin/usbipd bind")
                 for cmd_item in ssh_manager.calls
@@ -187,6 +218,8 @@ class ServerLifecycleTests(unittest.TestCase):
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.ensure_ubuntu_usbip_server(
             ssh_manager, MagicMock(), serials=["S1"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=worker_factory,
         )
         self.assertTrue(result["success"])
         self.assertTrue(result["started"])
@@ -202,20 +235,20 @@ class ServerLifecycleTests(unittest.TestCase):
                 "/usr/bin/usbipd\n/home/wlq/.local/bin/usbipd\n", "", 0,
             ),
             "/usr/bin/usbipd --version": ("usbipd 0.9.0", "", 0),
-            "/home/wlq/.local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/home/wlq/.local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
         })
         binary, version = usbip_linux_source.resolve_linux_usbipd_bin(
             ssh_manager, MagicMock(),
         )
         self.assertEqual(binary, "/home/wlq/.local/bin/usbipd")
-        self.assertEqual(version, "usbipd 0.9.4")
+        self.assertEqual(version, "usbipd 0.9.5")
 
     def test_install_falls_back_to_user_local_without_sudo(self):
         # sudo 需要密码的主机上，安装必须回退到用户目录并验证可用。
         responses = {
             "sudo -n install": ("", "sudo: a password is required", 1),
             "mkdir -p": ("", "", 0),
-            "/home/wlq/.local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/home/wlq/.local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
 
@@ -226,12 +259,12 @@ class ServerLifecycleTests(unittest.TestCase):
                 if any(
                     item.startswith("mkdir -p") for item in ssh_manager.calls[:-1]
                 ):
-                    return ("/home/wlq/.local/bin/usbipd\n", "", 0)
-                return ("", "", 0)
+                    return _cr(("/home/wlq/.local/bin/usbipd\n", "", 0))
+                return _cr(("", "", 0))
             for key, value in responses.items():
                 if cmd.startswith(key) or cmd == key:
-                    return value
-            return ("", "", 0)
+                    return _cr(value)
+            return _cr(("", "", 0))
 
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.install_ubuntu_usbipd(
@@ -239,7 +272,7 @@ class ServerLifecycleTests(unittest.TestCase):
         )
         self.assertTrue(result["success"])
         self.assertTrue(result["user_local"])
-        self.assertEqual(result["version"], "usbipd 0.9.4")
+        self.assertEqual(result["version"], "usbipd 0.9.5")
         self.assertTrue(any(
             cmd.startswith("sudo -n install") for cmd in ssh_manager.calls
         ))
@@ -264,9 +297,11 @@ class ServerLifecycleTests(unittest.TestCase):
     def test_start_new_server_with_serial_filters(self):
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
+            **WORKER_EGRESS_SETUP,
         }
         ssh_manager = _fake_ssh_manager(responses)
+        worker_factory, _opened = _worker_ssh_factory()
         # 启动命令执行后进程出现。
         state = _pgrep_protocol_state([])
 
@@ -285,6 +320,8 @@ class ServerLifecycleTests(unittest.TestCase):
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.ensure_ubuntu_usbip_server(
             ssh_manager, MagicMock(), serials=["S1"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=worker_factory,
         )
         self.assertTrue(result["success"])
         self.assertTrue(result["started"])
@@ -294,11 +331,12 @@ class ServerLifecycleTests(unittest.TestCase):
         )
         self.assertIn("--stop-adb", start_cmd)
         self.assertIn("--serial S1", start_cmd)
+        self.assertIn("--allow-client 172.16.10.20", start_cmd)
 
     def test_reuse_running_server_covering_requested_serials(self):
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
         state = _pgrep_protocol_state([
@@ -319,10 +357,12 @@ class ServerLifecycleTests(unittest.TestCase):
     def test_restart_merges_serial_filters(self):
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
             "kill": ("", "", 0),
+            **WORKER_EGRESS_SETUP,
         }
         ssh_manager = _fake_ssh_manager(responses)
+        worker_factory, _opened = _worker_ssh_factory()
         # 流程：ensure 初始查询(运行中S1) → 覆盖不足合并 → kill PID 停止 →
         # 停止后查询(已消失) → 启动 → 启动后轮询(运行中S1+S2)。
         state = _pgrep_protocol_state([
@@ -348,6 +388,8 @@ class ServerLifecycleTests(unittest.TestCase):
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.ensure_ubuntu_usbip_server(
             ssh_manager, MagicMock(), serials=["S2"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=worker_factory,
         )
         self.assertTrue(result["success"])
         self.assertTrue(result["started"])
@@ -373,13 +415,13 @@ class ServerLifecycleTests(unittest.TestCase):
             if cmd.startswith("pgrep"):
                 result = pgrep_results[min(pgrep_index["i"], len(pgrep_results) - 1)]
                 pgrep_index["i"] += 1
-                return result
+                return _cr(result)
             if "/proc/5/cmdline" in cmd:
-                return ("usbipd bind --vid 2207\0", "", 0)
+                return _cr(("usbipd bind --vid 2207\0", "", 0))
             for key, value in responses.items():
                 if cmd.startswith(key) or cmd == key:
-                    return value
-            return ("", "", 0)
+                    return _cr(value)
+            return _cr(("", "", 0))
 
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.stop_ubuntu_usbip_server(
@@ -428,9 +470,11 @@ class ServerLifecycleTests(unittest.TestCase):
         # 且启动命令要写 PID 文件供后续按 PID 停止。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
+            **WORKER_EGRESS_SETUP,
         }
         ssh_manager = _fake_ssh_manager(responses)
+        worker_factory, _opened = _worker_ssh_factory()
         state = _pgrep_protocol_state([])
 
         def execute(target, cmd, timeout=None, get_pty=False):
@@ -448,6 +492,8 @@ class ServerLifecycleTests(unittest.TestCase):
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.ensure_ubuntu_usbip_server(
             ssh_manager, MagicMock(), serials=['RK1; rm -rf /'],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=worker_factory,
         )
         self.assertTrue(result["success"])
         start_cmd = next(
@@ -463,10 +509,12 @@ class ServerLifecycleTests(unittest.TestCase):
         # serial-only 实例只导出串号命中的设备，不能声称已覆盖 VID。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
             "kill": ("", "", 0),
+            **WORKER_EGRESS_SETUP,
         }
         ssh_manager = _fake_ssh_manager(responses)
+        worker_factory, _opened = _worker_ssh_factory()
         # 流程：初始查询(serial-only S1) → 覆盖不足 kill → 重新查询(无) →
         # 启动 → 启动后轮询(S1 + vid 18d1)。
         state = _pgrep_protocol_state([
@@ -492,6 +540,8 @@ class ServerLifecycleTests(unittest.TestCase):
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.ensure_ubuntu_usbip_server(
             ssh_manager, MagicMock(), serials=[], vids=["18d1"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=worker_factory,
         )
         self.assertTrue(result["success"])
         self.assertTrue(result["started"])
@@ -506,10 +556,12 @@ class ServerLifecycleTests(unittest.TestCase):
         # 覆盖不足并合并重启，而不是错误复用。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
             "kill": ("", "", 0),
+            **WORKER_EGRESS_SETUP,
         }
         ssh_manager = _fake_ssh_manager(responses)
+        worker_factory, _opened = _worker_ssh_factory()
         state = _pgrep_protocol_state([
             ("7", "usbipd bind --vid 2207"),
         ])
@@ -532,6 +584,8 @@ class ServerLifecycleTests(unittest.TestCase):
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.ensure_ubuntu_usbip_server(
             ssh_manager, MagicMock(), serials=[], vids=["18d1"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=worker_factory,
         )
         self.assertTrue(result["success"])
         self.assertTrue(result["started"])
@@ -548,10 +602,11 @@ class ServerLifecycleTests(unittest.TestCase):
         # --listen <SSH可达IP>:3240，否则 Worker 无法 attach。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
-            "echo $SSH_CONNECTION": ("10.0.0.9 54321 10.0.0.5 22\n", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
+            **WORKER_EGRESS_SETUP,
         }
         ssh_manager = _fake_ssh_manager(responses)
+        worker_factory, _opened = _worker_ssh_factory()
         state = _pgrep_protocol_state([])
 
         def execute(target, cmd, timeout=None, get_pty=False):
@@ -567,6 +622,8 @@ class ServerLifecycleTests(unittest.TestCase):
         ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.ensure_ubuntu_usbip_server(
             ssh_manager, MagicMock(), serials=["S1"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=worker_factory,
         )
         self.assertTrue(result["success"])
         start_cmd = next(
@@ -575,40 +632,92 @@ class ServerLifecycleTests(unittest.TestCase):
         )
         self.assertIn("--listen 10.0.0.5:3240", start_cmd)
 
-    def test_start_without_ssh_connection_binds_all_interfaces_with_warning_path(self):
-        # SSH_CONNECTION 不可读时退化为 0.0.0.0:3240（仍显式 --listen，
-        # 不依赖 usbipd 默认值）；配合 --allow-client 白名单兜底。
+    def test_missing_worker_credentials_fails_closed(self):
+        # P0 回归：Worker 出口 IP 无法解析（无 SSH factory / 连接失败 /
+        # ip route get 失败）时，绝不能退化为无 --allow-client 的开放
+        # 实例——必须 fail-closed 拒绝启动。
+        base_responses = {
+            "for b in": ("/usr/local/bin/usbipd\n", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
+            **WORKER_EGRESS_SETUP,
+        }
+        # 1) 无 factory。
+        ssh_manager = _fake_ssh_manager(base_responses)
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=["S1"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+        )
+        self.assertFalse(result["success"])
+        self.assertFalse(any(
+            cmd.startswith("/usr/local/bin/usbipd bind")
+            for cmd in ssh_manager.calls
+        ))
+        self.assertIn("fail-closed", result["error"])
+        # 2) factory 返回 None（连接失败）。
+        ssh_manager = _fake_ssh_manager(base_responses)
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=["S1"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=lambda host: None,
+        )
+        self.assertFalse(result["success"])
+        self.assertFalse(any(
+            cmd.startswith("/usr/local/bin/usbipd bind")
+            for cmd in ssh_manager.calls
+        ))
+        # 3) ip route get 解析失败。
+        no_route = dict(base_responses)
+        no_route["ip route get"] = ("", "RTNETLINK answers: Network is unreachable", 1)
+        ssh_manager = _fake_ssh_manager(no_route)
+        worker_factory, _opened = _worker_ssh_factory()
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=["S1"],
+            allow_worker_hosts=["wlq@172.16.10.20"],
+            worker_ssh_factory=worker_factory,
+        )
+        self.assertFalse(result["success"])
+        self.assertFalse(any(
+            cmd.startswith("/usr/local/bin/usbipd bind")
+            for cmd in ssh_manager.calls
+        ))
+
+    def test_missing_allow_worker_hosts_fails_closed(self):
+        # P0 回归：完全没有 Worker 白名单输入时同样 fail-closed，不再
+        # 以"网络防火墙兜底"为由启动 allow-all 实例。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
+            **WORKER_EGRESS_SETUP,
+        }
+        ssh_manager = _fake_ssh_manager(responses)
+        result = usbip_linux_source.ensure_ubuntu_usbip_server(
+            ssh_manager, MagicMock(), serials=["S1"],
+        )
+        self.assertFalse(result["success"])
+        self.assertFalse(any(
+            cmd.startswith("/usr/local/bin/usbipd bind")
+            for cmd in ssh_manager.calls
+        ))
+
+    def test_start_without_ssh_connection_binds_all_interfaces_with_warning_path(self):
+        # SSH_CONNECTION 不可读时退化为 0.0.0.0:3240（仍显式 --listen，
+        # 不依赖 usbipd 默认值）；白名单改用 Worker 上 ip route get 解析
+        # 来源地址失败 → fail-closed，而不是 allow-all。
+        responses = {
+            "for b in": ("/usr/local/bin/usbipd\n", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
             "echo $SSH_CONNECTION": ("", "", 0),
         }
         ssh_manager = _fake_ssh_manager(responses)
-        state = _pgrep_protocol_state([])
-
-        def execute(target, cmd, timeout=None, get_pty=False):
-            if any(
-                cmd_item.startswith("/usr/local/bin/usbipd bind")
-                for cmd_item in ssh_manager.calls
-            ) and not state["candidates"]:
-                state["candidates"] = [("77", "usbipd bind")]
-            return _execute_with_pgrep_protocol(
-                state, ssh_manager, responses
-            )(target, cmd, timeout, get_pty)
-
-        ssh_manager.execute_command.side_effect = execute
         result = usbip_linux_source.ensure_ubuntu_usbip_server(
             ssh_manager, MagicMock(), serials=["S1"],
             allow_worker_hosts=["wlq@172.16.10.20", "172.16.10.21"],
         )
-        self.assertTrue(result["success"])
-        start_cmd = next(
-            cmd for cmd in ssh_manager.calls
-            if cmd.startswith("/usr/local/bin/usbipd bind")
-        )
-        self.assertIn("--listen 0.0.0.0:3240", start_cmd)
-        self.assertIn("--allow-client 172.16.10.20", start_cmd)
-        self.assertIn("--allow-client 172.16.10.21", start_cmd)
+        self.assertFalse(result["success"])
+        self.assertFalse(any(
+            cmd.startswith("/usr/local/bin/usbipd bind")
+            for cmd in ssh_manager.calls
+        ))
 
 
 class ManagerOsBranchTests(unittest.TestCase):
@@ -693,11 +802,67 @@ class ManagerOsBranchTests(unittest.TestCase):
         self.assertTrue(result["install_guide"])
 
 
+class WorkerEgressResolutionTests(unittest.TestCase):
+    def test_resolve_uses_worker_ssh_not_source_ssh(self):
+        # P0 回归：ip route get 必须在 Worker 自己的 SSH 会话上执行，
+        # 不能复用来源主机的连接（那只会解析到来源自己的路由）。
+        source_responses = {
+            "echo $SSH_CONNECTION": ("10.0.0.9 54321 10.0.0.5 22\n", "", 0),
+        }
+        ssh_manager = _fake_ssh_manager(source_responses)
+        worker_ssh = MagicMock()
+        worker_targets = []
+
+        def execute(target, cmd, timeout=None, get_pty=False):
+            ssh_manager.calls.append(cmd)
+            # 区分来源会话与 Worker 会话：target 即传入的 ssh 对象。
+            if target is worker_ssh:
+                worker_targets.append(cmd)
+                if cmd.startswith("ip route get"):
+                    return _cr(("10.0.0.5 dev tailscale0 src 100.64.0.7\n", "", 0))
+                return _cr(("", "", 0))
+            for key, value in source_responses.items():
+                if cmd.startswith(key) or cmd == key:
+                    return _cr(value)
+            return _cr(("", "", 0))
+
+        ssh_manager.execute_command.side_effect = execute
+        resolved = usbip_linux_source.resolve_worker_egress_ips(
+            ssh_manager, MagicMock(), ["wlq@172.16.10.20"],
+            worker_ssh_factory=lambda host: worker_ssh,
+        )
+        self.assertEqual(resolved, ["100.64.0.7"])
+        # ip route get 只能出现在 Worker 会话上。
+        self.assertTrue(any("ip route get" in cmd for cmd in worker_targets))
+
+    def test_resolve_returns_empty_without_factory(self):
+        ssh_manager = _fake_ssh_manager({
+            "echo $SSH_CONNECTION": ("10.0.0.9 54321 10.0.0.5 22\n", "", 0),
+        })
+        resolved = usbip_linux_source.resolve_worker_egress_ips(
+            ssh_manager, MagicMock(), ["wlq@172.16.10.20"],
+        )
+        self.assertEqual(resolved, [])
+
+    def test_resolve_closes_worker_connection(self):
+        ssh_manager = _fake_ssh_manager({
+            "echo $SSH_CONNECTION": ("10.0.0.9 54321 10.0.0.5 22\n", "", 0),
+            "ip route get": ("10.0.0.5 dev eth0 src 172.16.10.20\n", "", 0),
+        })
+        worker_ssh = MagicMock()
+        usbip_linux_source.resolve_worker_egress_ips(
+            ssh_manager, MagicMock(), ["wlq@172.16.10.20"],
+            worker_ssh_factory=lambda host: worker_ssh,
+        )
+        worker_ssh.close.assert_called_once()
+
+
 class AutoBindUbuntuTests(unittest.TestCase):
     def test_ensure_ubuntu_export_uses_assignment_serials(self):
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
-            "/usr/local/bin/usbipd --version": ("usbipd 0.9.4", "", 0),
+            "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),
+            **WORKER_EGRESS_SETUP,
         }
         ssh_manager = _fake_ssh_manager(responses)
         state = _pgrep_protocol_state([

@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
 SSH 异步管理器 - 异步执行 SSH 命令并实时推送日志
+
+4.txt 第 12 节收敛：执行实现统一委托给
+:class:`~features.system.ssh_executor.SSHExecutor`（与同步 SSHManager
+共用同一实现，杜绝行为漂移）；本类只保留异步连接管理和既有 API 兼容。
 """
 
 import asyncio
 import logging
-from collections.abc import Callable
 
 import paramiko
 
-from foundation.common_utils import CommonUtils
+from features.system.ssh_executor import ssh_executor
+from foundation.command_result import CommandResult
 from foundation.ssh_security import configure_strict_host_keys
 
 
@@ -21,10 +25,10 @@ class SSHAsyncManager:
     SSH 异步管理器
 
     特性：
-    - 异步执行 SSH 命令
-    - 实时流式输出日志
+    - 异步执行 SSH 命令（SSHExecutor.run_async 线程池实现）
+    - 实时流式输出日志（stderr 走 recv_stderr API）
     - 支持超时控制
-    - 连接池管理
+    - 按目标身份缓存的连接管理
     """
 
     def __init__(self):
@@ -87,76 +91,19 @@ class SSHAsyncManager:
         self,
         ssh: paramiko.SSHClient,
         command: str,
-        log_callback: Callable[[str, str], None],
-        timeout: int = 300
-    ) -> int:
-        """执行 SSH 命令，通过回调输出日志并返回退出码。"""
-        logger.info(f"[SSH] Executing command: {command[:100]}")
+        log_callback,
+        timeout: int = 300,
+        get_pty: bool = False,
+    ) -> CommandResult:
+        """执行 SSH 命令，通过回调输出日志并返回 :class:`CommandResult`。
 
-        try:
-            # 执行命令
-            _stdin, stdout, stderr = await asyncio.to_thread(
-                ssh.exec_command,
-                command,
-                get_pty=True,
-                timeout=timeout,
-            )
-
-            # 异步读取标准输出
-            stdout_task = asyncio.create_task(
-                self._read_stream(stdout, log_callback, 'info')
-            )
-
-            # 异步读取标准错误
-            stderr_task = asyncio.create_task(
-                self._read_stream(stderr, log_callback, 'error')
-            )
-
-            # 等待两个读取任务完成
-            await asyncio.gather(stdout_task, stderr_task)
-
-            # 获取退出码
-            exit_code = stdout.channel.recv_exit_status()
-
-            logger.info(f"[SSH] Command completed with exit code: {exit_code}")
-            return exit_code
-
-        except Exception as e:
-            logger.error(f"[SSH] Error executing command: {e}")
-            await log_callback(f"SSH 执行错误: {e!s}", 'error')
-            return -1
-
-    async def _read_stream(
-        self,
-        stream: paramiko.ChannelFile,
-        log_callback: Callable[[str, str], None],
-        log_type: str
-    ):
+        实现委托给 SSHExecutor.run_stream（stdout 走 ``recv``、stderr 走
+        ``recv_stderr``，drain 完成后再取退出码）。
         """
-        异步读取流
+        return await ssh_executor.run_stream(
+            ssh, command, log_callback, timeout, get_pty=get_pty,
+        )
 
-        Args:
-            stream: 输入流
-            log_callback: 日志回调函数
-            log_type: 日志类型
-        """
-        try:
-            while not stream.channel.exit_status_ready():
-                if stream.channel.recv_ready():
-                    # 在线程池中读取数据
-                    data = await asyncio.to_thread(stream.channel.recv, 65536)
-                    if data:
-                        text = CommonUtils.decode_ssh_output(data)
-                        # 按行分割并发送日志
-                        for line in text.split('\n'):
-                            if line.strip():
-                                await log_callback(line.strip(), log_type)
-                else:
-                    # 没有数据时短暂休眠
-                    await asyncio.sleep(0.01)
-
-        except Exception as e:
-            logger.error(f"[SSH] Error reading stream: {e}")
 
     async def execute_command_simple(
         self,
@@ -165,23 +112,10 @@ class SSHAsyncManager:
         password: str,
         command: str,
         timeout: int = 30
-    ) -> tuple[int, str, str]:
-        """执行非流式 SSH 命令并返回退出码及输出。"""
+    ) -> CommandResult:
+        """执行非流式 SSH 命令，统一返回 :class:`CommandResult`。"""
         ssh = await self.connect(host, username, password, timeout=timeout)
-
-        def _exec():
-            _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
-            exit_code = stdout.channel.recv_exit_status()
-            stdout_text = CommonUtils.decode_ssh_output(stdout.read())
-            stderr_text = CommonUtils.decode_ssh_output(stderr.read())
-            return exit_code, stdout_text, stderr_text
-
-        try:
-            result = await asyncio.to_thread(_exec)
-            return result
-        except Exception as e:
-            logger.error(f"[SSH] Error in simple execute: {e}")
-            return -1, '', str(e)
+        return await ssh_executor.run_async(ssh, command, timeout=timeout)
 
     def close(self, host: str):
         """
