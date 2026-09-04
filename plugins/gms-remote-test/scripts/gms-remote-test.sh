@@ -1930,6 +1930,12 @@ gms-rt-reports-download() {
 # List all reports
 gms-rt-reports-list() {
     check_jq
+    # --json mode must emit machine-readable data; the fixed-width human
+    # table below is for terminals only (agents pay for every padded column).
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        api_call "/reports/list" | jq '.'
+        return $?
+    fi
     echo "📋 Listing all reports..."
     local response=$(api_call "/reports/list")
     local count=$(echo "$response" | jq '.reports | length')
@@ -1975,17 +1981,23 @@ gms-rt-ssh-ping() {
         else
             warning "Network not reachable"
         fi
-        # Show route commands if available
-        local route_commands=$(echo "$response" | jq '.route_commands')
-        if [ "$route_commands" != "null" ]; then
+        # Show route commands if available; tolerate both object
+        # ({linux:[],windows:[]}) and plain array ([...]) shapes and
+        # missing sides, so a successful ping never fails on formatting.
+        local route_commands=$(echo "$response" | jq -r '
+            .route_commands // empty |
+            if type == "array" then {linux: ., windows: []}
+            elif type == "object" then {linux: (.linux // []), windows: (.windows // [])}
+            else {linux: [], windows: []} end' 2>/dev/null)
+        if [ -n "$route_commands" ] && [ "$route_commands" != "null" ]; then
             echo ""
             echo "📋 Suggested route commands:"
             echo ""
             echo "${YELLOW}Linux:${NC}"
-            echo "$response" | jq -r '.route_commands.linux[]'
+            echo "$route_commands" | jq -r '.linux[]' 2>/dev/null || true
             echo ""
             echo "${YELLOW}Windows:${NC}"
-            echo "$response" | jq -r '.route_commands.windows[]'
+            echo "$route_commands" | jq -r '.windows[]' 2>/dev/null || true
         fi
     else
         error "Network test failed"
@@ -2515,10 +2527,19 @@ gms-rt-jobs-wait() {
     local response status started_at elapsed
     started_at=$(date +%s)
     while true; do
-        response=$(api_call "/cluster/jobs/$(_urlencode "$job_id")") || return $?
+        # api_call prints the error body on stdout and returns non-zero for
+        # HTTP failures (404 not found, 401, ...); propagate that body so the
+        # JSON envelope carries the reason instead of an empty output.
+        response=$(api_call "/cluster/jobs/$(_urlencode "$job_id")") || {
+            printf '%s\n' "$response"
+            error "Failed to fetch job $job_id: $(printf '%s' "$response" | jq -r '.error // .detail // empty' 2>/dev/null || printf '%s' "$response" | head -c 200)"
+            return $?
+        }
         status=$(echo "$response" | jq -r '.job.status // empty')
         [ -n "$status" ] || {
-            error "Job response does not contain job.status"
+            # Surface the server's error (e.g. 404 job not found) instead of
+            # an empty envelope, so agents see *why* the wait failed.
+            error "Job $job_id not found or response missing job.status: $(echo "$response" | jq -r '.error // .detail // empty' 2>/dev/null || printf '%s' "$response" | head -c 200)"
             echo "$response" | jq '.' 2>/dev/null || printf '%s\n' "$response"
             return "$GMS_RT_EXIT_OPERATION"
         }
@@ -2783,6 +2804,14 @@ gms-rt-test-stop() {
 gms-rt-test-suites() {
     local base_path="${1:-}"
     check_jq
+    # --json mode emits the raw suite inventory; the fixed-width table below
+    # is terminal-only output.
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        local url="/test/suites"
+        [ -n "$base_path" ] && url="/test/suites?base_path=$(_urlencode "$base_path")"
+        api_call "$url" "GET" | jq '.'
+        return $?
+    fi
     if [ -n "$base_path" ]; then
         echo "📋 Listing test suites under $base_path..."
     else
@@ -2901,8 +2930,10 @@ gms-rt-test-suites-result() {
 
         echo "⏱️  Query time: ${elapsed}s"
         echo ""
-        # Output raw format (same as tradefed list results) - fast processing
-        echo "$response" | jq -r '.raw_output' | grep -E 'Session|^[ ]*[0-9]' | grep -v -E '^04-|^D/|DeviceManager'
+        # Output raw format (same as tradefed list results) - fast processing.
+        # The pipeline's exit status must not turn a successful query into a
+        # failure: an empty match just means no result rows for this suite.
+        echo "$response" | jq -r '.raw_output' | grep -E 'Session|^[ ]*[0-9]' | grep -v -E '^04-|^D/|DeviceManager' || true
     else
         local msg=$(extract_api_error "$response")
         error "Failed to list test results: $msg"

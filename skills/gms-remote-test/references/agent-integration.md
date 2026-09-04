@@ -5,7 +5,35 @@ other agents that can execute local processes. Agent-specific prompt systems
 may load `SKILL.md`, but automation must rely on the CLI contract instead of
 prompt text.
 
-## Recommended bootstrap
+## kkagent MCP plugin (preferred inside kkagent)
+
+The repository ships a self-contained plugin in `plugins/gms-remote-test`
+that wraps this CLI as typed MCP tools. It injects `--json
+--non-interactive` into every subprocess, compacts envelopes (drops
+`command`/`exit_code:0`, prunes empty fields, adds a next-action `hint` on
+errors), caches the safety catalog, and denies non-agent-safe commands at the
+tool boundary.
+
+| MCP tool | CLI equivalent |
+|---|---|
+| `gms_rt_run(cmd, args)` | any agent-safe `gms-rt-*` command |
+| `gms_rt_commands(group?)` | `gms-rt-system-commands` (compact) |
+| `gms_rt_describe(command)` | `gms-rt-system-command-describe` |
+| `gms_rt_devices()` | `gms-rt-devices-list` |
+| `gms_rt_auth_status()` | `gms-rt-auth-status` |
+| `gms_rt_auth_login(u, password_stdin)` | `gms-rt-auth-login --password-stdin` |
+| `gms_rt_test_start(device, type, module?, case?, suite?, retry?, wait?, max_wait?)` | `gms-rt-test-start` (incl. `--retry`) |
+| `gms_rt_jobs_list(limit?)` | `gms-rt-jobs-list` |
+| `gms_rt_jobs_status(job_id)` | `gms-rt-jobs-status` |
+| `gms_rt_jobs_wait(job_id, max_wait?)` | `gms-rt-jobs-wait` |
+| `gms_rt_jobs_events(job_id, after?, limit?)` | `gms-rt-jobs-events` |
+| `gms_rt_reports_list()` | `gms-rt-reports-list` |
+
+Install locally with `plugins/gms-remote-test/scripts/install_local.sh` and
+restart kkagent. Verified playbooks live in
+[agent-workflows.md](agent-workflows.md).
+
+## Recommended bootstrap (raw CLI)
 
 ```bash
 gms-rt-system-capabilities --json

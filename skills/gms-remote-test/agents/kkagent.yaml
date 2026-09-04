@@ -1,0 +1,4 @@
+interface:
+  display_name: "GMS Remote Test"
+  short_description: "Verified remote device, firmware, and GMS test operations"
+  default_prompt: "Use $gms-remote-test tooling for the requested GMS Remote Test operation. Bootstrap with gms_rt_run(system-health) and gms_rt_auth_status; authenticate with gms_rt_auth_login only when the user supplies credentials. Discover commands with gms_rt_commands/gms_rt_describe instead of guessing. Follow durable job IDs with gms_rt_jobs_events/gms_rt_jobs_wait using next_after, treat envelope exit codes and hint fields as authoritative, never retry exit 4/5 blindly, and require explicit human authorization (and human-run elevation) before any mutating operation."
