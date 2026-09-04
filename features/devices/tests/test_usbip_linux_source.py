@@ -9,8 +9,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from foundation.command_result import CommandResult
 from features.devices import usbip, usbip_flash, usbip_linux_source
+from foundation.command_result import CommandResult
 
 
 UDEV_OUTPUT = """@@DEV /dev/bus/usb/001/017
@@ -46,7 +46,7 @@ ID_MODEL=USB download gadget
 def _cr(value) -> CommandResult:
     """历史 tuple ``(stdout, stderr, code)`` → :class:`CommandResult`。"""
     if isinstance(value, CommandResult):
-        return _cr(value)
+        return value
     stdout, stderr, code = value
     return CommandResult(stdout=stdout, stderr=stderr, code=code)
 

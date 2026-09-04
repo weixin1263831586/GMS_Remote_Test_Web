@@ -9,7 +9,6 @@ import os
 import tempfile
 import unittest
 from unittest.mock import patch
-from foundation.command_result import CommandResult
 
 from features.devices import config_explorer as ce
 from features.devices import config_override as co
@@ -22,6 +21,7 @@ from features.devices.config_override import (
     render_resource_xml,
     validate_override,
 )
+from foundation.command_result import CommandResult
 
 
 # validate_override + _split_array_items

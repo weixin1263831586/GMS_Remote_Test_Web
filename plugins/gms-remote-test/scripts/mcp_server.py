@@ -332,7 +332,7 @@ def _load_catalog(force: bool = False) -> dict[str, Any] | None:
         and now - cache["loaded_at"] < SAFETY_CACHE_TTL_SECONDS
     ):
         return cache["commands"]
-    text, is_error = run_cli("gms-rt-system-commands")
+    text, _is_error = run_cli("gms-rt-system-commands")
     try:
         payload = json.loads(text)
         commands = payload["data"]["commands"]
@@ -398,7 +398,7 @@ def _catalog_lines(catalog: dict[str, Any], group: str | None = None) -> str:
         " | all commands except auth-*/system-* need a session;"
         " get details with gms_rt_describe"
     )
-    return "\n".join([header] + lines) if lines else header
+    return "\n".join([header, *lines]) if lines else header
 
 
 # ---------------------------------------------------------------------------

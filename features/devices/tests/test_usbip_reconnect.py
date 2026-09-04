@@ -4,8 +4,6 @@ import os
 import tempfile
 import threading
 import unittest
-
-from foundation.command_result import CommandResult
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,6 +24,7 @@ from features.devices.usbip import (
     find_device_host_password,
     parse_usbipd_android_busids,
 )
+from foundation.command_result import CommandResult
 
 
 global_state = SimpleNamespace(

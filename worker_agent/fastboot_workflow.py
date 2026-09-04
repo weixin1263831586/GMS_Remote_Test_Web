@@ -9,14 +9,14 @@ from pathlib import PurePath
 # Canonical CommandResult lives in foundation; re-exported here so the
 # existing `from worker_agent.fastboot_workflow import CommandResult`
 # call sites keep working (features/firmware, features/devices).
-from foundation.command_result import CommandResult  # noqa: F401
+from foundation.command_result import CommandResult
 
 
 __all__ = [
     "CommandResult",
-    "PreparedFastbootDevice",
     "FastbootPreparationError",
     "FastbootPreparer",
+    "PreparedFastbootDevice",
     "Runner",
 ]
 

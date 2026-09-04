@@ -1,13 +1,13 @@
 import os
 import tempfile
 import unittest
-from foundation.command_result import CommandResult
 
 from features.test_execution.tradefed import (
     find_tradefed_binary,
     find_tradefed_binary_local,
     sanitize_tradefed_console_command,
 )
+from foundation.command_result import CommandResult
 
 
 class FakeRuntimeSshManager:

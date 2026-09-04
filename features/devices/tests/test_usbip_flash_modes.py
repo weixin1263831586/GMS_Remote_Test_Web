@@ -1,6 +1,5 @@
 import threading
 import unittest
-from foundation.command_result import CommandResult
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -17,6 +16,7 @@ from features.devices.usbip import (
     parse_fastboot_devices,
     parse_usbipd_android_busids,
 )
+from foundation.command_result import CommandResult
 
 
 class UsbipFlashModeTests(unittest.TestCase):

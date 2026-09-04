@@ -395,6 +395,10 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     time.sleep(0.5)
                     x11vnc_running = False
 
+            # x11vnc/websockify 已在运行时不会执行启动命令，两个结果变量
+            # 预置 None，失败诊断分支按“是否真的启动过”取 stderr。
+            x11_result = None
+            novnc_result = None
             if not x11vnc_running:
                 auth_param = "-rfbauth ~/.vnc/passwd" if vnc_password else ""
                 x11vnc_cmd = (
@@ -469,8 +473,8 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                 command_errors = '\n'.join(
                     value.strip()
                     for value in (
-                        x11_result.stderr if not x11_result.ok else '',
-                        novnc_result.stderr if not novnc_result.ok else '',
+                        x11_result.stderr if x11_result is not None and not x11_result.ok else '',
+                        novnc_result.stderr if novnc_result is not None and not novnc_result.ok else '',
                         logs_result.stdout,
                         stderr,
                     )

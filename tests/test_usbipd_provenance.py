@@ -25,7 +25,9 @@ REQUIRED_FIELDS = (
     "version",
     "target",
     "sha256",
-    "cargo_lock_sha256",
+    # v0.9.6 起二进制来自 usbip 仓库 GitHub Release 产物，不再本地
+    # cargo build，溯源锚点是 release_url（下载来源）而非 Cargo.lock。
+    "release_url",
     "rustc",
 )
 

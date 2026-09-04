@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 
 import paramiko
@@ -25,10 +26,12 @@ import paramiko
 from foundation.command_result import CommandResult
 from foundation.common_utils import CommonUtils
 
+
 logger = logging.getLogger(__name__)
 
 _READ_CHUNK = 65536
 _POLL_INTERVAL = 0.01
+_EXIT_DRAIN_GRACE_SECONDS = 0.05
 
 
 class SSHExecutor:
@@ -53,12 +56,55 @@ class SSHExecutor:
     ) -> CommandResult:
         """Blocking execution on an established SSH client."""
         try:
-            _stdin, stdout, stderr = ssh.exec_command(
+            _stdin, stdout, _stderr = ssh.exec_command(
                 command, timeout=timeout, get_pty=get_pty,
             )
-            stdout_text = CommonUtils.decode_ssh_output(stdout.read())
-            stderr_text = CommonUtils.decode_ssh_output(stderr.read())
-            exit_code = stdout.channel.recv_exit_status()
+            channel = stdout.channel
+            # 缓冲原始字节、结束后整体解码：decode_ssh_output 的
+            # utf-8→gbk 兜底链必须作用于完整流，逐 chunk 解码会把跨
+            # chunk 的多字节字符误判为非 UTF-8 而产生乱码。
+            stdout_chunks: list[bytes] = []
+            stderr_chunks: list[bytes] = []
+            deadline = time.monotonic() + timeout if timeout and timeout > 0 else None
+            exit_seen_at: float | None = None
+
+            # stdout/stderr share one SSH channel window. Reading one stream to
+            # EOF before touching the other can deadlock when the unconsumed
+            # stream fills the remote window. Drain both streams concurrently.
+            while True:
+                made_progress = False
+                while channel.recv_ready():
+                    data = channel.recv(_READ_CHUNK)
+                    if data:
+                        stdout_chunks.append(data)
+                    made_progress = True
+                while channel.recv_stderr_ready():
+                    data = channel.recv_stderr(_READ_CHUNK)
+                    if data:
+                        stderr_chunks.append(data)
+                    made_progress = True
+
+                now = time.monotonic()
+                if channel.exit_status_ready():
+                    if exit_seen_at is None:
+                        exit_seen_at = now
+                    if (
+                        not channel.recv_ready()
+                        and not channel.recv_stderr_ready()
+                        and now - exit_seen_at >= _EXIT_DRAIN_GRACE_SECONDS
+                    ):
+                        break
+                else:
+                    exit_seen_at = None
+
+                if deadline is not None and now >= deadline and exit_seen_at is None:
+                    raise TimeoutError(f"SSH command timed out after {timeout} seconds")
+                if not made_progress:
+                    time.sleep(_POLL_INTERVAL)
+
+            stdout_text = CommonUtils.decode_ssh_output(b"".join(stdout_chunks))
+            stderr_text = CommonUtils.decode_ssh_output(b"".join(stderr_chunks))
+            exit_code = channel.recv_exit_status()
             return CommandResult(stdout=stdout_text, stderr=stderr_text, code=exit_code)
         except Exception as e:
             logger.error(f"[SSH] Command execution error: {e}")
@@ -93,54 +139,85 @@ class SSHExecutor:
         """
         logger.info(f"[SSH] Executing command: {command[:100]}")
         try:
-            _stdin, stdout, stderr = await asyncio.to_thread(
+            _stdin, stdout, _stderr = await asyncio.to_thread(
                 ssh.exec_command,
                 command,
                 get_pty=get_pty,
                 timeout=timeout,
             )
+            channel = stdout.channel
+            stdout_lines: list[str] = []
+            stderr_lines: list[str] = []
+            stdout_pending = ""
+            stderr_pending = ""
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout if timeout and timeout > 0 else None
+            exit_seen_at: float | None = None
 
-            async def relay(stream, log_type: str, reader) -> str:
-                # stderr 必须走 recv_stderr API；两个任务争抢同一个 stdout
-                # channel 会让 stderr 日志错乱/丢失（历史 P1）。
-                captured: list[str] = []
-                pending = ""
-                while True:
-                    if reader["ready"]():
-                        data = await asyncio.to_thread(reader["recv"], _READ_CHUNK)
-                        if data:
-                            pending += CommonUtils.decode_ssh_output(data)
-                            *lines, pending = pending.split("\n")
-                            for line in lines:
-                                if line.strip():
-                                    captured.append(line)
-                                    await log_callback(line.strip(), log_type)
-                        continue
-                    if stream.channel.exit_status_ready():
-                        # 进程已退出：flush 跨 chunk 残留的最后一行。
-                        if pending.strip():
-                            captured.append(pending)
-                            await log_callback(pending.strip(), log_type)
+            async def consume_chunk(
+                data: bytes,
+                pending: str,
+                captured: list[str],
+                log_type: str,
+            ) -> str:
+                pending += CommonUtils.decode_ssh_output(data)
+                *lines, pending = pending.split("\n")
+                for line in lines:
+                    if line.strip():
+                        captured.append(line)
+                        await log_callback(line.strip(), log_type)
+                return pending
+
+            # One loop owns the shared channel and drains both streams. This
+            # avoids two relay tasks racing on exit_status_ready() and prevents
+            # either stream from exiting before late tail data becomes ready.
+            while True:
+                made_progress = False
+                while channel.recv_ready():
+                    data = await asyncio.to_thread(channel.recv, _READ_CHUNK)
+                    if data:
+                        stdout_pending = await consume_chunk(
+                            data, stdout_pending, stdout_lines, "info",
+                        )
+                    made_progress = True
+                while channel.recv_stderr_ready():
+                    data = await asyncio.to_thread(channel.recv_stderr, _READ_CHUNK)
+                    if data:
+                        stderr_pending = await consume_chunk(
+                            data, stderr_pending, stderr_lines, "error",
+                        )
+                    made_progress = True
+
+                now = loop.time()
+                if channel.exit_status_ready():
+                    if exit_seen_at is None:
+                        exit_seen_at = now
+                    if (
+                        not channel.recv_ready()
+                        and not channel.recv_stderr_ready()
+                        and now - exit_seen_at >= _EXIT_DRAIN_GRACE_SECONDS
+                    ):
                         break
-                    await asyncio.sleep(_POLL_INTERVAL)
-                return "\n".join(captured)
+                else:
+                    exit_seen_at = None
 
-            stdout_text, stderr_text = await asyncio.gather(
-                relay(
-                    stdout, "info",
-                    {"ready": stdout.channel.recv_ready, "recv": stdout.channel.recv},
-                ),
-                relay(
-                    stderr, "error",
-                    {
-                        "ready": stderr.channel.recv_stderr_ready,
-                        "recv": stderr.channel.recv_stderr,
-                    },
-                ),
-            )
+                if deadline is not None and now >= deadline and exit_seen_at is None:
+                    raise TimeoutError(f"SSH command timed out after {timeout} seconds")
+                if not made_progress:
+                    await asyncio.sleep(_POLL_INTERVAL)
+
+            if stdout_pending.strip():
+                stdout_lines.append(stdout_pending)
+                await log_callback(stdout_pending.strip(), "info")
+            if stderr_pending.strip():
+                stderr_lines.append(stderr_pending)
+                await log_callback(stderr_pending.strip(), "error")
+
+            stdout_text = "\n".join(stdout_lines)
+            stderr_text = "\n".join(stderr_lines)
 
             # drain 完成后再取退出码，并移入线程避免阻塞事件循环。
-            exit_code = await asyncio.to_thread(stdout.channel.recv_exit_status)
+            exit_code = await asyncio.to_thread(channel.recv_exit_status)
             logger.info(f"[SSH] Command completed with exit code: {exit_code}")
             return CommandResult(
                 stdout=stdout_text, stderr=stderr_text, code=exit_code,

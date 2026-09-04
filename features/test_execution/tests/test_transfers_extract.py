@@ -24,8 +24,8 @@ from features.test_execution.transfers_api import (
     download_test_suite_from_url,
     extract_test_suite_archive,
 )
-from foundation.outbound import ResolvedOutboundTarget
 from foundation.command_result import CommandResult
+from foundation.outbound import ResolvedOutboundTarget
 
 
 class SuiteExtractTests(unittest.TestCase):

@@ -2524,17 +2524,22 @@ gms-rt-jobs-wait() {
     fi
 
     check_jq || return "$GMS_RT_EXIT_OPERATION"
-    local response status started_at elapsed
+    local response status started_at elapsed call_status
     started_at=$(date +%s)
     while true; do
         # api_call prints the error body on stdout and returns non-zero for
         # HTTP failures (404 not found, 401, ...); propagate that body so the
         # JSON envelope carries the reason instead of an empty output.
-        response=$(api_call "/cluster/jobs/$(_urlencode "$job_id")") || {
+        response=$(api_call "/cluster/jobs/$(_urlencode "$job_id")")
+        call_status=$?
+        if [ "$call_status" -ne 0 ]; then
             printf '%s\n' "$response"
-            error "Failed to fetch job $job_id: $(printf '%s' "$response" | jq -r '.error // .detail // empty' 2>/dev/null || printf '%s' "$response" | head -c 200)"
-            return $?
-        }
+            error "Failed to fetch job $job_id: $(printf '%s' "$response" | jq -r '.error // .detail // empty' 2>/dev/null || printf '%s' "$response" | head -c 200)" || true
+            # Preserve api_call's semantic exit code (3 auth / 4 permission /
+            # 5 conflict / 6 network / 7 operation). Calling error() changes
+            # $? to GMS_RT_EXIT_OPERATION, so never return $? here.
+            return "$call_status"
+        fi
         status=$(echo "$response" | jq -r '.job.status // empty')
         [ -n "$status" ] || {
             # Surface the server's error (e.g. 404 job not found) instead of

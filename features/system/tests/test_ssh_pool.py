@@ -122,11 +122,18 @@ def test_stream_reading_uses_stderr_api_for_stderr():
     from features.system.ssh_executor import ssh_executor
 
     channel = MagicMock(spec=paramiko.Channel)
-    # ready 一次取数据，之后不再 ready；进程已退出（exit ready 恒真）。
+    # ready 直到数据被消费；进程已退出（exit ready 恒真）。
+    # 单循环实现会多次轮询 ready 标志，不能用有限次数的 side_effect 列表。
     channel.exit_status_ready.return_value = True
     channel.recv_ready.return_value = False
-    channel.recv_stderr_ready.side_effect = [True, False]
-    channel.recv_stderr.return_value = b"boom\n"
+    stderr_pending = {"data": True}
+    channel.recv_stderr_ready.side_effect = lambda: stderr_pending["data"]
+
+    def _consume_stderr(_size):
+        stderr_pending["data"] = False
+        return b"boom\n"
+
+    channel.recv_stderr.side_effect = _consume_stderr
     stderr = MagicMock()
     stderr.channel = channel
     stdout = MagicMock()
@@ -160,8 +167,14 @@ def test_stream_reading_uses_stdout_api_for_stdout():
 
     channel = MagicMock(spec=paramiko.Channel)
     channel.exit_status_ready.return_value = True
-    channel.recv_ready.side_effect = [True, False]
-    channel.recv.return_value = b"hello\n"
+    stdout_pending = {"data": True}
+
+    def _consume_stdout(_size):
+        stdout_pending["data"] = False
+        return b"hello\n"
+
+    channel.recv_ready.side_effect = lambda: stdout_pending["data"]
+    channel.recv.side_effect = _consume_stdout
     channel.recv_stderr_ready.return_value = False
     stdout = MagicMock()
     stdout.channel = channel
@@ -195,24 +208,40 @@ def test_simple_exec_drains_output_before_exit_status():
 
     calls = []
 
-    class FakeStream:
-        def __init__(self, name, channel):
-            self._name = name
-            self.channel = channel
-
-        def read(self):
-            calls.append(f"read:{self._name}")
-            return b"out" if self._name == "stdout" else b"err"
-
     class FakeChannel:
+        def __init__(self):
+            self._stdout = [b"out"]
+            self._stderr = [b"err"]
+
+        def recv_ready(self):
+            return bool(self._stdout)
+
+        def recv(self, _size):
+            calls.append("recv:stdout")
+            return self._stdout.pop(0) if self._stdout else b""
+
+        def recv_stderr_ready(self):
+            return bool(self._stderr)
+
+        def recv_stderr(self, _size):
+            calls.append("recv:stderr")
+            return self._stderr.pop(0) if self._stderr else b""
+
+        def exit_status_ready(self):
+            return not self._stdout and not self._stderr
+
         def recv_exit_status(self):
             calls.append("exit_status")
             return 0
 
+    class FakeStream:
+        def __init__(self, channel):
+            self.channel = channel
+
     ssh = MagicMock()
     channel = FakeChannel()
     ssh.exec_command.return_value = (
-        MagicMock(), FakeStream("stdout", channel), FakeStream("stderr", channel),
+        MagicMock(), FakeStream(channel), FakeStream(channel),
     )
 
     async def run():
@@ -226,4 +255,6 @@ def test_simple_exec_drains_output_before_exit_status():
     result = asyncio.run(run())
     assert result.code == 0
     assert result.stdout == "out" and result.stderr == "err"
-    assert calls == ["read:stdout", "read:stderr", "exit_status"]
+    # 退出码必须在两条流都 drain 完之后才获取。
+    assert calls[-1] == "exit_status"
+    assert "recv:stdout" in calls and "recv:stderr" in calls
