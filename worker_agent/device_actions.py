@@ -13,6 +13,7 @@ import re
 import shutil
 import stat
 import subprocess
+import threading
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -54,20 +55,25 @@ def _adb_environment(adb_server_socket: str | None) -> dict[str, str] | None:
 # 设备详情缓存：heartbeat 高频调用 probe_devices，但每台设备的详情探测
 # 是一次串行 ADB 往返（超时 3s）。多设备 + ADB 卡顿时会拖过 Controller 的
 # offline 阈值造成假离线。详情（model/Android 版本/电量/SoC）变化缓慢，
-# 缓存 60s 内直接复用；设备状态为 device 且缓存过期才重新探测。
+# 因此 heartbeat 与详情探测彻底解耦：
+# - 后台 enrichment 线程按有界并发（4）逐台刷新，每台设备有独立的
+#   next_refresh_at（错峰，避免 cache stampede 同时过期）；
+# - heartbeat/probe_devices 只读缓存快照，永远不做同步 ADB 往返；
+#   缓存未就绪时对应字段为空，最坏情况是详情晚到一轮 heartbeat。
 _DEVICE_DETAILS_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 _DEVICE_DETAILS_TTL_SECONDS = 60.0
+_DEVICE_DETAILS_ENRICH_CONCURRENCY = 4
+_ENRICH_MIN_INTERVAL_SECONDS = 15.0
+_details_enrich_lock = threading.Lock()
+_details_refresh_at: dict[str, float] = {}
+_details_enrich_thread: threading.Thread | None = None
+_details_enrich_stop = threading.Event()
+_adb_socket_for_enrich: list[str | None] = [None]
 
 
-def _probe_device_details(
-    serial: str,
-    adb_server_socket: str | None = None,
+def _probe_device_details_uncached(
+    serial: str, adb_server_socket: str | None = None
 ) -> dict[str, str]:
-    """Read management attributes in one ADB round trip (with TTL cache)."""
-    now = time.monotonic()
-    cached = _DEVICE_DETAILS_CACHE.get(serial)
-    if cached and now - cached[0] < _DEVICE_DETAILS_TTL_SECONDS:
-        return cached[1]
     output = _run([
         "adb", "-s", serial, "shell",
         "echo __MODEL__; getprop ro.product.model; "
@@ -93,8 +99,69 @@ def _probe_device_details(
         if current == "battery_level":
             value = value.partition(":")[2].strip() if ":" in value else value
         details[current] = value
-    _DEVICE_DETAILS_CACHE[serial] = (now, details)
     return details
+
+
+def _enrich_details_worker() -> None:
+    """后台逐台刷新详情：有界并发、每台独立刷新周期。"""
+    while not _details_enrich_stop.is_set():
+        now = time.monotonic()
+        due = [
+            serial
+            for serial, (_, _) in list(_DEVICE_DETAILS_CACHE.items())
+            if _details_refresh_at.get(serial, 0.0) <= now
+        ]
+        if not due:
+            _details_enrich_stop.wait(2.0)
+            continue
+        # 错峰：即使一次刷多台，也把 next_refresh_at 展开到 TTL 区间内，
+        # 避免所有设备同一时刻集体过期（cache stampede）。
+        stagger = _DEVICE_DETAILS_TTL_SECONDS / max(len(due), 1)
+        for index, serial in enumerate(due):
+            if _details_enrich_stop.is_set():
+                return
+            details = _probe_device_details_uncached(
+                serial, _adb_socket_for_enrich[0])
+            _DEVICE_DETAILS_CACHE[serial] = (time.monotonic(), details)
+            _details_refresh_at[serial] = (
+                time.monotonic()
+                + min(_DEVICE_DETAILS_TTL_SECONDS,
+                      _ENRICH_MIN_INTERVAL_SECONDS + index * stagger)
+            )
+
+
+def ensure_details_enrichment_started(adb_server_socket: str | None = None) -> None:
+    """启动（幂等）后台详情探测线程。"""
+    global _details_enrich_thread
+    with _details_enrich_lock:
+        _adb_socket_for_enrich[0] = adb_server_socket
+        if _details_enrich_thread is None or not _details_enrich_thread.is_alive():
+            _details_enrich_stop.clear()
+            _details_enrich_thread = threading.Thread(
+                target=_enrich_details_worker,
+                name="device-details-enrich", daemon=True)
+            _details_enrich_thread.start()
+
+
+def seed_device_details(serial: str) -> None:
+    """设备首次出现时注册空详情并立即纳入刷新计划。"""
+    if serial not in _DEVICE_DETAILS_CACHE:
+        _DEVICE_DETAILS_CACHE[serial] = (0.0, {})
+        _details_refresh_at[serial] = 0.0
+    ensure_details_enrichment_started(_adb_socket_for_enrich[0])
+
+
+def _probe_device_details(
+    serial: str,
+    adb_server_socket: str | None = None,
+) -> dict[str, str]:
+    """只读缓存快照（探测由后台线程完成，绝不同步阻塞调用方）。"""
+    _adb_socket_for_enrich[0] = adb_server_socket or _adb_socket_for_enrich[0]
+    cached = _DEVICE_DETAILS_CACHE.get(serial)
+    if cached and cached[1]:
+        return cached[1]
+    seed_device_details(serial)
+    return {}
 
 
 def probe_devices(
@@ -146,6 +213,7 @@ def probe_devices(
                 "adb_proxy_source_serial": proxy_source["source_serial"],
             })
         if include_details and adb_state == "device":
+            seed_device_details(serial)
             properties.update(
                 _probe_device_details(serial, adb_server_socket)
             )
@@ -199,6 +267,15 @@ def execute_usbip_action(
 
 def execute_device_action(action: str, device_ids: list[str], options: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute one strictly allow-listed Android device operation."""
+    from features.cluster.device_action_spec import (
+        adb_proxy_forbidden_device_actions as _proxy_forbidden_builder,
+    )
+    from features.cluster.device_action_spec import (
+        inspection_device_actions as _inspection_builder,
+    )
+    _proxy_forbidden = _proxy_forbidden_builder()
+    _inspection_actions = _inspection_builder()
+
     attached = {item["serial"]: item for item in probe_devices()}
     serials = []
     for device_id in device_ids:
@@ -207,22 +284,14 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
             raise ValueError(f"device is not attached to this worker: {serial}")
         if (
             attached[serial].get("transport") == "adb_proxy"
-            and action in {
-                "reboot_bootloader", "bootloader_lock", "bootloader_unlock",
-            }
+            and action in _proxy_forbidden
         ):
             raise ValueError(
                 f"ADB Proxy remote device has no local USB/Fastboot channel: {serial}"
             )
         serials.append(serial)
     options = options or {}
-    inspection_actions = {
-        "packages_with_path", "packages_all", "features", "props",
-        "config_explore", "override_status", "override_apply",
-        "override_revert", "override_disable_verity", "override_enable_verity",
-        "override_reboot",
-    }
-    if action in inspection_actions:
+    if action in _inspection_actions:
         if len(serials) != 1:
             raise ValueError(f"{action} requires exactly one device")
         from .android_inspection import execute_inspection_action

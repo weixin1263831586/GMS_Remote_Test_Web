@@ -60,6 +60,23 @@ async def start_test(
             "Remote Worker execution is disabled for this deployment", 409
         )
 
+    # 跨 Worker 校验：devices 中的 "worker:serial" 前缀必须与目标 Worker
+    # 一致，否则 Worker Agent 会因设备不存在而静默失败，用户难以排查。
+    foreign = [
+        item
+        for item in req.devices
+        if ":" in item
+        and item.split(":", 1)[0]
+        not in {requested_worker_id, local_worker_id}
+        and not item.startswith(f"{requested_worker_id}:")
+    ]
+    if foreign:
+        return error_response(
+            f"Selected devices do not belong to worker {requested_worker_id}",
+            400,
+            detail={"devices": foreign},
+        )
+
     req = req.model_copy(update={"worker_id": requested_worker_id})
     if requested_worker_id == local_worker_id:
         try:

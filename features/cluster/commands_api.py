@@ -15,21 +15,17 @@ from features.auth import (
 )
 
 from .api import _authenticate, service
+from .device_action_spec import notified_device_actions
 from .models import CommandAck, CommandEventBatch
 
 
 router = APIRouter()
 
 
+# 派生集合：真值在 device_action_spec.DeviceActionSpec 中。
 # 需要终态通知的 device_action 集合：改变设备状态/可能触发重启的高风险
 # 操作。读操作（screenshot/props/scrcpy 等）即时返回，不进通知中心。
-NOTIFIED_DEVICE_ACTIONS = frozenset({
-    "override_apply", "override_revert",
-    "override_disable_verity", "override_enable_verity", "override_reboot",
-    "bootloader_lock", "bootloader_unlock",
-    "reboot", "reboot_bootloader", "remount",
-})
-
+NOTIFIED_DEVICE_ACTIONS = notified_device_actions()
 
 def _require_worker_session(
     worker_id: str, session_id: str = "", generation: int = 0

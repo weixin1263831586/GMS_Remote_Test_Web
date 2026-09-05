@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 from features.auth import (
+    CurrentUser,
     get_authenticated_user,
     principal_owner_id,
     require_authenticated_user_when_auth_required,
@@ -67,7 +68,12 @@ async def list_build_templates(enabled_only: bool = Query(False)):
 
 
 @router.post("/discover/workspaces")
-async def discover_build_workspaces(req: dict[str, Any]):
+async def discover_build_workspaces(
+    req: dict[str, Any],
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     try:
         items = await run_in_threadpool(
             build_service.discover_workspaces,
@@ -81,7 +87,12 @@ async def discover_build_workspaces(req: dict[str, Any]):
 
 
 @router.post("/discover/lunch-options")
-async def discover_lunch_options(req: dict[str, Any]):
+async def discover_lunch_options(
+    req: dict[str, Any],
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     try:
         items = await run_in_threadpool(
             build_service.discover_lunch_options,

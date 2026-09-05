@@ -230,7 +230,12 @@ def _parse_opengrok_results(base_url: str, project: str, html_text: str, limit: 
 
 @router.post("/api/opengrok/search")
 @handle_api_errors
-async def search_opengrok(req: dict):
+async def search_opengrok(
+    req: dict,
+    _user: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
+):
     """Search configured OpenGrok source index and return parsed source links."""
     query = str(req.get('query') or '').strip()
     if not query:
@@ -342,7 +347,12 @@ async def proxy_favicon(
 
 @router.post("/api/favicon/batch")
 @handle_api_errors
-async def batch_fetch_favicons(request: Request):
+async def batch_fetch_favicons(
+    request: Request,
+    _admin: CurrentUser | None = Depends(
+        require_elevated_admin_when_auth_required
+    ),
+):
     """批量获取网站 Favicon。"""
     data = await request.json()
     urls = data.get('urls', [])

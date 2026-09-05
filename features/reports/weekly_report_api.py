@@ -14,8 +14,12 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 import aiohttp
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
+from features.auth import (
+    CurrentUser,
+    require_authenticated_user_when_auth_required,
+)
 from features.test_execution import (
     execute_tradefed_command,
     get_available_test_suites,
@@ -931,7 +935,12 @@ def _collect_representative_issues(
 
 
 @router.post("/api/reports/weekly-report/ai-summary")
-async def get_weekly_report_ai_summary(request: Request):
+async def get_weekly_report_ai_summary(
+    request: Request,
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     """读取代表性工单完整内容，调用本地 AI 生成周报总结段落。
 
     Body: {"start","end","owner","name","redmine","gerrit","android17","gms_test"}

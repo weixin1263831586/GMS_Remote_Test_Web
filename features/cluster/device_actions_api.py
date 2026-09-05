@@ -8,32 +8,28 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 
 from features.auth import (
+    authentication_required,
     require_authenticated_user,
     require_elevated_admin_when_auth_required,
 )
 from foundation.config import config_manager
 
 from .api import _require_cluster_enabled, service
+from .device_action_spec import (
+    device_action_wait_steps,
+    elevated_device_actions,
+    read_only_device_actions,
+)
 from .models import ClusterDeviceAction
 
 
 router = APIRouter()
 
 
-# 只读操作：不申请独占设备 claim（测试运行中的设备仍可查看信息），
-# 也不走 exclusive fencing。新增只读 action 时在此登记。
-READ_ONLY_DEVICE_ACTIONS = frozenset({
-    "screenshot", "layout", "get_properties", "packages_with_path",
-    "packages_all", "features", "props", "config_explore",
-    "override_status", "bootloader_status",
-})
-
-# 需要管理员提权的写操作。
-ELEVATED_DEVICE_ACTIONS = frozenset({
-    "bootloader_lock", "bootloader_unlock", "override_apply",
-    "override_revert", "override_disable_verity",
-    "override_enable_verity", "override_reboot",
-})
+# 派生集合：真值在 device_action_spec.DeviceActionSpec 中，这里只为
+# 保持既有模块级引用兼容。
+READ_ONLY_DEVICE_ACTIONS = read_only_device_actions()
+ELEVATED_DEVICE_ACTIONS = elevated_device_actions()
 
 
 @router.post("/devices/actions")
@@ -82,6 +78,27 @@ async def device_action(body: ClusterDeviceAction, request: Request):
 
     user = require_authenticated_user(request)
     owner_id = user.id
+    # devices.use_leased 语义落地：普通 user（无 devices.lease 权限）对
+    # 非只读操作只能作用于自己已通过 claim/reservation 占有的设备；
+    # device_operator/admin 才可抢占任意空闲设备。否则权限名的安全承诺
+    # 与实际行为不一致。
+    if (
+        not is_read_only
+        and authentication_required()
+        and not user.has_permission("devices.lease")
+    ):
+        owned = {
+            str(claim.get("device_key") or "")
+            for claim in repository.claims.list_active(owner_id=owner_id)
+        }
+        owned |= repository.owned_reservation_device_ids(owner_id)
+        foreign = [item for item in requested if item not in owned]
+        if foreign:
+            raise HTTPException(
+                403,
+                "devices.use_leased only permits actions on devices you "
+                "already lease or reserve; ask a device operator for access",
+            )
     operation_id = f"device-action-{uuid.uuid4().hex}"
     claim_source = f"operation:{operation_id}"
     # 只读操作（Device Info/UI 操控等）不申请独占 claim：测试占用的设备
@@ -138,12 +155,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             repository.claims.release(claim_source, status="failed")
         raise
 
-    wait_steps = 1800 if body.action in {
-        "config_explore", "override_apply", "override_revert",
-    } else 350 if body.action in {
-        "screenshot", "layout", "packages_with_path", "packages_all",
-        "features", "props", "override_status",
-    } else 100
+    wait_steps = device_action_wait_steps(body.action)
     for _ in range(wait_steps):
         await asyncio.sleep(0.1)
         current = repository.get_command(command["id"])

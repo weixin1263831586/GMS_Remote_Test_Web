@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .config import ClusterConfig
+
+
+# Worker 上报的事件 payload 上限（字节，序列化后）。正常事件 payload 为空或
+# 少量键值；screenshot 等大负载走独立传输通道，不应经事件批灌入。
+_EVENT_PAYLOAD_MAX_BYTES = 8 * 1024
 
 
 class WorkerRegistration(BaseModel):
@@ -206,16 +211,28 @@ class ArtifactUploadComplete(BaseModel):
 
 class JobEvent(BaseModel):
     sequence: int = Field(ge=0)
-    event_type: str = "log"
-    source: str = "worker"
-    level: str = "info"
-    message: str = ""
+    event_type: str = Field(default="log", max_length=32)
+    source: str = Field(default="worker", max_length=64)
+    level: str = Field(default="info", max_length=16)
+    # Controller 是分布式服务边界：不依赖 Worker 自觉截断，
+    # 单条/批次/负载超限直接 422，防止 token 泄漏或 Agent bug 撑爆存储。
+    message: str = Field(default="", max_length=4096)
     payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("payload")
+    @classmethod
+    def _payload_bounded(cls, value: dict[str, Any]) -> dict[str, Any]:
+        serialized = len(str(value))
+        if serialized > _EVENT_PAYLOAD_MAX_BYTES:
+            raise ValueError(
+                f"event payload too large ({serialized} > "
+                f"{_EVENT_PAYLOAD_MAX_BYTES} bytes)")
+        return value
 
 
 class JobEventBatch(BaseModel):
-    attempt_id: str
-    events: list[JobEvent]
+    attempt_id: str = Field(max_length=128)
+    events: list[JobEvent] = Field(min_length=1, max_length=200)
 
 
 class CommandEvent(JobEvent):
@@ -223,4 +240,4 @@ class CommandEvent(JobEvent):
 
 
 class CommandEventBatch(BaseModel):
-    events: list[CommandEvent]
+    events: list[CommandEvent] = Field(min_length=1, max_length=100)

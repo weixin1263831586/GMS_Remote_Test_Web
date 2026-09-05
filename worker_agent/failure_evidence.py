@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from datetime import datetime, timedelta, timezone
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
 logger = logging.getLogger("gms-worker")
@@ -38,14 +38,16 @@ def _adb(serial: str, *args: str, timeout: int = 30) -> str:
 
 def collect_device_fingerprint(serial: str) -> dict[str, str]:
     """任务开始时采集设备指纹（全部尽力而为，缺项为空串）。"""
-    getprop = lambda name: _adb(serial, "shell", "getprop", name).strip()
+    def _getprop(name: str) -> str:
+        return _adb(serial, "shell", "getprop", name).strip()
+
     return {
-        "build_fingerprint": getprop("ro.build.fingerprint"),
-        "product_model": getprop("ro.product.model"),
-        "product_device": getprop("ro.product.device"),
-        "build_date": getprop("ro.build.date"),
-        "sdk_version": getprop("ro.build.version.sdk"),
-        "build_id": getprop("ro.build.id"),
+        "build_fingerprint": _getprop("ro.build.fingerprint"),
+        "product_model": _getprop("ro.product.model"),
+        "product_device": _getprop("ro.product.device"),
+        "build_date": _getprop("ro.build.date"),
+        "sdk_version": _getprop("ro.build.version.sdk"),
+        "build_id": _getprop("ro.build.id"),
         "kernel_version": _adb(
             serial, "shell", "cat", "/proc/version", timeout=10
         ).strip(),

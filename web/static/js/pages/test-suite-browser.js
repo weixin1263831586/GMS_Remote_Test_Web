@@ -2599,6 +2599,20 @@ async function refreshDevices() {
     }
     showToast('正在刷新设备列表...', 'info');
     try {
+        // 集群模式下先触发真正的 Worker 端 refresh_devices（重新 adb
+        // devices 并回写 Controller），失败或非集群模式再回落本地缓存读取。
+        if (state.clusterStatus?.enabled && workspaceWorkerId()) {
+            try {
+                const response = await apiCall(
+                    `/api/cluster/workers/${encodeURIComponent(workspaceWorkerId())}/refresh`,
+                    'POST');
+                if (Array.isArray(response?.devices)) {
+                    state.devices = response.devices;
+                }
+            } catch (workerError) {
+                debugLog(`[refreshDevices] worker refresh fallback: ${workerError.message}`);
+            }
+        }
         // 手动刷新时强制绕过缓存，并标记来源为手动。
         await loadDevices(true, {source: 'manual'});
         showToast('设备列表已刷新', 'success');

@@ -2,9 +2,13 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from features.auth import (
+    CurrentUser,
+    require_authenticated_user_when_auth_required,
+)
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
 
@@ -60,7 +64,13 @@ async def list_utility_tools():
 
 @router.post('/api/tools/browse')
 @handle_api_errors
-async def browse_utility_tools(req: dict):
+async def browse_utility_tools(
+    req: dict,
+    request: Request,
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     """浏览可下载工具清单，返回与 /api/files/list 相同格式以便复用文件浏览器弹框"""
     subpath = str(req.get('path') or '').strip('/')
     if '..' in Path(subpath).parts:

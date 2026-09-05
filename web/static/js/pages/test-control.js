@@ -15,6 +15,22 @@ async function startTest() {
 
     if (!validateDeviceSelection()) return;
 
+    // 前端最后一道 invariant：所有选中设备必须属于当前测试 Worker。
+    // 防御 inspection modal（Device Info / UI 操控等）历史版本污染
+    // selectedDevices 后提交 "worker A + worker B 设备" 的组合。
+    const currentWorker = workspaceWorkerId();
+    const foreignDevices = Array.from(state.selectedDevices).filter(deviceId => {
+        const owner = deviceId.includes(':') ? deviceId.split(':', 1)[0] : '';
+        if (!owner) return false;
+        return owner !== currentWorker && !isLocalWorkspaceWorker(owner);
+    });
+    if (foreignDevices.length > 0) {
+        showToast(
+            `所选设备不属于当前测试 Worker ${currentWorker}，请重新选择: ${foreignDevices.join(', ')}`,
+            'warning');
+        return;
+    }
+
     const testType = document.getElementById('test-type').value;
     const testModule = document.getElementById('test-module').value.trim();
     const testCase = document.getElementById('test-case').value.trim();

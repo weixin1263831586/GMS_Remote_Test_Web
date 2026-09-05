@@ -131,7 +131,10 @@ function workspaceLocalWorkerId() {
 }
 
 function isLocalWorkspaceWorker(workerId) {
-    return !workerId || workerId === 'ats-worker-controller' || workerId === workspaceLocalWorkerId();
+    // 只信 workspace context 同步的真实 local_worker_id；
+    // 'ats-worker-controller' 保留为 Cluster Status 尚未加载时的 fallback，
+    // 不再作为独立判断条件，避免自定义 local_worker_id 时误判双本机。
+    return !workerId || workerId === workspaceLocalWorkerId();
 }
 
 function workspaceWorkerId() {

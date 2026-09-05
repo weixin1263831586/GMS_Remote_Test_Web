@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="2026.08.25-1"
+GMS_RT_VERSION="2026.09.05-1"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -234,6 +234,13 @@ api_call() {
     shift "$(( $# >= 3 ? 3 : $# ))"
     local extra_args=("$@")
     local response body http_status exit_code curl_exit_code
+    # /auth/* 是认证边界本身：它们的 401/403 就是本次认证尝试的结果，
+    # 不是“缺会话”信号。统一追加“请先运行 auth-login”会把服务器返回的
+    # 真实原因（用户名或密码错误/限流/SSH 不可达）掩盖成误导性提示。
+    local is_auth_endpoint=0
+    case "$endpoint" in
+        /auth/login|/auth/logout|/auth/elevate|/auth/status|/auth/setup) is_auth_endpoint=1 ;;
+    esac
 
     _refresh_tls_args
     _ensure_auth_cookie_jar || {
@@ -279,10 +286,20 @@ api_call() {
     if [ "$exit_code" -ne 0 ]; then
         case "$exit_code" in
             "$GMS_RT_EXIT_AUTH")
-                diagnostic "需要登录。请先运行: gms-rt-auth-login [username]"
+                if [ "$is_auth_endpoint" = "1" ]; then
+                    # 登录/提权本身失败：真实原因已在响应 body 里输出到
+                    # stdout，这里不重复追加误导性的"请先登录"。
+                    :
+                else
+                    diagnostic "需要登录。请先运行: gms-rt-auth-login [username]"
+                fi
                 ;;
             "$GMS_RT_EXIT_PERMISSION")
-                diagnostic "权限不足或需要管理员提权。请运行: gms-rt-auth-elevate [username]"
+                if [ "$is_auth_endpoint" = "1" ]; then
+                    :
+                else
+                    diagnostic "权限不足或需要管理员提权。请运行: gms-rt-auth-elevate [username]"
+                fi
                 ;;
         esac
         return "$exit_code"
@@ -347,7 +364,12 @@ gms-rt-auth-login() {
     response=$(api_call "/auth/login" "POST" "$data")
     call_status=$?
     unset password data
-    [ "$call_status" -eq 0 ] || return "$call_status"
+    if [ "$call_status" -ne 0 ]; then
+        # api_call 已把服务器错误 body 输出到 stdout；这里再以人话给出
+        # 真实原因（密码错误/限流/SSH 不可达），不再叠加"请先登录"提示。
+        error "Login failed: $(extract_api_error "$response")"
+        return "$call_status"
+    fi
     if echo "$response" | jq -e '.success == true and .authenticated == true' >/dev/null 2>&1; then
         chmod 600 "$GMS_AUTH_COOKIE_JAR" 2>/dev/null || true
         success "Authenticated as $(echo "$response" | jq -r '.user.username // .user.display_name // "unknown"')"
