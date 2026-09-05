@@ -183,8 +183,9 @@ function clearWorkerLogs(workerId = '') {
         if (!logOutput) continue;
         for (const node of Array.from(logOutput.children)) {
             if (node.nodeType !== Node.ELEMENT_NODE) continue;
-            // 无 scope（全局/Controller）或属于当前 Worker 的条目才删除。
-            if (!node.dataset.workerId || node.dataset.workerId === scope) {
+            // 只删除属于当前 Worker scope 的条目；无 scope（全局/Controller/
+            // 登录信息等）的条目保留——"清当前 Worker 日志"不应误删平台日志。
+            if (node.dataset.workerId === scope) {
                 node.remove();
             }
         }

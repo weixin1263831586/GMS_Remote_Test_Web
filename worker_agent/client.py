@@ -96,12 +96,16 @@ class ControllerClient:
         return self._request_with_worker_header("POST", path, json.dumps(body, separators=(",", ":")).encode(),
                                                 "application/json")
 
-    def command_events(self, command_id: str, events: list[dict[str, Any]]):
-        """命令过程日志上报（烧写等长命令的实时输出通道）。"""
+    def command_events(self, command_id: str, events: list[dict[str, Any]], timeout: int = 5):
+        """命令过程日志上报（烧写等长长命令的实时输出通道）。
+
+        timeout 默认压到 5s：调用方是后台 uploader 线程，失败由其退避重试，
+        不需要 60s 的长超时占用连接。
+        """
         path = f"/api/cluster/workers/{quote(self.config.worker_id)}/commands/{quote(command_id)}/events"
         body = {"events": events}
         return self._request_with_worker_header("POST", path, json.dumps(body, separators=(",", ":")).encode(),
-                                                "application/json")
+                                                "application/json", timeout=timeout)
 
     def upload_artifact(self, job_id: str, attempt_id: str, path, artifact_type: str = "file"):
         path = Path(path)

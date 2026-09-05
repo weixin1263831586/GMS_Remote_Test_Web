@@ -2013,6 +2013,13 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.evaluate(
                 """async () => {
                     state.elevated = false;
+                    // 与设备前缀一致地设置 workspace worker，否则 startTest
+                    // 的跨 Worker invariant 会先拒绝该组合。
+                    state.clusterStatus = {...(state.clusterStatus || {}), enabled: true};
+                    window.GmsWorkspace?.update({
+                        scope_mode: 'cluster',
+                        worker_id: 'ats-worker-246'
+                    }, {source: 'ui-smoke', persist: false});
                     state.devices = [{
                         device_id: 'ats-worker-246:RK3576GMS1',
                         status: 'online',

@@ -441,6 +441,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/cluster/commands/{command_id}/events"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/cluster/devices"
   },
   {
@@ -793,6 +799,12 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/commands/{command_id}/events"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/cluster/workers/{worker_id}/config"
@@ -814,6 +826,12 @@
       "POST"
     ],
     "path": "/api/cluster/workers/{worker_id}/heartbeat"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/workers/{worker_id}/refresh"
   },
   {
     "methods": [

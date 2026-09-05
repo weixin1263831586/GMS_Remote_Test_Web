@@ -3,9 +3,13 @@
 import logging
 from enum import Enum
 
-from fastapi import APIRouter, Body, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import PlainTextResponse
 
+from features.auth import (
+    CurrentUser,
+    require_authenticated_user_when_auth_required,
+)
 from features.test_execution.models import (
     TestParseArgsRequest,
     TestParseArgsResponse,
@@ -85,6 +89,9 @@ async def parse_test_args(
     h: str | None = Query(None),
     help: bool = Query(False),
     req: TestParseArgsRequest = Body(None),
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
 ):
     """Parse test launch arguments - smart recognition of CLI parameters."""
     if help or req is None:

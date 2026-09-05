@@ -257,7 +257,15 @@
         ready, get: snapshot, update, navigate, postToFrame,
         initialize, setActivePage, loadClusterStatus,
         loadClusterWorkers, loadInitialTestData,
-        localWorkerId: () => localWorkerId
+        localWorkerId: () => localWorkerId,
+        // 供 Cluster Status 加载方在拿到真实 local_worker_id 后回填；
+        // 传入空值时保留当前值（初始默认仅作为 Cluster Status 加载前的
+        // fallback，不允许其它调用点硬编码具体 Worker ID）。
+        setLocalWorkerId: workerId => {
+            const next = String(workerId || '').trim();
+            if (next) localWorkerId = next;
+            return localWorkerId;
+        }
     });
     if (window.state?.authReady) {
         initialize();

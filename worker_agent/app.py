@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import json
 import logging
 import os
 import re
@@ -29,6 +30,7 @@ from .adb_proxy import (
 )
 from .android_inspection import _aapt2_path, prepare_device_export
 from .client import ControllerClient
+from .command_events import CommandEventUploader
 from .config import WorkerConfig
 from .inventory import (
     browse_directory,
@@ -905,46 +907,33 @@ class WorkerAgent:
                 downloaded[spec["kind"]] = target
             # 烧写过程逐行上报 command events，浏览器可实时
             # 看到 fastboot/upgrade_tool 输出（不再是结束后一次性 20KB）。
-            pending_events: list[dict] = []
-            pending_lock = threading.Lock()
+            # 输出回调只入队，HTTP 上传在独立 uploader 线程执行——
+            # 日志上报绝不能阻塞 child process stdout 消费，
+            # 否则 pipe 填满会把 fastboot/upgrade_tool 卡死。
             event_sequence = [0]
-
-            def _flush_command_events() -> None:
-                with pending_lock:
-                    batch, pending_events[:] = pending_events[:50], pending_events[50:]
-                if not batch:
-                    return
-                try:
-                    self.client.command_events(command["id"], batch)
-                except Exception:
-                    # 失败重入队：与 CTS 日志 offset 语义一致——只有上传
-                    # 成功才丢弃，Controller 暂时不可达时事件可重试，
-                    # 否则 fastboot 输出会永久丢失。
-                    with pending_lock:
-                        pending_events[0:0] = batch
-                    logger.debug("command event upload failed; requeued %d", len(batch))
+            event_sequence_lock = threading.Lock()
+            uploader = CommandEventUploader(
+                lambda batch: self.client.command_events(command["id"], batch))
 
             def _report_flash_output(line: str, _is_stderr: bool) -> None:
-                with pending_lock:
-                    pending_events.append({
-                        "sequence": event_sequence[0],
-                        "event_type": "log",
-                        "source": "burn",
-                        "level": "info",
-                        "message": line[:2000],
-                        "payload": {},
-                    })
+                with event_sequence_lock:
+                    sequence = event_sequence[0]
                     event_sequence[0] += 1
-                    should_flush = len(pending_events) >= 20
-                if should_flush:
-                    _flush_command_events()
+                uploader.submit({
+                    "sequence": sequence,
+                    "event_type": "log",
+                    "source": "burn",
+                    "level": "info",
+                    "message": line[:2000],
+                    "payload": {},
+                })
 
             result = (flash_gsi(self.config, downloaded.get("system"), downloaded.get("vendor"), payload.get("devices", []),
                                 on_output=_report_flash_output)
                       if command["command_type"] == "flash_gsi" else
                       flash_firmware(self.config, downloaded["firmware"], payload.get("devices", []),
                                      on_output=_report_flash_output))
-            _flush_command_events()  # 收尾：把剩余不足一批的行补报
+            uploader.flush()  # 收尾：有界等待排空剩余事件
             status = "completed" if result.get("success") else "failed"
             error = "" if status == "completed" else result.get("output", "firmware flash failed")
             self.runtime.save_command(command["id"], status, result, error)
@@ -1009,7 +998,13 @@ class WorkerAgent:
             keys = set(row.keys())
             raw = row["devices_json"] if "devices_json" in keys else "[]"
             devices = json.loads(raw or "[]")
-        except Exception:
+        except Exception as exc:
+            # 解析失败不能静默：指纹/失败取证会因此整体缺失，至少留 warning。
+            logger.warning(
+                "failed to parse devices_json for job %s: %s",
+                row.get("job_id") if isinstance(row, dict) else row,
+                exc,
+            )
             devices = []
         serials = []
         for item in devices if isinstance(devices, list) else []:

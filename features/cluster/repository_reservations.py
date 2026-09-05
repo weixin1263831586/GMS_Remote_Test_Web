@@ -18,6 +18,20 @@ def _expires(seconds: int) -> str:
 
 
 class ClusterReservationRepositoryMixin:
+    def owned_reservation_device_ids(self, owner_id: str) -> set[str]:
+        """该 owner 全部 active reservation 的 device_id 集合（worker:serial）。"""
+        if not owner_id:
+            return set()
+        now = _now()
+        with self.connect() as conn:
+            self._expire_device_reservations(conn, now)
+            rows = conn.execute(
+                """SELECT device_id FROM cluster_device_reservations
+                   WHERE owner_id=? AND status='active'""",
+                (owner_id,),
+            ).fetchall()
+        return {str(row["device_id"] or "") for row in rows if row["device_id"]}
+
     def _expire_device_reservations(self, conn, now: str | None = None) -> int:
         now = now or _now()
         rows = conn.execute(

@@ -2,8 +2,12 @@
 
 import logging
 
-from fastapi import APIRouter, Request, UploadFile
+from fastapi import APIRouter, Depends, Request, UploadFile
 
+from features.auth import (
+    CurrentUser,
+    require_authenticated_user_when_auth_required,
+)
 from features.redmine.client import RedmineClient
 from foundation.config import config_manager
 from foundation.responses import error_response, success_response
@@ -15,7 +19,12 @@ router = APIRouter()
 
 
 @router.post("/api/redmine/reply")
-async def redmine_reply(request: Request):
+async def redmine_reply(
+    request: Request,
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     """向 Redmine 工单发送文本回复和可选附件。"""
     try:
         content_type = (request.headers.get("content-type") or "").lower()

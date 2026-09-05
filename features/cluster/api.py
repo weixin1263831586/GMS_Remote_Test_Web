@@ -377,8 +377,14 @@ def _local_execute(command_type: str, payload: dict) -> dict:
     from worker_agent.config import WorkerConfig
     from worker_agent.inventory import execute_suite_action as _exec_suite
 
-    from .local_bridge import _suite_roots
+    from .local_bridge import _scan_suites, _suite_roots
 
+    if command_type == "refresh_devices":
+        from worker_agent.device_actions import probe_devices
+
+        return {"devices": probe_devices(include_details=True)}
+    if command_type == "refresh_suites":
+        return {"suites": _scan_suites(_suite_roots())}
     if command_type == "suite_action":
         config = WorkerConfig.__new__(WorkerConfig)
         config.suite_roots = _suite_roots()

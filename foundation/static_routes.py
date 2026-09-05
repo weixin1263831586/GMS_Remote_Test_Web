@@ -102,7 +102,7 @@ def apply_static_routes(config: dict | None = None) -> list[dict]:
         parsed = _parse_route(entry)
         if parsed is None:
             continue
-        network, gateway_ip = parsed
+        _network, gateway_ip = parsed
         destination = str(entry['destination']).strip()
         gateway = str(gateway_ip)
         # 网络对象带前缀长度；ip route 命令使用配置中的原始写法。

@@ -130,3 +130,60 @@ def list_devices(
             exc,
         )
     return {"success": True, "devices": devices}
+
+
+@router.post("/workers/{worker_id}/refresh")
+async def refresh_worker_inventory(
+    worker_id: str,
+    inventory: str = Query(
+        default="devices",
+        pattern="^(devices|suites|devices,suites|suites,devices)$",
+    ),
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
+    """Trigger a real Worker-side inventory refresh (not a cached read).
+
+    Sends ``refresh_devices`` / ``refresh_suites`` commands to the Worker
+    Agent so it re-runs ``adb devices`` / suite scanning immediately, then
+    applies the returned snapshot to the Controller repository. This closes
+    the gap where "刚插入设备/刚回 adb/刚解压 suite"后点刷新仍看到旧值，
+    必须等下一个 heartbeat。
+    """
+    import asyncio
+
+    from .api import _local_execute, _require_cluster_enabled, _run_worker_command
+
+    svc = service()
+    _require_cluster_enabled(remote=worker_id != svc.config.local_worker_id)
+    if svc.repository.get_worker(worker_id) is None:
+        raise HTTPException(404, "worker not found")
+
+    requested = {item.strip() for item in inventory.split(",") if item.strip()}
+    result: dict = {}
+    if "devices" in requested:
+        try:
+            result.update(await _run_worker_command(
+                worker_id, "refresh_devices", {}, timeout=15))
+        except HTTPException as exc:
+            if exc.status_code == 504:
+                raise HTTPException(
+                    504, "worker did not answer the refresh in time") from exc
+            raise
+        devices = result.get("devices")
+        if isinstance(devices, list):
+            svc.repository.refresh_worker_devices(worker_id, devices)
+    if "suites" in requested:
+        if worker_id == svc.config.local_worker_id:
+            suites = await asyncio.to_thread(
+                _local_execute, "refresh_suites", {})
+        else:
+            suites = await _run_worker_command(
+                worker_id, "refresh_suites", {}, timeout=30)
+        if isinstance(suites, dict) and isinstance(suites.get("suites"), list):
+            svc.repository.replace_worker_suites(worker_id, suites["suites"])
+
+    devices_list = svc.repository.list_devices(worker_id)
+    return {"success": True, "devices": devices_list,
+            "refreshed": sorted(requested)}

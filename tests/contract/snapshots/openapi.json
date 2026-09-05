@@ -1224,6 +1224,68 @@
         "title": "CommandCreate",
         "type": "object"
       },
+      "CommandEvent": {
+        "description": "Worker 命令过程日志事件。",
+        "properties": {
+          "event_type": {
+            "default": "log",
+            "maxLength": 32,
+            "title": "Event Type",
+            "type": "string"
+          },
+          "level": {
+            "default": "info",
+            "maxLength": 16,
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Message",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "sequence": {
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "source": {
+            "default": "worker",
+            "maxLength": 64,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence"
+        ],
+        "title": "CommandEvent",
+        "type": "object"
+      },
+      "CommandEventBatch": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CommandEvent"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "CommandEventBatch",
+        "type": "object"
+      },
       "DecompileRequest": {
         "properties": {
           "device_id": {
@@ -1390,16 +1452,19 @@
         "properties": {
           "event_type": {
             "default": "log",
+            "maxLength": 32,
             "title": "Event Type",
             "type": "string"
           },
           "level": {
             "default": "info",
+            "maxLength": 16,
             "title": "Level",
             "type": "string"
           },
           "message": {
             "default": "",
+            "maxLength": 4096,
             "title": "Message",
             "type": "string"
           },
@@ -1415,6 +1480,7 @@
           },
           "source": {
             "default": "worker",
+            "maxLength": 64,
             "title": "Source",
             "type": "string"
           }
@@ -1428,6 +1494,7 @@
       "JobEventBatch": {
         "properties": {
           "attempt_id": {
+            "maxLength": 128,
             "title": "Attempt Id",
             "type": "string"
           },
@@ -1435,6 +1502,8 @@
             "items": {
               "$ref": "#/components/schemas/JobEvent"
             },
+            "maxItems": 200,
+            "minItems": 1,
             "title": "Events",
             "type": "array"
           }
@@ -5337,6 +5406,67 @@
         ]
       }
     },
+    "/api/cluster/commands/{command_id}/events": {
+      "get": {
+        "description": "浏览器增量拉取命令过程日志（after 为上次收到的最大 sequence）。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "title": "Command Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": -1,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 2000,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Command Events",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/devices": {
       "get": {
         "parameters": [
@@ -8307,6 +8437,106 @@
         ]
       }
     },
+    "/api/cluster/workers/{worker_id}/commands/{command_id}/events": {
+      "post": {
+        "description": "Worker 上报命令执行过程日志（实时日志通道）。\n\n与 job events 平行的 command 维度通道：烧写/device_action 等无 job 的\n长命令把 fastboot/upgrade_tool 逐行输出上报到这里，浏览器按\ncommand_id 增量拉取，达到与单机模式一致的实时日志体验。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "title": "Command Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "worker-session",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Worker-Session",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GMS-Worker-Generation",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "X-Gms-Worker-Generation",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandEventBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
+        "summary": "Append Command Events",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/workers/{worker_id}/config": {
       "get": {
         "description": "Return the configurable parameters of a Worker.",
@@ -8545,6 +8775,57 @@
         ]
       }
     },
+    "/api/cluster/workers/{worker_id}/refresh": {
+      "post": {
+        "description": "Trigger a real Worker-side inventory refresh (not a cached read).\n\nSends ``refresh_devices`` / ``refresh_suites`` commands to the Worker\nAgent so it re-runs ``adb devices`` / suite scanning immediately, then\napplies the returned snapshot to the Controller repository. This closes\nthe gap where \"刚插入设备/刚回 adb/刚解压 suite\"后点刷新仍看到旧值，\n必须等下一个 heartbeat。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inventory",
+            "required": false,
+            "schema": {
+              "default": "devices",
+              "pattern": "^(devices|suites|devices,suites|suites,devices)$",
+              "title": "Inventory",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Worker Inventory",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/workers/{worker_id}/report-copies/{transfer_id}": {
       "get": {
         "description": "Allow only the locked target Worker to fetch a completed report archive.",
@@ -8604,6 +8885,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceBearer": []
+          }
+        ],
         "summary": "Download Report Copy For Worker",
         "tags": [
           "cluster"

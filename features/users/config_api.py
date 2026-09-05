@@ -18,6 +18,7 @@ from features.auth import (
     require_elevated_admin_when_auth_required,
 )
 from foundation.responses import error_response, success_response
+from foundation.static_routes import apply_static_routes
 
 from . import runtime
 from .clients import (
@@ -31,7 +32,6 @@ from .navigation_preferences import (
     load_navigation_preferences,
     save_navigation_preferences,
 )
-from foundation.static_routes import apply_static_routes
 
 
 config_manager = runtime.config_manager
@@ -553,7 +553,7 @@ async def update_static_routes_config(
     current = _load_static_routes_config()
     next_enabled = bool(enabled) if enabled is not None else current['enabled']
     if routes is None:
-        next_routes = current['routes']
+        routes = current['routes']
     else:
         routes, next_enabled, error = _validate_static_routes_payload(routes, next_enabled)
         if error:

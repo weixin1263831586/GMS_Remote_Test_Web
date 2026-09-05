@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from features.auth import (
     CurrentUser,
     get_authenticated_user,
+    require_authenticated_user_when_auth_required,
     require_elevated_admin,
     require_elevated_admin_when_auth_required,
 )
@@ -78,7 +79,13 @@ async def get_client_info(request: Request):
 
 
 @router.post("/api/users/detect")
-async def detect_client(req: ClientInfoRequest, request: Request):
+async def detect_client(
+    req: ClientInfoRequest,
+    request: Request,
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     """自动检测客户端用户名"""
     client_ip = get_client_ip(request)
 

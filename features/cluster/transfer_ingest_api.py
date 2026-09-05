@@ -165,10 +165,12 @@ async def upload_transfer_chunk(
         try:
             received = int(accounting.read_text() or "0")
         except (OSError, ValueError):
+            # 记账文件丢失/损坏时按磁盘现状重建：统计必须"包含"当前
+            # chunk 在内的全部 .part，与下方 received - previous_size
+            # 的增量公式自洽；排除当前块会重复扣一次。
             received = sum(
                 path.stat().st_size
                 for path in chunk_dir.glob("*.part")
-                if path != chunk_path
             )
         previous_size = chunk_path.stat().st_size if chunk_path.exists() else 0
         if received - previous_size + len(body) > max_bytes:

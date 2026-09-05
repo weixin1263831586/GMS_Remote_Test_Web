@@ -41,7 +41,6 @@ from .usbip_transaction import (
     USBIP_PORT_COMMAND,
     parse_usbip_port_entries,
     rollback_ubuntu_attachments,
-    usbip_attached_ports,
     usbip_error,
 )
 from .usbip_transaction import (

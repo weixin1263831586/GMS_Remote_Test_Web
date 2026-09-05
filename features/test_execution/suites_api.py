@@ -14,9 +14,13 @@ import urllib.parse
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from features.auth import (
+    CurrentUser,
+    require_authenticated_user_when_auth_required,
+)
 from features.devices import ssh_connection_failed_response
 from foundation.errors import handle_api_errors
 
@@ -127,7 +131,12 @@ async def search_suite_modules(
 
 @router.post("/api/test/suites/diagnose-target")
 @handle_api_errors
-async def diagnose_suite_target(req: SuiteDiagnosisTargetRequest):
+async def diagnose_suite_target(
+    req: SuiteDiagnosisTargetRequest,
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     """Locate the most likely suite artifact and source path for a report failure."""
     try:
         target = await asyncio.to_thread(

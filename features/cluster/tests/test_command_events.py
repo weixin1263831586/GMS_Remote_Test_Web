@@ -1,6 +1,5 @@
 """Worker 命令实时日志通道（command events）单元测试。"""
 
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +8,7 @@ from unittest import mock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from features.cluster import commands_api, repository_schema
+from features.cluster import commands_api
 from features.cluster.repository import ClusterRepository
 
 
@@ -117,7 +116,7 @@ class CommandEventsApiTests(unittest.TestCase):
                 mock.patch.object(commands_api, "_require_worker_session", return_value=None),
             ]
             client = self._client(repo, patches)
-            response = client.post(
+            client.post(
                 "/api/cluster/workers/worker-OTHER/commands/cmd-1/events",
                 json={"events": [{"sequence": 0, "message": "spoof"}]},
             )
