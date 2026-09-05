@@ -20,13 +20,25 @@ from .models import ClusterDeviceAction
 router = APIRouter()
 
 
+# 只读操作：不申请独占设备 claim（测试运行中的设备仍可查看信息），
+# 也不走 exclusive fencing。新增只读 action 时在此登记。
+READ_ONLY_DEVICE_ACTIONS = frozenset({
+    "screenshot", "layout", "get_properties", "packages_with_path",
+    "packages_all", "features", "props", "config_explore",
+    "override_status", "bootloader_status",
+})
+
+# 需要管理员提权的写操作。
+ELEVATED_DEVICE_ACTIONS = frozenset({
+    "bootloader_lock", "bootloader_unlock", "override_apply",
+    "override_revert", "override_disable_verity",
+    "override_enable_verity", "override_reboot",
+})
+
+
 @router.post("/devices/actions")
 async def device_action(body: ClusterDeviceAction, request: Request):
-    if body.action in {
-        "bootloader_lock", "bootloader_unlock", "override_apply",
-        "override_revert", "override_disable_verity",
-        "override_enable_verity", "override_reboot",
-    }:
+    if body.action in ELEVATED_DEVICE_ACTIONS:
         require_elevated_admin_when_auth_required(request)
     repository = service().repository
     is_local = body.worker_id == service().config.local_worker_id
@@ -35,11 +47,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
     if not worker or worker.get("status") not in {"online", "busy", "draining"}:
         raise HTTPException(409, "worker is not online")
     known = {item["id"]: item for item in repository.list_devices(body.worker_id)}
-    read_only_actions = {
-        "screenshot", "layout", "get_properties", "packages_with_path",
-        "packages_all", "features", "props", "config_explore", "override_status",
-    }
-    is_read_only = body.action in read_only_actions
+    is_read_only = body.action in READ_ONLY_DEVICE_ACTIONS
     action_payload = body.model_dump(exclude={"worker_id", "devices"})
     if body.action == "wifi":
         wifi = config_manager.load_config().get("wifi") or {}
@@ -76,28 +84,33 @@ async def device_action(body: ClusterDeviceAction, request: Request):
     owner_id = user.id
     operation_id = f"device-action-{uuid.uuid4().hex}"
     claim_source = f"operation:{operation_id}"
-    try:
-        records = repository.acquire_device_operation_claim(
-            body.worker_id,
-            requested,
-            owner_id=owner_id,
-            source_type="cluster-device-action",
-            source_id=claim_source,
-            ttl_seconds=3600,
-            username=user.username,
-        )
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    action_payload.update({
-        "owner_id": owner_id,
-        "claim_source_id": claim_source,
-        "release_claim_on_terminal": True,
-        "lease_tokens": repository.claim_fencing_tokens(records, operation_id),
-    })
-    request.state.device_lease_tokens = [
-        {**token, "owner_id": owner_id}
-        for token in action_payload["lease_tokens"]
-    ]
+    # 只读操作（Device Info/UI 操控等）不申请独占 claim：测试占用的设备
+    # 仍可查看信息。写操作保持独占 lease + fencing token 不变。
+    if not is_read_only:
+        try:
+            records = repository.acquire_device_operation_claim(
+                body.worker_id,
+                requested,
+                owner_id=owner_id,
+                source_type="cluster-device-action",
+                source_id=claim_source,
+                ttl_seconds=3600,
+                username=user.username,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        action_payload.update({
+            "owner_id": owner_id,
+            "claim_source_id": claim_source,
+            "release_claim_on_terminal": True,
+            "lease_tokens": repository.claim_fencing_tokens(records, operation_id),
+        })
+        request.state.device_lease_tokens = [
+            {**token, "owner_id": owner_id}
+            for token in action_payload["lease_tokens"]
+        ]
+    else:
+        action_payload.update({"owner_id": owner_id, "read_only": True})
 
     if is_local:
         try:
@@ -111,7 +124,8 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             )
             return {"success": True, **result}
         finally:
-            repository.claims.release(claim_source)
+            if not is_read_only:
+                repository.claims.release(claim_source)
     try:
         command = repository.create_command({
             "worker_id": body.worker_id,
@@ -120,7 +134,8 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             "payload": {**action_payload, "devices": requested},
         })
     except Exception:
-        repository.claims.release(claim_source, status="failed")
+        if not is_read_only:
+            repository.claims.release(claim_source, status="failed")
         raise
 
     wait_steps = 1800 if body.action in {

@@ -105,14 +105,22 @@ class ClusterRepository(
             row = conn.execute("SELECT status FROM cluster_jobs WHERE id=?", (job_id,)).fetchone()
             if not row or row["status"] not in {"completed", "failed", "cancelled"}:
                 return False
+            # 先收集该 job 的命令 ID 再删命令表，否则子查询恒为空，
+            # cluster_command_events 会永久留下孤儿事件。
+            command_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM cluster_commands WHERE job_id=?", (job_id,)
+                ).fetchall()
+            ]
             for table in ("cluster_job_events", "cluster_job_artifacts", "cluster_artifact_uploads", "device_leases",
                           "cluster_commands", "cluster_job_attempts", "cluster_timeline_events"):
                 conn.execute(f"DELETE FROM {table} WHERE job_id=?", (job_id,))
-            conn.execute(
-                """DELETE FROM cluster_command_events WHERE command_id IN
-                   (SELECT id FROM cluster_commands WHERE job_id=?)""",
-                (job_id,),
-            )
+            for command_id in command_ids:
+                conn.execute(
+                    "DELETE FROM cluster_command_events WHERE command_id=?",
+                    (command_id,),
+                )
             conn.execute("DELETE FROM cluster_jobs WHERE id=?", (job_id,))
             return True
 

@@ -87,6 +87,12 @@ function addLogEntry(message, type = 'info', showTimestamp = true, source = 'sys
     }
 }
 
+// 针对特定 Worker 的操作日志统一入口：强制携带 worker scope，
+// 避免调用方只把 Worker 写进文字而漏传 metadata 导致跨主机串台。
+function addWorkerLog(workerId, message, type = 'info', source = 'system', jobId = '') {
+    addLogEntry(message, type, true, source, workerId, jobId);
+}
+
 // 日志 scope 过滤。scope 信息随条目保存（data-* 属性），
 // 切换测试主机时只需换过滤条件，不删除历史。
 // - 无 scope 条目（本地 Controller 操作）：任何 Worker 下都显示；
@@ -164,6 +170,27 @@ function flushLogQueue() {
             logOutput.scrollTop = logOutput.scrollHeight;
         }
     }
+}
+
+// 清空指定 Worker scope 的日志条目。
+// 日志面板是跨主机共用的（隐藏而非删除），开始测试/清除日志只能清当前
+// Worker 的条目；无 scope 的全局条目（如登录/平台事件）也一并保留，
+// 避免其他 Worker 的隐藏历史被误删。
+function clearWorkerLogs(workerId = '') {
+    const scope = String(workerId || (window.workspaceWorkerId ? window.workspaceWorkerId() : ''));
+    for (const src of ['system', 'module']) {
+        const logOutput = getLogContainer(src);
+        if (!logOutput) continue;
+        for (const node of Array.from(logOutput.children)) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            // 无 scope（全局/Controller）或属于当前 Worker 的条目才删除。
+            if (!node.dataset.workerId || node.dataset.workerId === scope) {
+                node.remove();
+            }
+        }
+    }
+    state.lastLogCount = 0;
+    state.wsLogStallTicks = 0;
 }
 
 function isLogScrolledNearBottom(logOutput) {

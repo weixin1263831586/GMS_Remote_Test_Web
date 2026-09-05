@@ -544,8 +544,9 @@ class WorkerAgent:
                                    (worker_job_id,)).fetchone()
             if row:
                 sequence = 0
-                # 任务开始时上报设备指纹（"测的包 ≠ 刷的包"一眼识别）。
-                self._report_device_fingerprints(row)
+                # 任务开始时上报设备指纹（"测的包 ≠ 刷的包"一眼识别），
+                # 每条指纹占用一个 sequence，日志从其后继续编号。
+                sequence += self._report_device_fingerprints(row)
                 offsets = {"stdout.log": 0, "stderr.log": 0}
                 while self.runtime.process_poll(worker_job_id) is None:
                     try:
@@ -916,7 +917,12 @@ class WorkerAgent:
                 try:
                     self.client.command_events(command["id"], batch)
                 except Exception:
-                    logger.debug("command event upload failed", exc_info=True)
+                    # 失败重入队：与 CTS 日志 offset 语义一致——只有上传
+                    # 成功才丢弃，Controller 暂时不可达时事件可重试，
+                    # 否则 fastboot 输出会永久丢失。
+                    with pending_lock:
+                        pending_events[0:0] = batch
+                    logger.debug("command event upload failed; requeued %d", len(batch))
 
             def _report_flash_output(line: str, _is_stderr: bool) -> None:
                 with pending_lock:
@@ -1015,8 +1021,14 @@ class WorkerAgent:
                 serials.append(serial)
         return serials
 
-    def _report_device_fingerprints(self, row) -> None:
-        """任务开始时上报设备指纹事件（尽力而为）。"""
+    def _report_device_fingerprints(self, row) -> int:
+        """任务开始时上报设备指纹事件，返回已占用的 sequence 数。
+
+        事件表 UNIQUE(attempt_id, sequence)：多台设备若都从 0 开始会互相
+        静默覆盖（INSERT OR IGNORE），还会吃掉第一条 stdout 日志，因此
+        sequence 必须连续递增。
+        """
+        used = 0
         try:
             from .failure_evidence import collect_device_fingerprint
 
@@ -1024,10 +1036,10 @@ class WorkerAgent:
                 fingerprint = collect_device_fingerprint(serial)
                 if not any(fingerprint.values()):
                     continue
-                self._retry(lambda s=serial, f=fingerprint: self.client.events(
+                self._retry(lambda s=serial, f=fingerprint, seq=used: self.client.events(
                     row["job_id"], row["attempt_id"],
                     [{
-                        "sequence": 0,
+                        "sequence": seq,
                         "event_type": "device_fingerprint",
                         "source": "worker",
                         "level": "info",
@@ -1035,8 +1047,10 @@ class WorkerAgent:
                         "payload": {"serial": s, **f},
                     }],
                 ))
+                used += 1
         except Exception:
             logger.exception("device fingerprint report failed")
+        return used
 
     _RESULT_DIR_RE = re.compile(r"RESULT DIRECTORY\s*:\s*(\S+)")
     _FINAL_LOG_RE = re.compile(r"process final logs:\s*(/\S+)")

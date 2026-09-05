@@ -2351,8 +2351,8 @@ async function analyzeSuiteApk(path, options = {}) {
 // 和提权弹框，故此处不再提供 loadUsers 预取逻辑。
 
 
-// 防抖版本的刷新函数
-const debouncedRefreshDevices = debounce(() => loadDevices(false), 500);
+// 防抖版本的刷新函数（force=true 时绕过缓存强制刷新）
+const debouncedRefreshDevices = debounce((force = false) => loadDevices(Boolean(force)), 500);
 
 function renderDevices() {
     debugLog('[renderDevices] Called, state.devices:', state.devices);
@@ -2680,7 +2680,7 @@ async function rebootDevices() {
         await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/reboot', 'POST',
             workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'reboot'}
                      : {devices: Array.from(state.selectedDevices)});
-        addLogEntry(`正在重启 ${state.selectedDevices.size} 台设备...`, 'info');
+        addWorkerLog(workerId, `正在重启 ${state.selectedDevices.size} 台设备...`, 'info');
         showToast('设备正在重启', 'success');
         if (state.usbipConnected) {
             scheduleUsbipReconnect('USB/IP 设备正在重启');
@@ -2706,8 +2706,8 @@ async function remountDevices() {
     }
 
     try {
-        addLogEntry('正在执行 remount...', 'info');
         const workerId = selectedClusterWorker();
+        addWorkerLog(workerId, '正在执行 remount...', 'info');
         if (workerId) {
             await apiCall('/api/cluster/devices/actions', 'POST', {
                 worker_id: workerId, devices, action: 'remount'
@@ -2764,16 +2764,16 @@ async function submitWifiConfig() {
         // 立即关闭模态框
         closeWifiModal();
 
-        addLogEntry(`正在连接 Wi-Fi (${ssid})...`, 'info');
+        const workerId = selectedClusterWorker();
+        addWorkerLog(workerId, `正在连接 Wi-Fi (${ssid})...`, 'info');
         showToast('正在连接 Wi-Fi...', 'info');
 
-        const workerId = selectedClusterWorker();
         await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/wifi', 'POST',
             workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices),
                         action: 'wifi', ssid, password}
                      : {devices: Array.from(state.selectedDevices), ssid, password});
 
-        addLogEntry(`Wi-Fi 连接命令已发送 (${ssid})`, 'success');
+        addWorkerLog(workerId, `Wi-Fi 连接命令已发送 (${ssid})`, 'success');
     } catch (error) {
         addLogEntry('连接 WiFi 失败: ' + error.message, 'error');
     }
@@ -2796,8 +2796,8 @@ async function lockSelectedDevices(action) {
     try {
         const granted = await requestElevatedAccess(`${actionText}设备 Bootloader`);
         if (!granted) return;
-        addLogEntry(`正在${actionText}设备...`, 'info');
         const workerId = selectedClusterWorker();
+        addWorkerLog(workerId, `正在${actionText}设备...`, 'info');
         let result;
         if (workerId) {
             result = await apiCall('/api/cluster/devices/actions', 'POST', {
@@ -2817,7 +2817,7 @@ async function lockSelectedDevices(action) {
             ).join('; ');
             throw new Error(result?.error || detail || `设备${actionText}失败`);
         }
-        addLogEntry(`设备${actionText}完成`, 'info');
+        addWorkerLog(workerId, `设备${actionText}完成`, 'info');
         // 解锁/锁定后设备会重启并经历 fastboot→正常启动的状态转换，
         // 轮询刷新直到设备重新上线，避免界面停留在旧状态。
         loadDevices(true).catch(() => {});
@@ -2851,7 +2851,7 @@ async function checkDeviceLockStatus() {
         const result = await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/bootloader-status', 'POST',
             workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'bootloader_status'}
                      : {devices: Array.from(state.selectedDevices)});
-        addLogEntry('设备锁定状态: ' + JSON.stringify(result, null, 2), 'info');
+        addWorkerLog(workerId, '设备锁定状态: ' + JSON.stringify(result, null, 2), 'info');
     } catch (error) {
         addLogEntry('获取锁定状态失败: ' + error.message, 'error');
     } finally {
@@ -2881,7 +2881,7 @@ async function collectDeviceInfo() {
         const result = await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/info', 'POST',
             workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'get_properties'}
                      : {devices: Array.from(state.selectedDevices)});
-        addLogEntry('设备信息: ' + JSON.stringify(result, null, 2), 'info');
+        addWorkerLog(workerId, '设备信息: ' + JSON.stringify(result, null, 2), 'info');
     } catch (error) {
         addLogEntry('获取设备信息失败: ' + error.message, 'error');
     } finally {

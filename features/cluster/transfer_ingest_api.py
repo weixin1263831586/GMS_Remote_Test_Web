@@ -159,12 +159,19 @@ async def upload_transfer_chunk(
         chunk_dir = root / "chunks"
         chunk_dir.mkdir(parents=True, exist_ok=True)
         chunk_path = chunk_dir / f"{index:08d}.part"
-        existing_size = sum(
-            path.stat().st_size
-            for path in chunk_dir.glob("*.part")
-            if path != chunk_path
-        )
-        if existing_size + len(body) > max_bytes:
+        # 配额按累计字节数 O(1) 维护（.received-bytes 记账文件）。
+        # 逐块全量 glob+stat 在 20GB/4MB 场景是 O(n²)（约 1300 万次 stat）。
+        accounting = root / ".received-bytes"
+        try:
+            received = int(accounting.read_text() or "0")
+        except (OSError, ValueError):
+            received = sum(
+                path.stat().st_size
+                for path in chunk_dir.glob("*.part")
+                if path != chunk_path
+            )
+        previous_size = chunk_path.stat().st_size if chunk_path.exists() else 0
+        if received - previous_size + len(body) > max_bytes:
             raise HTTPException(413, "transfer is too large")
         temporary = chunk_dir / f".{index:08d}.{uuid.uuid4().hex}.upload"
         try:
@@ -172,6 +179,7 @@ async def upload_transfer_chunk(
             os.replace(temporary, chunk_path)
         finally:
             temporary.unlink(missing_ok=True)
+        accounting.write_text(str(received - previous_size + len(body)))
         service().repository.update_transfer(transfer_id, status="uploading")
     return {"success": True, "index": index, "size_bytes": len(body)}
 

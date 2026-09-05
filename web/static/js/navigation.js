@@ -622,10 +622,8 @@ function initEventListeners() {
     $('test-case').addEventListener('input', debouncedInputChange);
     $('retry-result').addEventListener('input', debouncedInputChange);
 
-    // Device host and local server confirm on Enter
-    $('device-host').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') onDeviceHostConfirm();
-    });
+    // Device host 输入框为 readonly（配置在 config.json），无需确认处理；
+    // local server 仍支持 Enter 确认更新。
     $('local-server').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') onLocalServerConfirm();
     });
@@ -810,14 +808,6 @@ function autoSelectTestSuite(testType) {
         // 清空测试套件选择
         document.getElementById('test-suite').value = '';
     }
-}
-
-function onDeviceHostConfirm() {
-    const deviceHost = document.getElementById('device-host').value.trim();
-    addLogEntry(`设备主机地址暂不支持动态更新: ${deviceHost}`, 'warning');
-    showToast('设备主机地址需要直接编辑config.json文件', 'warning');
-    // device_host 不支持通过 API 动态更新。
-    // 如需修改，请直接编辑configs/config.json文件
 }
 
 async function onLocalServerConfirm() {

@@ -192,6 +192,9 @@ class WorkerRuntime:
         payload = command.get("payload") or {}
         tokens = payload.get("lease_tokens") or []
         command_type = str(command.get("command_type") or "")
+        # 只读 device action（Device Info 等）不带独占 lease，跳过 fencing。
+        if command_type == "device_action" and payload.get("read_only"):
+            command_type = ""
         protected_types = {
             "start_test", "device_action", "flash_firmware", "flash_gsi",
             "device_export", "usbip_detach",

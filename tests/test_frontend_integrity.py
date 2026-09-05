@@ -107,12 +107,15 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_host_pages_share_short_lived_cluster_directory(self):
         shell = read_text("web/shell/shell.html")
         workspace_devices = read_text("web/static/js/shell/workspace-devices.js")
-        terminal_start = shell.index("async function loadTerminalClusterHosts()")
-        terminal_end = shell.index("function applyTerminalHost", terminal_start)
+        terminal = read_text("web/static/js/shell/shell-terminal.js")
+        terminal_start = terminal.index("async function loadTerminalClusterHosts()")
+        terminal_end = terminal.index("function applyTerminalHost", terminal_start)
 
         self.assertIn("async function loadClusterHostDirectory(force = false)", shell)
-        self.assertIn("const directoryHosts = await loadClusterHostDirectory()", shell)
-        self.assertNotIn("fetch('/api/cluster/hosts'", shell[terminal_start:terminal_end])
+        self.assertIn(
+            "const directoryHosts = await loadClusterHostDirectory()", terminal
+        )
+        self.assertNotIn("fetch('/api/cluster/hosts'", terminal[terminal_start:terminal_end])
         self.assertIn("hosts = await window.loadClusterHostDirectory()", workspace_devices)
 
     def test_page_initialization_is_deduplicated_and_rejections_are_handled(self):
@@ -157,7 +160,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("const clusterModeReady = initializeClusterMode()", navigation)
         self.assertIn("await Promise.all([clusterModeReady, configReady])", navigation)
         self.assertIn("test-reports.js?v=20260812-stable-surfaces", shell)
-        self.assertIn("navigation.js?v=20260827-apts-gts-suite", shell)
+        self.assertIn("navigation.js?v=20260902-adbproxy-state", shell)
         self.assertIn("testTypeLower === 'apts'", navigation)
         self.assertIn("APTS使用GTS测试套件", navigation)
 
@@ -266,12 +269,14 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_opengrok_tool_icon_does_not_probe_the_external_service(self):
         shell = read_text("web/shell/shell.html")
+        icon_auto = read_text("web/static/js/shell/icon-auto.js")
 
         self.assertIn(
             "'OpenGrok': '/static/icons/favicons/rockchip-opengrok.svg'",
-            shell,
+            icon_auto,
         )
         self.assertNotIn("/default/img/apple-touch-icon.png", shell)
+        self.assertNotIn("/default/img/apple-touch-icon.png", icon_auto)
 
     def test_login_explains_client_ssh_account_and_finishes_identity_prefill(self):
         shell = read_text("web/shell/shell.html")
@@ -579,7 +584,10 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("body.classList.add(enabled ? 'workspace-scope-cluster' : 'workspace-scope-single')", navigation_text)
 
     def test_terminal_page_switch_avoids_hidden_or_duplicate_resize(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = (
+            read_text("web/shell/shell.html")
+            + read_text("web/static/js/shell/shell-terminal.js")
+        )
 
         self.assertIn("!page.classList.contains('active')", main_text)
         self.assertIn("cols === instance.lastResizeCols", main_text)

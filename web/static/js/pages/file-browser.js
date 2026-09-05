@@ -12,7 +12,8 @@ async function handleUploadFile() {
 
     try {
         await apiCall('/api/terminal/open');
-        addLogEntry(`正在上传文件: ${file.name}`, 'info');
+        const workerId = workspaceWorkerId();
+        addWorkerLog(workerId, `正在上传文件: ${file.name}`, 'info');
         const progressFill = document.getElementById('upload-progress-fill');
         const progressInfo = document.getElementById('progress-info');
         const startTime = Date.now();
@@ -20,13 +21,12 @@ async function handleUploadFile() {
         // Create FormData
         const formData = new FormData();
         formData.append('file', file);
-        const workerId = workspaceWorkerId();
         if (!isLocalWorkspaceWorker(workerId)) {
             const host = await resolveClusterHost(workerId);
             formData.append('worker_id', workerId);
             formData.append('host', host.address);
             formData.append('user', host.ssh_user);
-            addLogEntry(`上传目标: ${workerId} (${host.ssh_user}@${host.address})`, 'info');
+            addWorkerLog(workerId, `上传目标: ${workerId} (${host.ssh_user}@${host.address})`, 'info');
         }
 
         // Use XMLHttpRequest for upload progress
@@ -51,7 +51,7 @@ async function handleUploadFile() {
                 try {
                     response = JSON.parse(xhr.responseText);
                 } catch (e) {
-                    addLogEntry('上传失败: 服务端返回非 JSON 响应', 'error');
+                    addWorkerLog(workerId, '上传失败: 服务端返回非 JSON 响应', 'error');
                     progressFill.style.width = '0%';
                     progressInfo.textContent = '';
                     return;
@@ -59,7 +59,7 @@ async function handleUploadFile() {
                 if (response.success) {
                     progressFill.style.width = '100%';
                     progressInfo.textContent = `上传完成 (${formatBytes(file.size)})`;
-                    addLogEntry(`文件上传成功: ${response.remote_path || file.name}`, 'success');
+                    addWorkerLog(workerId, `文件上传成功: ${response.remote_path || file.name}`, 'success');
                     showToast('文件上传成功', 'success');
 
                     setTimeout(() => {
@@ -72,19 +72,19 @@ async function handleUploadFile() {
                         document.getElementById('drop-zone-filename').textContent = '';
                     }, 3000);
                 } else {
-                    addLogEntry('上传失败: ' + (response.error || '未知错误'), 'error');
+                    addWorkerLog(workerId, '上传失败: ' + (response.error || '未知错误'), 'error');
                     progressFill.style.width = '0%';
                     progressInfo.textContent = '';
                 }
             } else {
-                addLogEntry(`上传失败: HTTP ${xhr.status}`, 'error');
+                addWorkerLog(workerId, `上传失败: HTTP ${xhr.status}`, 'error');
                 progressFill.style.width = '0%';
                 progressInfo.textContent = '';
             }
         });
 
         xhr.addEventListener('error', () => {
-            addLogEntry('上传失败: 网络错误', 'error');
+            addWorkerLog(workerId, '上传失败: 网络错误', 'error');
             progressFill.style.width = '0%';
             progressInfo.textContent = '';
         });
@@ -267,7 +267,7 @@ async function browseRemoteFile(mode) {
     if (!isLocalWorkspaceWorker(workerId)) {
         state.fileBrowser.clusterWorkerId = workerId;
         state.fileBrowser.clusterSuitePath = toolsPath;
-        addLogEntry(`自动导航到 ${workerId} 测试套件 results 目录`, 'info');
+        addWorkerLog(workerId, `自动导航到 ${workerId} 测试套件 results 目录`, 'info');
         await loadFileDirectory('results');
         return;
     }
@@ -592,7 +592,11 @@ function confirmFileSelection() {
                 path: fullPath,
             };
             state.gsiSystemFile = null;
-            addLogEntry(`已选择 Worker ${state.fileBrowser.workerBrowseId} 上的System镜像: ${fullPath}`, 'info');
+            addWorkerLog(
+                state.fileBrowser.workerBrowseId,
+                `已选择 Worker ${state.fileBrowser.workerBrowseId} 上的System镜像: ${fullPath}`,
+                'info'
+            );
         }
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'gsi-script') {

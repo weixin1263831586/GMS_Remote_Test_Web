@@ -7,12 +7,28 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
+from features.auth import (
+    authentication_required,
+    get_authenticated_user,
+    is_elevated,
+    require_authenticated_user,
+)
+
 from .api import _authenticate, service
 from .models import CommandAck, CommandEventBatch
-from .jobs_api import _require_job_access
 
 
 router = APIRouter()
+
+
+# 需要终态通知的 device_action 集合：改变设备状态/可能触发重启的高风险
+# 操作。读操作（screenshot/props/scrcpy 等）即时返回，不进通知中心。
+NOTIFIED_DEVICE_ACTIONS = frozenset({
+    "override_apply", "override_revert",
+    "override_disable_verity", "override_enable_verity", "override_reboot",
+    "bootloader_lock", "bootloader_unlock",
+    "reboot", "reboot_bootloader", "remount",
+})
 
 
 def _require_worker_session(
@@ -22,6 +38,30 @@ def _require_worker_session(
         worker_id, session_id, generation
     ):
         raise HTTPException(409, "stale worker session")
+
+
+def _require_command_access(request: Request, command: dict[str, Any]) -> None:
+    """浏览器访问单条 command 的归属校验。
+
+    command 顶层没有 owner_id：job 类命令从 job 反查，device action 等
+    从 payload.owner_id 判断（与 GET /commands/{id} 的规则一致）。
+    """
+    user = get_authenticated_user(request)
+    if user is None:
+        if authentication_required():
+            require_authenticated_user(request)
+        return
+    if user.role == "admin" or is_elevated(request):
+        return
+    payload = command.get("payload") or {}
+    owner_id = str(payload.get("owner_id") or "")
+    job = None
+    job_id = str(command.get("job_id") or "")
+    if job_id or not owner_id:
+        job = service().repository.get_job(job_id) if job_id else None
+        owner_id = owner_id or str((job or {}).get("owner_id") or "")
+    if owner_id != user.id:
+        raise HTTPException(404, "command not found")
 
 
 def synchronize_command(command: dict[str, Any]) -> None:
@@ -88,18 +128,12 @@ def synchronize_command(command: dict[str, Any]) -> None:
         command_id = str(command.get("id") or "")
         if command_id and service().repository.claim_terminal_notification(command_id):
             _notify_flash_result(command)
-    # 长耗时/改变设备状态的 device_action 也要终态通知。
-    # 读操作（screenshot/props/scrcpy 等）即时返回不需要；只覆盖风险表
-    # 中标注高/中的操作：override_apply/revert、bootloader lock/unlock、
-    # reboot/reboot_bootloader、remount。
+    # 长耗时/改变设备状态的 device_action 也要终态通知（集合见
+    # NOTIFIED_DEVICE_ACTIONS）。
     if command.get("command_type") == "device_action" \
             and command.get("status") in {"completed", "failed", "cancelled"}:
         action = str((command.get("payload") or {}).get("action") or "")
-        if action in {
-            "override_apply", "override_revert",
-            "bootloader_lock", "bootloader_unlock",
-            "reboot", "reboot_bootloader", "remount",
-        }:
+        if action in NOTIFIED_DEVICE_ACTIONS:
             command_id = str(command.get("id") or "")
             if command_id and service().repository.claim_terminal_notification(command_id):
                 _notify_device_action_result(command)
@@ -157,6 +191,9 @@ def _notify_device_action_result(command: dict[str, Any]) -> None:
     action_labels = {
         "override_apply": "RRO 配置应用",
         "override_revert": "RRO 配置还原",
+        "override_disable_verity": "关闭 dm-verity",
+        "override_enable_verity": "开启 dm-verity",
+        "override_reboot": "Override 后重启",
         "bootloader_lock": "Bootloader 锁定",
         "bootloader_unlock": "Bootloader 解锁",
         "reboot": "设备重启",
@@ -351,7 +388,7 @@ def list_command_events(
     command = service().repository.get_command(command_id)
     if command is None:
         raise HTTPException(404, "command not found")
-    _require_job_access(request, command)
+    _require_command_access(request, command)
     events = service().repository.list_command_events(command_id, after, limit)
     return {
         "success": True,

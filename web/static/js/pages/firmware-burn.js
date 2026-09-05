@@ -528,21 +528,23 @@ async function submitFirmwareBurn() {
             form.append('devices', devices.join(','));
             form.append('firmware_file', selectedFirmwareFile, selectedFirmwareFile.name);
             const staged = await apiCall('/api/cluster/firmware/stage', 'POST', form);
-            addLogEntry(`固件已暂存，Worker 命令: ${staged.command_id}`, 'success');
-            addLogEntry(`远端固件烧写开始: ${devices.join(', ')}（Worker: ${workerId}）`, 'info');
+            addWorkerLog(workerId, `固件已暂存，Worker 命令: ${staged.command_id}`, 'success');
+            addWorkerLog(workerId, `远端固件烧写开始: ${devices.join(', ')}（Worker: ${workerId}）`, 'info');
             await streamCommandEvents(staged.command_id, workerId);
             while (true) {
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(staged.command_id)}`);
                 const command = status.command;
                 if (command.status === 'completed') {
-                    addLogEntry(`远端固件烧写完成: ${command.result?.device || devices[0]}`, 'success');
+                    addWorkerLog(workerId, `远端固件烧写完成: ${command.result?.device || devices[0]}`, 'success');
                     showToast('远端固件烧写完成', 'success');
                     break;
                 }
                 if (['failed', 'cancelled'].includes(command.status)) {
-                    addLogEntry(`远端固件烧写失败: ${command.error || '远端固件烧写失败'}（Worker: ${workerId}）`, 'error');
-                    throw new Error(command.error || '远端固件烧写失败');
+                    addWorkerLog(workerId, `远端固件烧写失败: ${command.error || '远端固件烧写失败'}（Worker: ${workerId}）`, 'error');
+                    const failure = new Error(command.error || '远端固件烧写失败');
+                    failure.clusterCommandDispatched = true;
+                    throw failure;
                 }
             }
             await refreshDevicesAfterBurn(workerId);
@@ -695,7 +697,10 @@ async function submitFirmwareBurn() {
         }
     } catch (error) {
         // 网络层异常（后端不可达等）后端无法自行通知，保留本地通知。
-        notifyOperationResult('固件烧写失败', error.message, 'error', 'firmware-burn');
+        // Worker 命令已创建的失败由 Controller 终态通知负责，不重复回存。
+        if (!error.clusterCommandDispatched) {
+            notifyOperationResult('固件烧写失败', error.message, 'error', 'firmware-burn');
+        }
         addLogEntry(`固件烧写异常: ${error.message}`, 'error');
         loadDevices(true).catch(refreshError => {
             console.error('[Firmware Burn] Failed to refresh devices after error:', refreshError);
@@ -910,7 +915,8 @@ async function uploadGsiVendorBootToTestHost(file) {
     formData.append('file', file);
     formData.append('path', targetDir);
 
-    addLogEntry(`正在上传Vendor Boot镜像到测试主机: ${file.name}`, 'info');
+    const uploadWorkerId = selectedClusterWorker() || workspaceWorkerId();
+    addWorkerLog(uploadWorkerId, `正在上传Vendor Boot镜像到测试主机: ${file.name}`, 'info');
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.upload.addEventListener('progress', (e) => {
@@ -928,7 +934,7 @@ async function uploadGsiVendorBootToTestHost(file) {
             }
             if (xhr.status === 200 && result.success) {
                 updateUploadProgress(100, file.name, file.size, file.size);
-                addLogEntry(`Vendor Boot镜像上传完成: ${result.remote_path}`, 'success');
+                addWorkerLog(uploadWorkerId, `Vendor Boot镜像上传完成: ${result.remote_path}`, 'success');
                 resolve(result.remote_path);
                 return;
             }
@@ -974,6 +980,8 @@ async function submitGsiBurn() {
             : selectedWorkspaceDeviceIds();
         if (!devices.length) throw new Error('请重新选择要烧写GSI的设备');
         if (workerId) {
+            const granted = await requestElevatedAccess('烧写GSI');
+            if (!granted) return;
             const systemSource = state.gsiSystemWorkerSource || null;
             if (!systemSource && !state.gsiSystemFile && !state.gsiVendorFile) {
                 throw new Error('远端 GSI 烧写必须选择 System 或 Vendor Boot 镜像');
@@ -983,10 +991,7 @@ async function submitGsiBurn() {
             if (systemSource) {
                 // System 镜像来自 Worker/Controller 主机目录，无需浏览器上传。
                 closeGsiModal();
-                addLogEntry(
-                    `System 镜像来源: ${systemSource.worker_id}:${systemSource.path}`,
-                    'info'
-                );
+                addWorkerLog(workerId, `System 镜像来源: ${systemSource.worker_id}:${systemSource.path}`, 'info');
                 const form = new FormData();
                 form.append('worker_id', workerId);
                 form.append('devices', devices.join(','));
@@ -1001,7 +1006,7 @@ async function submitGsiBurn() {
                     const sourceWorkers = Array.from(
                         new Set(staged.pulls.map(item => item.worker_id))
                     ).join(', ');
-                    addLogEntry(`正在从 ${sourceWorkers} 传输镜像到测试主机...`, 'info');
+                    addWorkerLog(workerId, `正在从 ${sourceWorkers} 传输镜像到测试主机...`, 'info');
                     for (const pull of staged.pulls) {
                         await pollClusterCommand(
                             pull.command_id,
@@ -1028,18 +1033,20 @@ async function submitGsiBurn() {
                 state.gsiSystemWorkerSource = null;
                 // 远端 GSI 与固件一致：补"开始 + 命令 ID"系统日志
                 // （此前只有完成 Toast，系统日志缺开始与命令 ID）。
-                addLogEntry(`远端 GSI 烧写开始: ${devices.join(', ')}（Worker: ${workerId}，命令: ${flashCommandId}）`, 'info');
+                addWorkerLog(workerId, `远端 GSI 烧写开始: ${devices.join(', ')}（Worker: ${workerId}，命令: ${flashCommandId}）`, 'info');
                 streamCommandEvents(flashCommandId, workerId);
                 while (true) {
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(flashCommandId)}`);
                     if (status.command.status === 'completed') break;
                     if (['failed', 'cancelled'].includes(status.command.status)) {
-                        addLogEntry(`远端 GSI 烧写失败: ${status.command.error || 'GSI 烧写失败'}（Worker: ${workerId}，命令: ${flashCommandId}）`, 'error');
-                        throw new Error(status.command.error || 'GSI 烧写失败');
+                        addWorkerLog(workerId, `远端 GSI 烧写失败: ${status.command.error || 'GSI 烧写失败'}（Worker: ${workerId}，命令: ${flashCommandId}）`, 'error');
+                        const failure = new Error(status.command.error || 'GSI 烧写失败');
+                        failure.clusterCommandDispatched = true;
+                        throw failure;
                     }
                 }
-                addLogEntry(`远端 GSI 烧写完成: ${devices.join(', ')}（Worker: ${workerId}）`, 'success');
+                addWorkerLog(workerId, `远端 GSI 烧写完成: ${devices.join(', ')}（Worker: ${workerId}）`, 'success');
                 showToast('远端 GSI 烧写完成', 'success');
                 await refreshDevicesAfterBurn(workerId);
                 return;
@@ -1051,20 +1058,22 @@ async function submitGsiBurn() {
             if (state.gsiVendorFile) form.append('vendor_file', state.gsiVendorFile, state.gsiVendorFile.name);
             closeGsiModal();
             const staged = await apiCall('/api/cluster/gsi/stage', 'POST', form);
-            addLogEntry(`GSI 已暂存，Worker 命令: ${staged.command_id}`, 'success');
-            addLogEntry(`远端 GSI 烧写开始: ${devices.join(', ')}（Worker: ${workerId}）`, 'info');
+            addWorkerLog(workerId, `GSI 已暂存，Worker 命令: ${staged.command_id}`, 'success');
+            addWorkerLog(workerId, `远端 GSI 烧写开始: ${devices.join(', ')}（Worker: ${workerId}）`, 'info');
             streamCommandEvents(staged.command_id, workerId);
             while (true) {
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 const status = await apiCall(`/api/cluster/commands/${encodeURIComponent(staged.command_id)}`);
                 if (status.command.status === 'completed') break;
                 if (['failed', 'cancelled'].includes(status.command.status)) {
-                    addLogEntry(`远端 GSI 烧写失败: ${status.command.error || 'GSI 烧写失败'}（Worker: ${workerId}，命令: ${staged.command_id}）`, 'error');
-                    throw new Error(status.command.error || 'GSI 烧写失败');
+                    addWorkerLog(workerId, `远端 GSI 烧写失败: ${status.command.error || 'GSI 烧写失败'}（Worker: ${workerId}，命令: ${staged.command_id}）`, 'error');
+                    const failure = new Error(status.command.error || 'GSI 烧写失败');
+                    failure.clusterCommandDispatched = true;
+                    throw failure;
                 }
             }
             state.gsiSystemFile = null; state.gsiVendorFile = null; state.gsiSystemWorkerSource = null;
-            addLogEntry(`远端 GSI 烧写完成: ${devices.join(', ')}（Worker: ${workerId}）`, 'success');
+            addWorkerLog(workerId, `远端 GSI 烧写完成: ${devices.join(', ')}（Worker: ${workerId}）`, 'success');
             showToast('远端 GSI 烧写完成', 'success');
             await refreshDevicesAfterBurn(workerId);
             return;
@@ -1086,7 +1095,11 @@ async function submitGsiBurn() {
     } catch (error) {
         showToast(error.message, 'error');
         addLogEntry(`GSI 烧写失败: ${error.message}`, 'error');
-        notifyOperationResult('远端 GSI 烧写失败', error.message, 'error', 'gsi-burn');
+        // Controller 终态通知已覆盖 Worker 命令创建后的失败；
+        // 仅命令创建前（staging/参数校验）失败时本地通知。
+        if (!error.clusterCommandDispatched) {
+            notifyOperationResult('远端 GSI 烧写失败', error.message, 'error', 'gsi-burn');
+        }
     }
 }
 
@@ -1193,12 +1206,12 @@ async function initAndStartVnc(forceRestart = false) {
         const logMsg = forceRestart
             ? '🔄 正在重启VNC环境（杀死旧进程并重新启动）...'
             : '🔄 正在启动VNC环境...';
-        addLogEntry(logMsg, 'info');
+        addWorkerLog(workerId, logMsg, 'info');
         const request = {force_restart: forceRestart};
         request.worker_id = workerId;
         if (!isLocalWorkspaceWorker(workerId)) {
             const host = await resolveClusterHost(workerId);
-            addLogEntry(`目标测试主机: ${workerId} (${host.address})`, 'info');
+            addWorkerLog(workerId, `目标测试主机: ${workerId} (${host.address})`, 'info');
         }
         const result = isLocalWorkspaceWorker(workerId)
             ? await apiCall('/api/desktop/vnc/start', 'POST', request)
@@ -1206,7 +1219,7 @@ async function initAndStartVnc(forceRestart = false) {
         if (!result.success) {
             throw new Error(result.error || 'VNC 启动失败');
         }
-        addLogEntry(result.message || 'VNC 服务已就绪', 'info');
+        addWorkerLog(workerId, result.message || 'VNC 服务已就绪', 'info');
         return result;
     } catch (error) {
         addLogEntry('启动 VNC 失败: ' + error.message, 'error');
@@ -1224,11 +1237,11 @@ async function showDeviceScreen() {
     try {
         const workerId = selectedClusterWorker();
         if (workerId) {
-            addLogEntry(`正在 ${workerId} 启动设备投屏...`, 'info');
+            addWorkerLog(workerId, `正在 ${workerId} 启动设备投屏...`, 'info');
             const result = await apiCall('/api/cluster/devices/actions', 'POST', {
                 worker_id: workerId, devices, action: 'scrcpy_start'
             });
-            addLogEntry(`已在 ${workerId} 启动 ${result.summary?.success || devices.length} 个投屏窗口`, 'success');
+            addWorkerLog(workerId, `已在 ${workerId} 启动 ${result.summary?.success || devices.length} 个投屏窗口`, 'success');
             window.GmsWorkspace?.update({worker_id: workerId, origin_page: 'desktop'}, {source: 'device-screen'});
             switchPage('desktop');
             return;
@@ -1852,7 +1865,7 @@ async function refreshAdbProxyTargetDevices(result) {
     if (!targetWorkerId || targetWorkerId !== workspaceWorkerId()) return;
     try {
         await loadDevices(true, {silent: true});
-        addLogEntry(`已自动刷新 ${targetWorkerId} 的ADB设备列表`, 'info');
+        addWorkerLog(targetWorkerId, `已自动刷新 ${targetWorkerId} 的ADB设备列表`, 'info');
     } catch (error) {
         addLogEntry(`ADB接入已更新，但设备列表自动刷新失败: ${error.message}`, 'warning');
     }

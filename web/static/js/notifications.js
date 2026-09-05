@@ -106,17 +106,17 @@ function handleRealtimeNotification(notification, options = {}) {
     }
     // Sync to backend so it survives panel reloads
     if (!options.skipSync) {
-        try {
-            apiCall('/api/notifications', 'POST', {
-                title: item.title,
-                message: item.message,
-                level: item.level,
-                category: item.category,
-                data: { ...item.data, _synced_id: item.id, _synced_read: item.read }
-            });
-        } catch (error) {
+        // apiCall 返回 Promise：必须显式 .catch，否则 rejection 不会被
+        // 外层 try/catch 捕获（unhandled rejection）。
+        apiCall('/api/notifications', 'POST', {
+            title: item.title,
+            message: item.message,
+            level: item.level,
+            category: item.category,
+            data: { ...item.data, _synced_id: item.id, _synced_read: item.read }
+        }).catch(error => {
             debugLog('[Notification] Sync to backend failed:', error);
-        }
+        });
     }
 }
 

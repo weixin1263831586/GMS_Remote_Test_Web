@@ -83,7 +83,11 @@ function startStatusPolling() {
                 }
                 if (!active) {
                     const level = job.status === 'completed' ? 'success' : 'error';
-                    addLogEntry(`分布式测试 ${job.status}${job.error ? `: ${job.error}` : ''}`, level);
+                    addWorkerLog(
+                        eventWorkerId || job.assigned_worker_id || workspaceWorkerId(),
+                        `分布式测试 ${job.status}${job.error ? `: ${job.error}` : ''}`,
+                        level
+                    );
                     showToast(`分布式测试${job.status === 'completed' ? '完成' : '结束'}: ${job.status}`, level);
                     state.clusterJobId = '';
                     state.testStopping = false;
@@ -294,6 +298,13 @@ async function checkInitialTestStatus() {
             state.testing = active && jobBelongsToCurrentWorker;
             updateTestToggleButton(state.testing);
             if (active) {
+                // job 属于其他 Worker：只解绑当前 UI，后端任务继续跑。
+                // 不清 sessionStorage/workspace，保留 report 跳转溯源。
+                if (!jobBelongsToCurrentWorker) {
+                    state.clusterJobId = '';
+                    resetClusterEventCursor();
+                    sessionStorage.removeItem('active_cluster_job');
+                }
                 wakeTestStatusPolling();
                 return;
             }

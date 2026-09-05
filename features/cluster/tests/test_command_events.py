@@ -127,7 +127,7 @@ class CommandEventsApiTests(unittest.TestCase):
     def test_command_events_repository_level(self):
         """repository 层幂等/归属校验已由上面用例覆盖；这里验证 GET 端点集成。
 
-        GET /commands/{id}/events 需要 _require_job_access（走真实 auth），
+        GET /commands/{id}/events 需要 _require_command_access（走真实 auth），
         单元层以 e2e 覆盖；此处直接验证响应结构（mock 掉权限）。
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -137,7 +137,7 @@ class CommandEventsApiTests(unittest.TestCase):
                 {"sequence": 1, "message": "line-1"},
             ])
             patches = [
-                mock.patch.object(commands_api, "_require_job_access", return_value=None),
+                mock.patch.object(commands_api, "_require_command_access", return_value=None),
             ]
             client = self._client(repo, patches)
             response = client.get("/api/cluster/commands/cmd-1/events?after=0")

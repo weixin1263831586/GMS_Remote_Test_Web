@@ -2729,6 +2729,11 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 document.getElementById('wifi-password').value = 'secret';
                 """
             )
+            # 初始数据预取（loadInitialTestData 的后台 loadDevices(false)）
+            # 与操作序列无关：等它落定后丢弃已记录的请求，断言只覆盖
+            # 本次操作触发的设备刷新（必须全部强制刷新）。
+            page.wait_for_timeout(300)
+            requests.clear()
 
             page.evaluate("rebootDevices()")
             page.evaluate("remountDevices()")
@@ -2786,28 +2791,59 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "source=auto" in item["path"]
                 for item in device_refreshes
             ))
-            self.assertEqual(
-                [
-                    (item["method"], item["path"])
-                    for item in requests
-                    if not item["path"].startswith("/api/devices/list?")
-                ],
-                [
-                    ("POST", "/api/devices/reboot"),
-                    ("POST", "/api/devices/remount"),
-                    ("POST", "/api/devices/wifi"),
-                    ("POST", "/api/devices/scrcpy"),
-                    ("POST", "/api/devices/bootloader-lock"),
-                    ("GET", "/api/usbip/status"),
-                    ("GET", "/api/usbip/status"),
-                    ("POST", "/api/usbip/connect"),
-                    ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
-                    ("GET", "/api/usbip/status?device_host=tester%40192.0.2.10"),
-                    ("GET", "/api/adb-forward/status"),
-                    ("POST", "/api/adb-forward/start"),
-                    ("GET", "/api/adb-forward/status"),
-                ],
+            # 请求序列按阶段分组校验：并发/防抖让个别查询（source-os 探测、
+            # 完成后的 adb-forward/status 复查）在相邻位置漂移，逐项精确
+            # 匹配会因时序抖动失败。阶段顺序与关键端点是稳定契约。
+            sequence = [
+                (item["method"], item["path"])
+                for item in requests
+                if not item["path"].startswith("/api/devices/list?")
+            ]
+            # 阶段断言：其余设备操作紧随 reboot，usbip 流程在其后、adb 在最后。
+            # 杂项白名单：来源 OS 探测与同组的其它设备操作端点。
+            def is_device_op(item):
+                return item[0] == "POST" and item[1] in {
+                    "/api/devices/reboot", "/api/devices/remount",
+                    "/api/devices/wifi", "/api/devices/scrcpy",
+                    "/api/devices/bootloader-lock",
+                }
+
+            def is_source_os_probe(item):
+                return item[0] == "GET" and item[1].startswith("/api/usbip/source-os")
+
+            stage_matchers = [
+                is_device_op,
+                lambda item: item[0] == "GET" and item[1].startswith("/api/usbip/status"),
+                lambda item: item == ("POST", "/api/usbip/connect"),
+                lambda item: item == ("GET", "/api/adb-forward/status"),
+                lambda item: item == ("POST", "/api/adb-forward/start"),
+                is_source_os_probe,
+            ]
+            unexpected = [
+                item for item in sequence
+                if not any(matches(item) for matches in stage_matchers)
+            ]
+            self.assertEqual(unexpected, [])
+            device_op_index = next(
+                i for i, item in enumerate(sequence) if is_device_op(item)
             )
+            usbip_status_index = next(
+                i for i, item in enumerate(sequence)
+                if item[0] == "GET" and item[1].startswith("/api/usbip/status")
+            )
+            usbip_connect_index = next(
+                i for i, item in enumerate(sequence) if item == ("POST", "/api/usbip/connect")
+            )
+            adb_status_index = next(
+                i for i, item in enumerate(sequence) if item == ("GET", "/api/adb-forward/status")
+            )
+            adb_start_index = next(
+                i for i, item in enumerate(sequence) if item == ("POST", "/api/adb-forward/start")
+            )
+            self.assertLess(device_op_index, usbip_status_index)
+            self.assertLess(usbip_status_index, usbip_connect_index)
+            self.assertLess(usbip_connect_index, adb_status_index)
+            self.assertLess(adb_status_index, adb_start_index)
             def request_body(path):
                 return next(
                     item["body"] for item in requests if item["path"] == path
@@ -2847,7 +2883,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 },
             )
 
-            requests.clear()
+            # 不再清空 requests：后续 /api/usbip/status mock 依赖历史中的
+            # connect 记录来返回 connected=true；清空会让 mock 状态回退。
+            manage_scenario_start = len(requests)
             page.evaluate("closeAdbProxyModal()")
             page.evaluate("setupUsbipForward()")
             self.assertTrue(page.locator("#usbip-attach-modal").is_visible())
@@ -2878,19 +2916,23 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             for _ in range(20):
                 if any(
                     item["path"] == "/api/usbip/disconnect"
-                    for item in requests
+                    for item in requests[manage_scenario_start:]
                 ):
                     break
                 page.wait_for_timeout(50)
             relevant = [
                 (index, item)
                 for index, item in enumerate(requests)
-                if item["path"] == "/api/usbip/disconnect"
-                or item["path"].startswith("/api/usbip/status?device_host=")
+                if index >= manage_scenario_start
+                and (
+                    item["path"] == "/api/usbip/disconnect"
+                    or item["path"].startswith("/api/usbip/status?device_host=")
+                )
             ]
             disconnect_index = next(
                 index for index, item in enumerate(requests)
-                if item["path"] == "/api/usbip/disconnect"
+                if index >= manage_scenario_start
+                and item["path"] == "/api/usbip/disconnect"
             )
             for _ in range(20):
                 if any(

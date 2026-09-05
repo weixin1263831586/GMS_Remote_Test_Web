@@ -31,13 +31,9 @@ async function startTest() {
             void requestBrowserNotificationPermission();
         }
 
-        // 清空两个日志容器并重置计数
-        const systemOut = getLogContainer('system');
-        const moduleOut = getLogContainer('module');
-        if (systemOut) systemOut.innerHTML = '';
-        if (moduleOut) moduleOut.innerHTML = '';
-        state.lastLogCount = 0;
-        state.wsLogStallTicks = 0;
+        // 只清当前 Worker scope 的日志，保留其他 Worker 的隐藏历史
+        // 和无 scope 的全局条目。
+        clearWorkerLogs(workspaceWorkerId());
 
         const startResult = await apiCall('/api/test/start', 'POST', {
             worker_id: workspaceWorkerId(),
@@ -63,14 +59,14 @@ async function startTest() {
                 attempt_id: startResult?.data?.attempt_id || startResult?.attempt_id || '',
                 origin_page: 'test'
             }, {source: 'test-start'});
-            addLogEntry(`分布式任务 ${clusterJobId} 已排队`, 'info');
+            addWorkerLog(workspaceWorkerId(), `分布式任务 ${clusterJobId} 已排队`, 'info');
         }
 
         debugLog('[startTest] API call successful, setting testing = true');
         state.testStopping = false;
         state.testing = true;
         updateTestToggleButton(true);
-        addLogEntry('测试已启动', 'success');
+        addWorkerLog(workspaceWorkerId(), '测试已启动', 'success');
         showToast('测试已启动', 'success');
         switchLogTab('module');
         wakeTestStatusPolling();
@@ -92,10 +88,11 @@ async function stopTest() {
         addLogEntry('⏹ 用户请求停止测试...', 'info');
 
         if (state.clusterJobId) {
+            const workerId = workspaceWorkerId();
             await apiCall(`/api/cluster/jobs/${encodeURIComponent(state.clusterJobId)}/cancel`, 'POST');
             state.testStopping = true;
             updateTestToggleButton(true);
-            addLogEntry('停止请求已发送，正在等待 Worker 结束任务...', 'warning');
+            addWorkerLog(workerId, '停止请求已发送，正在等待 Worker 结束任务...', 'warning');
             showToast('停止请求已发送', 'warning');
             wakeTestStatusPolling();
             return;
@@ -185,15 +182,13 @@ function updateTestToggleButton(isTesting) {
 
 async function cleanTest() {
     try {
-        if (isLocalWorkspaceWorker(workspaceWorkerId())) {
+        const workerId = workspaceWorkerId();
+        if (isLocalWorkspaceWorker(workerId)) {
             await apiCall('/api/test/clean', 'POST');
         }
-        const systemOut = getLogContainer('system');
-        const moduleOut = getLogContainer('module');
-        if (systemOut) systemOut.innerHTML = '';
-        if (moduleOut) moduleOut.innerHTML = '';
-        addLogEntry('测试日志已清除', 'info');
-        state.lastLogCount = 0;
+        // 只清当前 Worker scope 的日志，保留其他 Worker 的隐藏历史。
+        clearWorkerLogs(workerId);
+        addWorkerLog(workerId, '测试日志已清除', 'info');
     } catch (error) {
         addLogEntry('清除日志失败: ' + error.message, 'error');
     }
@@ -218,10 +213,10 @@ async function downloadTestLog() {
             return;
         }
 
-        // 发送日志内容到后端保存
+        // 发送日志内容到后端保存（test_type 直接读下拉框：state.testType 无人维护）
         const saveResult = await apiCall('/api/test/logs/save', 'POST', {
             content: logContent,
-            test_type: state.testType || 'unknown'
+            test_type: document.getElementById('test-type')?.value || state.testType || 'unknown'
         });
 
         if (saveResult.success) {

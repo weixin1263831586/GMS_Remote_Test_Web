@@ -432,8 +432,8 @@ async function submitDevicePassword() {
         addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
         showToast('USB/IP 连接成功', 'success');
 
-        // 刷新设备列表（使用防抖版本）
-        setTimeout(() => debouncedRefreshDevices(), 3500);
+        // 刷新设备列表（使用防抖版本；强制刷新以便立即看到新接入的设备）
+        setTimeout(() => debouncedRefreshDevices(true), 3500);
 
         // 主函数返回后更新按钮状态。
         const btn = $('usbip-btn');

@@ -186,6 +186,7 @@ def _report_copy_archive(transfer: dict) -> Path:
 @router.post("/firmware/stage")
 async def stage_worker_firmware(
     request: Request,
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
     worker_id: str = Form(...),
     devices: str = Form(...),
     reservation_id: str = Form(default=""),
@@ -294,6 +295,7 @@ def download_staged_firmware(
 @router.post("/gsi/stage")
 async def stage_worker_gsi(
     request: Request,
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
     worker_id: str = Form(...),
     devices: str = Form(...),
     system_file: UploadFile | None = File(default=None),

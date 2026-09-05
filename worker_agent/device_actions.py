@@ -51,11 +51,23 @@ def _adb_environment(adb_server_socket: str | None) -> dict[str, str] | None:
     return env
 
 
+# 设备详情缓存：heartbeat 高频调用 probe_devices，但每台设备的详情探测
+# 是一次串行 ADB 往返（超时 3s）。多设备 + ADB 卡顿时会拖过 Controller 的
+# offline 阈值造成假离线。详情（model/Android 版本/电量/SoC）变化缓慢，
+# 缓存 60s 内直接复用；设备状态为 device 且缓存过期才重新探测。
+_DEVICE_DETAILS_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
+_DEVICE_DETAILS_TTL_SECONDS = 60.0
+
+
 def _probe_device_details(
     serial: str,
     adb_server_socket: str | None = None,
 ) -> dict[str, str]:
-    """Read management attributes in one ADB round trip."""
+    """Read management attributes in one ADB round trip (with TTL cache)."""
+    now = time.monotonic()
+    cached = _DEVICE_DETAILS_CACHE.get(serial)
+    if cached and now - cached[0] < _DEVICE_DETAILS_TTL_SECONDS:
+        return cached[1]
     output = _run([
         "adb", "-s", serial, "shell",
         "echo __MODEL__; getprop ro.product.model; "
@@ -81,6 +93,7 @@ def _probe_device_details(
         if current == "battery_level":
             value = value.partition(":")[2].strip() if ":" in value else value
         details[current] = value
+    _DEVICE_DETAILS_CACHE[serial] = (now, details)
     return details
 
 
