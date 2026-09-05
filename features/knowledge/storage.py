@@ -92,14 +92,6 @@ def _csv(value: Any) -> list[str]:
     return result
 
 
-def _json_dumps(value: Any) -> str:
-    return json.dumps(value if value is not None else {}, ensure_ascii=False)
-
-
-def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    return dict(row) if row else None
-
-
 class KnowledgeStore(KnowledgeVersionMixin):
     _REQUIRED_TABLES = KNOWLEDGE_REQUIRED_TABLES
 

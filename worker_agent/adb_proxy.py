@@ -111,11 +111,6 @@ def imported_devices() -> dict[str, dict[str, str]]:
     }
 
 
-def imported_serials() -> set[str]:
-    """Backward-compatible serial-only view of current adb-hub imports."""
-    return set(imported_devices())
-
-
 def imported_device_for_serial(serial: str) -> dict[str, str] | None:
     """Resolve either the raw or adb-hub-prefixed serial to its source."""
     value = str(serial or "")

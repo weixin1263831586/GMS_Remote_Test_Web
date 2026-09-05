@@ -124,12 +124,6 @@ function updateTestHostScopedControls(workerId = workspaceWorkerId()) {
     }
 }
 
-function requireControllerHostAction(actionName) {
-    if (isLocalWorkspaceWorker(workspaceWorkerId())) return true;
-    showToast(`${actionName}只作用于 Controller 本机，请先切换测试主机`, 'warning');
-    return false;
-}
-
 function workspaceLocalWorkerId() {
     return window.GmsWorkspace?.localWorkerId?.()
         || state.clusterStatus?.local_worker_id
@@ -311,7 +305,7 @@ window.addEventListener('gms:workspace-context', event => {
         || ['reports', 'report-analysis'].includes(contextSource);
     if (contextJobId && contextJobId !== state.clusterJobId && !reportProvenanceOnly) {
         state.clusterJobId = contextJobId;
-        state.clusterEventSequence = -1;
+        resetClusterEventCursor();
         sessionStorage.setItem('active_cluster_job', contextJobId);
         wakeTestStatusPolling();
     }
@@ -332,6 +326,10 @@ let testWorkerSwitchGeneration = 0;
 async function switchTestWorker() {
     const workerId = document.getElementById('cluster-worker')?.value || workspaceLocalWorkerId();
     const switchGeneration = ++testWorkerSwitchGeneration;
+    const previousWorkerLabel = isLocalWorkspaceWorker(workspaceWorkerId())
+        ? '本机测试主机'
+        : (window.GmsWorkspace?.get?.().worker_id || '上一台主机');
+    const interruptedJobId = state.testing && state.clusterJobId ? state.clusterJobId : '';
     state.selectedDevices.clear();
     window.GmsWorkspace?.update({
         scope_mode: isLocalWorkspaceWorker(workerId) ? window.GmsWorkspace.get().scope_mode : 'cluster',
@@ -343,10 +341,15 @@ async function switchTestWorker() {
     // 立即清除旧主机的测试状态。旧 job 继续在后端跑，但 UI 必须切到空闲状态。
     // refreshTestStatusForWorker 会异步查询新主机状态并在有活跃测试时恢复。
     state.clusterJobId = '';
-    state.clusterEventSequence = -1;
+    resetClusterEventCursor();
     state.testing = false;
     state.testStopping = false;
     updateTestToggleButton(false);
+    // 切主机后按新的 worker scope 重过滤日志面板，
+    // 其他 Worker 的历史保留在 DOM 中（隐藏而非删除）。
+    if (typeof applyLogScopeFilter === 'function') {
+        applyLogScopeFilter();
+    }
     refreshTestStatusForWorker(workerId);
     try {
         testSuitesCache = [];
@@ -356,6 +359,15 @@ async function switchTestWorker() {
             switchGeneration !== testWorkerSwitchGeneration
             || workspaceWorkerId() !== workerId
         ) return;
+        // 日志面板是会话级、跨主机共用的：写一条切换标记，
+        // 避免不同主机的操作/测试日志混在一起无法分辨。
+        addLogEntry(`已切换测试主机: ${isLocalWorkspaceWorker(workerId) ? '本机测试主机' : workerId}`, 'info');
+        if (interruptedJobId) {
+            addLogEntry(
+                `${previousWorkerLabel} 上的测试仍在后台运行，测试日志已停止滚动；完成后可在测试报告中查看结果`,
+                'info'
+            );
+        }
         showToast(isLocalWorkspaceWorker(workerId)
             ? '已切换到本机测试主机'
             : `已切换到 ${workerId}，发现 ${state.devices.length} 台设备`, 'success');
@@ -378,7 +390,7 @@ async function refreshTestStatusForWorker(workerId) {
         if (job) {
             state.testing = true;
             state.clusterJobId = job.id;
-            state.clusterEventSequence = -1;
+            resetClusterEventCursor();
             state.testStopping = job.status === 'stopping';
             sessionStorage.setItem('active_cluster_job', job.id);
             window.GmsWorkspace?.update(
@@ -392,7 +404,7 @@ async function refreshTestStatusForWorker(workerId) {
             state.testing = false;
             state.testStopping = false;
             state.clusterJobId = '';
-            state.clusterEventSequence = -1;
+            resetClusterEventCursor();
             updateTestToggleButton(false);
         }
     } catch (error) {
@@ -454,16 +466,6 @@ function selectedTestDeviceIds() {
 
 function selectedWorkspaceDeviceIds() {
     return selectedDeviceIdsMatching(isSelectableWorkspaceDevice);
-}
-
-function selectedFastbootDeviceIds() {
-    return Array.from(state.selectedDevices).filter(deviceId => {
-        const device = state.devices.find(item => {
-            const id = typeof item === 'string' ? item : item.device_id;
-            return id === deviceId;
-        });
-        return device && (device.status === 'fastboot' || device.state === 'fastboot');
-    });
 }
 
 function fetchDevicesForWorker(workerId, forceRefresh, source) {

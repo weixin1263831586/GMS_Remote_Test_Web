@@ -36,9 +36,13 @@ function startStatusPolling() {
         try {
             if (state.clusterJobId) {
                 const jobId = encodeURIComponent(state.clusterJobId);
+                // per-job 游标：切 A→B→A 时旧 job 的日志不会
+                // 重复追加（每个 job 记住自己的 sequence）。
+                state.clusterEventSequenceByJob = state.clusterEventSequenceByJob || {};
+                const jobCursor = state.clusterEventSequenceByJob[state.clusterJobId] ?? -1;
                 const [jobResponse, eventResponse] = await Promise.all([
                     apiCall(`/api/cluster/jobs/${jobId}`, 'GET', null, {background: true}),
-                    apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(state.clusterEventSequence ?? -1))}&limit=1000`, 'GET', null, {background: true})
+                    apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(jobCursor))}&limit=1000`, 'GET', null, {background: true})
                 ]);
                 const job = jobResponse.job;
                 // 轮询只更新 job/attempt 元数据，不覆盖用户手动选择的 worker。
@@ -48,14 +52,23 @@ function startStatusPolling() {
                     cluster_job_id: job.id || state.clusterJobId,
                     attempt_id: job.current_attempt_id || ''
                 }, {source: 'test-poll'});
-                const currentSequence = Number(state.clusterEventSequence ?? -1);
+                const currentSequence = jobCursor;
                 const events = (eventResponse.events || []).filter(
                     event => Number(event.sequence) > currentSequence
                 );
-                events.forEach(event => addNormalizedLogEntry({message: event.message,
+                const eventWorkerId = job.assigned_worker_id || workspaceWorkerId();
+                events.forEach(event => addNormalizedLogEntry({
+                    message: event.message,
                     type: event.level === 'error' ? 'error' : 'info',
-                    source: ['stdout', 'stderr'].includes(event.source) ? 'module' : undefined}));
-                if (events.length) state.clusterEventSequence = Math.max(...events.map(event => Number(event.sequence)));
+                    source: ['stdout', 'stderr'].includes(event.source) ? 'module' : undefined,
+                    worker_id: eventWorkerId,
+                    job_id: String(event.job_id || state.clusterJobId || '')
+                }));
+                if (events.length) {
+                    const maxSequence = Math.max(...events.map(event => Number(event.sequence)));
+                    state.clusterEventSequenceByJob[state.clusterJobId] = maxSequence;
+                    state.clusterEventSequence = maxSequence;
+                }
                 const active = ['created', 'queued', 'leasing', 'assigned', 'dispatching', 'running', 'stopping', 'collecting', 'worker_lost'].includes(job.status);
 
                 // 只在 job 属于当前选中主机时才更新测试状态。
@@ -74,7 +87,7 @@ function startStatusPolling() {
                     showToast(`分布式测试${job.status === 'completed' ? '完成' : '结束'}: ${job.status}`, level);
                     state.clusterJobId = '';
                     state.testStopping = false;
-                    state.clusterEventSequence = -1;
+                    resetClusterEventCursor();
                     sessionStorage.removeItem('active_cluster_job');
                     window.GmsWorkspace?.update({
                         cluster_job_id: '',
@@ -113,7 +126,7 @@ function startStatusPolling() {
                 const recoveredJob = activeJobs.find(job => job.worker_id === workspaceWorkerId());
                 if (recoveredJob) {
                     state.clusterJobId = recoveredJob.id;
-                    state.clusterEventSequence = -1;
+                    resetClusterEventCursor();
                     state.testStopping = recoveredJob.status === 'stopping';
                     sessionStorage.setItem('active_cluster_job', recoveredJob.id);
                     window.GmsWorkspace?.update({
@@ -239,7 +252,7 @@ async function checkInitialTestStatus() {
         if (savedClusterJob) {
             if (state.clusterJobId !== savedClusterJob) {
                 state.clusterJobId = savedClusterJob;
-                state.clusterEventSequence = -1;
+                resetClusterEventCursor();
             }
             let response;
             try {
@@ -298,7 +311,7 @@ async function checkInitialTestStatus() {
             const recoveredJob = activeJobs.find(job => job.worker_id === workspaceWorkerId());
             if (recoveredJob) {
                 state.clusterJobId = recoveredJob.id;
-                state.clusterEventSequence = -1;
+                resetClusterEventCursor();
                 state.testStopping = recoveredJob.status === 'stopping';
                 state.testing = true;
                 sessionStorage.setItem('active_cluster_job', recoveredJob.id);

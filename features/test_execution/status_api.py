@@ -123,6 +123,10 @@ async def get_status(
         client_id = runtime.get_client_id_from_request(request)
         user_state = get_or_create_user_state(client_id)
         active_jobs = _active_durable_jobs(client_id)
+        # 本地日志按浏览器 client_id 存储（集群 job 日志由
+        # /api/cluster/jobs/{id}/events 按 job 维度提供）；响应中声明
+        # scope 供前端区分本地与远端 Worker 日志流。
+        requested_worker = str(request.query_params.get("worker_id") or "").strip()
 
         logger.info(f"[Status] Client {client_id} running={user_state.get('running', False)}")
 
@@ -138,7 +142,17 @@ async def get_status(
             "test_outcome": user_state.get("test_outcome", ""),
             "report_timestamp": user_state.get("report_timestamp", ""),
             "active_jobs": active_jobs,
+            # 本地日志的 scope 标记：local 表示 Controller 本机单机链路。
+            "log_scope": {"kind": "local", "worker_id": ""},
         }
+        if requested_worker:
+            # 请求声明了目标 Worker：仅当目标为本机 Worker 时本地日志相关。
+            response["log_scope"] = {
+                "kind": "local",
+                "worker_id": "",
+                "requested_worker_id": requested_worker,
+                "relevant": requested_worker in {"local", ""},
+            }
 
         try:
             usb_monitor = get_usb_monitor()

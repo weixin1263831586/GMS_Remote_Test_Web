@@ -53,19 +53,6 @@ def _parse_route(entry: dict) -> tuple[ipaddress._BaseNetwork, ipaddress._BaseAd
     return network, gateway_ip
 
 
-def _route_exists(destination: str) -> bool:
-    """内核路由表中是否已有该目标的任意路由（不管网关）。"""
-    try:
-        result = subprocess.run(
-            ['ip', 'route', 'show', destination],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning('[StaticRoutes] 查询路由失败 %s: %s', destination, exc)
-        return False
-    return bool(result.returncode == 0 and result.stdout.strip())
-
-
 def _route_matches(destination: str, gateway: str) -> bool:
     """已存在的该目标路由是否与配置的网关一致。"""
     try:

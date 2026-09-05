@@ -38,13 +38,17 @@ function normalizeLogEntry(log) {
     return {
         message: cleanedMessage,
         type: isObject ? (log.type || log.log_type || 'info') : 'info',
-        source: inferLogSource(cleanedMessage, isObject ? log.source : undefined)
+        source: inferLogSource(cleanedMessage, isObject ? log.source : undefined),
+        // 日志条目携带 worker/job scope，切主机按过滤条件
+        // 显示，而不是共享一锅日志造成串台。
+        worker_id: isObject ? String(log.worker_id || '') : '',
+        job_id: isObject ? String(log.job_id || '') : ''
     };
 }
 
 function addNormalizedLogEntry(log) {
     const entry = normalizeLogEntry(log);
-    addLogEntry(entry.message, entry.type, true, entry.source);
+    addLogEntry(entry.message, entry.type, true, entry.source, entry.worker_id, entry.job_id);
 }
 
 function getLogDisplayLimit() {
@@ -54,13 +58,22 @@ function getLogMaxEntries() {
     return parseInt(localStorage.getItem('gms-log-max-entries')) || 1000;
 }
 
-function addLogEntry(message, type = 'info', showTimestamp = true, source = 'system') {
+// 集群测试日志游标统一重置：全局游标与 per-job 游标（按 job 记忆，
+// 避免 A→B→A 重复追加）必须同步清理，否则残留游标会吞掉后续日志。
+function resetClusterEventCursor() {
+    state.clusterEventSequence = -1;
+    if (state.clusterEventSequenceByJob) delete state.clusterEventSequenceByJob[state.clusterJobId];
+}
+
+function addLogEntry(message, type = 'info', showTimestamp = true, source = 'system', workerId = '', jobId = '') {
     // Queue the log entry
     _logQueue.push({
         message,
         type,
         showTimestamp,
         source: source === 'module' ? 'module' : 'system',
+        workerId: String(workerId || ''),
+        jobId: String(jobId || ''),
         timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false })
     });
 
@@ -71,6 +84,35 @@ function addLogEntry(message, type = 'info', showTimestamp = true, source = 'sys
     if (!_logFlushScheduled) {
         _logFlushScheduled = true;
         requestAnimationFrame(flushLogQueue);
+    }
+}
+
+// 日志 scope 过滤。scope 信息随条目保存（data-* 属性），
+// 切换测试主机时只需换过滤条件，不删除历史。
+// - 无 scope 条目（本地 Controller 操作）：任何 Worker 下都显示；
+// - worker scope 条目：只在对应 Worker（或未标记时）显示；
+// - job scope 条目（module 日志）：跟随 job 所属 Worker 显示。
+function _entryMatchesScope(entry) {
+    const currentWorker = window.workspaceWorkerId ? window.workspaceWorkerId() : '';
+    if (!entry.workerId && !entry.jobId) return true;
+    return !entry.workerId || !currentWorker || entry.workerId === currentWorker;
+}
+
+function applyLogScopeFilter() {
+    for (const src of ['system', 'module']) {
+        const logOutput = getLogContainer(src);
+        if (!logOutput) continue;
+        let shouldFollow = isLogScrolledNearBottom(logOutput);
+        let visible = 0;
+        for (const node of logOutput.children) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            const matches = !node.dataset.workerId
+                || !window.workspaceWorkerId
+                || node.dataset.workerId === window.workspaceWorkerId();
+            node.style.display = matches ? '' : 'none';
+            if (matches) visible++;
+        }
+        if (shouldFollow) logOutput.scrollTop = logOutput.scrollHeight;
     }
 }
 
@@ -95,10 +137,15 @@ function flushLogQueue() {
 
         // Use DocumentFragment for batch DOM insertion
         const fragment = document.createDocumentFragment();
-        bucket.forEach(({ message, type, timestamp, showTimestamp }) => {
+        bucket.forEach(({ message, type, timestamp, showTimestamp, workerId, jobId }) => {
             const logEntry = document.createElement('div');
             logEntry.className = `log-entry log-${type}`;
             logEntry.textContent = showTimestamp ? `[${timestamp}] ${message}` : message;
+            if (workerId) logEntry.dataset.workerId = workerId;
+            if (jobId) logEntry.dataset.jobId = jobId;
+            if (!_entryMatchesScope({ workerId, jobId })) {
+                logEntry.style.display = 'none';
+            }
             fragment.appendChild(logEntry);
         });
 

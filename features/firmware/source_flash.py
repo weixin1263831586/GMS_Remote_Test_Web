@@ -76,14 +76,6 @@ class SourceFlashReport:
     elapsed_seconds: float = 0.0
 
 
-async def _log_async(on_log, message: str) -> None:
-    if on_log is not None:
-        try:
-            await on_log(message)
-        except Exception:
-            logger.debug("on_log callback failed", exc_info=True)
-
-
 def open_windows_ssh(device_host: str):
     """Open an SSH session to the Windows source host using stored creds."""
     host = str(device_host or "").strip()

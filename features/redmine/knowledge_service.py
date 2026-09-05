@@ -598,10 +598,3 @@ class RedmineKnowledgeService:
                 await client.close()
 
 
-def safe_json(value: Any) -> Any:
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except Exception:
-            return value
-    return value

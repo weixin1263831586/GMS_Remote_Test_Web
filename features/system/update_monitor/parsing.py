@@ -37,10 +37,6 @@ def text_content(node: html.HtmlElement) -> str:
     return ' '.join(' '.join(node.xpath('.//text()')).split())
 
 
-def direct_text(node: html.HtmlElement) -> str:
-    return ' '.join(' '.join(node.xpath('./text()')).split())
-
-
 def article_node(doc: html.HtmlElement) -> html.HtmlElement:
     articles = doc.xpath('//article[contains(@class, "devsite-article")]')
     return articles[0] if articles else doc
@@ -98,10 +94,6 @@ def node_links(node: html.HtmlElement, base_url: str) -> list[LinkInfo]:
             continue
         links.append(LinkInfo(text=text, url=urljoin(base_url, href)))
     return links
-
-
-def node_links_json(node: html.HtmlElement, base_url: str) -> str:
-    return json.dumps([asdict(link) for link in node_links(node, base_url)], ensure_ascii=False, sort_keys=True)
 
 
 def cell_text(cell: html.HtmlElement) -> str:

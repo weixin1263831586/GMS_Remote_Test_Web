@@ -94,11 +94,6 @@ def detach_ubuntu_usbip_ports(
         usbip_manager.ssh_manager, ssh, remote_host, detach_all, busids
     )
 
-def _usbip_attached_ports(ssh) -> set[str]:
-    """Return the set of currently attached usbip port numbers (as strings)."""
-    return usbip_attached_ports(usbip_manager.ssh_manager, ssh)
-
-
 def parse_adb_device_states(output: str) -> dict[str, str]:
     """Parse all adb-visible serials, including recovery/offline/unauthorized."""
     states: dict[str, str] = {}

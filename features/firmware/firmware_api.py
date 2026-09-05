@@ -75,55 +75,6 @@ _FIRMWARE_CHUNK_ROOT = upload_temp_root("gms_firmware_uploads")
 MAX_FIRMWARE_CHUNKS = chunk_uploads.MAX_FIRMWARE_CHUNKS
 
 
-def _usbip_routes_for_devices(
-    routes: list[dict], selected_devices: set[str],
-) -> list[dict]:
-    """Keep the BUSID/device pairing when a route serves mixed protocols."""
-    selected = {str(device or "").strip() for device in selected_devices}
-    if not selected:
-        return []
-    subset: list[dict] = []
-    for route in routes or []:
-        route_devices = [
-            str(device or "").strip()
-            for device in route.get("device_ids") or []
-            if str(device or "").strip()
-        ]
-        route_busids = [
-            str(busid or "").strip()
-            for busid in route.get("busids") or []
-            if str(busid or "").strip()
-        ]
-        if not route_devices or not route_busids:
-            continue
-        # resolve_usbip_flash_routes builds these lists from the same
-        # assignment records, so their order is the stable device↔BUSID map.
-        if len(route_devices) != len(route_busids):
-            logger.error(
-                "USB/IP route has mismatched device/BUSID lists: %s", route,
-            )
-            continue
-        pairs = [
-            (device, busid)
-            for device, busid in zip(route_devices, route_busids)
-            if device in selected
-        ]
-        if not pairs:
-            continue
-        filtered = dict(route)
-        filtered["device_ids"] = [device for device, _busid in pairs]
-        filtered["busids"] = [busid for _device, busid in pairs]
-        bindings = route.get("bindings") or []
-        if bindings:
-            filtered["bindings"] = [
-                dict(binding)
-                for binding in bindings
-                if str(binding.get("device_id") or "").strip() in selected
-            ]
-        subset.append(filtered)
-    return subset
-
-
 def _usbip_device_route_map(routes: list[dict]) -> dict[str, dict]:
     """Return the immutable physical route captured for each burn device."""
     mapped: dict[str, dict] = {}
@@ -154,20 +105,8 @@ def strip_ansi_codes(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text or "")
 
 
-def _safe_upload_token(value: str) -> str:
-    return chunk_uploads.safe_upload_token(value)
-
-
 def _firmware_upload_session_dir(client_id: str, upload_id: str) -> str:
     return chunk_uploads.upload_session_dir(_FIRMWARE_CHUNK_ROOT, client_id, upload_id)
-
-
-def _cleanup_expired_upload_sessions(client_id: str) -> None:
-    chunk_uploads.cleanup_expired_upload_sessions(
-        _FIRMWARE_CHUNK_ROOT,
-        client_id,
-        UPLOAD_PROGRESS_EXPIRATION,
-    )
 
 
 async def _handle_firmware_chunk_upload(form, client_id: str):

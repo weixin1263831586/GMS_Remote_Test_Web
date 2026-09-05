@@ -390,7 +390,62 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
             "failed": sum(not item["success"] for item in results)}}
 
 
-def flash_firmware(config: WorkerConfig, firmware: Path, device_ids: list[str]) -> dict[str, Any]:
+def _run_with_output_stream(
+    argv: list[str],
+    timeout: int = 1800,
+    on_output=None,
+) -> dict[str, Any]:
+    """运行长命令并逐行流式回调输出（实时日志通道）。
+
+    ``on_output(line, is_stderr)`` 由调用方提供（可为 None，退化为
+    subprocess.run 行为）。返回 stdout/stderr/returncode 与既有
+    subprocess.run 兼容的结构，便于 flash_* 继续复用解析逻辑。
+    """
+    if on_output is None:
+        completed = subprocess.run(argv, capture_output=True, text=True,
+                                   timeout=timeout, check=False)
+        return {"stdout": completed.stdout or "", "stderr": completed.stderr or "",
+                "returncode": completed.returncode}
+    process = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1, start_new_session=True,
+    )
+    lines: list[str] = []
+    try:
+        deadline = time.monotonic() + timeout
+        import select
+        fd = process.stdout.fileno()
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                raise subprocess.TimeoutExpired(argv, timeout)
+            ready, _f, _e = select.select([fd], [], [], min(remaining, 1.0))
+            if not ready:
+                if process.poll() is not None:
+                    break
+                continue
+            line = process.stdout.readline()
+            if not line:
+                if process.poll() is not None:
+                    break
+                continue
+            lines.append(line)
+            try:
+                on_output(line.rstrip("\r\n"), False)
+            except Exception:
+                pass
+        process.wait(timeout=30)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+    return {"stdout": "\n".join(lines), "stderr": "",
+            "returncode": process.returncode}
+
+
+def flash_firmware(config: WorkerConfig, firmware: Path, device_ids: list[str],
+                   on_output=None) -> dict[str, Any]:
     """Flash exactly one locally attached device using a Worker-local image."""
     if len(device_ids) != 1:
         raise ValueError("firmware flashing requires exactly one device")
@@ -446,15 +501,15 @@ def flash_firmware(config: WorkerConfig, firmware: Path, device_ids: list[str]) 
     match = re.search(r"List of rockusb connected\((\d+)\)", listed.stdout or "")
     if listed.returncode != 0 or not match or int(match.group(1)) != 1:
         raise RuntimeError("expected exactly one RockUSB loader device on Worker")
-    completed = subprocess.run([str(tool), "uf", str(firmware)], capture_output=True,
-                               text=True, timeout=1800, check=False)
-    output = "\n".join(filter(None, [completed.stdout, completed.stderr])).strip()
-    return {"device": serial, "success": completed.returncode == 0,
-            "exit_code": completed.returncode, "output": output[-20000:]}
+    completed = _run_with_output_stream([str(tool), "uf", str(firmware)], timeout=1800,
+                                        on_output=on_output)
+    output = "\n".join(filter(None, [completed["stdout"], completed["stderr"]])).strip()
+    return {"device": serial, "success": completed["returncode"] == 0,
+            "exit_code": completed["returncode"], "output": output[-20000:]}
 
 
 def flash_gsi(config: WorkerConfig, system_img: Path | None, vendor_img: Path | None,
-              device_ids: list[str]) -> dict[str, Any]:
+              device_ids: list[str], on_output=None) -> dict[str, Any]:
     if len(device_ids) != 1:
         raise ValueError("GSI flashing requires exactly one device")
     if system_img is None and vendor_img is None:
@@ -485,10 +540,10 @@ def flash_gsi(config: WorkerConfig, system_img: Path | None, vendor_img: Path | 
     ]
     if vendor_img:
         argv.extend([vendor_partition(str(vendor_img)), str(vendor_img)])
-    completed = subprocess.run(argv, capture_output=True, text=True, timeout=1800, check=False)
-    output = "\n".join(filter(None, [completed.stdout, completed.stderr])).strip()
-    return {"device": serial, "success": completed.returncode == 0,
-            "exit_code": completed.returncode, "output": output[-20000:]}
+    completed = _run_with_output_stream(argv, timeout=1800, on_output=on_output)
+    output = "\n".join(filter(None, [completed["stdout"], completed["stderr"]])).strip()
+    return {"device": serial, "success": completed["returncode"] == 0,
+            "exit_code": completed["returncode"], "output": output[-20000:]}
 
 
 def host_metrics(config: WorkerConfig) -> dict[str, float]:

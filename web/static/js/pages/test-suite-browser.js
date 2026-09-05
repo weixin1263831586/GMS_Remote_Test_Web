@@ -291,7 +291,7 @@ async function switchSuiteWorker() {
     clearSuiteBrowserSelection('正在加载 Worker 套件...');
     // 立即清除旧主机的测试状态，再异步查询新主机状态。
     state.clusterJobId = '';
-    state.clusterEventSequence = -1;
+    resetClusterEventCursor();
     state.testing = false;
     state.testStopping = false;
     updateTestToggleButton(false);
@@ -1862,13 +1862,6 @@ function renderSuiteFiles(items) {
     if (activeRow) {
         activeRow.scrollIntoView({ block: 'center' });
     }
-}
-
-function isSuiteResultsFolderPath(currentPath) {
-    // 当前浏览路径位于某个 .../results 目录内（例如 "android-vts/results" 或
-    // "android-vts/results/2026.06.25_10.57.05"）。
-    const segs = (currentPath || '').split('/').filter(Boolean);
-    return segs.some(seg => seg.toLowerCase() === 'results');
 }
 
 // item 是否为一个测试运行文件夹 results/<ts> 或 logs/<ts>——恰好两段、首段为

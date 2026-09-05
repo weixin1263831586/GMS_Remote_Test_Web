@@ -1,6 +1,6 @@
 """Unified SSH execution layer (sync + async + streaming).
 
-4.txt 第 12 节：同步 ``SSHManager`` 与异步 ``SSHAsyncManager`` 两套实现
+同步 ``SSHManager`` 与异步 ``SSHAsyncManager`` 两套实现
 行为漂移（stdout/stderr API 混用、``recv_exit_status`` 顺序、tuple 顺序
 错位），统一收敛到本模块——整个项目只有这一份 SSH 执行实现：
 

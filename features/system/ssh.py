@@ -152,7 +152,7 @@ class SSHManager:
                     continue
                 # 测试连接是否仍然有效（轻量级检查）。
                 # 注意：paramiko 的 recv_exit_status() 不接受 timeout 参数
-                # （历史 P1：MagicMock 测试掩盖了 TypeError，导致池内健康
+                # MagicMock 测试掩盖了 TypeError，导致池内健康
                 # 连接被误判为死连接、复用路径永远走不到）。这里靠
                 # exec_command(timeout=2) 的 channel 读超时兜底。
                 try:
@@ -192,7 +192,7 @@ class SSHManager:
     ) -> CommandResult:
         """执行 SSH 命令，统一返回 :class:`CommandResult`。
 
-        4.txt 第 12 节重构：同步/异步执行收敛到
+        同步/异步执行统一委托给
         :class:`~features.system.ssh_executor.SSHExecutor` 唯一实现，
         彻底废除 ``(stdout, stderr, exit_code)`` 裸 tuple（位置错用曾造成
         真实功能 bug）。

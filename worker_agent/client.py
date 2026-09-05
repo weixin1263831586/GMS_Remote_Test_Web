@@ -96,6 +96,13 @@ class ControllerClient:
         return self._request_with_worker_header("POST", path, json.dumps(body, separators=(",", ":")).encode(),
                                                 "application/json")
 
+    def command_events(self, command_id: str, events: list[dict[str, Any]]):
+        """命令过程日志上报（烧写等长命令的实时输出通道）。"""
+        path = f"/api/cluster/workers/{quote(self.config.worker_id)}/commands/{quote(command_id)}/events"
+        body = {"events": events}
+        return self._request_with_worker_header("POST", path, json.dumps(body, separators=(",", ":")).encode(),
+                                                "application/json")
+
     def upload_artifact(self, job_id: str, attempt_id: str, path, artifact_type: str = "file"):
         path = Path(path)
         chunk_size = 4 * 1024 * 1024

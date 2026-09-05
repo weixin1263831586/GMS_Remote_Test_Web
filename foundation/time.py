@@ -18,9 +18,3 @@ def parse_datetime(value: Any) -> datetime | None:
         return None
 
 
-def iso_text(value: Any) -> str:
-    if value in (None, ''):
-        return ''
-    if isinstance(value, (date, datetime)):
-        return value.isoformat()
-    return str(value)

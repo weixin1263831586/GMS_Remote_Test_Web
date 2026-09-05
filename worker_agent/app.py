@@ -544,6 +544,8 @@ class WorkerAgent:
                                    (worker_job_id,)).fetchone()
             if row:
                 sequence = 0
+                # 任务开始时上报设备指纹（"测的包 ≠ 刷的包"一眼识别）。
+                self._report_device_fingerprints(row)
                 offsets = {"stdout.log": 0, "stderr.log": 0}
                 while self.runtime.process_poll(worker_job_id) is None:
                     try:
@@ -562,7 +564,7 @@ class WorkerAgent:
             error = "" if status in {"completed", "cancelled"} else f"process exited with {result['exit_code']}"
             if row:
                 work_dir = Path(row["work_dir"])
-                # P0-1：识别 tradefed "No matched tradefed modules"，把
+                # 识别 tradefed "No matched tradefed modules"，把
                 # "process exited with N" 的误导性错误替换为结构化根因。
                 stdout_log = work_dir / "stdout.log"
                 if status == "failed" and stdout_log.is_file():
@@ -583,6 +585,19 @@ class WorkerAgent:
                         self._retry(lambda path=log_path: self.client.upload_artifact(
                             row["job_id"], row["attempt_id"], path, "log"))
                 self._upload_tradefed_results(row, work_dir)
+                # 失败任务自动采集设备现场证据（logcat + 快照），
+                # 尽力而为，采集/上传失败不影响结果上报。
+                if status == "failed":
+                    try:
+                        from .failure_evidence import collect_failure_evidence
+
+                        serials = self._job_device_serials(row)
+                        collect_failure_evidence(
+                            row["job_id"], row["attempt_id"], serials, work_dir,
+                            self.client.upload_artifact, self._retry,
+                        )
+                    except Exception:
+                        logger.exception("failure evidence collection error")
             self.runtime.save_command(command_id, status, result, error)
             self._retry(lambda: self._ack_command(command_id, status, result, error))
         except Exception as exc:
@@ -887,9 +902,43 @@ class WorkerAgent:
                 if target.stat().st_size != int(spec["size_bytes"]) or digest.hexdigest() != spec["sha256"]:
                     raise ValueError("staged image checksum mismatch")
                 downloaded[spec["kind"]] = target
-            result = (flash_gsi(self.config, downloaded.get("system"), downloaded.get("vendor"), payload.get("devices", []))
+            # 烧写过程逐行上报 command events，浏览器可实时
+            # 看到 fastboot/upgrade_tool 输出（不再是结束后一次性 20KB）。
+            pending_events: list[dict] = []
+            pending_lock = threading.Lock()
+            event_sequence = [0]
+
+            def _flush_command_events() -> None:
+                with pending_lock:
+                    batch, pending_events[:] = pending_events[:50], pending_events[50:]
+                if not batch:
+                    return
+                try:
+                    self.client.command_events(command["id"], batch)
+                except Exception:
+                    logger.debug("command event upload failed", exc_info=True)
+
+            def _report_flash_output(line: str, _is_stderr: bool) -> None:
+                with pending_lock:
+                    pending_events.append({
+                        "sequence": event_sequence[0],
+                        "event_type": "log",
+                        "source": "burn",
+                        "level": "info",
+                        "message": line[:2000],
+                        "payload": {},
+                    })
+                    event_sequence[0] += 1
+                    should_flush = len(pending_events) >= 20
+                if should_flush:
+                    _flush_command_events()
+
+            result = (flash_gsi(self.config, downloaded.get("system"), downloaded.get("vendor"), payload.get("devices", []),
+                                on_output=_report_flash_output)
                       if command["command_type"] == "flash_gsi" else
-                      flash_firmware(self.config, downloaded["firmware"], payload.get("devices", [])))
+                      flash_firmware(self.config, downloaded["firmware"], payload.get("devices", []),
+                                     on_output=_report_flash_output))
+            _flush_command_events()  # 收尾：把剩余不足一批的行补报
             status = "completed" if result.get("success") else "failed"
             error = "" if status == "completed" else result.get("output", "firmware flash failed")
             self.runtime.save_command(command["id"], status, result, error)
@@ -947,6 +996,47 @@ class WorkerAgent:
                 last_error = exc
                 time.sleep(delay)
         raise last_error or RuntimeError("operation failed")
+
+    def _job_device_serials(self, row) -> list[str]:
+        """从 jobs 表的 devices_json 解析设备序列号。"""
+        try:
+            keys = set(row.keys())
+            raw = row["devices_json"] if "devices_json" in keys else "[]"
+            devices = json.loads(raw or "[]")
+        except Exception:
+            devices = []
+        serials = []
+        for item in devices if isinstance(devices, list) else []:
+            serial = str(item or "").strip()
+            # 形如 "worker:serial" 的前缀去掉（与 _device_serials 约定一致）。
+            if ":" in serial:
+                serial = serial.split(":", 1)[1]
+            if serial:
+                serials.append(serial)
+        return serials
+
+    def _report_device_fingerprints(self, row) -> None:
+        """任务开始时上报设备指纹事件（尽力而为）。"""
+        try:
+            from .failure_evidence import collect_device_fingerprint
+
+            for serial in self._job_device_serials(row):
+                fingerprint = collect_device_fingerprint(serial)
+                if not any(fingerprint.values()):
+                    continue
+                self._retry(lambda s=serial, f=fingerprint: self.client.events(
+                    row["job_id"], row["attempt_id"],
+                    [{
+                        "sequence": 0,
+                        "event_type": "device_fingerprint",
+                        "source": "worker",
+                        "level": "info",
+                        "message": f"device fingerprint for {s}",
+                        "payload": {"serial": s, **f},
+                    }],
+                ))
+        except Exception:
+            logger.exception("device fingerprint report failed")
 
     _RESULT_DIR_RE = re.compile(r"RESULT DIRECTORY\s*:\s*(\S+)")
     _FINAL_LOG_RE = re.compile(r"process final logs:\s*(/\S+)")

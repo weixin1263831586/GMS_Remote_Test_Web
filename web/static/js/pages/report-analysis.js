@@ -782,7 +782,7 @@ function ensureReportAnalysisResultStructure() {
             </div>
             <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <div style="font-size: 12px; font-weight: 600;">❌ 失败用例</div>
+                    <div id="report-failures-title" style="font-size: 12px; font-weight: 600;">❌ 失败用例</div>
                 </div>
                 <div id="report-failure-list" style="max-height: 580px; overflow-y: auto;"></div>
             </div>
@@ -830,6 +830,8 @@ function displayReportAnalysis(data) {
     if (detailsDiv) detailsDiv.innerHTML = '';
     if (failureList) failureList.innerHTML = '';
     if (failuresDiv) failuresDiv.style.display = 'none';
+    const failuresTitle = $('report-failures-title');
+    if (failuresTitle) failuresTitle.textContent = '❌ 失败用例';
 
     // 移除上传空状态类（缩小到固定高度）
     if (uploadZone) uploadZone.classList.remove('upload-empty');
@@ -929,6 +931,7 @@ function displayReportAnalysis(data) {
     // 显示失败用例
     if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
         failuresDiv.style.display = 'block';
+        if (failuresTitle) failuresTitle.textContent = '❌ 失败用例';
 
         // 测试类型在循环外提取（每份报告固定不变）
         const reportTestType = escapeJsAttr((data.details && data.details.test_type) || '');
@@ -987,11 +990,13 @@ function displayReportAnalysis(data) {
         failureList.innerHTML = failuresHTML;
     } else if (failuresDiv) {
         failuresDiv.style.display = 'block';
+        if (failuresTitle) failuresTitle.textContent = '✅ 测试结果';
         if (failureList) {
+            const passRate = (data.summary && data.summary.pass_rate) || '';
             failureList.innerHTML = `
                 <div class="report-empty-success">
-                    <b>未发现失败用例</b>
-                    <span>这份报告没有可诊断的失败项，可以清除后继续分析下一份报告。</span>
+                    <b>✅ 全部通过</b>
+                    <span>这份报告${passRate ? `通过率 ${escapeHtml(passRate)}` : '没有失败用例'}，无需诊断失败项，可以清除后继续分析下一份报告。</span>
                 </div>
             `;
         }
@@ -1171,24 +1176,6 @@ async function runReportDiagnosis(failureIndex = 0) {
         }
         notifyOperationResult('报告诊断失败', error.message, 'error', 'report-diagnosis');
     }
-}
-
-function switchReportDiagnosisPanel(panelName) {
-    document.querySelectorAll('[data-dx-tab]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.dxTab === panelName);
-    });
-    document.querySelectorAll('[data-dx-panel]').forEach(panel => {
-        panel.classList.toggle('active', panel.dataset.dxPanel === panelName);
-    });
-}
-
-function renderDxMetric(label, value) {
-    return `
-        <div class="dx-metric">
-            <span class="dx-metric-label">${escapeHtml(label)}</span>
-            <span class="dx-metric-value">${escapeHtml(value || '无')}</span>
-        </div>
-    `;
 }
 
 function renderDxLocatorRow(label, value) {

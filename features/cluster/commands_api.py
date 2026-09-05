@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from .api import _authenticate, service
-from .models import CommandAck
+from .models import CommandAck, CommandEventBatch
+from .jobs_api import _require_job_access
 
 
 router = APIRouter()
@@ -60,6 +61,11 @@ def synchronize_command(command: dict[str, Any]) -> None:
         update_cluster_report_status(
             command["job_id"], command["status"], command.get("error", "")
         )
+        # 用户切走 Worker/页面后不再轮询该 job，后台测试的
+        # 完成/失败只能靠持久通知触达。
+        command_id = str(command.get("id") or "")
+        if command_id and service().repository.claim_terminal_notification(command_id):
+            _notify_start_test_result(command)
     from .transfers_api import cleanup_staged_firmware
 
     cleanup_staged_firmware(command)
@@ -77,6 +83,201 @@ def synchronize_command(command: dict[str, Any]) -> None:
         command_id = str(command.get("id") or "")
         if command_id and service().repository.claim_terminal_notification(command_id):
             _notify_suite_action_result(command)
+    if command.get("command_type") in {"flash_firmware", "flash_gsi"} \
+            and command.get("status") in {"completed", "failed", "cancelled"}:
+        command_id = str(command.get("id") or "")
+        if command_id and service().repository.claim_terminal_notification(command_id):
+            _notify_flash_result(command)
+    # 长耗时/改变设备状态的 device_action 也要终态通知。
+    # 读操作（screenshot/props/scrcpy 等）即时返回不需要；只覆盖风险表
+    # 中标注高/中的操作：override_apply/revert、bootloader lock/unlock、
+    # reboot/reboot_bootloader、remount。
+    if command.get("command_type") == "device_action" \
+            and command.get("status") in {"completed", "failed", "cancelled"}:
+        action = str((command.get("payload") or {}).get("action") or "")
+        if action in {
+            "override_apply", "override_revert",
+            "bootloader_lock", "bootloader_unlock",
+            "reboot", "reboot_bootloader", "remount",
+        }:
+            command_id = str(command.get("id") or "")
+            if command_id and service().repository.claim_terminal_notification(command_id):
+                _notify_device_action_result(command)
+    if command.get("command_type") == "file_transfer" \
+            and command.get("status") in {"failed", "cancelled"}:
+        # 拉取成功无需通知（后续烧写命令会发）；失败必须让发起人知道，
+        # 否则页面关闭后跨 Worker 镜像传输失败将无任何记录。
+        command_id = str(command.get("id") or "")
+        if command_id and service().repository.claim_terminal_notification(command_id):
+            _notify_file_transfer_failed(command)
+
+
+def _notify_file_transfer_failed(command: dict[str, Any]) -> None:
+    """Worker 镜像拉取命令失败时，向发起人发送通知中心消息。"""
+    from features.system import queue_notification
+
+    payload = command.get("payload") or {}
+    owner_id = str(payload.get("owner_id") or "")
+    if not owner_id:
+        return
+    worker_id = str(command.get("worker_id") or "")
+    source_path = str(payload.get("source_path") or "")
+    error = str(command.get("error") or "拉取失败").strip()
+    queue_notification(
+        owner_id,
+        "Worker 镜像拉取失败",
+        f"从 {worker_id} 拉取 {source_path} 失败：{error[:300]}",
+        "error",
+        "cluster",
+        {
+            "command_id": str(command.get("id") or ""),
+            "worker_id": worker_id,
+            "transfer_id": str(payload.get("transfer_id") or ""),
+            "status": str(command.get("status") or ""),
+        },
+    )
+
+
+def _notify_device_action_result(command: dict[str, Any]) -> None:
+    """长耗时/改变设备状态的 device_action 终态通知。
+
+    Controller 等待超时转 accepted 后浏览器不再轮询，Worker 后台完成的
+    结果只能靠通知中心触达。owner 从 payload 取（device_action payload
+    带 owner_id；无 owner 时静默跳过）。
+    """
+    # 跨 feature 只允许走 features.system 公开包边界。
+    from features.system import queue_notification
+
+    payload = command.get("payload") or {}
+    owner_id = str(payload.get("owner_id") or "")
+    if not owner_id:
+        return
+    status = str(command.get("status") or "")
+    action = str(payload.get("action") or "device_action")
+    action_labels = {
+        "override_apply": "RRO 配置应用",
+        "override_revert": "RRO 配置还原",
+        "bootloader_lock": "Bootloader 锁定",
+        "bootloader_unlock": "Bootloader 解锁",
+        "reboot": "设备重启",
+        "reboot_bootloader": "进入 Bootloader",
+        "remount": "Remount",
+    }
+    subject = action_labels.get(action, action)
+    worker_id = str(command.get("worker_id") or "")
+    devices = [str(item).split(":", 1)[-1] for item in payload.get("devices") or []]
+    device_text = ", ".join(devices) or "-"
+    title = f"{subject}{'完成' if status == 'completed' else '失败' if status == 'failed' else '已取消'}"
+    parts = [f"设备 {device_text}（Worker: {worker_id}）"]
+    error = str(command.get("error") or "").strip()
+    if error:
+        parts.append(error[:300])
+    level = {"completed": "success", "failed": "error"}.get(status, "warning")
+    queue_notification(
+        owner_id,
+        title,
+        "；".join(parts),
+        level,
+        "cluster",
+        {
+            "command_id": str(command.get("id") or ""),
+            "worker_id": worker_id,
+            "command_type": "device_action",
+            "action": action,
+            "devices": devices,
+            "status": status,
+        },
+    )
+
+
+def _notify_start_test_result(command: dict[str, Any]) -> None:
+    """Worker 测试命令到达终态时，向发起人发送通知中心消息。
+
+    用户切到其他 Worker/页面后不再轮询该 job，后台测试的
+    完成/失败必须持久通知。owner 从 job 记录反查（start_test 的
+    payload 不带 owner_id）。
+    """
+    # 跨 feature 只允许走 features.system 公开包边界。
+    from features.system import queue_notification
+
+    job = service().repository.get_job(str(command.get("job_id") or "")) or {}
+    owner_id = str(job.get("owner_id") or "")
+    if not owner_id:
+        return
+    status = str(command.get("status") or "")
+    job_id = str(command.get("job_id") or "")
+    worker_id = str(command.get("worker_id") or job.get("assigned_worker_id") or "")
+    request = job.get("request") or {}
+    suite_key = str(request.get("suite_key") or "").strip() or "-"
+    devices = [
+        str(item).split(":", 1)[-1]
+        for item in (
+            request.get("devices")
+            or [lease.get("device_id") for lease in job.get("leases") or []]
+            or []
+        )
+    ]
+    device_text = ", ".join(dict.fromkeys(devices)) or "-"
+    title = f"{suite_key} 测试{'完成' if status == 'completed' else '失败' if status == 'failed' else '已取消'}"
+    parts = [f"Worker: {worker_id}", f"设备: {device_text}", f"Job: {job_id}"]
+    error = str(command.get("error") or "").strip()
+    if error:
+        parts.append(error[:300])
+    level = {"completed": "success", "failed": "error"}.get(status, "warning")
+    queue_notification(
+        owner_id,
+        title,
+        "；".join(parts),
+        level,
+        "cluster",
+        {
+            "command_id": str(command.get("id") or ""),
+            "worker_id": worker_id,
+            "job_id": job_id,
+            "command_type": "start_test",
+            "status": status,
+        },
+    )
+
+
+def _notify_flash_result(command: dict[str, Any]) -> None:
+    """远端固件/GSI 烧写命令到达终态时，向发起人发送通知中心消息。"""
+    # 跨 feature 只允许走 features.system 公开包边界。
+    from features.system import queue_notification
+
+    payload = command.get("payload") or {}
+    owner_id = str(payload.get("owner_id") or "")
+    if not owner_id:
+        return
+    status = str(command.get("status") or "")
+    subject = "GSI" if command.get("command_type") == "flash_gsi" else "固件"
+    worker_id = str(command.get("worker_id") or "")
+    devices = [str(item).split(":", 1)[-1] for item in payload.get("devices") or []]
+    device_text = ", ".join(devices) or "-"
+    title = f"远端{subject}烧写{'完成' if status == 'completed' else '失败' if status == 'failed' else '已取消'}"
+    parts = [f"设备 {device_text}（Worker: {worker_id}）"]
+    error = str(command.get("error") or "").strip()
+    result = command.get("result") or {}
+    output = str(result.get("output") or "").strip() if isinstance(result, dict) else ""
+    if output:
+        parts.append(output[-300:])
+    elif error:
+        parts.append(error[:300])
+    level = {"completed": "success", "failed": "error"}.get(status, "warning")
+    queue_notification(
+        owner_id,
+        title,
+        "；".join(parts),
+        level,
+        "cluster",
+        {
+            "command_id": str(command.get("id") or ""),
+            "worker_id": worker_id,
+            "command_type": str(command.get("command_type") or ""),
+            "devices": devices,
+            "status": status,
+        },
+    )
 
 
 def _notify_suite_action_result(command: dict[str, Any]) -> None:
@@ -114,6 +315,49 @@ def _notify_suite_action_result(command: dict[str, Any]) -> None:
             "status": status,
         },
     )
+
+
+@router.post("/workers/{worker_id}/commands/{command_id}/events")
+def append_command_events(
+    worker_id: str,
+    command_id: str,
+    body: CommandEventBatch,
+    authorization: str | None = Header(default=None),
+    worker_session: str = Header(default=""),
+    worker_generation: int = Header(default=0, alias="X-GMS-Worker-Generation"),
+):
+    """Worker 上报命令执行过程日志（实时日志通道）。
+
+    与 job events 平行的 command 维度通道：烧写/device_action 等无 job 的
+    长命令把 fastboot/upgrade_tool 逐行输出上报到这里，浏览器按
+    command_id 增量拉取，达到与单机模式一致的实时日志体验。
+    """
+    _authenticate(worker_id, authorization)
+    _require_worker_session(worker_id, worker_session, worker_generation)
+    inserted = service().repository.append_command_events(
+        worker_id, command_id, [item.model_dump() for item in body.events]
+    )
+    return {"success": True, "inserted": inserted}
+
+
+@router.get("/commands/{command_id}/events")
+def list_command_events(
+    command_id: str,
+    request: Request,
+    after: int = Query(default=-1),
+    limit: int = Query(default=500, le=2000),
+):
+    """浏览器增量拉取命令过程日志（after 为上次收到的最大 sequence）。"""
+    command = service().repository.get_command(command_id)
+    if command is None:
+        raise HTTPException(404, "command not found")
+    _require_job_access(request, command)
+    events = service().repository.list_command_events(command_id, after, limit)
+    return {
+        "success": True,
+        "command": {"id": command_id, "status": command.get("status", "")},
+        "events": events,
+    }
 
 
 @router.post("/workers/{worker_id}/commands/poll")

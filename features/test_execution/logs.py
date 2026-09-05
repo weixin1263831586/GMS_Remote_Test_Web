@@ -217,16 +217,23 @@ class TestLogsManager:
     def save_current_log(
         self,
         log_content: str,
-        client_id: str
+        client_id: str,
+        test_type: str = '',
     ) -> dict[str, Any]:
-        """保存当前日志"""
+        """保存当前日志（文件名用测试类型命名，按 client_id 归属目录隔离）"""
         try:
             save_dir = self._owner_log_dir(client_id)
             save_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f'test_log_{self._safe_log_token(client_id)}_{timestamp}.log'
+            label = self._safe_log_token(test_type) if test_type else 'MANUAL'
+            filename = f'test_log_{label}_{timestamp}.log'
             file_path = save_dir / filename
+            suffix = 0
+            while file_path.exists():
+                suffix += 1
+                filename = f'test_log_{label}_{timestamp}_{suffix}.log'
+                file_path = save_dir / filename
 
             file_path.write_text(log_content, encoding='utf-8')
 

@@ -94,33 +94,6 @@ function getCategoryName(category) {
 }
 
 /**
- * Get category sort order
- * @param {string} category - Category key
- * @returns {number} Sort order (lower = first)
- */
-function getCategoryOrder(category) {
-    const order = {
-        'test': 1,
-        'config': 2,
-        'device': 3,
-        'users': 4,
-        'client': 4,
-        'report': 5,
-        'vpn': 6,
-        'ssh': 7,
-        'desktop': 8,
-        'terminal': 9,
-        'usbip': 10,
-        'burn': 11,
-        'file': 12,
-        'apk': 13,
-        'system': 14,
-        'other': 999
-    };
-    return order[category] || 999;
-}
-
-/**
  * Sort APIs by path (alphabetical). Despite the name, ignores category order.
  * @param {Array} apis - Array of API objects
  * @returns {Array} Sorted array

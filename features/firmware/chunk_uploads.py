@@ -71,14 +71,6 @@ def _read_metadata(session_dir: str) -> dict | None:
         return None
 
 
-def _read_uploaded_chunks(session_dir: str) -> set[int]:
-    try:
-        with open(os.path.join(session_dir, "uploaded_chunks.json"), encoding="utf-8") as handle:
-            return {int(item) for item in json.load(handle)}
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return set()
-
-
 def _write_uploaded_chunks(session_dir: str, uploaded_chunks: set[int]) -> None:
     target = os.path.join(session_dir, "uploaded_chunks.json")
     temporary = f"{target}.{uuid.uuid4().hex}.tmp"
