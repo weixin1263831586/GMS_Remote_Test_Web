@@ -2407,7 +2407,7 @@ async def stop_usbip(
             await asyncio.sleep(1)
             _clear_usbip_device_sources(config["device_host"], devices_to_remove)
         else:
-            # P1-11：usbipd detach/unbind 是同步 SSH 调用，放线程池避免
+            # usbipd detach/unbind 是同步 SSH 调用，放线程池避免
             # 冻结事件循环（DeviceSSHConnection 的建立本身也是阻塞的）。
             def _detach_source_bindings():
                 with DeviceSSHConnection(config) as source_ssh:

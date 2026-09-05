@@ -74,11 +74,6 @@ def _persist_apk_task_locked(task_id: str) -> None:
         runtime.apk_task_store.upsert(task_id, task)
 
 
-def _persist_apk_task(task_id: str) -> None:
-    with runtime.global_state.apk_analysis_tasks_lock:
-        _persist_apk_task_locked(task_id)
-
-
 def _get_apk_upload_lock(task_id: str) -> asyncio.Lock:
     with runtime.global_state.apk_upload_locks_lock:
         return runtime.global_state.apk_upload_locks.setdefault(task_id, asyncio.Lock())

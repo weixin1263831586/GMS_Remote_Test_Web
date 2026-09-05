@@ -314,13 +314,6 @@ def _enabled_overlays_by_target(device_id: str | None) -> dict[str, list[str]] |
     return by_target
 
 
-def _enabled_overlays(device_id: str | None) -> list[str] | None:
-    by_target = _enabled_overlays_by_target(device_id)
-    if by_target is None:
-        return None
-    return [overlay for overlays in by_target.values() for overlay in overlays]
-
-
 def _lookup_effective(
     device_id: str | None, package: str, entry: ResourceEntry
 ) -> None:

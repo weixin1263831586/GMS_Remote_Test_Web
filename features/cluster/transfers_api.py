@@ -576,6 +576,7 @@ def _stage_gsi_pull_from_worker(
             "payload": {
                 "transfer_id": transfer["id"],
                 "source_path": path_text,
+                "owner_id": principal_owner_id(request),
             },
         })
         pulls.append({

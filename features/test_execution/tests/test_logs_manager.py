@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -55,6 +56,27 @@ class TestLogsManagerTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertNotIn("..", result["filename"])
         self.assertNotIn("/", result["filename"])
+
+    def test_save_current_log_names_file_by_test_type_and_timestamp(self):
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls):
+                return cls(2026, 9, 5, 9, 20, 30)
+
+        with TemporaryDirectory() as tmp, patch(
+            "features.test_execution.logs.datetime", FixedDatetime
+        ):
+            manager = GmsTestLogsManager()
+            manager.saved_logs_dir = Path(tmp)
+            manager.log_dirs = [Path(tmp)]
+            result = manager.save_current_log("hello", "user-a", test_type="CTS")
+            first = result["filename"]
+            again = manager.save_current_log("hello", "user-a", test_type="CTS")
+            second = again["filename"]
+
+        self.assertTrue(result["success"])
+        self.assertEqual(first, "test_log_CTS_20260905_092030.log")
+        self.assertEqual(second, "test_log_CTS_20260905_092030_1.log")
 
     def test_regular_user_cannot_list_or_download_another_owners_log(self):
         with TemporaryDirectory() as tmp:

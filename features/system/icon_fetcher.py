@@ -859,11 +859,3 @@ async def get_icon_fetcher(timeout: int = 10, use_cache: bool = True):
 
 
 # 便捷函数
-async def fetch_website_icon(url: str, timeout: int = 10) -> dict[str, Any]:
-    """获取网站图标并返回字典结果。"""
-    fetcher = IconFetcher(timeout=timeout)
-    try:
-        result = await fetcher.fetch_icon_async(url)
-        return result.to_dict()
-    finally:
-        await fetcher.close()

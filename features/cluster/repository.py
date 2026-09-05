@@ -108,6 +108,11 @@ class ClusterRepository(
             for table in ("cluster_job_events", "cluster_job_artifacts", "cluster_artifact_uploads", "device_leases",
                           "cluster_commands", "cluster_job_attempts", "cluster_timeline_events"):
                 conn.execute(f"DELETE FROM {table} WHERE job_id=?", (job_id,))
+            conn.execute(
+                """DELETE FROM cluster_command_events WHERE command_id IN
+                   (SELECT id FROM cluster_commands WHERE job_id=?)""",
+                (job_id,),
+            )
             conn.execute("DELETE FROM cluster_jobs WHERE id=?", (job_id,))
             return True
 

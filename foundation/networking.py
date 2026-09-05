@@ -89,11 +89,6 @@ def _collect_local_ips() -> set[str]:
     return local_ips
 
 
-def get_local_ips() -> set[str]:
-    """Public alias for the cached local-IP set used by is_local_host."""
-    return _collect_local_ips()
-
-
 def is_local_host(host: str) -> bool:
     if not host:
         return False

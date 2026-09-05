@@ -158,7 +158,7 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
         '**报错信息**:\n' +
         '<pre>\n' + failureReason + '\n</pre>';
 
-    // DOM XSS 防护（审计 P1-8）：moduleName/testCaseName/failureReason/
+    // DOM XSS 防护：moduleName/testCaseName/failureReason/
     // issueId 全部来自测试报告数据，绝不能拼进 innerHTML（value="..."/
     // <textarea> 均可被 `</textarea><img onerror=...>` 逃逸）。模板只含
     // 常量，报告数据在 DOM 构建后通过 .value 赋值。
@@ -462,23 +462,6 @@ function filterByCategory(category) {
 }
 
 /**
- * 按方法筛选
- */
-function filterByMethod(method) {
-    currentMethodFilter = method;
-
-    // 更新按钮状态
-    document.querySelectorAll('[data-method]').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.dataset.method === method) {
-            btn.classList.add('active');
-        }
-    });
-
-    applyFilters();
-}
-
-/**
  * Debounce wrapper for search input
  */
 let debounceTimer;
@@ -636,21 +619,6 @@ function updateApiStats(apis) {
  */
 function createBadge(text, colorVar, size = 'xs') {
     return `<span style="background: var(--${colorVar}); color: white; padding: ${BADGE_PADDINGS[size]}; border-radius: 3px; font-size: ${BADGE_SIZES[size]};">${escapeHtml(text)}</span>`;
-}
-
-/**
- * Get example value for parameter type
- */
-function getExampleValue(type) {
-    const examples = {
-        'string': '"VALUE"',
-        'number': '123',
-        'array': '[]',
-        'boolean': 'true',
-        'file': '"/path/to/file"',
-        'object': '{}'
-    };
-    return examples[type] || '"VALUE"';
 }
 
 /**

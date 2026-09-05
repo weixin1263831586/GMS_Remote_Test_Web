@@ -362,23 +362,6 @@ def update_user_state_field(client_id: str, updates: dict):
 
 # ==================== 并行设备操作 ====================
 
-async def execute_on_devices_parallel(devices: list[str], operation_func, ssh, **kwargs) -> list[dict]:
-    """并行执行单设备操作并汇总结果。"""
-    async def process_device(device_id: str) -> dict:
-        try:
-            result = await operation_func(device_id, ssh, **kwargs)
-            result['device'] = device_id
-            result['success'] = True
-        except Exception as e:
-            logger.error(f"Error processing device {device_id}: {e}")
-            result = {'device': device_id, 'success': False, 'error': str(e)}
-        return result
-
-    # 并行执行所有设备操作
-    tasks = [process_device(device_id) for device_id in devices]
-    return await asyncio.gather(*tasks)
-
-
 # ==================== 设备属性获取 ====================
 
 def get_device_properties_optimized(device_id: str, ssh) -> dict[str, str]:

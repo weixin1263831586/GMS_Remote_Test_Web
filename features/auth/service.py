@@ -29,7 +29,7 @@ DEFAULT_SESSION_ABSOLUTE_HOURS = 100 * 365 * 24
 SESSION_ABSOLUTE_HOURS = int(
     os.getenv("GMS_SESSION_ABSOLUTE_HOURS", str(DEFAULT_SESSION_ABSOLUTE_HOURS))
 )
-SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "2"))
+SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "12"))
 # 管理员二次认证（提权）使用固定时长，不做滑动续期：普通会话的轮询
 # 会不断刷新 idle 超时，若提权跟随会话生命周期，会在整个工作日内保持。
 ELEVATION_MINUTES = int(os.getenv("GMS_ADMIN_ELEVATION_MINUTES", "30"))

@@ -99,6 +99,60 @@ class ClusterCommandRepositoryMixin:
             )
         return self.get_command(command_id) or {}
 
+    def append_command_events(
+        self, worker_id: str, command_id: str, events: list[dict[str, Any]]
+    ) -> int:
+        """Worker 命令过程日志（实时日志通道）。
+
+        与 job events 平行：烧写/device_action 等长命令把 fastboot/
+        upgrade_tool 逐行输出上报到这里；sequence 由 Worker 维护，
+        UNIQUE(command_id, sequence) 幂等去重。
+        """
+        inserted = 0
+        now = _utc_now()
+        with self.connect() as conn:
+            owner = conn.execute(
+                "SELECT worker_id FROM cluster_commands WHERE id=?", (command_id,)
+            ).fetchone()
+            if owner is None or str(owner["worker_id"]) != worker_id:
+                return 0
+            for event in events:
+                cursor = conn.execute(
+                    """INSERT OR IGNORE INTO cluster_command_events
+                        (command_id,worker_id,sequence,event_type,source,level,
+                         message,payload_json,created_at)
+                        VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (
+                        command_id,
+                        worker_id,
+                        int(event.get("sequence", 0)),
+                        str(event.get("event_type", "log")),
+                        str(event.get("source", "worker")),
+                        str(event.get("level", "info")),
+                        str(event.get("message", "")),
+                        json.dumps(event.get("payload", {}), separators=(",", ":")),
+                        now,
+                    ),
+                )
+                inserted += cursor.rowcount
+        return inserted
+
+    def list_command_events(
+        self, command_id: str, after: int = -1, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM cluster_command_events
+                   WHERE command_id=? AND sequence>? ORDER BY sequence LIMIT ?""",
+                (command_id, after, limit),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json") or "{}")
+            result.append(item)
+        return result
+
     def poll_commands(
         self, worker_id: str, limit: int = 5, redelivery_seconds: int = 120
     ) -> list[dict[str, Any]]:

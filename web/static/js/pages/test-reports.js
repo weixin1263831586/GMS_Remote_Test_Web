@@ -716,19 +716,6 @@ async function downloadReportAsZip(timestamp, reportId = '', reportName = '') {
     }
 }
 
-function openReportAnalysis(timestamp) {
-    // 切换到报告分析页面
-    const sidebarItem = document.querySelector('[data-page="report-analysis"]');
-    if (sidebarItem) {
-        sidebarItem.click();
-    }
-
-    // 等待页面切换完成后，自动加载并分析报告
-    setTimeout(() => {
-        analyzeReport(timestamp);
-    }, 300);
-}
-
 async function analyzeReport(timestamp, reportId = '') {
     try {
         // 从报告列表行中提前回写 Worker 上下文，确保分析结果跳转和后续操作

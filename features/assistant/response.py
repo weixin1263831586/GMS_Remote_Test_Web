@@ -79,20 +79,6 @@ def generate(result: ToolResult) -> AgentResponse:
     )
 
 
-def generate_error(error: str, suggestions: list[str] | None = None) -> AgentResponse:
-    """生成错误响应。"""
-    content = f"❌ {error}"
-    if suggestions:
-        content += "\n\n您可以尝试：\n" + "\n".join(f"- {s}" for s in suggestions)
-    return AgentResponse(
-        content=content,
-        kind="error",
-        data={"error": error, "suggestions": suggestions or []},
-        quick_actions=[],
-        page="",
-    )
-
-
 def generate_clarification(suggestions: list[dict[str, str]]) -> AgentResponse:
     """生成澄清响应（当意图置信度低时）。"""
     lines = ["我不太确定您想要做什么。您是想要："]

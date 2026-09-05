@@ -52,7 +52,7 @@ async function startTest() {
         const clusterJobId = startResult?.data?.cluster_job_id || startResult?.cluster_job_id || '';
         if (clusterJobId) {
             state.clusterJobId = clusterJobId;
-            state.clusterEventSequence = -1;
+            resetClusterEventCursor();
             sessionStorage.setItem('active_cluster_job', clusterJobId);
             window.GmsWorkspace?.update({
                 worker_id: workspaceWorkerId(),
@@ -108,7 +108,7 @@ async function stopTest() {
         state.testing = false;
         state.testStopping = false;
         state.clusterJobId = '';
-        state.clusterEventSequence = -1;
+        resetClusterEventCursor();
         sessionStorage.removeItem('active_cluster_job');
         window.GmsWorkspace?.update({cluster_job_id: '', attempt_id: ''}, {source: 'test-stop'});
         updateTestToggleButton(false);

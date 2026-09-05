@@ -2957,6 +2957,89 @@ gms-rt-test-suites-result() {
     fi
 }
 
+# P1-3：列出套件可用模块（解析 testcases/ 目录，精确/模糊过滤）。
+# 用法: gms-rt-test-modules <suite_path|suite_name> [--filter PATTERN]
+gms-rt-test-modules() {
+    local suite_path=""
+    local filter_pattern=""
+    local argument
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                echo "Usage: gms-rt-test-modules <suite_path|suite_name> [--filter PATTERN]"
+                echo "  suite_path  Full tools path, e.g. ~/GMS-Suite/android-cts-17_r1/android-cts/tools"
+                echo "  suite_name  Short suite name, e.g. android-cts-17_r1 (resolved automatically)"
+                echo "  --filter    Case-insensitive substring filter, e.g. CtsHardware"
+                return 0
+                ;;
+            --filter)
+                shift
+                [ $# -gt 0 ] || { error "--filter requires a pattern"; return "$GMS_RT_EXIT_USAGE"; }
+                filter_pattern="$1"
+                ;;
+            *)
+                [ -z "$suite_path" ] || {
+                    error "Unexpected argument: $1"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                suite_path="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [ -z "$suite_path" ] && { error "Suite path required. Usage: gms-rt-test-modules <suite_path|suite_name> [--filter PATTERN]"; return "$GMS_RT_EXIT_USAGE"; }
+
+    suite_path="${suite_path/#\~/$HOME}"
+
+    # Resolve short suite names against the suite inventory.
+    if [[ "$suite_path" != */* ]]; then
+        local resolved
+        resolved=$(_resolve_suite_reference "$suite_path") || resolved=""
+        if [ -n "$resolved" ]; then
+            [ "$GMS_RT_QUIET" != "1" ] && info "Suite '$suite_path' resolved to: $resolved"
+            suite_path="$resolved"
+        fi
+    fi
+
+    # testcases/ lives next to the tools directory (suite tools path layout:
+    # <suite>/android-cts/tools → <suite>/android-cts/testcases).
+    local testcases_dir="${suite_path%/}/../testcases"
+    if [ ! -d "$testcases_dir" ]; then
+        error "testcases directory not found: $testcases_dir"
+        diagnostic "提示: 传入套件的 tools 目录（如 ~/GMS-Suite/android-cts-17_r2/android-cts/tools）。"
+        return "$GMS_RT_EXIT_OPERATION"
+    fi
+
+    # Modules are testcases/ entries: directories and *.config files.
+    local modules
+    modules=$(
+        {
+            find "$testcases_dir" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null
+            find "$testcases_dir" -maxdepth 1 -type f -name '*.config' -printf '%f\n' 2>/dev/null | sed 's/\.config$//'
+        } | sort -u
+    )
+    if [ -n "$filter_pattern" ]; then
+        modules=$(echo "$modules" | grep -iF "$filter_pattern" || true)
+    fi
+
+    local count
+    count=$(echo "$modules" | grep -c . || true)
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        echo "$modules" | jq -Rn '[inputs | select(length > 0)] | {success: true, count: length, modules: .}'
+        return 0
+    fi
+
+    if [ -z "$modules" ]; then
+        success "No modules matched (filter: $filter_pattern)"
+        return 0
+    fi
+    success "Found $count module(s)$( [ -n "$filter_pattern" ] && echo " matching '$filter_pattern'" )"
+    echo "$modules"
+    return 0
+}
+
 # ==============================================================================
 # USB/IP Commands
 # ==============================================================================
@@ -3156,6 +3239,7 @@ _gms_rt_command_usage() {
         gms-rt-test-stop) printf '%s' 'gms-rt-test-stop [job_id]' ;;
         gms-rt-test-suites) printf '%s' 'gms-rt-test-suites [base_path]' ;;
         gms-rt-test-suites-result) printf '%s' 'gms-rt-test-suites-result <tools_path|suite_name> [--force-refresh]' ;;
+        gms-rt-test-modules) printf '%s' 'gms-rt-test-modules <tools_path|suite_name> [--filter PATTERN]' ;;
         *) printf '%s' "$1 [arguments]" ;;
     esac
 }
@@ -3171,6 +3255,7 @@ _gms_rt_command_summary() {
         gms-rt-system-version) printf '%s' 'Print the local CLI version' ;;
         gms-rt-devices-wait) printf '%s' 'Wait for selected devices to become visible in the requested state' ;;
         gms-rt-test-suites-result) printf '%s' 'List tradefed results for a suite path or short suite name' ;;
+        gms-rt-test-modules) printf '%s' 'List available tradefed modules for a suite (testcases/ directory)' ;;
         gms-rt-test-start) printf '%s' 'Start a test with smart args, suite short names, device prefixes, and optional --wait' ;;
         gms-rt-jobs-list) printf '%s' 'List durable test jobs visible to the current session' ;;
         gms-rt-jobs-status) printf '%s' 'Get authoritative durable test job state' ;;

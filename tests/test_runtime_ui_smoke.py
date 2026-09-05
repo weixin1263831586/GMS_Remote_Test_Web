@@ -8338,7 +8338,6 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 """() => {
                     state.clusterMode = false;
                     state.clusterEnabled = false;
-                    requireControllerHostAction = () => true;
                 }"""
             )
 

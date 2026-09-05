@@ -131,10 +131,10 @@ async def save_current_log(req: dict, request: Request):
             f"GMS Test Log - {display_test_type}\n"
             f"Saved: {timestamp}\n"
             f"User: {client_id}\n"
-            f"Client ID: {client_id}\n"
             f"{'=' * 80}\n\n"
             f"{log_content}",
             client_id,
+            test_type=display_test_type,
         )
         if not result.get("success"):
             return error_response(result.get("error", "Failed to save log"), status_code=500)

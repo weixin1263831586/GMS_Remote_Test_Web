@@ -251,25 +251,6 @@ def find_flash_controls(win):
     return long_edits, upgrade_buttons
 
 
-def _wait_device_not_adb(win, timeout: int = 120) -> bool:
-    """Wait until the device leaves ADB (reboot loader in progress).
-
-    RKDevTool 的「升级」只在 Loader/Maskrom 模式下生效；设备为 ADB 时
-    必须先 `adb reboot loader`。检测方式：主窗口 ComboBox 文本含 "ADB"。
-    """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            for c in win.descendants():
-                if (c.element_info.class_name or "") == "ComboBox":
-                    if "ADB" not in (c.window_text() or ""):
-                        return True
-        except Exception:
-            pass
-        time.sleep(2)
-    return False
-
-
 def _adb_reboot_loader(device: str = "") -> None:
     """Reboot the target device into loader via ADB.
 

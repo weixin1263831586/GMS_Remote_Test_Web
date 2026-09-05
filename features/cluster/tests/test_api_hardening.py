@@ -313,6 +313,83 @@ class ClusterApiHardeningTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(stage_dir.exists())
 
+    def test_flash_gsi_terminal_ack_queues_owner_notification(self):
+        command = self.repo.create_command({
+            "worker_id": "worker-246",
+            "command_type": "flash_gsi",
+            "payload": {
+                "stage_id": "fw-" + "d" * 32,
+                "files": [],
+                "devices": ["worker-246:ABC"],
+                "owner_id": "tester-1",
+            },
+        })
+
+        with patch("features.system.queue_notification") as notify:
+            response = self.client.post(
+                f"/api/cluster/workers/worker-246/commands/{command['id']}/ack",
+                headers={"Authorization": "Bearer token"},
+                json={"status": "completed", "result": {"device": "ABC", "success": True},
+                      "error": ""},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        notify.assert_called_once()
+        owner_id, title, message, level = notify.call_args.args[:4]
+        self.assertEqual(owner_id, "tester-1")
+        self.assertIn("GSI烧写完成", title)
+        self.assertIn("ABC", message)
+        self.assertIn("worker-246", message)
+        self.assertEqual(level, "success")
+
+    def test_file_transfer_failure_ack_queues_owner_notification(self):
+        command = self.repo.create_command({
+            "worker_id": "worker-246",
+            "command_type": "file_transfer",
+            "payload": {
+                "transfer_id": "transfer-" + "e" * 32,
+                "source_path": "/srv/gsi/system.img",
+                "owner_id": "tester-1",
+            },
+        })
+
+        with patch("features.system.queue_notification") as notify:
+            response = self.client.post(
+                f"/api/cluster/workers/worker-246/commands/{command['id']}/ack",
+                headers={"Authorization": "Bearer token"},
+                json={"status": "failed", "result": {}, "error": "source file missing"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        notify.assert_called_once()
+        owner_id, title, message, level = notify.call_args.args[:4]
+        self.assertEqual(owner_id, "tester-1")
+        self.assertEqual(title, "Worker 镜像拉取失败")
+        self.assertIn("/srv/gsi/system.img", message)
+        self.assertIn("source file missing", message)
+        self.assertEqual(level, "error")
+
+    def test_file_transfer_success_ack_does_not_notify(self):
+        command = self.repo.create_command({
+            "worker_id": "worker-246",
+            "command_type": "file_transfer",
+            "payload": {
+                "transfer_id": "transfer-" + "f" * 32,
+                "source_path": "/srv/gsi/system.img",
+                "owner_id": "tester-1",
+            },
+        })
+
+        with patch("features.system.queue_notification") as notify:
+            response = self.client.post(
+                f"/api/cluster/workers/worker-246/commands/{command['id']}/ack",
+                headers={"Authorization": "Bearer token"},
+                json={"status": "completed", "result": {}, "error": ""},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        notify.assert_not_called()
+
     def test_manual_firmware_claim_is_released_by_terminal_ack(self):
         staged = self.client.post(
             "/api/cluster/firmware/stage",

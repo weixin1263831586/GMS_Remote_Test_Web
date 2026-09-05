@@ -369,10 +369,10 @@ async def download_test_suite_from_url(
                 download_url,
             ]
             cmd = f"{shlex.join(command_parts)} 2>&1"
-            # P1-10 回归：统一 CommandResult 后属性访问消除位置错用——
+            # 统一 CommandResult 后属性访问消除位置错用——
             # 历史解包成 (output, exit_code, _) 曾把 stderr 当退出码，
             # curl 成功也被判 Download failed。
-            # P1-11：同步 execute_command 最长阻塞 600s，必须放入线程池，
+            # 同步 execute_command 最长阻塞 600s，放入线程池，
             # 否则整个 FastAPI 事件循环被冻结（loop_watchdog 只能检测、
             # 不能消除卡顿）。
             download_result = await asyncio.to_thread(

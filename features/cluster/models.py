@@ -216,3 +216,11 @@ class JobEvent(BaseModel):
 class JobEventBatch(BaseModel):
     attempt_id: str
     events: list[JobEvent]
+
+
+class CommandEvent(JobEvent):
+    """Worker 命令过程日志事件。"""
+
+
+class CommandEventBatch(BaseModel):
+    events: list[CommandEvent]

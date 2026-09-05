@@ -17,6 +17,7 @@ REQUIRED_TABLES = frozenset({
     "cluster_worker_suites",
     "cluster_worker_tests",
     "cluster_commands",
+    "cluster_command_events",
     "cluster_job_events",
     "cluster_jobs",
     "cluster_timeline_events",
@@ -115,6 +116,7 @@ def create_indexes(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_timeline_trace ON cluster_timeline_events(trace_id,id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_worker_metrics_time ON cluster_worker_metrics(worker_id,recorded_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_job_events_job ON cluster_job_events(job_id,sequence)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cluster_command_events_cmd ON cluster_command_events(command_id,sequence)")
 
 
 def apply_schema(conn: sqlite3.Connection) -> None:
@@ -187,6 +189,13 @@ def apply_schema(conn: sqlite3.Connection) -> None:
             event_type TEXT NOT NULL, source TEXT NOT NULL, level TEXT NOT NULL,
             message TEXT NOT NULL, payload_json TEXT NOT NULL,
             created_at TEXT NOT NULL, UNIQUE(attempt_id, sequence)
+        );
+        CREATE TABLE IF NOT EXISTS cluster_command_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, command_id TEXT NOT NULL,
+            worker_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+            event_type TEXT NOT NULL, source TEXT NOT NULL, level TEXT NOT NULL,
+            message TEXT NOT NULL, payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL, UNIQUE(command_id, sequence)
         );
         CREATE TABLE IF NOT EXISTS cluster_jobs (
             id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, source_type TEXT NOT NULL,

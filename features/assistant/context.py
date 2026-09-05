@@ -174,29 +174,6 @@ def resolve_reference(session: dict[str, Any], text: str) -> dict[str, Any]:
 
 # ==================== Context Queries ====================
 
-def get_last_entities(session: dict[str, Any], entity_type: str) -> list[str]:
-    """获取上次记录的某类实体。"""
-    ctx = get_context(session)
-    return ctx.get("last_entities", {}).get(entity_type, [])
-
-
-def get_conversation_summary(session: dict[str, Any], last_n: int = 4) -> str:
-    """获取最近 N 轮对话的文本摘要。"""
-    ctx = get_context(session)
-    turns = ctx.get("turns", [])[-last_n:]
-    lines = []
-    for turn in turns:
-        role = "用户" if turn.get("role") == "user" else "Agent"
-        lines.append(f"{role}: {turn.get('summary', '')}")
-    return "\n".join(lines)
-
-
-def get_last_tool(session: dict[str, Any]) -> str:
-    """获取上次执行的工具名。"""
-    ctx = get_context(session)
-    return ctx.get("last_tool", "")
-
-
 # ==================== Helpers ====================
 
 _CN_DIGITS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,

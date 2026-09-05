@@ -274,6 +274,11 @@ run_tradefed() {
 
     log "⏱️ 结束时间: $(date)"
     log "📊 退出代码: $exit_code"
+    # P2-5：0 模块匹配时结构化透传根因，避免被"未找到 RESULT DIRECTORY"掩盖。
+    if grep -Fq "No matched tradefed modules" "$LOG_FILE"; then
+        log "❌ module not found in suite: tradefed matched 0 modules"
+        return 2
+    fi
     return $exit_code
 }
 
@@ -448,12 +453,19 @@ validate_module() {
     [[ -z "$Test_Module" || "$MODE" == "retry" ]] && return 0
     local testcases_dir
     testcases_dir="$(cd "$SUITE_PATH/.." && pwd)/testcases"
-    [[ -d "$testcases_dir" ]] && return 0
+    [[ -d "$testcases_dir" ]] || return 0
     if [[ -d "$testcases_dir/$Test_Module" ]] || [[ -f "$testcases_dir/$Test_Module.config" ]]; then
         return 0
     fi
     local match
-    match=$(ls "$testcases_dir" 2>/dev/null | grep -iF "$Test_Module" | head -5)
+    match=$(ls "$testcases_dir" 2>/dev/null | grep -iFx "$Test_Module" | head -1 || true)
+    if [[ -n "$match" ]]; then
+        # 大小写不敏感存在同名模块：放行并提示正确大小写，由 tradefed 正常执行。
+        log "⚠️ 模块名大小写与 testcases/ 不一致: $Test_Module → $match"
+        Test_Module="$match"
+        return 0
+    fi
+    match=$(ls "$testcases_dir" 2>/dev/null | grep -iF "$Test_Module" | head -5 || true)
     if [[ -n "$match" ]]; then
         die "module not found in suite: $Test_Module. 相近候选模块: $(echo "$match" | tr '\n' ', ' | sed 's/,$//')"
     fi

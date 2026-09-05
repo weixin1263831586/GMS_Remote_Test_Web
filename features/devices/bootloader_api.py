@@ -117,7 +117,7 @@ async def _manage_bootloader_lock(
                 )
 
         config = runtime.config_manager.load_config()
-        # P1-11：整个 SSH 块（SFTP 上传 + 脚本执行 + 60s 轮询）都是阻塞
+        # 整个 SSH 块（SFTP 上传 + 脚本执行 + 60s 轮询）都是阻塞
         # 调用，必须整体放进线程池执行，不能在 async 路由里直接跑。
         return await asyncio.to_thread(
             _run_bootloader_lock_block, config, devices, action,

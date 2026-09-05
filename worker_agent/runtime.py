@@ -407,7 +407,7 @@ class WorkerRuntime:
             pass
 
     def _validate_requested_module(self, argv: list[str]) -> None:
-        """P0-2 fail-fast：模块名不在套件 testcases/ 中时拒绝任务。
+        """fail-fast：模块名不在套件 testcases/ 中时拒绝任务。
 
         run_GMS_Test_Auto.sh argv 形如 ``[script, test_type, module?,
         test_case?, ...]``；retry 模式（argv[2]=='retry'）与未指定模块时
@@ -468,7 +468,7 @@ class WorkerRuntime:
                 f"test executable not found: {executable}. "
                 f"Ensure run_GMS_Test_Auto.sh is deployed to a suite root ({configured})."
             )
-        # P0-2 fail-fast：模块名错误时拒绝任务，避免占用设备租约走完
+        # fail-fast：模块名错误时拒绝任务，避免占用设备租约走完
         # tradefed 初始化约 4 秒才失败。argv[1]=test_type, argv[2]=module。
         self._validate_requested_module(argv)
         worker_job_id = payload.get("worker_job_id") or f"wj-{command['id']}"

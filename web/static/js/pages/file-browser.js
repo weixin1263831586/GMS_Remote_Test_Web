@@ -518,29 +518,6 @@ function openFileOrDirectory(name, type) {
     }
 }
 
-function selectFile(name, type, sourceEvent) {
-    if (type === 'directory') {
-        // Navigate into directory
-        const newPath = state.fileBrowser.currentPath === '/'
-            ? `/${name}`
-            : `${state.fileBrowser.currentPath}/${name}`;
-        loadFileDirectory(newPath);
-    } else {
-        // Select file
-        state.fileBrowser.selectedFile = name;
-
-        // Update UI to show selection
-        document.querySelectorAll('.file-browser-item').forEach(item => {
-            item.classList.remove('selected');
-        });
-
-        const eventSource = sourceEvent || window.event;
-        if (eventSource && eventSource.currentTarget) {
-            eventSource.currentTarget.classList.add('selected');
-        }
-    }
-}
-
 function closeFileBrowserModal() {
     ModalManager.close('file-browser-modal');
     state.fileBrowser.selectedFile = null;
