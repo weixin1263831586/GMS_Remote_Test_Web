@@ -334,16 +334,21 @@ async function switchTestWorker() {
     window.GmsWorkspace?.update({
         scope_mode: isLocalWorkspaceWorker(workerId) ? window.GmsWorkspace.get().scope_mode : 'cluster',
         worker_id: workerId,
-        device_ids: []
+        device_ids: [],
+        cluster_job_id: '',
+        attempt_id: ''
     }, {source: 'test'});
     syncWorkspaceWorkerSelectors(workerId);
     updateTestHostScopedControls(workerId);
-    // 立即清除旧主机的测试状态。旧 job 继续在后端跑，但 UI 必须切到空闲状态。
-    // refreshTestStatusForWorker 会异步查询新主机状态并在有活跃测试时恢复。
+    // 立即清除旧主机的测试状态：内存、sessionStorage、workspace 持久层
+    // 三处同步清理，否则 F5 后 active_cluster_job 会把旧 Worker 的 job
+    // 恢复到新主机上下文。旧 job 继续在后端跑；refreshTestStatusForWorker
+    // 查询到新主机有活跃测试时再绑定新 job。
     state.clusterJobId = '';
     resetClusterEventCursor();
     state.testing = false;
     state.testStopping = false;
+    sessionStorage.removeItem('active_cluster_job');
     updateTestToggleButton(false);
     // 切主机后按新的 worker scope 重过滤日志面板，
     // 其他 Worker 的历史保留在 DOM 中（隐藏而非删除）。
@@ -400,11 +405,17 @@ async function refreshTestStatusForWorker(workerId) {
             updateTestToggleButton(true);
             wakeTestStatusPolling();
         } else {
-            // 当前主机没有活跃测试，恢复空闲状态
+            // 当前主机没有活跃测试，恢复空闲状态并清掉持久层的旧 job 绑定
+            // （否则 F5 后 active_cluster_job 会恢复别的 Worker 的任务）。
             state.testing = false;
             state.testStopping = false;
             state.clusterJobId = '';
             resetClusterEventCursor();
+            sessionStorage.removeItem('active_cluster_job');
+            window.GmsWorkspace?.update(
+                {cluster_job_id: '', attempt_id: ''},
+                {source: 'worker-switch-idle'}
+            );
             updateTestToggleButton(false);
         }
     } catch (error) {
@@ -573,7 +584,7 @@ async function loadDevices(forceRefresh = false, options = {}) {
                     deviceInfo += ` (${serials})`;
                 }
             }
-            addLogEntry(deviceInfo, 'info');
+            addWorkerLog(workerId, deviceInfo, 'info');
         }
 
         // 不再自动检查 USB/IP 状态，避免覆盖连接状态
@@ -586,7 +597,7 @@ async function loadDevices(forceRefresh = false, options = {}) {
         if (silent) {
             debugLog('[Devices] Silent refresh failed:', error.message);
         } else {
-            addLogEntry('加载设备列表失败: ' + error.message, 'error');
+            addWorkerLog(workerId, '加载设备列表失败: ' + error.message, 'error');
         }
         throw error;
     } finally {

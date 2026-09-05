@@ -183,8 +183,11 @@ async function checkRouting(targetHost) {
 
                 result = {
                     success: true,
+                    // fallback 只完成了网段比较，不是真实连通性检测：
+                    // 同网段 != 可达，绝不能显示"测试通过"。
+                    fallback: true,
                     reachable: sameNetwork,
-                    latency: sameNetwork ? '<1ms (同一网段)' : 'N/A',
+                    latency: sameNetwork ? 'N/A（未执行真实 Ping）' : 'N/A',
                     same_network: sameNetwork,
                     test_host_ip: testHostIp,
                     client_ip: clientIp,
@@ -195,6 +198,22 @@ async function checkRouting(targetHost) {
             }
 
             if (result.success) {
+                if (result.fallback) {
+                    // Ping API 不可用的降级路径：仅做网段比较。
+                    pingResult.innerHTML = `
+                        <div class="ping-warning" style="border:1px solid var(--warning-color,#e6a700);padding:12px;border-radius:6px;">
+                            <h4>⚠️ 无法执行真实连通性检测</h4>
+                            <p>Ping 服务不可用，本次仅比较了两个地址是否处于同一 /24 网段。</p>
+                            <p><strong>测试主机:</strong> ${testHostIp}（网段 ${result.test_network}）</p>
+                            <p><strong>客户端:</strong> ${clientIp}（网段 ${result.client_network}）</p>
+                            <p>状态: ${result.same_network
+                                ? '同一网段（不代表主机实际可达）'
+                                : '不同网段（需要配置路由才能互通）'}</p>
+                            <p>同网段不等于可达，请以实际 SSH 连接结果为准。</p>
+                        </div>
+                    `;
+                    return;
+                }
                 if (result.reachable) {
                     pingResult.innerHTML = `
                         <div class="ping-success">

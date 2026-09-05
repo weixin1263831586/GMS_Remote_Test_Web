@@ -72,9 +72,15 @@ _SERVICE_AUTHENTICATED_ROUTES = (
     ('POST', re.compile(r'^/api/cluster/workers/[^/]+/commands/poll$')),
     ('POST', re.compile(r'^/api/cluster/workers/[^/]+/commands/[^/]+/ack$')),
     ('POST', re.compile(
+        r'^/api/cluster/workers/[^/]+/commands/[^/]+/events$'
+    )),
+    ('POST', re.compile(
         r'^/api/cluster/workers/[^/]+/adb-proxy/pair-code$'
     )),
     ('GET', re.compile(r'^/api/cluster/workers/[^/]+/firmware/[^/]+$')),
+    ('GET', re.compile(
+        r'^/api/cluster/workers/[^/]+/report-copies/[^/]+$'
+    )),
     ('GET', re.compile(
         r'^/api/cluster/suite-library-download/[^/]+/[^/]+$'
     )),

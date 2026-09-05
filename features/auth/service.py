@@ -74,6 +74,16 @@ def _from_iso(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _last_seen_recent(last_seen_at: str | None, now: datetime) -> bool:
+    """会话 last_seen 距 now 是否不足 60s（用于 session touch 节流）。"""
+    if not last_seen_at:
+        return False
+    try:
+        return (now - _from_iso(last_seen_at)) < timedelta(seconds=60)
+    except ValueError:
+        return False
+
+
 @dataclass(frozen=True)
 class CurrentUser:
     id: str
@@ -551,7 +561,7 @@ class AuthService(AuthRateLimitMixin):
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT u.*
+                SELECT u.*, s.last_seen_at AS session_last_seen_at
                 FROM platform_sessions s
                 JOIN platform_users u ON u.id = s.user_id
                 WHERE s.token_hash = ?
@@ -565,19 +575,26 @@ class AuthService(AuthRateLimitMixin):
             if not row:
                 return None
             if refresh:
-                conn.execute(
-                    """
-                    UPDATE platform_sessions
-                    SET last_seen_at = ?, idle_expires_at = ?
-                    WHERE token_hash = ?
-                    """,
-                    (
-                        _to_iso(now),
-                        _to_iso(now + timedelta(hours=SESSION_IDLE_HOURS)),
-                        token_hash,
-                    ),
-                )
-                conn.commit()
+                # 节流：last_seen 距上次刷新不足 60s 时跳过 UPDATE。
+                # 轮询类请求（/test/status、/notifications 等）每 1~2s 一次，
+                # 每次都写认证库会把读请求全变成 SQLite 写热点。
+                idle_deadline = _to_iso(now + timedelta(hours=SESSION_IDLE_HOURS))
+                if not _last_seen_recent(row["session_last_seen_at"], now):
+                    conn.execute(
+                        """
+                        UPDATE platform_sessions
+                        SET last_seen_at = ?, idle_expires_at = ?
+                        WHERE token_hash = ?
+                          AND last_seen_at < ?
+                        """,
+                        (
+                            _to_iso(now),
+                            idle_deadline,
+                            token_hash,
+                            _to_iso(now - timedelta(seconds=60)),
+                        ),
+                    )
+                    conn.commit()
         return self._row_to_user(row)
 
     def list_users(self) -> list[dict[str, Any]]:
