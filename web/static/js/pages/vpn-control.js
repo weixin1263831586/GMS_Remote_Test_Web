@@ -341,9 +341,14 @@ async function checkVpnStatus() {
     try {
         let connected;
         if (remote) {
+            // silentToast：后台状态轮询失败只写日志，绝不允许弹错误
+            // toast——用户可能正在阅读其他操作的反馈（如启动测试的
+            // 409 容量提示），轮询噪音会把它覆盖掉。
             const result = await apiCall(
                 `/api/cluster/workers/${encodeURIComponent(workerId)}/vpn-status`,
-                'GET'
+                'GET',
+                null,
+                {silentToast: true}
             );
             if (result.connected === null || result.connected === undefined) {
                 updateVpnStatus(null);
@@ -509,7 +514,9 @@ async function submitVpnCredential() {
 // ==================== USB/IP Status Check ====================
 async function checkUsbipStatus() {
     try {
-        const result = await apiCall('/api/usbip/status', 'GET');
+        // silentToast：后台状态轮询失败不弹 toast（见 checkVpnStatus）。
+        const result = await apiCall('/api/usbip/status', 'GET', null,
+            {silentToast: true});
         if (result.device_host) {
             pendingUsbipDeviceHost = result.device_host;
         }

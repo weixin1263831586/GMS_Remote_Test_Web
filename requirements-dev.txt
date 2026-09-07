@@ -1,0 +1,9 @@
+-r requirements.txt
+# 测试专用依赖（生产部署无需安装）。
+# httpx 是 starlette TestClient 的硬依赖（8+ 个测试模块经
+# fastapi.testclient 走进程内 API）。
+pytest==9.1.1
+httpx==0.28.1
+# Playwright 供浏览器冒烟/E2E（tests/e2e、test_runtime_ui_smoke.py），
+# 由独立 E2E job 安装并在 unit job 中 --ignore=tests/e2e 隔离。
+playwright==1.58.0

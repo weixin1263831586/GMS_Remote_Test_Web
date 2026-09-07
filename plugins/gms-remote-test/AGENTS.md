@@ -33,11 +33,17 @@ changing anything here.
   are denied outright (`_DENIED_COMMANDS`).
 - Passwords travel only via `password_stdin` → subprocess stdin; never in
   args, logs, or tool descriptions.
-- Elevation is a human action (`gms-rt-auth-elevate` outside the agent);
-  elevated sessions only unlock the 5 elevated read-only commands
-  (`users-list`, `adb-forward-status`, `desktop-validate`,
+- Elevation: `gms_rt_auth_elevate` (added v0.6.0) performs the admin step-up
+  with admin credentials provided by the user; the CLI catalog still marks
+  `gms-rt-auth-elevate` non-agent-safe for `gms_rt_run`, so the generic
+  runner cannot reach it. Elevated sessions unlock the 5 elevated read-only
+  commands (`users-list`, `adb-forward-status`, `desktop-validate`,
   `desktop-vnc-status`, `test-suites-result`). Verified by the
   elevation matrix in the skill's `references/agent-workflows.md`.
+- `gms_rt_burn_firmware` (added v0.6.0) is the only typed path to a
+  mutating burn: it requires an elevated session (hint on exit_code 4
+  points agents to it) and forwards to `gms-rt-burn-firmware` with
+  explicit wipe/wait-online arguments.
 
 ## Token discipline (regression-test any output change)
 
@@ -47,7 +53,10 @@ changing anything here.
 3. Catalog cached per process (5 min TTL); `gms_rt_commands` renders one
    line per command and omits `<name> [arguments]` fallback usage.
 4. `gms_rt_run("system-docs")` renders one line per endpoint (~24KB → ~4.5KB).
-5. Typed tools for hot paths so agents skip describe+run round trips.
+5. `gms_rt_jobs_list` renders one line per job and `gms_rt_jobs_status` /
+   `gms_rt_jobs_wait` trim the single-job payload (v0.6.0; ~60-80% smaller
+   on real payloads). Error envelopes are never re-rendered.
+6. Typed tools for hot paths so agents skip describe+run round trips.
 
 ## Verification quick sheet
 

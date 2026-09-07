@@ -6,6 +6,18 @@ from typing import Any
 
 
 class ClusterClaimRepositoryMixin:
+    def resolve_worker_device(
+        self, worker_id: str, value: str
+    ) -> dict[str, Any] | None:
+        """按 inventory 精确解析设备；serial 可能含 ":"，禁止前缀切分猜测。"""
+        value = str(value or "").strip()
+        if not value:
+            return None
+        for device in self.list_devices(worker_id):
+            if value in {str(device.get("id") or ""), str(device.get("serial") or "")}:
+                return device
+        return None
+
     def _claim_devices(
         self, worker_id: str, devices: list[str]
     ) -> list[dict[str, Any]]:

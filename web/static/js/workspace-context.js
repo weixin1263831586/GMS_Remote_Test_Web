@@ -16,6 +16,9 @@
     let persistQueued = false;
     let revision = 0;
     let localWorkerId = 'ats-worker-controller';
+    // 已知 Worker ID 集合（Cluster Status 加载后回填）：用于区分
+    // "worker:serial" 前缀与本身就含 ":" 的 serial（ip:5555 等）。
+    const knownWorkerIds = new Set();
     let context = {...DEFAULT_CONTEXT};
     let activePage = String(window.__targetPage || 'test');
     let resolveReady;
@@ -33,7 +36,18 @@
             .map(value => String(value || '').trim()).filter(Boolean))).slice(0, 32);
         if (next.scope_mode === 'single') {
             next.worker_id = localWorkerId;
-            next.device_ids = next.device_ids.filter(value => !value.includes(':') || value.startsWith(`${localWorkerId}:`));
+            // 只剥离已知 localWorkerId 前缀；serial 本身可能含 ":"
+            // （ADB TCP "ip:5555"、ADB Proxy "localhost:port"），不能按
+            // "包含冒号" 判断为跨 Worker 设备而误删——只有以其它已知
+            // Worker ID 前缀开头的条目才是跨 Worker 残留。
+            const knownWorkerPrefix = prefix => prefix
+                && prefix !== localWorkerId
+                && knownWorkerIds.has(prefix);
+            next.device_ids = next.device_ids.filter(value => {
+                const separator = value.indexOf(':');
+                if (separator <= 0) return true;
+                return !knownWorkerPrefix(value.slice(0, separator));
+            });
         }
         return next;
     }
@@ -200,7 +214,13 @@
             if (clusterResponse?.ok) {
                 clusterStatus = await clusterResponse.json();
                 localWorkerId = String(clusterStatus.local_worker_id || localWorkerId);
+                knownWorkerIds.clear();
+                knownWorkerIds.add(localWorkerId);
                 if (Array.isArray(clusterStatus.workers)) {
+                    clusterStatus.workers.forEach(worker => {
+                        const id = String(worker?.id || '').trim();
+                        if (id) knownWorkerIds.add(id);
+                    });
                     window.clusterWorkersSnapshot = {
                         workers: clusterStatus.workers,
                         loadedAt: Date.now(),

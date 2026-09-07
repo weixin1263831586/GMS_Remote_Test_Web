@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
@@ -335,7 +336,28 @@ def get_command(command_id: str, request: Request):
             or owner_id == user.id
         ):
             raise HTTPException(404, "command not found")
-    return {"success": True, "command": command}
+    return {"success": True, "command": _redact_command_payload(command)}
+
+
+def _redact_command_payload(command: dict[str, Any]) -> dict[str, Any]:
+    """Strip secrets from a command payload before browser serialization.
+
+    device_action(wifi) 在 Controller 侧把全局配置的 wifi.password 填入
+    payload 并随 cluster_commands 持久化；命令 owner（普通用户）可以通过
+    本端点读回完整 payload，等于泄露共享基础设施凭据。返回前统一打码。
+    """
+    payload = command.get("payload")
+    if not isinstance(payload, dict):
+        return command
+    redacted = False
+    safe_payload = dict(payload)
+    for key in ("password", "wifi_password"):
+        if safe_payload.get(key):
+            safe_payload[key] = "***redacted***"
+            redacted = True
+    if not redacted:
+        return command
+    return {**command, "payload": safe_payload}
 
 
 @router.get("/suites")

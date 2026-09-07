@@ -40,14 +40,18 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install ruff pytest
+          # requirements-dev.txt 包含 requirements.txt + pytest/httpx
+          # （TestClient 硬依赖）等测试专用依赖，生产部署不装它。
+          pip install -r requirements-dev.txt
+          pip install ruff
 
       - name: Ruff lint
         run: ruff check .
 
       - name: Unit + feature + worker_agent tests
-        run: pytest tests features worker_agent/tests -q
+        # tests/e2e 依赖 Playwright 浏览器，由独立 browser-e2e job 执行，
+        # 避免 browser 故障与 unit 故障混在一起。
+        run: pytest tests features worker_agent/tests --ignore=tests/e2e -q
 
       - name: Security and architecture tests
         run: |
@@ -65,5 +69,29 @@ jobs:
 
       - name: Soak tests (self-skipping without real devices)
         run: pytest tests/soak -q
+
+  browser-e2e:
+    name: browser-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium || \
+            python -m playwright install chromium
+
+      - name: Browser E2E and smoke tests
+        run: pytest tests/e2e tests/test_runtime_ui_smoke.py -q
 
 # 真机链路由 nightly-soak.yml 在隔离实验台 runner 上执行。

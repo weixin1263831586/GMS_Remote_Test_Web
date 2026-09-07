@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import os
 import re
 import shutil
@@ -24,6 +25,9 @@ from foundation.transport_contract import execute_external_transport
 
 from .config import WorkerConfig
 from .fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_partition
+
+
+logger = logging.getLogger(__name__)
 
 
 def _run(
@@ -63,9 +67,14 @@ def _adb_environment(adb_server_socket: str | None) -> dict[str, str] | None:
 _DEVICE_DETAILS_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 _DEVICE_DETAILS_TTL_SECONDS = 60.0
 _DEVICE_DETAILS_ENRICH_CONCURRENCY = 4
+# 设备从清单消失后超过该时长即从缓存/刷新计划中淘汰：
+# 不淘汰会让后台线程对大量历史 serial 持续做无效 ADB 探测
+# （每台最坏 3s timeout），逐渐占满 enrichment 线程。
+_DEVICE_DETAILS_EVICTION_SECONDS = 180.0
 _ENRICH_MIN_INTERVAL_SECONDS = 15.0
 _details_enrich_lock = threading.Lock()
 _details_refresh_at: dict[str, float] = {}
+_details_last_seen_at: dict[str, float] = {}
 _details_enrich_thread: threading.Thread | None = None
 _details_enrich_stop = threading.Event()
 _adb_socket_for_enrich: list[str | None] = [None]
@@ -103,9 +112,19 @@ def _probe_device_details_uncached(
 
 
 def _enrich_details_worker() -> None:
-    """后台逐台刷新详情：有界并发、每台独立刷新周期。"""
+    """后台刷新详情：有界并发（4）+ 每台独立错峰刷新周期 + stale 淘汰。"""
+    from concurrent.futures import ThreadPoolExecutor
+
     while not _details_enrich_stop.is_set():
         now = time.monotonic()
+        # 淘汰长期未出现在 probe_devices 清单中的设备。
+        for serial in [
+            serial for serial, last_seen in list(_details_last_seen_at.items())
+            if now - last_seen > _DEVICE_DETAILS_EVICTION_SECONDS
+        ]:
+            _DEVICE_DETAILS_CACHE.pop(serial, None)
+            _details_refresh_at.pop(serial, None)
+            _details_last_seen_at.pop(serial, None)
         due = [
             serial
             for serial, (_, _) in list(_DEVICE_DETAILS_CACHE.items())
@@ -114,20 +133,41 @@ def _enrich_details_worker() -> None:
         if not due:
             _details_enrich_stop.wait(2.0)
             continue
-        # 错峰：即使一次刷多台，也把 next_refresh_at 展开到 TTL 区间内，
-        # 避免所有设备同一时刻集体过期（cache stampede）。
+        # 错峰：把 next_refresh_at 展开到 TTL 区间内，避免所有设备
+        # 同一时刻集体过期（cache stampede）。探测本身以并发 4 执行。
         stagger = _DEVICE_DETAILS_TTL_SECONDS / max(len(due), 1)
-        for index, serial in enumerate(due):
-            if _details_enrich_stop.is_set():
-                return
+
+        def _refresh(serial: str, index: int, stagger_step: float = stagger) -> None:
             details = _probe_device_details_uncached(
                 serial, _adb_socket_for_enrich[0])
             _DEVICE_DETAILS_CACHE[serial] = (time.monotonic(), details)
             _details_refresh_at[serial] = (
                 time.monotonic()
                 + min(_DEVICE_DETAILS_TTL_SECONDS,
-                      _ENRICH_MIN_INTERVAL_SECONDS + index * stagger)
+                      _ENRICH_MIN_INTERVAL_SECONDS + index * stagger_step)
             )
+
+        with ThreadPoolExecutor(
+            max_workers=_DEVICE_DETAILS_ENRICH_CONCURRENCY,
+            thread_name_prefix="device-details",
+        ) as executor:
+            futures = [
+                executor.submit(_refresh, serial, index)
+                for index, serial in enumerate(due)
+            ]
+            # 不设整体死线：设备多时排在其后的 future 等待时间 =
+            # (N/并发-1) × 3s，固定 timeout 会让最后一台必然超时并
+            # 杀死 enrichment 线程（且设备集不变时不会重启）。
+            # 单次探测自身有 3s timeout，不会永久卡住。
+            for future in futures:
+                try:
+                    future.result()
+                except Exception:
+                    logger.warning(
+                        "device detail enrichment failed for a batch",
+                        exc_info=True,
+                    )
+        _details_enrich_stop.wait(0.5)
 
 
 def ensure_details_enrichment_started(adb_server_socket: str | None = None) -> None:
@@ -144,7 +184,8 @@ def ensure_details_enrichment_started(adb_server_socket: str | None = None) -> N
 
 
 def seed_device_details(serial: str) -> None:
-    """设备首次出现时注册空详情并立即纳入刷新计划。"""
+    """设备出现时注册/续期：纳入刷新计划并记录 last_seen（供淘汰）。"""
+    _details_last_seen_at[serial] = time.monotonic()
     if serial not in _DEVICE_DETAILS_CACHE:
         _DEVICE_DETAILS_CACHE[serial] = (0.0, {})
         _details_refresh_at[serial] = 0.0
@@ -490,13 +531,18 @@ def _run_with_output_stream(
                 "returncode": completed.returncode}
     process = subprocess.Popen(
         argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1, start_new_session=True,
+        start_new_session=True,
     )
     lines: list[str] = []
     try:
         deadline = time.monotonic() + timeout
         import select
         fd = process.stdout.fileno()
+        # 行缓冲在用户态维护：select 就绪后用 os.read 取"当前可用"字节，
+        # 绝不使用文本流 readline()——缓冲里只有不完整行（无换行符）时
+        # readline 会阻塞等待剩余数据，select 的超时保护被击穿，烧写
+        # 卡死时超时杀进程不再生效。
+        pending = b""
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -507,14 +553,28 @@ def _run_with_output_stream(
                 if process.poll() is not None:
                     break
                 continue
-            line = process.stdout.readline()
-            if not line:
+            chunk = os.read(fd, 65536)
+            if not chunk:
                 if process.poll() is not None:
                     break
                 continue
+            pending += chunk
+            while True:
+                newline = pending.find(b"\n")
+                if newline < 0:
+                    break
+                raw, pending = pending[:newline], pending[newline + 1:]
+                line = raw.decode("utf-8", errors="replace")
+                lines.append(line)
+                try:
+                    on_output(line.rstrip("\r"), False)
+                except Exception:
+                    pass
+        if pending:
+            line = pending.decode("utf-8", errors="replace")
             lines.append(line)
             try:
-                on_output(line.rstrip("\r\n"), False)
+                on_output(line.rstrip("\r"), False)
             except Exception:
                 pass
         process.wait(timeout=30)
@@ -633,6 +693,9 @@ def host_metrics(config: WorkerConfig) -> dict[str, float]:
     memory_percent = 0.0
     memory_total_gb = 0.0
     memory_available_gb = 0.0
+    # load 先赋默认值：/proc/meminfo 解析异常跳过时局部变量仍存在，
+    # 不需要靠 'load' in locals() 这类脆弱判断。
+    load = 0.0
     try:
         values = {}
         for line in Path("/proc/meminfo").read_text().splitlines():
@@ -652,7 +715,7 @@ def host_metrics(config: WorkerConfig) -> dict[str, float]:
             "memory_percent": round(memory_percent, 2),
             "memory_total_gb": round(memory_total_gb, 2),
             "memory_available_gb": round(memory_available_gb, 2),
-            "load_1m": round(load if 'load' in locals() else 0.0, 2),
+            "load_1m": round(load, 2),
             "disk_free_gb": round(usage.free / 1024 ** 3, 2),
             "disk_total_gb": round(usage.total / 1024 ** 3, 2)}
 

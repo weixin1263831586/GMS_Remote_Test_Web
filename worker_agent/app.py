@@ -867,6 +867,7 @@ class WorkerAgent:
 
     def run_firmware_flash(self, command: dict):
         directory = None
+        uploader = None
         try:
             payload = command.get("payload", {})
             directory = self.config.data_root / "firmware" / payload["stage_id"]
@@ -941,6 +942,10 @@ class WorkerAgent:
         except Exception as exc:
             logger.exception("firmware command %s failed", command.get("id"))
             error = str(exc)
+            if uploader is not None:
+                # 异常路径同样有界排空已产生的过程日志：烧写中途失败的
+                # 输出证据不能随 daemon uploader 线程丢弃。
+                uploader.flush()
             self.runtime.save_command(command["id"], "failed", error=error)
             self._retry(lambda: self._ack_command(command["id"], "failed", error=error))
         finally:

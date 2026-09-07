@@ -48,10 +48,12 @@ authenticate outside the agent session.
 | `gms_rt_devices` | List devices with state, serials, transport. |
 | `gms_rt_auth_status` | Inspect the CLI session's authentication state. |
 | `gms_rt_auth_login` | Establish the CLI session (username + `password_stdin`). |
+| `gms_rt_auth_elevate` | Admin step-up re-auth for the current session (admin credentials via `password_stdin`); unlocks elevated operations. |
+| `gms_rt_burn_firmware` | Burn `update.img` to device(s); requires elevation, wipes `/data` by default, optional `--wait-online`. |
 | `gms_rt_test_start` | Start a test on a device (or `retry=<timestamp>` a failed report); returns `cluster_job_id`, optional `--wait`. |
-| `gms_rt_jobs_list` | List durable test jobs (cheap pre-flight / busy check). |
-| `gms_rt_jobs_status` | Authoritative state of one durable job (cheap polling). |
-| `gms_rt_jobs_wait` | Wait for a durable job to reach a terminal state. |
+| `gms_rt_jobs_list` | List durable test jobs (cheap pre-flight / busy check); rendered one line per job. |
+| `gms_rt_jobs_status` | Authoritative state of one durable job (cheap polling); trimmed to key fields. |
+| `gms_rt_jobs_wait` | Wait for a durable job to reach a terminal state; trimmed like `jobs_status`. |
 | `gms_rt_jobs_events` | Read incremental job events (`after` sequence + `limit`). |
 | `gms_rt_reports_list` | List finished test reports. |
 
@@ -72,21 +74,30 @@ authenticate outside the agent session.
    strings, instead of asking agents to pull `gms-rt-system-commands --json`
    (~6x larger). `gms_rt_run("system-docs")` renders the ~24KB API docs
    listing as one line per endpoint (~80% smaller).
-5. **Typed tools for hot paths** (`devices`, `auth_status`, `test_start`
-   including retry mode, `jobs_list`, `jobs_*`, `reports_list`) so agents
-   don't pay schema-guessing round trips.
+5. **Compact jobs output** (v0.6.0): `gms_rt_jobs_list` renders one line
+   per job (`job_id | status | attempt | devices | module | case | created |
+   finished | error`), and `gms_rt_jobs_status` / `gms_rt_jobs_wait` trim
+   the single-job payload to key fields — ~60-80% fewer tokens on real
+   payloads. Error envelopes are never re-rendered.
+6. **Typed tools for hot paths** (`devices`, `auth_status`, `test_start`
+   including retry mode, `jobs_list`, `jobs_*`, `reports_list`, `shell`,
+   `auth_elevate`, `burn_firmware`) so agents don't pay schema-guessing
+   round trips.
 
 ## Recommended agent workflow
 
 ```text
 gms_rt_auth_status                          # check the session
 gms_rt_auth_login  username=admin  password_stdin=...   # only if needed
+gms_rt_auth_elevate username=<admin> password_stdin=... # only for burn/elevated ops
 gms_rt_commands                             # discover commands (compact)
 gms_rt_describe   command=devices-wait      # risk/usage details
 gms_rt_devices
 gms_rt_test_start  device=RK3572  type=CTS  module=...  wait=true
-gms_rt_jobs_status  job_id=<cluster_job_id> # cheap polling
+gms_rt_jobs_status  job_id=<cluster_job_id> # cheap polling (trimmed output)
 gms_rt_jobs_events  job_id=<cluster_job_id> after=<last_seq>
+gms_rt_burn_firmware firmware_path=update.img device=RK3562GMS7   # requires elevation
+gms_rt_shell       device=RK3562GMS7 command="getprop ro.build.fingerprint"
 gms_rt_reports_list
 ```
 
@@ -104,12 +115,14 @@ Execution rules for agents (enforced by the CLI contract, see
 ## Security boundary
 
 The generic runner (`gms_rt_run`) only executes commands the CLI marks
-`agent_safe_unattended` (read-only). Mutating/high-risk operations (firmware
-burn, reboot, USB/IP connect/disconnect, config changes, ...) and
-interactive sessions (`terminal-open`, `devices-scrcpy`, ...) are denied;
-they require the dedicated typed MCP tools with explicit confirmation, or a
-human-run CLI. Passwords are only accepted via `password_stdin` and are
-forwarded on stdin, never logged.
+`agent_safe_unattended` (read-only). Mutating/high-risk operations (reboot,
+USB/IP connect/disconnect, config changes, ...) and interactive sessions
+(`terminal-open`, `devices-scrcpy`, ...) are denied; they require the
+dedicated typed MCP tools with explicit confirmation, or a human-run CLI.
+Firmware burn is reachable only through `gms_rt_burn_firmware` (typed) after
+`gms_rt_auth_elevate` with admin credentials the user explicitly provided.
+Passwords are only accepted via `password_stdin` and are forwarded on
+stdin, never logged.
 
 ## Maintaining the bundled CLI
 
@@ -125,5 +138,5 @@ bump `version` in `kk.plugin.json` when the behavior of exposed tools changes.
 ## Tests
 
 ```bash
-python3 plugins/gms-remote-test/tests/test_mcp_server.py   # 43 tests, no network needed
+python3 plugins/gms-remote-test/tests/test_mcp_server.py   # 59 tests, no network needed
 ```

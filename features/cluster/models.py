@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from .config import ClusterConfig
+from .device_action_spec import DeviceAction
 
 
 # Worker 上报的事件 payload 上限（字节，序列化后）。正常事件 payload 为空或
@@ -143,13 +145,9 @@ class ClusterJobCreate(BaseModel):
 class ClusterDeviceAction(BaseModel):
     worker_id: str
     devices: list[str] = Field(min_length=1, max_length=32)
-    action: Literal["reboot", "reboot_bootloader", "remount", "get_properties",
-                    "bootloader_status", "bootloader_lock", "bootloader_unlock",
-                    "wifi", "screenshot", "layout", "tap", "scrcpy_start",
-                    "packages_with_path", "packages_all", "features", "props",
-                    "config_explore", "override_status", "override_apply",
-                    "override_revert", "override_disable_verity",
-                    "override_enable_verity", "override_reboot"]
+    # DeviceAction 枚举由 DeviceActionSpec 派生——新增 action 只需在
+    # device_action_spec._DEVICE_ACTION_SPECS 登记一行。
+    action: DeviceAction
     x: int | None = Field(default=None, ge=0, le=10000)
     y: int | None = Field(default=None, ge=0, le=10000)
     ssid: str = Field(default="", max_length=256)
@@ -222,10 +220,14 @@ class JobEvent(BaseModel):
     @field_validator("payload")
     @classmethod
     def _payload_bounded(cls, value: dict[str, Any]) -> dict[str, Any]:
-        serialized = len(str(value))
-        if serialized > _EVENT_PAYLOAD_MAX_BYTES:
+        # 以 UTF-8 JSON 序列化字节数为准：len(str(dict)) 既不是稳定
+        # 序列化契约，也把中文按 1 字符计（UTF-8 实为 3 字节）。
+        serialized = json.dumps(
+            value, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        if len(serialized) > _EVENT_PAYLOAD_MAX_BYTES:
             raise ValueError(
-                f"event payload too large ({serialized} > "
+                f"event payload too large ({len(serialized)} > "
                 f"{_EVENT_PAYLOAD_MAX_BYTES} bytes)")
         return value
 

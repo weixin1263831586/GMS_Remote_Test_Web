@@ -61,6 +61,14 @@ and a unique serial prefix such as `RK3572` expands to the full device serial
 in the device commands. After firmware or GSI burns, add
 `--wait-online[=SECONDS]` to block until devices return to the `online` state.
 
+For unattended device diagnosis inside kkagent, prefer the typed
+`gms_rt_shell` tool (plugin >= 0.5.0): it runs a strictly read-only
+allowlist of shell commands (getprop, dumpsys, logcat dump mode, ls, cat,
+ps, pidof, settings get, stat, uptime, vmstat, df, wm) on a device without
+weakening the mutating-command gate. See
+[references/agent-workflows.md](references/agent-workflows.md) section 5.1
+for the full allowlist and a worked ANR-diagnosis loop.
+
 Set `GMS_REMOTE_TEST_SERVER` when the automatic server address is wrong. Set
 `GMS_CURL_CA_CERT` for a trusted CA, or set `GMS_CURL_INSECURE=1` only for a
 local self-signed deployment. For one invocation, prefer `--server URL`,

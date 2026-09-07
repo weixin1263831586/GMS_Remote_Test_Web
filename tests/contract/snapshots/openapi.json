@@ -884,33 +884,7 @@
       "ClusterDeviceAction": {
         "properties": {
           "action": {
-            "enum": [
-              "reboot",
-              "reboot_bootloader",
-              "remount",
-              "get_properties",
-              "bootloader_status",
-              "bootloader_lock",
-              "bootloader_unlock",
-              "wifi",
-              "screenshot",
-              "layout",
-              "tap",
-              "scrcpy_start",
-              "packages_with_path",
-              "packages_all",
-              "features",
-              "props",
-              "config_explore",
-              "override_status",
-              "override_apply",
-              "override_revert",
-              "override_disable_verity",
-              "override_enable_verity",
-              "override_reboot"
-            ],
-            "title": "Action",
-            "type": "string"
+            "$ref": "#/components/schemas/DeviceAction"
           },
           "devices": {
             "items": {
@@ -1303,6 +1277,35 @@
         ],
         "title": "DecompileRequest",
         "type": "object"
+      },
+      "DeviceAction": {
+        "enum": [
+          "reboot",
+          "reboot_bootloader",
+          "remount",
+          "bootloader_lock",
+          "bootloader_unlock",
+          "override_apply",
+          "override_revert",
+          "override_disable_verity",
+          "override_enable_verity",
+          "override_reboot",
+          "wifi",
+          "tap",
+          "scrcpy_start",
+          "screenshot",
+          "layout",
+          "get_properties",
+          "bootloader_status",
+          "packages_with_path",
+          "packages_all",
+          "features",
+          "props",
+          "config_explore",
+          "override_status"
+        ],
+        "title": "DeviceAction",
+        "type": "string"
       },
       "DeviceActionRequest": {
         "properties": {

@@ -733,3 +733,68 @@ class FrontendIntegrityTests(unittest.TestCase):
                 function_names = FUNCTION_RE.findall(text)
                 duplicate_functions = sorted({item for item in function_names if function_names.count(item) > 1})
                 self.assertEqual(duplicate_functions, [])
+
+
+class WorkspaceIdentityRegressions(unittest.TestCase):
+    """第二轮评审：serial 含 ":" 不得被误判为 Worker 前缀；
+    Reports/Suite 页不得改写全局 Test Worker。"""
+
+    def test_workspace_keeps_local_colon_serial(self):
+        # workspace-context single 模式过滤只剥离已知 localWorkerId 前缀；
+        # localhost:port / ip:5555 这类 serial 不再按"包含冒号"误删。
+        text = read_text("web/static/js/workspace-context.js")
+        self.assertNotIn(
+            "!value.includes(':') ||",
+            text,
+            "normalize 不得按'是否含冒号'丢弃设备（ADB TCP/Proxy serial 含冒号）",
+        )
+        self.assertIn("knownWorkerIds", text)
+
+    def test_report_worker_filter_does_not_change_test_worker(self):
+        text = read_text("web/static/js/pages/test-reports.js")
+        switch_body_start = text.index("async function switchReportsWorker()")
+        switch_body = text[switch_body_start:text.index("}", text.index("loadTestReports", switch_body_start))]
+        self.assertNotIn(
+            "GmsWorkspace?.update",
+            switch_body,
+            "Reports 筛选不得写全局 workspace worker_id",
+        )
+        self.assertNotIn(
+            "syncWorkspaceWorkerSelectors",
+            switch_body,
+            "Reports 筛选不得联动其他页面的 Worker 选择器",
+        )
+        # 全局联动 helper 也不得回写 reports filter
+        devices_text = read_text("web/static/js/shell/workspace-devices.js")
+        sync_start = devices_text.index("function syncWorkspaceWorkerSelectors")
+        sync_body = devices_text[sync_start:devices_text.index("}", sync_start + 100)]
+        # 检查选择器数组本身（忽略说明注释里的提及）。
+        selector_ids = re.findall(r"'([a-z-]+)'", sync_body)
+        self.assertNotIn(
+            "reports-worker-filter",
+            selector_ids,
+            "全局联动 helper 不得把 Test Worker 写进 Reports 筛选器",
+        )
+
+    def test_suite_browser_worker_does_not_change_test_worker(self):
+        text = read_text("web/static/js/pages/test-suite-browser.js")
+        switch_start = text.index("async function switchSuiteWorker()")
+        switch_body = text[switch_start:text.index("window.switchSuiteWorker", switch_start)]
+        self.assertNotIn(
+            "GmsWorkspace?.update",
+            switch_body,
+            "Suite Browser 切换 Worker 不得写全局 workspace",
+        )
+        self.assertNotIn(
+            "state.testing = false",
+            switch_body,
+            "浏览 Worker 套件不得重置测试运行状态",
+        )
+
+    def test_start_test_ownership_check_uses_inventory_not_colon_split(self):
+        text = read_text("web/static/js/pages/test-control.js")
+        self.assertNotIn(
+            "deviceId.split(':', 1)[0]",
+            text,
+            "startTest 归属校验必须走 state.devices inventory，不得按冒号切分",
+        )

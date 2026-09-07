@@ -144,7 +144,10 @@ function workspaceWorkerId() {
 }
 
 function syncWorkspaceWorkerSelectors(workerId) {
-    for (const id of ['cluster-worker', 'suite-worker-select', 'reports-worker-filter']) {
+    // 只同步执行目标选择器（cluster-worker）与 Suite Browser 的浏览目标。
+    // reports-worker-filter 是查询条件，属于 Reports 页本地状态，
+    // 不跟随 Test Worker 联动（否则切测试主机会重写报告筛选）。
+    for (const id of ['cluster-worker', 'suite-worker-select']) {
         const select = document.getElementById(id);
         if (!select) continue;
         if (Array.from(select.options).some(option => option.value === workerId)) {
@@ -705,6 +708,22 @@ async function loadTestSuites(forceRefresh = false) {
                 const url = forceRefresh ? '/api/test/suites?force_refresh=1' : '/api/test/suites';
                 response = await apiCall(url);
             } else {
+                // forceRefresh 时触发真正的 Worker 端套件扫描（refresh
+                // 命令回写 Controller），随后读取回写后的清单——否则
+                // "刚解压 suite" 点刷新仍看到旧缓存。
+                if (forceRefresh) {
+                    try {
+                        // silentToast：refresh 失败由随后的 suites 读取
+                        // 给出权威错误，后台回写失败不单独弹 toast。
+                        await apiCall(
+                            `/api/cluster/workers/${encodeURIComponent(requestedWorker)}/refresh?inventory=suites`,
+                            'POST',
+                            null,
+                            {silentToast: true});
+                    } catch (refreshError) {
+                        debugLog(`[loadTestSuites] worker refresh failed: ${refreshError.message}`);
+                    }
+                }
                 const remoteResponse = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(requestedWorker)}`,
                     {cache: 'no-store'});
                 if (!remoteResponse.ok) {
