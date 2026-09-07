@@ -182,6 +182,38 @@ async def get_status(
 
 # ==================== Log Stream ====================
 
+_ACTIVE_JOB_STATUSES = {
+    "assigned", "dispatching", "running", "stopping", "leasing",
+    "queued", "created", "collecting", "worker_lost",
+}
+
+
+def _active_durable_job_for_owner(client_id: str):
+    """Return the owner's active durable job (R33), or None.
+
+    The legacy log stream used to read only the in-process ``user_state``;
+    durable Worker jobs never write there, so this legacy endpoint streamed
+    nothing (and never signalled completion) for current tests.
+    """
+    try:
+        # foundation.cluster_port is the composition seam: importing
+        # features.cluster from test_execution would create a static
+        # feature-dependency cycle (cluster -> test_execution).
+        from foundation.cluster_port import get_cluster_service
+
+        repository = get_cluster_service().repository
+    except (RuntimeError, AttributeError):
+        return None
+    try:
+        jobs = repository.list_jobs(limit=10, owner_id=client_id)
+    except Exception:
+        return None
+    for job in jobs:
+        if job.get("status") in _ACTIVE_JOB_STATUSES:
+            return job
+    return None
+
+
 @router.get("/api/test/logs/stream")
 async def stream_test_logs(request: Request):
     """Stream test logs (plain text format)."""
@@ -190,6 +222,44 @@ async def stream_test_logs(request: Request):
     async def log_stream():
         try:
             last_log_count = 0
+            # R33: bridge to the durable job event source when this owner has
+            # an active job; fall back to the legacy in-process user_state
+            # stream for process-local runs that predate durable jobs.
+            active_job = _active_durable_job_for_owner(client_id)
+            if active_job is not None:
+                job_id = str(active_job.get("id") or "")
+                event_sequence = -1
+                idle_ticks = 0
+                while True:
+                    from foundation.cluster_port import get_cluster_service
+
+                    repository = get_cluster_service().repository
+                    current = repository.get_job(job_id)
+                    if current is None:
+                        break
+                    events = repository.list_events(
+                        job_id, after=event_sequence, limit=1000,
+                    )
+                    for event in events:
+                        text = str(event.get("message") or "").strip()
+                        if text:
+                            yield text + "\n"
+                    if events:
+                        event_sequence = max(
+                            int(item.get("sequence") or event_sequence)
+                            for item in events
+                        )
+                        idle_ticks = 0
+                    else:
+                        idle_ticks += 1
+                    if current.get("status") in {"completed", "failed", "cancelled", "stopped"}:
+                        yield "=== Test complete ===\n"
+                        break
+                    if idle_ticks > 7200:  # ~1h without events
+                        yield "=== Stream timeout ===\n"
+                        break
+                    await asyncio.sleep(0.5)
+                return
             while True:
                 user_state = get_or_create_user_state(client_id)
                 running = user_state.get("running", False)

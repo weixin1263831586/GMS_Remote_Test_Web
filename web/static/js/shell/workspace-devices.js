@@ -220,6 +220,19 @@ function applyClusterMode(enabled) {
     updateClusterToggleUI(enabled);
 }
 
+// R20: single cleanup used by BOTH switchTestWorker and toggleClusterMode.
+// The mode toggle previously skipped job/attempt/testStopping/sessionStorage
+// cleanup, so switching modes left the previous host's active-job state
+// attached to the new context.
+function clearActiveTestContext() {
+    state.clusterJobId = '';
+    resetClusterEventCursor();
+    state.testing = false;
+    state.testStopping = false;
+    sessionStorage.removeItem('active_cluster_job');
+    updateTestToggleButton(false);
+}
+
 async function toggleClusterMode() {
     const row = document.getElementById('cluster-mode-toggle-row');
     if (row) { row.style.pointerEvents = 'none'; row.style.opacity = '0.6'; }
@@ -232,10 +245,13 @@ async function toggleClusterMode() {
         const context = window.GmsWorkspace?.update({
             scope_mode: wasEnabled ? 'single' : 'cluster',
             worker_id: wasEnabled ? workspaceLocalWorkerId() : (window.GmsWorkspace?.get?.().worker_id || workspaceLocalWorkerId()),
-            device_ids: []
+            device_ids: [],
+            cluster_job_id: '',
+            attempt_id: ''
         }, {source: 'cluster-toggle'});
         const enabled = context?.scope_mode === 'cluster';
         applyClusterMode(enabled);
+        clearActiveTestContext();
         if (enabled) {
             await loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
             showToast('已切换到集群模式', 'success');

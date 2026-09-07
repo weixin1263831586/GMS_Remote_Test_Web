@@ -380,8 +380,45 @@ def run_cli(
     except OSError as error:
         return f"failed to launch gms-rt CLI: {error}", True
 
-    stdout = bounded_text(completed.stdout).strip()
-    stderr = bounded_text(completed.stderr).strip()
+    # R17: parse the JSON envelope BEFORE truncating. bounded_text() used to
+    # cut the raw stdout first, which turned oversized-but-valid envelopes
+    # into invalid JSON that then fell through to the plain-text branch with
+    # is_error=False — agents received silently corrupted data.  Now: try the
+    # full stdout as JSON; only when it is not parseable (genuinely not an
+    # envelope) fall back to bounded raw text.
+    raw_stdout = completed.stdout or ""
+    raw_stderr = completed.stderr or ""
+    parsed_envelope = None
+    try:
+        candidate = json.loads(raw_stdout)
+        if isinstance(candidate, dict) and "ok" in candidate:
+            parsed_envelope = candidate
+    except ValueError:
+        parsed_envelope = None
+    if parsed_envelope is not None:
+        # Trim oversized data/output STRING fields, not the envelope text:
+        # the returned value must stay valid JSON (R17).
+        for key in ("output", "diagnostics"):
+            value = parsed_envelope.get(key)
+            if isinstance(value, str) and len(value) > MAX_OUTPUT_BYTES:
+                parsed_envelope[key] = (
+                    value[: MAX_OUTPUT_BYTES // 2]
+                    + "\n...[truncated by gms-remote-test MCP adapter]...\n"
+                    + value[-MAX_OUTPUT_BYTES // 2 :]
+                )
+        data = parsed_envelope.get("data")
+        if isinstance(data, dict):
+            for key, value in list(data.items()):
+                if isinstance(value, str) and len(value) > MAX_OUTPUT_BYTES:
+                    data[key] = (
+                        value[: MAX_OUTPUT_BYTES // 2]
+                        + "\n...[truncated by gms-remote-test MCP adapter]...\n"
+                        + value[-MAX_OUTPUT_BYTES // 2 :]
+                    )
+        stdout = json.dumps(parsed_envelope, ensure_ascii=False).strip()
+    else:
+        stdout = bounded_text(raw_stdout).strip()
+    stderr = bounded_text(raw_stderr).strip()
     # The CLI emits exactly one JSON envelope on stdout in --json mode; use
     # the compacted form when present, otherwise fall back to joined text.
     normalized = normalize_command(command)
@@ -815,6 +852,9 @@ _SHELL_FORBIDDEN_CHARS = frozenset(";|&><`(){}[]$\\'\"\n\r\t*?")
 _SHELL_DUMPSYS_MUTATING = frozenset({
     "unplug", "reset", "disable", "enable", "whitelist", "set-debug-app",
     "force-stop", "kill", "suspend", "resume", "reset-role",
+    # battery/simulation setters mutate device state (R12):
+    # dumpsys battery set level 1 was previously allowed through.
+    "set", "plug", "charge", "nocharge", "persist", "import",
 })
 # Binaries that may smuggle arbitrary execution; never allow as arguments.
 # NOTE: 'cmd' and 'am' are in _SHELL_READONLY_BINARIES but only for the
@@ -866,11 +906,27 @@ def _validate_shell_command(command: str) -> tuple[bool, str]:
         if len(rest) != 1 or rest[0] not in ("size", "density"):
             return False, "only 'wm size' / 'wm density' (read-only) is allowed"
     elif binary == "logcat":
-        if "-c" in rest or "-f" in rest:
+        # R12: token-exact matching missed "--clear" and attached-value
+        # forms like "-f/path".  Match flag prefixes explicitly: logcat -c
+        # clears the log buffer and -f/--file write files — never read-only.
+        if any(
+            arg == "-c" or arg == "--clear"
+            or arg.startswith("-f") or arg.startswith("--file")
+            for arg in rest
+        ):
             return False, "logcat -c/-f mutate or write files and are not allowed"
         if not any(flag in rest for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")):
             return False, (
                 "streaming logcat is not allowed; add -d/-t/-T (dump mode)"
+            )
+    elif binary == "dmesg":
+        # R12: dmesg -c (and -C) clear the kernel ring buffer; restrict to
+        # explicitly read-only forms.
+        allowed_dmesg = {"", "-T", "-t", "-r", "-n", "-H", "-e"}
+        if any(arg not in allowed_dmesg for arg in rest):
+            return False, (
+                "only plain read-only dmesg (or -T/-t/-r/-H/-e) is allowed; "
+                "-c/-C would clear the kernel ring buffer"
             )
     elif binary == "dumpsys":
         if any(arg in _SHELL_DUMPSYS_MUTATING for arg in rest):
@@ -967,13 +1023,19 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
                 "metacharacters or quotes",
                 True,
             )
-        if item in _LOGCAT_CLEAR_FLAGS:
+        if item in _LOGCAT_CLEAR_FLAGS or item == "--clear":
             return (
                 "denied: clearing the logcat buffer needs the explicit "
                 "clear=true argument (runs logcat -c before the capture)",
                 True,
             )
-        if item in _LOGCAT_FORBIDDEN_FLAGS:
+        # R12: also catch attached-value forms ("-f/path", "--file=path")
+        # that the token-exact check above used to miss.
+        if (
+            item in _LOGCAT_FORBIDDEN_FLAGS
+            or item.startswith("-f")
+            or item.startswith("--file")
+        ):
             return (
                 f"denied: {item} writes device files and is not allowed",
                 True,

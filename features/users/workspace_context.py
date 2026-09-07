@@ -31,6 +31,14 @@ from .storage_paths import owner_storage_key
 router = APIRouter(prefix="/api/users/workspace-context")
 _storage_lock = threading.RLock()
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@/+-]*$")
+# R18: adb TCP serials look like "host:port" (host may be an IPv4 address or
+# hostname; the port is numeric).  These are device serials, not worker
+# namespace prefixes.
+_TCP_SERIAL_RE = re.compile(r"^[A-Za-z0-9._-]+:\d+$")
+
+
+def _is_tcp_serial(value: str) -> bool:
+    return bool(_TCP_SERIAL_RE.fullmatch(value))
 
 
 def _local_worker_id() -> str:
@@ -140,7 +148,13 @@ def save_workspace_context(owner_id: str, patch: WorkspaceContextPatch) -> dict:
             current["worker_id"] = local_worker_id
             current["device_ids"] = [
                 value for value in current.get("device_ids", [])
-                if ":" not in value or value.startswith(f"{local_worker_id}:")
+                # R18: a colon means either a worker namespace prefix
+                # ("worker:serial") or a TCP serial ("10.0.0.5:5555").
+                # Strip only foreign worker prefixes; TCP serials without
+                # the local worker prefix must survive the single-mode save.
+                if ":" not in value
+                or value.startswith(f"{local_worker_id}:")
+                or _is_tcp_serial(value)
             ]
         elif not current.get("worker_id"):
             current["worker_id"] = _local_worker_id()

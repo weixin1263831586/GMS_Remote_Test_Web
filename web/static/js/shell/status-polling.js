@@ -36,6 +36,10 @@ function startStatusPolling() {
         try {
             if (state.clusterJobId) {
                 const jobId = encodeURIComponent(state.clusterJobId);
+                // R13: snapshot the polled job id; responses that arrive after
+                // the user switched to another job/worker must not write the
+                // stale context back.
+                const polledJobId = String(state.clusterJobId);
                 // per-job 游标：切 A→B→A 时旧 job 的日志不会
                 // 重复追加（每个 job 记住自己的 sequence）。
                 state.clusterEventSequenceByJob = state.clusterEventSequenceByJob || {};
@@ -44,6 +48,13 @@ function startStatusPolling() {
                     apiCall(`/api/cluster/jobs/${jobId}`, 'GET', null, {background: true}),
                     apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(jobCursor))}&limit=1000`, 'GET', null, {background: true})
                 ]);
+                // Stale-response guard: if the user switched jobs (or stopped
+                // polling) while these requests were in flight, drop them.
+                if (stopped) return;
+                if (String(state.clusterJobId || '') !== polledJobId) {
+                    debugLog('[StatusPolling] Discarding stale poll response for', polledJobId);
+                    return;
+                }
                 const job = jobResponse.job;
                 // 轮询只更新 job/attempt 元数据，不覆盖用户手动选择的 worker。
                 // 否则正在运行的旧任务会反复把 worker_id 刷回它分配的主机，

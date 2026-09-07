@@ -382,6 +382,17 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
 
     root = _state_root(create=True)
     config_path = root / "hub.toml"
+    # Validate the requested generation BEFORE mutating any state file:
+    # rejecting a stale request after rewriting hub.toml left the config
+    # polluted with a backend for a stale source (R05).
+    state = _read_json(root / "target.json")
+    requested_generation = int(payload.get("generation") or 0)
+    current_import = next((
+        item for item in state.get("imports") or []
+        if item.get("source_worker_id") == source_worker_id
+    ), None)
+    if current_import and int(current_import.get("generation") or 0) > requested_generation:
+        raise RuntimeError("stale ADB Proxy target generation")
     config = _read_hub_config(config_path)
     backends = [
         item for item in config.get("backend") or []
@@ -395,14 +406,6 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     })
     _write_hub_config(config_path, backends)
 
-    state = _read_json(root / "target.json")
-    requested_generation = int(payload.get("generation") or 0)
-    current_import = next((
-        item for item in state.get("imports") or []
-        if item.get("source_worker_id") == source_worker_id
-    ), None)
-    if current_import and int(current_import.get("generation") or 0) > requested_generation:
-        raise RuntimeError("stale ADB Proxy target generation")
     imports = [
         item for item in state.get("imports") or []
         if item.get("source_worker_id") != source_worker_id

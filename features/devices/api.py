@@ -382,10 +382,16 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
             value_to_devices.setdefault(source_host, []).append(device_id)
         # 将 worker_id 映射为友好名称
         worker_names: dict[str, str] = {}
+        # R34: get_cluster_service was not imported here — the NameError was
+        # swallowed by this bare except and the friendly-name backfill
+        # silently degraded.  Import explicitly and narrow the guard to the
+        # cluster-unavailable case only.
+        from foundation.cluster_port import get_cluster_service
+
         try:
             for worker in get_cluster_service().list_workers():
                 worker_names[worker["id"]] = worker.get("name") or worker["id"]
-        except Exception:
+        except (RuntimeError, AttributeError, KeyError):
             pass
         # Controller 使用统一 Worker ID，避免设备分组继续显示 user@host 旧名称。
         worker_names[local_worker_id] = local_worker_id

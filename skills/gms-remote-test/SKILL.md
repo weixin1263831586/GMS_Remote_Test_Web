@@ -118,6 +118,18 @@ request or response fields, inspect the current route and its service call path.
   certificate settings, service status, and firewall.
 - On device failures, inspect device state and ownership before retrying. Do not
   bypass device locks.
+- Targeting (R29): the platform HTTP API accepts an explicit `worker_id` for
+  every cluster operation. The CLI convenience commands (`gms-rt-devices-shell`,
+  `gms-rt-devices-logcat`, test start helpers) resolve targets via
+  `_resolve_ssh_host()` / the local worker — this is a local-maintenance
+  fallback, NOT an expression of the cluster execution context. For anything
+  that targets a specific Worker or device, prefer the typed tools and HTTP
+  APIs that carry `worker_id`/`device` explicitly; never assume the "first"
+  or local host.
+- Direct `adb`/OS SSH access from the test host (R11) is outside the
+  platform's device-claim and fencing system. It is retained for interactive
+  maintenance only; automated flows MUST use the controlled device APIs so
+  leases, ownership and audit apply.
 - Treat test, firmware, SSH, VPN, USB/IP, and allocation changes as
   security-sensitive. Trace the full backend call path before modifying them.
 

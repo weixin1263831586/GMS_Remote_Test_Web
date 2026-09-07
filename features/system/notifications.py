@@ -226,19 +226,29 @@ notification_store = NotificationStore(
 
 
 async def safe_websocket_send(client_id: str, message: dict):
-    """线程安全地发送WebSocket消息（带背压检查）"""
-    with global_state.websocket_connections_lock:
-        ws = global_state.websocket_connections.get(client_id)
+    """线程安全地发送WebSocket消息（带背压检查）。
 
-    if ws:
+    R26: a client may have several live sockets; deliver to every one so a
+    second tab on the same account stops losing push notifications.
+    """
+    with global_state.websocket_connections_lock:
+        sockets = global_state.websocket_connections.get(client_id)
+
+    if not sockets:
+        return
+    if isinstance(sockets, set):
+        websockets = list(sockets)
+    else:
+        websockets = [sockets]
+    for ws in websockets:
         try:
             if ws.client_state == WebSocketState.DISCONNECTED:
                 logger.debug(f"WebSocket {client_id} already disconnected")
-                return
+                continue
 
             if hasattr(ws, '_queue') and ws._queue.qsize() > 100:
                 logger.warning(f"WebSocket buffer full for {client_id}, dropping message")
-                return
+                continue
 
             await ws.send_json(message)
         except Exception:

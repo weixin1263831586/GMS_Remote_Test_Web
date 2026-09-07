@@ -203,6 +203,109 @@ class ClusterRepository(
                 self.claims.release(job_source, status="failed")
             raise
 
+    @staticmethod
+    def _physical_alias_device_ids(
+        conn: Any,
+        source_worker_id: str,
+        source_serial: str,
+        exclude_device_id: str = "",
+    ) -> list[str]:
+        """All inventory ids that route to the same physical device.
+
+        A device exposed through ADB Proxy carries
+        adb_proxy_source_worker_id/adb_proxy_source_serial in its
+        properties (worker_agent/device_actions.py:251).  Every inventory
+        row with the same proxy metadata — plus the source worker's own
+        local-USB row — is the same physical hardware (R01).
+        """
+        rows = conn.execute(
+            """SELECT id, worker_id, transport, properties_json
+               FROM cluster_worker_devices
+               WHERE transport='adb_proxy'"""
+        ).fetchall()
+        alias_ids: list[str] = []
+        for row in rows:
+            if row["id"] == exclude_device_id:
+                continue
+            try:
+                properties = json.loads(row["properties_json"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            if (
+                str(properties.get("adb_proxy_source_worker_id") or "") == source_worker_id
+                and str(properties.get("adb_proxy_source_serial") or "") == source_serial
+            ):
+                alias_ids.append(row["id"])
+        source_row = conn.execute(
+            "SELECT id FROM cluster_worker_devices WHERE worker_id=? AND serial=?",
+            (source_worker_id, source_serial),
+        ).fetchone()
+        if source_row and source_row["id"] != exclude_device_id:
+            alias_ids.append(source_row["id"])
+        return alias_ids
+
+    def _physical_alias_lease_conflict(
+        self,
+        conn: Any,
+        worker_id: str,
+        device_id: str,
+        device_row: Any,
+    ) -> str:
+        """Return the conflicting alias device_id if the same physical
+        device is already actively leased through another route (R01)."""
+        properties = device_row["properties_json"] if not isinstance(
+            device_row, dict
+        ) else json.dumps(device_row.get("properties") or {})
+        try:
+            device_properties = json.loads(properties or "{}")
+        except json.JSONDecodeError:
+            device_properties = {}
+        transport = str(device_row["transport"] if not isinstance(
+            device_row, dict
+        ) else device_row.get("transport") or "")
+        candidates: list[str] = []
+        if transport == "adb_proxy":
+            source_worker_id = str(
+                device_properties.get("adb_proxy_source_worker_id") or ""
+            )
+            source_serial = str(
+                device_properties.get("adb_proxy_source_serial") or ""
+            )
+            if source_worker_id and source_serial:
+                candidates = self._physical_alias_device_ids(
+                    conn, source_worker_id, source_serial,
+                    exclude_device_id=device_id,
+                )
+        else:
+            # Claiming the physical device on its source worker: check
+            # active leases on every proxied alias pointing at it.
+            proxy_rows = conn.execute(
+                """SELECT id, properties_json FROM cluster_worker_devices
+                   WHERE transport='adb_proxy' AND id != ?""",
+                (device_id,),
+            ).fetchall()
+            for row in proxy_rows:
+                try:
+                    properties = json.loads(row["properties_json"] or "{}")
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    str(properties.get("adb_proxy_source_worker_id") or "") == worker_id
+                    and str(properties.get("adb_proxy_source_serial") or "")
+                    == str(device_row["serial"] if not isinstance(
+                        device_row, dict) else device_row.get("serial") or "")
+                ):
+                    candidates.append(row["id"])
+        for alias_id in candidates:
+            row = conn.execute(
+                """SELECT id, job_id, owner_id FROM device_leases
+                   WHERE device_id=? AND status='active'""",
+                (alias_id,),
+            ).fetchone()
+            if row:
+                return f"{alias_id} (job {row['job_id']}, owner {row['owner_id']})"
+        return ""
+
     def _create_job_with_leases_metadata(self, data: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()
         job_id = data["_job_id"]
@@ -309,6 +412,14 @@ class ClusterRepository(
                     raise ValueError(f"device is not available: {raw_id}")
                 if conn.execute("SELECT 1 FROM device_leases WHERE device_id=? AND status='active'", (device_id,)).fetchone():
                     raise ValueError(f"device is already leased: {raw_id}")
+                alias_conflict = self._physical_alias_lease_conflict(
+                    conn, worker_id, device_id, device
+                )
+                if alias_conflict:
+                    raise ValueError(
+                        "device is already claimed through another transport "
+                        f"alias: {alias_conflict}"
+                    )
                 claim = claim_records.get(device_id) or {}
                 lease_id = str(claim.get("id") or f"lease-{uuid.uuid4().hex}")
                 lease_ids.append(lease_id)

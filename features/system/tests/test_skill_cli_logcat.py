@@ -82,8 +82,9 @@ class DevicesLogcatTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         envelope = json.loads(result.stdout)
         self.assertTrue(envelope["ok"])
-        # 设备端命令固定为 logcat -v time, 无 dump 标志时自动附加 -d。
-        self.assertIn("-s SERIAL-1 shell logcat -v time -d", calls)
+        # 设备端命令固定为 logcat -v time, 无 dump 标志时自动附加 -d
+        # (R16: 参数逐项加引号, 含空格参数不再被设备端拆散)。
+        self.assertIn("-s SERIAL-1 shell logcat -v time '-d'", calls)
         self.assertIn("fake logcat line", envelope["output"])
 
     def test_existing_dump_flag_is_kept_and_args_pass_through(self):
@@ -100,9 +101,9 @@ class DevicesLogcatTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "-s SERIAL-1 shell logcat -v time -b crash -t 100", calls
+            "-s SERIAL-1 shell logcat -v time '-b' 'crash' '-t' '100'", calls
         )
-        self.assertNotIn("time -d -b", calls)
+        self.assertNotIn("time -d", calls)
 
     def test_clear_flag_runs_logcat_c_first(self):
         result, calls = self._run(
@@ -114,7 +115,7 @@ class DevicesLogcatTests(unittest.TestCase):
         self.assertTrue(envelope["ok"])
         # 先清空缓冲, 再以 -v time dump 抓取; -c 本身不进入抓取参数。
         self.assertIn("-s SERIAL-1 shell logcat -c", calls)
-        self.assertIn("-s SERIAL-1 shell logcat -v time -d", calls)
+        self.assertIn("-s SERIAL-1 shell logcat -v time '-d'", calls)
         self.assertIn("fake logcat line", envelope["output"])
 
     def test_clear_flag_combines_with_other_args(self):
@@ -129,7 +130,7 @@ class DevicesLogcatTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("-s SERIAL-1 shell logcat -v time -d -b crash", calls)
+        self.assertIn("-s SERIAL-1 shell logcat -v time '-d' '-b' 'crash'", calls)
 
     def test_file_flag_is_a_usage_error(self):
         result, _calls = self._run(

@@ -92,9 +92,16 @@ def _local_secret() -> bytes:
     if path.exists():
         if path.stat().st_mode & 0o077:
             raise RuntimeError(f"ADB Proxy secret file permissions must be 0600: {path}")
-        value = path.read_bytes().strip()
-        if len(value) < 32:
-            raise RuntimeError("ADB Proxy secret file is invalid")
+        value = path.read_bytes()
+        if len(value) != 32:
+            # Legacy writers may have terminated the key with a trailing
+            # newline.  Tolerate exactly that shape, but never strip a
+            # genuine 32-byte binary key: random bytes can start/end with
+            # whitespace (e.g. b"\n"), and stripping them made the file
+            # unreadable forever (R06).
+            if value != value[:32] + b"\n":
+                raise RuntimeError("ADB Proxy secret file is invalid")
+            value = value[:32]
         return value
     path.parent.mkdir(parents=True, exist_ok=True)
     value = secrets.token_bytes(32)

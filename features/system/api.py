@@ -21,7 +21,6 @@ from fastapi.responses import (
 )
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
-from foundation.cluster_port import get_local_worker_id as _get_local_worker_id
 from features.system.api_docs_list import API_DOCS_LIST
 from features.system.skill_archive_signing import (
     sign_skill_archive,
@@ -46,6 +45,7 @@ from features.system.websocket_security import (
     get_websocket_client_ip as _get_websocket_client_ip,
 )
 from features.users import runtime as users_runtime
+from foundation.cluster_port import get_local_worker_id as _get_local_worker_id
 from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT, config_manager
 from foundation.files import FileUtils
 from foundation.responses import error_response
@@ -680,7 +680,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             state["client_ip"] = client_ip
             state["display_client_id"] = display_client_id
     with global_state.websocket_connections_lock:
-        global_state.websocket_connections[client_id] = websocket
+        # R26: a user may open several tabs; store ALL connections per
+        # client so the second tab no longer silently steals pushes from
+        # the first.  {client_id: set[websocket]}.
+        connections = global_state.websocket_connections.get(client_id)
+        if isinstance(connections, set):
+            connections.add(websocket)
+        else:
+            global_state.websocket_connections[client_id] = {websocket}
     logger.info(f"WebSocket client connected: {client_id} ({display_client_id})")
 
     try:
@@ -757,10 +764,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except Exception as e:
         logger.error(f"WebSocket error for {client_id}: {e}")
     finally:
-        # 清理WebSocket连接
+        # 清理WebSocket连接（R26: 按 set 成员移除，不影响同账号其他标签页）
         with global_state.websocket_connections_lock:
-            if global_state.websocket_connections.get(client_id) is websocket:
-                del global_state.websocket_connections[client_id]
+            connections = global_state.websocket_connections.get(client_id)
+            if isinstance(connections, set):
+                connections.discard(websocket)
+                if not connections:
+                    global_state.websocket_connections.pop(client_id, None)
+            elif connections is websocket:
+                global_state.websocket_connections.pop(client_id, None)
 
         close_websocket_terminal(websocket)
 

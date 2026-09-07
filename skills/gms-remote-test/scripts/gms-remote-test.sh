@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="2026.09.07-2"
+GMS_RT_VERSION="2026.09.07-6"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -18,6 +18,10 @@ GMS_RT_EXIT_PERMISSION=4
 GMS_RT_EXIT_CONFLICT=5
 GMS_RT_EXIT_NETWORK=6
 GMS_RT_EXIT_OPERATION=7
+# R30: batch operations where some devices succeeded and others failed.
+# Mapped to GMS_RT_EXIT_OPERATION by _gms_rt_dispatch's envelope case, but
+# keeps the semantic exit code for direct callers.
+GMS_RT_EXIT_PARTIAL=7
 
 # GMS Web App Configuration Directory
 # Can be overridden by environment variable
@@ -80,8 +84,33 @@ CURL_EXIT_SSL_CERT=60
 # Authentication
 # The current backend authenticates API clients with the gms_session cookie.
 # Keep the cookie outside the repository and allow callers to override its path.
-GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/session.cookies}"
+# R32: multiple agents running under the same Unix user used to share one
+# writable cookie jar with no concurrency protection — concurrent login/
+# logout/parallel requests clobbered each other's sessions.  A profile name
+# (GMS_RT_PROFILE) separates jars per agent; flock serialises writes to the
+# same jar.  Profiles do NOT strengthen server-side auth: a revoked token
+# stays revoked regardless of the local file.
+GMS_RT_PROFILE="${GMS_RT_PROFILE:-default}"
+GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.cookies}"
 CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
+# Serialises cookie-jar writes across concurrent CLI processes.
+GMS_COOKIE_LOCK_FILE="${GMS_AUTH_COOKIE_JAR}.lock"
+_gms_with_cookie_lock() {
+    local cookie_dir
+    cookie_dir=$(dirname "$GMS_AUTH_COOKIE_JAR")
+    if [ ! -d "$cookie_dir" ]; then
+        mkdir -p "$cookie_dir" 2>/dev/null || true
+        chmod 700 "$cookie_dir" 2>/dev/null || true
+    fi
+    if command -v flock >/dev/null 2>&1 && [ -f "$GMS_COOKIE_LOCK_FILE" -o -w "$cookie_dir" ]; then
+        (
+            flock -w 10 200 2>/dev/null || true
+            "$@"
+        ) 200>"$GMS_COOKIE_LOCK_FILE"
+    else
+        "$@"
+    fi
+}
 
 # Local deployments commonly use a self-signed HTTPS certificate. Fail
 # closed by default; provide GMS_CURL_CA_CERT for a real CA bundle or set
@@ -247,18 +276,20 @@ api_call() {
         _record_api_exit_code "$GMS_RT_EXIT_OPERATION"
         return "$GMS_RT_EXIT_OPERATION"
     }
+    # R32: serialise requests that may write the shared cookie jar so
+    # concurrent CLI processes cannot clobber each other's session file.
     if [ "${#extra_args[@]}" -gt 0 ]; then
-        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
+        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
             -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT" \
             -X "$method" "${API_BASE}${endpoint}" "${extra_args[@]}")
     elif [ -n "$data" ] || [ "$method" = "POST" ]; then
-        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -X "${method}" "${API_BASE}${endpoint}" \
+        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -X "${method}" "${API_BASE}${endpoint}" \
             -H "Content-Type: application/json" \
             -d "${data}" \
             -w $'\nHTTP_STATUS:%{http_code}' \
             --max-time "$CURL_TIMEOUT")
     else
-        response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
+        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
             -w $'\nHTTP_STATUS:%{http_code}' \
             -X "$method" "${API_BASE}${endpoint}" --max-time "$CURL_TIMEOUT")
     fi
@@ -1382,7 +1413,12 @@ gms-rt-devices-wait() {
 
 # Reboot multiple devices (parallel)
 gms-rt-devices-reboot() {
-    local devices="$1"
+    # R30: the help text promises "DEVICE1 [DEVICE2 ...]" but the old
+    # implementation only consumed $1, silently dropping extra devices.
+    # Collect every argument (also accepts the space-separated single-arg
+    # form for backwards compatibility).
+    local devices
+    devices=$(printf '%s\n' "$*" | tr ' ' '\n' | sed '/^$/d' | paste -sd' ' -)
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-reboot DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     devices=$(_resolve_devices "$devices")
@@ -1392,12 +1428,19 @@ gms-rt-devices-reboot() {
 
     local response=$(api_call "/devices/reboot" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then
-        success "设备重启成功"
-
-        # 美化输出格式
-        local count=$(echo "$response" | jq -r '.data.summary.total // 0')
         local success=$(echo "$response" | jq -r '.data.summary.success // 0')
         local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
+
+        # R30: request-level success:true does not mean every device
+        # succeeded.  Map partial/full failure to a non-zero exit so
+        # agents can tell them apart.
+        if [ "$failed" -gt 0 ] 2>/dev/null; then
+            error "设备重启部分失败: 成功 $success 台, 失败 $failed 台"
+            echo "$response" | jq -r '.data.results[]? | select(.success != true) | "❌ \(.device): \(.error // .status // "失败")"' 2>/dev/null
+            [ "$success" -gt 0 ] 2>/dev/null && return "$GMS_RT_EXIT_PARTIAL"
+            return "$GMS_RT_EXIT_OPERATION"
+        fi
+        success "设备重启成功"
 
         echo "📊 操作统计: 成功 $success 台, 失败 $failed 台"
         echo ""
@@ -1407,6 +1450,7 @@ gms-rt-devices-reboot() {
     else
         error "设备重启失败"
         echo "$response" | jq '.'
+        return "$GMS_RT_EXIT_OPERATION"
     fi
 }
 
@@ -1549,12 +1593,20 @@ gms-rt-devices-shell() {
     if _is_test_host && command -v adb &> /dev/null && adb devices 2>/dev/null | grep -q "$device_id"; then
         if [ -n "$shell_command" ]; then
             adb -s "$device_id" shell "$shell_command"
+            local adb_status=$?
+            # R15: propagate the real adb exit code — swallowing it made
+            # failed device commands report ok:true / exit_code:0.
+            if [ "$adb_status" -ne 0 ]; then
+                GMS_RT_ERROR_SEEN=1
+                return "$adb_status"
+            fi
+            return 0
         else
             echo ""; echo "💻 打开设备Shell: $device_id..."
             echo "🔌 使用 Ctrl+D 退出 shell"; echo ""
             adb -s "$device_id" shell
+            return 0
         fi
-        return 0
     fi
 
     local ssh_info=($(_resolve_ssh_host))
@@ -1567,6 +1619,12 @@ gms-rt-devices-shell() {
         quoted_device=$(_shell_quote "$device_id")
         quoted_command=$(_shell_quote "$shell_command")
         ssh -p "$port" "$user@$host" "adb -s ${quoted_device} shell ${quoted_command}"
+        local ssh_status=$?
+        if [ "$ssh_status" -ne 0 ]; then
+            GMS_RT_ERROR_SEEN=1
+            return "$ssh_status"
+        fi
+        return 0
     else
         echo ""; echo "💻 打开设备Shell: $device_id... (via $user@$host)"
         echo "🔌 使用 Ctrl+D 退出 shell"; echo ""
@@ -1613,8 +1671,17 @@ gms-rt-devices-logcat() {
                 return "$GMS_RT_EXIT_USAGE"
             fi
         done
-        # 无 dump 标志时自动附加 -d, 保证命令终止。
-        if [ "$has_dump_flag" -eq 0 ]; then
+        # R31: '-T <time>' does NOT imply dump mode in logcat — it keeps
+        # following output and would hang a non-interactive call until the
+        # timeout.  Only -d/-t/-g/-L/-p/-print terminate on their own, so
+        # append -d unless one of those (excluding -T) is present.
+        local has_terminating_flag=0
+        for arg in "${logcat_args[@]}"; do
+            case "$arg" in
+                -d|-t|-g|-L|-p|-print) has_terminating_flag=1 ;;
+            esac
+        done
+        if [ "$has_terminating_flag" -eq 0 ]; then
             logcat_args=(-d "${logcat_args[@]}")
         fi
     elif [ "$has_dump_flag" -eq 0 ] && [ "$GMS_RT_QUIET" != "1" ]; then
@@ -1627,7 +1694,14 @@ gms-rt-devices-logcat() {
         if [ "$clear_first" -eq 1 ]; then
             adb -s "$device_id" shell logcat -c || { error "logcat -c 清空缓冲失败"; return "$GMS_RT_EXIT_OPERATION"; }
         fi
-        adb -s "$device_id" shell logcat -v time "${logcat_args[@]}"
+        # 逐参数加引号: adb shell 将所有参数拼接后交给设备端 sh 解释,
+        # 含空格的参数 (如 logcat -t '09-07 10:52:00.000') 不加引号会被拆开。
+        local device_cmd="logcat -v time"
+        local arg
+        for arg in "${logcat_args[@]}"; do
+            device_cmd+=" $(_shell_quote "$arg")"
+        done
+        adb -s "$device_id" shell "$device_cmd"
         return $?
     fi
 
@@ -1636,11 +1710,12 @@ gms-rt-devices-logcat() {
     [ -z "$host" ] && { error "无法确定测试主机地址"; return 1; }
     ! command -v ssh &> /dev/null && { error "ssh 命令未找到. 请安装 OpenSSH 客户端"; return 1; }
 
-    # 各参数以空格拼接后交给远端 adb shell; 含空格的参数会被设备端拆分,
-    # 非交互模式已拒绝元字符, 该差异仅影响少数过滤表达式。
+    # 逐参数加引号: 远端 adb shell 将参数拼接后由设备端 sh 解释,
+    # 含空格的参数 (如 logcat -t '09-07 10:52:00.000') 不加引号会被拆开。
     local logcat_command="logcat -v time"
+    local arg
     for arg in "${logcat_args[@]}"; do
-        logcat_command+=" $arg"
+        logcat_command+=" $(_shell_quote "$arg")"
     done
     local quoted_device quoted_command remote_command
     quoted_device=$(_shell_quote "$device_id")
@@ -3819,26 +3894,30 @@ _gms_rt_dispatch() {
     esac
 
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        local stdout_text stderr_text
-        stdout_text=$(<"$stdout_file")
-        stderr_text=$(<"$stderr_file")
+        # NOTE: 大输出(如 logcat -d / jobs-events)不能经 shell 变量 + jq --arg 传递,
+        # 否则超过单参数上限报 "Argument list too long"。改用 --rawfile 直接读临时文件。
+        # 同时对未解析为 JSON 的纯文本输出做尾部截断, 保护调用方(如 AI agent)的上下文。
         jq -cn \
             --arg command "$command" \
-            --arg stdout "$stdout_text" \
-            --arg stderr "$stderr_text" \
+            --rawfile stdout "$stdout_file" \
+            --rawfile stderr "$stderr_file" \
             --argjson exit_code "$command_status" '
             def json_suffix:
                 ([try (
                     capture("(?s)(?<json>[\\[{].*)$").json | fromjson
                 ) catch empty][0] // null);
             ($stdout | json_suffix) as $parsed |
+            def truncate_text:
+                if (length > 200000)
+                then "...[output truncated, kept last 200000 of \(length) chars]...\n" + .[-200000:]
+                else . end;
             {
                 ok: ($exit_code == 0),
                 command: $command,
                 exit_code: $exit_code
             }
-            + (if $parsed == null then {output: $stdout} else {data: $parsed} end)
-            + (if $stderr == "" then {} else {diagnostics: $stderr} end)'
+            + (if $parsed == null then {output: ($stdout | truncate_text)} else {data: $parsed} end)
+            + (if $stderr == "" then {} else {diagnostics: ($stderr | truncate_text)} end)'
     fi
 
     rm -f -- "$status_file" "$stdout_file" "$stderr_file"

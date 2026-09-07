@@ -462,6 +462,85 @@ async def test_connect_adds_remaining_device_to_existing_assignment():
 
 
 @pytest.mark.asyncio
+async def test_connect_restore_replays_new_generation_instead_of_stale_one():
+    """R04: when target_connect fails with a previous assignment present,
+    the restore commands must carry the NEW generation — replaying the
+    stale one is always rejected by the worker's staleness check."""
+    repository = _Repository()
+    repository.devices["worker-source"].extend([
+        {
+            "serial": "RK3572GMS1",
+            "state": "available",
+            "transport": "local_usb",
+            "properties": {"model": "RK3572"},
+        },
+        {
+            "serial": "RK3576GMS1",
+            "state": "available",
+            "transport": "local_usb",
+            "properties": {"model": "RK3576"},
+        },
+    ])
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
+        effective_enabled=True,
+        list_workers=lambda: list(repository.workers.values()),
+    )
+    service = ADBProxyService()
+    service.config_manager = _ConfigManager()
+    stale_generation = 100
+    service.config_manager.runtime["adb_proxy_assignments"] = {
+        "worker-source|worker-target": {
+            "source_worker_id": "worker-source",
+            "source_address": "10.10.10.206",
+            "target_worker_id": "worker-target",
+            "target_address": "10.10.10.207",
+            "devices": ["RK3572GMS1"],
+            "status": "connected",
+            "generation": stale_generation,
+        }
+    }
+    run = AsyncMock(side_effect=[
+        {"running": True},                    # source_start (new)
+        RuntimeError("target connect failed"),  # target_connect (new)
+        {"running": True},                    # source_start (restore)
+        {"connected": True},                  # target_connect (restore)
+    ])
+
+    with patch(
+        "features.cluster.get_cluster_service", return_value=cluster
+    ), patch(
+        "features.cluster.api._require_cluster_enabled"
+    ), patch(
+        "features.cluster.api._run_worker_command", run
+    ), patch(
+        "features.devices.adb_proxy_service.create_pair_grant",
+        return_value="short-lived-grant",
+    ), pytest.raises(RuntimeError, match="target connect failed"):
+        await service.connect(
+            "worker-source",
+            "worker-target",
+            ["RK3576GMS1"],
+        )
+
+    new_generation = run.await_args_list[0].args[2]["generation"]
+    assert new_generation > stale_generation
+    restore_source = run.await_args_list[2].args[2]
+    restore_target = run.await_args_list[3].args[2]
+    # Restore replays the PREVIOUS device set (pre-failure state) but with
+    # the new generation — the workers already accepted it.
+    assert restore_source["devices"] == ["RK3572GMS1"]
+    assert restore_source["generation"] == new_generation
+    assert restore_target["generation"] == new_generation
+    # Restored assignment must persist the new generation so reconcile
+    # does not flag degraded_source after a successful restore.
+    saved = service.config_manager.runtime["adb_proxy_assignments"]
+    assert saved["worker-source|worker-target"]["generation"] == new_generation
+    assert saved["worker-source|worker-target"]["status"] == "connected"
+
+
+@pytest.mark.asyncio
 async def test_disconnect_stops_source_even_when_target_is_offline():
     service = ADBProxyService()
     service.config_manager = _ConfigManager()
@@ -757,3 +836,73 @@ async def test_connect_rejects_worker_with_legacy_default_allow_proxy():
         if item["worker_id"] == "worker-source"
     )
     assert source["adb_proxy"] is False
+
+
+def test_guards_block_operation_claimed_devices_with_available_state():
+    """R03: an operation claim can coexist with state='available'.  Both
+    proxy guards must treat any active claim as busy, not just the
+    protocol-state fields."""
+    from fastapi import HTTPException as _HTTPException
+
+    repository = _Repository()
+    repository.devices["worker-target"].append({
+        "serial": "PROXIED1",
+        "state": "available",
+        "claimed": True,
+        "claim_owner_id": "other-user",
+        "transport": "adb_proxy",
+    })
+    cluster = SimpleNamespace(repository=repository)
+    worker = {"worker_id": "worker-target", "status": "online", "running_jobs": 0}
+
+    with patch("foundation.cluster_port.get_cluster_service", return_value=cluster):
+        with pytest.raises(_HTTPException, match="占用中的设备"):
+            ADBProxyService._require_idle_target("worker-target", worker)
+
+        with pytest.raises(_HTTPException, match="被占用的代理设备"):
+            ADBProxyService._require_proxy_devices_not_claimed(
+                "worker-target", {"PROXIED1"}
+            )
+
+
+@pytest.mark.asyncio
+async def test_disconnect_blocks_when_other_assignment_devices_claimed():
+    """R02: target_disconnect restarts the shared Hub, so disconnecting one
+    source must also verify the OTHER assignments' devices on the same
+    target are claim-free."""
+    run = AsyncMock(side_effect=[
+        {"connected": True},   # connect source-1 -> target
+        {"connected": True},   # connect source-2 -> target
+    ])
+    repository = _Repository()
+    cluster = SimpleNamespace(
+        repository=repository,
+        config=SimpleNamespace(local_worker_id="ats-worker-controller"),
+        effective_enabled=True,
+        list_workers=lambda: list(repository.workers.values()),
+    )
+    service = ADBProxyService()
+    service.config_manager = _ConfigManager()
+    service.config_manager.runtime["adb_proxy_assignments"] = {
+        "source-1|worker-target": {
+            "source_worker_id": "source-1", "target_worker_id": "worker-target",
+            "devices": ["D1"], "status": "connected",
+        },
+        "source-2|worker-target": {
+            "source_worker_id": "source-2", "target_worker_id": "worker-target",
+            "devices": ["D2"], "status": "connected",
+            # D2 is actively claimed via an operation claim while
+            # state stays 'available' (protocol state vs ownership).
+        },
+    }
+    repository.devices["worker-target"].append({
+        "serial": "D2", "state": "available", "claimed": True,
+        "claim_owner_id": "someone", "transport": "adb_proxy",
+    })
+
+    with patch(
+        "features.cluster.get_cluster_service", return_value=cluster
+    ), patch(
+        "features.cluster.api._run_worker_command", run
+    ), pytest.raises(HTTPException, match="被占用的代理设备"):
+        await service.disconnect("source-1", "worker-target")

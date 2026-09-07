@@ -258,3 +258,36 @@ def test_simple_exec_drains_output_before_exit_status():
     # 退出码必须在两条流都 drain 完之后才获取。
     assert calls[-1] == "exit_status"
     assert "recv:stdout" in calls and "recv:stderr" in calls
+
+
+def test_pool_health_check_is_bounded_when_exit_status_never_arrives():
+    """R28: paramiko's recv_exit_status() blocks forever when the remote
+    never sends an exit status; the health check must poll
+    exit_status_ready() with a deadline and treat the timeout as a dead
+    connection instead of hanging the event loop."""
+    import time as _time
+
+    import paramiko
+
+    manager = SSHManager(pool_size=2)
+    pooled = MagicMock()
+    pooled._gms_pool_identity = ('host-a', '22', 'tester')
+    channel = MagicMock(spec=paramiko.Channel)
+    channel.exit_status_ready.return_value = False  # never ready
+    stdout = MagicMock()
+    stdout.channel = channel
+    pooled.exec_command.return_value = (MagicMock(), stdout, MagicMock())
+    manager.return_connection(pooled)
+
+    started = _time.monotonic()
+    replacement = MagicMock()
+    with patch.object(manager, 'create_connection', return_value=replacement):
+        result = manager.get_connection(
+            {'host': 'host-a', 'username': 'tester', 'password': 'secret'}
+        )
+
+    elapsed = _time.monotonic() - started
+    assert result is replacement
+    # Health-check deadline (~3s) must be honoured, not infinite.
+    assert elapsed < 10
+    pooled.close.assert_called_once_with()

@@ -699,8 +699,34 @@ function onTestTypeChange() {
 }
 
 // 自动选择测试套件的函数
+// R22: whether the currently selected suite still exists in the fresh list.
+// A refresh must not override the user's manual version pick — but an
+// explicit test-TYPE change must still re-select (the old suite belongs to
+// the previous type), so validity is checked against the requested type.
+function currentTestSuiteStillValid(selectedPath, testType) {
+    if (!selectedPath || typeof testSuitesCache === 'undefined') return false;
+    const selected = testSuitesCache.find(suite => suite.tools_path === selectedPath);
+    if (!selected) return false;
+    if (!testType) return true;
+    const selectedType = String(selected.test_type || '').toLowerCase();
+    const requested = String(testType || '').toLowerCase();
+    // GSI rides CTS suites; GTS-ROOT/APTS ride GTS suites.
+    if (requested === 'gsi') return selectedType === 'cts';
+    if (requested === 'gts-root' || requested === 'apts') return selectedType === 'gts';
+    return selectedType === requested;
+}
+
 function autoSelectTestSuite(testType) {
-    // 获取所有匹配的测试套件
+    // R22: a refresh re-render must not override the user's manual suite
+    // version.  If the currently selected suite still exists and matches the
+    // requested test type, keep it; auto-select the latest only on first
+    // entry or when the user explicitly changed the test type.
+    const selectElement = document.getElementById('test-suite');
+    const currentSelection = selectElement?.value || '';
+    if (currentTestSuiteStillValid(currentSelection, testType)) {
+        debugLog('[autoSelectTestSuite] keeping user selection:', currentSelection);
+        return;
+    }
     // 特殊处理：GSI使用CTS的测试套件，GTS-ROOT和APTS使用GTS的测试套件
     let matchingSuites;
     const testTypeLower = testType.toLowerCase();
@@ -796,7 +822,6 @@ function autoSelectTestSuite(testType) {
         // 选择版本号最大的
         const latestSuite = matchingSuites[0];
         $('test-suite').value = latestSuite.tools_path;
-        addLogEntry(`自动选择最新测试套件: ${latestSuite.version}`, 'info');
 
         debugLog(`[autoSelectTestSuite] 已选择套件:`, {
             version: latestSuite.version,

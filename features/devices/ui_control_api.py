@@ -84,17 +84,25 @@ def _extract_json_object(text: str):
             break
     if start < 0:
         return None
+    # R25: 从首个 { 或 [ 起用 raw_decode 解析，而不是按最后一个 ]/} 裁剪——
+    # 裁剪点在嵌套结构中会错位（连合法的 {"elements":[...]} 都解析失败），
+    # 且对象后跟数组/日志的混合输出同样出错。raw_decode 一次解析出
+    # 最外层完整 JSON 值，天然忽略其后的日志尾随。
+    decoder = json.JSONDecoder()
     candidate = text[start:]
-    # 从末尾裁掉 JSON 之后的日志尾随。
-    for end_char in ("]", "}"):
-        idx = candidate.rfind(end_char)
-        if idx > 0:
-            candidate = candidate[: idx + 1]
-            break
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        return None
+    best = None
+    idx = 0
+    while idx < len(candidate):
+        ch = candidate[idx]
+        if ch in "[{":
+            try:
+                value, _end = decoder.raw_decode(candidate, idx)
+                best = value
+                break
+            except json.JSONDecodeError:
+                pass
+        idx += 1
+    return best
 
 
 def _run_remote(ssh, command: str, timeout: int = 30) -> CommandResult:

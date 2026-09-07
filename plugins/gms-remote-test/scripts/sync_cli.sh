@@ -23,3 +23,16 @@ chmod +x "${TARGET}"
 
 SOURCE_VERSION="$(sed -n 's/^GMS_RT_VERSION="\(.*\)"/\1/p' "${SOURCE}")"
 echo "Synced gms-remote-test.sh (CLI version ${SOURCE_VERSION:-unknown}) into plugins/gms-remote-test/scripts/"
+
+# R16 drift guard: same version must always mean identical content.  If the
+# previous plugin copy already carried this version but differed from the
+# source (content drift with an unchanged version — the exact trap that let
+# plugins ship fixes skills lacked), refuse to sync silently.
+if git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    PREVIOUS_HASH="$(git -C "${REPO_ROOT}" show "HEAD:${TARGET#"${REPO_ROOT}/"}" 2>/dev/null | sha256sum | cut -d' ' -f1 || true)"
+    SOURCE_HASH="$(sha256sum "${SOURCE}" | cut -d' ' -f1)"
+    if [[ -n "${PREVIOUS_HASH}" && "${PREVIOUS_HASH}" != "${SOURCE_HASH}" ]]; then
+        echo "Warning: plugin CLI content changed at the same version (${SOURCE_VERSION});" >&2
+        echo "bump GMS_RT_VERSION in skills/gms-remote-test/scripts/gms-remote-test.sh before shipping." >&2
+    fi
+fi

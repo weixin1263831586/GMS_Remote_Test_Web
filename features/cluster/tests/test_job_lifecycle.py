@@ -244,3 +244,84 @@ class ClusterJobLifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PhysicalDeviceAliasLeaseTests(unittest.TestCase):
+    """R01: the same physical device reachable via ADB Proxy aliases must
+    not be leased concurrently through different worker routes."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.repo = ClusterRepository(Path(self.temp.name) / "cluster.sqlite3")
+        self.repo.register_worker({
+            "worker_id": "source", "name": "src", "hostname": "src",
+            "address": "10.0.0.1", "agent_version": "1", "max_jobs": 2,
+            "capabilities": {},
+        })
+        self.repo.register_worker({
+            "worker_id": "target", "name": "tgt", "hostname": "tgt",
+            "address": "10.0.0.2", "agent_version": "1", "max_jobs": 2,
+            "capabilities": {},
+        })
+        self.repo.heartbeat("source", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "SERIAL", "state": "available"}],
+        })
+        self.repo.heartbeat("target", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{
+                "serial": "localhost:5038", "state": "available",
+                "transport": "adb_proxy",
+                "properties": {
+                    "adb_proxy_source_worker_id": "source",
+                    "adb_proxy_source_serial": "SERIAL",
+                },
+            }],
+        })
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_proxy_alias_cannot_be_leased_while_source_is_leased(self):
+        job = self.repo.create_job_with_leases({
+            "worker_id": "source", "owner_id": "alice",
+            "devices": ["source:SERIAL"], "suite_key": "CTS:17_r1",
+        })
+        self.assertEqual(job["status"], "assigned")
+        with self.assertRaisesRegex(ValueError, "another transport alias"):
+            self.repo.create_job_with_leases({
+                "worker_id": "target", "owner_id": "bob",
+                "devices": ["target:localhost:5038"], "suite_key": "CTS:17_r1",
+            })
+
+    def test_source_device_cannot_be_leased_while_proxy_alias_is_leased(self):
+        job = self.repo.create_job_with_leases({
+            "worker_id": "target", "owner_id": "bob",
+            "devices": ["target:localhost:5038"], "suite_key": "CTS:17_r1",
+        })
+        self.assertEqual(job["status"], "assigned")
+        with self.assertRaisesRegex(ValueError, "another transport alias"):
+            self.repo.create_job_with_leases({
+                "worker_id": "source", "owner_id": "alice",
+                "devices": ["source:SERIAL"], "suite_key": "CTS:17_r1",
+            })
+
+    def test_alias_is_reusable_after_lease_release(self):
+        job = self.repo.create_job_with_leases({
+            "worker_id": "source", "owner_id": "alice",
+            "devices": ["source:SERIAL"], "suite_key": "CTS:17_r1",
+        })
+        command = self.repo.create_command({
+            "worker_id": "source", "command_type": "start_test",
+            "job_id": job["id"], "attempt_id": job["current_attempt_id"],
+            "payload": {},
+        })
+        command = self.repo.ack_command("source", command["id"], {
+            "status": "completed", "result": {}, "error": "",
+        })
+        self.repo.sync_job_from_command(command)
+        second = self.repo.create_job_with_leases({
+            "worker_id": "target", "owner_id": "bob",
+            "devices": ["target:localhost:5038"], "suite_key": "CTS:17_r1",
+        })
+        self.assertEqual(second["status"], "assigned")

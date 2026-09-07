@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Any
@@ -7,6 +8,9 @@ from typing import Any
 from features.cluster import get_cluster_service
 from features.cluster.execution_spec import build_argv_from_spec
 from foundation.responses import error_response, success_response
+
+
+logger = logging.getLogger(__name__)
 
 
 # 与 features/test_execution/suite_modules.py 的 MODULE_EXTENSIONS 保持一致；
@@ -62,16 +66,25 @@ def _module_suggestions(requested: str, modules: dict[str, str]) -> list[str]:
     return ranked[:5]
 
 
-def _resolve_test_module(tools_path: str, module: str) -> str:
+def _resolve_test_module(tools_path: str, module: str, worker_id: str = "") -> str:
     """Validate test_module against the suite's local testcases directory.
 
-    Returns an error message ("" when the module is acceptable). Only runs
-    when the testcases directory exists on the local filesystem (local
-    Worker); remote Worker suites are passed through unchanged.
+    Returns an error message ("" when the module is acceptable).  Only runs
+    for the LOCAL Worker and only when the testcases directory exists on the
+    local filesystem.  R19: a remote Worker may have a suite at the same
+    path with different modules — validating it against the Controller's
+    local files rejected valid remote modules (HTTP 400).  Remote Worker
+    suites are passed through unchanged; the Worker executes what its own
+    inventory advertises.
     """
     module = str(module or "").strip()
     if not module:
         return ""
+    if worker_id:
+        from foundation.cluster_port import get_local_worker_id
+
+        if str(worker_id) != get_local_worker_id():
+            return ""
     testcases_dir = _suite_testcases_dir(tools_path)
     if not os.path.isdir(testcases_dir):
         return ""
@@ -129,7 +142,7 @@ def start_cluster_test(request: Any, client_id: str):
     if not selected_suite:
         return error_response("Selected suite is not available on the Worker", 409)
     tools_path = selected_suite["tools_path"]
-    module_error = _resolve_test_module(tools_path, request.test_module)
+    module_error = _resolve_test_module(tools_path, request.test_module, request.worker_id)
     if module_error:
         return error_response(module_error, 400)
     serials = [item.split(":", 1)[1] if item.startswith(f"{request.worker_id}:") else item
@@ -153,6 +166,37 @@ def start_cluster_test(request: Any, client_id: str):
     except Exception as exc:  # HTTPException from the shared builder
         detail = getattr(exc, "detail", None) or str(exc)
         return error_response(str(detail), 400)
+    # Transport compatibility applies to EVERY job entry point (R08):
+    # /api/cluster/jobs runs this check via jobs_api, but /api/test/start
+    # previously skipped it, letting ADB Proxy devices receive tests that
+    # require a physical USB/Fastboot channel.
+    from features.devices import incompatible_test_devices
+
+    inventory = {
+        str(item.get("serial") or ""): item
+        for item in repository.list_devices(request.worker_id)
+    }
+    selected_inventory = []
+    for device_id in request.devices:
+        serial = str(device_id or "")
+        prefix = f"{request.worker_id}:"
+        if serial.startswith(prefix):
+            serial = serial[len(prefix):]
+        if serial in inventory:
+            selected_inventory.append(inventory[serial])
+    incompatible, policy = incompatible_test_devices(
+        selected_inventory,
+        cmd_parts,
+        {},
+    )
+    if incompatible:
+        return error_response(
+            "所选测试需要真实USB/Fastboot通道，不能使用ADB Proxy设备: "
+            + ", ".join(incompatible)
+            + "；请改用USB/IP或在设备来源Worker本地执行。"
+            + f"原因：{policy['reason']}",
+            409,
+        )
     full_suite = not request.retry_dir and not request.test_module and not request.test_case
     required_memory_gb = (float(os.getenv("GMS_CTS_FULL_MEMORY_GB", "28"))
                           if full_suite and (request.test_type or selected_suite["suite_type"]).lower() == "cts"
@@ -176,6 +220,9 @@ def start_cluster_test(request: Any, client_id: str):
     })
     try:
         job = repository.create_job_with_leases(data)
+    except ValueError as exc:
+        return error_response(str(exc), 409)
+    try:
         command = repository.create_command({
             "worker_id": request.worker_id, "command_type": "start_test",
             "job_id": job["id"], "attempt_id": job["current_attempt_id"],
@@ -197,5 +244,36 @@ def start_cluster_test(request: Any, client_id: str):
                                  "attempt_id": job["current_attempt_id"],
                                  "worker_id": request.worker_id},
                                 message="Distributed test queued")
-    except ValueError as exc:
-        return error_response(str(exc), 409)
+    except Exception as exc:
+        # R09: job and dispatch command are committed separately.  Without
+        # compensation, a command-write failure left an `assigned` job with
+        # zero dispatchable commands and active claims; no watchdog covered
+        # that state.  Fail the job and release its claims so callers can
+        # retry cleanly.
+        logger.exception(
+            "Dispatch command commit failed for job %s; compensating", job["id"]
+        )
+        try:
+            repository.transition_job(
+                job["id"],
+                "failed",
+                error=f"dispatch command failed: {exc}",
+                source="controller",
+                message="任务派发命令写入失败，任务已置为失败",
+            )
+        except Exception:
+            logger.exception(
+                "Failed to transition job %s to failed after command error",
+                job["id"],
+            )
+        try:
+            repository.claims.release(
+                f"job:{job['id']}", status="failed"
+            )
+        except Exception:
+            logger.exception(
+                "Failed to release claims for job %s", job["id"]
+            )
+        return error_response(
+            "任务已创建但派发命令写入失败，请稍后重试（任务已回滚为失败状态）", 503
+        )
