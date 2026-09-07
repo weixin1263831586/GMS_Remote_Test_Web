@@ -91,6 +91,36 @@ gms_rt_run(devices-wait, ["<prefix>", "--state", "online", "--max-wait", "300"])
 Device list entries use `status` + `protocol` (`adb`/`fastboot`);
 `devices-wait` matches on those fields.
 
+`devices-info` may transiently fail with exit_code 6 (curl cannot connect)
+right after a Controller restart — retry once after a few seconds before
+escalating to `system-health`.
+
+### 5.1 Read-only device shell (`gms_rt_shell`, plugin >= 0.5.0)
+
+For unattended device diagnosis, the plugin exposes a typed tool backed by
+`gms-rt-devices-shell` with a strict read-only allowlist:
+
+```
+gms_rt_shell(device="RK3562GMS7", command="getprop ro.build.fingerprint")
+gms_rt_shell(device="RK3562GMS7", command="logcat -d -b crash -v threadtime")
+gms_rt_shell(device="RK3562GMS7", command="ls /data/anr/")
+gms_rt_shell(device="RK3562GMS7", command="cat /data/anr/anr_2026-09-05-12-56-34-035")
+gms_rt_shell(device="RK3562GMS7", command="dumpsys window")
+gms_rt_shell(device="RK3562GMS7", command="settings get secure user_setup_complete")
+```
+
+- Allowlisted binaries: `getprop dumpsys logcat ls cat ps pidof settings stat uptime vmstat df wm`.
+- Denied: any chaining (`|`, `;`, `&&`), redirection, globs, quoting,
+  mutating binaries (`am pm cmd input svc reboot`), `logcat` without dump
+  flags (`-d/-t/-T`), `settings` subcommands other than `get`,
+  `wm` other than `size`/`density` (read), mutating `dumpsys` args
+  (`unplug reset disable enable kill force-stop ...`).
+- Typical agent diagnosis loop: `gms_rt_devices` -> `gms_rt_shell(getprop...)`
+  -> `gms_rt_shell(logcat -d -b events -v threadtime)` -> `gms_rt_shell(ls /data/anr/)`
+  -> `gms_rt_shell(cat /data/anr/<file>)`.
+- Everything else (reboot, push, Wi-Fi, remount, log clear) still requires a
+  human-run `gms-rt-devices-*` CLI command — do not attempt to bypass.
+
 ## 6. Token-cheap discovery
 
 ```
@@ -118,10 +148,11 @@ guidance — prefer it over doc lookups.
 Mutating (burn, reboot, usbip, vpn-connect/disconnect, config-update,
 test-start via `gms_rt_run`, reports-delete, users-set-username,
 system-update, adb-forward start/stop, terminal-push, test-clean/stop,
-jobs-cancel) and interactive (terminal-open/push, devices-shell/scrcpy,
-test-logs-stream). Route these through typed tools where they exist
-(`gms_rt_test_start`) or a human-run CLI. This was verified as 35/35 denied
-with elevation active.
+jobs-cancel) and interactive (terminal-open/push, devices-shell raw /
+scrcpy, test-logs-stream). Route these through typed tools where they exist
+(`gms_rt_test_start`, and the read-only allowlist wrapper `gms_rt_shell`)
+or a human-run CLI. The generic gate was verified as 35/35 denied with
+elevation active.
 
 ## 9. Install / upgrade ("翻版")
 

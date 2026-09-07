@@ -21,6 +21,37 @@ class ClusterCommandRepositoryMixin:
                 "SELECT * FROM cluster_commands WHERE id=?", (command_id,)
             ).fetchone())
 
+    def prune_terminal_command_events(
+        self, retention_hours: int = 24, limit: int = 500
+    ) -> int:
+        """删除已到终态且超过保留期的命令的过程事件。
+
+        ``delete_job`` 只覆盖 job 关联命令；device_action/flash 等无 job
+        命令的事件会永久累积（烧写一条可产生数千行日志）。终态命令的
+        实时日志在完成通知触达后即失去价值，按 updated_at 定期清理。
+        """
+        cutoff = (
+            datetime.now(timezone.utc).timestamp() - retention_hours * 3600
+        )
+        cutoff_str = datetime.fromtimestamp(
+            cutoff, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        deleted = 0
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT c.id FROM cluster_commands c
+                   WHERE c.status IN ('completed','failed','cancelled')
+                     AND c.updated_at < ?
+                   ORDER BY c.updated_at LIMIT ?""",
+                (cutoff_str, limit),
+            ).fetchall()
+            for row in rows:
+                cursor = conn.execute(
+                    "DELETE FROM cluster_command_events WHERE command_id=?",
+                    (row["id"],),
+                )
+                deleted += cursor.rowcount
+        return deleted
+
     def find_correlated_command(
         self, worker_id: str, command_type: str, key: str, value: str
     ) -> dict[str, Any] | None:

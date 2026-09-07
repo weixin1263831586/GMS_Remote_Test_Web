@@ -148,21 +148,28 @@ class SSHExecutor:
             channel = stdout.channel
             stdout_lines: list[str] = []
             stderr_lines: list[str] = []
-            stdout_pending = ""
-            stderr_pending = ""
+            # 行缓冲以字节为单位、解码放在整行完成后：逐 chunk 直接
+            # decode 会把跨 chunk 的多字节中文字符截断成替换符（与
+            # run() 的整流解码约束一致，见其注释）。
+            stdout_pending = b""
+            stderr_pending = b""
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout if timeout and timeout > 0 else None
             exit_seen_at: float | None = None
 
             async def consume_chunk(
                 data: bytes,
-                pending: str,
+                pending: bytes,
                 captured: list[str],
                 log_type: str,
-            ) -> str:
-                pending += CommonUtils.decode_ssh_output(data)
-                *lines, pending = pending.split("\n")
-                for line in lines:
+            ) -> bytes:
+                pending += data
+                while True:
+                    newline = pending.find(b"\n")
+                    if newline < 0:
+                        break
+                    raw, pending = pending[:newline], pending[newline + 1:]
+                    line = raw.decode("utf-8", errors="replace")
                     if line.strip():
                         captured.append(line)
                         await log_callback(line.strip(), log_type)
@@ -207,11 +214,13 @@ class SSHExecutor:
                     await asyncio.sleep(_POLL_INTERVAL)
 
             if stdout_pending.strip():
-                stdout_lines.append(stdout_pending)
-                await log_callback(stdout_pending.strip(), "info")
+                line = stdout_pending.decode("utf-8", errors="replace")
+                stdout_lines.append(line)
+                await log_callback(line.strip(), "info")
             if stderr_pending.strip():
-                stderr_lines.append(stderr_pending)
-                await log_callback(stderr_pending.strip(), "error")
+                line = stderr_pending.decode("utf-8", errors="replace")
+                stderr_lines.append(line)
+                await log_callback(line.strip(), "error")
 
             stdout_text = "\n".join(stdout_lines)
             stderr_text = "\n".join(stderr_lines)

@@ -71,6 +71,32 @@ class CommandEventsRepositoryTests(unittest.TestCase):
             events = repo.list_command_events("cmd-1", after=2)
             self.assertEqual([e["sequence"] for e in events], [3, 4])
 
+    def test_prune_terminal_command_events(self):
+        """终态命令超保留期的事件被清理，进行中命令保留。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _repository(tmp)
+            with repo.connect() as conn:
+                # cmd-1 已完成且过期（updated_at 早于 cutoff）
+                conn.execute(
+                    "UPDATE cluster_commands SET status='completed',"
+                    "updated_at='2026-01-01T00:00:00Z' WHERE id='cmd-1'")
+                # cmd-2 进行中，事件必须保留
+                conn.execute("""INSERT INTO cluster_commands
+                    (id,worker_id,command_type,job_id,attempt_id,dispatch_token,
+                     payload_json,status,result_json,error,created_at,updated_at,
+                     delivered_at,acknowledged_at)
+                    VALUES('cmd-2','worker-A','flash_gsi','','',
+                           'tok','{}','running','{}','','2026-01-01',
+                           '2026-01-01','','')""")
+            repo.append_command_events("worker-A", "cmd-1", [
+                {"sequence": 0, "message": "a"}, {"sequence": 1, "message": "b"}])
+            repo.append_command_events("worker-A", "cmd-2", [
+                {"sequence": 0, "message": "live"}])
+            deleted = repo.prune_terminal_command_events(retention_hours=1)
+            self.assertEqual(deleted, 2)
+            self.assertEqual(repo.list_command_events("cmd-1"), [])
+            self.assertEqual(len(repo.list_command_events("cmd-2")), 1)
+
 
 class CommandEventsApiTests(unittest.TestCase):
     def _client(self, repo, patches):

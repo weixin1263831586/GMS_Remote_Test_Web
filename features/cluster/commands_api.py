@@ -78,6 +78,17 @@ def synchronize_command(command: dict[str, Any]) -> None:
             service().repository.replace_worker_suites(
                 str(command.get("worker_id") or ""), suites
             )
+    if (
+        command.get("command_type") == "refresh_devices"
+        and command.get("status") == "completed"
+    ):
+        # 结果不依赖刷新端点的同步等待：即使等待方 504 超时，
+        # ACK 到达时快照仍然落库。
+        devices = (command.get("result") or {}).get("devices")
+        if isinstance(devices, list):
+            service().repository.refresh_worker_devices(
+                str(command.get("worker_id") or ""), devices
+            )
     if command.get("status") in {"completed", "failed", "cancelled"}:
         payload = command.get("payload") or {}
         claim_source = str(payload.get("claim_source_id") or "")

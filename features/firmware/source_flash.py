@@ -25,10 +25,10 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 
-from features.devices.ssh_credentials import find_device_host_password
 from foundation.ssh_security import configure_strict_host_keys
 
 from . import runtime
@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 WINDOWS_FIRMWARE_DIR = r"C:\gms-flash"
 RESULT_POLL_INTERVAL_SECONDS = 10.0
 RESULT_TIMEOUT_SECONDS = 5400
+# device 串号会拼进 task_id 并被 wait_result 的 `type "..."` cmd.exe
+# 命令插值：只放行无 cmd 元字符的字符集，杜绝引号/>& 逃逸。
+_SOURCE_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 
 def windows_queue_dir(device_host: str) -> str:
@@ -81,8 +84,9 @@ def open_windows_ssh(device_host: str):
     host = str(device_host or "").strip()
     username, hostname = host.split("@", 1) if "@" in host else ("", host)
     config = runtime.config_manager.load_config()
+    # 凭据查找走 config_manager（foundation 层，避免跨 feature import）。
     password = (
-        find_device_host_password(host, config)
+        runtime.config_manager.find_device_host_password(host)
         or config.get("device_pswd", "")
     )
     if not password:
@@ -190,6 +194,10 @@ def _sync_flash_flow(
     keepalive=None,
 ) -> SourceFlashReport:
     started = time.time()
+
+    if not _SOURCE_DEVICE_ID_RE.fullmatch(device or ""):
+        raise SourceFlashError(
+            f"invalid source device id: {device!r}", stage="FLASHING")
 
     def log(message: str) -> None:
         if on_log is not None:

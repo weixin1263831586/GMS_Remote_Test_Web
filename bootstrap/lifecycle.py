@@ -89,6 +89,14 @@ async def _periodic_cleanup() -> None:
         try:
             await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
             global_state.cleanup_old_user_states()
+            # 无 job 命令（device_action/flash）的实时日志事件只在
+            # delete_job 清理，终态后仍会无限累积；按保留期定期裁剪。
+            try:
+                from features.cluster import get_cluster_service
+
+                get_cluster_service().repository.prune_terminal_command_events()
+            except Exception:
+                logger.debug('command event prune skipped', exc_info=True)
         except asyncio.CancelledError:
             raise
         except Exception:

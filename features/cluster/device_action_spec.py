@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,17 @@ _DEVICE_ACTION_SPECS: tuple[DeviceActionSpec, ...] = (
 DEVICE_ACTION_SPECS: dict[str, DeviceActionSpec] = {
     spec.action: spec for spec in _DEVICE_ACTION_SPECS
 }
+
+
+# 设备操作枚举——从 DEVICE_ACTION_SPECS 派生的单一真值。
+# ClusterDeviceAction.action 直接使用本枚举；新增 action 只需在
+# _DEVICE_ACTION_SPECS 登记一行，Pydantic 模型自动接受，不存在
+# Literal 与 Spec 各列一份的漂移可能。
+DeviceAction = Enum(  # type: ignore[misc]
+    "DeviceAction",
+    {spec.action.upper(): spec.action for spec in _DEVICE_ACTION_SPECS},
+    type=str,
+)
 
 
 def device_action_spec(action: str) -> DeviceActionSpec | None:

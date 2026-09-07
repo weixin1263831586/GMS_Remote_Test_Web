@@ -595,5 +595,188 @@ class DocsCompactionTests(unittest.TestCase):
         out = mcp_server._render_docs_envelope(envelope)
         self.assertEqual(json.loads(out)["ok"], False)
 
+
+class JobsCompactionTests(unittest.TestCase):
+    """One-line-per-job rendering for jobs-list / single-job trimming."""
+
+    def _sample_job(self, job_id="job-1", status="completed"):
+        return {
+            "id": job_id,
+            "status": status,
+            "created_at": "2026-09-05T07:00:47Z",
+            "finished_at": "2026-09-05T07:08:53Z",
+            "error": None,
+            "request": {
+                "devices": ["RK3562GMS7"],
+                "test_module": "CtsDeqpTestCases",
+                "test_case": "dEQP-VK.x#y",
+            },
+            "attempt": {"status": "completed", "error": None, "result": {}},
+            "leases": [{"id": "claim-1", "status": "released"}],
+        }
+
+    def test_compact_jobs_list_renders_one_line_per_job(self):
+        data = {"jobs": [self._sample_job(), self._sample_job("job-2", "failed")]}
+        out = mcp_server._compact_jobs_list(data)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], mcp_server._compact_jobs_list.__doc__ and lines[0])
+        self.assertIn("# 2 jobs | columns: job_id | status | attempt | devices", lines[0])
+        self.assertIn("job-1 | completed | completed | RK3562GMS7 | CtsDeqpTestCases", lines[1])
+        self.assertIn("job-2 | failed", lines[2])
+        self.assertNotIn("leases", out)
+
+    def test_compact_jobs_list_passes_through_other_shapes(self):
+        self.assertEqual(mcp_server._compact_jobs_list({"devices": []}), {"devices": []})
+        self.assertEqual(mcp_server._compact_jobs_list(None), None)
+
+    def test_compact_job_single_trims_nested_payload(self):
+        data = {
+            "id": "job-1",
+            "status": "failed",
+            "created_at": "2026-09-05T09:35:25Z",
+            "request": {"devices": ["RK3562GMS7"], "test_module": "M", "test_case": "C"},
+            "attempt": {
+                "status": "failed",
+                "error": "device fencing claim expired",
+                "result": {"exit_code": 0, "work_dir": "/tmp/w"},
+            },
+            "state_version": 4,
+            "recovery_count": 0,
+        }
+        out = mcp_server._compact_job_single(data)
+        self.assertEqual(out["id"], "job-1")
+        self.assertEqual(out["status"], "failed")
+        self.assertEqual(out["error"], "device fencing claim expired")
+        self.assertEqual(out["attempt_exit_code"], 0)
+        self.assertNotIn("state_version", out)
+        self.assertNotIn("attempt", out)
+
+    def test_compact_job_single_passes_through_other_shapes(self):
+        self.assertEqual(mcp_server._compact_job_single({"foo": 1}), {"foo": 1})
+
+    def test_render_data_envelope_is_generic(self):
+        envelope = json.dumps({"ok": True, "data": {"jobs": [self._sample_job()]}})
+        out = mcp_server._render_data_envelope(envelope, mcp_server._compact_jobs_list)
+        payload = json.loads(out)
+        self.assertIn("job-1 | completed", payload["data"])
+
+
+class AuthElevateAndBurnToolTests(unittest.TestCase):
+    def setUp(self):
+        _reset_catalog_cache()
+        self.addCleanup(_reset_catalog_cache)
+
+    def _capture_run(self):
+        captured = {}
+
+        def fake_run(command, args=None, stdin_text=None, timeout=None):
+            captured["command"] = command
+            captured["args"] = args
+            captured["stdin_text"] = stdin_text
+            captured["timeout"] = timeout
+            return '{"ok":true,"exit_code":0,"data":{}}', False
+
+        original = mcp_server.run_cli
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        return captured
+
+    def test_auth_elevate_requires_username_and_secret(self):
+        text, is_error = mcp_server.auth_elevate_tool({"password_stdin": "x"})
+        self.assertTrue(is_error)
+        self.assertIn("username", text)
+        text, is_error = mcp_server.auth_elevate_tool({"username": "gms"})
+        self.assertTrue(is_error)
+        self.assertIn("password_stdin", text)
+
+    def test_auth_elevate_forwards_secret_on_stdin_only(self):
+        captured = self._capture_run()
+        _text, is_error = mcp_server.auth_elevate_tool(
+            {"username": "gms", "password_stdin": "adm1n"}
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(captured["command"], "gms-rt-auth-elevate")
+        self.assertEqual(captured["args"], ["gms", "--password-stdin"])
+        self.assertEqual(captured["stdin_text"], "adm1n\n")
+        self.assertNotIn("adm1n", json.dumps(captured["args"]))
+
+    def test_burn_firmware_requires_path_and_device(self):
+        text, is_error = mcp_server.burn_firmware_tool({"device": "D1"})
+        self.assertTrue(is_error)
+        self.assertIn("firmware_path", text)
+        text, is_error = mcp_server.burn_firmware_tool({"firmware_path": "/a/img"})
+        self.assertTrue(is_error)
+        self.assertIn("device", text)
+
+    def test_burn_firmware_defaults_wipe_true_and_timeout_1800(self):
+        captured = self._capture_run()
+        _text, is_error = mcp_server.burn_firmware_tool(
+            {"firmware_path": "/a/update.img", "device": "RK3562GMS7"}
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(captured["command"], "gms-rt-burn-firmware")
+        self.assertEqual(
+            captured["args"], ["/a/update.img", "RK3562GMS7", "true"]
+        )
+        self.assertEqual(captured["timeout"], 1800)
+
+    def test_burn_firmware_wipe_false_and_wait_online(self):
+        captured = self._capture_run()
+        _text, is_error = mcp_server.burn_firmware_tool({
+            "firmware_path": "/a/update.img", "device": "D1,D2",
+            "wipe_data": False, "wait_online": True, "wait_online_max": 900,
+        })
+        self.assertFalse(is_error)
+        self.assertEqual(
+            captured["args"],
+            ["/a/update.img", "D1,D2", "false", "--wait-online", "--wait-online=900"],
+        )
+
+    def test_burn_firmware_rejects_bad_wait_online_max(self):
+        text, is_error = mcp_server.burn_firmware_tool({
+            "firmware_path": "/a/img", "device": "D1",
+            "wait_online": True, "wait_online_max": "soon",
+        })
+        self.assertTrue(is_error)
+        self.assertIn("wait_online_max", text)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ShellToolGateTests(unittest.TestCase):
+    """gms_rt_shell read-only command gate (added 2026-09-05)."""
+
+    def test_gate_allows_readonly_commands(self):
+        for cmd in (
+            "getprop ro.build.fingerprint",
+            "dumpsys window",
+            "logcat -d -b events -v threadtime",
+            "settings get secure user_setup_complete",
+            "ls /system/etc",
+            "pidof com.google.android.setupwizard",
+        ):
+            allowed, reason = mcp_server._validate_shell_command(cmd)
+            self.assertTrue(allowed, f"{cmd!r} should be allowed: {reason}")
+
+    def test_gate_denies_chaining_and_mutation(self):
+        for cmd in (
+            "dumpsys window | grep focus",
+            "logcat -b all",
+            "settings put secure x y",
+            "wm density 480",
+            "dumpsys battery unplug",
+            "sh -c x",
+            "input tap 1 2",
+            "getprop; reboot",
+        ):
+            allowed, reason = mcp_server._validate_shell_command(cmd)
+            self.assertFalse(allowed, f"{cmd!r} should be denied")
+
+    def test_shell_tool_requires_device_and_command(self):
+        out, is_err = mcp_server.shell_tool({"command": "getprop"})
+        self.assertTrue(is_err)
+        self.assertIn("device", out)
+        out, is_err = mcp_server.shell_tool({"device": "D1"})
+        self.assertTrue(is_err)
+        self.assertIn("command", out)

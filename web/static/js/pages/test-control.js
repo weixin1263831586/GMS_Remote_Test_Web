@@ -16,12 +16,27 @@ async function startTest() {
     if (!validateDeviceSelection()) return;
 
     // 前端最后一道 invariant：所有选中设备必须属于当前测试 Worker。
-    // 防御 inspection modal（Device Info / UI 操控等）历史版本污染
-    // selectedDevices 后提交 "worker A + worker B 设备" 的组合。
+    // 通过 state.devices inventory 解析归属，绝不按 ":" 猜 Worker 前缀——
+    // Android serial 可能含 ":"（ADB TCP "ip:5555"、ADB Proxy
+    // "localhost:port"），字符串切分会误杀这类本机设备。
     const currentWorker = workspaceWorkerId();
+    const resolveDeviceOwner = deviceId => {
+        const device = state.devices.find(item => {
+            const candidate = typeof item === 'string' ? item : item;
+            return candidate === deviceId
+                || candidate.device_id === deviceId
+                || candidate.id === deviceId
+                || candidate.serial === deviceId
+                || candidate.serial_no === deviceId;
+        });
+        if (!device || typeof device === 'string') return null;
+        return device.worker_id || device.cluster_worker_id || null;
+    };
     const foreignDevices = Array.from(state.selectedDevices).filter(deviceId => {
-        const owner = deviceId.includes(':') ? deviceId.split(':', 1)[0] : '';
-        if (!owner) return false;
+        const owner = resolveDeviceOwner(deviceId);
+        // inventory 里找不到（列表未加载/设备刚消失）时交给后端权威校验，
+        // 前端只拦截"明确解析到其他 Worker"的情况。
+        if (owner === null) return false;
         return owner !== currentWorker && !isLocalWorkspaceWorker(owner);
     });
     if (foreignDevices.length > 0) {

@@ -711,6 +711,34 @@ class ClusterApiHardeningTests(unittest.TestCase):
         self.assertEqual(data["path"], str(browse_dir))
         self.assertEqual([item["name"] for item in data["files"]], ["gsi.img"])
 
+    def test_get_command_redacts_wifi_password_for_owner(self):
+        """wifi action 命令的 payload 返回给 owner 前必须打码密码。
+
+        Controller 侧把全局配置的 wifi.password 填入 payload 并随
+        cluster_commands 持久化；owner（普通用户）读回时不能看到明文。
+        """
+        command = self.repo.create_command({
+            "worker_id": "worker-246",
+            "command_type": "device_action",
+            "payload": {
+                "action": "wifi",
+                "ssid": "corp-net",
+                "password": "SuperSecret-2026!",
+                "owner_id": "user-1",
+            },
+        })
+        with patch.object(cluster_api, "get_authenticated_user",
+                          return_value=CurrentUser(
+                              id="user-1", username="u1", role="user")), \
+             patch.object(cluster_api, "authentication_required",
+                          return_value=False):
+            response = self.client.get(
+                f"/api/cluster/commands/{command['id']}")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["command"]["payload"]
+        self.assertEqual(payload["password"], "***redacted***")
+        self.assertEqual(payload["ssid"], "corp-net")
+
 
 if __name__ == "__main__":
     unittest.main()

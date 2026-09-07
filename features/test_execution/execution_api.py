@@ -60,22 +60,40 @@ async def start_test(
             "Remote Worker execution is disabled for this deployment", 409
         )
 
-    # 跨 Worker 校验：devices 中的 "worker:serial" 前缀必须与目标 Worker
-    # 一致，否则 Worker Agent 会因设备不存在而静默失败，用户难以排查。
-    foreign = [
-        item
-        for item in req.devices
-        if ":" in item
-        and item.split(":", 1)[0]
-        not in {requested_worker_id, local_worker_id}
-        and not item.startswith(f"{requested_worker_id}:")
-    ]
-    if foreign:
-        return error_response(
-            f"Selected devices do not belong to worker {requested_worker_id}",
-            400,
-            detail={"devices": foreign},
-        )
+    # 跨 Worker 校验：通过 inventory 解析设备归属，绝不按 ":" 猜 Worker。
+    # Android serial 可能含 ":"（ADB TCP "ip:5555"、ADB Proxy
+    # "localhost:port"），字符串前缀切分会把这类设备误判为外 Worker。
+    # 解析不到且不以其它已知 Worker ID 开头的值（如裸 serial 或清单
+    # 未加载）保持旧行为：交给目标 Worker 的执行层按自身命名空间处理。
+    try:
+        known_worker_ids = {
+            str(worker.get("id") or "")
+            for worker in cluster.list_workers()
+        }
+        foreign = []
+        for item in req.devices:
+            if cluster.repository.resolve_worker_device(
+                requested_worker_id, item
+            ) is not None or cluster.repository.resolve_worker_device(
+                local_worker_id, item
+            ) is not None:
+                continue
+            separator = item.find(":")
+            if separator <= 0:
+                continue
+            prefix = item[:separator]
+            if prefix != requested_worker_id and prefix != local_worker_id \
+                    and prefix in known_worker_ids:
+                foreign.append(item)
+        if foreign:
+            return error_response(
+                f"Selected devices do not belong to worker {requested_worker_id}",
+                400,
+                detail={"devices": foreign},
+            )
+    except (RuntimeError, AttributeError):
+        logger.exception("Failed to resolve device ownership")
+        return error_response("Device ownership check failed", 503)
 
     req = req.model_copy(update={"worker_id": requested_worker_id})
     if requested_worker_id == local_worker_id:

@@ -120,6 +120,10 @@ def test_replace_route_direct_as_root(mock_euid, mock_run):
 @pytest.mark.parametrize('stdout,expected', [
     ('10.10.10.0/24 via 172.16.14.1 dev eno1', True),
     ('10.10.10.0/24 via 172.16.14.254 dev eno1', False),
+    # 子串陷阱：'via 172.16.14.1' 是 'via 172.16.14.10' 的前缀，
+    # 逐 token 匹配必须判定为"网关不同"。
+    ('10.10.10.0/24 via 172.16.14.10 dev eno1', False),
+    ('10.10.10.0/24 via 172.16.14.100 dev eno1', False),
     ('', False),
 ])
 def test_route_matches(stdout, expected):

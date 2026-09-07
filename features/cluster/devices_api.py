@@ -158,7 +158,16 @@ async def refresh_worker_inventory(
     svc = service()
     _require_cluster_enabled(remote=worker_id != svc.config.local_worker_id)
     if svc.repository.get_worker(worker_id) is None:
-        raise HTTPException(404, "worker not found")
+        # 与 _run_worker_command 的语义一致：本地 Worker 由
+        # LocalWorkerBridge 在服务启动约 1s 后才注册，冷启动窗口内
+        # 直接 404 会让"点刷新"在刚开机的页面上必然失败。有界等待
+        # 注册完成后再判定 404。
+        for _ in range(60):
+            await asyncio.sleep(0.1)
+            if svc.repository.get_worker(worker_id) is not None:
+                break
+        else:
+            raise HTTPException(404, "worker not found")
 
     requested = {item.strip() for item in inventory.split(",") if item.strip()}
     result: dict = {}

@@ -4,7 +4,7 @@ import io
 import subprocess
 import tarfile
 import zipfile
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from worker_agent.android_inspection import _aapt2_path
 from worker_agent.config import WorkerConfig
@@ -541,3 +541,42 @@ def test_firmware_flash_accepts_device_already_in_fastboot(tmp_path):
         ["adb", "-s", "ABC", "reboot", "loader"],
     ]
     assert result["success"] is True
+
+
+def test_run_with_output_stream_reports_lines_without_trailing_newline():
+    """select 就绪后用 os.read 取字节；不完整行不再阻塞 readline。
+
+    回归：text 流 readline() 在"有数据但无换行符"时会阻塞等待剩余
+    输出，击穿 select 的 1s 轮询窗口，超时杀进程失效。
+    """
+    import os as _os
+
+    from worker_agent import device_actions
+
+    received: list[str] = []
+
+    class FakeStream:
+        def __init__(self, fd):
+            self._fd = fd
+
+        def fileno(self):
+            return self._fd
+
+    r, w = _os.pipe()
+    process = Mock()
+    process.stdout = FakeStream(r)
+    # 写入无换行的输出后关闭写端，触发 EOF 路径
+    _os.write(w, b"progress 50%")
+    _os.close(w)
+    process.poll.return_value = 0
+    process.returncode = 0
+    try:
+        with patch("worker_agent.device_actions.subprocess.Popen",
+                   return_value=process):
+            result = device_actions._run_with_output_stream(
+                ["fake"], timeout=5,
+                on_output=lambda line, err: received.append(line))
+    finally:
+        _os.close(r)
+    assert received == ["progress 50%"]
+    assert result["returncode"] == 0

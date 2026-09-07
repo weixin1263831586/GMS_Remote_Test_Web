@@ -259,13 +259,23 @@ async function loadSuiteWorkerSelector() {
 
 async function loadSuitesForBrowserWorker(force = false) {
     const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
-    window.GmsWorkspace?.update({
-        worker_id: workerId
-    }, {source: 'suites'});
-    syncWorkspaceWorkerSelectors(workerId);
+    // Suite Browser 是浏览上下文：只维护 page-local 的选择器，
+    // 不改全局 Test Workspace（worker_id），否则浏览 Worker B
+    // 的套件会顺手把测试执行上下文切到 B。
+    syncSuiteWorkerSelectOnly(workerId);
     if (isLocalWorkspaceWorker(workerId)) {
         testSuitesWorkerId = '';
         return loadTestSuites(force);
+    }
+    // force 时触发真正的 Worker 端套件扫描，再读回写后的清单。
+    if (force) {
+        try {
+            await apiCall(
+                `/api/cluster/workers/${encodeURIComponent(workerId)}/refresh?inventory=suites`,
+                'POST');
+        } catch (refreshError) {
+            debugLog(`[suite-browser] worker refresh failed: ${refreshError.message}`);
+        }
     }
     const response = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
     if (!response.ok) throw new Error('加载 Worker 套件失败');
@@ -283,19 +293,11 @@ async function loadSuitesForBrowserWorker(force = false) {
 
 async function switchSuiteWorker() {
     const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
-    window.GmsWorkspace?.update({
-        scope_mode: isLocalWorkspaceWorker(workerId) ? window.GmsWorkspace.get().scope_mode : 'cluster',
-        worker_id: workerId, suite_key: '', suite_path: ''
-    }, {source: 'suites'});
-    syncWorkspaceWorkerSelectors(workerId);
+    // Suite Browser 的 Worker 切换只影响浏览目标，不修改全局
+    // Test Workspace / 测试运行状态——浏览 Worker B 套件不应把
+    // 测试执行上下文切到 B。
+    syncSuiteWorkerSelectOnly(workerId);
     clearSuiteBrowserSelection('正在加载 Worker 套件...');
-    // 立即清除旧主机的测试状态，再异步查询新主机状态。
-    state.clusterJobId = '';
-    resetClusterEventCursor();
-    state.testing = false;
-    state.testStopping = false;
-    updateTestToggleButton(false);
-    refreshTestStatusForWorker(workerId);
     try {
         testSuitesCache = [];
         await loadSuitesForBrowserWorker(true);
@@ -303,6 +305,14 @@ async function switchSuiteWorker() {
         clearSuiteBrowserSelection(testSuitesCache.length ? '请选择左侧测试套件' : '此 Worker 暂无套件');
     } catch (error) {
         clearSuiteBrowserSelection(`加载失败: ${error.message}`);
+    }
+}
+
+// 只同步 Suite Browser 自己的下拉框显示，不触碰全局 workspace/其他页面选择器。
+function syncSuiteWorkerSelectOnly(workerId) {
+    const select = document.getElementById('suite-worker-select');
+    if (select && Array.from(select.options).some(option => option.value === workerId)) {
+        select.value = workerId;
     }
 }
 
@@ -2599,19 +2609,31 @@ async function refreshDevices() {
     }
     showToast('正在刷新设备列表...', 'info');
     try {
-        // 集群模式下先触发真正的 Worker 端 refresh_devices（重新 adb
-        // devices 并回写 Controller），失败或非集群模式再回落本地缓存读取。
+        // 集群模式下触发真正的 Worker 端 refresh_devices（重新 adb devices
+        // 并回写 Controller）。该命令最长可达 Worker 命令超时（15s+），不能
+        // 阻塞手动刷新的关键路径：以后台任务方式执行，完成后再静默合并
+        // 最新快照；失败只记日志（随后 loadDevices 读取的仍是回写前缓存）。
+        // silentToast：后台请求失败绝不允许弹出错误 toast 覆盖用户
+        // 正在阅读的操作反馈（如启动测试的 409 容量提示）。
         if (state.clusterStatus?.enabled && workspaceWorkerId()) {
-            try {
-                const response = await apiCall(
-                    `/api/cluster/workers/${encodeURIComponent(workspaceWorkerId())}/refresh`,
-                    'POST');
-                if (Array.isArray(response?.devices)) {
-                    state.devices = response.devices;
-                }
-            } catch (workerError) {
-                debugLog(`[refreshDevices] worker refresh fallback: ${workerError.message}`);
-            }
+            const refreshedWorker = workspaceWorkerId();
+            apiCall(
+                `/api/cluster/workers/${encodeURIComponent(refreshedWorker)}/refresh`,
+                'POST',
+                null,
+                {silentToast: true})
+                .then(response => {
+                    if (workspaceWorkerId() !== refreshedWorker) return;
+                    if (Array.isArray(response?.devices)) {
+                        state.devices = response.devices;
+                        if (typeof renderDevices === 'function') {
+                            renderDevices();
+                        }
+                    }
+                })
+                .catch(workerError => {
+                    debugLog(`[refreshDevices] worker refresh fallback: ${workerError.message}`);
+                });
         }
         // 手动刷新时强制绕过缓存，并标记来源为手动。
         await loadDevices(true, {source: 'manual'});

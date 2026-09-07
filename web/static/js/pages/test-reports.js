@@ -87,13 +87,12 @@ window.preloadTestReports = preloadTestReports;
 
 async function switchReportsWorker() {
     const workerId = document.getElementById('reports-worker-filter')?.value || '';
-    if (workerId) {
-        window.GmsWorkspace?.update({
-            scope_mode: isLocalWorkspaceWorker(workerId) ? window.GmsWorkspace.get().scope_mode : 'cluster',
-            worker_id: workerId,
-            origin_page: 'reports'
-        }, {source: 'reports'});
-        syncWorkspaceWorkerSelectors(workerId);
+    // Reports 筛选是查询条件，不是执行目标：只维护本页 filter 状态，
+    // 绝不写 GmsWorkspace.worker_id / 同步其他页面的 Worker 选择器——
+    // 否则在 Reports 过滤 Worker B 会把测试页执行主机静默切到 B。
+    const workerSelect = document.getElementById('reports-worker-filter');
+    if (workerSelect) {
+        workerSelect.dataset.reportsWorkerId = workerId || '';
     }
     await loadTestReports(currentUserFilter, false, true);
 }
@@ -103,10 +102,11 @@ window.switchReportsWorker = switchReportsWorker;
 function reportsListUrl(userOnly, cursor = '') {
     const params = new URLSearchParams();
     if (userOnly) params.set('user_only', 'true');
+    // 只读本页 filter 状态（dataset），回落 workspace 仅用于筛选显示。
     const workerSelect = document.getElementById('reports-worker-filter');
     const workerId = workerSelect?.dataset.workersLoaded === 'true'
         ? workerSelect.value
-        : (window.GmsWorkspace?.get?.().worker_id || '');
+        : (workerSelect?.dataset.reportsWorkerId || '');
     if (workerId) params.set('worker_id', workerId);
     if (cursor) params.set('cursor', cursor);
     const query = params.toString();

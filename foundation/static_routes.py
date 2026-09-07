@@ -54,7 +54,12 @@ def _parse_route(entry: dict) -> tuple[ipaddress._BaseNetwork, ipaddress._BaseAd
 
 
 def _route_matches(destination: str, gateway: str) -> bool:
-    """已存在的该目标路由是否与配置的网关一致。"""
+    """已存在的该目标路由是否与配置的网关一致。
+
+    逐 token 精确匹配 ``via <gateway>``：``'via 172.16.14.1' in stdout``
+    式的子串判断会把 ``via 172.16.14.10`` 误判为已匹配，导致配置的
+    网关修正（ip route replace）被跳过。
+    """
     try:
         result = subprocess.run(
             ['ip', 'route', 'show', destination],
@@ -62,7 +67,12 @@ def _route_matches(destination: str, gateway: str) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return f'via {gateway}' in (result.stdout or '')
+    for line in (result.stdout or '').splitlines():
+        tokens = line.split()
+        for index, token in enumerate(tokens[:-1]):
+            if token == 'via' and tokens[index + 1] == gateway:
+                return True
+    return False
 
 
 def _replace_route(destination: str, gateway: str) -> tuple[bool, str]:

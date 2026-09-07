@@ -31,8 +31,11 @@ Tools:
 - gms_rt_devices     list devices
 - gms_rt_auth_status inspect the CLI session's authentication state
 - gms_rt_auth_login  establish the CLI session (username + password_stdin)
+- gms_rt_auth_elevate step-up admin re-auth (unlocks burn and elevated ops)
+- gms_rt_burn_firmware  burn update.img to devices (requires elevation)
 - gms_rt_test_start / gms_rt_jobs_list / gms_rt_jobs_wait / gms_rt_jobs_events / gms_rt_jobs_status
 - gms_rt_reports_list
+- gms_rt_shell       read-only device shell (allowlisted diagnostics)
 
 Passwords are never handled here beyond forwarding on stdin to
 gms-rt-auth-login; the CLI stores the session cookie itself.
@@ -52,7 +55,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.6.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -135,8 +138,10 @@ def build_argv(command: str, args: list[str] | str | None) -> list[str]:
 _EXIT_HINTS = {
     2: "check usage with gms_rt_describe",
     3: "authenticate with gms_rt_auth_login",
-    4: "needs admin elevation (human-run gms-rt-auth-elevate)",
-    5: "conflict/busy: check gms_rt_jobs_list, retry when free",
+    4: "needs admin elevation (gms_rt_auth_elevate with admin credentials, "
+       "or human-run gms-rt-auth-elevate)",
+    5: "conflict/busy or selection unavailable: check gms_rt_jobs_list and "
+       "diagnostics, retry when free",
     6: "network/timeout: safe to retry (bounded)",
     7: "operation failed: inspect diagnostics",
 }
@@ -204,6 +209,102 @@ def _compact_docs(data: Any) -> Any:
             line += f" | {skill}"
         lines.append(line)
     return "\n".join(lines)
+
+
+_JOBS_COLUMNS = (
+    "job_id | status | attempt | devices | module | case | created | finished | error"
+)
+
+
+def _job_row(job: dict[str, Any]) -> list[str]:
+    """Extract the summary fields of one durable job for the line renderer."""
+    request = job.get("request") or {}
+    attempt = job.get("attempt") or {}
+    if not isinstance(request, dict):
+        request = {}
+    if not isinstance(attempt, dict):
+        attempt = {}
+    devices = ",".join(request.get("devices") or []) or "-"
+    error = str(job.get("error") or attempt.get("error") or "-")
+    return [
+        str(job.get("id") or "?"),
+        str(job.get("status") or "?"),
+        str(attempt.get("status") or "-"),
+        devices,
+        str(request.get("test_module") or request.get("module") or "-"),
+        str(request.get("test_case") or request.get("case") or "-"),
+        str(job.get("created_at") or "-"),
+        str(job.get("finished_at") or attempt.get("finished_at") or "-"),
+        error.replace("\n", " "),
+    ]
+
+
+def _compact_jobs_list(data: Any) -> Any:
+    """Render gms-rt-jobs-list data as one line per job.
+
+    The raw payload nests request/attempt/leases per job (~1KB each); agents
+    polling "what is running / what finished" need id, state, device, module
+    and error, which fits in one line (~1/8 the tokens).
+    """
+    if not isinstance(data, dict):
+        return data
+    jobs = data.get("jobs")
+    if not isinstance(jobs, list):
+        return data
+    lines = [f"# {len(jobs)} jobs | columns: {_JOBS_COLUMNS}"]
+    for job in jobs:
+        if isinstance(job, dict):
+            lines.append(" | ".join(_job_row(job)))
+    return "\n".join(lines)
+
+
+def _compact_job_single(data: Any) -> Any:
+    """Trim a single-job payload (jobs-status / jobs-wait) to key fields."""
+    if not isinstance(data, dict) or not data.get("id") or not data.get("status"):
+        return data
+    request = data.get("request") or {}
+    attempt = data.get("attempt") or {}
+    if not isinstance(request, dict):
+        request = {}
+    if not isinstance(attempt, dict):
+        attempt = {}
+    result = attempt.get("result") or {}
+    if not isinstance(result, dict):
+        result = {}
+    trimmed: dict[str, Any] = {"id": data["id"], "status": data["status"]}
+    if attempt.get("status"):
+        trimmed["attempt_status"] = attempt["status"]
+    if request.get("devices"):
+        trimmed["devices"] = request["devices"]
+    for key in ("test_module", "test_case"):
+        if request.get(key):
+            trimmed[key] = request[key]
+    for key in ("created_at", "started_at", "finished_at"):
+        if data.get(key):
+            trimmed[key] = data[key]
+    if data.get("error"):
+        trimmed["error"] = data["error"]
+    elif attempt.get("error"):
+        trimmed["error"] = attempt["error"]
+    if result.get("exit_code") is not None:
+        trimmed["attempt_exit_code"] = result["exit_code"]
+    if result.get("work_dir"):
+        trimmed["work_dir"] = result["work_dir"]
+    return trimmed
+
+
+def _render_data_envelope(text: str, render: Any) -> str:
+    """Apply a data-field renderer to a compacted envelope."""
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return text
+    data = payload.get("data")
+    rendered = render(data)
+    if rendered is data:
+        return text  # shape mismatch; keep the JSON form
+    payload["data"] = rendered
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _compact_envelope(text: str) -> str | None:
@@ -281,12 +382,18 @@ def run_cli(
     stderr = bounded_text(completed.stderr).strip()
     # The CLI emits exactly one JSON envelope on stdout in --json mode; use
     # the compacted form when present, otherwise fall back to joined text.
+    normalized = normalize_command(command)
     text = _compact_envelope(stdout)
-    if text is not None:
-        # Size-sensitive payloads (API docs listings) are rendered as one
-        # line per endpoint instead of the full JSON scaffolding.
-        if normalize_command(command) in _DOCS_COMPACT_COMMANDS and not is_error_text(text):
-            text = _render_docs_envelope(text)
+    if text is not None and not is_error_text(text):
+        # Size-sensitive payloads are rendered to compact forms instead of
+        # the full nested JSON scaffolding (docs: one line per endpoint;
+        # jobs: one line per job / trimmed single job).
+        if normalized in _DOCS_COMPACT_COMMANDS:
+            text = _render_data_envelope(text, _compact_docs)
+        elif normalized == "gms-rt-jobs-list":
+            text = _render_data_envelope(text, _compact_jobs_list)
+        elif normalized in ("gms-rt-jobs-status", "gms-rt-jobs-wait"):
+            text = _render_data_envelope(text, _compact_job_single)
     else:
         parts = [part for part in (stdout, stderr) if part]
         text = "\n".join(parts) if parts else "{}"
@@ -305,17 +412,8 @@ def is_error_text(text: str) -> bool:
 
 
 def _render_docs_envelope(text: str) -> str:
-    """Apply _compact_docs to a compacted envelope's data field."""
-    try:
-        payload = json.loads(text)
-    except ValueError:
-        return text
-    data = payload.get("data")
-    rendered = _compact_docs(data)
-    if rendered is data:
-        return text  # shape mismatch; keep the JSON form
-    payload["data"] = rendered
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    """Backwards-compatible wrapper: apply _compact_docs to the data field."""
+    return _render_data_envelope(text, _compact_docs)
 
 
 def _load_catalog(force: bool = False) -> dict[str, Any] | None:
@@ -429,6 +527,64 @@ def auth_login_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         "gms-rt-auth-login",
         [username, "--password-stdin"],
         stdin_text=f"{password}\n",
+    )
+
+
+def auth_elevate_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Re-authenticate as admin (step-up) for the current CLI session."""
+    username = str(arguments.get("username") or "").strip()
+    password = arguments.get("password_stdin")
+    if not username:
+        return "Missing required argument: username (admin account)", True
+    if not isinstance(password, str) or not password:
+        return (
+            "Missing required argument: password_stdin (never place the "
+            "password in args or prompts)",
+            True,
+        )
+    return run_cli(
+        "gms-rt-auth-elevate",
+        [username, "--password-stdin"],
+        stdin_text=f"{password}\n",
+    )
+
+
+def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Burn firmware to one or more devices (typed, requires elevation).
+
+    The CLI copies the image to the worker host over SSH (direct mode) and
+    posts /api/burn/firmware; wipes /data by default. Long-running: bump the
+    default timeout.
+    """
+    firmware_path = str(arguments.get("firmware_path") or "").strip()
+    device = str(arguments.get("device") or "").strip()
+    if not firmware_path:
+        return "Missing required argument: firmware_path", True
+    if not device:
+        return "Missing required argument: device", True
+    wipe_data = arguments.get("wipe_data")
+    if wipe_data is None:
+        wipe_str = "true"
+    elif isinstance(wipe_data, bool):
+        wipe_str = "true" if wipe_data else "false"
+    else:
+        wipe_str = "false" if str(wipe_data).strip().lower() in ("0", "false", "no") else "true"
+    wait_online = arguments.get("wait_online")
+    extra: list[str] = []
+    if wait_online:
+        extra.append("--wait-online")
+        if arguments.get("wait_online_max") is not None:
+            try:
+                extra.append(
+                    f"--wait-online={max(1, int(arguments['wait_online_max']))}"
+                )
+            except (TypeError, ValueError):
+                return "wait_online_max must be an integer (seconds)", True
+    args = [firmware_path, device, wipe_str, *extra]
+    return run_cli(
+        "gms-rt-burn-firmware",
+        args,
+        timeout=arguments.get("timeout") if arguments.get("timeout") is not None else 1800,
     )
 
 
@@ -623,6 +779,106 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Read-only device shell (typed tool)
+# ---------------------------------------------------------------------------
+
+# The Controller catalog marks gms-rt-devices-shell "manual" because arbitrary
+# shell access is interactive by definition. This typed tool exposes a strictly
+# read-only subset so agents can diagnose devices (props, services, logs,
+# filesystem state) without weakening the catalog security boundary
+# (2026-09-05 audit follow-up).
+_SHELL_READONLY_BINARIES = frozenset({
+    "cat", "df", "dumpsys", "getprop", "logcat", "ls", "pidof", "ps",
+    "settings", "stat", "uptime", "vmstat", "wm",
+})
+# Characters that enable chaining/redirection/substitution; none of the
+# allowlisted read-only commands need them.
+_SHELL_FORBIDDEN_CHARS = frozenset(";|&><`(){}[]$\\'\"\n\r\t*?")
+# dumpsys service subcommands known to mutate state.
+_SHELL_DUMPSYS_MUTATING = frozenset({
+    "unplug", "reset", "disable", "enable", "whitelist", "set-debug-app",
+    "force-stop", "kill", "suspend", "resume", "reset-role",
+})
+# Binaries that may smuggle arbitrary execution; never allow as arguments.
+_SHELL_SMUGGLING_BINARIES = frozenset({
+    "sh", "bash", "su", "toybox", "toolbox", "nohup", "xargs", "run-as",
+    "am", "pm", "cmd", "input", "svc", "reboot", "sync", "dd", "rm", "mv",
+    "cp", "mkdir", "touch", "chmod", "chown", "kill",
+})
+_SHELL_MAX_COMMAND_CHARS = 2000
+_DEVICE_ID_PATTERN = None  # compiled lazily
+
+
+def _validate_shell_command(command: str) -> tuple[bool, str]:
+    """Return (allowed, reason) for a proposed device shell command."""
+    if not command or not command.strip():
+        return False, "empty command"
+    if len(command) > _SHELL_MAX_COMMAND_CHARS:
+        return False, f"command exceeds {_SHELL_MAX_COMMAND_CHARS} characters"
+    bad = sorted(set(command) & _SHELL_FORBIDDEN_CHARS)
+    if bad:
+        return False, f"forbidden characters in command: {' '.join(bad)}"
+    tokens = command.split()
+    binary = tokens[0]
+    if "/" in binary:
+        return False, "absolute or relative binary paths are not allowed"
+    if binary not in _SHELL_READONLY_BINARIES:
+        return False, (
+            f"binary '{binary}' is not in the read-only allowlist "
+            f"({', '.join(sorted(_SHELL_READONLY_BINARIES))})"
+        )
+    if any(t in _SHELL_SMUGGLING_BINARIES for t in tokens[1:]):
+        return False, "command references a mutating binary as an argument"
+    rest = tokens[1:]
+    if binary == "settings":
+        if len(rest) < 2 or rest[0] != "get":
+            return False, "only 'settings get <namespace> <key>' is allowed"
+    elif binary == "wm":
+        if len(rest) != 1 or rest[0] not in ("size", "density"):
+            return False, "only 'wm size' / 'wm density' (read-only) is allowed"
+    elif binary == "logcat":
+        if "-c" in rest or "-f" in rest:
+            return False, "logcat -c/-f mutate or write files and are not allowed"
+        if not any(flag in rest for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")):
+            return False, (
+                "streaming logcat is not allowed; add -d/-t/-T (dump mode)"
+            )
+    elif binary == "dumpsys":
+        if any(arg in _SHELL_DUMPSYS_MUTATING for arg in rest):
+            return False, "dumpsys service arguments may mutate device state"
+    elif binary == "ip" or binary == "ifconfig":
+        if any(arg in ("set", "add", "del", "flush", "up", "down") for arg in rest):
+            return False, "network configuration commands are not allowed"
+    return True, ""
+
+
+def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    import re
+
+    global _DEVICE_ID_PATTERN
+    device = str(arguments.get("device") or "").strip()
+    command = str(arguments.get("command") or "").strip()
+    if not device:
+        return "Missing required argument: device", True
+    if not command:
+        return "Missing required argument: command", True
+    if _DEVICE_ID_PATTERN is None:
+        _DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+    if not _DEVICE_ID_PATTERN.match(device):
+        return "denied: device id must match [A-Za-z0-9._:-]{1,64}", True
+    allowed, reason = _validate_shell_command(command)
+    if not allowed:
+        return f"denied: {reason}", True
+    timeout = 120
+    if arguments.get("timeout") is not None:
+        try:
+            timeout = min(600, max(1, int(arguments["timeout"])))
+        except (TypeError, ValueError):
+            return "timeout must be an integer (seconds)", True
+    return run_cli("gms-rt-devices-shell", [device, command], timeout=timeout)
+
+
 def tools() -> list[dict[str, Any]]:
     return [
         {
@@ -749,6 +1005,76 @@ def tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "gms_rt_auth_elevate",
+            "description": (
+                "Step-up re-authentication as admin for the current CLI "
+                "session (gms-rt-auth-elevate USERNAME --password-stdin). "
+                "Unlocks elevated operations such as firmware burn. Only "
+                "call with admin credentials the user explicitly provided; "
+                "the password travels via stdin and is never logged."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "description": "Admin account username.",
+                    },
+                    "password_stdin": {
+                        "type": "string",
+                        "description": "Admin secret forwarded on stdin; never log it.",
+                    },
+                },
+                "required": ["username", "password_stdin"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_burn_firmware",
+            "description": (
+                "Burn firmware (update.img) to one or more devices via "
+                "gms-rt-burn-firmware. Requires an elevated session "
+                "(gms_rt_auth_elevate first); wipes /data by default. The "
+                "CLI copies the image to the worker host over SSH. Long "
+                "running: default timeout 1800s. Follow with "
+                "gms-rt-devices / gms_rt_shell to verify boot."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "firmware_path": {
+                        "type": "string",
+                        "description": "Local path to update.img.",
+                    },
+                    "device": {
+                        "type": "string",
+                        "description": (
+                            "Device serial or unique prefix, comma-separated "
+                            "for multiple devices, e.g. RK3562GMS7."
+                        ),
+                    },
+                    "wipe_data": {
+                        "type": "boolean",
+                        "description": "Wipe /data during burn (default true).",
+                    },
+                    "wait_online": {
+                        "type": "boolean",
+                        "description": "Block until devices come back online after burn.",
+                    },
+                    "wait_online_max": {
+                        "type": "integer",
+                        "description": "Max seconds for --wait-online (default 600).",
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Per-call timeout in seconds (default 1800).",
+                    },
+                },
+                "required": ["firmware_path", "device"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_test_start",
             "description": (
                 "Start a GMS test (CTS/GTS/VTS/STS) on a device, or retry a "
@@ -800,7 +1126,9 @@ def tools() -> list[dict[str, Any]]:
             "name": "gms_rt_jobs_list",
             "description": (
                 "List durable test jobs visible to the session; the cheap "
-                "pre-flight check for busy devices and recent runs."
+                "pre-flight check for busy devices and recent runs. Output "
+                "is one line per job: job_id | status | attempt | devices | "
+                "module | case | created | finished | error."
             ),
             "inputSchema": {
                 "type": "object",
@@ -817,7 +1145,8 @@ def tools() -> list[dict[str, Any]]:
             "name": "gms_rt_jobs_status",
             "description": (
                 "Get the authoritative state of one durable test job "
-                "(cheaper than events for polling)."
+                "(cheaper than events for polling). Output trimmed to key "
+                "fields (id/status/attempt/devices/module/error)."
             ),
             "inputSchema": {
                 "type": "object",
@@ -859,6 +1188,41 @@ def tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "gms_rt_shell",
+            "description": (
+                "Run a READ-ONLY diagnostic shell command on a device via "
+                "gms-rt-devices-shell. Allowlist only: getprop, dumpsys, "
+                "logcat (dump mode), ls, cat, ps, pidof, settings get, "
+                "stat, uptime, vmstat, wm, df. Chaining/redirection/"
+                "mutating commands are denied. Use for device diagnosis "
+                "(props, ANR traces, service state); reboot/push/log-mgmt "
+                "need the human CLI."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "device": {
+                        "type": "string",
+                        "description": "Device serial, e.g. RK3562GMS7.",
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": (
+                            "Read-only shell command, e.g. "
+                            "'getprop ro.build.fingerprint' or "
+                            "'logcat -d -b crash -v threadtime'."
+                        ),
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Seconds (1-600, default 120).",
+                    },
+                },
+                "required": ["device", "command"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_reports_list",
             "description": (
                 "List finished test reports visible to the session (client, "
@@ -890,12 +1254,15 @@ _TOOL_HANDLERS = {
     "gms_rt_devices": devices_tool,
     "gms_rt_auth_status": auth_status_tool,
     "gms_rt_auth_login": auth_login_tool,
+    "gms_rt_auth_elevate": auth_elevate_tool,
+    "gms_rt_burn_firmware": burn_firmware_tool,
     "gms_rt_test_start": test_start_tool,
     "gms_rt_jobs_list": jobs_list_tool,
     "gms_rt_jobs_status": jobs_status_tool,
     "gms_rt_jobs_wait": jobs_wait_tool,
     "gms_rt_jobs_events": jobs_events_tool,
     "gms_rt_reports_list": reports_tool,
+    "gms_rt_shell": shell_tool,
 }
 
 
