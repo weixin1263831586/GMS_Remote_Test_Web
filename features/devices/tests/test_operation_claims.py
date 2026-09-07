@@ -104,3 +104,36 @@ def test_lock_status_resolves_internal_owner_to_user_management_identity():
                 manager.get_lock_status("SERIAL-1")["locked_by"]
                 == "hcq@172.16.14.66"
             )
+
+
+def test_operation_claim_borrows_existing_claim_for_same_owner():
+    """R10: a device already claimed by the same owner (reservation/job/
+    earlier operation) must be reused, not rejected with a spurious 409."""
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        alice = authenticated_request("user-alice", "alice")
+        with patch.object(operation_claims, "device_lock_manager", manager):
+            # Alice holds the device via a long-lived reservation claim.
+            ok, _first = manager.lock_devices(
+                ["SERIAL-1"], "user-alice", "alice",
+                source_id="reservation:res-1", source_type="cluster-reservation",
+                ttl_seconds=3600, allow_existing_source=True,
+            )
+            assert ok
+
+            source_id, records, conflict = (
+                support.acquire_device_operation_claim(alice, ["SERIAL-1"], "remount")
+            )
+            assert conflict is None
+            # The existing claim is borrowed, not re-acquired under a new
+            # source_id; nothing is released by the operation source_id.
+            assert records[0]["source_id"] == "reservation:res-1"
+            assert support.release_device_operation_claim(source_id) == 0
+            # The original reservation claim survives the operation.
+            active = manager.registry.list_active(worker_id="ats-worker-controller")
+            assert any(
+                c["source_id"] == "reservation:res-1" for c in active
+            )

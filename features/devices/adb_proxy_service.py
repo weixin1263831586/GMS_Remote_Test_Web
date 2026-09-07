@@ -215,9 +215,21 @@ class ADBProxyService:
         if not expected.issubset({str(item) for item in target_import.get("devices") or []}):
             return grace_status or "degraded_target"
         visible = {
+            # R18: keep the full serial as-is; TCP serials like
+            # "10.0.0.5:5555" must NOT be folded to the port (split(':')[-1])
+            # or they never match the assignment's serial.  Also expose the
+            # host:port-less form to match worker_agent's dual matching.
+            str(item.get("serial") or "")
+            for item in target_devices
+            if str(item.get("state") or "") not in {"offline", "unknown"}
+        }
+        visible |= {
+            # Match the controller-reported serial against the worker's
+            # "backend:serial" alias form (adb_proxy.py:436).
             str(item.get("serial") or "").split(":")[-1]
             for item in target_devices
             if str(item.get("state") or "") not in {"offline", "unknown"}
+            and ":" in str(item.get("serial") or "")
         }
         if expected and not expected.issubset(visible):
             return grace_status or "device_missing"
@@ -514,6 +526,11 @@ class ADBProxyService:
                         target_worker_id,
                         local_worker_id,
                     )
+                    # Restore the previous device set with the NEW generation:
+                    # the source worker already accepted `generation`, so
+                    # replaying the stale previous generation would always be
+                    # rejected by the worker's staleness check (R04).  The
+                    # restored expected state keeps the larger generation.
                     await _run_worker_command(
                         source_worker_id,
                         "adb_proxy",
@@ -524,7 +541,7 @@ class ADBProxyService:
                             "allowed_peer_address": target_address,
                             "devices": previous_devices,
                             "access_token": restore_grant,
-                            "generation": int(previous_assignment.get("generation") or 0),
+                            "generation": generation,
                             "operation_id": f"adb-proxy-restore-{uuid.uuid4().hex}",
                         },
                         timeout=20,
@@ -538,7 +555,7 @@ class ADBProxyService:
                             "source_address": source_address,
                             "devices": previous_devices,
                             "access_token": restore_grant,
-                            "generation": int(previous_assignment.get("generation") or 0),
+                            "generation": generation,
                             "operation_id": f"adb-proxy-restore-{uuid.uuid4().hex}",
                         },
                         timeout=90,
@@ -567,6 +584,11 @@ class ADBProxyService:
                         "status": "connected" if restored else "connect_failed",
                         "updated_at": time.time(),
                     })
+                    if restored:
+                        # Workers now hold the new generation for the
+                        # restored device set; persisting it keeps the
+                        # reconcile check from flagging degraded_source (R04).
+                        previous_assignment["generation"] = generation
                     assignments[key] = previous_assignment
                 else:
                     assignments.pop(key, None)
@@ -616,18 +638,38 @@ class ADBProxyService:
                 "message": "ADB Proxy接入已经断开",
                 "already_disconnected": True,
             }
-        # disconnect does NOT restart the target's ADB daemon, so the running
-        # test check from _require_idle_target is unnecessary.  But disconnect
-        # MUST be blocked when the *proxied* devices are actively claimed —
-        # removing the proxy route mid-operation would break the test.  Only
-        # check the devices that belong to this assignment, not every device
-        # on the target host (which may include unrelated local-USB devices).
+        # disconnect does not usually restart the target's ADB daemon, so the
+        # full running-jobs check from _require_idle_target is unnecessary.
+        # But the Worker DOES restart the shared Hub whenever other imports
+        # remain, and stops the side ADB on the last disconnect (R02), so the
+        # claim guards below must cover this assignment AND every other
+        # assignment that shares this target's Hub.  Unrelated local-USB
+        # devices on the target are not touched and stay unchecked.
         proxy_devices = {
             str(serial or "").strip()
             for serial in assignment.get("devices") or []
             if str(serial or "").strip()
         }
         self._require_proxy_devices_not_claimed(target_worker_id, proxy_devices)
+        # R02: the Worker's target_disconnect restarts the whole Hub whenever
+        # OTHER imports remain, and stops the side ADB on the last disconnect.
+        # Both affect every proxied route on this target, so all devices of
+        # the *other* assignments must also be claim-free before proceeding.
+        other_proxy_devices: set[str] = set()
+        for other_key, other in self.assignments().items():
+            if other_key == key:
+                continue
+            if str(other.get("target_worker_id") or "") != target_worker_id:
+                continue
+            other_proxy_devices.update(
+                str(serial or "").strip()
+                for serial in other.get("devices") or []
+                if str(serial or "").strip()
+            )
+        if other_proxy_devices:
+            self._require_proxy_devices_not_claimed(
+                target_worker_id, other_proxy_devices
+            )
         target_error = None
         disconnect_generation = max(
             int(time.time() * 1000),
@@ -743,6 +785,10 @@ class ADBProxyService:
             str(item.get("serial") or "")
             for item in get_cluster_service().repository.list_devices(worker_id)
             if item.get("state") in {"allocated", "reserved", "external_busy"}
+            # Protocol state and ownership are independent: an operation
+            # claim can coexist with state='available' (R03).  Any active
+            # claim counts as busy for host-wide ADB restarts.
+            or item.get("claimed")
         ]
         if claimed:
             raise HTTPException(
@@ -771,7 +817,10 @@ class ADBProxyService:
             claimed = [
                 str(item.get("serial") or "")
                 for item in get_cluster_service().repository.list_devices(worker_id)
-                if item.get("state") in {"allocated", "reserved", "external_busy"}
+                if (
+                    item.get("state") in {"allocated", "reserved", "external_busy"}
+                    or item.get("claimed")  # operation claim with state='available' (R03)
+                )
                 and str(item.get("serial") or "") in proxy_devices
             ]
         except (AttributeError, RuntimeError, TypeError) as exc:

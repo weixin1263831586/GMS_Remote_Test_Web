@@ -62,7 +62,12 @@ def render_metrics() -> str:
     from features.system.state import global_state
 
     with global_state.websocket_connections_lock:
-        websocket_count = len(global_state.websocket_connections)
+        # R26: values are now sets of sockets; count each live socket, not
+        # just one per client.
+        websocket_count = sum(
+            len(v) if isinstance(v, set) else 1
+            for v in global_state.websocket_connections.values()
+        )
     with global_state.terminal_lock:
         terminal_count = len(global_state.terminal_ssh_sessions)
     usage = resource.getrusage(resource.RUSAGE_SELF)

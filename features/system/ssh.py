@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import queue
+import time
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
@@ -151,18 +152,28 @@ class SSHManager:
                         pass
                     continue
                 # 测试连接是否仍然有效（轻量级检查）。
-                # 注意：paramiko 的 recv_exit_status() 不接受 timeout 参数
-                # MagicMock 测试掩盖了 TypeError，导致池内健康
-                # 连接被误判为死连接、复用路径永远走不到）。这里靠
-                # exec_command(timeout=2) 的 channel 读超时兜底。
+                # 注意：paramiko 的 recv_exit_status() 内部是不带超时的
+                # status_event.wait()，channel settimeout 约束不到它——
+                # 远端不回传 exit status 时这里会无限阻塞整个事件循环
+                # （R28）。改为按 deadline 轮询 exit_status_ready，超时
+                # 主动关闭 channel 并判定连接已死。
                 try:
                     _stdin, stdout, _stderr = ssh.exec_command('true', timeout=2)
-                    stdout.channel.settimeout(2.0)
-                    exit_code = stdout.channel.recv_exit_status()
-                    if exit_code == 0:
+                    channel = stdout.channel
+                    channel.settimeout(2.0)
+                    deadline = time.monotonic() + 3.0
+                    while not channel.exit_status_ready():
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(
+                                "ssh health check: no exit status within 3s"
+                            )
+                        time.sleep(0.05)
+                    if channel.recv_exit_status() == 0:
                         logger.debug("[SSH] Reused connection from pool")
                         return ssh
-                    logger.debug(f"[SSH] Pool health check exit_code={exit_code}")
+                    logger.debug(
+                        f"[SSH] Pool health check exit_code={channel.recv_exit_status()}"
+                    )
                 except Exception as e:
                     logger.debug(f"[SSH] Connection {attempt+1}/{max_attempts} is dead: {e}")
                     try:

@@ -118,5 +118,60 @@ class BroadcastDeviceChangeTests(unittest.TestCase):
         self.assertNotIn("notification", page_ws.sent[0])
 
 
+class BroadcastDeviceChangeMultiTabTests(unittest.TestCase):
+    """R26/R27: websocket_connections values are SETS of sockets."""
+
+    def test_every_socket_in_set_receives_broadcast_and_owner_notification(self):
+        import features.devices.support as support
+
+        stored = []
+        page_ws = _FakeWebSocket()
+        terminal_ws = _FakeWebSocket()
+        other_user_ws = _FakeWebSocket()
+        # New R26 shape: {client_id: set[websocket]}.
+        connections = {
+            "user-a": {page_ws, terminal_ws},
+            "user-b": {other_user_ws},
+        }
+
+        class _NullLock:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        runtime_stub = _runtime_with_notification_store(stored)
+        runtime_stub.global_state = SimpleNamespace(
+            websocket_connections=connections,
+            websocket_connections_lock=_NullLock(),
+        )
+
+        async def run():
+            await support.broadcast_device_change(
+                ["user-a"], disconnected=["RK3572GMS1"],
+                source="usbip_disconnect",
+            )
+
+        with patch.object(support.runtime, "store_notification",
+                          runtime_stub.store_notification), \
+             patch.object(support.runtime, "global_state",
+                          runtime_stub.global_state):
+            asyncio.run(run())
+
+        # One persisted notification PER OWNER (R27), not per socket.
+        self.assertEqual(len(stored), 2)
+        self.assertEqual(
+            {record["owner"] for record in stored}, {"user-a", "user-b"}
+        )
+        # EVERY socket of every owner receives the device change.
+        self.assertEqual(len(page_ws.sent), 1)
+        self.assertEqual(len(terminal_ws.sent), 1)
+        self.assertEqual(len(other_user_ws.sent), 1)
+        # Each owner is delivered its OWN notification record (R27).
+        self.assertEqual(page_ws.sent[0]["notification"]["owner"], "user-a")
+        self.assertEqual(other_user_ws.sent[0]["notification"]["owner"], "user-b")
+
+
 if __name__ == "__main__":
     unittest.main()

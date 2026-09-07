@@ -28,14 +28,14 @@ function findSuitePathForReport(testType, suitePath = '') {
     }
 
     const normalizedType = normalizeReportTestType(testType);
-    if (!normalizedType || !Array.isArray(testSuitesCache) || testSuitesCache.length === 0) {
+    if (!normalizedType || !Array.isArray(_browserSuitesCache) || _browserSuitesCache.length === 0) {
         return '';
     }
 
-    const exact = testSuitesCache.find(suite => normalizeReportTestType(suite.test_type) === normalizedType);
+    const exact = _browserSuitesCache.find(suite => normalizeReportTestType(suite.test_type) === normalizedType);
     if (exact) return exact.tools_path || '';
 
-    const pathMatch = testSuitesCache.find(suite => {
+    const pathMatch = _browserSuitesCache.find(suite => {
         const path = String(suite.tools_path || '').toLowerCase();
         return path.includes(`/android-${normalizedType}-`) || path.includes(`/android-${normalizedType}/`);
     });
@@ -127,9 +127,9 @@ function buildSuiteBrowserLink(path = '', type = 'file') {
     }
     // 分享链接始终携带明确 Worker ID；本机链接也必须能把其他浏览器
     // 从上次保存的远端 Worker 切回 Controller。
-    const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    const suite = _browserSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
     const workerId = suite?.worker_id
-        || testSuitesWorkerId
+        || _browserSuitesWorkerId
         || $('suite-worker-select')?.value
         || workspaceLocalWorkerId();
     params.set('worker_id', workerId);
@@ -188,7 +188,7 @@ async function initTestSuiteBrowserPageOnce() {
     // 普通页面回访保留已绘制的目录和滚动位置。套件列表仍会
     // 在上方同步，但不用“正在加载”临时页覆盖已经可用的内容。
     if (suiteBrowserInitialized && !routeParams) {
-        const selectedSuite = testSuitesCache.find(
+        const selectedSuite = _browserSuitesCache.find(
             suite => suite.tools_path === state.suiteBrowser.selectedSuitePath
         );
         if (!state.suiteBrowser.selectedSuitePath || selectedSuite) return;
@@ -208,7 +208,7 @@ async function initTestSuiteBrowserPageOnce() {
     }
 
     if (state.suiteBrowser.selectedSuitePath) {
-        const selectedSuite = testSuitesCache.find(s => s.tools_path === state.suiteBrowser.selectedSuitePath);
+        const selectedSuite = _browserSuitesCache.find(s => s.tools_path === state.suiteBrowser.selectedSuitePath);
         if (selectedSuite) {
             await selectTestSuiteForBrowser(selectedSuite.tools_path, state.suiteBrowser.currentPath || '');
             suiteBrowserInitialized = true;
@@ -257,6 +257,13 @@ async function loadSuiteWorkerSelector() {
     }
 }
 
+// R21: the Suite Browser keeps its OWN cache.  It previously wrote the
+// execution page's shared test-suites cache, so browsing
+// Worker B's suites replaced the execution page's cached list (and the
+// reverse).  A per-browser cache keyed by worker keeps both views intact.
+let _browserSuitesCache = [];
+let _browserSuitesWorkerId = '';
+
 async function loadSuitesForBrowserWorker(force = false) {
     const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
     // Suite Browser 是浏览上下文：只维护 page-local 的选择器，
@@ -264,8 +271,17 @@ async function loadSuitesForBrowserWorker(force = false) {
     // 的套件会顺手把测试执行上下文切到 B。
     syncSuiteWorkerSelectOnly(workerId);
     if (isLocalWorkspaceWorker(workerId)) {
-        testSuitesWorkerId = '';
-        return loadTestSuites(force);
+        if (!force && _browserSuitesWorkerId === workerId && _browserSuitesCache.length > 0) {
+            return _browserSuitesCache;
+        }
+        // 本机分支：读取执行页数据，但存入浏览器自己的缓存，
+        // 不再回写共享的执行页缓存 (R21)。
+        const suites = await loadTestSuites(force);
+        _browserSuitesCache = suites || [];
+        _browserSuitesWorkerId = workerId;
+        // 恢复执行页缓存归属：loadTestSuites 按"当前执行 worker"缓存，
+        // 浏览本机不改变它。
+        return _browserSuitesCache;
     }
     // force 时触发真正的 Worker 端套件扫描，再读回写后的清单。
     if (force) {
@@ -280,15 +296,15 @@ async function loadSuitesForBrowserWorker(force = false) {
     const response = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
     if (!response.ok) throw new Error('加载 Worker 套件失败');
     const payload = await response.json();
-    testSuitesCache = (payload.suites || []).filter(item => item.available).map(item => ({
+    _browserSuitesCache = (payload.suites || []).filter(item => item.available).map(item => ({
         tools_path: item.tools_path,
         test_type: String(item.test_type || '').toLowerCase(),
         version: item.version,
         suite_key: item.suite_key || item.tools_path,
         worker_id: workerId
     }));
-    testSuitesWorkerId = workerId;
-    return testSuitesCache;
+    _browserSuitesWorkerId = workerId;
+    return _browserSuitesCache;
 }
 
 async function switchSuiteWorker() {
@@ -299,10 +315,10 @@ async function switchSuiteWorker() {
     syncSuiteWorkerSelectOnly(workerId);
     clearSuiteBrowserSelection('正在加载 Worker 套件...');
     try {
-        testSuitesCache = [];
+        _browserSuitesCache = [];
         await loadSuitesForBrowserWorker(true);
         renderTestSuiteBrowserList();
-        clearSuiteBrowserSelection(testSuitesCache.length ? '请选择左侧测试套件' : '此 Worker 暂无套件');
+        clearSuiteBrowserSelection(_browserSuitesCache.length ? '请选择左侧测试套件' : '此 Worker 暂无套件');
     } catch (error) {
         clearSuiteBrowserSelection(`加载失败: ${error.message}`);
     }
@@ -323,7 +339,7 @@ async function refreshTestSuiteBrowser(preferredSuiteRoot = '') {
     renderTestSuiteBrowserList();
     const normalizedPreferredRoot = (preferredSuiteRoot || '').replace(/\/+$/, '');
     if (normalizedPreferredRoot) {
-        const preferredSuite = testSuitesCache.find(suite => {
+        const preferredSuite = _browserSuitesCache.find(suite => {
             const toolsPath = (suite.tools_path || '').replace(/\/+$/, '');
             const releasePath = (getSuiteReleasePath(suite) || '').replace(/\/+$/, '');
             return toolsPath === normalizedPreferredRoot
@@ -342,7 +358,7 @@ async function refreshTestSuiteBrowser(preferredSuiteRoot = '') {
         return;
     }
 
-    const selectedSuite = testSuitesCache.find(s => s.tools_path === suitePath);
+    const selectedSuite = _browserSuitesCache.find(s => s.tools_path === suitePath);
     if (selectedSuite) {
         await selectTestSuiteForBrowser(suitePath, state.suiteBrowser.currentPath || '');
     } else {
@@ -898,7 +914,7 @@ function renderTestSuiteBrowserList() {
     if (!listEl) return;
 
     const filterText = ($('suite-browser-filter')?.value || '').trim().toLowerCase();
-    const suites = testSuitesCache.filter(suite => {
+    const suites = _browserSuitesCache.filter(suite => {
         const haystack = [
             suite.test_type,
             suite.version,
@@ -909,7 +925,7 @@ function renderTestSuiteBrowserList() {
     });
 
     if (countEl) {
-        countEl.textContent = `${testSuitesCache.length} 个套件`;
+        countEl.textContent = `${_browserSuitesCache.length} 个套件`;
     }
 
     if (suites.length === 0) {
@@ -944,7 +960,7 @@ function renderTestSuiteBrowserList() {
 }
 
 async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
-    const suite = testSuitesCache.find(s => s.tools_path === suitePath);
+    const suite = _browserSuitesCache.find(s => s.tools_path === suitePath);
     if (!suite) {
         renderSuiteFileEmpty('测试套件不存在');
         return;
@@ -952,8 +968,10 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
 
     state.suiteBrowser.selectedSuitePath = suite.tools_path;
     state.suiteBrowser.currentPath = path || '';
+    // R14: Suite Browser is a browsing context — selecting a suite must NOT
+    // change the global test-execution worker.  Writing worker_id here made
+    // browsing Worker B's suites silently switch the execution host to B.
     window.GmsWorkspace?.update({
-        worker_id: $('suite-worker-select')?.value || workspaceWorkerId(),
         suite_key: suite.suite_key || suite.tools_path,
         suite_path: suite.tools_path,
         origin_page: 'test-suites'
@@ -1074,10 +1092,12 @@ async function searchSuiteFiles() {
         showToast('请输入搜索关键词', 'warning');
         return;
     }
-    if (!testSuitesCache.length) {
-        await loadTestSuites();
+    if (!_browserSuitesCache.length) {
+        // R21: 浏览页空缓存时走自己的加载器，避免把执行页的缓存
+        // 隐式拉进浏览上下文。
+        await loadSuitesForBrowserWorker(false);
     }
-    if (!testSuitesCache.length) {
+    if (!_browserSuitesCache.length) {
         showToast('未找到可搜索的测试套件', 'warning');
         return;
     }
@@ -1089,10 +1109,10 @@ async function searchSuiteFiles() {
     }
 
     try {
-        const selectedSuite = testSuitesCache.find(suite => suite.tools_path === state.suiteBrowser.selectedSuitePath);
+        const selectedSuite = _browserSuitesCache.find(suite => suite.tools_path === state.suiteBrowser.selectedSuitePath);
         const orderedSuites = [
             ...(selectedSuite ? [selectedSuite] : []),
-            ...testSuitesCache.filter(suite => !selectedSuite || suite.tools_path !== selectedSuite.tools_path)
+            ..._browserSuitesCache.filter(suite => !selectedSuite || suite.tools_path !== selectedSuite.tools_path)
         ];
         let items = [];
         for (const suite of orderedSuites) {
@@ -1134,7 +1154,7 @@ async function loadSuiteBrowserDirectory(path = '') {
             suite_path: state.suiteBrowser.selectedSuitePath,
             path: path || ''
         });
-        const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+        const suite = _browserSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
         if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
         const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
             ? '/api/cluster/suites/files' : '/api/test/suites/files';
@@ -1526,7 +1546,7 @@ const _testResultsCache = new Map();
 
 function testResultsCacheKey(suitePath, suite = null) {
     const workerId = suite?.worker_id
-        || testSuitesWorkerId
+        || _browserSuitesWorkerId
         || $('suite-worker-select')?.value
         || workspaceLocalWorkerId();
     return `${workerId}\u0000${suitePath || ''}`;
@@ -1542,7 +1562,7 @@ window.openTestResultsModal = function openTestResultsModal() {
     if (minimized) minimized.style.display = 'none';
     // 若已有缓存则立即渲染，再后台静默刷新（后端缓存命中时几乎无延迟）。
     const suitePath = state.suiteBrowser.selectedSuitePath;
-    const suite = testSuitesCache.find(item => item.tools_path === suitePath);
+    const suite = _browserSuitesCache.find(item => item.tools_path === suitePath);
     const cached = _testResultsCache.get(testResultsCacheKey(suitePath, suite));
     if (cached) {
         renderTestResults(cached.results, cached.columns);
@@ -1579,7 +1599,7 @@ window.restoreTestResultsModal = function restoreTestResultsModal() {
 
 async function loadTestResults(force = false, showSpinner = true) {
     const suitePath = state.suiteBrowser.selectedSuitePath;
-    const suite = testSuitesCache.find(s => s.tools_path === suitePath);
+    const suite = _browserSuitesCache.find(s => s.tools_path === suitePath);
     const cacheKey = testResultsCacheKey(suitePath, suite);
     const requestWorkerId = cacheKey.split('\u0000', 1)[0];
     const listEl = $('test-results-list');
@@ -1618,7 +1638,7 @@ async function loadTestResults(force = false, showSpinner = true) {
             if (statusEl) statusEl.textContent = '查询失败';
             return;
         }
-        const currentSuite = testSuitesCache.find(item => item.tools_path === suitePath);
+        const currentSuite = _browserSuitesCache.find(item => item.tools_path === suitePath);
         if (state.suiteBrowser.selectedSuitePath !== suitePath
                 || testResultsCacheKey(suitePath, currentSuite).split('\u0000', 1)[0] !== requestWorkerId) {
             return;
@@ -1816,7 +1836,7 @@ function renderSuiteBreadcrumb(path) {
             const m = String(suitePath).toLowerCase().match(/android-([a-z]+)/);
             const typeMap = { cts: 'CTS', gsi: 'GSI', gts: 'GTS', sts: 'STS', vts: 'VTS', apts: 'APTS' };
             const testType = (m && typeMap[m[1]]) || '';
-            const selectedSuite = testSuitesCache.find(item => item.tools_path === suitePath);
+            const selectedSuite = _browserSuitesCache.find(item => item.tools_path === suitePath);
             retryReportWithSuite(ts, testType, suitePath, {
                 worker_id: selectedSuite?.worker_id || workspaceLocalWorkerId(),
                 source_timestamp: ts
@@ -1909,7 +1929,7 @@ async function analyzeSuiteLogDir(relPath) {
     setTimeout(async () => {
         showToast(`正在分析 ${folderName} ...`, 'info');
         try {
-            const suite = testSuitesCache.find(item => item.tools_path === suitePath);
+            const suite = _browserSuitesCache.find(item => item.tools_path === suitePath);
             let data;
             if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) {
                 const transferId = await createRemoteSuiteTransfer(relPath, true, suite);
@@ -2144,7 +2164,7 @@ function openSuiteFileInline(path) {
         path,
         inline: 'true'
     });
-    const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    const suite = _browserSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
     if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
     const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
         ? '/api/cluster/suites/download' : '/api/test/suites/download';
@@ -2152,7 +2172,7 @@ function openSuiteFileInline(path) {
 }
 
 async function startRemoteSuiteExport(path, directory = false) {
-    const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    const suite = _browserSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
     if (!suite?.worker_id || isLocalWorkspaceWorker(suite.worker_id)) return false;
     const transferId = await createRemoteSuiteTransfer(path, directory, suite);
     const frame = document.getElementById('suite-download-frame') || Object.assign(document.createElement('iframe'), {
@@ -2165,7 +2185,7 @@ async function startRemoteSuiteExport(path, directory = false) {
 }
 
 async function createRemoteSuiteTransfer(path, directory = false, suite = null) {
-    suite = suite || testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    suite = suite || _browserSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
     if (!suite?.worker_id || isLocalWorkspaceWorker(suite.worker_id)) {
         throw new Error('未选择远端 Worker 套件');
     }
@@ -2211,7 +2231,7 @@ async function downloadSuiteFile(path, filename = '') {
     }
 
     const link = document.createElement('a');
-    const suite = testSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
+    const suite = _browserSuitesCache.find(item => item.tools_path === state.suiteBrowser.selectedSuitePath);
     if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
     const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
         ? '/api/cluster/suites/download' : '/api/test/suites/download';
@@ -2280,7 +2300,7 @@ async function analyzeSuiteApk(path, options = {}) {
 
     try {
         showToast('正在准备反编译任务...', 'info');
-        const suite = testSuitesCache.find(item =>
+        const suite = _browserSuitesCache.find(item =>
             item.tools_path === state.suiteBrowser.selectedSuitePath);
         const result = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
             ? await (async () => {

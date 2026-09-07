@@ -33,17 +33,17 @@ MIGRATION_LINE_LIMITS = {
     'features/reports/analysis_api.py': 712,
     'features/reports/api_helpers.py': 775,
     'features/reports/weekly_report_api.py': 1123,
-    'features/system/api.py': 1132,  # +3: shell 模板注入 local_worker_id 单一真值
+    'features/system/api.py': 1143,  # +11: R26 multi-tab websocket connections
     'features/system/api_docs_list.py': 985,
     'features/system/integrations.py': 613,
     'features/system/assets.py': 604,  # +10: auth deps on opengrok/favicon
     'features/system/icon_fetcher.py': 870,
     'features/users/config_api.py': 617,
-    'features/devices/adb_proxy_service.py': 787,
+    'features/devices/adb_proxy_service.py': 836,  # R02/R03/R18 guard hardening
     'features/devices/config_explorer.py': 625,
     'features/devices/integrations_api.py': 2552,
     'features/devices/reconnect.py': 942,
-    'features/devices/tests/test_adb_proxy_service.py': 759,
+    'features/devices/tests/test_adb_proxy_service.py': 908,  # R01-R05/R18 regression tests
     'features/devices/tests/test_usbip_flash_modes.py': 808,
     'features/devices/tests/test_usbip_linux_source.py': 990,
     'features/devices/tests/test_usbip_reconnect.py': 3121,

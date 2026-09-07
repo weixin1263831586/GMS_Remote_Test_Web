@@ -6,6 +6,7 @@ import functools
 import inspect
 import logging
 from datetime import datetime
+from typing import Any
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -189,6 +190,17 @@ async def broadcast_device_change(devices: list[str], disconnected: list[str] | 
     with runtime.global_state.websocket_connections_lock:
         clients = list(runtime.global_state.websocket_connections.items())
 
+    # R26: each client maps to a SET of live sockets (multi-tab).  Flatten
+    # to per-socket pairs so every tab receives the device change; the old
+    # single-websocket path would crash on sets (AttributeError swallowed
+    # by the per-socket handler) and silently drop all device broadcasts.
+    sockets: list[tuple[str, Any]] = []
+    for cid, connections in clients:
+        if isinstance(connections, set):
+            sockets.extend((cid, socket) for socket in connections)
+        else:
+            sockets.append((cid, connections))
+
     notification_level = ''
     notification_title = ''
     notification_message = ''
@@ -201,38 +213,50 @@ async def broadcast_device_change(devices: list[str], disconnected: list[str] | 
         notification_title = 'USB设备已连接'
         notification_message = '连接：' + ', '.join(connected)
 
-    # 同一浏览器的多个 WebSocket 连接（terminal workspace 以
-    # ``<client_id>:terminal_workspace_...`` 后缀区分）共享同一通知中心。
-    # 通知按基础 client_id 只落一份，避免广播循环里逐连接重复入库。
-    base_client_id = next(
-        (cid.split(':', 1)[0] for cid, _ in clients if cid), '',
-    )
-    shared_notification = None
-    if notification_title and base_client_id:
-        shared_notification = runtime.store_notification(
-            base_client_id,
-            notification_title,
-            notification_message,
-            notification_level,
-            'device',
-            {
-                'connected': connected or [],
-                'disconnected': disconnected or [],
-                'source': source,
-            }
-        )
+    # R27: 按 owner（base client_id）分组。旧实现从全部连接中取第一个
+    # base client_id 只为这一个 owner 入库，却把同一通知记录广播给所有
+    # 用户——其他用户实时看到通知，刷新后历史却没有，已读状态也无法
+    # 按 owner 持久化。现在每个 owner 入库一份，并投递自己的通知 ID。
+    owners: dict[str, list] = {}
+    for cid, socket in sockets:
+        base = cid.split(':', 1)[0] if cid else ''
+        owners.setdefault(base, []).append((cid, socket))
 
-    async def _send_device_change(client_id, ws):
+    notifications_by_owner: dict[str, Any] = {}
+    if notification_title:
+        for owner_id in owners:
+            if not owner_id:
+                continue
+            notifications_by_owner[owner_id] = runtime.store_notification(
+                owner_id,
+                notification_title,
+                notification_message,
+                notification_level,
+                'device',
+                {
+                    'connected': connected or [],
+                    'disconnected': disconnected or [],
+                    'source': source,
+                }
+            )
+
+    async def _send_device_change(client_id, socket):
         try:
-            if ws.client_state == WebSocketState.CONNECTED:
+            if socket.client_state == WebSocketState.CONNECTED:
                 client_message = dict(message)
-                if shared_notification is not None:
-                    client_message['notification'] = shared_notification
-                await ws.send_json(client_message)
+                owner_id = client_id.split(':', 1)[0]
+                notification = notifications_by_owner.get(owner_id)
+                if notification is not None:
+                    client_message['notification'] = notification
+                await socket.send_json(client_message)
         except Exception as e:
             logger.debug(f"Failed to broadcast to {client_id}: {e}")
 
-    await asyncio.gather(*[_send_device_change(cid, ws) for cid, ws in clients])
+    await asyncio.gather(
+        *[_send_device_change(cid, socket)
+          for connections in owners.values()
+          for cid, socket in connections]
+    )
 
 
 async def notify_device_change(devices_to_remove: list[str], context: str = "USB/IP Stop"):

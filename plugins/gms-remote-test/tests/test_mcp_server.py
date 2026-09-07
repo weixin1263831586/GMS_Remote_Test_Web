@@ -191,6 +191,32 @@ class RunCliTests(unittest.TestCase):
         self.assertEqual(payload["exit_code"], 5)
         self.assertEqual(payload["ok"], False)
 
+    def test_run_cli_oversized_envelope_stays_valid_json(self):
+        """R17: an envelope larger than MAX_OUTPUT_BYTES must still parse as
+        JSON after adapter trimming — the old head/tail text cut produced
+        invalid JSON with is_error=False (silently corrupted data)."""
+        import subprocess as _subprocess
+
+        def fake_run(argv, **kwargs):
+            payload = json.dumps({
+                "ok": True, "exit_code": 0,
+                "data": {"logs": "x" * (mcp_server.MAX_OUTPUT_BYTES + 100)},
+            })
+            return _subprocess.CompletedProcess(
+                argv, 0, stdout=payload, stderr="",
+            )
+
+        original = mcp_server.subprocess.run
+        mcp_server.subprocess.run = fake_run
+        try:
+            text, is_error = mcp_server.run_cli("gms-rt-jobs-events", ["J1"])
+        finally:
+            mcp_server.subprocess.run = original
+        self.assertFalse(is_error)
+        payload = json.loads(text)  # must not raise
+        self.assertEqual(payload["ok"], True)
+        self.assertIn("truncated", payload["data"]["logs"])
+
     def test_run_cli_falls_back_to_text_for_non_envelope_output(self):
         self._write_stub("printf 'plain human output\\n'")
         text, is_error = mcp_server.run_cli("gms-rt-system-version")
@@ -789,7 +815,7 @@ class ShellToolGateTests(unittest.TestCase):
             "input tap 1 2",
             "getprop; reboot",
         ):
-            allowed, reason = mcp_server._validate_shell_command(cmd)
+            allowed, _reason = mcp_server._validate_shell_command(cmd)
             self.assertFalse(allowed, f"{cmd!r} should be denied")
 
     def test_shell_tool_requires_device_and_command(self):
@@ -799,6 +825,32 @@ class ShellToolGateTests(unittest.TestCase):
         out, is_err = mcp_server.shell_tool({"device": "D1"})
         self.assertTrue(is_err)
         self.assertIn("command", out)
+
+    def test_gate_denies_mutating_variants_found_by_audit(self):
+        """R12: token-exact flag matching and the narrow dumpsys blacklist
+        let real mutating commands through the read-only gate."""
+        for cmd in (
+            "dumpsys battery set level 1",           # 'set' not in old blacklist
+            "logcat -d --clear",                     # long option form of -c
+            "logcat -d -f/data/local/tmp/audit.log", # attached -f value
+            "logcat -d --file=/data/local/tmp/a.log",
+            "dmesg -c",                              # clears kernel ring buffer
+            "dmesg -C",
+            "dumpsys battery plug",                  # 'plug' simulates charging
+        ):
+            allowed, _reason = mcp_server._validate_shell_command(cmd)
+            self.assertFalse(allowed, f"{cmd!r} must be denied")
+
+    def test_gate_still_allows_readonly_logcat_and_dmesg(self):
+        for cmd in (
+            "logcat -d -v time",
+            "logcat -T 10 -d",
+            "dmesg",
+            "dmesg -T",
+            "dmesg -r",
+        ):
+            allowed, reason = mcp_server._validate_shell_command(cmd)
+            self.assertTrue(allowed, f"{cmd!r} should be allowed: {reason}")
 
 
 class LogcatToolTests(unittest.TestCase):

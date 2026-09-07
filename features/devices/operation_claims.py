@@ -12,6 +12,26 @@ from foundation.security import sanitize_device_ids
 from .locks import device_lock_manager
 
 
+def _owned_local_device_keys(owner_id: str, device_keys: list[str]) -> dict[str, dict]:
+    """Return the caller's active claims for the requested devices.
+
+    Used for the devices.use_leased semantics (R10): a plain user without
+    devices.lease may only act on devices they already hold via a claim,
+    reservation or running job — matching the cluster device-actions API.
+    """
+    owned: dict[str, dict] = {}
+    try:
+        active = device_lock_manager.registry.list_active(worker_id=None)
+    except TypeError:
+        active = device_lock_manager.registry.list_active()
+    wanted = set(device_keys)
+    for claim in active:
+        key = str(claim.get("device_key") or "")
+        if claim.get("owner_id") == owner_id and key in wanted:
+            owned[key] = claim
+    return owned
+
+
 def acquire_device_operation_claim(
     request,
     device_ids: list[str],
@@ -35,42 +55,63 @@ def acquire_device_operation_claim(
         )
     if not devices:
         return "", [], None
+    device_keys = [device_lock_manager._device(item)["device_key"] for item in devices]
+    # R10 borrow semantics: a device already claimed by THIS owner (a
+    # reservation, running job, or an earlier operation) is reused instead of
+    # hitting the different-source_id 409 that previously blocked legitimate
+    # self-owned operations ("持有自己的租约却操作不了").
+    owned = _owned_local_device_keys(user.id, device_keys)
+    borrowed = [owned[key] for key in device_keys if key in owned]
+    missing = [
+        item for item, key in zip(devices, device_keys)
+        if key not in owned
+    ]
     source_id = f"operation:{operation}:{uuid.uuid4().hex}"
-    acquired, records = device_lock_manager.lock_devices(
-        devices,
-        user.id,
-        user.username,
-        source_id=source_id,
-        source_type=f"local-{operation}",
-        ttl_seconds=ttl_seconds,
-        allow_existing_source=False,
-    )
-    if acquired:
-        request.state.device_lease_tokens = [
-            {
-                "lease_id": row["id"],
-                "device_id": row["device_key"],
-                "generation": row["generation"],
-                "owner_id": user.id,
-            }
-            for row in records
-        ]
-        return source_id, records, None
-    conflicts = [
+    records = list(borrowed)
+    if missing:
+        acquired, new_records = device_lock_manager.lock_devices(
+            missing,
+            user.id,
+            user.username,
+            source_id=source_id,
+            source_type=f"local-{operation}",
+            ttl_seconds=ttl_seconds,
+            allow_existing_source=False,
+        )
+        if not acquired:
+            conflicts = [
+                {
+                    "device_id": row.get("serial", ""),
+                    "source_type": row.get("source_type", "operation"),
+                }
+                for row in new_records
+            ]
+            # Keep the full conflicting claim records on the response so the
+            # caller can surface who holds the device (API contract).
+            return "", new_records, JSONResponse(
+                content={
+                    "success": False,
+                    "error": "Device is reserved by an active operation",
+                    "conflicts": conflicts,
+                },
+                status_code=409,
+            )
+        records.extend(new_records)
+    request.state.device_lease_tokens = [
         {
-            "device_id": row.get("serial", ""),
-            "source_type": row.get("source_type", "operation"),
+            "lease_id": row["id"],
+            "device_id": row["device_key"],
+            "generation": row["generation"],
+            "owner_id": user.id,
         }
         for row in records
     ]
-    return "", records, JSONResponse(
-        content={
-            "success": False,
-            "error": "Device is reserved by an active operation",
-            "conflicts": conflicts,
-        },
-        status_code=409,
-    )
+    # All requested devices were satisfied by existing claims: no new
+    # operation claim was created, so there is nothing to release by
+    # source_id (borrowed claims belong to their reservation/job).
+    if not missing:
+        return "", records, None
+    return source_id, records, None
 
 
 def release_device_operation_claim(source_id: str) -> int:

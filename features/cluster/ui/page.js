@@ -379,7 +379,48 @@ function render(){
 }
 function formatBytes(v){const n=Number(v)||0;if(n>=1073741824)return `${(n/1073741824).toFixed(2)} GB`;if(n>=1048576)return `${(n/1048576).toFixed(1)} MB`;return `${n} B`}
 function archiveFolder(name){return String(name).replace(/\.(tar\.gz|tar\.bz2|zip|tgz|tar)$/i,'').replace(/[^A-Za-z0-9._+-]+/g,'_')}
-function renderLibrary(){const body=document.querySelector('#library');if(!body)return;const workers=commandWorkers();body.innerHTML=state.library.map((a,i)=>`<tr><td title="${esc(a.name)}">${esc(a.name)}${a.complete===false?' <span style="color:#c62828" title="压缩包不完整（可能下载中断），无法下发">不完整</span>':''}</td><td>${formatBytes(a.size)}</td><td>${new Date(a.modified*1000).toLocaleString()}</td><td><select id="library-worker-${i}">${workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join('')}</select></td><td><input id="library-folder-${i}" value="${esc(archiveFolder(a.name))}"></td><td><button class="primary" data-action="deploy-archive" data-index="${i}" ${workers.length&&a.complete!==false?'':'disabled title="没有可接收命令的在线 Worker 或压缩包不完整"'}>下发并解压</button> <span class="progress-wrap"><span class="progress-track"><span class="progress-bar" id="library-bar-${i}"></span></span><span class="deploy-progress" id="library-progress-${i}"></span></span></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Controller 套件目录中没有压缩包</td></tr>'}
+function renderLibrary(){
+ const body=document.querySelector('#library');if(!body)return;
+ // R23: 保存当前草稿（目标 Worker、目录名、打开的菜单与焦点），
+ // 后台每 10 秒的 refresh 会触发整体重绘——不保留时未提交的下发
+ // 草稿被重置为默认目录、目标回到第一台 Worker。
+ const drafts={};
+ state.library.forEach((a,i)=>{
+  const w=document.querySelector(`#library-worker-${i}`),f=document.querySelector(`#library-folder-${i}`);
+  if(w)drafts[i]={worker:w.value,folder:f?f.value:''};
+ });
+ const openMenu=document.querySelector('.worker-menu:not([hidden])');
+ const menuWrap=openMenu?.closest('.worker-menu-wrap');
+ const active=document.activeElement;
+ const activeId=active&&active.id&&active.id.startsWith('library-')?active.id:'';
+ const workers=commandWorkers();
+ body.innerHTML=state.library.map((a,i)=>`<tr><td title="${esc(a.name)}">${esc(a.name)}${a.complete===false?' <span style="color:#c62828" title="压缩包不完整（可能下载中断），无法下发">不完整</span>':''}</td><td>${formatBytes(a.size)}</td><td>${new Date(a.modified*1000).toLocaleString()}</td><td><select id="library-worker-${i}">${workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join('')}</select></td><td><input id="library-folder-${i}" value="${esc(archiveFolder(a.name))}"></td><td><button class="primary" data-action="deploy-archive" data-index="${i}" ${workers.length&&a.complete!==false?'':'disabled title="没有可接收命令的在线 Worker 或压缩包不完整"'}>下发并解压</button> <span class="progress-wrap"><span class="progress-track"><span class="progress-bar" id="library-bar-${i}"></span></span><span class="deploy-progress" id="library-progress-${i}"></span></span></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Controller 套件目录中没有压缩包</td></tr>';
+ // 恢复草稿：仅当条目仍存在且选项仍然有效。
+ Object.keys(drafts).forEach(i=>{
+  const w=document.querySelector(`#library-worker-${i}`),f=document.querySelector(`#library-folder-${i}`);
+  if(!w)return;
+  if(drafts[i].worker&&Array.from(w.options).some(o=>o.value===drafts[i].worker))w.value=drafts[i].worker;
+  if(f&&drafts[i].folder)f.value=drafts[i].folder;
+ });
+ // 恢复焦点（输入框）与打开的菜单状态。
+ if(activeId&&activeId.startsWith('library-')){
+  const restored=document.getElementById(activeId);
+  if(restored&&restored!==document.body)restored.focus();
+ }
+ if(menuWrap){
+  // 重绘重建了 DOM（R23）：toggle 按钮本身不带 worker id，用同卡片
+  // worker-config 按钮的 data-worker-id 定位新 DOM 里的同一张卡片，
+  // 再点开它的菜单，后台刷新不再"闪退"打开中的菜单。
+  const workerId=menuWrap.closest('.card')
+    ?.querySelector('[data-action="worker-config"]')?.getAttribute('data-worker-id');
+  if(workerId){
+   const newToggle=document.querySelector(
+     `#workers .card [data-action="worker-config"][data-worker-id="${workerId}"]`)
+     ?.closest('.card')?.querySelector('.worker-menu-toggle');
+   newToggle?.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+  }
+ }
+}
 async function loadLibrary(){const button=document.querySelector('#reload-library'),original=button?.textContent||'↻ 刷新测试套件';if(button){button.disabled=true;button.textContent='刷新中…';button.setAttribute('aria-busy','true')}try{const d=await api('/api/cluster/suite-library');state.library=d.archives||[];renderLibrary();toast('测试套件已更新')}catch(e){toast(e.message)}finally{if(button){button.disabled=false;button.textContent=original;button.removeAttribute('aria-busy')}}}
 async function waitCommand(id,progress,onProgress){for(let i=0;i<7200;i++){const d=await api(`/api/cluster/commands/${encodeURIComponent(id)}`),c=d.command;if(c.status==='completed')return c.result||{};if(['failed','cancelled'].includes(c.status))throw new Error(c.error||`${c.command_type}失败`);if(onProgress&&c.result?.downloaded_bytes)onProgress(c.result);else if(i%10===0)progress.textContent=`处理中 ${Math.floor(i/10)}s`;await new Promise(r=>setTimeout(r,1000))}throw new Error('操作超时')}
 async function deployArchive(index){

@@ -138,8 +138,25 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
                 get_service.return_value = SimpleNamespace(
                     repository=repository
                 )
+                from foundation.cluster_port import get_local_worker_id
+
+                local_id = get_local_worker_id()
+                repository.register_worker({
+                    "worker_id": local_id, "agent_version": "1", "max_jobs": 2,
+                    "name": "local", "hostname": "local", "address": "127.0.0.1",
+                    "capabilities": {},
+                })
+                repository.heartbeat(local_id, {
+                    "running_jobs": [], "devices": [],
+                    "suites": [{
+                        "suite_type": "CTS", "suite_version": "17_r1",
+                        "suite_key": "CTS:17_r1", "tools_path": tools_path,
+                        "available": True,
+                    }],
+                })
                 result = start_cluster_test(
-                    _request(test_suite=tools_path, test_module="android.hardware.cts"),
+                    _request(test_suite=tools_path, test_module="android.hardware.cts",
+                             worker_id=local_id),
                     "alice",
                 )
 
@@ -160,8 +177,25 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
                 get_service.return_value = SimpleNamespace(
                     repository=repository
                 )
+                from foundation.cluster_port import get_local_worker_id
+
+                local_id = get_local_worker_id()
+                repository.register_worker({
+                    "worker_id": local_id, "agent_version": "1", "max_jobs": 2,
+                    "name": "local", "hostname": "local", "address": "127.0.0.1",
+                    "capabilities": {},
+                })
+                repository.heartbeat(local_id, {
+                    "running_jobs": [], "devices": [],
+                    "suites": [{
+                        "suite_type": "CTS", "suite_version": "17_r1",
+                        "suite_key": "CTS:17_r1", "tools_path": tools_path,
+                        "available": True,
+                    }],
+                })
                 result = start_cluster_test(
-                    _request(test_suite=tools_path, test_module="NoSuchModuleAnywhere"),
+                    _request(test_suite=tools_path, test_module="NoSuchModuleAnywhere",
+                             worker_id=local_id),
                     "alice",
                 )
 
@@ -178,8 +212,29 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
                 get_service.return_value = SimpleNamespace(
                     repository=repository
                 )
+                from foundation.cluster_port import get_local_worker_id
+
+                local_id = get_local_worker_id()
+                repository.register_worker({
+                    "worker_id": local_id, "agent_version": "1", "max_jobs": 2,
+                    "name": "local", "hostname": "local", "address": "127.0.0.1",
+                    "capabilities": {},
+                })
+                repository.heartbeat(local_id, {
+                    "running_jobs": [], "devices": [
+                        {"serial": "ABC", "state": "available"},
+                        {"serial": "DEF", "state": "available"},
+                    ],
+                    "suites": [{
+                        "suite_type": "CTS", "suite_version": "17_r1",
+                        "suite_key": "CTS:17_r1", "tools_path": tools_path,
+                        "available": True,
+                    }],
+                })
                 result = start_cluster_test(
-                    _request(test_suite=tools_path, test_module="CtsCameraTestCases"),
+                    _request(test_suite=tools_path, test_module="CtsCameraTestCases",
+                             worker_id=local_id,
+                             devices=[f"{local_id}:ABC", f"{local_id}:DEF"]),
                     "alice",
                 )
 
@@ -189,3 +244,75 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartClusterTestTransportPolicyTests(unittest.TestCase):
+    def test_adb_proxy_device_rejects_physical_usb_module(self):
+        """R08: /api/test/start (workflow path) must enforce the same
+        transport compatibility policy as /api/cluster/jobs — a test that
+        requires a physical USB channel cannot run on an ADB Proxy device."""
+        with tempfile.TemporaryDirectory() as directory:
+            repository = _repository(Path(directory))
+            # Mark ABC as an ADB Proxy device via a heartbeat refresh that
+            # preserves the suite inventory.
+            repository.heartbeat("worker-1", {
+                "running_jobs": [],
+                "devices": [
+                    {"serial": "ABC", "state": "available",
+                     "transport": "adb_proxy"},
+                    {"serial": "DEF", "state": "available"},
+                ],
+                "suites": [{
+                    "suite_type": "CTS", "suite_version": "17_r1",
+                    "suite_key": "CTS:17_r1",
+                    "tools_path": "/srv/GMS-Suite/android-cts/tools",
+                    "available": True,
+                }],
+            })
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(repository=repository)
+                result = start_cluster_test(
+                    _request(test_module="CtsUsbTests", test_case=""), "alice"
+                )
+
+        self.assertEqual(result.status_code, 409, result.body)
+        self.assertIn("USB/Fastboot", json.loads(result.body)["error"])
+
+
+class StartClusterTestDispatchCompensationTests(unittest.TestCase):
+    def test_command_failure_fails_job_and_releases_claims(self):
+        """R09: when the dispatch-command write fails after the job was
+        persisted, the job must be transitioned to failed and its claims
+        released — instead of leaving an `assigned` job with no commands."""
+        from foundation.command_result import CommandResult  # noqa: F401
+
+        with tempfile.TemporaryDirectory() as directory:
+            repository = _repository(Path(directory))
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(repository=repository)
+                def failing_create_command(data):
+                    raise RuntimeError("disk full")
+
+                repository.create_command = failing_create_command
+                result = start_cluster_test(_request(), "alice")
+
+            self.assertEqual(result.status_code, 503, result.body)
+            body = json.loads(result.body)
+            self.assertIn("失败", body["error"])
+
+            # The error envelope doesn't carry the job id; look up the job
+            # via repository state instead.
+            jobs = repository.list_jobs(owner_id="alice")
+            self.assertEqual(len(jobs), 1)
+            job = jobs[0]
+            self.assertEqual(job["status"], "failed")
+            # Claims were released: devices are no longer claimed by the job.
+            active_claims = [
+                claim for claim in repository.claims.list_active()
+                if claim.get("source_id") == f"job:{job['id']}"
+            ]
+            self.assertEqual(active_claims, [])

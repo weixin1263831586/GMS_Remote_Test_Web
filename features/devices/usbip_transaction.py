@@ -89,13 +89,18 @@ def parse_usbip_port_entries(output: str) -> list[dict[str, str]]:
     return entries
 
 
-def usbip_attached_ports(ssh_manager, ssh) -> set[str]:
-    """Return the set of currently attached usbip port numbers (as strings)."""
+def usbip_attached_ports(ssh_manager, ssh) -> set[str] | None:
+    """Return the set of currently attached usbip port numbers (as strings).
+
+    Returns ``None`` when the port listing command itself failed: callers
+    must treat that as "state unknown", NOT as "no ports attached" —
+    an empty set here used to make failed detaches look successful (R07).
+    """
     result = ssh_manager.execute_command(
         ssh, USBIP_PORT_COMMAND, timeout=10
     )
     if not result.ok:
-        return set()
+        return None
     # parse_usbip_port_entries keeps every Port header even when a future
     # usbip version changes the detail-line format.  This makes the
     # post-detach confirmation fail closed: an unparsed-but-present port is
@@ -140,7 +145,17 @@ def detach_ubuntu_usbip_ports(
         )
         # 仅当 detach 命令成功或端口确实已消失时才计入 detached，
         # 否则调用方会误以为端口已释放并继续 attach。
-        port_gone = current_port not in usbip_attached_ports(ssh_manager, ssh)
+        # 确认查询失败（None）时状态未知，不计成功，避免假 detach (R07)。
+        ports_after = usbip_attached_ports(ssh_manager, ssh)
+        if ports_after is None:
+            logger.warning(
+                "[USB/IP] Cannot confirm usbip port %s state after detach "
+                "(port listing failed); not counting it as detached",
+                current_port,
+            )
+            port_gone = False
+        else:
+            port_gone = current_port not in ports_after
         if detach_result.ok or port_gone:
             detached.append(current_port)
         else:
