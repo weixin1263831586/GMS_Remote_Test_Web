@@ -395,7 +395,7 @@ def list_suites(worker_id: str = Query(default="")):
 
 
 def _local_execute(command_type: str, payload: dict) -> dict:
-    """Execute a command directly on the Controller host (ats-worker-controller)."""
+    """Execute a command directly on the Controller host (local Worker)."""
     from worker_agent.config import WorkerConfig
     from worker_agent.inventory import execute_suite_action as _exec_suite
 

@@ -1,7 +1,8 @@
 // Shell 模块：终端功能（从 shell.html 内联脚本尾部提取）。
 // ==================== 终端功能 ====================
 const terminalConfig = {
-    worker_id: 'ats-worker-controller',
+    // 由 workspace context / Cluster Status 回填（单一真值，不做硬编码比较）。
+    worker_id: '',
     ssh_host: '{{ config.ubuntu_host }}',
     ssh_user: '{{ config.ubuntu_user }}'
 };

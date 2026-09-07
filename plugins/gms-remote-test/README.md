@@ -98,6 +98,12 @@ gms_rt_jobs_status  job_id=<cluster_job_id> # cheap polling (trimmed output)
 gms_rt_jobs_events  job_id=<cluster_job_id> after=<last_seq>
 gms_rt_burn_firmware firmware_path=update.img device=RK3562GMS7   # requires elevation
 gms_rt_shell       device=RK3562GMS7 command="getprop ro.build.fingerprint"
+gms_rt_logcat      device=RK3562GMS7            # adb shell logcat -v time (dump mode)
+gms_rt_logcat      device=RK3562GMS7 args="-b crash -t 500"
+gms_rt_logcat      device=RK3562GMS7 clear=true  # logcat -c first, then fresh dump
+gms_rt_logcat      device=RK3562GMS7 since="09-07 10:52:00.000"  # dump entries at/after time (device-side -t filter)
+gms_rt_logcat      device=RK3562GMS7 since="09-07 10:52:00" until="09-07 11:00:00.000"  # bounded time window
+gms_rt_shell_exec  device=RK3562GMS7 command="settings put global wifi_on 1" authorized=true   # user-approved one-shot only
 gms_rt_reports_list
 ```
 
@@ -121,8 +127,12 @@ USB/IP connect/disconnect, config changes, ...) and interactive sessions
 dedicated typed MCP tools with explicit confirmation, or a human-run CLI.
 Firmware burn is reachable only through `gms_rt_burn_firmware` (typed) after
 `gms_rt_auth_elevate` with admin credentials the user explicitly provided.
-Passwords are only accepted via `password_stdin` and are forwarded on
-stdin, never logged.
+Arbitrary device shell commands are reachable only through
+`gms_rt_shell_exec`, which requires `authorized=true` (explicit user
+approval of the exact one-shot command) on every single call. The read-only
+`gms_rt_shell` allowlist and dump-mode `gms_rt_logcat` need no extra
+authorization. Passwords are only accepted via `password_stdin` and are
+forwarded on stdin, never logged.
 
 ## Maintaining the bundled CLI
 

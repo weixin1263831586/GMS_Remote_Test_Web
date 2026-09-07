@@ -125,8 +125,11 @@ function updateTestHostScopedControls(workerId = workspaceWorkerId()) {
 }
 
 function workspaceLocalWorkerId() {
+    // 优先级：workspace context（模板注入的真实配置）→ Cluster Status →
+    // bootstrap 兜底。字面量仅是 bootstrap 缺失时的最后防线，不用于业务比较。
     return window.GmsWorkspace?.localWorkerId?.()
         || state.clusterStatus?.local_worker_id
+        || window.__GMS_BOOTSTRAP__?.localWorkerId
         || 'ats-worker-controller';
 }
 
@@ -452,12 +455,24 @@ function isSelectableBootloaderDevice(device) {
 function isSelectableWorkspaceDevice(device) {
     if (typeof device === 'string') return true;
     const status = device.status || device.state || 'online';
-    if (status === 'fastboot') {
+    if (status === 'fastboot' || status === 'loader') {
         // 当前 GSI 直刷 Fastbootd 仅由本机 /api/burn/gsi 支持；
         // 远端 Worker 仍需从 available 状态发起。
+        // Loader/MaskROM 设备由固件烧写链路直接处理（跳过 reboot loader）。
         return !device.locked && !device.cluster_worker_id;
     }
     return !device.locked && ['online', 'available'].includes(status);
+}
+
+function isSelectableBurnStateDevice(device) {
+    if (typeof device === 'string') return true;
+    if (device.transport === 'adb_proxy') return false;
+    const status = device.status || device.state || 'online';
+    // Fastboot 设备烧写前由后端 fastboot reboot 回 ADB 再进 Loader；
+    // Loader/MaskROM 设备直接进入 upgrade_tool uf。
+    return ['fastboot', 'loader'].includes(status)
+        && !device.locked
+        && !device.cluster_worker_id;
 }
 
 function isSelectableRebootDevice(device) {
@@ -483,6 +498,12 @@ function selectedTestDeviceIds() {
 
 function selectedWorkspaceDeviceIds() {
     return selectedDeviceIdsMatching(isSelectableWorkspaceDevice);
+}
+
+function selectedBurnableDeviceIds() {
+    return selectedDeviceIdsMatching(
+        device => isSelectableTestDevice(device) || isSelectableBurnStateDevice(device)
+    );
 }
 
 function fetchDevicesForWorker(workerId, forceRefresh, source) {

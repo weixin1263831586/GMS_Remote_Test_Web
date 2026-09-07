@@ -105,7 +105,7 @@ def _suite_roots() -> list[Path]:
 
 
 class LocalWorkerBridge:
-    """Registers the Controller host as ``ats-worker-controller`` and heartbeats it."""
+    """Registers the Controller host under its configured Worker ID and heartbeats it."""
 
     def __init__(self, repository: ClusterRepository, config: ClusterConfig):
         self.repository = repository

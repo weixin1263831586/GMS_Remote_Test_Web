@@ -69,6 +69,23 @@ weakening the mutating-command gate. See
 [references/agent-workflows.md](references/agent-workflows.md) section 5.1
 for the full allowlist and a worked ANR-diagnosis loop.
 
+For timestamped device logs, use the typed `gms_rt_logcat` tool
+(plugin >= 0.7.0): it captures `adb shell logcat -v time` in one-shot dump
+mode (`-d`) with optional logcat filters, and `clear=true` (CLI `-c`) runs
+`logcat -c` first so only fresh logs are captured; `-f` and shell
+metacharacters are denied. The human CLI command is
+`gms-rt-devices-logcat DEVICE [-c] [args]` (live streaming without flags).
+See [references/agent-workflows.md](references/agent-workflows.md)
+section 5.2.
+
+For a state-changing device command (`am`, `pm`, `cmd`, `input`,
+`settings put`, ...), use the typed `gms_rt_shell_exec` tool
+(plugin >= 0.8.0): it forwards one-shot `gms-rt-devices-shell DEVICE
+'COMMAND'` only when `authorized=true` is passed, which must reflect the
+user's explicit approval of that exact command; approval never persists
+across calls. The interactive device shell itself remains human-only. See
+[references/agent-workflows.md](references/agent-workflows.md) section 5.3.
+
 Set `GMS_REMOTE_TEST_SERVER` when the automatic server address is wrong. Set
 `GMS_CURL_CA_CERT` for a trusted CA, or set `GMS_CURL_INSECURE=1` only for a
 local self-signed deployment. For one invocation, prefer `--server URL`,

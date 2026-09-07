@@ -1,7 +1,7 @@
 {
   "name": "gms-remote-test",
-  "version": "0.6.0",
-  "description": "Operate the GMS Remote Test platform through the bundled gms-rt CLI: device inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware burn, USB/IP, VPN. Self-contained; requires GMS_REMOTE_TEST_SERVER (and credentials via stdin). Adds read-only device shell (gms_rt_shell) for agent diagnostics, admin step-up elevation (gms_rt_auth_elevate) and typed firmware burn (gms_rt_burn_firmware); jobs output is rendered one line per job.",
+  "version": "0.8.2",
+  "description": "Operate the GMS Remote Test platform through the bundled gms-rt CLI: device inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware burn, USB/IP, VPN. Self-contained; requires GMS_REMOTE_TEST_SERVER (and credentials via stdin). Adds read-only device shell (gms_rt_shell) for agent diagnostics, typed logcat capture (gms_rt_logcat, adb shell logcat -v time in dump mode with optional buffer clear), user-authorized one-shot device shell (gms_rt_shell_exec), admin step-up elevation (gms_rt_auth_elevate) and typed firmware burn (gms_rt_burn_firmware); jobs output is rendered one line per job.",
   "keywords": [
     "gms",
     "cts",

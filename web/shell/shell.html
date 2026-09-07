@@ -24,6 +24,9 @@
     <script>
         const EXTERNAL_SERVICES = {{ config.get('external_services', {}) | tojson }};
         const PRODUCT_BRANDING = {{ config.get('product_branding', {}) | tojson }};
+        // 启动即注入真实 local worker ID（cluster 配置单一真值），
+        // workspace-context 等模块无需"先猜默认值→异步纠正"。
+        window.__GMS_BOOTSTRAP__ = { localWorkerId: {{ local_worker_id | tojson }} };
     </script>
     <script src="/static/js/shell/logging.js?v=20260826-shell-split" defer></script>
     <script src="/static/js/shell/status-polling.js?v=20260826-shell-split" defer></script>

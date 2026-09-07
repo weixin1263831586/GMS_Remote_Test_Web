@@ -203,6 +203,26 @@ async def get_connected_devices(
                 "protocol": "fastboot",
                 "transport": "local_usb",
             }
+
+        # Rockchip Loader/MaskROM 设备：烧写失败后设备停留在烧写模式，
+        # 对 adb/fastboot 不可见；并入列表以便重新选中直接烧写。
+        try:
+            loader_devices = await asyncio.to_thread(
+                device_manager.get_rockusb_loader_devices,
+                set(inventory_by_id),
+            )
+        except Exception:
+            logger.warning("[Device] rockusb loader scan failed", exc_info=True)
+            loader_devices = []
+        for device_id in loader_devices:
+            if device_id in inventory_by_id:
+                continue
+            inventory_by_id[device_id] = {
+                "device_id": device_id,
+                "status": "loader",
+                "protocol": "rockusb-loader",
+                "transport": "local_usb",
+            }
         inventory = list(inventory_by_id.values())
 
     adb_devices = [
@@ -349,13 +369,9 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
     # worker 维度：用集群设备池确定每台设备归属的主机，不需要 SSH 读属性
     if dim == "worker":
         value_to_devices: dict[str, list[str]] = {}
-        local_worker_id = "ats-worker-controller"
-        try:
-            from foundation.cluster_port import get_cluster_service
-            cluster = get_cluster_service()
-            local_worker_id = cluster.config.local_worker_id
-        except Exception:
-            pass
+        from foundation.cluster_port import get_local_worker_id
+
+        local_worker_id = get_local_worker_id()
         # 本地设备：用裸 serial（与 /api/devices/management 返回的 device_id 一致）
         local_devices = await asyncio.to_thread(device_manager.get_connected_devices)
         for device_id in local_devices:

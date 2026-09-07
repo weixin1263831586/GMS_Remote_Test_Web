@@ -1,4 +1,4 @@
-const state={workers:[],devices:[],suites:[],jobs:[],tests:[],library:[],status:{local_worker_id:'ats-worker-controller'}};
+const state={workers:[],devices:[],suites:[],jobs:[],tests:[],library:[],status:{local_worker_id:(window.__GMS_BOOTSTRAP__&&window.__GMS_BOOTSTRAP__.localWorkerId)||'ats-worker-controller'}};
 const dashCharts={gauges:null,pie:null,trend:null};
 let dashTrendWorker='';
 let dashTrendLastFetch=0;
@@ -59,7 +59,7 @@ function workerBadge(worker){const activity=workerActivity(worker),status=worker
 function compactDuration(seconds){const value=Math.max(0,Math.floor(Number(seconds)||0)),days=Math.floor(value/86400),hours=Math.floor((value%86400)/3600),minutes=Math.floor((value%3600)/60);if(days)return `${days}天${hours?`${hours}小时`:''}`;if(hours)return `${hours}小时${minutes?`${minutes}分钟`:''}`;if(minutes)return `${minutes}分钟`;return `${value}秒`}
 function workerWarning(value){const text=String(value||''),inactive=text.match(/^Tradefed output has been inactive for (\d+) seconds;/);if(inactive)return `Tradefed 已 ${compactDuration(inactive[1])} 未产生输出，当前模块可能耗时较长或已停滞`;if(text==='Tradefed is running but its device could not be identified')return 'Tradefed 正在运行，但无法识别其占用设备';if(text==='An external Tradefed process has no identifiable device; new tests are blocked')return '外部 Tradefed 无法识别占用设备，已阻止派发新测试';return text}
 function workerTestsMarkup(worker,tests){const activity=workerActivity(worker),visibleExternal=tests.filter(test=>test.source==='external').length,visibleManaged=tests.length-visibleExternal,hiddenExternal=Math.max(0,activity.external-visibleExternal),hiddenManaged=Math.max(0,activity.managed-visibleManaged),hidden=hiddenExternal+hiddenManaged;let rows=tests.map(test=>`<div><strong>${test.source==='external'?'手工/外部':'平台'} ${esc(test.suite_type||'XTS')}</strong> · PID ${esc(test.pid||'-')} · 设备 ${esc((test.devices||[]).join(', ')||'未识别')} · 运行 ${compactDuration(test.elapsed_seconds)}</div>`).join('');if(hidden){const kind=hiddenExternal&&!hiddenManaged?'外部':hiddenManaged&&!hiddenExternal?'平台':'运行中';rows+=`<div class="muted">检测到 ${hidden} 个${kind}测试，详情暂不可用</div>`}return rows||'<span class="muted">当前无测试</span>'}
-function localWorkerId(){return state.status.local_worker_id||'ats-worker-controller'}
+function localWorkerId(){return state.status.local_worker_id||window.__GMS_BOOTSTRAP__?.localWorkerId||'ats-worker-controller'}
 function terminalJob(status){return ['completed','failed','cancelled'].includes(status)}
 function renderModeStatus(){
  const modeHint=document.querySelector('#cluster-mode-status');if(!modeHint)return;

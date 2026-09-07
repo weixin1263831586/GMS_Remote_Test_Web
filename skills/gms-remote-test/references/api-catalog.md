@@ -23,7 +23,7 @@ downloads, DELETE requests, and log streams.
 | Group | Commands |
 |---|---|
 | Test | `gms-rt-test-start`, `gms-rt-test-stop`, `gms-rt-test-status`, `gms-rt-test-clean`, `gms-rt-test-suites`, `gms-rt-test-suites-result`, `gms-rt-test-logs-stream` |
-| Devices | `gms-rt-devices-list`, `gms-rt-devices-info`, `gms-rt-devices-wait`, `gms-rt-devices-reboot`, `gms-rt-devices-remount`, `gms-rt-devices-shell`, `gms-rt-devices-push`, `gms-rt-devices-wifi`, `gms-rt-devices-scrcpy`, `gms-rt-devices-user-locked` |
+| Devices | `gms-rt-devices-list`, `gms-rt-devices-info`, `gms-rt-devices-wait`, `gms-rt-devices-reboot`, `gms-rt-devices-remount`, `gms-rt-devices-shell`, `gms-rt-devices-logcat`, `gms-rt-devices-push`, `gms-rt-devices-wifi`, `gms-rt-devices-scrcpy`, `gms-rt-devices-user-locked` |
 | Bootloader | `gms-rt-devices-bootloader-lock`, `gms-rt-devices-bootloader-unlock`, `gms-rt-devices-bootloader-status` |
 | Reports | `gms-rt-reports-list`, `gms-rt-reports-analyze`, `gms-rt-reports-download`, `gms-rt-reports-delete` |
 | Desktop and terminal | `gms-rt-desktop-validate`, `gms-rt-desktop-vnc-start`, `gms-rt-desktop-vnc-status`, `gms-rt-desktop-vnc-stop`, `gms-rt-terminal-open`, `gms-rt-terminal-push` |

@@ -44,6 +44,15 @@ changing anything here.
   mutating burn: it requires an elevated session (hint on exit_code 4
   points agents to it) and forwards to `gms-rt-burn-firmware` with
   explicit wipe/wait-online arguments.
+- `gms_rt_logcat` (added v0.7.0) is the typed path to
+  `gms-rt-devices-logcat` (`adb shell logcat -v time`): it always runs
+  dump-mode, rejects `-c/-f` and shell metacharacters; the CLI catalog
+  marks the raw command manual, so `gms_rt_run` cannot reach it.
+- `gms_rt_shell_exec` (added v0.8.0) is the only agent path to
+  `gms-rt-devices-shell`: it requires `authorized=true` (the user's
+  approval of the exact one-shot command) on every call. The bare/empty
+  interactive shell stays human-only, `gms_rt_run` keeps denying the raw
+  command, and the denial message points agents here.
 
 ## Token discipline (regression-test any output change)
 

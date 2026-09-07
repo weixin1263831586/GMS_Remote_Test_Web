@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="2026.09.05-1"
+GMS_RT_VERSION="2026.09.07-2"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -1572,6 +1572,84 @@ gms-rt-devices-shell() {
         echo "🔌 使用 Ctrl+D 退出 shell"; echo ""
         ssh -t -p "$port" "$user@$host" "adb -s $device_id shell"
     fi
+}
+
+# Capture device logcat via `adb shell logcat -v time` (local adb or SSH fallback).
+# Optional -c/--clear runs `logcat -c` first, then captures with `-v time`.
+# Interactive use streams live; --non-interactive (agents/CI) forces one-shot
+# dump mode (-d) so the command always terminates. -f (write device file) is
+# rejected, and non-interactive args must not contain shell metacharacters.
+gms-rt-devices-logcat() {
+    local device_id="$1"
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-logcat DEVICE_ID [-c] [logcat参数...]"; return "$GMS_RT_EXIT_USAGE"; }
+    shift
+
+    local clear_first=0 has_dump_flag=0
+    local logcat_args=() arg
+    for arg in "$@"; do
+        case "$arg" in
+            -c|--clear)
+                clear_first=1
+                ;;
+            -f|--file=*)
+                error "logcat 参数 -f 会写设备文件, 不允许: $arg"
+                return "$GMS_RT_EXIT_USAGE"
+                ;;
+            *)
+                case "$arg" in
+                    -d|-t|-T|-g|-L|-p|-print) has_dump_flag=1 ;;
+                esac
+                logcat_args+=("$arg")
+                ;;
+        esac
+    done
+
+    if [ "$GMS_RT_NON_INTERACTIVE" = "1" ]; then
+        # 设备端由远端 sh 解释拼接命令, 非交互参数禁止 shell 元字符。
+        local unsafe_pattern='[;&|><$`'"'"'()\\]'
+        for arg in "${logcat_args[@]}"; do
+            if [[ "$arg" =~ $unsafe_pattern ]]; then
+                error "非交互模式拒绝包含 shell 元字符的参数: $arg"
+                return "$GMS_RT_EXIT_USAGE"
+            fi
+        done
+        # 无 dump 标志时自动附加 -d, 保证命令终止。
+        if [ "$has_dump_flag" -eq 0 ]; then
+            logcat_args=(-d "${logcat_args[@]}")
+        fi
+    elif [ "$has_dump_flag" -eq 0 ] && [ "$GMS_RT_QUIET" != "1" ]; then
+        echo ""
+        echo "🖥 抓取 $device_id logcat (adb shell logcat -v time), Ctrl+C 停止..."
+        echo ""
+    fi
+
+    if _is_test_host && command -v adb &> /dev/null && adb devices 2>/dev/null | grep -q "$device_id"; then
+        if [ "$clear_first" -eq 1 ]; then
+            adb -s "$device_id" shell logcat -c || { error "logcat -c 清空缓冲失败"; return "$GMS_RT_EXIT_OPERATION"; }
+        fi
+        adb -s "$device_id" shell logcat -v time "${logcat_args[@]}"
+        return $?
+    fi
+
+    local ssh_info=($(_resolve_ssh_host))
+    local host="${ssh_info[0]}" user="${ssh_info[1]}" port="${ssh_info[2]}"
+    [ -z "$host" ] && { error "无法确定测试主机地址"; return 1; }
+    ! command -v ssh &> /dev/null && { error "ssh 命令未找到. 请安装 OpenSSH 客户端"; return 1; }
+
+    # 各参数以空格拼接后交给远端 adb shell; 含空格的参数会被设备端拆分,
+    # 非交互模式已拒绝元字符, 该差异仅影响少数过滤表达式。
+    local logcat_command="logcat -v time"
+    for arg in "${logcat_args[@]}"; do
+        logcat_command+=" $arg"
+    done
+    local quoted_device quoted_command remote_command
+    quoted_device=$(_shell_quote "$device_id")
+    quoted_command=$(_shell_quote "$logcat_command")
+    remote_command="adb -s ${quoted_device} shell ${quoted_command}"
+    if [ "$clear_first" -eq 1 ]; then
+        remote_command="adb -s ${quoted_device} shell logcat -c && ${remote_command}"
+    fi
+    ssh -p "$port" "$user@$host" "$remote_command"
 }
 
 # Push file to device (adb push)
@@ -3249,6 +3327,7 @@ _gms_rt_command_usage() {
             ;;
         gms-rt-devices-wait) printf '%s' 'gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]' ;;
         gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [command]' ;;
+        gms-rt-devices-logcat) printf '%s' 'gms-rt-devices-logcat <device_id> [-c] [logcat args]' ;;
         gms-rt-devices-push) printf '%s' 'gms-rt-devices-push <device_id> <local_file> <remote_path>' ;;
         gms-rt-jobs-list) printf '%s' 'gms-rt-jobs-list [limit]' ;;
         gms-rt-jobs-status) printf '%s' 'gms-rt-jobs-status <job_id>' ;;
@@ -3276,6 +3355,7 @@ _gms_rt_command_summary() {
         gms-rt-system-update) printf '%s' 'Reinstall the latest Skill and CLI command links' ;;
         gms-rt-system-version) printf '%s' 'Print the local CLI version' ;;
         gms-rt-devices-wait) printf '%s' 'Wait for selected devices to become visible in the requested state' ;;
+        gms-rt-devices-logcat) printf '%s' 'Capture device logcat via adb shell logcat -v time (-c clears the buffer first; dump mode in non-interactive sessions)' ;;
         gms-rt-test-suites-result) printf '%s' 'List tradefed results for a suite path or short suite name' ;;
         gms-rt-test-modules) printf '%s' 'List available tradefed modules for a suite (testcases/ directory)' ;;
         gms-rt-test-start) printf '%s' 'Start a test with smart args, suite short names, device prefixes, and optional --wait' ;;
@@ -3463,6 +3543,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-remount            - Remount RW (with auto-reboot prompt)
   gms-rt-devices-wifi               - Connect to WiFi
   gms-rt-devices-shell              - Open interactive ADB shell
+  gms-rt-devices-logcat             - Capture device logcat (adb shell logcat -v time; -c clears buffer first)
   gms-rt-devices-push               - Push file to device (adb push)
   gms-rt-devices-scrcpy             - Show device screen
 
