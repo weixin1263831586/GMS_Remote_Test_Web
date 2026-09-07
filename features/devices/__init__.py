@@ -45,6 +45,9 @@ _LAZY_API_EXPORTS = {
     'resolve_usbip_flash_routes': '.usbip_flash',
     'open_usbip_source_ssh': '.usbip_flash',
     'migrate_local_usbip_serial': '.usbip_persistence',
+    'rockusb_loader_serials': '.rockusb',
+    'rockusb_loader_vid_pids': '.rockusb',
+    'ROCKUSB_SYSFS_PROBE_COMMAND': '.rockusb',
     'usbipd_list_via_ssh': '.usbip_flash',
     'usbipd_policy_list_via_ssh': '.usbip_flash',
     'query_usbipd_busid_instance_ids': '.usbip_identity',
@@ -72,6 +75,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "ROCKUSB_SYSFS_PROBE_COMMAND",
     "USBIP_PORT_COMMAND",
     "ADBForwardStartRequest",
     "ADBForwardStopRequest",
@@ -115,6 +119,8 @@ __all__ = [
     "reconcile_cluster_usbip_heartbeat",
     "release_device_locks",
     "resolve_usbip_flash_routes",
+    "rockusb_loader_serials",
+    "rockusb_loader_vid_pids",
     "ssh_connection_failed_response",
     "update_user_state_field",
     "usbip_manager",

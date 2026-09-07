@@ -36,6 +36,8 @@ Tools:
 - gms_rt_test_start / gms_rt_jobs_list / gms_rt_jobs_wait / gms_rt_jobs_events / gms_rt_jobs_status
 - gms_rt_reports_list
 - gms_rt_shell       read-only device shell (allowlisted diagnostics)
+- gms_rt_logcat      capture device logcat via adb shell logcat -v time (v0.7.0)
+- gms_rt_shell_exec  user-authorized one-shot device shell command (v0.8.0)
 
 Passwords are never handled here beyond forwarding on stdin to
 gms-rt-auth-login; the CLI stores the session cookie itself.
@@ -55,7 +57,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.6.0"
+SERVER_VERSION = "0.8.1"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -752,13 +754,22 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             True,
         )
     if not descriptor.get("agent_safe_unattended"):
+        guidance = (
+            "Use the dedicated typed MCP tool with explicit confirmation, "
+            "or run it manually via the gms-rt CLI."
+        )
+        if normalized == "gms-rt-devices-shell":
+            guidance = (
+                "For device diagnosis use the read-only gms_rt_shell tool; "
+                "for a user-authorized one-shot command use "
+                "gms_rt_shell_exec(authorized=true)."
+            )
         return (
             f"denied: {normalized} is not agent-safe for unattended "
             f"execution (mode={descriptor.get('mode')}, "
             f"requires_explicit_authorization="
             f"{descriptor.get('requires_explicit_authorization')}). "
-            "Use the dedicated typed MCP tool with explicit confirmation, "
-            "or run it manually via the gms-rt CLI.",
+            f"{guidance}",
             True,
         )
     args = arguments.get("args")
@@ -791,6 +802,11 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 _SHELL_READONLY_BINARIES = frozenset({
     "cat", "df", "dumpsys", "getprop", "logcat", "ls", "pidof", "ps",
     "settings", "stat", "uptime", "vmstat", "wm",
+    # Read-only diagnostics added after the CTS profiling investigation
+    # (2026-09-07): process/pattern lookup, log post-processing on files
+    # already readable via cat, kernel ring buffer, and device_config reads.
+    "pgrep", "grep", "wc", "head", "tail", "dmesg", "id", "printenv",
+    "device_config", "cmd", "am",
 })
 # Characters that enable chaining/redirection/substitution; none of the
 # allowlisted read-only commands need them.
@@ -801,10 +817,22 @@ _SHELL_DUMPSYS_MUTATING = frozenset({
     "force-stop", "kill", "suspend", "resume", "reset-role",
 })
 # Binaries that may smuggle arbitrary execution; never allow as arguments.
+# NOTE: 'cmd' and 'am' are in _SHELL_READONLY_BINARIES but only for the
+# explicit read-only subcommands in _SHELL_CMD_READONLY_SUBCOMMANDS; they
+# must stay here so they are rejected as arguments to other binaries.
 _SHELL_SMUGGLING_BINARIES = frozenset({
     "sh", "bash", "su", "toybox", "toolbox", "nohup", "xargs", "run-as",
-    "am", "pm", "cmd", "input", "svc", "reboot", "sync", "dd", "rm", "mv",
+    "pm", "input", "svc", "reboot", "sync", "dd", "rm", "mv",
     "cp", "mkdir", "touch", "chmod", "chown", "kill",
+})
+# 'cmd' / 'am' read-only subcommand allowlist (exact prefix match).
+_SHELL_CMD_READONLY_SUBCOMMANDS = {
+    "cmd": ("list", "help"),
+    "am": ("stack list", "get-current-user", "get-standby-bucket"),
+}
+# device_config subcommands that mutate device state.
+_SHELL_DEVICE_CONFIG_MUTATING = frozenset({
+    "put", "delete", "edit", "reset", "set-sync-disabled-for-test",
 })
 _SHELL_MAX_COMMAND_CHARS = 2000
 _DEVICE_ID_PATTERN = None  # compiled lazily
@@ -847,6 +875,21 @@ def _validate_shell_command(command: str) -> tuple[bool, str]:
     elif binary == "dumpsys":
         if any(arg in _SHELL_DUMPSYS_MUTATING for arg in rest):
             return False, "dumpsys service arguments may mutate device state"
+    elif binary == "device_config":
+        if not rest:
+            return False, "device_config requires a subcommand"
+        if rest[0] in _SHELL_DEVICE_CONFIG_MUTATING:
+            return False, f"device_config {rest[0]} mutates device state"
+        if rest[0] not in ("get", "list"):
+            return False, "only 'device_config get/list' is allowed"
+    elif binary in _SHELL_CMD_READONLY_SUBCOMMANDS:
+        joined = " ".join(rest)
+        if not any(joined == sub or joined.startswith(sub + " ")
+                   for sub in _SHELL_CMD_READONLY_SUBCOMMANDS[binary]):
+            allowed = "; ".join(
+                f"'{binary} {sub}'" for sub in _SHELL_CMD_READONLY_SUBCOMMANDS[binary]
+            )
+            return False, f"only {allowed} are allowed for '{binary}'"
     elif binary == "ip" or binary == "ifconfig":
         if any(arg in ("set", "add", "del", "flush", "up", "down") for arg in rest):
             return False, "network configuration commands are not allowed"
@@ -870,6 +913,200 @@ def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     allowed, reason = _validate_shell_command(command)
     if not allowed:
         return f"denied: {reason}", True
+    timeout = 120
+    if arguments.get("timeout") is not None:
+        try:
+            timeout = min(600, max(1, int(arguments["timeout"])))
+        except (TypeError, ValueError):
+            return "timeout must be an integer (seconds)", True
+    return run_cli("gms-rt-devices-shell", [device, command], timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
+# Device logcat capture (typed tool, v0.7.0)
+# ---------------------------------------------------------------------------
+
+# The CLI catalog lists gms-rt-devices-logcat as read_only and agent-safe
+# (dump mode under --non-interactive). This typed tool adds an adapter-side
+# argument gate (dump flag, no -f, no metacharacters) so agents skip the
+# describe+run round trip and cannot smuggle destructive flags. Buffer
+# clearing is opt-in via the explicit clear=true argument, which the CLI
+# executes as `logcat -c` followed by the `-v time` capture.
+_LOGCAT_FORBIDDEN_FLAGS = ("-f", "--file")
+_LOGCAT_CLEAR_FLAGS = ("-c", "--clear")
+_LOGCAT_FORBIDDEN_CHARS = frozenset(";|&><`(){}[]$\\'\"\n\r")
+_LOGCAT_MAX_ARGS = 16
+
+
+def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    import re
+
+    global _DEVICE_ID_PATTERN
+    device = str(arguments.get("device") or "").strip()
+    if not device:
+        return "Missing required argument: device", True
+    if _DEVICE_ID_PATTERN is None:
+        _DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+    if not _DEVICE_ID_PATTERN.match(device):
+        return "denied: device id must match [A-Za-z0-9._:-]{1,64}", True
+    args = arguments.get("args")
+    items: list[str] = []
+    if args is not None:
+        if isinstance(args, str):
+            items = args.split()
+        elif isinstance(args, list):
+            items = [str(item) for item in args if str(item).strip()]
+        else:
+            return "args must be a string or a list of logcat arguments", True
+    if len(items) > _LOGCAT_MAX_ARGS:
+        return f"too many logcat arguments (max {_LOGCAT_MAX_ARGS})", True
+    for item in items:
+        if any(ch in _LOGCAT_FORBIDDEN_CHARS for ch in item):
+            return (
+                "denied: logcat arguments must not contain shell "
+                "metacharacters or quotes",
+                True,
+            )
+        if item in _LOGCAT_CLEAR_FLAGS:
+            return (
+                "denied: clearing the logcat buffer needs the explicit "
+                "clear=true argument (runs logcat -c before the capture)",
+                True,
+            )
+        if item in _LOGCAT_FORBIDDEN_FLAGS:
+            return (
+                f"denied: {item} writes device files and is not allowed",
+                True,
+            )
+
+    # Native time-window support (2026-09-07): 'since' maps to logcat -t
+    # <time> (dump entries at/after the timestamp, device-side filtering);
+    # 'until' trims the captured output client-side. Validated against the
+    # logcat time format so the value is always a safe single argument.
+    since_value = arguments.get("since")
+    until_value = arguments.get("until")
+    timestamp_pattern = re.compile(r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,3})?$")
+    since_text: str | None = None
+    until_text: str | None = None
+    for label, raw in (("since", since_value), ("until", until_value)):
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        if not timestamp_pattern.match(text):
+            return (
+                f"denied: {label} must match 'MM-DD HH:MM:SS[.mmm]' "
+                "(logcat time format), got: " + text,
+                True,
+            )
+        if label == "since":
+            since_text = text
+        else:
+            until_text = text
+    if since_text is not None:
+        if "-t" in items or "-T" in items:
+            return (
+                "denied: -t/-T in args conflicts with the since parameter; "
+                "use only one of them",
+                True,
+            )
+        items.extend(["-t", since_text])
+        if len(items) > _LOGCAT_MAX_ARGS + 2:
+            return f"too many logcat arguments (max {_LOGCAT_MAX_ARGS})", True
+    if until_text is not None and since_text is None and not any(
+        flag in items for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")
+    ):
+        # -d is added below anyway; keep the check consistent with the
+        # existing dump-mode logic.
+        pass
+    # Dump mode keeps the call bounded for unattended agents; the CLI adds
+    # -d itself in --non-interactive mode when no dump flag is present.
+    if not any(
+        flag in items for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")
+    ):
+        items = ["-d", *items]
+    # clear=true -> CLI runs `logcat -c` first, then captures with -v time.
+    clear_value = arguments.get("clear")
+    if clear_value is True or (
+        isinstance(clear_value, str) and clear_value.strip().lower() == "true"
+    ):
+        items = ["-c", *items]
+    timeout = 180
+    if arguments.get("timeout") is not None:
+        try:
+            timeout = min(600, max(1, int(arguments["timeout"])))
+        except (TypeError, ValueError):
+            return "timeout must be an integer (seconds)", True
+    text, is_error = run_cli(
+        "gms-rt-devices-logcat", [device, *items], timeout=timeout
+    )
+    if is_error or until_text is None:
+        return text, is_error
+    # Client-side 'until' trim: logcat has no end-time flag in dump mode, so
+    # drop entries strictly after the given timestamp. Line timestamps sort
+    # lexicographically within the same year ("09-07 10:52:00.000"); header
+    # lines ("--------- ...") carry no timestamp and are kept verbatim.
+    kept: list[str] = []
+    dropped = 0
+    for line in text.splitlines():
+        stamp = line[0:18] if len(line) >= 18 else ""
+        if len(stamp) == 18 and stamp[2] == "-" and stamp[5] == " ":
+            if stamp >= until_text:
+                dropped += 1
+                continue
+        kept.append(line)
+    if dropped:
+        kept.append(f"...[until trim: dropped {dropped} entries after {until_text}]")
+    return "\n".join(kept), False
+
+
+# ---------------------------------------------------------------------------
+# Authorized one-shot device shell (typed tool, v0.8.0)
+# ---------------------------------------------------------------------------
+
+# The CLI catalog deliberately marks gms-rt-devices-shell manual: the bare
+# form opens an interactive shell and arbitrary commands are state-changing
+# by nature, so the generic runner (gms_rt_run) denies it outright. This
+# typed tool is the explicit-authorization escape hatch for one-shot
+# commands: the caller must pass authorized=true, which represents the
+# user's approval of this exact command. Read-only diagnosis should still
+# go through gms_rt_shell (allowlist, no authorization needed).
+_SHELL_EXEC_MAX_COMMAND_CHARS = 2000
+
+
+def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    import re
+
+    global _DEVICE_ID_PATTERN
+    device = str(arguments.get("device") or "").strip()
+    command = str(arguments.get("command") or "").strip()
+    if not device:
+        return "Missing required argument: device", True
+    if not command:
+        return (
+            "Missing required argument: command (one-shot only; the "
+            "interactive device shell is not available to agents)",
+            True,
+        )
+    if arguments.get("authorized") is not True:
+        return (
+            "denied: explicit authorization required. Ask the user to "
+            "approve this exact command, then call again with "
+            "authorized=true. For read-only diagnosis use gms_rt_shell "
+            "instead (no authorization needed).",
+            True,
+        )
+    if _DEVICE_ID_PATTERN is None:
+        _DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+    if not _DEVICE_ID_PATTERN.match(device):
+        return "denied: device id must match [A-Za-z0-9._:-]{1,64}", True
+    if len(command) > _SHELL_EXEC_MAX_COMMAND_CHARS:
+        return (
+            f"denied: command exceeds {_SHELL_EXEC_MAX_COMMAND_CHARS} "
+            "characters; split the work into smaller commands",
+            True,
+        )
     timeout = 120
     if arguments.get("timeout") is not None:
         try:
@@ -1223,6 +1460,110 @@ def tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "gms_rt_logcat",
+            "description": (
+                "Capture device logcat via `adb shell logcat -v time` "
+                "(gms-rt-devices-logcat). Runs in one-shot dump mode (-d) "
+                "for unattended agents; -f (write device files) and shell "
+                "metacharacters are denied. Pass clear=true to run "
+                "`logcat -c` first (clears the buffer, then captures only "
+                "fresh logs). Optional logcat args, e.g. '-b crash', "
+                "'-t 500', '-s ActivityManager'. Use for device log "
+                "diagnosis; other log management needs the human CLI."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "device": {
+                        "type": "string",
+                        "description": "Device serial, e.g. RK3562GMS7.",
+                    },
+                    "args": {
+                        "description": (
+                            "Optional logcat arguments as a list or one "
+                            "string, e.g. \"-b crash -t 500\"."
+                        ),
+                    },
+                    "since": {
+                        "type": "string",
+                        "description": (
+                            "Dump only entries at/after this time (device-"
+                            "side logcat -t filter). Format "
+                            "'MM-DD HH:MM:SS' or 'MM-DD HH:MM:SS.mmm', "
+                            "e.g. '09-07 10:52:00.000'. Conflicts with "
+                            "-t/-T in args."
+                        ),
+                    },
+                    "until": {
+                        "type": "string",
+                        "description": (
+                            "Drop captured entries after this time "
+                            "(client-side trim; logcat has no end-time "
+                            "flag). Same format as since. Combine with "
+                            "since for a bounded time window."
+                        ),
+                    },
+                    "clear": {
+                        "type": "boolean",
+                        "description": (
+                            "Run `logcat -c` before the capture: clears the "
+                            "device log buffer so only fresh logs are "
+                            "returned (destructive to existing buffer "
+                            "content)."
+                        ),
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Seconds (1-600, default 180).",
+                    },
+                },
+                "required": ["device"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_shell_exec",
+            "description": (
+                "Run a USER-AUTHORIZED one-shot shell command on a device "
+                "via gms-rt-devices-shell DEVICE COMMAND. Pass "
+                "authorized=true ONLY after the user approved this exact "
+                "command; without it the call is denied. Prefer "
+                "gms_rt_shell (read-only allowlist, no authorization) for "
+                "diagnosis, and this tool for approved state-changing "
+                "commands (am/pm/cmd/input/svc, settings put, rm, ...). "
+                "Never opens an interactive shell."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "device": {
+                        "type": "string",
+                        "description": "Device serial, e.g. RK3562GMS7.",
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": (
+                            "One-shot shell command, e.g. "
+                            "'am broadcast -a android.intent.action.BOOT_COMPLETED'."
+                        ),
+                    },
+                    "authorized": {
+                        "type": "boolean",
+                        "description": (
+                            "Must be true and reflect explicit user "
+                            "approval of this exact command."
+                        ),
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Seconds (1-600, default 120).",
+                    },
+                },
+                "required": ["device", "command", "authorized"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_reports_list",
             "description": (
                 "List finished test reports visible to the session (client, "
@@ -1263,6 +1604,8 @@ _TOOL_HANDLERS = {
     "gms_rt_jobs_events": jobs_events_tool,
     "gms_rt_reports_list": reports_tool,
     "gms_rt_shell": shell_tool,
+    "gms_rt_logcat": logcat_tool,
+    "gms_rt_shell_exec": shell_exec_tool,
 }
 
 

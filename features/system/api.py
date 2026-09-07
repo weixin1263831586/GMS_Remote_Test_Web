@@ -21,6 +21,7 @@ from fastapi.responses import (
 )
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
+from foundation.cluster_port import get_local_worker_id as _get_local_worker_id
 from features.system.api_docs_list import API_DOCS_LIST
 from features.system.skill_archive_signing import (
     sign_skill_archive,
@@ -139,10 +140,11 @@ async def root(request: Request):
     saved_page = request.cookies.get("gms_current_page") or "test"
     initial_title = SHELL_PAGE_TITLES.get(saved_page, SHELL_PAGE_TITLES["test"])
 
+    # local_worker_id: 单一真值, 随页面注入前端 (shell.html bootstrap)。
     response = _templates.TemplateResponse(
-        request=request,
-        name="shell.html",
-        context={"config": config, "initial_title": initial_title},
+        request=request, name="shell.html",
+        context={"config": config, "initial_title": initial_title,
+                 "local_worker_id": _get_local_worker_id()},
     )
     # 短暂复用导航外壳；must-revalidate 保证过期后确认新版本。
     response.headers["Cache-Control"] = "private, max-age=10, must-revalidate"

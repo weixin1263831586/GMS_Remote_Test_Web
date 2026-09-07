@@ -15,7 +15,12 @@
     let persistPromise = null;
     let persistQueued = false;
     let revision = 0;
-    let localWorkerId = 'ats-worker-controller';
+    // 单一真值：local worker ID 由 shell 模板启动注入（真实 cluster 配置），
+    // Cluster Status 仅作校验回填；DEFAULT 仅在无 bootstrap 的极端环境兜底。
+    let localWorkerId = String(
+        (window.__GMS_BOOTSTRAP__ && window.__GMS_BOOTSTRAP__.localWorkerId)
+        || 'ats-worker-controller'
+    );
     // 已知 Worker ID 集合（Cluster Status 加载后回填）：用于区分
     // "worker:serial" 前缀与本身就含 ":" 的 serial（ip:5555 等）。
     const knownWorkerIds = new Set();

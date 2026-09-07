@@ -288,12 +288,9 @@ def _prune_stale_unknown_usbip_assignments(
     return stale_keys
 
 def _local_worker_id() -> str:
-    try:
-        from foundation.cluster_port import get_cluster_service
+    from foundation.cluster_port import get_local_worker_id
 
-        return str(get_cluster_service().config.local_worker_id or "ats-worker-controller")
-    except Exception:
-        return "ats-worker-controller"
+    return get_local_worker_id()
 
 def _reconcile_usbip_assignment_serials(
     device_host: str,

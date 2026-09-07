@@ -17,6 +17,12 @@ ClusterServiceProvider = Callable[[], Any]
 LateBoundCallable = Callable[..., Any]
 WorkerTokens = Callable[[], dict[str, str]]
 
+# Single source of truth for the Controller host's Worker ID. The literal
+# must appear only here (the default), in fixtures/examples/tests/docs, and
+# as a last-resort fallback in client scripts — never in business logic
+# comparisons. ``features.cluster.config`` derives its default from it.
+DEFAULT_LOCAL_WORKER_ID = "ats-worker-controller"
+
 # Default for ``configure_cluster_access`` arguments: omitted means "keep the
 # current registration", while an explicit ``None`` clears it.
 _UNSET: Any = object()
@@ -70,6 +76,27 @@ def get_cluster_service() -> Any:
     if _cluster_service_provider is None:
         raise RuntimeError("cluster service is not configured")
     return _cluster_service_provider()
+
+
+def get_local_worker_id() -> str:
+    """Return the configured Worker ID of the Controller host.
+
+    Business logic that needs "is this the local/Controller worker?" must
+    compare against this accessor, never against a hardcoded ID: deployments
+    may set ``local_worker_id`` in the cluster config, and a hardcoded
+    comparison silently breaks ownership fallbacks for them. Falls back to
+    ``DEFAULT_LOCAL_WORKER_ID`` when the cluster service is not configured
+    (single-host mode) or the config carries an empty value.
+    """
+    try:
+        service = get_cluster_service()
+        worker_id = str(
+            getattr(getattr(service, "config", None), "local_worker_id", "")
+            or ""
+        ).strip()
+        return worker_id or DEFAULT_LOCAL_WORKER_ID
+    except Exception:
+        return DEFAULT_LOCAL_WORKER_ID
 
 
 def cancel_durable_job(*args: Any, **kwargs: Any) -> Any:

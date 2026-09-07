@@ -11,6 +11,12 @@ from typing import Any
 from foundation.networking import is_local_host
 
 from .adb_ops import fastboot_reboot_with_runner, reboot_with_runner, root_and_remount
+from .rockusb import (
+    ROCKUSB_SYSFS_PROBE_COMMAND,
+    rockusb_loader_serials,
+    rockusb_loader_vid_pids,
+)
+from .usbip import parse_adb_device_states
 from .utils import DeviceUtils
 
 
@@ -181,6 +187,82 @@ class DeviceManager:
             )
         except Exception as exc:
             logger.error("[Device] Error getting remote fastboot devices: %s", exc)
+            return []
+        finally:
+            if created_ssh and ssh:
+                self.ssh_manager.return_connection(ssh)
+
+    def get_rockusb_loader_devices(self, exclude_serials=None, ssh=None) -> list[str]:
+        """返回测试主机上处于 Loader/MaskROM 烧写模式的 Rockchip 设备序列号。
+
+        通过 sysfs 枚举 VID 2207 设备；PID 必须属于烧写模式 PID 集合
+        （平台配置 usbip_vid_pids 中 VID 2207 的条目），且任何出现在
+        adb 输出（含 unauthorized/offline 等任意状态）或调用方给定排除
+        集中的序列号都视为非烧写模式，避免把健康设备暴露成可烧写目标。
+        """
+        exclude = {
+            str(serial).strip()
+            for serial in (exclude_serials or ())
+            if str(serial).strip()
+        }
+        config = self.config_manager.load_config()
+        loader_pids = rockusb_loader_vid_pids(config)
+
+        if ssh is None and is_local_host(config.get("ubuntu_host", "")):
+            try:
+                if has_blocked_adb_process():
+                    logger.warning(
+                        "[Device] Local adb server is blocked in kernel state; "
+                        "skipping rockusb loader scan"
+                    )
+                    return []
+                adb_raw = subprocess.run(
+                    ["adb", "devices"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                probe = subprocess.run(
+                    ["bash", "-c", ROCKUSB_SYSFS_PROBE_COMMAND],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            except FileNotFoundError:
+                logger.warning("[Device] bash/adb unavailable for rockusb loader scan")
+                return []
+            except Exception as exc:
+                logger.error("[Device] Error scanning local rockusb loader devices: %s", exc)
+                return []
+            return rockusb_loader_serials(
+                probe.stdout,
+                exclude_serials=exclude | set(parse_adb_device_states(adb_raw.stdout or "")),
+                loader_pids=loader_pids,
+            )
+
+        if ssh is None:
+            ssh = self.ssh_manager.get_connection(config)
+            if not ssh:
+                logger.error("[Device] Failed to get SSH connection for rockusb loader scan")
+                return []
+            created_ssh = True
+        else:
+            created_ssh = False
+
+        try:
+            adb_raw = self.ssh_manager.execute_command(ssh, "adb devices", timeout=10)
+            probe = self.ssh_manager.execute_command(
+                ssh,
+                ROCKUSB_SYSFS_PROBE_COMMAND,
+                timeout=15,
+            )
+            return rockusb_loader_serials(
+                probe.stdout or "",
+                exclude_serials=exclude | set(parse_adb_device_states(adb_raw.stdout or "")),
+                loader_pids=loader_pids,
+            )
+        except Exception as exc:
+            logger.error("[Device] Error scanning remote rockusb loader devices: %s", exc)
             return []
         finally:
             if created_ssh and ssh:

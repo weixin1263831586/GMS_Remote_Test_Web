@@ -219,12 +219,9 @@ def _merge_device_protocols(
 
 def _local_adb_proxy_sources(device_ids: list[str]) -> dict[str, dict[str, str]]:
     """Resolve connected Controller imports from persisted ADB Proxy routes."""
-    try:
-        from foundation.cluster_port import get_cluster_service
+    from foundation.cluster_port import get_local_worker_id
 
-        local_worker_id = get_cluster_service().config.local_worker_id
-    except Exception:
-        local_worker_id = "ats-worker-controller"
+    local_worker_id = get_local_worker_id()
     try:
         from .adb_proxy_service import adb_proxy_service
 
@@ -355,6 +352,9 @@ def _build_devices_management_payload(
 
 
 def _cached_management_payload(client_id: str) -> dict[str, Any] | None:
+    from foundation.cluster_port import get_local_worker_id
+
+    local_worker_id = get_local_worker_id()
     with runtime.global_state.device_cache_lock:
         cached_devices = runtime.global_state.device_cache.get("devices") or []
     devices_info = []
@@ -384,7 +384,7 @@ def _cached_management_payload(client_id: str) -> dict[str, Any] | None:
                     else "local"
                 ),
                 "source_host": (
-                    f"{proxy_source_worker} → ats-worker-controller"
+                    f"{proxy_source_worker} → {local_worker_id}"
                     if is_adb_proxy and proxy_source_worker
                     else device.get("source")
                     or device.get("source_host")

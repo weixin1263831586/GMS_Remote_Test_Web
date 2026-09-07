@@ -77,9 +77,12 @@ def report_client_display_id(
     """Prefer the test execution host, then resolve the report owner."""
     worker_id = str(report.get("worker_id") or "").strip()
     if worker_id:
-        try:
-            from foundation.cluster_port import get_cluster_service
+        from foundation.cluster_port import (
+            get_cluster_service,
+            get_local_worker_id,
+        )
 
+        try:
             worker = get_cluster_service().repository.get_worker(worker_id) or {}
             capabilities = worker.get("capabilities") or {}
             ssh_user = str(capabilities.get("ssh_user") or "").strip()
@@ -90,7 +93,7 @@ def report_client_display_id(
                 return f"{ssh_user}@{address}"
         except Exception:
             pass
-        if worker_id == "ats-worker-controller":
+        if worker_id == get_local_worker_id():
             try:
                 from foundation.config import config_manager
 

@@ -9,10 +9,12 @@ import re
 import time
 
 from features.devices import (
+    ROCKUSB_SYSFS_PROBE_COMMAND,
     DeviceUtils,
     ensure_usbip_auto_bind_policies,
     parse_adb_device_states,
     resolve_usbip_flash_routes,
+    rockusb_loader_serials,
 )
 from features.devices import reconnect as usbip_reconnect
 
@@ -125,10 +127,25 @@ def device_flash_protocols(ssh, devices: list[str]) -> dict[str, str]:
             fastboot_result.stdout or fastboot_result.stderr
         )
     )
+    try:
+        loader_probe = runtime.ssh_manager.execute_command(
+            ssh, ROCKUSB_SYSFS_PROBE_COMMAND, timeout=15
+        )
+        loader_devices = set(
+            rockusb_loader_serials(
+                loader_probe.stdout or "",
+                exclude_serials=set(adb_states) | fastboot_devices,
+            )
+        )
+    except Exception:
+        logger.warning("rockusb loader probe failed", exc_info=True)
+        loader_devices = set()
     return {
         serial: (
             "adb" if adb_states.get(serial) == "device"
-            else "fastboot" if serial in fastboot_devices else ""
+            else "fastboot" if serial in fastboot_devices
+            else "rockusb-loader" if serial in loader_devices
+            else ""
         )
         for serial in devices
     }
@@ -138,8 +155,11 @@ def partition_devices_by_flash_state(
     ssh, devices: list[str],
 ) -> tuple[list[str], list[str]]:
     protocols = device_flash_protocols(ssh, devices)
-    ready = [serial for serial in devices if protocols.get(serial)]
-    return ready, [serial for serial in devices if not protocols.get(serial)]
+    # GSI 直刷只支持从 ADB/Fastboot 起步；rockusb-loader 仅属于
+    # update.img 固件烧写链路（firmware_api 直接探测 protocols）。
+    flash_ready = {"adb", "fastboot"}
+    ready = [serial for serial in devices if protocols.get(serial) in flash_ready]
+    return ready, [serial for serial in devices if protocols.get(serial) not in flash_ready]
 
 
 async def notify_skipped_devices(client_id: str, offline: list[str]) -> None:

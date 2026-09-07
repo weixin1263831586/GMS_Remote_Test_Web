@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from foundation.cluster_port import DEFAULT_LOCAL_WORKER_ID
 from foundation.config import settings
 from foundation.device_claims import DeviceClaimRegistry
 
@@ -46,14 +47,17 @@ class DeviceLockManager:
         self,
         db_path: str | Path | None = None,
         *,
-        local_worker_id: str = "ats-worker-controller",
+        local_worker_id: str = DEFAULT_LOCAL_WORKER_ID,
     ):
         self.db_path = Path(db_path) if db_path is not None else None
         self.local_worker_id = local_worker_id
         self.registry = DeviceClaimRegistry(self.db_path)
 
     def configure_local_worker(self, worker_id: str) -> None:
-        self.local_worker_id = str(worker_id or "ats-worker-controller").strip() or "ats-worker-controller"
+        self.local_worker_id = (
+            str(worker_id or DEFAULT_LOCAL_WORKER_ID).strip()
+            or DEFAULT_LOCAL_WORKER_ID
+        )
 
     def _device(self, serial: str) -> dict[str, str]:
         serial = str(serial or "").strip()

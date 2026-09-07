@@ -121,6 +121,57 @@ gms_rt_shell(device="RK3562GMS7", command="settings get secure user_setup_comple
 - Everything else (reboot, push, Wi-Fi, remount, log clear) still requires a
   human-run `gms-rt-devices-*` CLI command — do not attempt to bypass.
 
+### 5.3 Authorized one-shot shell (`gms_rt_shell_exec`, plugin >= 0.8.0)
+
+When a task genuinely needs a state-changing device command (`am`, `pm`,
+`cmd`, `input`, `settings put`, ...), `gms_rt_run` denies `gms-rt-devices-shell`
+forever (interactive/manual by catalog). The authorized path:
+
+1. Tell the user the exact command and device, and get their approval.
+2. Call `gms_rt_shell_exec` with `authorized=true` for that exact command:
+
+```
+gms_rt_shell_exec(device="RK3562GMS7",
+                  command="am broadcast -a android.intent.action.BOOT_COMPLETED",
+                  authorized=true)
+```
+
+- Every call requires `authorized=true` again; approval does not persist.
+- Without the flag the tool denies with guidance (exit via read-only
+  `gms_rt_shell` needs no authorization).
+- The interactive shell itself stays human-only; `gms_rt_shell_exec` is
+  strictly one-shot (`gms-rt-devices-shell DEVICE 'COMMAND'`).
+
+### 5.2 Device logcat capture (`gms_rt_logcat`, plugin >= 0.7.0)
+
+Typed wrapper over `gms-rt-devices-logcat`, which runs
+`adb shell logcat -v time` on the device (local adb on the test host, or SSH
+fallback to it):
+
+```
+gms_rt_logcat(device="RK3562GMS7")                        # full dump, -v time
+gms_rt_logcat(device="RK3562GMS7", args="-b crash")       # crash buffer dump
+gms_rt_logcat(device="RK3562GMS7", args=["-t", "500"])    # last 500 lines
+gms_rt_logcat(device="RK3562GMS7", args="-s ActivityManager")
+gms_rt_logcat(device="RK3562GMS7", clear=true)            # logcat -c, then fresh -v time dump
+```
+
+- Agents always get one-shot dump mode: the tool (and the CLI under
+  `--non-interactive`) appends `-d` when no dump flag (`-d/-t/-T/-g/-L/-p`)
+  is present, so the call terminates instead of streaming.
+- `-c`/`--clear` (CLI) or `clear=true` (tool) runs `logcat -c` first —
+  clears the device log buffer, then captures only fresh `-v time` logs.
+  Useful for "clear, reproduce, capture" triage; destructive to existing
+  buffer content, so the tool requires the explicit `clear` argument
+  (raw `-c` inside `args` is redirected to it).
+- Denied: `-f`/`--file` (write device files) and any argument containing
+  shell metacharacters; exit code 2 usage errors follow.
+- Human interactive use (`gms-rt-devices-logcat DEVICE` without flags)
+  streams live `logcat -v time` until Ctrl+C.
+- Prefer this over `gms_rt_shell(command="logcat ...")` when you want the
+  `-v time` timestamped format; `gms_rt_shell` remains the general
+  read-only allowlist (threadtime etc.).
+
 ## 6. Token-cheap discovery
 
 ```

@@ -30,7 +30,10 @@ let activeWorkflowPane = restoreAutomationViewValue(
 let toastTimer = null;
 let atsWorkspaceContext = {};
 let applyingWorkspaceContext = false;
-let atsLocalWorkerId = 'ats-worker-controller';
+let atsLocalWorkerId = String(
+    (window.__GMS_BOOTSTRAP__ && window.__GMS_BOOTSTRAP__.localWorkerId)
+    || 'ats-worker-controller'
+);
 let pendingBuildWorkspace = '';
 let pendingBuildLunchTarget = '';
 let workspaceDiscoveryRequest = 0;

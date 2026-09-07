@@ -2372,11 +2372,24 @@ function renderDevices() {
 
     debugLog('[renderDevices] Containers:', { leftContainer: !!leftContainer, rightContainer: !!rightContainer, deviceCanvas: !!deviceCanvas });
 
-    // Early return if containers not ready
     if (!leftContainer || !rightContainer || !deviceCanvas) {
         console.warn('[renderDevices] Early return: containers not ready');
         return;
     }
+
+    // 设备数据签名：数据未变化时跳过整表重建。手动刷新是双次渲染
+    // （缓存渲染 + worker refresh 回包渲染），叠加 devices_changed /
+    // catch-up 补刷并发触发，同数据重复 innerHTML 重建会造成闪屏。
+    const renderSignature = JSON.stringify([
+        state.devices, state.selectedDevices, state.deviceGroups,
+        state.followFilter, window.GmsWorkspace?.get?.().device_ids || []
+    ]);
+    if (renderSignature === leftContainer.dataset.renderSignature) {
+        debugLog('[renderDevices] Skip: device data unchanged');
+        syncLocalUsbActionButtons();
+        return;
+    }
+    leftContainer.dataset.renderSignature = renderSignature;
 
     if (state.devices.length === 0) {
         // 先加居中 class 再渲染消息，避免分两步布局导致空态提示先出现在
@@ -2390,7 +2403,6 @@ function renderDevices() {
 
     deviceCanvas.classList.remove('device-canvas-empty');
 
-    // 设备统一放入响应式网格，由可用宽度自动决定一至三列。
     // ADB 区按"关注"筛选：开启且有关注分组时，只显示属于任一关注分组的设备
     const followedIds = new Set(
         (state.deviceGroups || []).filter(g => g.followed).flatMap(g => g.device_ids || [])
@@ -2437,14 +2449,9 @@ function renderDevices() {
         });
     });
 
-    // 使用DocumentFragment优化DOM操作
-    // 容器统一使用事件委托。
-    const renderDeviceItem = (info) => buildDeviceItemEl(info);
-
-    // 旧的左右栏 ID 保持不变以兼容现有页面选择器；主栏承载响应式网格。
     const deviceFragment = document.createDocumentFragment();
     deviceInfos.forEach(deviceInfo => {
-        deviceFragment.appendChild(renderDeviceItem(deviceInfo));
+        deviceFragment.appendChild(buildDeviceItemEl(deviceInfo));
     });
     leftContainer.innerHTML = '';
     leftContainer.appendChild(deviceFragment);
@@ -2503,6 +2510,8 @@ function buildDeviceItemEl({
         ? `已被 ${lockedBy} 占用`
         : status === 'fastboot'
         ? 'Fastboot/Fastbootd 设备可用于 GSI 烧写和重启'
+        : status === 'loader'
+        ? 'Loader/MaskROM 烧写模式设备，可直接选中重新烧写固件'
         : selectable ? '点击选择设备' : `设备当前处于 ${status} 状态`;
 
     const checkbox = document.createElement('input');
@@ -2531,9 +2540,12 @@ function buildDeviceItemEl({
     }
     const statusEl = document.createElement('span');
     statusEl.className = 'device-status';
-    const displayStatus = String(status || '').toLowerCase() === 'fastboot'
+    const statusLower = String(status || '').toLowerCase();
+    const displayStatus = statusLower === 'fastboot'
         ? 'Fastboot'
-        : String(status || '').toLowerCase() === 'unauthorized'
+        : statusLower === 'loader'
+        ? 'Loader'
+        : statusLower === 'unauthorized'
         ? '未授权'
         : isLocked ? '已分配' : selectable ? '可用' : status;
     statusEl.textContent = isLocked && displayStatus !== '已分配'
@@ -2625,7 +2637,12 @@ async function refreshDevices() {
                 .then(response => {
                     if (workspaceWorkerId() !== refreshedWorker) return;
                     if (Array.isArray(response?.devices)) {
-                        state.devices = response.devices;
+                        // refresh 端点回写快照后 offline 设备保留在库里作历史；
+                        // 旧版 Controller 的响应未过滤，这里兜底剔除，
+                        // 避免手动刷新闪现一批不存在的历史设备。
+                        state.devices = response.devices.filter(device =>
+                            !['offline', 'unknown'].includes(String(device?.state || device?.status || ''))
+                        );
                         if (typeof renderDevices === 'function') {
                             renderDevices();
                         }

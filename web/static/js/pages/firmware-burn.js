@@ -1,6 +1,6 @@
 // ==================== VNC & Remote Control ====================
 async function burnFirmware() {
-    if (selectedTestDeviceIds().length === 0) {
+    if (selectedBurnableDeviceIds().length === 0) {
         showToast('请先选择要烧写固件的设备', 'warning');
         return;
     }
@@ -486,11 +486,10 @@ async function submitFirmwareBurn() {
         return;
     }
 
-    // 获取文件输入框
     const fileInput = document.getElementById('firmware-file-input');
     const selectedFirmwareFile = fileInput?.files?.[0] || null;
 
-    const devices = selectedTestDeviceIds();
+    const devices = selectedBurnableDeviceIds();
     if (!devices.length) {
         showToast('请重新选择要烧写的设备', 'warning');
         return;

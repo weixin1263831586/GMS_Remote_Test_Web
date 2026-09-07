@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from foundation.cluster_port import DEFAULT_LOCAL_WORKER_ID
+
 
 def configured_max_bytes(env_name: str, configured: int) -> int:
     """Resolve a positive capacity limit from product config, then env."""
@@ -17,7 +19,7 @@ class ClusterConfig:
     remote_dispatch_enabled: bool = False
     global_device_pool_enabled: bool = False
     lease_enforcement_enabled: bool = False
-    local_worker_id: str = "ats-worker-controller"
+    local_worker_id: str = DEFAULT_LOCAL_WORKER_ID
     worker_offline_seconds: int = 45
     worker_lost_fail_seconds: int = 3600
     lease_ttl_seconds: int = 90
@@ -43,7 +45,7 @@ class ClusterConfig:
             remote_dispatch_enabled=enabled and bool(raw.get("remote_dispatch_enabled", False)),
             global_device_pool_enabled=enabled and bool(raw.get("global_device_pool_enabled", False)),
             lease_enforcement_enabled=enabled and bool(raw.get("lease_enforcement_enabled", False)),
-            local_worker_id=str(raw.get("local_worker_id") or "ats-worker-controller"),
+            local_worker_id=str(raw.get("local_worker_id") or DEFAULT_LOCAL_WORKER_ID),
             worker_offline_seconds=max(15, int(raw.get("worker_offline_seconds", 45))),
             worker_lost_fail_seconds=max(
                 60, int(raw.get("worker_lost_fail_seconds", 3600))

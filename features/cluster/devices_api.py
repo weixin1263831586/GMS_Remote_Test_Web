@@ -194,5 +194,11 @@ async def refresh_worker_inventory(
             svc.repository.replace_worker_suites(worker_id, suites["suites"])
 
     devices_list = svc.repository.list_devices(worker_id)
+    # 数据库保留 offline 历史记录（供离线计数/回溯），但刷新响应面向
+    # "当前可用设备"：不过滤会让手动刷新闪现一批早已不存在的历史设备。
+    devices_list = [
+        device for device in devices_list
+        if str(device.get("state") or "") not in {"offline", "unknown"}
+    ]
     return {"success": True, "devices": devices_list,
             "refreshed": sorted(requested)}

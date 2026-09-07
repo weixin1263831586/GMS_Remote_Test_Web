@@ -99,6 +99,66 @@ class RefreshWorkerInventoryTests(unittest.TestCase):
             self.assertEqual(response.status_code, 404)
             self.assertEqual(response.json()["detail"], "worker not found")
 
+    def test_refresh_response_hides_offline_history_devices(self):
+        """刷新响应只含当前可用设备，不回显 offline 历史记录。
+
+        回归（2026-09-07）：refresh 端点把 Worker 快照回写数据库，消失的
+        本地 USB 设备被标记 offline 保留作历史；原实现原样返回
+        list_devices()，导致手动刷新闪现一批不存在的历史设备。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = ClusterRepository(Path(tmp) / "cluster.sqlite3")
+            app = FastAPI()
+            app.include_router(devices_api.router, prefix="/api/cluster")
+            repo.register_worker({
+                "worker_id": "local-A", "name": "local", "hostname": "h",
+                "address": "127.0.0.1", "agent_version": "1",
+                "capabilities": {},
+            })
+            # 模拟回写后的库状态：两台在线 + 一台 offline 历史设备。
+            repo.refresh_worker_devices("local-A", [
+                {"serial": "ONLINE-1", "transport": "local_usb", "state": "available"},
+                {"serial": "ONLINE-2", "transport": "local_usb", "state": "available"},
+                {"serial": "GHOST-1", "transport": "local_usb", "state": "offline"},
+                {"serial": "UNKNOWN-1", "transport": "local_usb", "state": "unknown"},
+            ])
+
+            class Svc:
+                config = type("Cfg", (), {"local_worker_id": "local-A"})()
+                repository = repo
+
+            patches = [
+                patch.object(devices_api, "service", lambda: Svc()),
+                patch.object(cluster_api_mod, "_require_cluster_enabled",
+                             return_value=None),
+                # Worker 报告的快照同样只有在线设备；offline 记录留在库里
+                # 是 _replace_devices 的设计（保留历史），不是 Worker 上报。
+                patch.object(
+                    cluster_api_mod, "_run_worker_command",
+                    new=AsyncOnce(return_value={"devices": [
+                        {"serial": "ONLINE-1", "transport": "local_usb",
+                         "state": "available"},
+                        {"serial": "ONLINE-2", "transport": "local_usb",
+                         "state": "available"},
+                    ]})),
+                patch.object(
+                    devices_api, "require_authenticated_user_when_auth_required",
+                    lambda request: CurrentUser(
+                        id="u", username="u", role="admin")),
+            ]
+            for item in patches:
+                item.start()
+            self.addCleanup(lambda: [item.stop() for item in patches])
+
+            client = TestClient(app)
+            response = client.post("/api/cluster/workers/local-A/refresh")
+            self.assertEqual(response.status_code, 200)
+            serials = {
+                device["serial"] for device in response.json()["devices"]
+            }
+            # 历史记录仍在库里（供回溯），但刷新响应不再回显。
+            self.assertEqual(serials, {"ONLINE-1", "ONLINE-2"})
+
 
 class AsyncOnce:
     """可 await 的一次性 mock（返回预定值）。"""

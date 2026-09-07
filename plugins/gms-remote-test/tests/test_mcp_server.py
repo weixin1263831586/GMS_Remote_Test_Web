@@ -286,6 +286,25 @@ class CatalogCacheTests(unittest.TestCase):
         self.assertIn("denied", text)
         self.assertIn("mutating", text)
 
+    def test_run_tool_denial_points_devices_shell_to_typed_tools(self):
+        # The generic runner must keep denying the raw command (interactive
+        # by catalog), but the message now routes agents to the two typed
+        # paths instead of a dead end.
+        catalog = {
+            "gms-rt-devices-shell": {
+                "name": "gms-rt-devices-shell",
+                "mode": "interactive",
+                "requires_explicit_authorization": True,
+                "agent_safe_unattended": False,
+            }
+        }
+        mcp_server._CATALOG_CACHE["commands"] = catalog
+        text, is_error = mcp_server.run_tool({"command": "gms-rt-devices-shell"})
+        self.assertTrue(is_error)
+        self.assertIn("not agent-safe", text)
+        self.assertIn("gms_rt_shell", text)
+        self.assertIn("gms_rt_shell_exec", text)
+
     def test_run_tool_allows_agent_safe_command(self):
         self._write_catalog_stub()
         mcp_server._load_catalog(force=True)
@@ -780,3 +799,207 @@ class ShellToolGateTests(unittest.TestCase):
         out, is_err = mcp_server.shell_tool({"device": "D1"})
         self.assertTrue(is_err)
         self.assertIn("command", out)
+
+
+class LogcatToolTests(unittest.TestCase):
+    """gms_rt_logcat typed tool (added v0.7.0)."""
+
+    def _capture_run(self):
+        captured = {}
+
+        def fake_run(command, args=None, stdin_text=None, timeout=None):
+            captured["command"] = command
+            captured["args"] = args
+            captured["stdin_text"] = stdin_text
+            captured["timeout"] = timeout
+            return '{"ok":true,"exit_code":0,"data":{}}', False
+
+        original = mcp_server.run_cli
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        return captured
+
+    def test_logcat_requires_device(self):
+        out, is_err = mcp_server.logcat_tool({})
+        self.assertTrue(is_err)
+        self.assertIn("device", out)
+
+    def test_logcat_rejects_bad_device_id(self):
+        out, is_err = mcp_server.logcat_tool({"device": "D1;reboot"})
+        self.assertTrue(is_err)
+        self.assertIn("denied", out)
+
+    def test_logcat_adds_dump_flag_by_default(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.logcat_tool({"device": "RK3562GMS7"})
+        self.assertFalse(is_err)
+        self.assertEqual(captured["command"], "gms-rt-devices-logcat")
+        self.assertEqual(captured["args"], ["RK3562GMS7", "-d"])
+        self.assertEqual(captured["timeout"], 180)
+
+    def test_logcat_keeps_existing_dump_flag(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.logcat_tool(
+            {"device": "D1", "args": ["-t", "500"]}
+        )
+        self.assertFalse(is_err)
+        self.assertEqual(captured["args"], ["D1", "-t", "500"])
+
+    def test_logcat_accepts_string_args(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.logcat_tool(
+            {"device": "D1", "args": "-b crash -s ActivityManager"}
+        )
+        self.assertFalse(is_err)
+        self.assertEqual(
+            captured["args"],
+            ["D1", "-d", "-b", "crash", "-s", "ActivityManager"],
+        )
+
+    def test_logcat_denies_file_flag(self):
+        for bad in ("-f", "--file=x"):
+            out, is_err = mcp_server.logcat_tool({"device": "D1", "args": [bad]})
+            self.assertTrue(is_err, bad)
+            self.assertIn("denied", out)
+
+    def test_logcat_clear_true_prepends_clear_flag(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.logcat_tool(
+            {"device": "D1", "args": ["-b", "crash"], "clear": True}
+        )
+        self.assertFalse(is_err)
+        self.assertEqual(captured["args"], ["D1", "-c", "-d", "-b", "crash"])
+
+    def test_logcat_clear_accepts_string_true(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.logcat_tool({"device": "D1", "clear": "true"})
+        self.assertFalse(is_err)
+        self.assertEqual(captured["args"], ["D1", "-c", "-d"])
+
+    def test_logcat_clear_false_by_default(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.logcat_tool({"device": "D1"})
+        self.assertFalse(is_err)
+        self.assertEqual(captured["args"], ["D1", "-d"])
+
+    def test_logcat_raw_clear_flag_is_redirected(self):
+        # Raw -c in args is denied with a pointer to the explicit
+        # clear=true argument.
+        for bad in ("-c", "--clear"):
+            out, is_err = mcp_server.logcat_tool({"device": "D1", "args": [bad]})
+            self.assertTrue(is_err, bad)
+            self.assertIn("denied", out)
+            self.assertIn("clear=true", out)
+
+    def test_logcat_denies_metacharacters(self):
+        for bad in ("a;b", "x|y", "$(id)", "`id`", "p'q", 'p"q'):
+            out, is_err = mcp_server.logcat_tool(
+                {"device": "D1", "args": [bad]}
+            )
+            self.assertTrue(is_err, bad)
+            self.assertIn("denied", out)
+
+    def test_logcat_rejects_wrong_args_type_and_too_many(self):
+        out, is_err = mcp_server.logcat_tool({"device": "D1", "args": {"x": 1}})
+        self.assertTrue(is_err)
+        out, is_err = mcp_server.logcat_tool(
+            {"device": "D1", "args": [f"a{i}" for i in range(20)]}
+        )
+        self.assertTrue(is_err)
+        self.assertIn("too many", out)
+
+    def test_logcat_timeout_is_clamped_and_validated(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.logcat_tool(
+            {"device": "D1", "timeout": 9999}
+        )
+        self.assertFalse(is_err)
+        self.assertEqual(captured["timeout"], 600)
+        out, is_err = mcp_server.logcat_tool({"device": "D1", "timeout": "x"})
+        self.assertTrue(is_err)
+        self.assertIn("timeout", out)
+
+    def test_logcat_registered_in_tools_and_handlers(self):
+        names = {tool["name"] for tool in mcp_server.tools()}
+        self.assertIn("gms_rt_logcat", names)
+        self.assertIn("gms_rt_logcat", mcp_server._TOOL_HANDLERS)
+
+
+class ShellExecToolTests(unittest.TestCase):
+    """gms_rt_shell_exec authorized one-shot gate (added v0.8.0)."""
+
+    def _capture_run(self):
+        captured = {}
+
+        def fake_run(command, args=None, stdin_text=None, timeout=None):
+            captured["command"] = command
+            captured["args"] = args
+            captured["timeout"] = timeout
+            return '{"ok":true,"exit_code":0,"data":{}}', False
+
+        original = mcp_server.run_cli
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        return captured
+
+    def test_requires_device_and_command(self):
+        out, is_err = mcp_server.shell_exec_tool({})
+        self.assertTrue(is_err)
+        self.assertIn("device", out)
+        out, is_err = mcp_server.shell_exec_tool({"device": "D1"})
+        self.assertTrue(is_err)
+        self.assertIn("command", out)
+
+    def test_denies_without_explicit_authorization(self):
+        for bad in (None, False, "true", 1):
+            out, is_err = mcp_server.shell_exec_tool({
+                "device": "D1", "command": "am broadcast -a X", "authorized": bad,
+            })
+            self.assertTrue(is_err, repr(bad))
+            self.assertIn("denied", out)
+            self.assertIn("authorized=true", out)
+
+    def test_authorized_true_forwards_to_devices_shell(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.shell_exec_tool({
+            "device": "RK3562GMS7",
+            "command": "settings put global wifi_on 1",
+            "authorized": True,
+        })
+        self.assertFalse(is_err)
+        self.assertEqual(captured["command"], "gms-rt-devices-shell")
+        self.assertEqual(
+            captured["args"],
+            ["RK3562GMS7", "settings put global wifi_on 1"],
+        )
+        self.assertEqual(captured["timeout"], 120)
+
+    def test_rejects_bad_device_id_and_oversized_command(self):
+        out, is_err = mcp_server.shell_exec_tool({
+            "device": "D1;reboot", "command": "ls", "authorized": True,
+        })
+        self.assertTrue(is_err)
+        self.assertIn("denied", out)
+        out, is_err = mcp_server.shell_exec_tool({
+            "device": "D1", "command": "x" * 2001, "authorized": True,
+        })
+        self.assertTrue(is_err)
+        self.assertIn("exceeds", out)
+
+    def test_timeout_clamped_and_validated(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.shell_exec_tool({
+            "device": "D1", "command": "ls", "authorized": True, "timeout": 9999,
+        })
+        self.assertFalse(is_err)
+        self.assertEqual(captured["timeout"], 600)
+        out, is_err = mcp_server.shell_exec_tool({
+            "device": "D1", "command": "ls", "authorized": True, "timeout": "x",
+        })
+        self.assertTrue(is_err)
+        self.assertIn("timeout", out)
+
+    def test_registered_in_tools_and_handlers(self):
+        names = {tool["name"] for tool in mcp_server.tools()}
+        self.assertIn("gms_rt_shell_exec", names)
+        self.assertIn("gms_rt_shell_exec", mcp_server._TOOL_HANDLERS)
