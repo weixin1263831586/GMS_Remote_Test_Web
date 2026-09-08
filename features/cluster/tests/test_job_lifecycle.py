@@ -288,7 +288,10 @@ class PhysicalDeviceAliasLeaseTests(unittest.TestCase):
             "devices": ["source:SERIAL"], "suite_key": "CTS:17_r1",
         })
         self.assertEqual(job["status"], "assigned")
-        with self.assertRaisesRegex(ValueError, "another transport alias"):
+        # R01: the claim layer now acquires the alias AND its source key in
+        # one atomic acquire, so the conflict surfaces as "already claimed
+        # by <owner>" before the lease metadata guard runs.
+        with self.assertRaisesRegex(ValueError, "already claimed"):
             self.repo.create_job_with_leases({
                 "worker_id": "target", "owner_id": "bob",
                 "devices": ["target:localhost:5038"], "suite_key": "CTS:17_r1",
@@ -300,7 +303,10 @@ class PhysicalDeviceAliasLeaseTests(unittest.TestCase):
             "devices": ["target:localhost:5038"], "suite_key": "CTS:17_r1",
         })
         self.assertEqual(job["status"], "assigned")
-        with self.assertRaisesRegex(ValueError, "another transport alias"):
+        # R01: the claim layer now acquires the alias AND its source key in
+        # one atomic acquire, so the conflict surfaces as "already claimed
+        # by <owner>" before the lease metadata guard runs.
+        with self.assertRaisesRegex(ValueError, "already claimed"):
             self.repo.create_job_with_leases({
                 "worker_id": "source", "owner_id": "alice",
                 "devices": ["source:SERIAL"], "suite_key": "CTS:17_r1",

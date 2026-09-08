@@ -29,6 +29,12 @@ MIGRATION_ALLOWLIST = {
     ("features/auth/api.py", "/login"),
     ("features/auth/api.py", "/logout"),
     ("features/auth/api.py", "/setup"),
+    # /agent-enroll is the pairing-code redemption boundary: it accepts a
+    # one-shot enrollment code INSTEAD of a session by design (the build
+    # server has no session yet). Scopes/ACLs/expiry come from the server-side
+    # enrollment record, so a leaked code grants nothing beyond what the
+    # admin approved. Fail-closed: unknown/used/expired code → 403.
+    ("features/auth/agent_api.py", "/agent-enroll"),
     ("features/automation/api.py", "/gerrit/webhook"),
     ("features/cluster/transfer_ingest_api.py", "/transfers/{transfer_id}/report-analysis"),
     ("features/devices/api.py", "/api/device-groups/auto"),
@@ -388,9 +394,12 @@ class SensitiveRouteAuthorizationTests(unittest.TestCase):
 
     def test_migration_allowlist_only_shrinks(self):
         """Encode the ratchet: bound to the entries listed above at review time."""
+        # 2026-09-08: +1 for /agent-enroll (pairing-code redemption boundary —
+        # the build server has no session yet; the one-shot code IS the
+        # credential, scopes/ACLs/expiry come from the server-side record).
         self.assertLessEqual(
             len(MIGRATION_ALLOWLIST),
-            6,
+            7,
             "the authorization migration allowlist must not grow",
         )
 

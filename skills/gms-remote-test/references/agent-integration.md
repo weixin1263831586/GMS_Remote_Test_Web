@@ -79,14 +79,25 @@ Never put passwords directly in prompts or command arguments.
 
 ## Build server workflow
 
-Install from the Controller while logged in to the build server:
+Install from the Controller while logged in to the build server. Do NOT use
+`curl -k` — it defeats the entire bootstrap trust chain (an attacker able to
+MITM install.sh could also swap the embedded Ed25519 public key). Install a
+trusted CA first, or use the pinned key flow:
 
 ```bash
-curl -kfsSL "https://CONTROLLER:5001/api/system/skills/install.sh" | bash
+curl --cacert /etc/gms/controller-ca.pem -fsSL \
+  "https://CONTROLLER:5001/api/system/skills/install.sh" -o /tmp/gms-agent-install.sh
+bash /tmp/gms-agent-install.sh --client auto
 export PATH="$HOME/.local/bin:$PATH"
 gms-rt-system-health --json --non-interactive
 gms-rt-auth-status --json --non-interactive
 ```
+
+`--client auto` additionally registers the MCP server with Codex/Kimi and
+writes per-agent env profiles. Agents authenticate with an Agent Service
+Token instead of a password: mint a one-shot enrollment code in the web UI
+and run `gms-rt-agent-enroll CODE` once; the token file (0600) is referenced
+by `GMS_AUTH_TOKEN_FILE` and no platform password ever reaches the agent.
 
 The installer binds the standalone commands to that Controller. Use
 `--server https://OTHER-CONTROLLER:5001` for a one-off override. A local

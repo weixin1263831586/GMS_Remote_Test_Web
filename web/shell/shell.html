@@ -335,6 +335,10 @@
         body.workspace-scope-cluster #page-terminal .host-workspace-pane-header .btn-xs {
             height: 24px;
             min-height: 24px;
+            /* R24: single-glyph buttons (⛶ ▦ ×) measured 19.8–21.5px wide
+               with the old 1px 6px padding; enforce the 24×24 pointer-target
+               minimum the geometry tests require. */
+            min-width: 24px;
             padding: 1px 6px;
             border-radius: 3px;
             font-size: 10px;

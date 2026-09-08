@@ -64,6 +64,15 @@ jobs:
       - name: Frontend integrity
         run: pytest tests/test_frontend_integrity.py -q
 
+      - name: Agent plugin gate (2026-09-08 audit §一)
+        # plugins/gms-remote-test ships its own regression tests and a
+        # three-way version contract (kk.plugin.json / mcp_server.py / CLI);
+        # both must gate main, otherwise manifest/CLI drift ships silently.
+        run: |
+          bash plugins/gms-remote-test/scripts/sync_cli.sh .
+          git diff --exit-code -- plugins/gms-remote-test/scripts/gms-remote-test.sh
+          python -m pytest plugins/gms-remote-test/tests -q
+
       - name: Release tree validation
         run: pytest tests/test_release_packaging.py -q
 

@@ -653,8 +653,10 @@ class ADBProxyService:
         self._require_proxy_devices_not_claimed(target_worker_id, proxy_devices)
         # R02: the Worker's target_disconnect restarts the whole Hub whenever
         # OTHER imports remain, and stops the side ADB on the last disconnect.
-        # Both affect every proxied route on this target, so all devices of
-        # the *other* assignments must also be claim-free before proceeding.
+        # The final stop also tears down the local ADB used by the target's
+        # LOCAL-USB devices, so those must be claim-free too — not just the
+        # proxied ones (the previous gap let a disconnect disrupt another
+        # user's local device session).
         other_proxy_devices: set[str] = set()
         for other_key, other in self.assignments().items():
             if other_key == key:
@@ -670,6 +672,11 @@ class ADBProxyService:
             self._require_proxy_devices_not_claimed(
                 target_worker_id, other_proxy_devices
             )
+        self._require_local_devices_not_claimed(target_worker_id)
+        # R03: source_stop tears down the source worker's proxy exporter and
+        # touches its device inventory; the source's OWN devices must also be
+        # free of claims, mirroring the target-side host-level guard.
+        self._require_local_devices_not_claimed(source_worker_id)
         target_error = None
         disconnect_generation = max(
             int(time.time() * 1000),
@@ -829,6 +836,37 @@ class ADBProxyService:
             raise HTTPException(
                 409,
                 f"{worker_id} 存在被占用的代理设备，不能断开ADB接入: "
+                + ", ".join(claimed),
+            )
+
+    @staticmethod
+    def _require_local_devices_not_claimed(worker_id: str) -> None:
+        """R02/R03: block host-level ADB teardown on any claimed local device.
+
+        The last proxy disconnect stops the worker's side ADB (5039) and the
+        Hub restart clears 5037 — both are the same ADB instance the
+        worker's LOCAL-USB and USB/IP devices use. A disconnect that leaves
+        another user's local-device claim running would disrupt their
+        session, so ANY actively claimed device on the host (not only the
+        proxied serials) must block the operation.
+        """
+        from foundation.cluster_port import get_cluster_service
+
+        try:
+            claimed = [
+                str(item.get("serial") or "")
+                for item in get_cluster_service().repository.list_devices(worker_id)
+                if (
+                    item.get("state") in {"allocated", "reserved", "external_busy"}
+                    or item.get("claimed")  # operation claim with state='available' (R03)
+                )
+            ]
+        except (AttributeError, RuntimeError, TypeError) as exc:
+            raise HTTPException(503, f"无法核对 {worker_id} 的设备占用状态，已拒绝断开ADB接入") from exc
+        if claimed:
+            raise HTTPException(
+                409,
+                f"{worker_id} 存在占用中的设备（含本机USB设备），不能断开ADB接入: "
                 + ", ".join(claimed),
             )
 

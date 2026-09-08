@@ -145,6 +145,54 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/agent-enroll"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/agent-enrollment-codes"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/auth/agent-scopes"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/auth/agent-tokens"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/agent-tokens"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/auth/agent-tokens/{token_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/approval-tokens"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/auth/approval-tokens/consume"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/auth/client-ssh-status"

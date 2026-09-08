@@ -30,7 +30,7 @@ from .manager import device_manager
 from .models import DeviceActionRequest, DeviceLockRequest, DeviceShellRequest, WifiConnectRequest
 from .screens_api import router as screens_router
 from .support import (
-    SSHConnection,
+    AsyncSSHConnection,
     broadcast_device_lock_update,
     device_claim_conflict_response,
     device_mutation_guard,
@@ -197,7 +197,10 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
     if conflict:
         return conflict
 
-    with SSHConnection() as ssh:
+    # R28: AsyncSSHConnection keeps the pool acquire/release (SSH health
+    # probes and cold connect) off the event loop; a stalled host used to
+    # freeze every concurrent request during `with SSHConnection()`.
+    async with AsyncSSHConnection() as ssh:
         async def remount_single_device(device_id: str) -> dict:
             await runtime.safe_websocket_send(
                 client_id,

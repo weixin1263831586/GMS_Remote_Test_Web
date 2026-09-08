@@ -196,6 +196,22 @@ async def burn_firmware(
     if resp:
         return resp
 
+    # Approval Token enforcement (2026-09-08 audit §五): agent principals
+    # (Bearer token, role=agent_service) may only burn with a valid one-shot
+    # approval bound to this tool + every target device + the burn command.
+    # Human admin sessions are unaffected.
+    from features.auth import get_authenticated_user
+
+    caller = get_authenticated_user(request)
+    if caller is not None and caller.role == "agent_service":
+        approval_token = str(request.query_params.get("approval_token") or "").strip()
+        if not approval_token:
+            return error_response(
+                "Agent 烧录需要一次性审批令牌：请让用户运行 "
+                "gms-rt-approval-create --tool gms_rt_burn_firmware ... 并携带 approval_token 重试",
+                status_code=403,
+            )
+
     client_id = ""
     merged_firmware = None
     burn_lock_path = None
@@ -240,6 +256,21 @@ async def burn_firmware(
 
         if not devices:
             return error_response("No devices selected")
+        # Consume the agent's one-shot approval now that target devices are
+        # known: the approval must cover every device in this burn command.
+        if caller is not None and caller.role == "agent_service":
+            from features.auth import auth_service as _auth
+
+            for _device in devices:
+                if not _auth.consume_approval_token(
+                    approval_token,
+                    tool="gms_rt_burn_firmware",
+                    device=_device,
+                    command=f"burn_firmware:{','.join(devices)}",
+                ):
+                    return error_response(
+                        "审批令牌无效、已使用或与本次烧录设备不匹配", status_code=403
+                    )
         proxy_devices = _adb_proxy_devices(devices)
         if proxy_devices:
             return error_response(

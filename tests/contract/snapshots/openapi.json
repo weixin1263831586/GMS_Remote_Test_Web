@@ -3683,6 +3683,260 @@
         "summary": "Upload Apk"
       }
     },
+    "/api/auth/agent-enroll": {
+      "post": {
+        "description": "Exchange an enrollment code for an Agent Service Token.\n\nIntentionally does not require a session: the build server only holds the\none-shot code. Scopes/ACLs/expiry come from the enrollment record.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Agent Enroll"
+      }
+    },
+    "/api/auth/agent-enrollment-codes": {
+      "post": {
+        "description": "Mint a one-shot enrollment code (5-minute TTL).\n\nThe build server runs `gms-rt-agent-enroll <code>` once; the code is\ndeleted on use and the returned Service Token is stored 0600 client-side.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Create Agent Enrollment"
+      }
+    },
+    "/api/auth/agent-scopes": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Agent Scopes"
+      }
+    },
+    "/api/auth/agent-tokens": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Agent Tokens"
+      },
+      "post": {
+        "description": "Create one agent service token.\n\nThe raw token is returned exactly once; the database keeps only its\nSHA-256 hash. Deploy it to the build server as a 0600 file and point\nGMS_AUTH_TOKEN_FILE at it.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Create Agent Token"
+      }
+    },
+    "/api/auth/agent-tokens/{token_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Revoke Agent Token"
+      }
+    },
+    "/api/auth/approval-tokens": {
+      "post": {
+        "description": "Issue a one-shot approval token for a destructive agent action.\n\nMust be called by a human session (cookie) — an Agent Service Token can\nnever mint approvals for itself. Firmware burn additionally requires a\nlive admin elevation on the approving session.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Create Approval Token"
+      }
+    },
+    "/api/auth/approval-tokens/consume": {
+      "post": {
+        "description": "Validate-and-consume one approval token before a destructive action.\n\nCalled by the gms-rt CLI right before executing the approved command.\nThe approval token itself is the proof of human approval; the caller may\nhold a human session or an agent service token. Enforces the exact\ntool + device + SHA256(command) binding, single use, and TTL, plus the\nagent token's allowed_devices ACL.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Consume Approval Token"
+      }
+    },
     "/api/auth/client-ssh-status": {
       "get": {
         "description": "登录层主动探测客户端 SSH 端口。\n\n客户端账号登录依赖回连本机的 SSH 服务验证身份；端口不通时提前提示\n安装 SSHD，而不是等用户输入账号密码后才在失败信息里得知。\n仅探测请求来源 IP 自身（端口 22），不提供任意主机探测能力。",

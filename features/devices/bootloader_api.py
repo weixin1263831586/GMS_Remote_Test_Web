@@ -22,7 +22,7 @@ from . import runtime
 from .manager import device_manager
 from .models import DeviceActionRequest, DeviceLockRequest, VerifiedBootState
 from .support import (
-    SSHConnection,
+    AsyncSSHConnection,
     device_claim_conflict_response,
     device_mutation_guard,
     get_device_properties_optimized,
@@ -277,7 +277,7 @@ async def check_bootloader_status(
         if conflict:
             return conflict
 
-        with SSHConnection() as ssh:
+        async with AsyncSSHConnection() as ssh:
             def check_single_device(device_id: str) -> dict:
                 result = runtime.ssh_manager.execute_command(
                     ssh,
@@ -323,7 +323,7 @@ async def get_device_info(req: DeviceActionRequest, request: Request):
         if conflict:
             return conflict
 
-        with SSHConnection() as ssh:
+        async with AsyncSSHConnection() as ssh:
             def get_single_device_info(device_id: str) -> dict:
                 device_info = {"device": device_id, "properties": {}}
                 base_info = device_manager.get_device_info(device_id, ssh)

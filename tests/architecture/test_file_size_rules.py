@@ -17,7 +17,9 @@ MIGRATION_LINE_LIMITS = {
     'features/cluster/api.py': 723,
     'features/cluster/tests/test_api_hardening.py': 744,
     'features/cluster/tests/test_cluster.py': 667,
-    'features/auth/service.py': 631,
+    'features/auth/service.py': 637,
+    'features/auth/agent_tokens.py': 456,
+    'features/auth/constants.py': 87,
     'features/auth/tests/test_auth_api.py': 610,
     'features/auth/tests/test_security_boundary.py': 615,
     'features/devices/config_override.py': 740,
@@ -39,17 +41,17 @@ MIGRATION_LINE_LIMITS = {
     'features/system/assets.py': 604,  # +10: auth deps on opengrok/favicon
     'features/system/icon_fetcher.py': 870,
     'features/users/config_api.py': 617,
-    'features/devices/adb_proxy_service.py': 836,  # R02/R03/R18 guard hardening
+    'features/devices/adb_proxy_service.py': 874,  # R02/R03/R18 + R02/R03 host-level disconnect guards
     'features/devices/config_explorer.py': 625,
     'features/devices/integrations_api.py': 2552,
     'features/devices/reconnect.py': 942,
-    'features/devices/tests/test_adb_proxy_service.py': 908,  # R01-R05/R18 regression tests
+    'features/devices/tests/test_adb_proxy_service.py': 911,  # R01-R05/R18 + R02/R03 guard regression stubs
     'features/devices/tests/test_usbip_flash_modes.py': 808,
     'features/devices/tests/test_usbip_linux_source.py': 990,
     'features/devices/tests/test_usbip_reconnect.py': 3121,
     'features/devices/usbip_linux_source.py': 818,
     'features/devices/usbip.py': 1631,
-    'features/firmware/firmware_api.py': 1023,
+    'features/firmware/firmware_api.py': 1054,
     'features/system/vnc.py': 613,
 }
 

@@ -95,4 +95,67 @@ def initialize_auth_schema(db_path: Path) -> None:
             conn.execute("ALTER TABLE platform_sessions ADD COLUMN elevated_until TEXT")
         if "elevated_by_user_id" not in existing_cols:
             conn.execute("ALTER TABLE platform_sessions ADD COLUMN elevated_by_user_id TEXT")
+        # Agent Service Token (2026-09-08 audit §二/§四): long-lived credentials
+        # for build-server agents. Only SHA256(token) is stored; the raw token
+        # is returned once at creation and kept in a 0600 file client-side.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS platform_agent_tokens (
+                id TEXT PRIMARY KEY,
+                token_hash TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                owner_user_id TEXT NOT NULL,
+                scopes TEXT NOT NULL DEFAULT '',
+                allowed_workers TEXT NOT NULL DEFAULT '*',
+                allowed_devices TEXT NOT NULL DEFAULT '*',
+                created_at TEXT NOT NULL,
+                expires_at TEXT,
+                revoked_at TEXT,
+                last_used_at TEXT,
+                FOREIGN KEY(owner_user_id) REFERENCES platform_users(id)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_platform_agent_tokens_owner "
+            "ON platform_agent_tokens(owner_user_id)"
+        )
+        # One-shot Approval Token (2026-09-08 audit §五): server-side proof of
+        # a human approval bound to one tool + device + command hash with a
+        # short TTL. Replaces the client-declared authorized=true boolean.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS platform_approval_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                device TEXT NOT NULL,
+                command_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES platform_users(id)
+            )
+            """
+        )
+        # One-shot Enrollment Codes (2026-09-08 audit §三): an admin mints a
+        # short-lived pairing code; the build server exchanges it once for a
+        # real Agent Service Token via gms-rt-agent-enroll.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS platform_agent_enrollments (
+                code_hash TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                scopes TEXT NOT NULL DEFAULT '',
+                allowed_workers TEXT NOT NULL DEFAULT '*',
+                allowed_devices TEXT NOT NULL DEFAULT '*',
+                expires_days INTEGER NOT NULL DEFAULT 90,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                FOREIGN KEY(created_by) REFERENCES platform_users(id)
+            )
+            """
+        )
         conn.commit()

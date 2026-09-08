@@ -208,8 +208,13 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             trace_id = request_id
         request.state.request_id = request_id
         request.state.trace_id = trace_id
-        token = request.cookies.get(AUTH_COOKIE_NAME)
-        current_user = auth_service.get_user_for_token(token)
+        # 2026-09-08 audit §二: resolve through the Bearer-aware helper so an
+        # Agent Service Token in the Authorization header wins over any
+        # cookie, and an invalid Bearer token does NOT silently fall back to
+        # cookie or anonymous identity (fail closed).
+        from features.auth.access import get_authenticated_user
+
+        current_user = get_authenticated_user(request)
         if current_user:
             request.state.current_user = current_user
 
@@ -239,7 +244,17 @@ def create_app(services: AppServices | None = None) -> FastAPI:
                 not _is_public_path(path, request.method)
                 and not _is_service_authenticated_path(path, request.method)
             )
-            if auth_required and session_required and not current_user:
+            # 2026-09-08 audit §二: an Authorization header with an invalid
+            # Bearer token must fail closed even when auth is not globally
+            # enforced (dev mode) — rejected credentials never downgrade to
+            # anonymous access.
+            credentials_rejected = bool(
+                getattr(request.state, 'credentials_rejected', False)
+            )
+            if (
+                (auth_required and session_required and not current_user)
+                or (credentials_rejected and session_required)
+            ):
                 response = JSONResponse(
                     content={
                         'success': False,

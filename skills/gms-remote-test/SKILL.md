@@ -9,12 +9,21 @@ Use the implementation in the current checkout as the source of truth. Do not re
 
 ## Operate the platform
 
-On another Linux host, install or update the Skill and CLI from the Controller:
+On another Linux host, install or update the Skill and CLI from the Controller.
+Never pipe the install script through `curl -k`: `-k` breaks the bootstrap
+trust chain (an attacker who can MITM install.sh can also replace the embedded
+signing key). Use a trusted CA bundle instead:
 
 ```bash
-curl -kfsSL "https://CONTROLLER:5001/api/system/skills/install.sh" | bash
+curl --cacert /etc/gms/controller-ca.pem -fsSL \
+  "https://CONTROLLER:5001/api/system/skills/install.sh" -o /tmp/gms-agent-install.sh
+bash /tmp/gms-agent-install.sh --client auto   # auto-detects codex / kimi / kkagent
 gms-rt-system-health --json --non-interactive
 ```
+
+`--client` registers the MCP server for the detected agent and writes a
+per-agent env profile (`GMS_RT_PROFILE`, `GMS_AUTH_TOKEN_FILE` reference) under
+`~/.local/share/gms-remote-test/mcp/`.
 
 Before calling protected APIs, inspect and establish the CLI session:
 
@@ -22,6 +31,10 @@ Before calling protected APIs, inspect and establish the CLI session:
 gms-rt-system-capabilities --json
 gms-rt-system-commands --json
 gms-rt-auth-status --json
+# Agents (preferred): enroll once with a one-shot code from the web UI, then
+# every CLI/MCP call authenticates via the 0600 token file — no password:
+#   GMS_RT_PROFILE=codex-build01 gms-rt-agent-enroll 7K3M-FG9A-WX21
+# Humans (interactive):
 printf '%s\n' "$PASSWORD" | gms-rt-auth-login USERNAME --password-stdin --non-interactive --json
 gms-rt-system-doctor test --json --non-interactive
 gms-rt-devices-list --json
@@ -80,11 +93,20 @@ section 5.2.
 
 For a state-changing device command (`am`, `pm`, `cmd`, `input`,
 `settings put`, ...), use the typed `gms_rt_shell_exec` tool
-(plugin >= 0.8.0): it forwards one-shot `gms-rt-devices-shell DEVICE
-'COMMAND'` only when `authorized=true` is passed, which must reflect the
-user's explicit approval of that exact command; approval never persists
-across calls. The interactive device shell itself remains human-only. See
+(plugin >= 0.9.0): it forwards one-shot
+`gms-rt-devices-shell DEVICE --approval-token TOKEN 'COMMAND'` only when the
+caller passes a one-shot approval token minted by the user via
+`gms-rt-approval-create --tool gms_rt_shell_exec --device SERIAL --command
+'COMMAND'` (web UI or human CLI session). The server validates the
+tool+device+command binding, a 5-minute TTL, and single use — a client-side
+`authorized=true` boolean was never a security boundary and is no longer
+accepted. The interactive device shell itself remains human-only. See
 [references/agent-workflows.md](references/agent-workflows.md) section 5.3.
+
+Multi-worker deployments: discover the owning worker authoritatively with
+`gms_rt_cluster_devices` / `gms-rt-cluster-resolve --device SERIAL` before
+targeting anything; pass `worker_id` explicitly when serials repeat across
+workers. Never assume "the first worker".
 
 Set `GMS_REMOTE_TEST_SERVER` when the automatic server address is wrong. Set
 `GMS_CURL_CA_CERT` for a trusted CA, or set `GMS_CURL_INSECURE=1` only for a

@@ -17,6 +17,7 @@ from .access import (
     require_elevated_admin,
     require_role,
 )
+from .agent_api import router as agent_api_router
 from .request_security import (
     authentication_required,
     bootstrap_token_matches,
@@ -495,3 +496,6 @@ async def auth_revoke_user_sessions(
 ):
     revoked = auth_service.revoke_user_sessions(user_id)
     return {"success": True, "revoked_sessions": revoked}
+
+
+router.include_router(agent_api_router)

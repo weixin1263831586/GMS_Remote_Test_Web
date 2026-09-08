@@ -6,13 +6,21 @@ import os
 import secrets
 import sqlite3
 import threading
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from foundation.config import settings
 
+from .agent_tokens import AgentTokenServiceMixin
+from .constants import (  # noqa: F401  (re-exported for back-compat)
+    AGENT_ROLE,
+    AGENT_SCOPES,
+    APPROVAL_TOKEN_TTL_SECONDS,
+    DEFAULT_AGENT_TOKEN_DAYS,
+    ROLE_PERMISSIONS,
+    CurrentUser,
+)
 from .rate_limit import AuthRateLimitMixin
 from .schema import initialize_auth_schema
 
@@ -34,29 +42,6 @@ SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "12"))
 # 会不断刷新 idle 超时，若提权跟随会话生命周期，会在整个工作日内保持。
 ELEVATION_MINUTES = int(os.getenv("GMS_ADMIN_ELEVATION_MINUTES", "30"))
 # 二次认证状态绑定当前会话，并随会话失效或重新登录清除。
-ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
-    "user": frozenset({
-        "tests.execute",
-        "resources.read_own",
-        "resources.write_own",
-        "devices.use_leased",
-    }),
-    "device_operator": frozenset({
-        "tests.execute",
-        "resources.read_own",
-        "resources.write_own",
-        "devices.use_leased",
-        "devices.inventory",
-        "devices.lease",
-    }),
-    "admin": frozenset({"*"}),
-    "worker_service": frozenset({
-        "worker.register",
-        "worker.heartbeat",
-        "worker.commands",
-        "worker.artifacts",
-    }),
-}
 
 
 def _utcnow() -> datetime:
@@ -84,28 +69,7 @@ def _last_seen_recent(last_seen_at: str | None, now: datetime) -> bool:
         return False
 
 
-@dataclass(frozen=True)
-class CurrentUser:
-    id: str
-    username: str
-    role: str
-    display_name: str = ""
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "username": self.username,
-            "role": self.role,
-            "display_name": self.display_name,
-            "permissions": sorted(ROLE_PERMISSIONS.get(self.role, frozenset())),
-        }
-
-    def has_permission(self, permission: str) -> bool:
-        granted = ROLE_PERMISSIONS.get(self.role, frozenset())
-        return "*" in granted or permission in granted
-
-
-class AuthService(AuthRateLimitMixin):
+class AuthService(AgentTokenServiceMixin, AuthRateLimitMixin):
     _REQUIRED_TABLES = frozenset({"platform_users", "platform_sessions", "platform_auth_attempts"})
 
     def __init__(self, db_path: Path | None = None):
@@ -596,6 +560,7 @@ class AuthService(AuthRateLimitMixin):
                     )
                     conn.commit()
         return self._row_to_user(row)
+
 
     def list_users(self) -> list[dict[str, Any]]:
         with self._connect() as conn:

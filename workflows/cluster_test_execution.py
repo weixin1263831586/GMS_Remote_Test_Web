@@ -223,23 +223,16 @@ def start_cluster_test(request: Any, client_id: str):
     except ValueError as exc:
         return error_response(str(exc), 409)
     try:
-        command = repository.create_command({
-            "worker_id": request.worker_id, "command_type": "start_test",
-            "job_id": job["id"], "attempt_id": job["current_attempt_id"],
-            "operation_id": f"{job['current_attempt_id']}:start_test",
-            "payload": {"worker_job_id": f"wj-{job['id']}", "argv": cmd_parts,
-                        "execution_spec": data["execution_spec"],
-                        "env": {}, "devices": request.devices,
-                        "trace_id": job.get("trace_id", ""),
-                        "lease_tokens": [{
-                            "lease_id": lease["id"],
-                            "device_id": lease["device_id"],
-                            "generation": lease["generation"],
-                            "attempt_id": lease["attempt_id"],
-                        } for lease in job.get("leases") or []
-                            if lease.get("status") == "active"]},
-        })
-        repository.attach_command_to_job(job["id"], command)
+        # R09: shared dispatch helper (idempotent per attempt) with the
+        # same compensation contract as /api/cluster/jobs.
+        command = repository.dispatch_job_start_command(
+            job,
+            argv=cmd_parts,
+            execution_spec=data["execution_spec"],
+            env={},
+            devices=request.devices,
+        )
+        del command
         return success_response({"cluster_job_id": job["id"],
                                  "attempt_id": job["current_attempt_id"],
                                  "worker_id": request.worker_id},
@@ -253,27 +246,7 @@ def start_cluster_test(request: Any, client_id: str):
         logger.exception(
             "Dispatch command commit failed for job %s; compensating", job["id"]
         )
-        try:
-            repository.transition_job(
-                job["id"],
-                "failed",
-                error=f"dispatch command failed: {exc}",
-                source="controller",
-                message="任务派发命令写入失败，任务已置为失败",
-            )
-        except Exception:
-            logger.exception(
-                "Failed to transition job %s to failed after command error",
-                job["id"],
-            )
-        try:
-            repository.claims.release(
-                f"job:{job['id']}", status="failed"
-            )
-        except Exception:
-            logger.exception(
-                "Failed to release claims for job %s", job["id"]
-            )
+        repository.compensate_failed_dispatch(job["id"], exc)
         return error_response(
             "任务已创建但派发命令写入失败，请稍后重试（任务已回滚为失败状态）", 503
         )

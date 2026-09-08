@@ -12,6 +12,24 @@ def get_authenticated_user(request: Request) -> CurrentUser | None:
     user = getattr(request.state, "current_user", None)
     if isinstance(user, CurrentUser):
         return user
+    # Agent Service Token (2026-09-08 audit §二): Bearer credentials from the
+    # Authorization header. An invalid/unknown Bearer token fails closed —
+    # it must not silently fall back to cookie auth or dev-mode anonymity
+    # (request.state.credentials_rejected marks the difference).
+    auth_header = str(request.headers.get("Authorization") or "")
+    if auth_header.startswith("Bearer "):
+        principal, record = auth_service.get_agent_token_principal(
+            auth_header[len("Bearer "):].strip()
+        )
+        request.state.agent_token_record = record
+        if principal is None:
+            request.state.auth_method = "invalid_agent_token"
+            request.state.credentials_rejected = True
+            return None
+        request.state.current_user = principal
+        request.state.auth_method = "agent_token"
+        return principal
+    request.state.auth_method = "session"
     token = request.cookies.get(AUTH_COOKIE_NAME)
     user = auth_service.get_user_for_token(token)
     if user:
@@ -22,6 +40,12 @@ def get_authenticated_user(request: Request) -> CurrentUser | None:
 def require_authenticated_user(request: Request) -> CurrentUser:
     user = get_authenticated_user(request)
     if not user:
+        # Rejected credentials (invalid agent token) must 401/403 even in
+        # dev mode — never downgrade to an anonymous principal.
+        if getattr(request.state, "credentials_rejected", False):
+            raise HTTPException(
+                status_code=401, detail="Invalid agent credentials"
+            )
         raise HTTPException(status_code=401, detail="Authentication required")
     return user
 
@@ -190,3 +214,47 @@ def require_elevated_admin_when_auth_required(request: Request) -> CurrentUser |
     if not authentication_required():
         return None
     return require_elevated_admin(request)
+
+
+def require_agent_scope(scope: str):
+    """Require an agent principal carrying ``scope`` (human roles also pass)."""
+
+    def dependency(request: Request) -> CurrentUser:
+        user = require_authenticated_user(request)
+        if user.has_permission(scope):
+            return user
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": f"Agent token scope '{scope}' required",
+                "scope_required": scope,
+            },
+        )
+
+    return dependency
+
+
+def ensure_agent_worker_allowed(request: Request, worker_id: str) -> None:
+    """Enforce the token's allowed_workers ACL (no-op for human sessions)."""
+
+    if getattr(request.state, "auth_method", None) != "agent_token":
+        return
+    record = getattr(request.state, "agent_token_record", None)
+    if not auth_service.agent_acl_allows(record, "workers", str(worker_id or "")):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Agent token is not allowed to target worker '{worker_id}'",
+        )
+
+
+def ensure_agent_device_allowed(request: Request, serial: str) -> None:
+    """Enforce the token's allowed_devices ACL (no-op for human sessions)."""
+
+    if getattr(request.state, "auth_method", None) != "agent_token":
+        return
+    record = getattr(request.state, "agent_token_record", None)
+    if not auth_service.agent_acl_allows(record, "devices", str(serial or "")):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Agent token is not allowed to target device '{serial}'",
+        )

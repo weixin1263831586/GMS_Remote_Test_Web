@@ -121,26 +121,37 @@ gms_rt_shell(device="RK3562GMS7", command="settings get secure user_setup_comple
 - Everything else (reboot, push, Wi-Fi, remount, log clear) still requires a
   human-run `gms-rt-devices-*` CLI command — do not attempt to bypass.
 
-### 5.3 Authorized one-shot shell (`gms_rt_shell_exec`, plugin >= 0.8.0)
+### 5.3 Approved one-shot shell (`gms_rt_shell_exec`, plugin >= 0.9.0)
 
 When a task genuinely needs a state-changing device command (`am`, `pm`,
 `cmd`, `input`, `settings put`, ...), `gms_rt_run` denies `gms-rt-devices-shell`
-forever (interactive/manual by catalog). The authorized path:
+forever (interactive/manual by catalog). The approval path:
 
 1. Tell the user the exact command and device, and get their approval.
-2. Call `gms_rt_shell_exec` with `authorized=true` for that exact command:
+2. The user runs, in their own (human) session:
+
+```
+gms-rt-approval-create --tool gms_rt_shell_exec \
+    --device RK3562GMS7 \
+    --command 'am broadcast -a android.intent.action.BOOT_COMPLETED'
+```
+
+3. Pass the returned token within its 5-minute TTL:
 
 ```
 gms_rt_shell_exec(device="RK3562GMS7",
                   command="am broadcast -a android.intent.action.BOOT_COMPLETED",
-                  authorized=true)
+                  approval_token="<one-shot token>")
 ```
 
-- Every call requires `authorized=true` again; approval does not persist.
-- Without the flag the tool denies with guidance (exit via read-only
-  `gms_rt_shell` needs no authorization).
+- The SERVER validates tool+device+SHA256(command), 5-minute TTL and single
+  use; the token cannot be reused or redirected to another command/device.
+- A client-declared `authorized=true` was never a security boundary (any MCP
+  client could pass true itself) and is no longer accepted.
+- Without the token the tool denies with guidance (read-only
+  `gms_rt_shell` needs no approval).
 - The interactive shell itself stays human-only; `gms_rt_shell_exec` is
-  strictly one-shot (`gms-rt-devices-shell DEVICE 'COMMAND'`).
+  strictly one-shot.
 
 ### 5.2 Device logcat capture (`gms_rt_logcat`, plugin >= 0.7.0)
 

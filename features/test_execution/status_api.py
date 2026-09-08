@@ -8,7 +8,7 @@ import re
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from features.devices import get_or_create_user_state, get_usb_monitor
+from features.devices import get_or_create_user_state, get_usb_monitor, iter_websocket_targets
 from foundation.responses import error_response
 
 from . import runtime
@@ -114,7 +114,9 @@ async def get_status(
                             with contextlib.suppress(Exception):
                                 await ws.send_json(usb_event)
 
-                        await asyncio.gather(*[_send_usb_event(cid, ws) for cid, ws in list(runtime.global_state.websocket_connections.items())])
+                        # R26: values are sets of sockets since the multi-tab
+                        # migration; iterate flattened (client, socket) pairs.
+                        await asyncio.gather(*[_send_usb_event(cid, ws) for cid, ws in iter_websocket_targets()])
                 except _queue.Empty:
                     pass
         except Exception:
@@ -214,6 +216,32 @@ def _active_durable_job_for_owner(client_id: str):
     return None
 
 
+def _resolve_stream_job(request: Request, client_id: str):
+    """R33: resolve the durable job this legacy stream should bridge to.
+
+    Precedence: explicit ``job_id`` query parameter, then the owner's most
+    recent active job. A recently finished explicit job is still streamed
+    (drained) so CLI invocations started right before completion do not
+    fall back to the empty legacy user_state stream.
+    """
+    requested_job = str(request.query_params.get("job_id") or "").strip()
+    try:
+        from foundation.cluster_port import get_cluster_service
+
+        repository = get_cluster_service().repository
+    except (RuntimeError, AttributeError):
+        return None
+    if requested_job:
+        try:
+            job = repository.get_job(requested_job)
+        except Exception:
+            return None
+        if job and str(job.get("owner_id") or "") == client_id:
+            return job
+        return None
+    return _active_durable_job_for_owner(client_id)
+
+
 @router.get("/api/test/logs/stream")
 async def stream_test_logs(request: Request):
     """Stream test logs (plain text format)."""
@@ -222,12 +250,13 @@ async def stream_test_logs(request: Request):
     async def log_stream():
         try:
             last_log_count = 0
-            # R33: bridge to the durable job event source when this owner has
-            # an active job; fall back to the legacy in-process user_state
-            # stream for process-local runs that predate durable jobs.
-            active_job = _active_durable_job_for_owner(client_id)
-            if active_job is not None:
-                job_id = str(active_job.get("id") or "")
+            # R33: bridge to the durable job event source when a job is
+            # resolved (explicit job_id or the owner's active job); fall
+            # back to the legacy in-process user_state stream for
+            # process-local runs that predate durable jobs.
+            stream_job = _resolve_stream_job(request, client_id)
+            if stream_job is not None:
+                job_id = str(stream_job.get("id") or "")
                 event_sequence = -1
                 idle_ticks = 0
                 while True:
@@ -237,28 +266,40 @@ async def stream_test_logs(request: Request):
                     current = repository.get_job(job_id)
                     if current is None:
                         break
-                    events = repository.list_events(
-                        job_id, after=event_sequence, limit=1000,
-                    )
-                    for event in events:
-                        text = str(event.get("message") or "").strip()
-                        if text:
-                            yield text + "\n"
-                    if events:
+                    terminal = current.get("status") in {
+                        "completed", "failed", "cancelled", "stopped",
+                    }
+                    # Drain ALL pages before exiting on a terminal status:
+                    # list_events is paginated (default 1000); stopping at
+                    # the first page truncated the log tail (R33).
+                    while True:
+                        events = repository.list_events(
+                            job_id, after=event_sequence, limit=1000,
+                        )
+                        for event in events:
+                            text = str(event.get("message") or "").strip()
+                            if text:
+                                yield text + "\n"
+                        if not events:
+                            break
                         event_sequence = max(
                             int(item.get("sequence") or event_sequence)
                             for item in events
                         )
+                        if len(events) < 1000:
+                            break
+                    if events:
                         idle_ticks = 0
                     else:
                         idle_ticks += 1
-                    if current.get("status") in {"completed", "failed", "cancelled", "stopped"}:
+                    if terminal:
                         yield "=== Test complete ===\n"
                         break
                     if idle_ticks > 7200:  # ~1h without events
                         yield "=== Stream timeout ===\n"
                         break
-                    await asyncio.sleep(0.5)
+                    if not terminal:
+                        await asyncio.sleep(0.5)
                 return
             while True:
                 user_state = get_or_create_user_state(client_id)
@@ -276,6 +317,12 @@ async def stream_test_logs(request: Request):
                     yield "=== Test complete ===\n"
                     break
 
+                # R33: the legacy fallback used to spin forever when a
+                # finished local run never produced logs; idle_timeout
+                # bounds the wait so consumers are not left hanging.
+                if not running:
+                    yield "=== Test complete ===\n"
+                    break
                 await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Error in stream: {e}")

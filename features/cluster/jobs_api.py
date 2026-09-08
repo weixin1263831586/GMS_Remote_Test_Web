@@ -223,32 +223,26 @@ def create_job(
             for lease in job.get("leases") or []
             if lease.get("status") == "active"
         ]
-        command = service().repository.create_command({
-            "worker_id": data["worker_id"],
-            "command_type": "start_test",
-            "job_id": job["id"],
-            "attempt_id": job["current_attempt_id"],
-            "operation_id": f"{job['current_attempt_id']}:start_test",
-            "payload": {
-                "worker_job_id": f"wj-{job['id']}",
-                "argv": data["argv"],
-                "execution_spec": data.get("execution_spec"),
-                "env": data["env"],
-                "devices": data["devices"],
-                "trace_id": job.get("trace_id", ""),
-                "lease_tokens": [
-                    {
-                        "lease_id": lease["id"],
-                        "device_id": lease["device_id"],
-                        "generation": lease["generation"],
-                        "attempt_id": lease["attempt_id"],
-                    }
-                    for lease in job.get("leases") or []
-                    if lease.get("status") == "active"
-                ],
-            },
-        })
-        service().repository.attach_command_to_job(job["id"], command)
+        # R09: job creation and command queuing are two separate commits;
+        # without compensation a command-write failure used to leave an
+        # `assigned` job with zero dispatchable commands and an active
+        # claim. Fail the job and release its claims so it can be retried.
+        try:
+            command = service().repository.dispatch_job_start_command(
+                job,
+                argv=data["argv"],
+                execution_spec=data.get("execution_spec"),
+                env=data["env"],
+                devices=data["devices"],
+            )
+        except Exception as dispatch_exc:
+            service().repository.compensate_failed_dispatch(
+                job["id"], dispatch_exc
+            )
+            raise HTTPException(
+                503,
+                "任务已创建但派发命令写入失败，请稍后重试（任务已回滚为失败状态）",
+            ) from dispatch_exc
         return {
             "success": True,
             "job": _job_response(service().repository.get_job(job["id"]) or {}),

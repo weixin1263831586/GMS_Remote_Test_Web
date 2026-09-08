@@ -57,7 +57,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.8.1"
+SERVER_VERSION = "0.9.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -559,7 +559,9 @@ def auth_login_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if not isinstance(password, str) or not password:
         return (
             "Missing required argument: password_stdin (never place the "
-            "password in args or prompts)",
+            "password in args or prompts). Prefer GMS_AUTH_TOKEN_FILE "
+            "agent-token auth instead: enroll once with "
+            "gms-rt-agent-enroll, then no password ever flows through MCP.",
             True,
         )
     return run_cli(
@@ -567,6 +569,29 @@ def auth_login_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         [username, "--password-stdin"],
         stdin_text=f"{password}\n",
     )
+
+
+def agent_enroll_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Exchange a one-shot enrollment code for a 0600 agent token file."""
+    code = str(arguments.get("code") or "").strip()
+    if not code:
+        return "Missing required argument: code (one-shot enrollment code)", True
+    args: list[str] = [code]
+    out_file = str(arguments.get("out_file") or "").strip()
+    if out_file:
+        args.extend(["--out", out_file])
+    return run_cli("gms-rt-agent-enroll", args)
+
+
+def approval_create_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Create a one-shot approval token (must run under a human session)."""
+    tool = str(arguments.get("tool") or "").strip()
+    device = str(arguments.get("device") or "").strip()
+    command = str(arguments.get("command") or "")
+    if not tool or not device:
+        return "Missing required arguments: tool, device", True
+    args = ["--tool", tool, "--device", device, "--command", command]
+    return run_cli("gms-rt-approval-create", args)
 
 
 def auth_elevate_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -588,12 +613,38 @@ def auth_elevate_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     )
 
 
+def _resolve_worker_for_device(
+    device: str, worker_id: str | None
+) -> tuple[str | None, str | None]:
+    """Authoritative worker_id resolution for a device (audit §六).
+
+    Returns (worker_id, error). Explicit worker_id wins. Otherwise the
+    cluster inventory must match exactly one worker; zero/ambiguous matches
+    are an error — never fall back to "the first/current worker".
+    """
+    if worker_id:
+        return str(worker_id).strip(), None
+    text, is_error = run_cli("gms-rt-cluster-resolve", ["--device", str(device)])
+    if is_error:
+        return None, text
+    try:
+        payload = json.loads(text)
+        resolved = str(payload.get("worker_id") or "").strip()
+    except ValueError:
+        return None, text
+    if not resolved:
+        return None, text
+    return resolved, None
+
+
 def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Burn firmware to one or more devices (typed, requires elevation).
 
     The CLI copies the image to the worker host over SSH (direct mode) and
     posts /api/burn/firmware; wipes /data by default. Long-running: bump the
-    default timeout.
+    default timeout. Destructive: requires a one-shot approval token bound to
+    this exact burn (server-enforced; the caller-side authorized flag was
+    never a security boundary).
     """
     firmware_path = str(arguments.get("firmware_path") or "").strip()
     device = str(arguments.get("device") or "").strip()
@@ -601,6 +652,16 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         return "Missing required argument: firmware_path", True
     if not device:
         return "Missing required argument: device", True
+    approval_token = str(arguments.get("approval_token") or "").strip()
+    if not approval_token:
+        return (
+            "denied: firmware burn is destructive and requires a one-shot "
+            "approval token. Ask the user to run "
+            "'gms-rt-approval-create --tool gms_rt_burn_firmware --device "
+            f"{device} --command burn_firmware:{device}' under their own "
+            "session, then pass approval_token here.",
+            True,
+        )
     wipe_data = arguments.get("wipe_data")
     if wipe_data is None:
         wipe_str = "true"
@@ -619,7 +680,7 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
                 )
             except (TypeError, ValueError):
                 return "wait_online_max must be an integer (seconds)", True
-    args = [firmware_path, device, wipe_str, *extra]
+    args = [firmware_path, device, wipe_str, "--approval-token", approval_token, *extra]
     return run_cli(
         "gms-rt-burn-firmware",
         args,
@@ -669,11 +730,20 @@ def test_start_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
                 except (TypeError, ValueError):
                     return "max_wait must be an integer", True
         return run_cli("gms-rt-test-start", args)
+    # worker_id (audit §六): resolve the owning worker authoritatively when
+    # not explicit; ambiguity is an error, never a guess.
+    resolved_worker, worker_error = _resolve_worker_for_device(
+        device, arguments.get("worker_id")
+    )
+    if worker_error:
+        return worker_error, True
     args = [device]
     for key in ("type", "module", "case", "suite"):
         value = str(arguments.get(key) or "").strip()
         if value:
             args.append(value)
+    if resolved_worker:
+        args.extend(["--worker", resolved_worker])
     if arguments.get("wait"):
         args.append("--wait")
         if arguments.get("max_wait") is not None:
@@ -798,8 +868,8 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         if normalized == "gms-rt-devices-shell":
             guidance = (
                 "For device diagnosis use the read-only gms_rt_shell tool; "
-                "for a user-authorized one-shot command use "
-                "gms_rt_shell_exec(authorized=true)."
+                "for an approved one-shot command use gms_rt_shell_exec "
+                "with an approval_token from gms_rt_approval_create."
             )
         return (
             f"denied: {normalized} is not agent-safe for unattended "
@@ -878,8 +948,58 @@ _SHELL_MAX_COMMAND_CHARS = 2000
 _DEVICE_ID_PATTERN = None  # compiled lazily
 
 
+def _split_short_option(token: str) -> list[str]:
+    """Split a combined short-option token ('-dc' → ['-d', '-c']).
+
+    getopt_short clusters: ``-dc`` is exactly equivalent to ``-d -c`` for
+    every binary using getopt_short (logcat, dmesg, toolbox applets), so
+    the gate must evaluate each cluster letter as its own flag. A leading
+    '-' followed by multiple letters, or '-' + letters + attached value,
+    all expand here.
+    """
+    if not token.startswith("-") or token == "-" or token.startswith("--"):
+        return [token]
+    body = token[1:]
+    # Attached value form: -fPATH → the whole token is the flag -f plus a
+    # value; keep it as one token (callers check startswith) but also
+    # expose the leading flag.
+    return [f"-{ch}" for ch in body]
+
+
+def _expand_option_tokens(tokens: list[str]) -> list[str]:
+    """Expand clustered short options into individual flags.
+
+    Only clusters of KNOWN short-flag letters expand: '-dc' for logcat is
+    -d + -c. Unknown-letter clusters stay intact so value tokens (file
+    names like '-some-file') are not misread as flags.
+    """
+    expanded: list[str] = []
+    for token in tokens:
+        if token.startswith("-") and not token.startswith("--") and len(token) > 2:
+            expanded.extend(_split_short_option(token))
+        else:
+            expanded.append(token)
+    return expanded
+
+
+def _is_long_option_prefix(token: str, long_name: str) -> bool:
+    """True when token is --name or --name=value or an unambiguous
+    abbreviation that getopt_long would still accept as --name."""
+    if not token.startswith("--"):
+        return False
+    body = token[2:].split("=", 1)[0]
+    return long_name.startswith(body) and body  # non-empty prefix of long_name
+
+
 def _validate_shell_command(command: str) -> tuple[bool, str]:
-    """Return (allowed, reason) for a proposed device shell command."""
+    """Return (allowed, reason) for a proposed device shell command.
+
+    R12: the gate is STRUCTURED and POSITIVE per binary. Every option token
+    (including clustered short flags like ``-dc`` and abbreviated long
+    options like ``--cle`` that getopt_long accepts) is expanded and then
+    must match an explicit per-binary allowlist; anything unrecognized is
+    denied instead of passing through a blacklist.
+    """
     if not command or not command.strip():
         return False, "empty command"
     if len(command) > _SHELL_MAX_COMMAND_CHARS:
@@ -906,31 +1026,95 @@ def _validate_shell_command(command: str) -> tuple[bool, str]:
         if len(rest) != 1 or rest[0] not in ("size", "density"):
             return False, "only 'wm size' / 'wm density' (read-only) is allowed"
     elif binary == "logcat":
-        # R12: token-exact matching missed "--clear" and attached-value
-        # forms like "-f/path".  Match flag prefixes explicitly: logcat -c
-        # clears the log buffer and -f/--file write files — never read-only.
-        if any(
-            arg == "-c" or arg == "--clear"
-            or arg.startswith("-f") or arg.startswith("--file")
-            for arg in rest
-        ):
-            return False, "logcat -c/-f mutate or write files and are not allowed"
-        if not any(flag in rest for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")):
+        # Positive structural allowlist: expand clustered shorts, then every
+        # option token must be a known read-only flag. '-c' inside '-dc',
+        # abbreviated '--cle', and attached-value '-fPATH' all fail here.
+        allowed_logcat_flags = {
+            "-d", "-v", "-t", "-T", "-g", "-b", "-s", "-e", "-m",
+            "-n", "-r", "-P", "-Q", "-p", "-L", "-D", "-B", "-G", "-S",
+            "--dividers", "--buffer", "--format", "--tag", "--uid",
+            "--pid", "--print", "--statistics", "--help",
+        }
+        needs_value = {"-v", "-b", "-t", "-T", "-e", "-m", "-n", "-r", "-D", "-G", "-s"}
+        i = 0
+        has_dump_mode = False
+        while i < len(rest):
+            token = rest[i]
+            if token.startswith("--"):
+                if _is_long_option_prefix(token, "clear") or _is_long_option_prefix(token, "file"):
+                    return False, (
+                        "logcat --clear/--file mutate or write and are not allowed"
+                    )
+                matched = any(
+                    _is_long_option_prefix(token, flag[2:])
+                    for flag in allowed_logcat_flags
+                    if flag.startswith("--")
+                )
+                if not matched:
+                    if token in ("--filename",):
+                        return False, "logcat --filename writes files"
+                    return False, (
+                        f"logcat option '{token}' is not in the read-only allowlist"
+                    )
+                if token in ("--print", "--statistics", "--dividers"):
+                    has_dump_mode = has_dump_mode or token == "--print"
+                i += 1
+                continue
+            cluster = _split_short_option(token)
+            for flag in cluster:
+                if flag == "-c":
+                    return False, (
+                        "logcat -c clears the log buffer and is not allowed "
+                        "(including inside clustered flags like -dc)"
+                    )
+                if flag == "-f":
+                    return False, (
+                        "logcat -f writes files and is not allowed "
+                        "(including attached-value forms like -f/path)"
+                    )
+                if flag not in allowed_logcat_flags:
+                    return False, (
+                        f"logcat option '{flag}' (from '{token}') is not in "
+                        "the read-only allowlist"
+                    )
+                if flag == "-d":
+                    has_dump_mode = True
+            # Skip the value consumed by value-taking flags.
+            value_takers = [f for f in cluster if f in needs_value]
+            i += 1 + len(value_takers)
+        if not has_dump_mode and "-t" not in rest and "-T" not in rest:
+            return False, (
+                "streaming logcat is not allowed; add -d/-t/-T (dump mode)"
+            )
+        has_dump_mode = has_dump_mode or any(
+            t in rest for t in ("-d", "-t", "-T")
+        )
+        if not has_dump_mode:
             return False, (
                 "streaming logcat is not allowed; add -d/-t/-T (dump mode)"
             )
     elif binary == "dmesg":
-        # R12: dmesg -c (and -C) clear the kernel ring buffer; restrict to
-        # explicitly read-only forms.
-        allowed_dmesg = {"", "-T", "-t", "-r", "-n", "-H", "-e"}
-        if any(arg not in allowed_dmesg for arg in rest):
-            return False, (
-                "only plain read-only dmesg (or -T/-t/-r/-H/-e) is allowed; "
-                "-c/-C would clear the kernel ring buffer"
-            )
+        # R12: dmesg -c (and -C, including inside clusters like -tc) clear
+        # the kernel ring buffer; positively allow only read-only flags.
+        allowed_dmesg = {"-T", "-t", "-r", "-H", "-e", "-n", "--color=never"}
+        for token in rest:
+            for flag in _split_short_option(token):
+                if flag in ("-c", "-C"):
+                    return False, (
+                        "dmesg -c/-C clear the kernel ring buffer and are "
+                        "not allowed (including clustered forms)"
+                    )
+                if flag not in allowed_dmesg:
+                    return False, (
+                        f"dmesg option '{flag}' is not in the read-only allowlist"
+                    )
     elif binary == "dumpsys":
-        if any(arg in _SHELL_DUMPSYS_MUTATING for arg in rest):
-            return False, "dumpsys service arguments may mutate device state"
+        # Expand clusters so 'dumpsys battery set' style mutating args and
+        # combined flags cannot smuggle through.
+        for token in rest:
+            for flag in _split_short_option(token):
+                if flag in _SHELL_DUMPSYS_MUTATING:
+                    return False, "dumpsys service arguments may mutate device state"
     elif binary == "device_config":
         if not rest:
             return False, "device_config requires a subcommand"
@@ -1124,16 +1308,18 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 # ---------------------------------------------------------------------------
-# Authorized one-shot device shell (typed tool, v0.8.0)
+# Approved one-shot device shell (typed tool, v0.9.0)
 # ---------------------------------------------------------------------------
 
 # The CLI catalog deliberately marks gms-rt-devices-shell manual: the bare
 # form opens an interactive shell and arbitrary commands are state-changing
 # by nature, so the generic runner (gms_rt_run) denies it outright. This
-# typed tool is the explicit-authorization escape hatch for one-shot
-# commands: the caller must pass authorized=true, which represents the
-# user's approval of this exact command. Read-only diagnosis should still
-# go through gms_rt_shell (allowlist, no authorization needed).
+# typed tool is the approval-token escape hatch for one-shot commands: the
+# caller must pass a one-shot approval token that the SERVER validates
+# against tool+device+SHA256(command), TTL and single use (2026-09-08 audit
+# §五). A client-declared authorized=true boolean was never a security
+# boundary — any MCP client could pass true itself. Read-only diagnosis
+# should still go through gms_rt_shell (allowlist, no approval needed).
 _SHELL_EXEC_MAX_COMMAND_CHARS = 2000
 
 
@@ -1151,12 +1337,15 @@ def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             "interactive device shell is not available to agents)",
             True,
         )
-    if arguments.get("authorized") is not True:
+    approval_token = str(arguments.get("approval_token") or "").strip()
+    if not approval_token:
         return (
-            "denied: explicit authorization required. Ask the user to "
-            "approve this exact command, then call again with "
-            "authorized=true. For read-only diagnosis use gms_rt_shell "
-            "instead (no authorization needed).",
+            "denied: server-side approval required. Ask the user to run "
+            "'gms-rt-approval-create --tool gms_rt_shell_exec --device "
+            f"{device} --command {command}' under their own session "
+            "(the token is valid 5 minutes and single-use), then pass "
+            "approval_token here. For read-only diagnosis use gms_rt_shell "
+            "instead (no approval needed).",
             True,
         )
     if _DEVICE_ID_PATTERN is None:
@@ -1175,7 +1364,13 @@ def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             timeout = min(600, max(1, int(arguments["timeout"])))
         except (TypeError, ValueError):
             return "timeout must be an integer (seconds)", True
-    return run_cli("gms-rt-devices-shell", [device, command], timeout=timeout)
+    # The CLI validates-and-consumes the approval server-side before running
+    # the command (gms-rt-devices-shell --approval-token ...).
+    return run_cli(
+        "gms-rt-devices-shell",
+        [device, "--approval-token", approval_token, command],
+        timeout=timeout,
+    )
 
 
 def tools() -> list[dict[str, Any]]:
@@ -1265,11 +1460,50 @@ def tools() -> list[dict[str, Any]]:
             "name": "gms_rt_devices",
             "description": (
                 "List Android devices known to the Controller with state, "
-                "serials, and transport."
+                "serials, and transport. For cluster deployments prefer "
+                "gms_rt_cluster_devices, which includes the owning worker_id "
+                "needed to target devices unambiguously."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_cluster_workers",
+            "description": (
+                "List cluster workers (id, status, device counts). Call "
+                "before targeting devices when multiple build servers "
+                "(workers) are attached."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_cluster_devices",
+            "description": (
+                "List the cluster-wide device inventory including each "
+                "device's owning worker_id (authoritative for multi-worker "
+                "deployments). Filter by --worker or a serial substring."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "worker_id": {
+                        "type": "string",
+                        "description": "Optional worker id filter.",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Optional case-insensitive serial substring filter."
+                        ),
+                    },
+                },
                 "additionalProperties": False,
             },
         },
@@ -1310,7 +1544,9 @@ def tools() -> list[dict[str, Any]]:
                 "session (gms-rt-auth-elevate USERNAME --password-stdin). "
                 "Unlocks elevated operations such as firmware burn. Only "
                 "call with admin credentials the user explicitly provided; "
-                "the password travels via stdin and is never logged."
+                "the password travels via stdin and is never logged. "
+                "Prefer GMS_AUTH_TOKEN_FILE agent-token auth so no password "
+                "ever flows through MCP."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1325,6 +1561,69 @@ def tools() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["username", "password_stdin"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_agent_enroll",
+            "description": (
+                "Exchange a one-shot enrollment code for a permanent Agent "
+                "Service Token stored as a 0600 file (gms-rt-agent-enroll). "
+                "The admin mints the code in the web UI (5-minute TTL); "
+                "after enrollment set GMS_AUTH_TOKEN_FILE to the token file "
+                "so every CLI/MCP call authenticates without any password."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "One-shot enrollment code, e.g. 7K3M-FG9A-WX21.",
+                    },
+                    "out_file": {
+                        "type": "string",
+                        "description": (
+                            "Optional token file path (default "
+                            "~/.local/state/gms-remote-test/<profile>.token, 0600)."
+                        ),
+                    },
+                },
+                "required": ["code"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_approval_create",
+            "description": (
+                "Create a one-shot approval token for a destructive action "
+                "(gms-rt-approval-create). MUST run under the user's own "
+                "human session (cookie), never an agent token. Bindings: "
+                "tool + device + exact command, 5-minute TTL, single use. "
+                "The agent then passes the token to gms_rt_shell_exec / "
+                "gms_rt_burn_firmware as approval_token."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tool": {
+                        "type": "string",
+                        "description": (
+                            "gms_rt_shell_exec or gms_rt_burn_firmware."
+                        ),
+                    },
+                    "device": {
+                        "type": "string",
+                        "description": "Target device serial.",
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": (
+                            "Exact command (or burn_firmware:<devices>) "
+                            "being approved."
+                        ),
+                    },
+                },
+                "required": ["tool", "device"],
                 "additionalProperties": False,
             },
         },
@@ -1352,6 +1651,15 @@ def tools() -> list[dict[str, Any]]:
                             "for multiple devices, e.g. RK3562GMS7."
                         ),
                     },
+                    "approval_token": {
+                        "type": "string",
+                        "description": (
+                            "One-shot approval token from "
+                            "gms_rt_approval_create (tool="
+                            "gms_rt_burn_firmware). Server-enforced; a burn "
+                            "without it is denied for agent tokens."
+                        ),
+                    },
                     "wipe_data": {
                         "type": "boolean",
                         "description": "Wipe /data during burn (default true).",
@@ -1369,7 +1677,7 @@ def tools() -> list[dict[str, Any]]:
                         "description": "Per-call timeout in seconds (default 1800).",
                     },
                 },
-                "required": ["firmware_path", "device"],
+                "required": ["firmware_path", "device", "approval_token"],
                 "additionalProperties": False,
             },
         },
@@ -1378,8 +1686,10 @@ def tools() -> list[dict[str, Any]]:
             "description": (
                 "Start a GMS test (CTS/GTS/VTS/STS) on a device, or retry a "
                 "previous report (retry=<timestamp> from a failed report). "
-                "Returns a cluster_job_id; follow up with gms_rt_jobs_wait "
-                "and gms_rt_jobs_events instead of scraping logs."
+                "Returns a cluster_job_id; follow up with gms_rt_jobs_status "
+                "polling (every 20-30s) and gms_rt_jobs_events instead of "
+                "long blocking waits — MCP clients often cap a single tool "
+                "call at 60s, so prefer wait=false plus polling."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1389,6 +1699,15 @@ def tools() -> list[dict[str, Any]]:
                         "description": (
                             "Device serial or unique prefix (not needed in "
                             "retry mode)."
+                        ),
+                    },
+                    "worker_id": {
+                        "type": "string",
+                        "description": (
+                            "Owning cluster worker. Optional: auto-resolved "
+                            "via the cluster inventory; ambiguous devices "
+                            "fail with exit 5 instead of guessing. Pass it "
+                            "explicitly when multiple workers share serials."
                         ),
                     },
                     "type": {
@@ -1504,6 +1823,13 @@ def tools() -> list[dict[str, Any]]:
                         "type": "string",
                         "description": "Device serial, e.g. RK3562GMS7.",
                     },
+                    "worker_id": {
+                        "type": "string",
+                        "description": (
+                            "Owning cluster worker (optional; ambiguity "
+                            "fails instead of guessing)."
+                        ),
+                    },
                     "command": {
                         "type": "string",
                         "description": (
@@ -1539,6 +1865,13 @@ def tools() -> list[dict[str, Any]]:
                     "device": {
                         "type": "string",
                         "description": "Device serial, e.g. RK3562GMS7.",
+                    },
+                    "worker_id": {
+                        "type": "string",
+                        "description": (
+                            "Owning cluster worker (optional; ambiguity "
+                            "fails instead of guessing)."
+                        ),
                     },
                     "args": {
                         "description": (
@@ -1586,14 +1919,14 @@ def tools() -> list[dict[str, Any]]:
         {
             "name": "gms_rt_shell_exec",
             "description": (
-                "Run a USER-AUTHORIZED one-shot shell command on a device "
-                "via gms-rt-devices-shell DEVICE COMMAND. Pass "
-                "authorized=true ONLY after the user approved this exact "
-                "command; without it the call is denied. Prefer "
-                "gms_rt_shell (read-only allowlist, no authorization) for "
-                "diagnosis, and this tool for approved state-changing "
-                "commands (am/pm/cmd/input/svc, settings put, rm, ...). "
-                "Never opens an interactive shell."
+                "Run a USER-APPROVED one-shot shell command on a device "
+                "via gms-rt-devices-shell DEVICE --approval-token TOKEN "
+                "COMMAND. The approval token comes from "
+                "gms_rt_approval_create (tool=gms_rt_shell_exec) run by the "
+                "user under their own session; the server validates "
+                "tool+device+command binding, 5-minute TTL and single use. "
+                "Prefer gms_rt_shell (read-only allowlist, no approval) for "
+                "diagnosis. Never opens an interactive shell."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1602,6 +1935,13 @@ def tools() -> list[dict[str, Any]]:
                         "type": "string",
                         "description": "Device serial, e.g. RK3562GMS7.",
                     },
+                    "worker_id": {
+                        "type": "string",
+                        "description": (
+                            "Owning cluster worker (optional; ambiguity "
+                            "fails instead of guessing)."
+                        ),
+                    },
                     "command": {
                         "type": "string",
                         "description": (
@@ -1609,11 +1949,13 @@ def tools() -> list[dict[str, Any]]:
                             "'am broadcast -a android.intent.action.BOOT_COMPLETED'."
                         ),
                     },
-                    "authorized": {
-                        "type": "boolean",
+                    "approval_token": {
+                        "type": "string",
                         "description": (
-                            "Must be true and reflect explicit user "
-                            "approval of this exact command."
+                            "One-shot approval token created by the user via "
+                            "gms_rt_approval_create; replaces the old "
+                            "client-declared authorized=true (not a security "
+                            "boundary)."
                         ),
                     },
                     "timeout": {
@@ -1621,7 +1963,7 @@ def tools() -> list[dict[str, Any]]:
                         "description": "Seconds (1-600, default 120).",
                     },
                 },
-                "required": ["device", "command", "authorized"],
+                "required": ["device", "command", "approval_token"],
                 "additionalProperties": False,
             },
         },
@@ -1650,14 +1992,29 @@ def response(request_id: Any, result: Any = None, error: Any = None) -> None:
     sys.stdout.flush()
 
 
+def cluster_devices_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    args: list[str] = []
+    worker_id = str(arguments.get("worker_id") or "").strip()
+    query = str(arguments.get("query") or "").strip()
+    if worker_id:
+        args.extend(["--worker", worker_id])
+    if query:
+        args.extend(["--query", query])
+    return run_cli("gms-rt-cluster-devices", args)
+
+
 _TOOL_HANDLERS = {
     "gms_rt_run": run_tool,
     "gms_rt_commands": commands_tool,
     "gms_rt_describe": describe_tool,
     "gms_rt_devices": devices_tool,
+    "gms_rt_cluster_workers": lambda args: run_cli("gms-rt-cluster-workers"),
+    "gms_rt_cluster_devices": cluster_devices_tool,
     "gms_rt_auth_status": auth_status_tool,
     "gms_rt_auth_login": auth_login_tool,
     "gms_rt_auth_elevate": auth_elevate_tool,
+    "gms_rt_agent_enroll": agent_enroll_tool,
+    "gms_rt_approval_create": approval_create_tool,
     "gms_rt_burn_firmware": burn_firmware_tool,
     "gms_rt_test_start": test_start_tool,
     "gms_rt_jobs_list": jobs_list_tool,

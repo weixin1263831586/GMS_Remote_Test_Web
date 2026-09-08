@@ -559,7 +559,10 @@ async def test_disconnect_stops_source_even_when_target_is_offline():
     with patch(
         "features.cluster.get_cluster_service",
         return_value=SimpleNamespace(
-            repository=SimpleNamespace(get_worker=lambda _worker_id: None)
+            repository=SimpleNamespace(
+                get_worker=lambda _worker_id: None,
+                list_devices=lambda _worker_id: [],
+            )
         ),
     ), patch(
         "features.cluster.api._run_worker_command", run

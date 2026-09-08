@@ -21,7 +21,7 @@ MIGRATION_BYTE_LIMITS = {
     'web/static/css/common.css': 130667,      # target: < 50 KB after split
     'web/static/js/navigation.js': 50 * 1024,
     'web/static/js/api-constants.js': 36286,
-    'web/static/js/pages/test-suite-browser.js': 124835,   # target: < 50 KB (+refresh ghost-device filter & render signature; R21 per-worker browser cache)
+    'web/static/js/pages/test-suite-browser.js': 125721,   # target: < 50 KB (R14 browser context isolation + R21 direct local fetch & request generation)
     'web/static/js/pages/report-analysis.js': 116723,      # target: < 50 KB
     'web/static/js/pages/firmware-burn.js': 128896,        # target: < 50 KB
     'web/static/js/pages/api-docs.js': 50139,

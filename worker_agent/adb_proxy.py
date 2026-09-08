@@ -759,23 +759,111 @@ def _hub_device_wait_seconds(backend_count: int) -> float:
 
 
 def _force_kill_adb_port(port: int) -> None:
-    """Kill every process listening on the given loopback port.
+    """Kill only processes LISTENING on the given loopback port.
 
     ``adb kill-server`` can fail when the server is in a half-broken state
     (the exact scenario that triggers the protocol fault). Use ``fuser`` to
     forcefully clear the port so adb-hub can bind cleanly.
+
+    R02: the previous ``fuser -k PORT/tcp`` killed EVERY process with a
+    socket on the port — including outbound client connections from
+    unrelated tooling. Restrict the kill to processes that OWN a listening
+    socket bound to the loopback address the managed hub uses, so foreign
+    listeners and stray clients are not shot.
     """
-    for socket_addr in (f"127.0.0.1:{port}", f"127.0.0.1:{port}"):
-        _kill_adb_server(socket_addr)
-    # fuser fallback: OS-level kill of anything still on the port.
-    subprocess.run(
-        ["fuser", "-k", f"{port}/tcp"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-        check=False,
-    )
+    for socket_addr in ("127.0.0.1:5037", "127.0.0.1:5039"):
+        if _socket_port(socket_addr) == port:
+            _kill_adb_server(socket_addr)
+    # fuser fallback: only the process holding the LISTEN socket on the
+    # loopback port. fuser has no "listening only" flag, so narrow by
+    # namespace (tcp), port and the fact that adb servers are the only
+    # intended listeners; -k still targets processes, not connections,
+    # when given a single port spec.
+    listening = _listeners_on_loopback_port(port)
+    for pid in listening:
+        subprocess.run(
+            ["kill", "-TERM", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
     time.sleep(0.5)
+
+
+def _socket_port(socket_addr: str) -> int:
+    try:
+        return int(str(socket_addr).rsplit(":", 1)[1])
+    except (IndexError, ValueError):
+        return -1
+
+
+def _listeners_on_loopback_port(port: int) -> list[int]:
+    """PIDs with a LISTEN socket on 127.0.0.1:<port> (or [::1]:<port>).
+
+    Parses /proc/net/tcp{,6} instead of a blanket ``fuser -k``: the pid is
+    resolved through /proc/<pid>/fd -> socket inode, which only matches the
+    owning listeners, never clients with established connections.
+    """
+    inodes: set[int] = set()
+    for path, address_column in (
+        ("/proc/net/tcp", 1),
+        ("/proc/net/tcp6", 1),
+    ):
+        try:
+            content = Path(path).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in content:
+            fields = line.split()
+            if len(fields) < 10 or fields[3] != "0A":  # TCP_LISTEN
+                continue
+            local_address = fields[address_column]
+            try:
+                address_hex, port_hex = local_address.split(":")
+            except ValueError:
+                continue
+            try:
+                if int(port_hex, 16) != port:
+                    continue
+            except ValueError:
+                continue
+            # Loopback only: v4 127.0.0.0/8 prefix 01..., v6 ::1.
+            if not (address_hex.upper().startswith("0100") or address_hex == "00000000000000000000000000000001"):
+                continue
+            try:
+                inodes.add(int(fields[9]))
+            except ValueError:
+                continue
+    if not inodes:
+        return []
+    pids: list[int] = []
+    try:
+        proc_dirs = list(Path("/proc").iterdir())
+    except OSError:
+        return []
+    for proc_entry in proc_dirs:
+        if not proc_entry.name.isdigit():
+            continue
+        fd_dir = proc_entry / "fd"
+        try:
+            descriptors = list(fd_dir.iterdir())
+        except OSError:
+            continue
+        for descriptor in descriptors:
+            try:
+                target = descriptor.readlink()
+            except OSError:
+                continue
+            text = str(target)
+            if text.startswith("socket:["):
+                try:
+                    if int(text[8:-1]) in inodes:
+                        pids.append(int(proc_entry.name))
+                        break
+                except ValueError:
+                    continue
+    return sorted(set(pids))
 
 
 def _read_hub_config(path: Path) -> dict[str, Any]:
