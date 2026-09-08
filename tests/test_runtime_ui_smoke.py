@@ -43,6 +43,12 @@ class RuntimeUiHarness(unittest.TestCase):
         env["ATS_WORKER_ENABLED"] = "0"
         env["GMS_AUTH_REQUIRED"] = "true"
         env["GMS_SECURE_COOKIES"] = "false"
+        # 终端 E2E 需要确定性的本地 PTY 通道：不设置时配置回退到
+        # config.example.json 的 192.0.2.10（TEST-NET），CI 上会走真实
+        # SSH 分支并连接失败，terminal 用例集体超时。127.0.0.1 属于
+        # _LOCAL_HOSTS，终端服务进入 local PTY 模式，与主机环境无关。
+        env["UBUNTU_HOST"] = "127.0.0.1"
+        env["UBUNTU_USER"] = "ui-smoke"
         cls.server = subprocess.Popen(
             ["python", "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(cls.port)],
             cwd=Path(__file__).resolve().parents[1],
@@ -5724,9 +5730,12 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                         self.assertIsNotNone(header_box)
                         self.assertIsNotNone(select_box)
                         self.assertIsNotNone(maximize_box)
-                        self.assertLessEqual(header_box["height"], 27.5)
-                        self.assertAlmostEqual(select_box["height"], 22, delta=0.5)
-                        self.assertAlmostEqual(maximize_box["height"], 22, delta=0.5)
+                        # ba3be31 为触屏可达性把簇模式 header 控件从 22px 提到
+                        # 24px（header = 24 内容 + 4 padding + 1 边框 = 29），
+                        # 同步契约：header ≤ 29.5、select/按钮高 24。
+                        self.assertLessEqual(header_box["height"], 29.5)
+                        self.assertAlmostEqual(select_box["height"], 24, delta=0.5)
+                        self.assertAlmostEqual(maximize_box["height"], 24, delta=0.5)
                     refresh_style = refresh_button.evaluate(
                         "button=>({border:button.style.border||getComputedStyle(button).border,"
                         "background:getComputedStyle(button).backgroundColor,"

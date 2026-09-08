@@ -1,3 +1,4 @@
+import threading
 import time
 from unittest.mock import patch
 
@@ -13,8 +14,17 @@ def test_detailed_probe_serves_from_cache_and_enriches_in_background():
 
     detail 属性由后台 enrichment 线程填充；首轮 heartbeat 的详情字段
     允许为空，最坏晚到一轮（评审第七节的设计契约）。
+
+    注意：首轮"详情为空"不是硬契约——seed 之后、同步读取之前，后台
+    线程可能恰好完成首轮 refresh（全量测试套件下 CPU 竞争会放大这个
+    窗口，此前"首轮必须无 detail 字段"的断言因此偶发失败）。硬契约是：
+    同步路径绝不为 detail 发起或等待 ADB 往返，detail 一律来自缓存。
     """
     def run(argv, timeout=10, env=None):
+        # 按调用时刻记录调用方线程：mock 的 call_args_list 无法事后区分
+        # 调用来自主线程还是后台 enrichment 线程（生成器里
+        # threading.current_thread() 求值于测试主线程，恒为 MainThread）。
+        shell_calls.append((threading.current_thread().name, tuple(argv[:4])))
         if argv[:3] == ["adb", "devices", "-l"]:
             return "List of devices attached\nABC device product:rk model:Box transport_id:1\n"
         if argv[:4] == ["adb", "-s", "ABC", "shell"]:
@@ -28,23 +38,25 @@ def test_detailed_probe_serves_from_cache_and_enriches_in_background():
             return ""
         raise AssertionError(argv)
 
+    shell_calls: list[tuple[str, tuple[str, ...]]] = []
     _DEVICE_DETAILS_CACHE.pop("ABC", None)
     _details_refresh_at.pop("ABC", None)
     try:
         with patch("worker_agent.device_actions._run", side_effect=run) as runner:
             devices = probe_devices(include_details=True)
 
-            # 首轮：不阻塞等待 detail，返回快照 + base 属性。
-            assert devices[0]["properties"] == {
-                "product": "rk",
-                "model": "Box",
-                "transport_id": "1",
-            }
-            # 同步路径没有对设备做 detail shell 调用。
-            assert sum(
-                call.args[0][:4] == ["adb", "-s", "ABC", "shell"]
-                for call in runner.call_args_list
-            ) == 0
+            # 首轮：base 属性来自 `adb devices -l` 快照行。
+            assert devices[0]["properties"]["product"] == "rk"
+            assert devices[0]["properties"]["model"] in {"Box", "Living Room Box"}
+            assert devices[0]["properties"]["transport_id"] == "1"
+            # 硬契约：主线程（同步 probe 路径）从未发起 detail shell 调用；
+            # 后台 enrichment 线程的调用不受此限制（记录于调用时刻的线程名）。
+            assert not [
+                call for call in shell_calls
+                if call[0] == "MainThread"
+                and call[1] == ("adb", "-s", "ABC", "shell")
+            ]
+            assert runner.call_count >= 2
 
             # 后台 enrichment 线程完成一轮后，detail 属性从缓存提供。
             # （等待必须在 patch 块内：线程用的是模块级 _run。）

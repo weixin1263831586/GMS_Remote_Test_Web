@@ -276,6 +276,10 @@ def _adb_devices() -> list[dict[str, str]]:
 
 
 def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
+    # 校验顺序契约：schema/语义校验（source/target/generation/allowlist/
+    # transport 兼容性）必须先于外部依赖解析（adb 设备探测、adb-proxy
+    # 二进制）。否则非法请求（如 target address 为空）会先报"adb-proxy
+    # 未安装"，且触碰本地可执行文件解析/外部状态。
     if not re.fullmatch(r"[A-Z0-9]{8}", pair_code or ""):
         raise ValueError("invalid adb-proxy pair code")
     root = _state_root()
@@ -286,6 +290,21 @@ def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     if (_read_json(root / "target.json").get("imports") or []):
         raise RuntimeError("同一主机不能同时作为 ADB Proxy 设备来源和接入主机")
     requested = _validated_serials(payload.get("devices") or [])
+    requested_listen = str(payload.get("listen_address") or "").strip()
+    allowed_peer_address = str(
+        payload.get("allowed_peer_address") or ""
+    ).strip()
+    if not allowed_peer_address:
+        raise ValueError("ADB Proxy target address is empty")
+    # 语义校验阶段完成 DNS/内网地址约束（allowlist）与监听地址兼容性。
+    allowed_peers = sorted(_private_addresses(allowed_peer_address))
+    listen_host = (
+        _private_bind_address(requested_listen)
+        if requested_listen
+        else "0.0.0.0"
+    )
+
+    # ---- 语义校验通过，才解析外部依赖并触碰状态 ----
     live = _adb_devices()
     available = {
         item["serial"] for item in live if item.get("state") == "device"
@@ -296,18 +315,6 @@ def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
 
     root = _state_root(create=True)
     proxy_bin = _binary("adb-proxy")
-    requested_listen = str(payload.get("listen_address") or "").strip()
-    allowed_peer_address = str(
-        payload.get("allowed_peer_address") or ""
-    ).strip()
-    if not allowed_peer_address:
-        raise ValueError("ADB Proxy target address is empty")
-    allowed_peers = sorted(_private_addresses(allowed_peer_address))
-    listen_host = (
-        _private_bind_address(requested_listen)
-        if requested_listen
-        else "0.0.0.0"
-    )
     policy_path = root / "proxy.toml"
     _write_source_policy(policy_path, requested)
     _stop_managed(root / "proxy.pid", "adb-proxy")

@@ -501,6 +501,40 @@ def test_registration_forces_cached_suite_inventory_into_first_heartbeat(tmp_pat
     assert payload["suites"] == agent.suites
 
 
+def test_first_heartbeat_includes_suites_on_freshly_booted_host(tmp_path):
+    """刚开机主机的 monotonic 时钟小于 suite_scan_interval 时，注册后的
+    首次心跳仍必须携带 suites（回归：CI 容器开机 ~40s < 300s 间隔，
+    ``now - 0.0 >= interval`` 不成立导致 KeyError: 'suites'）。"""
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.suites = [{"suite_key": "CTS:17", "tools_path": "/suite/tools"}]
+    agent.last_suite_scan = float("inf")
+    agent.client = MagicMock()
+    agent.client.session_id = "session-1"
+    agent.client.connection_generation = 1
+    agent.client.heartbeat.side_effect = KeyboardInterrupt
+
+    with patch.object(agent, "registration", return_value={"worker_id": "worker-test"}), patch(
+        "worker_agent.app.scan_suites", return_value=agent.suites
+    ), patch(
+        "worker_agent.app.host_metrics", return_value={}
+    ), patch(
+        "worker_agent.app.probe_devices", return_value=[]
+    ), patch(
+        "worker_agent.app.discover_tradefed_processes", return_value=[]
+    ), patch.object(
+        agent.runtime, "recoverable_jobs", return_value=[]
+    ), patch.object(
+        agent.runtime, "fail_interrupted_commands", return_value=[]
+    ), patch(
+        # 模拟刚开机 42 秒的主机：monotonic(42) < suite_scan_interval(300)。
+        "worker_agent.app.time.monotonic", side_effect=lambda: 42.0,
+    ):
+        agent.run()
+
+    payload = agent.client.heartbeat.call_args.args[0]
+    assert payload["suites"] == agent.suites
+
+
 def test_suite_failure_keeps_original_error_when_ack_is_retried(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()

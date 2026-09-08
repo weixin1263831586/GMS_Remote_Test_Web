@@ -78,3 +78,6 @@ testpaths = ["tests", "features", "worker_agent/tests"]
 pythonpath = ["."]
 norecursedirs = ["rk-skills", "skills", "tools", "data", ".worktrees"]
 addopts = ["-p", "no:xonsh"]
+# auto 模式：所有 async def 测试自动按 asyncio 执行，避免依赖每个测试
+# 显式标记；缺失该配置时异步测试会被静默跳过（CI 红灯根因之一）。
+asyncio_mode = "auto"

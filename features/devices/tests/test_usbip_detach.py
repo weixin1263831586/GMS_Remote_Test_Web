@@ -55,9 +55,9 @@ class ParseUsbipPortEntriesTests(unittest.TestCase):
     def test_parses_entries_structurally(self):
         entries = usbip.parse_usbip_port_entries(self.MULTI_HOST_LISTING)
         self.assertEqual(entries, [
-            {"port": "00", "busid": "1-2", "host": "10.10.10.1"},
-            {"port": "01", "busid": "1-21", "host": "10.10.10.10"},
-            {"port": "02", "busid": "2-1", "host": "10.10.10.1"},
+            {"port": "00", "busid": "1-2", "host": "10.10.10.1", "local_busid": ""},
+            {"port": "01", "busid": "1-21", "host": "10.10.10.10", "local_busid": ""},
+            {"port": "02", "busid": "2-1", "host": "10.10.10.1", "local_busid": ""},
         ])
 
     def test_parses_standard_linux_usbip_url_format(self):
@@ -69,7 +69,7 @@ class ParseUsbipPortEntriesTests(unittest.TestCase):
         )
         self.assertEqual(
             usbip.parse_usbip_port_entries(listing),
-            [{"port": "03", "busid": "1-2", "host": "10.0.0.5"}],
+            [{"port": "03", "busid": "1-2", "host": "10.0.0.5", "local_busid": "2-1"}],
         )
 
     def test_host_prefix_does_not_match_longer_host(self):

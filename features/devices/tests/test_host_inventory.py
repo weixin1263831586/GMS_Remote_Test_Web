@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from features.devices import host_inventory
@@ -69,11 +70,13 @@ class HostLocalInventoryTests(unittest.TestCase):
             {"busid": "2-1", "serial": "S2"},
             {"busid": "3-1", "serial": ""},
         ])
-        with patch.object(host_inventory, "usbip_manager", manager):
+        with patch.object(host_inventory, "usbip_manager", manager), patch.object(
+            host_inventory, "_attached_usbip_serial_map", return_value={},
+        ):
             host_inventory._refresh("hcq@10.0.0.5")
             result = host_inventory.host_local_device_inventory("hcq@10.0.0.5")
         self.assertTrue(result["available"])
-        # 全部设备展示；无序列号设备回退显示 BUSID。
+        # 全部设备展示；无序列号且无 USB/IP 映射时回退显示 BUSID。
         self.assertEqual(result["devices"], ["S1", "S2", "3-1"])
         self.assertEqual(result["source_os"], "windows")
 
@@ -98,6 +101,135 @@ class HostLocalInventoryTests(unittest.TestCase):
         self.assertIsNone(devices_port.host_local_device_inventory("hcq@10.0.0.5"))
         host_inventory.register_devices_port()
         self.assertIsNone(devices_port.host_local_device_inventory("10.0.0.5"))
+
+
+def _shell_result(stdout="", ok=True):
+    return SimpleNamespace(ok=ok, stdout=stdout)
+
+
+class AttachedUsbipSerialBackfillTests(unittest.TestCase):
+    """USB/IP 共享期间的序列号回填（直连设备列显示真实序列号）。"""
+
+    def setUp(self):
+        host_inventory._cache.clear()
+        host_inventory._inflight.clear()
+
+    def tearDown(self):
+        host_inventory._cache.clear()
+        host_inventory._inflight.clear()
+
+    def test_backfills_serial_for_device_attached_via_usbip(self):
+        manager = _fake_usbip_manager(devices=[
+            {"busid": "1-1", "serial": ""},
+            {"busid": "2-1", "serial": "S2"},
+        ])
+        with patch.object(host_inventory, "usbip_manager", manager), patch.object(
+            host_inventory,
+            "_attached_usbip_serial_map",
+            return_value={("10.0.0.5", "1-1"): "RK3562GMS7"},
+        ):
+            host_inventory._refresh("hcq@10.0.0.5")
+            result = host_inventory.host_local_device_inventory("hcq@10.0.0.5")
+        self.assertEqual(result["devices"], ["RK3562GMS7", "S2"])
+
+    def test_unique_busid_backfills_even_with_unknown_attach_host(self):
+        # usbip port 里的 host 是 attach 用的地址（可能是 Tailscale IP），
+        # 与来源 user@host 不同；BUSID 全局唯一时仍应回填。
+        manager = _fake_usbip_manager(devices=[{"busid": "1-1", "serial": ""}])
+        with patch.object(host_inventory, "usbip_manager", manager), patch.object(
+            host_inventory,
+            "_attached_usbip_serial_map",
+            return_value={("100.82.1.32", "1-1"): "c3d9b8674f4b94f6"},
+        ):
+            host_inventory._refresh("hcq@10.0.0.5")
+            result = host_inventory.host_local_device_inventory("hcq@10.0.0.5")
+        self.assertEqual(result["devices"], ["c3d9b8674f4b94f6"])
+
+    def test_ambiguous_busid_keeps_busid_display(self):
+        # 来源主机不在映射里（如 attach 走 Tailscale 地址对不上），且
+        # 不同来源主机同 BUSID 序列号不唯一：宁显 BUSID 不错配。
+        manager = _fake_usbip_manager(devices=[{"busid": "1-1", "serial": ""}])
+        manager.config_manager.load_config.return_value = {}
+        with patch.object(host_inventory, "usbip_manager", manager), patch.object(
+            host_inventory,
+            "_attached_usbip_serial_map",
+            return_value={
+                ("100.82.1.32", "1-1"): "S1",
+                ("10.0.0.6", "1-1"): "S2",
+            },
+        ):
+            host_inventory._refresh("hcq@10.0.0.5")
+            result = host_inventory.host_local_device_inventory("hcq@10.0.0.5")
+        self.assertEqual(result["devices"], ["1-1"])
+
+
+class AttachedUsbipSerialMapTests(unittest.TestCase):
+    """(来源主机, 来源BUSID) -> 序列号 映射的构建。"""
+
+    def _run(self, outputs):
+        def fake_run(command, timeout=10):
+            return outputs.pop(0)
+        return fake_run
+
+    def test_url_format_uses_local_busid_directly(self):
+        outputs = [
+            _shell_result(
+                "Port 00: <Port in Use>\n"
+                "  3-1 -> usbip://10.0.0.5:3240/1-1\n"
+            ),
+            _shell_result("3-1 c3d9b8674f4b94f6\n"),
+        ]
+        with patch.object(
+            host_inventory, "_run_on_test_host", self._run(outputs),
+        ):
+            mapping = host_inventory._attached_usbip_serial_map()
+        self.assertEqual(mapping, {("10.0.0.5", "1-1"): "c3d9b8674f4b94f6"})
+
+    def test_pipe_format_joins_via_vhci_status_port(self):
+        outputs = [
+            _shell_result(
+                "Port 00: <Port in Use>\n"
+                "    1-1 | 2207:0006 | SSI 17 | Remote USB/IP host 10.0.0.5\n"
+            ),
+            _shell_result("3-1 c3d9b8674f4b94f6\n"),
+            _shell_result(
+                "hub port sta spd dev      sockfd local_busid\n"
+                "hs  0000 008 480 00000002 7      3-1\n"
+            ),
+        ]
+        with patch.object(
+            host_inventory, "_run_on_test_host", self._run(outputs),
+        ):
+            mapping = host_inventory._attached_usbip_serial_map()
+        self.assertEqual(mapping, {("10.0.0.5", "1-1"): "c3d9b8674f4b94f6"})
+
+    def test_single_entry_fallback_when_join_fails(self):
+        outputs = [
+            _shell_result(
+                "Port 00: <Port in Use>\n"
+                "    1-1 | 2207:0006 | SSI 17 | Remote USB/IP host 10.0.0.5\n"
+            ),
+            _shell_result("3-1 c3d9b8674f4b94f6\n"),
+            _shell_result(""),  # status 不可读：格式兜底生效
+        ]
+        with patch.object(
+            host_inventory, "_run_on_test_host", self._run(outputs),
+        ):
+            mapping = host_inventory._attached_usbip_serial_map()
+        self.assertEqual(mapping, {("10.0.0.5", "1-1"): "c3d9b8674f4b94f6"})
+
+    def test_port_command_failure_returns_empty(self):
+        with patch.object(
+            host_inventory, "_run_on_test_host",
+            self._run([_shell_result(ok=False)]),
+        ):
+            self.assertEqual(host_inventory._attached_usbip_serial_map(), {})
+
+    def test_exception_returns_empty(self):
+        def boom(command, timeout=10):
+            raise RuntimeError("ssh down")
+        with patch.object(host_inventory, "_run_on_test_host", boom):
+            self.assertEqual(host_inventory._attached_usbip_serial_map(), {})
 
 
 if __name__ == "__main__":
