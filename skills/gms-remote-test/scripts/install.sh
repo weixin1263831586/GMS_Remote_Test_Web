@@ -29,6 +29,17 @@ info() {
     printf '%s\n' "$*"
 }
 
+# 4.txt P1a：TOML basic string 转义。Bash %q 是 shell 转义而非 TOML 转义，
+# 生成未加引号的裸值会让 Codex 解析 config.toml 失败。
+toml_str() {
+    local s="$1"
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\t'/\\t}
+    s=${s//$'\n'/\\n}
+    printf '"%s"' "$s"
+}
+
 case "$SERVER_URL" in
     __GMS_*|'') fail "请从 Controller 的 /api/system/skills/install.sh 获取安装脚本，或设置 GMS_REMOTE_TEST_SERVER" ;;
 esac
@@ -269,15 +280,62 @@ install_portable_jq() {
     mv "$temporary" "$target"
 }
 
+install_jq_from_controller() {
+    # 2026-09-08 audit §十二 (fix): the Controller itself serves the pinned
+    # jq binary from the same origin that already provides the signed skill
+    # ZIP — no GitHub access needed. The downloaded file is verified against
+    # the X-GMS-SHA256 response header before it is installed.
+    local target="${RUNTIME_BIN_DIR}/jq"
+    local temporary="${target}.tmp.$$"
+    local expected actual
+    info "jq not found; fetching the Controller-pinned jq binary"
+    local headers
+    headers=$(curl "${CURL_ARGS[@]}" -sS -D - -o "$temporary" \
+        "${SERVER_URL%/}/api/system/tools/jq" 2>/dev/null) || {
+        rm -f -- "$temporary"
+        return 1
+    }
+    expected=$(printf '%s\n' "$headers" | tr -d '\r' \
+        | sed -n 's/^X-GMS-SHA256:[[:space:]]*//Ip' | head -n 1)
+    if [ -z "$expected" ]; then
+        rm -f -- "$temporary"
+        return 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual=$(sha256sum "$temporary" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        actual=$(shasum -a 256 "$temporary" | awk '{print $1}')
+    else
+        rm -f -- "$temporary"
+        return 1
+    fi
+    [ "$actual" = "$expected" ] || {
+        rm -f -- "$temporary"
+        warning "Controller jq SHA-256 mismatch; falling back"
+        return 1
+    }
+    chmod 755 "$temporary"
+    mv "$temporary" "$target"
+    info "jq installed from Controller (verified): $target"
+    return 0
+}
+
 if ! command -v jq >/dev/null 2>&1 && [ ! -x "${RUNTIME_BIN_DIR}/jq" ]; then
     # 2026-09-08 audit §十二: enterprise build servers often cannot reach
-    # github.com. Prefer the bundled CLI's own JSON handling (python3 ships
-    # with every target OS) and only fall back to downloading jq when no
-    # python3 exists either.
-    if command -v python3 >/dev/null 2>&1; then
-        info "jq not found; python3 is available, the CLI will use its JSON fallback (no GitHub download)"
-    else
-        install_portable_jq
+    # github.com. Priority: Controller-served binary (same origin as the
+    # signed skill ZIP) → GitHub fallback → python3-only warning (the CLI
+    # requires jq for every command, so python3 alone is NOT a working
+    # fallback and must not be advertised as one).
+    if ! install_jq_from_controller; then
+        if command -v python3 >/dev/null 2>&1; then
+            # python3 可用于 GitHub 不可达场景下的 jq 校验工具链，
+            # 但 CLI 本身仍需要 jq；尝试 GitHub，失败则明确报错。
+            install_portable_jq || \
+                fail "jq 不可用且 Controller/GitHub 下载均失败；请手动安装 jq (sudo apt-get install jq)"
+        else
+            install_portable_jq || \
+                fail "jq 不可用且无法下载；请手动安装 jq (sudo apt-get install jq)"
+        fi
     fi
 fi
 
@@ -398,7 +456,9 @@ install_agent_profile() {
         fi
     } > "${GMS_MCP_DIR}/${agent}.env"
     chmod 600 "${GMS_MCP_DIR}/${agent}.env"
-    info "Agent env profile: ${GMS_MCP_DIR}/${agent}.env (source it in the agent's launch env)"
+    # 日志必须走 stderr：本函数的 stdout 被 command substitution 捕获，
+    # 混入任何进度日志都会污染 profile_name（4.txt P0-5）。
+    info "Agent env profile: ${GMS_MCP_DIR}/${agent}.env (source it in the agent's launch env)" >&2
     printf '%s\n' "$profile_name"
 }
 
@@ -410,17 +470,19 @@ configure_codex_mcp() {
         info "Codex MCP already configured: $codex_config"
         return 0
     fi
+    # 4.txt P1a：不要用 Bash %q 拼 TOML（%q 是 shell 转义，生成的
+    # 未加引号裸值不是合法 TOML 字符串）。toml_str 产出规范的 "..." 值。
+    local token_file="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${profile_name}.token"
     {
         printf '\n[mcp_servers.gms_remote_test]\n'
         printf 'command = "python3"\n'
-        printf 'args = ["%s"]\n' "$GMS_MCP_SERVER"
+        printf 'args = [%s]\n' "$(toml_str "$GMS_MCP_SERVER")"
         printf '\n[mcp_servers.gms_remote_test.env]\n'
-        printf 'GMS_REMOTE_TEST_SERVER = %q\n' "$SERVER_URL"
-        printf 'GMS_RT_PROFILE = %q\n' "$profile_name"
-        printf 'GMS_AUTH_TOKEN_FILE = "%s/%s.token"\n' \
-            "${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test" "$profile_name"
+        printf 'GMS_REMOTE_TEST_SERVER = %s\n' "$(toml_str "$SERVER_URL")"
+        printf 'GMS_RT_PROFILE = %s\n' "$(toml_str "$profile_name")"
+        printf 'GMS_AUTH_TOKEN_FILE = %s\n' "$(toml_str "$token_file")"
         if [ -n "${GMS_INSTALL_CA_CERT:-}" ]; then
-            printf 'GMS_CURL_CA_CERT = %q\n' "$GMS_INSTALL_CA_CERT"
+            printf 'GMS_CURL_CA_CERT = %s\n' "$(toml_str "$GMS_INSTALL_CA_CERT")"
         fi
     } >> "$codex_config"
     info "Codex MCP registered: $codex_config"
@@ -431,7 +493,10 @@ configure_kimi_mcp() {
     local kimi_config="${KIMI_CODE_HOME:-${HOME}/.kimi-code}/mcp.json"
     mkdir -p "$(dirname "$kimi_config")"
     if command -v python3 >/dev/null 2>&1; then
-        python3 - "$kimi_config" "$GMS_MCP_SERVER" "$SERVER_URL" "$profile_name" "${GMS_INSTALL_CA_CERT:-}" <<'PY'
+        # 4.txt P1a：token 路径必须传绝对路径（argv[6]）。env 值里的 "~"
+        # 不会被 tilde 展开，CLI 的 [ -r "$GMS_AUTH_TOKEN_FILE" ] 会失败。
+        local kimi_token_file="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${profile_name}.token"
+        python3 - "$kimi_config" "$GMS_MCP_SERVER" "$SERVER_URL" "$profile_name" "${GMS_INSTALL_CA_CERT:-}" "$kimi_token_file" <<'PY'
 import json, sys
 from pathlib import Path
 
@@ -452,9 +517,7 @@ server = {
     "env": {
         "GMS_REMOTE_TEST_SERVER": sys.argv[3],
         "GMS_RT_PROFILE": sys.argv[4],
-        "GMS_AUTH_TOKEN_FILE": "~/.local/state/gms-remote-test/"
-        + sys.argv[4]
-        + ".token",
+        "GMS_AUTH_TOKEN_FILE": sys.argv[6],
     },
 }
 ca = sys.argv[5]

@@ -48,6 +48,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -57,7 +58,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.9.0"
+SERVER_VERSION = "0.10.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -591,6 +592,26 @@ def approval_create_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if not tool or not device:
         return "Missing required arguments: tool, device", True
     args = ["--tool", tool, "--device", device, "--command", command]
+    # 4.txt P1 精确绑定：burn 审批必须绑定固件 SHA256（服务端据此派生
+    # 命令串），否则服务端 400。
+    if tool == "gms_rt_burn_firmware":
+        sha = str(arguments.get("firmware_sha256") or "").strip().lower()
+        if not sha:
+            return (
+                "Missing required argument: firmware_sha256 (SHA-256 of the "
+                "exact update.img to burn; compute it with sha256sum before "
+                "requesting approval)",
+                True,
+            )
+        args = ["--tool", tool, "--device", device,
+                "--firmware-sha256", sha]
+        wipe = arguments.get("wipe_data")
+        if wipe is not None:
+            args += ["--wipe-data",
+                     "false" if wipe is False or str(wipe).lower() in ("0", "false", "no") else "true"]
+        mode = str(arguments.get("burn_mode") or "").strip()
+        if mode:
+            args += ["--burn-mode", mode]
     return run_cli("gms-rt-approval-create", args)
 
 
@@ -629,9 +650,15 @@ def _resolve_worker_for_device(
         return None, text
     try:
         payload = json.loads(text)
-        resolved = str(payload.get("worker_id") or "").strip()
     except ValueError:
         return None, text
+    # run_cli returns the compacted CLI envelope {"ok": true, "data": {...}};
+    # 4.txt P1b: the resolver used to read the top level, which is always
+    # empty — read worker_id from the data object, with a top-level fallback
+    # for non-envelope output.
+    data = payload.get("data") if isinstance(payload, dict) else None
+    source = data if isinstance(data, dict) else payload
+    resolved = str(source.get("worker_id") or "").strip()
     if not resolved:
         return None, text
     return resolved, None
@@ -641,10 +668,13 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Burn firmware to one or more devices (typed, requires elevation).
 
     The CLI copies the image to the worker host over SSH (direct mode) and
-    posts /api/burn/firmware; wipes /data by default. Long-running: bump the
-    default timeout. Destructive: requires a one-shot approval token bound to
-    this exact burn (server-enforced; the caller-side authorized flag was
-    never a security boundary).
+    posts /api/burn/firmware; wipes /data by default. Destructive: requires a
+    one-shot approval token bound to this exact burn (server-enforced; the
+    caller-side authorized flag was never a security boundary).
+
+    异步模型（15.txt §十一，Kimi 等客户端单次 tool call 默认 60s）：
+    wait=false（默认）立即后台启动 CLI 并返回 {operation_id, status: "running"}，
+    之后用 gms_rt_burn_status 轮询；wait=true 保持旧的同步等待语义（≤timeout）。
     """
     firmware_path = str(arguments.get("firmware_path") or "").strip()
     device = str(arguments.get("device") or "").strip()
@@ -656,10 +686,11 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if not approval_token:
         return (
             "denied: firmware burn is destructive and requires a one-shot "
-            "approval token. Ask the user to run "
+            "approval token bound to the exact firmware. Ask the user to run "
             "'gms-rt-approval-create --tool gms_rt_burn_firmware --device "
-            f"{device} --command burn_firmware:{device}' under their own "
-            "session, then pass approval_token here.",
+            f"{device} --firmware-sha256 <sha256 of update.img>' under their "
+            "own session (the approval binds the firmware digest, device "
+            "list, wipe_data and burn_mode), then pass approval_token here.",
             True,
         )
     wipe_data = arguments.get("wipe_data")
@@ -681,11 +712,147 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             except (TypeError, ValueError):
                 return "wait_online_max must be an integer (seconds)", True
     args = [firmware_path, device, wipe_str, "--approval-token", approval_token, *extra]
-    return run_cli(
-        "gms-rt-burn-firmware",
-        args,
-        timeout=arguments.get("timeout") if arguments.get("timeout") is not None else 1800,
+    if arguments.get("wait") is True:
+        return run_cli(
+            "gms-rt-burn-firmware",
+            args,
+            timeout=arguments.get("timeout") if arguments.get("timeout") is not None else 1800,
+        )
+    # 异步：后台启动 CLI，立即返回 operation_id；结果落盘供 burn_status 读取。
+    return start_burn_operation("gms-rt-burn-firmware", args)
+
+
+def _burn_operations_dir() -> Path:
+    base = os.environ.get(
+        "GMS_BURN_OPS_DIR",
+        os.path.join(
+            os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+            "gms-remote-test", "burn-ops",
+        ),
     )
+    return Path(base)
+
+
+def _process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    # Detached children become zombies until reaped; a zombie means the CLI
+    # already exited, so treat it as finished rather than "running".
+    stat_path = Path(f"/proc/{pid}/stat")
+    try:
+        fields = stat_path.read_text(encoding="utf-8", errors="ignore").split()
+        return fields[2] != "Z"
+    except (OSError, IndexError):
+        return True
+
+
+def start_burn_operation(command: str, args: list[str]) -> tuple[str, bool]:
+    """Launch a long CLI op detached; return an operation id immediately.
+
+    The CLI runs detached from this MCP subprocess (setsid, own process
+    group) so a 60s client-side tool timeout can never kill a burn. Its
+    stdout/stderr land in a spool file the status tool parses for the final
+    JSON envelope.
+    """
+    ops_dir = _burn_operations_dir()
+    try:
+        ops_dir.mkdir(parents=True, exist_ok=True)
+        op_id = f"burn-{int(time.time())}-{os.getpid()}-{os.urandom(3).hex()}"
+        op_dir = ops_dir / op_id
+        op_dir.mkdir(mode=0o700)
+        meta = op_dir / "meta.json"
+        log_path = op_dir / "output.log"
+        argv = build_argv(command, args)
+        # SIM115: the handle must stay open across Popen (the child writes to
+        # it) and is closed deterministically in the finally block below.
+        log_handle = open(log_path, "w")  # noqa: SIM115
+        try:
+            # setsid: decouple from the MCP process group so client-side
+            # cancellation of the tool call leaves the burn running.
+            process = subprocess.Popen(
+                argv,
+                cwd=os.getcwd(),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        finally:
+            log_handle.close()
+        meta.write_text(json.dumps({
+            "operation_id": op_id,
+            "command": normalize_command(command),
+            "pid": process.pid,
+            "started_at": time.time(),
+        }), encoding="utf-8")
+        return json.dumps({
+            "ok": True,
+            "operation_id": op_id,
+            "status": "running",
+            "command": normalize_command(command),
+            "hint": (
+                "poll gms_rt_burn_status(operation_id=...) every 20-30s; "
+                "each MCP call stays short"
+            ),
+        }), False
+    except OSError as error:
+        return f"failed to start background burn: {error}", True
+
+
+def burn_status_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Poll a background burn operation started with wait=false."""
+    operation_id = str(arguments.get("operation_id") or "").strip()
+    if not operation_id or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", operation_id):
+        return "Missing or invalid required argument: operation_id", True
+    op_dir = _burn_operations_dir() / operation_id
+    meta_path = op_dir / "meta.json"
+    log_path = op_dir / "output.log"
+    if not meta_path.is_file() or not re.fullmatch(r"burn-[0-9a-f-]+", operation_id):
+        return f"operation not found: {operation_id}", True
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return f"operation metadata unreadable: {operation_id}", True
+    pid = int(meta.get("pid") or 0)
+    running = bool(pid) and _process_alive(pid)
+    try:
+        log_text = log_path.read_text(
+            encoding="utf-8", errors="ignore"
+        ) if log_path.is_file() else ""
+    except OSError:
+        log_text = ""
+    payload: dict[str, Any] = {
+        "ok": True,
+        "operation_id": operation_id,
+        "command": meta.get("command"),
+        "status": "running" if running else "finished",
+    }
+    if not running:
+        # CLI 已退出：从日志尾部提取 JSON envelope 作为最终结果。
+        final = None
+        for line in reversed(log_text.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    candidate = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(candidate, dict) and "ok" in candidate:
+                    final = candidate
+                    break
+        if final is not None:
+            payload["result"] = final
+            payload["exit_code"] = final.get("exit_code")
+        else:
+            payload["diagnostics"] = bounded_text(log_text)[:MAX_OUTPUT_BYTES]
+    else:
+        # 运行中：给一段尾部日志帮助判断进度。
+        payload["recent_output"] = bounded_text(log_text)
+    return json.dumps(payload, ensure_ascii=False), False
 
 
 def reports_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -1599,8 +1766,11 @@ def tools() -> list[dict[str, Any]]:
                 "(gms-rt-approval-create). MUST run under the user's own "
                 "human session (cookie), never an agent token. Bindings: "
                 "tool + device + exact command, 5-minute TTL, single use. "
-                "The agent then passes the token to gms_rt_shell_exec / "
-                "gms_rt_burn_firmware as approval_token."
+                "For gms_rt_burn_firmware the approval additionally binds "
+                "the firmware SHA-256, wipe_data and burn_mode (server-"
+                "derived operation string), so it is valid for exactly that "
+                "firmware. The agent then passes the token to "
+                "gms_rt_shell_exec / gms_rt_burn_firmware as approval_token."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1613,13 +1783,38 @@ def tools() -> list[dict[str, Any]]:
                     },
                     "device": {
                         "type": "string",
-                        "description": "Target device serial.",
+                        "description": (
+                            "Target device serial, comma-separated for "
+                            "multi-device burns."
+                        ),
                     },
                     "command": {
                         "type": "string",
                         "description": (
-                            "Exact command (or burn_firmware:<devices>) "
-                            "being approved."
+                            "Exact command being approved (shell_exec only; "
+                            "ignored for burn, which derives its binding "
+                            "from firmware_sha256/wipe_data/burn_mode)."
+                        ),
+                    },
+                    "firmware_sha256": {
+                        "type": "string",
+                        "description": (
+                            "Required for gms_rt_burn_firmware: SHA-256 of "
+                            "the exact update.img to burn (compute with "
+                            "sha256sum)."
+                        ),
+                    },
+                    "wipe_data": {
+                        "type": "boolean",
+                        "description": (
+                            "Burn only: wipe userdata (default true)."
+                        ),
+                    },
+                    "burn_mode": {
+                        "type": "string",
+                        "enum": ["auto", "uf"],
+                        "description": (
+                            "Burn only: burn_mode binding (default auto)."
                         ),
                     },
                 },
@@ -1631,11 +1826,11 @@ def tools() -> list[dict[str, Any]]:
             "name": "gms_rt_burn_firmware",
             "description": (
                 "Burn firmware (update.img) to one or more devices via "
-                "gms-rt-burn-firmware. Requires an elevated session "
-                "(gms_rt_auth_elevate first); wipes /data by default. The "
-                "CLI copies the image to the worker host over SSH. Long "
-                "running: default timeout 1800s. Follow with "
-                "gms-rt-devices / gms_rt_shell to verify boot."
+                "gms-rt-burn-firmware. Destructive: requires a one-shot "
+                "approval token (gms_rt_approval_create; agent tokens can "
+                "never self-approve). Default wait=false returns an "
+                "operation_id immediately; poll gms_rt_burn_status every "
+                "20-30s so no single MCP call runs long."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1656,8 +1851,10 @@ def tools() -> list[dict[str, Any]]:
                         "description": (
                             "One-shot approval token from "
                             "gms_rt_approval_create (tool="
-                            "gms_rt_burn_firmware). Server-enforced; a burn "
-                            "without it is denied for agent tokens."
+                            "gms_rt_burn_firmware, bound to this firmware's "
+                            "SHA-256 + device list + wipe_data + burn_mode). "
+                            "Server-enforced; a burn without it is denied "
+                            "for agent tokens."
                         ),
                     },
                     "wipe_data": {
@@ -1674,10 +1871,47 @@ def tools() -> list[dict[str, Any]]:
                     },
                     "timeout": {
                         "type": "integer",
-                        "description": "Per-call timeout in seconds (default 1800).",
+                        "description": (
+                            "Per-call timeout in seconds (default 1800, only "
+                            "used with wait=true)."
+                        ),
+                    },
+                    "wait": {
+                        "type": "boolean",
+                        "description": (
+                            "false (default): start the burn in the "
+                            "background and return operation_id immediately "
+                            "(recommended for 60s-capped MCP clients like "
+                            "Kimi); poll with gms_rt_burn_status. true: "
+                            "legacy synchronous wait (may exceed client "
+                            "tool-call timeouts)."
+                        ),
                     },
                 },
                 "required": ["firmware_path", "device", "approval_token"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_burn_status",
+            "description": (
+                "Poll a background firmware burn started with "
+                "gms_rt_burn_firmware (wait=false). Returns "
+                "status=running with recent output, or status=finished with "
+                "the final JSON envelope and exit_code. Cheap: safe to call "
+                "every 20-30s."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation_id": {
+                        "type": "string",
+                        "description": (
+                            "operation_id returned by gms_rt_burn_firmware."
+                        ),
+                    },
+                },
+                "required": ["operation_id"],
                 "additionalProperties": False,
             },
         },
@@ -2016,6 +2250,7 @@ _TOOL_HANDLERS = {
     "gms_rt_agent_enroll": agent_enroll_tool,
     "gms_rt_approval_create": approval_create_tool,
     "gms_rt_burn_firmware": burn_firmware_tool,
+    "gms_rt_burn_status": burn_status_tool,
     "gms_rt_test_start": test_start_tool,
     "gms_rt_jobs_list": jobs_list_tool,
     "gms_rt_jobs_status": jobs_status_tool,

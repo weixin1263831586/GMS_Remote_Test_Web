@@ -6,10 +6,15 @@ import re
 import shlex
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import require_elevated_admin_when_auth_required
+from features.auth import (
+    AGENT_ROLE,
+    authentication_required,
+    get_authenticated_user,
+    require_elevated_admin,
+)
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
@@ -25,17 +30,11 @@ from .api_helpers import (
 from .api_helpers import (
     remote_file_exists as _remote_file_exists,
 )
-from .api_helpers import (
-    resolve_gsi_remote_image as _resolve_gsi_remote_image,
-)
 from .firmware_validation import (
     FirmwareValidationResult,
     validate_local_update_image,
     validate_remote_update_image,
 )
-from .gsi_diagnostics import diagnose_gsi_burn_failure
-from .gsi_transport import prepare_gsi_command, upload_gsi_assets
-from .models import SNBurnRequest
 from .source_flash import (
     SourceFlashError,
     run_source_flash,
@@ -43,12 +42,6 @@ from .source_flash import (
 from .upload_transport import upload_firmware_to_test_host as _upload_firmware_to_test_host
 from .usbip_transport import (
     device_flash_protocols as _device_flash_protocols,
-)
-from .usbip_transport import (
-    notify_skipped_devices as _notify_skip,
-)
-from .usbip_transport import (
-    partition_devices_by_flash_state as _partition_devices_by_flash_state,
 )
 from .usbip_transport import (
     prepare_usbip_firmware_routes as _prepare_usbip_firmware_routes,
@@ -184,26 +177,51 @@ async def get_firmware_upload_progress(request: Request):
 
 
 
+async def _require_elevated_admin_or_agent_approval(request: Request) -> None:
+    """Burn authorization gate (2026-09-08 audit §五, fix for agent burn).
+
+    Two credential paths may authorize a firmware burn:
+
+    - human session: a live admin elevation (cookie), exactly as before;
+    - agent_service principal (Bearer Agent Service Token): allowed through
+      the gate, but every later stage of the endpoint still consumes a
+      one-shot approval token bound to tool+device+burn command. Without
+      that approval the request never reaches the flasher.
+
+    Anything else fails with 403 in authenticated deployments. Unauthenticated
+    access is only possible when the deployment globally disabled auth (dev).
+    """
+    if not authentication_required():
+        return None
+    caller = get_authenticated_user(request)
+    if caller is not None and caller.role == AGENT_ROLE:
+        return caller
+    return require_elevated_admin(request)
+
+
 @router.post("/api/burn/firmware")
 async def burn_firmware(
     request: Request,
     h: str | None = Query(None),
     help: bool = Query(False),
-    _admin=Depends(require_elevated_admin_when_auth_required),
+    _authorized=Depends(_require_elevated_admin_or_agent_approval),
 ):
     """Firmware burning - supports file upload."""
     resp = runtime.generate_help_or_continue(help, "POST", "/api/burn/firmware")
     if resp:
         return resp
 
-    # Approval Token enforcement (2026-09-08 audit §五): agent principals
-    # (Bearer token, role=agent_service) may only burn with a valid one-shot
-    # approval bound to this tool + every target device + the burn command.
+    # Approval Token enforcement (4.txt P0-2/P0-3): agent principals
+    # (Bearer token, role=agent_service) burn only with a valid one-shot
+    # approval. The token is consumed ONCE per burn operation and binds the
+    # canonical device list (P0-3: one approval covers the whole multi-device
+    # operation; per-device consumption always failed on the second device).
     # Human admin sessions are unaffected.
-    from features.auth import get_authenticated_user
+    from features.auth import AGENT_ROLE, get_authenticated_user
 
     caller = get_authenticated_user(request)
-    if caller is not None and caller.role == "agent_service":
+    agent_burn = caller is not None and caller.role == AGENT_ROLE
+    if agent_burn:
         approval_token = str(request.query_params.get("approval_token") or "").strip()
         if not approval_token:
             return error_response(
@@ -256,21 +274,6 @@ async def burn_firmware(
 
         if not devices:
             return error_response("No devices selected")
-        # Consume the agent's one-shot approval now that target devices are
-        # known: the approval must cover every device in this burn command.
-        if caller is not None and caller.role == "agent_service":
-            from features.auth import auth_service as _auth
-
-            for _device in devices:
-                if not _auth.consume_approval_token(
-                    approval_token,
-                    tool="gms_rt_burn_firmware",
-                    device=_device,
-                    command=f"burn_firmware:{','.join(devices)}",
-                ):
-                    return error_response(
-                        "审批令牌无效、已使用或与本次烧录设备不匹配", status_code=403
-                    )
         proxy_devices = _adb_proxy_devices(devices)
         if proxy_devices:
             return error_response(
@@ -294,6 +297,11 @@ async def burn_firmware(
             return error_response(
                 "Invalid burn_mode, expected 'auto' or 'uf'"
             )
+        # 4.txt P1 精确绑定：wipe_data 进入审批绑定串；默认 true（与
+        # CLI/API 文档语义一致）。
+        wipe_data = str(form.get("wipe_data", "true")).strip().lower() not in {
+            "0", "false", "no"
+        }
         if merged_firmware:
             firmware_file = None
             firmware_path = merged_firmware["path"]
@@ -396,6 +404,68 @@ async def burn_firmware(
                             firmware_name,
                             file_size,
                             upload_id=merged_firmware.get("upload_id", "") if merged_firmware else "",
+                        )
+
+                # ---- Agent approval consumption (4.txt P0-3 + P1 精确绑定)
+                # Placed AFTER the firmware source is fully resolved and
+                # validated: the approval is bound server-side to the whole
+                # operation (canonical device list + SHA256 of the exact
+                # firmware bytes + wipe_data + burn_mode) and consumed
+                # exactly once. An approval minted for firmware A is
+                # rejected for firmware B; reuse fails on used_at.
+                if agent_burn:
+                    import hashlib as _hashlib
+
+                    from features.auth import auth_service as _auth
+
+                    burn_mode_for_approval = burn_mode
+                    _firmware_for_digest = (
+                        local_firmware_path
+                        if local_firmware_path
+                        else remote_firmware
+                    )
+                    if not os.path.exists(_firmware_for_digest):
+                        return error_response(
+                            f"Firmware not found: {_firmware_for_digest}"
+                        )
+                    with open(_firmware_for_digest, "rb") as _fw:
+                        _digest = _hashlib.sha256()
+                        for _chunk in iter(
+                            lambda: _fw.read(1024 * 1024), b""
+                        ):
+                            _digest.update(_chunk)
+                    firmware_sha256 = _digest.hexdigest()
+                    _canonical_devices = ",".join(sorted(devices))
+                    # Agent token device ACL: a token scoped to specific
+                    # devices must not be driven against anything else.
+                    _agent_record = getattr(
+                        request.state, "agent_token_record", None
+                    )
+                    if _agent_record is not None:
+                        for _dev in _canonical_devices.split(","):
+                            if not _auth.agent_acl_allows(
+                                _agent_record, "devices", _dev
+                            ):
+                                return error_response(
+                                    f"Agent token 不允许操作设备 {_dev}",
+                                    status_code=403,
+                                )
+                    _wipe = wipe_data is not False
+                    if not _auth.consume_approval_token(
+                        approval_token,
+                        tool="gms_rt_burn_firmware",
+                        device=_canonical_devices,
+                        command=_auth.derive_burn_command(
+                            device=_canonical_devices,
+                            firmware_sha256=firmware_sha256,
+                            wipe_data=_wipe,
+                            burn_mode=burn_mode_for_approval,
+                        ),
+                    ):
+                        return error_response(
+                            "审批令牌无效、已使用或与本次烧录操作"
+                            "（设备/固件/参数）不匹配",
+                            status_code=403,
                         )
 
                 # Upload upgrade_tool only after the firmware source has been
@@ -755,300 +825,3 @@ async def burn_firmware(
             with contextlib.suppress(Exception):
                 await runtime.release_firmware_devices(client_id, locked_devices)
 
-@router.post("/api/burn/gsi")
-async def burn_gsi(
-    request: Request,
-    _admin=Depends(require_elevated_admin_when_auth_required),
-):
-    """GSI burning using run_GSI_Burn.sh script."""
-    try:
-        client_id = runtime.get_client_id_from_request(request)
-        req_data = await request.json()
-        devices = req_data.get("devices", [])
-        script_path = req_data.get("script_path", "").strip()
-        system_img = req_data.get("system_img", "").strip()
-        vendor_img = req_data.get("vendor_img", "").strip()
-
-        if not devices:
-            return error_response("No devices selected")
-        proxy_devices = _adb_proxy_devices(devices)
-        if proxy_devices:
-            return error_response(
-                "ADB Proxy远程设备不支持GSI烧写，请在设备来源主机操作: "
-                + ", ".join(proxy_devices),
-                status_code=409,
-            )
-        if not script_path:
-            return error_response("Script path is required")
-        if not system_img and not vendor_img:
-            return error_response("At least one of system image or vendor boot image is required")
-
-        config = runtime.config_manager.load_config()
-        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
-            if not ssh:
-                return error_response("SSH connection failed")
-
-            # 烧写前预检：允许设备从 ADB、bootloader Fastboot 或 Fastbootd
-            # 开始；其他离线/未授权状态仍提前剔除。
-            online_devices, offline_devices = await asyncio.to_thread(
-                _partition_devices_by_flash_state, ssh, devices
-            )
-            if not online_devices:
-                return error_response(
-                    f"没有可烧写的 ADB/Fastboot 设备，离线/状态异常: {', '.join(offline_devices)}"
-                )
-            await _notify_skip(client_id, offline_devices)
-
-            locked_devices, lock_err = await _lock_devices(request, client_id, online_devices)
-            if lock_err:
-                return lock_err
-
-            # USB/IP 设备在 ADB→Fastboot→Fastbootd 切换时会重新枚举 USB 身份；
-            # 与固件路径一致先做 AutoBind 预检，保证物理 BUSID 可被自动共享。
-            _usbip_flash_routes, usbip_route_error = (
-                await _prepare_usbip_firmware_routes(online_devices)
-            )
-            if usbip_route_error:
-                await runtime.release_firmware_devices(client_id, locked_devices)
-                return error_response(usbip_route_error, status_code=409)
-
-            try:
-                gms_suite_dir = get_default_suites_path(config)
-                remote_script, resolved_misc, asset_error = await asyncio.to_thread(
-                    upload_gsi_assets,
-                    ssh=ssh,
-                    ssh_manager=runtime.ssh_manager,
-                    project_root=str(runtime.project_root),
-                    suite_dir=gms_suite_dir,
-                )
-                if asset_error:
-                    await runtime.release_firmware_devices(client_id, locked_devices)
-                    return error_response(asset_error)
-
-                resolved_system = ""
-                if system_img:
-                    resolved_system, system_error = await asyncio.to_thread(
-                        _resolve_gsi_remote_image,
-                        ssh,
-                        gms_suite_dir,
-                        system_img,
-                        "System image",
-                    )
-                    if system_error:
-                        await runtime.release_firmware_devices(client_id, locked_devices)
-                        return error_response(system_error)
-
-                remote_vendor = ""
-                if vendor_img:
-                    resolved_vendor, vendor_error = await asyncio.to_thread(
-                        _resolve_gsi_remote_image,
-                        ssh,
-                        gms_suite_dir,
-                        vendor_img,
-                        "Vendor boot image",
-                    )
-                    if vendor_error:
-                        await runtime.release_firmware_devices(client_id, locked_devices)
-                        return error_response(vendor_error)
-                    remote_vendor = resolved_vendor or ""
-
-                results = []
-
-                if client_id in runtime.global_state.websocket_connections:
-                    with contextlib.suppress(Exception):
-                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Starting GSI burn for {len(online_devices)} devices...", "log_type": "info"})
-
-                for device in online_devices:
-                    if client_id in runtime.global_state.websocket_connections:
-                        with contextlib.suppress(Exception):
-                            await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Burning device: {device}", "log_type": "info"})
-
-                    try:
-                        burn_cmd = await asyncio.to_thread(
-                            prepare_gsi_command,
-                            ssh=ssh,
-                            ssh_manager=runtime.ssh_manager,
-                            remote_script=remote_script,
-                            device=device,
-                            system_img=resolved_system,
-                            misc_img=resolved_misc,
-                            vendor_img=remote_vendor,
-                            on_transport_reset=_schedule_usbip_mode_reconnect,
-                        )
-                    except Exception as prep_error:
-                        error_msg = f"Fastboot preparation failed: {prep_error}"
-                        results.append({
-                            "device": device,
-                            "success": False,
-                            "error": error_msg,
-                            "output": error_msg,
-                        })
-                        if client_id in runtime.global_state.websocket_connections:
-                            with contextlib.suppress(Exception):
-                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
-                        continue
-
-                    _stdin, stdout, stderr = await asyncio.to_thread(
-                        ssh.exec_command,
-                        burn_cmd,
-                        get_pty=True,
-                        timeout=600,
-                    )
-                    output_buffer = []
-
-                    while not stdout.channel.exit_status_ready():
-                        if stdout.channel.recv_ready():
-                            chunk = (await asyncio.to_thread(stdout.channel.recv, 1024)).decode("utf-8", errors="ignore")
-                            output_buffer.append(chunk)
-                            clean_chunk = strip_ansi_codes(chunk)
-
-                            if client_id in runtime.global_state.websocket_connections:
-                                try:
-                                    for line in clean_chunk.split("\n"):
-                                        line = line.strip()
-                                        if not line:
-                                            continue
-                                        # 过滤 fastboot 冗余输出
-                                        if (line.startswith("OKAY") or
-                                            line.startswith("Writing '") or
-                                            line.startswith("Finished.") or
-                                            line.startswith("< waiting for")):
-                                            continue
-                                        # 保留操作名，去掉尾部的 OKAY [x.xxxs]
-                                        cleaned = _FASTBOOT_OKAY_RE.sub("", line)
-                                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": cleaned, "log_type": "info"})
-                                except Exception:
-                                    pass
-                        else:
-                            await asyncio.sleep(0.5)
-
-                    while stdout.channel.recv_ready():
-                        chunk = await asyncio.to_thread(stdout.channel.recv, 1024)
-                        output_buffer.append(chunk.decode("utf-8", errors="ignore"))
-                    final_output = "".join(output_buffer)
-                    exit_status = stdout.channel.recv_exit_status()
-                    error_output = (await asyncio.to_thread(stderr.read)).decode("utf-8", errors="ignore")
-
-                    if exit_status == 0:
-                        reboot_result = await asyncio.to_thread(
-                            runtime.ssh_manager.execute_command,
-                            ssh,
-                            f"fastboot -s {shlex.quote(device)} reboot",
-                            timeout=30,
-                        )
-                        # Schedule even if fastboot reports a transport race:
-                        # the device may already have accepted the reboot.
-                        _schedule_usbip_mode_reconnect(device, "adb")
-                        if not reboot_result.ok:
-                            detail = (
-                                reboot_result.stderr
-                                or reboot_result.stdout
-                                or "unknown error"
-                            ).strip()
-                            error_msg = f"镜像已写入，但设备重启失败: {detail}"
-                            results.append({
-                                "device": device,
-                                "success": False,
-                                "error": error_msg,
-                                "output": final_output,
-                            })
-                            if client_id in runtime.global_state.websocket_connections:
-                                with contextlib.suppress(Exception):
-                                    await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
-                            continue
-                        results.append({"device": device, "success": True, "output": final_output})
-                        if client_id in runtime.global_state.websocket_connections:
-                            with contextlib.suppress(Exception):
-                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn complete", "log_type": "success"})
-                    else:
-                        combined_output = "\n".join(
-                            part for part in (final_output, error_output) if part
-                        )
-                        error_msg = diagnose_gsi_burn_failure(combined_output)
-                        results.append({"device": device, "success": False, "error": error_msg, "output": combined_output})
-                        if client_id in runtime.global_state.websocket_connections:
-                            try:
-                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
-                            except Exception:
-                                pass
-
-                try:
-                    await runtime.release_firmware_devices(client_id, locked_devices)
-                except Exception as release_error:
-                    logger.warning("[GSI Burn] Failed to release device locks: %s", release_error)
-
-                all_success = all(r["success"] for r in results)
-                if all_success:
-                    try:
-                        runtime.store_notification(client_id, "GSI burn complete", f"Devices: {', '.join(online_devices)}", "success", "firmware", {"devices": online_devices, "results": results})
-                    except Exception as notify_error:
-                        logger.warning("[GSI Burn] Failed to store success notification: %s", notify_error)
-                    # 设备锁已释放，通知前端刷新 ADB 设备状态
-                    if client_id in runtime.global_state.websocket_connections:
-                        with contextlib.suppress(Exception):
-                            await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": online_devices, "success": True})
-                    return JSONResponse(content={"success": True, "message": "GSI burn completed successfully", "results": results})
-                else:
-                    failed_results = [r for r in results if not r.get("success")]
-                    failure_summary = "; ".join(
-                        f"{result.get('device')}: {result.get('error')}"
-                        for result in failed_results
-                    )
-                    try:
-                        runtime.store_notification(client_id, "GSI burn failed", failure_summary[:300], "error", "firmware", {"devices": online_devices, "results": results})
-                    except Exception as notify_error:
-                        logger.warning("[GSI Burn] Failed to store failure notification: %s", notify_error)
-                    return error_response(f"部分设备烧写失败: {failure_summary}", results=results)
-
-            except Exception as e:
-                try:
-                    runtime.store_notification(client_id, "GSI burn error", str(e)[:300], "error", "firmware", {"devices": online_devices})
-                except Exception as notify_error:
-                    logger.warning("[GSI Burn] Failed to store error notification: %s", notify_error)
-                try:
-                    await runtime.release_firmware_devices(client_id, locked_devices)
-                except Exception as release_error:
-                    logger.warning("[GSI Burn] Failed to release device locks after error: %s", release_error)
-                return error_response(str(e))
-
-    except Exception as e:
-        logger.error(f"Error in burn_gsi: {e}")
-        return error_response(str(e), 500)
-
-
-
-@router.post("/api/burn/serial")
-async def burn_sn(
-    req: SNBurnRequest,
-    _admin=Depends(require_elevated_admin_when_auth_required),
-):
-    """SN burning - burn serial number to selected devices."""
-    try:
-        devices = req.devices
-        sn_code = req.sn_code
-
-        if not devices:
-            return error_response("No devices selected", 400)
-        if not sn_code:
-            return error_response("SN code is required", 400)
-
-        config = runtime.config_manager.load_config()
-        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
-            if not ssh:
-                return error_response("SSH connection failed", 500)
-
-            results = [
-                {
-                    "device": device_id,
-                    "success": False,
-                    "error": "SN burning requires device in loader mode. Feature needs specific tool support.",
-                }
-                for device_id in devices
-            ]
-
-            return JSONResponse(content={"success": True, "results": results})
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error burning SN: {e}")
-        return error_response(str(e), status_code=500)

@@ -7,8 +7,6 @@ and reuses its _connect/_lock/hash_token helpers.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import secrets
 import sqlite3  # noqa: F401  (kept for parity with service.py helpers)
 from datetime import datetime, timedelta, timezone
@@ -17,7 +15,6 @@ from typing import Any
 from .constants import (
     AGENT_ROLE,
     AGENT_SCOPES,
-    APPROVAL_TOKEN_TTL_SECONDS,
     DEFAULT_AGENT_TOKEN_DAYS,
     CurrentUser,
 )
@@ -236,102 +233,6 @@ class AgentTokenServiceMixin:
         if allowed == "*":
             return True
         return value in {part.strip() for part in allowed.split(",") if part.strip()}
-
-    # ------------------------------------------------------------------
-    # One-shot Approval Tokens (2026-09-08 audit §五)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def command_hash(command: str) -> str:
-        return hashlib.sha256(str(command or "").encode("utf-8")).hexdigest()
-
-    def create_approval_token(
-        self,
-        *,
-        user: CurrentUser,
-        tool: str,
-        device: str,
-        command: str,
-        ttl_seconds: int = APPROVAL_TOKEN_TTL_SECONDS,
-    ) -> dict[str, Any]:
-        """Issue a single-use approval bound to tool+device+SHA256(command)."""
-        tool_name = str(tool or "").strip()
-        device_name = str(device or "").strip()
-        if not tool_name or not device_name:
-            raise ValueError("tool 和 device 必填")
-        ttl = max(30, min(600, int(ttl_seconds or APPROVAL_TOKEN_TTL_SECONDS)))
-        token = secrets.token_urlsafe(32)
-        now = _utcnow()
-        expires_at = now + timedelta(seconds=ttl)
-        with self._lock, self._connect() as conn:
-            # Bound the table: drop fully consumed/expired approvals.
-            conn.execute(
-                "DELETE FROM platform_approval_tokens WHERE expires_at <= ? OR used_at IS NOT NULL",
-                (_to_iso(now),),
-            )
-            conn.execute(
-                """
-                INSERT INTO platform_approval_tokens (
-                    token_hash, user_id, tool, device, command_hash,
-                    created_at, expires_at, used_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-                """,
-                (
-                    self.hash_token(token),
-                    user.id,
-                    tool_name,
-                    device_name,
-                    self.command_hash(command),
-                    _to_iso(now),
-                    _to_iso(expires_at),
-                ),
-            )
-            conn.commit()
-        return {
-            "token": token,
-            "tool": tool_name,
-            "device": device_name,
-            "expires_at": _to_iso(expires_at),
-            "ttl_seconds": ttl,
-        }
-
-    def consume_approval_token(
-        self, token: str, *, tool: str, device: str, command: str
-    ) -> bool:
-        """Atomically consume a matching one-shot approval token."""
-        if not token:
-            return False
-        token_hash = self.hash_token(token)
-        now = _utcnow()
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT command_hash, expires_at, used_at
-                FROM platform_approval_tokens
-                WHERE token_hash = ? AND tool = ? AND device = ?
-                """,
-                (token_hash, str(tool or "").strip(), str(device or "").strip()),
-            ).fetchone()
-            if not row or row["used_at"]:
-                return False
-            try:
-                if _from_iso(row["expires_at"]) <= now:
-                    return False
-            except ValueError:
-                return False
-            if not hmac.compare_digest(
-                str(row["command_hash"]), self.command_hash(command)
-            ):
-                return False
-            # Single use: only the first consume wins; a racing caller's
-            # UPDATE matches zero rows because used_at is now set.
-            cursor = conn.execute(
-                "UPDATE platform_approval_tokens SET used_at = ? "
-                "WHERE token_hash = ? AND used_at IS NULL",
-                (_to_iso(now), token_hash),
-            )
-            conn.commit()
-            return cursor.rowcount == 1
 
     # ------------------------------------------------------------------
     # Enrollment Codes (2026-09-08 audit §三)
