@@ -41,7 +41,7 @@ from .operations_api import (
     router as operations_router,
 )
 from .screens_api import show_device_screens as show_device_screens
-from .support import SSHConnection, get_or_create_user_state
+from .support import AsyncSSHConnection, get_or_create_user_state
 from .ui_control_api import router as ui_control_router
 
 
@@ -408,7 +408,8 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
         # 收集每台设备的属性值
         value_to_devices = {}
         if raw_devices:
-            with SSHConnection() as ssh:
+            # R28: acquire the pooled SSH connection off the event loop.
+            async with AsyncSSHConnection() as ssh:
                 for device_id in raw_devices:
                     base_info = await asyncio.to_thread(
                         device_manager.get_device_info, device_id, ssh

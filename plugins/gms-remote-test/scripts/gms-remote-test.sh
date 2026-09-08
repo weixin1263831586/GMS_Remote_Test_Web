@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="2026.09.07-6"
+GMS_RT_VERSION="0.9.0"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -92,7 +92,27 @@ CURL_EXIT_SSL_CERT=60
 # stays revoked regardless of the local file.
 GMS_RT_PROFILE="${GMS_RT_PROFILE:-default}"
 GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.cookies}"
+# Agent Service Token (2026-09-08 audit §二): when GMS_AUTH_TOKEN_FILE points
+# at a 0600 token file, every request carries Authorization: Bearer <token>
+# instead of the session cookie. The CLI never prints the token and agents
+# only ever learn the path. Token auth is mutually exclusive with the
+# cookie jar: with a token file set, login is unnecessary and the cookie
+# jar is not read.
+GMS_AUTH_TOKEN_FILE="${GMS_AUTH_TOKEN_FILE:-}"
 CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
+_gms_bearer_token=""  # cached per process; reloaded by _refresh_tls_args
+_gms_refresh_bearer_token() {
+    if [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
+        if [ ! -r "$GMS_AUTH_TOKEN_FILE" ]; then
+            _gms_bearer_token=""
+            return 1
+        fi
+        _gms_bearer_token=$(tr -d '[:space:]' < "$GMS_AUTH_TOKEN_FILE" 2>/dev/null)
+    else
+        _gms_bearer_token=""
+    fi
+    return 0
+}
 # Serialises cookie-jar writes across concurrent CLI processes.
 GMS_COOKIE_LOCK_FILE="${GMS_AUTH_COOKIE_JAR}.lock"
 _gms_with_cookie_lock() {
@@ -104,7 +124,12 @@ _gms_with_cookie_lock() {
     fi
     if command -v flock >/dev/null 2>&1 && [ -f "$GMS_COOKIE_LOCK_FILE" -o -w "$cookie_dir" ]; then
         (
-            flock -w 10 200 2>/dev/null || true
+            # R32: failing to take the lock must NOT fall through to the
+            # unprotected command.  `|| true` used to let a lock-starved
+            # process run curl anyway, which is exactly the concurrent
+            # jar clobber the lock exists to prevent.  Exit non-zero from
+            # the subshell so the caller sees a transport failure.
+            flock -w 10 200 || exit 99
             "$@"
         ) 200>"$GMS_COOKIE_LOCK_FILE"
     else
@@ -126,6 +151,14 @@ _refresh_tls_args() {
         elif [ "${GMS_CURL_INSECURE:-0}" = "1" ]; then
             CURL_TLS_ARGS=(-k)
         fi
+    fi
+    # Agent token: pick up the file fresh on every call (callers may export
+    # GMS_AUTH_TOKEN_FILE after sourcing this script in function mode).
+    CURL_BEARER_ARGS=()
+    if _gms_refresh_bearer_token && [ -n "$_gms_bearer_token" ]; then
+        CURL_BEARER_ARGS=(-H "Authorization: Bearer $_gms_bearer_token")
+    else
+        CURL_BEARER_ARGS=()
     fi
 }
 _refresh_tls_args
@@ -279,17 +312,17 @@ api_call() {
     # R32: serialise requests that may write the shared cookie jar so
     # concurrent CLI processes cannot clobber each other's session file.
     if [ "${#extra_args[@]}" -gt 0 ]; then
-        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
+        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
             -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT" \
             -X "$method" "${API_BASE}${endpoint}" "${extra_args[@]}")
     elif [ -n "$data" ] || [ "$method" = "POST" ]; then
-        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -X "${method}" "${API_BASE}${endpoint}" \
+        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -X "${method}" "${API_BASE}${endpoint}" \
             -H "Content-Type: application/json" \
             -d "${data}" \
             -w $'\nHTTP_STATUS:%{http_code}' \
             --max-time "$CURL_TIMEOUT")
     else
-        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
+        response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
             -w $'\nHTTP_STATUS:%{http_code}' \
             -X "$method" "${API_BASE}${endpoint}" --max-time "$CURL_TIMEOUT")
     fi
@@ -491,6 +524,210 @@ gms-rt-auth-elevation-reset() {
     return "$GMS_RT_EXIT_OPERATION"
 }
 
+# ==============================================================================
+# Agent Service Token commands (2026-09-08 audit §二/§三/§五)
+# ==============================================================================
+
+# Exchange a one-shot enrollment code for an Agent Service Token and store it
+# as a 0600 file. Run once per build server; afterwards every CLI/MCP call in
+# that profile authenticates via GMS_AUTH_TOKEN_FILE with no platform
+# password anywhere on the agent path.
+gms-rt-agent-enroll() {
+    local code="${1:-}"
+    local out_file="${GMS_AUTH_TOKEN_FILE:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.token}"
+    [ -n "$code" ] || {
+        error "Usage: gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE]"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    shift
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --out)
+                shift
+                [ "$#" -gt 0 ] && { out_file="$1"; } || {
+                    error "--out requires a path"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                ;;
+            --out=*) out_file="${1#*=}" ;;
+            *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
+        esac
+        shift
+    done
+    check_jq || return 1
+    _refresh_tls_args
+    local data response
+    data=$(jq -cn --arg code "$code" '{code: $code}')
+    # Enrollment is a cookie-free, token-free call by design.
+    response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST "${API_BASE}/auth/agent-enroll" \
+        -H "Content-Type: application/json" -d "$data" \
+        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
+    local http_status body
+    body=$(_body_from_http_response "$response")
+    http_status=$(_status_from_http_response "$response")
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Enrollment failed: $(extract_api_error "$body")"
+        return "$GMS_RT_EXIT_PERMISSION"
+    fi
+    local token scopes
+    token=$(echo "$body" | jq -r '.token.token // empty')
+    scopes=$(echo "$body" | jq -r '.token.scopes | join(",")' 2>/dev/null)
+    [ -n "$token" ] || { error "Enrollment response missing token"; return "$GMS_RT_EXIT_OPERATION"; }
+    local dir
+    dir=$(dirname "$out_file")
+    mkdir -p "$dir" && chmod 700 "$dir" 2>/dev/null || true
+    umask 077
+    printf '%s\n' "$token" > "$out_file"
+    unset token data code response body
+    success "Agent token enrolled (0600): $out_file"
+    jq -cn --arg file "$out_file" --arg scopes "${scopes:-}" \
+        '{ok: true, token_file: $file, mode: "0600", scopes: ($scopes | split(",") | map(select(length > 0)))}'
+}
+
+# Show which credential mode the CLI currently uses (token file or cookie).
+gms-rt-auth-credential-mode() {
+    check_jq || return 1
+    if [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
+        if [ -r "$GMS_AUTH_TOKEN_FILE" ]; then
+            jq -cn --arg file "$GMS_AUTH_TOKEN_FILE" \
+                '{mode: "agent_token", token_file: $file}'
+        else
+            jq -cn --arg file "$GMS_AUTH_TOKEN_FILE" \
+                '{mode: "agent_token", token_file: $file, error: "token file not readable"}'
+        fi
+    else
+        jq -cn --arg jar "$GMS_AUTH_COOKIE_JAR" --arg profile "$GMS_RT_PROFILE" \
+            '{mode: "session_cookie", cookie_jar: $jar, profile: $profile}'
+    fi
+}
+
+# Create a one-shot approval token (must run under a human session).
+gms-rt-approval-create() {
+    local tool="" device="" command=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --tool) shift; tool="${1:-}" ;;
+            --tool=*) tool="${1#*=}" ;;
+            --device) shift; device="${1:-}" ;;
+            --device=*) device="${1#*=}" ;;
+            --command) shift; command="${1:-}" ;;
+            --command=*) command="${1#*=}" ;;
+            *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
+        esac
+        shift
+    done
+    [ -n "$tool" ] && [ -n "$device" ] && [ -n "$command" ] || {
+        error "Usage: gms-rt-approval-create --tool <gms_rt_tool> --device <serial> --command <command>"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    check_jq || return 1
+    _refresh_tls_args
+    local data response
+    data=$(jq -cn --arg tool "$tool" --arg device "$device" --arg command "$command" \
+        '{tool: $tool, device: $device, command: $command}')
+    response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST "${API_BASE}/auth/approval-tokens" \
+        -H "Content-Type: application/json" -d "$data" \
+        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
+    local http_status body
+    body=$(_body_from_http_response "$response")
+    http_status=$(_status_from_http_response "$response")
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Approval creation failed: $(extract_api_error "$body")"
+        return "$GMS_RT_EXIT_PERMISSION"
+    fi
+    echo "$body" | jq '.approval // .'
+}
+
+# ==============================================================================
+# Cluster worker/device discovery (2026-09-08 audit §六)
+# ==============================================================================
+
+gms-rt-cluster-workers() {
+    check_jq || return 1
+    _refresh_tls_args
+    api_call "/cluster/workers" | jq '.'
+}
+
+# Authoritative cluster-wide device inventory. Lists devices across workers
+# (worker_id filter optional); agents should call this before targeting a
+# device so worker_id resolution is explicit instead of guessed.
+gms-rt-cluster-devices() {
+    local worker_id=""
+    local query=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --worker) shift; worker_id="${1:-}" ;;
+            --worker=*) worker_id="${1#*=}" ;;
+            --query) shift; query="${1:-}" ;;
+            --query=*) query="${1#*=}" ;;
+            *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
+        esac
+        shift
+    done
+    check_jq || return 1
+    local response
+    if [ -n "$worker_id" ]; then
+        response=$(api_call "/cluster/devices?worker_id=$(_urlencode "$worker_id")")
+    else
+        response=$(api_call "/cluster/devices")
+    fi
+    if [ -n "$query" ]; then
+        echo "$response" | jq --arg q "$query" '[.devices[]? | select((.serial // .device_id // "") | test($q; "i"))]'
+    else
+        echo "$response" | jq '.'
+    fi
+}
+
+# Resolve a device serial to its owning worker via the cluster inventory.
+# Fails (exit 5) when the serial matches zero or several workers and no
+# explicit --worker was given — never guess "the first worker".
+gms-rt-cluster-resolve() {
+    local device="" worker_id=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --device) shift; device="${1:-}" ;;
+            --device=*) device="${1#*=}" ;;
+            --worker) shift; worker_id="${1:-}" ;;
+            --worker=*) worker_id="${1#*=}" ;;
+            *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
+        esac
+        shift
+    done
+    [ -n "$device" ] || {
+        error "Usage: gms-rt-cluster-resolve --device <serial> [--worker <worker_id>]"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    check_jq || return 1
+    if [ -n "$worker_id" ]; then
+        jq -cn --arg worker "$worker_id" --arg device "$device" \
+            '{worker_id: $worker, device: $device, resolved: true, explicit: true}'
+        return 0
+    fi
+    local response matches
+    response=$(gms-rt-cluster-devices) || return $?
+    matches=$(echo "$response" | jq -c --arg d "$device" \
+        '[.devices[]? | select((.serial // .device_id // "") == $d) | {worker_id: (.worker_id // .worker // "")}]')
+    local count
+    count=$(echo "$matches" | jq 'length')
+    case "$count" in
+        1)
+            local resolved
+            resolved=$(echo "$matches" | jq -r '.[0].worker_id')
+            jq -cn --arg worker "$resolved" --arg device "$device" \
+                '{worker_id: $worker, device: $device, resolved: true, explicit: false}'
+            ;;
+        0)
+            error "Device '$device' not found in cluster inventory"
+            return "$GMS_RT_EXIT_CONFLICT"
+            ;;
+        *)
+            error "Device '$device' matches $count workers; pass --worker explicitly"
+            echo "$matches" >&2
+            return "$GMS_RT_EXIT_CONFLICT"
+            ;;
+    esac
+}
+
 # Extract error message from API response
 extract_api_error() {
     local response="$1"
@@ -616,9 +853,13 @@ _post_firmware_burn_path() {
 
     _refresh_tls_args
     _ensure_auth_cookie_jar || return 1
-    curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -w "\nHTTP_STATUS:%{http_code}" \
+    local approval_query=""
+    if [ -n "${GMS_RT_BURN_APPROVAL_TOKEN:-}" ]; then
+        approval_query="?approval_token=$(_urlencode "$GMS_RT_BURN_APPROVAL_TOKEN")"
+    fi
+    curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
-        -X POST "${API_BASE}/burn/firmware" \
+        -X POST "${API_BASE}/burn/firmware${approval_query}" \
         -F "firmware_path=${remote_path}" \
         -F "devices=${device_list}" \
         -F "wipe_data=${wipe_data}"
@@ -632,12 +873,16 @@ _post_firmware_burn_upload() {
     local device_query
     device_list=$(echo "$devices" | tr ' ' ',')
     device_query=$(_urlencode "$device_list")
+    local approval_query=""
+    if [ -n "${GMS_RT_BURN_APPROVAL_TOKEN:-}" ]; then
+        approval_query="&approval_token=$(_urlencode "$GMS_RT_BURN_APPROVAL_TOKEN")"
+    fi
 
     _refresh_tls_args
     _ensure_auth_cookie_jar || return 1
-    curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
+    curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
-        -X POST "${API_BASE}/burn/firmware?devices=${device_query}" \
+        -X POST "${API_BASE}/burn/firmware?devices=${device_query}${approval_query}" \
         -F "firmware_file=@${firmware_path}" \
         -F "firmware_path=$(basename "$firmware_path")" \
         -F "wipe_data=${wipe_data}"
@@ -877,6 +1122,7 @@ gms-rt-burn-firmware() {
     local upload_mode="${GMS_BURN_UPLOAD_MODE:-auto}"
     local wait_online=0
     local wait_max="${GMS_BURN_WAIT_ONLINE_MAX:-600}"
+    local approval_token=""
 
     local positional=()
     while [ "$#" -gt 0 ]; do
@@ -886,6 +1132,14 @@ gms-rt-burn-firmware() {
                 wait_online=1
                 wait_max="${1#*=}"
                 ;;
+            --approval-token)
+                shift
+                [ "$#" -gt 0 ] && { approval_token="$1"; } || {
+                    error "--approval-token requires a token"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                ;;
+            --approval-token=*) approval_token="${1#*=}" ;;
             *) positional+=("$1") ;;
         esac
         shift
@@ -899,11 +1153,15 @@ gms-rt-burn-firmware() {
         return "$GMS_RT_EXIT_USAGE"
     fi
 
-    [ -z "$firmware_path" ] && { error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--wait-online[=SECONDS]]"; return 1; }
-    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--wait-online[=SECONDS]]"; return 1; }
+    [ -z "$firmware_path" ] && { error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]"; return 1; }
+    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]"; return 1; }
     [ ! -f "$firmware_path" ] && { error "Firmware file not found: $firmware_path"; return 1; }
     check_jq || return 1
     devices=$(_resolve_devices "$devices")
+    # Agent token sessions burn only with a one-shot approval (§五); human
+    # admin sessions may omit it. Forwarded to the server via env.
+    GMS_RT_BURN_APPROVAL_TOKEN="$approval_token"
+    export GMS_RT_BURN_APPROVAL_TOKEN
 
     echo "🔥 Burning firmware: $firmware_path to devices: $devices..."
     local response=""
@@ -1581,10 +1839,54 @@ gms-rt-devices-scrcpy() {
 # Execute shell command (local adb or SSH fallback to test host)
 gms-rt-devices-shell() {
     local device_id="$1"
-    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID [COMMAND]"; return 1; }
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID [--approval-token TOKEN] [COMMAND]"; return 1; }
 
     shift
-    local shell_command="$*"
+    # One-shot approval token (2026-09-08 audit §五): with this flag the CLI
+    # validates-and-consumes the approval server-side (tool+device+command
+    # binding, 5-min TTL, single use) before running the command.
+    local approval_token=""
+    local shell_args=()
+    local pending_approval=0
+    local arg
+    for arg in "$@"; do
+        if [ "$pending_approval" = "1" ]; then
+            approval_token="$arg"
+            pending_approval=0
+            continue
+        fi
+        case "$arg" in
+            --approval-token) pending_approval=1 ;;
+            --approval-token=*) approval_token="${arg#*=}" ;;
+            *) shell_args+=("$arg") ;;
+        esac
+    done
+    if [ -n "$approval_token" ] && [ "${#shell_args[@]}" -eq 0 ]; then
+        error "--approval-token requires a command to approve"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    if [ -n "$approval_token" ]; then
+        _refresh_tls_args
+        local consume_data consume_response
+        consume_data=$(jq -cn \
+            --arg token "$approval_token" \
+            --arg device "$device_id" \
+            --arg command "${shell_args[*]}" \
+            '{token: $token, tool: "gms_rt_shell_exec", device: $device, command: $command}')
+        consume_response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST \
+            "${API_BASE}/auth/approval-tokens/consume" \
+            -H "Content-Type: application/json" -d "$consume_data" \
+            -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
+        unset consume_data approval_token
+        local consume_status
+        consume_status=$(_status_from_http_response "$consume_response")
+        if [[ ! "$consume_status" =~ ^2[0-9]{2}$ ]] || \
+           ! echo "$consume_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            error "审批令牌校验失败: $(extract_api_error "$(echo "$consume_response" | sed 's/\nHTTP_STATUS:.*//')")"
+            return "$GMS_RT_EXIT_PERMISSION"
+        fi
+    fi
+    local shell_command="${shell_args[*]:-}"
     if [ -z "$shell_command" ] && [ "$GMS_RT_NON_INTERACTIVE" = "1" ]; then
         error "Interactive device shell is disabled by --non-interactive; provide a command"
         return "$GMS_RT_EXIT_USAGE"
@@ -2769,6 +3071,7 @@ gms-rt-test-start() {
     local args=()
     local wait_for_job=0
     local wait_max=""
+    local worker_id=""
     local first_param="${1:-}"
 
     # Show help if no arguments
@@ -2796,6 +3099,16 @@ gms-rt-test-start() {
             --max-wait=*)
                 wait_for_job=1
                 wait_max="${1#*=}"
+                ;;
+            --worker)
+                shift
+                [ "$#" -gt 0 ] && { worker_id="$1"; } || {
+                    error "--worker requires a worker id"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                ;;
+            --worker=*)
+                worker_id="${1#*=}"
                 ;;
             *) args+=("$1") ;;
         esac
@@ -2889,6 +3202,7 @@ gms-rt-test-start() {
         --arg tmod "$test_module" \
         --arg tcase "$test_case" \
         --arg tsuite "$test_suite" \
+        --arg wid "$worker_id" \
         '{
             retry_dir: $rdir,
             devices: [$dev],
@@ -2896,7 +3210,8 @@ gms-rt-test-start() {
             test_module: $tmod,
             test_case: $tcase,
             test_suite: $tsuite
-        }')
+        }
+        + (if $wid == "" then {} else {worker_id: $wid} end)')
 
     # Call /api/test/start
     local response=$(api_call "/test/start" "POST" "$data")
@@ -3897,7 +4212,11 @@ _gms_rt_dispatch() {
         # NOTE: 大输出(如 logcat -d / jobs-events)不能经 shell 变量 + jq --arg 传递,
         # 否则超过单参数上限报 "Argument list too long"。改用 --rawfile 直接读临时文件。
         # 同时对未解析为 JSON 的纯文本输出做尾部截断, 保护调用方(如 AI agent)的上下文。
-        jq -cn \
+        # R16: jq 自身失败（损坏安装/内存不足）绝不能沿用业务命令的成功码——
+        # 之前 stub jq 返回 99 时 CLI 仍退出 0 且 stdout 为空，Agent 把
+        # “序列化失败”当成功。序列化失败按操作失败上报。
+        local envelope
+        envelope=$(jq -cn \
             --arg command "$command" \
             --rawfile stdout "$stdout_file" \
             --rawfile stderr "$stderr_file" \
@@ -3917,7 +4236,15 @@ _gms_rt_dispatch() {
                 exit_code: $exit_code
             }
             + (if $parsed == null then {output: ($stdout | truncate_text)} else {data: $parsed} end)
-            + (if $stderr == "" then {} else {diagnostics: ($stderr | truncate_text)} end)'
+            + (if $stderr == "" then {} else {diagnostics: ($stderr | truncate_text)} end)')
+        local jq_status=$?
+        if [ "$jq_status" -ne 0 ]; then
+            error "输出序列化失败 (jq exit $jq_status)，无法生成 JSON envelope" >&2
+            rm -f -- "$status_file" "$stdout_file" "$stderr_file"
+            unset GMS_RT_STATUS_FILE
+            return "$GMS_RT_EXIT_OPERATION"
+        fi
+        printf '%s\n' "$envelope"
     fi
 
     rm -f -- "$status_file" "$stdout_file" "$stderr_file"

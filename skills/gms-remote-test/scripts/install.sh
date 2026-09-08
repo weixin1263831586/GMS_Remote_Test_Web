@@ -270,7 +270,15 @@ install_portable_jq() {
 }
 
 if ! command -v jq >/dev/null 2>&1 && [ ! -x "${RUNTIME_BIN_DIR}/jq" ]; then
-    install_portable_jq
+    # 2026-09-08 audit §十二: enterprise build servers often cannot reach
+    # github.com. Prefer the bundled CLI's own JSON handling (python3 ships
+    # with every target OS) and only fall back to downloading jq when no
+    # python3 exists either.
+    if command -v python3 >/dev/null 2>&1; then
+        info "jq not found; python3 is available, the CLI will use its JSON fallback (no GitHub download)"
+    else
+        install_portable_jq
+    fi
 fi
 
 {
@@ -357,8 +365,155 @@ fi
 info "Installed Skill: ${TARGET_DIR}"
 info "Installed CLI Runtime: ${DISPATCHER_PATH}"
 info "Installed Commands: ${#COMMAND_NAMES[@]} (gms-rt-*)"
+
+# ---------------------------------------------------------------------------
+# Agent auto-configuration (2026-09-08 audit §八/§九): --client auto|codex|kimi|kkagent
+# ---------------------------------------------------------------------------
+# Installs the MCP server registration so Codex/Kimi/kkagent directly see the
+# gms_rt_* tools without any manual config editing. Every agent gets its own
+# GMS_RT_PROFILE so concurrent agents on one build server never share a
+# session cookie.
+CLIENT_MODE="${GMS_INSTALL_CLIENT:-}"
+if [ "$#" -gt 0 ]; then
+    case "$1" in
+        --client) CLIENT_MODE="${2:-}"; shift 2 || true ;;
+        --client=*) CLIENT_MODE="${1#*=}" ;;
+    esac
+fi
+GMS_MCP_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/gms-remote-test/mcp"
+GMS_MCP_SERVER="${GMS_MCP_DIR}/mcp_server.py"
+STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test"
+
+install_agent_profile() {
+    local agent="$1"
+    local profile_name="${agent}-$(hostname -s 2>/dev/null || echo host)-${USER:-$(whoami)}"
+    local token_file="${STATE_DIR}/${profile_name}.token"
+    {
+        printf '# GMS Remote Test agent bootstrap (%s)\n' "$agent"
+        printf 'export GMS_REMOTE_TEST_SERVER=%q\n' "$SERVER_URL"
+        printf 'export GMS_RT_PROFILE=%q\n' "$profile_name"
+        printf 'export GMS_AUTH_TOKEN_FILE=%q\n' "$token_file"
+        if [ -n "${GMS_INSTALL_CA_CERT:-}" ]; then
+            printf 'export GMS_CURL_CA_CERT=%q\n' "$GMS_INSTALL_CA_CERT"
+        fi
+    } > "${GMS_MCP_DIR}/${agent}.env"
+    chmod 600 "${GMS_MCP_DIR}/${agent}.env"
+    info "Agent env profile: ${GMS_MCP_DIR}/${agent}.env (source it in the agent's launch env)"
+    printf '%s\n' "$profile_name"
+}
+
+configure_codex_mcp() {
+    local profile_name="$1"
+    local codex_config="${CODEX_HOME:-${HOME}/.codex}/config.toml"
+    mkdir -p "$(dirname "$codex_config")"
+    if [ -f "$codex_config" ] && grep -q 'mcp_servers.gms_remote_test' "$codex_config"; then
+        info "Codex MCP already configured: $codex_config"
+        return 0
+    fi
+    {
+        printf '\n[mcp_servers.gms_remote_test]\n'
+        printf 'command = "python3"\n'
+        printf 'args = ["%s"]\n' "$GMS_MCP_SERVER"
+        printf '\n[mcp_servers.gms_remote_test.env]\n'
+        printf 'GMS_REMOTE_TEST_SERVER = %q\n' "$SERVER_URL"
+        printf 'GMS_RT_PROFILE = %q\n' "$profile_name"
+        printf 'GMS_AUTH_TOKEN_FILE = "%s/%s.token"\n' \
+            "${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test" "$profile_name"
+        if [ -n "${GMS_INSTALL_CA_CERT:-}" ]; then
+            printf 'GMS_CURL_CA_CERT = %q\n' "$GMS_INSTALL_CA_CERT"
+        fi
+    } >> "$codex_config"
+    info "Codex MCP registered: $codex_config"
+}
+
+configure_kimi_mcp() {
+    local profile_name="$1"
+    local kimi_config="${KIMI_CODE_HOME:-${HOME}/.kimi-code}/mcp.json"
+    mkdir -p "$(dirname "$kimi_config")"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$kimi_config" "$GMS_MCP_SERVER" "$SERVER_URL" "$profile_name" "${GMS_INSTALL_CA_CERT:-}" <<'PY'
+import json, sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+config = {}
+if config_path.exists():
+    try:
+        config = json.loads(config_path.read_text())
+    except ValueError:
+        config = {}
+servers = config.setdefault("mcpServers", {})
+if "gms" in servers:
+    print("Kimi MCP already configured:", config_path)
+    raise SystemExit(0)
+server = {
+    "command": "python3",
+    "args": [sys.argv[2]],
+    "env": {
+        "GMS_REMOTE_TEST_SERVER": sys.argv[3],
+        "GMS_RT_PROFILE": sys.argv[4],
+        "GMS_AUTH_TOKEN_FILE": "~/.local/state/gms-remote-test/"
+        + sys.argv[4]
+        + ".token",
+    },
+}
+ca = sys.argv[5]
+if ca:
+    server["env"]["GMS_CURL_CA_CERT"] = ca
+servers["gms"] = server
+config_path.parent.mkdir(parents=True, exist_ok=True)
+config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+print("Kimi MCP registered:", config_path)
+PY
+    else
+        info "Skipped Kimi MCP registration (python3 required)"
+    fi
+}
+
+mkdir -p "$GMS_MCP_DIR"
+# MCP server source: prefer a sibling plugin checkout, else the installed skill.
+if [ -f "${SOURCE_DIR}/scripts/mcp_server.py" ]; then
+    install -m 755 "${SOURCE_DIR}/scripts/mcp_server.py" "$GMS_MCP_SERVER" 2>/dev/null || true
+    # The MCP adapter drives the CLI beside it.
+    cp "${SOURCE_DIR}/scripts/gms-remote-test.sh" "${GMS_MCP_DIR}/" 2>/dev/null || true
+    chmod 755 "${GMS_MCP_DIR}/gms-remote-test.sh" 2>/dev/null || true
+fi
+
+case "${CLIENT_MODE:-skip}" in
+    codex)  P=$(install_agent_profile codex);  configure_codex_mcp "$P" ;;
+    kimi)   P=$(install_agent_profile kimi);   configure_kimi_mcp "$P" ;;
+    kkagent)
+        P=$(install_agent_profile kkagent)
+        info "kkagent: point the gms MCP server at ${GMS_MCP_SERVER} with env from ${GMS_MCP_DIR}/kkagent.env"
+        ;;
+    auto)
+        if command -v codex >/dev/null 2>&1; then
+            P=$(install_agent_profile codex); configure_codex_mcp "$P"
+        fi
+        if [ -d "${HOME}/.kimi-code" ] || command -v kimi >/dev/null 2>&1; then
+            P=$(install_agent_profile kimi); configure_kimi_mcp "$P"
+        fi
+        [ -e "${GMS_MCP_DIR}/codex.env" ] || [ -e "${GMS_MCP_DIR}/kimi.env" ] || {
+            P=$(install_agent_profile kkagent)
+            info "No codex/kimi client detected; kkagent env written. Set GMS_AUTH_TOKEN_FILE after enrolling."
+        }
+        ;;
+    *) : ;;
+esac
+
+# Enrollment hint: the token file reference exists in the agent env, but the
+# token itself is minted from the web UI (one-shot enrollment code).
+case "${CLIENT_MODE:-skip}" in
+    codex|kimi|kkagent|auto)
+        info "Next: create an enrollment code in the web UI, then run:"
+        info "  GMS_RT_PROFILE=${P:-<profile>} gms-rt-agent-enroll <CODE>"
+        info "  (writes ${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${P:-<profile>}.token, 0600)"
+        ;;
+esac
+
 if [ "$path_ready" = true ]; then
-    info "Run: gms-rt-auth-login USERNAME"
+    info "Run: gms-rt-auth-login USERNAME   # human session"
+    info "  or: gms-rt-agent-enroll CODE    # agent service token"
     info "     gms-rt-devices-list"
     info "Update later: gms-rt-system-update"
 else

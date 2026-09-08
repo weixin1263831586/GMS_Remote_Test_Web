@@ -23,6 +23,26 @@ from .operation_claims import (
 
 logger = logging.getLogger(__name__)
 
+
+def iter_websocket_targets() -> list[tuple[str, Any]]:
+    """R26: flatten {client_id: set[socket] | socket} to (client_id, socket).
+
+    Several broadcast paths still iterated ``websocket_connections.items()``
+    and called ``ws.send_json`` on the SET itself — the TypeError was
+    swallowed and every tab silently received nothing, including the
+    single-tab case (a one-element set is still not a socket).
+    """
+    with runtime.global_state.websocket_connections_lock:
+        clients = list(runtime.global_state.websocket_connections.items())
+    targets: list[tuple[str, Any]] = []
+    for cid, connections in clients:
+        if isinstance(connections, set):
+            targets.extend((cid, socket) for socket in connections)
+        else:
+            targets.append((cid, connections))
+    return targets
+
+
 # ==================== 设备锁管理 ====================
 
 def device_mutation_guard(
@@ -187,19 +207,11 @@ async def broadcast_device_change(devices: list[str], disconnected: list[str] | 
 
     logger.info(f"[Broadcast] Notifying {len(runtime.global_state.websocket_connections)} clients about device change (source: {source})")
 
-    with runtime.global_state.websocket_connections_lock:
-        clients = list(runtime.global_state.websocket_connections.items())
-
     # R26: each client maps to a SET of live sockets (multi-tab).  Flatten
     # to per-socket pairs so every tab receives the device change; the old
     # single-websocket path would crash on sets (AttributeError swallowed
     # by the per-socket handler) and silently drop all device broadcasts.
-    sockets: list[tuple[str, Any]] = []
-    for cid, connections in clients:
-        if isinstance(connections, set):
-            sockets.extend((cid, socket) for socket in connections)
-        else:
-            sockets.append((cid, connections))
+    sockets = iter_websocket_targets()
 
     notification_level = ''
     notification_title = ''
@@ -345,7 +357,10 @@ async def broadcast_device_lock_update(device_ids: list | None = None):
             with contextlib.suppress(Exception):
                 await ws.send_json(lock_msg)
 
-        await asyncio.gather(*[_send_lock_update(cid, ws) for cid, ws in runtime.global_state.websocket_connections.items()])
+        # R26: websocket_connections values are sets of sockets since the
+        # multi-tab migration; sending on the set itself raised inside the
+        # suppressed handler and NO tab got the lock update.
+        await asyncio.gather(*[_send_lock_update(cid, ws) for cid, ws in iter_websocket_targets()])
 
     except Exception as e:
         logger.error(f"[Broadcast Device Lock] 广播设备锁定更新失败: {e}")
@@ -449,6 +464,43 @@ class SSHConnection:
         if self.ssh:
             try:
                 self._ssh_manager.return_connection(self.ssh)
+            except Exception as e:
+                logger.error(f"Failed to return SSH connection: {e}")
+
+
+class AsyncSSHConnection:
+    """R28: async SSH context whose acquire/release never touch the loop.
+
+    ``SSHConnection.__enter__`` calls the pool synchronously: the health
+    check sends SSH commands and a cold connect does a TCP+auth handshake,
+    so an async handler using ``with SSHConnection()`` stalled the whole
+    event loop whenever the host was slow or unreachable. This variant
+    moves acquire AND return into worker threads, mirroring
+    ``ssh_manager.async_optional_connection``.
+    """
+
+    def __init__(self, config=None):
+        self.config = config or runtime.config_manager.load_config()
+        self.ssh = None
+        self._ssh_manager = runtime.ssh_manager
+
+    async def __aenter__(self):
+        self.ssh = await asyncio.to_thread(
+            self._ssh_manager.get_connection, self.config
+        )
+        if not self.ssh:
+            raise HTTPException(
+                status_code=500,
+                detail="SSH连接失败"
+            )
+        return self.ssh
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.ssh:
+            try:
+                await asyncio.to_thread(
+                    self._ssh_manager.return_connection, self.ssh
+                )
             except Exception as e:
                 logger.error(f"Failed to return SSH connection: {e}")
 

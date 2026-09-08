@@ -9,6 +9,7 @@ single source of truth.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -31,14 +32,43 @@ from .storage_paths import owner_storage_key
 router = APIRouter(prefix="/api/users/workspace-context")
 _storage_lock = threading.RLock()
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@/+-]*$")
-# R18: adb TCP serials look like "host:port" (host may be an IPv4 address or
-# hostname; the port is numeric).  These are device serials, not worker
-# namespace prefixes.
-_TCP_SERIAL_RE = re.compile(r"^[A-Za-z0-9._-]+:\d+$")
 
 
 def _is_tcp_serial(value: str) -> bool:
-    return bool(_TCP_SERIAL_RE.fullmatch(value))
+    """R18: structural adb TCP-serial detection, not prefix guessing.
+
+    A TCP serial is exactly ``host:port`` where host is an IPv4 literal, an
+    IPv6 literal (possibly bracketed), or a hostname without colons, and
+    port is 1-5 digits. Multiple colons only parse as ``[v6]:port`` —
+    ``2001:db8::1:5555`` (bare IPv6 with port) is NOT a valid adb serial
+    form and must not be kept as a device id; conversely
+    ``remote:12345`` IS a valid TCP serial (adb accepts hostnames) even
+    though the host part is not an IP.
+    """
+    text = str(value or "").strip()
+    if not text or ":" not in text:
+        return False
+    host, sep, port = text.rpartition(":")
+    if not sep or not host or not port.isdigit():
+        return False
+    if not 1 <= len(port) <= 5:
+        return False
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+        try:
+            ipaddress.IPv6Address(host)
+            return True
+        except ValueError:
+            return False
+    if ":" in host:
+        # Bare IPv6 with :port is ambiguous; adb requires brackets.
+        return False
+    try:
+        ipaddress.IPv4Address(host)
+        return True
+    except ValueError:
+        # Hostname form: adb serials allow [A-Za-z0-9._-] host labels.
+        return bool(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*)", host))
 
 
 def _local_worker_id() -> str:

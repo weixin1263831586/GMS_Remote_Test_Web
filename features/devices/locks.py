@@ -33,6 +33,12 @@ def devices_display_name_resolver(client_id: str, username: str | None) -> str:
     return cleaned or client_id
 
 
+# Register at import time so every entry point (bootstrap apps, isolated
+# tests, CLI workers) resolves owner display names consistently instead of
+# leaking the internal owner id when bootstrap registration is skipped.
+configure_display_name_resolver(devices_display_name_resolver)
+
+
 __all__ = [
     "DeviceLockManager",
     "configure_display_name_resolver",

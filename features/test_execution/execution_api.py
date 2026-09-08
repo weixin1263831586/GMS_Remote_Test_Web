@@ -39,6 +39,27 @@ async def start_test(
     if not req.devices:
         return error_response("No devices selected", 400)
 
+    # Agent Service Token enforcement (2026-09-08 audit §四/§六): agents must
+    # hold tests.execute and may only target workers/devices in their ACL.
+    from features.auth import (
+        ensure_agent_device_allowed,
+        ensure_agent_worker_allowed,
+        get_authenticated_user,
+    )
+
+    principal = None
+    try:
+        principal = get_authenticated_user(request)
+    except AttributeError:
+        principal = None  # stub request without state (unit tests)
+    if principal is not None:
+        if not principal.has_permission("tests.execute"):
+            return error_response("缺少 tests.execute 权限", status_code=403)
+        for device in req.devices:
+            ensure_agent_device_allowed(request, device)
+        if req.worker_id:
+            ensure_agent_worker_allowed(request, req.worker_id)
+
     owner_id = runtime.get_client_id_from_request(request)
     try:
         from foundation.cluster_port import get_cluster_service

@@ -76,6 +76,76 @@ class ClusterCommandRepositoryMixin:
                 (json.dumps(result, separators=(",", ":")), _utc_now(), command_id),
             )
 
+    def dispatch_job_start_command(
+        self,
+        job: dict[str, Any],
+        *,
+        argv: list[str],
+        execution_spec: dict[str, Any] | None,
+        env: dict[str, Any],
+        devices: list[str],
+    ) -> dict[str, Any]:
+        """R09: queue the start_test command for a freshly leased job.
+
+        Both submission entrances (``/api/cluster/jobs`` and
+        ``/api/test/start``) used to commit the job first and the dispatch
+        command second; a write failure in between left an ``assigned`` job
+        with zero dispatchable commands, active leases and an active device
+        claim. ``create_command`` is idempotent per
+        ``(worker_id, operation_id)``, so a retried submission reuses the
+        queued command instead of duplicating it.
+        """
+        command = self.create_command({
+            "worker_id": job["assigned_worker_id"],
+            "command_type": "start_test",
+            "job_id": job["id"],
+            "attempt_id": job["current_attempt_id"],
+            "operation_id": f"{job['current_attempt_id']}:start_test",
+            "payload": {
+                "worker_job_id": f"wj-{job['id']}",
+                "argv": argv,
+                "execution_spec": execution_spec,
+                "env": env,
+                "devices": devices,
+                "trace_id": job.get("trace_id", ""),
+                "lease_tokens": [
+                    {
+                        "lease_id": lease["id"],
+                        "device_id": lease["device_id"],
+                        "generation": lease["generation"],
+                        "attempt_id": lease["attempt_id"],
+                    }
+                    for lease in job.get("leases") or []
+                    if lease.get("status") == "active"
+                ],
+            },
+        })
+        self.attach_command_to_job(job["id"], command)
+        return command
+
+    def compensate_failed_dispatch(self, job_id: str, exc: Exception) -> None:
+        """R09: roll back a job whose dispatch command could not be queued.
+
+        Fail the job and release its device claims so the devices do not
+        stay occupied by a job that can never execute. Both release steps
+        are best-effort: if they also fail the job stays visible as failed
+        with its error recorded, instead of silently disappearing.
+        """
+        try:
+            self.transition_job(
+                job_id,
+                "failed",
+                error=f"dispatch command failed: {exc}",
+                source="controller",
+                message="任务派发命令写入失败，任务已置为失败",
+            )
+        except Exception:
+            pass
+        try:
+            self.claims.release(f"job:{job_id}", status="failed")
+        except Exception:
+            pass
+
     def create_command(self, data: dict[str, Any]) -> dict[str, Any]:
         now = _utc_now()
         command_id = f"cmd-{uuid.uuid4().hex}"

@@ -428,13 +428,16 @@ class TypedToolTests(unittest.TestCase):
 
     def test_test_start_tool_builds_wait_args(self):
         captured = self._capture_run()
+        # worker_id is optional; explicit worker avoids the cluster-resolve
+        # call in unit tests (no controller available).
         mcp_server.test_start_tool({
             "device": "RK3572", "type": "CTS", "module": "m1",
-            "wait": True, "max_wait": 300,
+            "wait": True, "max_wait": 300, "worker_id": "w1",
         })
         self.assertEqual(captured["command"], "gms-rt-test-start")
         self.assertEqual(
-            captured["args"], ["RK3572", "CTS", "m1", "--wait", "--max-wait", "300"]
+            captured["args"],
+            ["RK3572", "CTS", "m1", "--worker", "w1", "--wait", "--max-wait", "300"],
         )
 
     def test_test_start_tool_retry_mode(self):
@@ -756,12 +759,17 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
     def test_burn_firmware_defaults_wipe_true_and_timeout_1800(self):
         captured = self._capture_run()
         _text, is_error = mcp_server.burn_firmware_tool(
-            {"firmware_path": "/a/update.img", "device": "RK3562GMS7"}
+            {
+                "firmware_path": "/a/update.img",
+                "device": "RK3562GMS7",
+                "approval_token": "tok",
+            }
         )
         self.assertFalse(is_error)
         self.assertEqual(captured["command"], "gms-rt-burn-firmware")
         self.assertEqual(
-            captured["args"], ["/a/update.img", "RK3562GMS7", "true"]
+            captured["args"],
+            ["/a/update.img", "RK3562GMS7", "true", "--approval-token", "tok"],
         )
         self.assertEqual(captured["timeout"], 1800)
 
@@ -770,17 +778,30 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
         _text, is_error = mcp_server.burn_firmware_tool({
             "firmware_path": "/a/update.img", "device": "D1,D2",
             "wipe_data": False, "wait_online": True, "wait_online_max": 900,
+            "approval_token": "tok",
         })
         self.assertFalse(is_error)
         self.assertEqual(
             captured["args"],
-            ["/a/update.img", "D1,D2", "false", "--wait-online", "--wait-online=900"],
+            [
+                "/a/update.img", "D1,D2", "false",
+                "--approval-token", "tok",
+                "--wait-online", "--wait-online=900",
+            ],
         )
+
+    def test_burn_firmware_requires_approval_token(self):
+        text, is_error = mcp_server.burn_firmware_tool(
+            {"firmware_path": "/a/update.img", "device": "RK3562GMS7"}
+        )
+        self.assertTrue(is_error)
+        self.assertIn("approval", text)
 
     def test_burn_firmware_rejects_bad_wait_online_max(self):
         text, is_error = mcp_server.burn_firmware_tool({
             "firmware_path": "/a/img", "device": "D1",
             "wait_online": True, "wait_online_max": "soon",
+            "approval_token": "tok",
         })
         self.assertTrue(is_error)
         self.assertIn("wait_online_max", text)
@@ -978,7 +999,7 @@ class LogcatToolTests(unittest.TestCase):
 
 
 class ShellExecToolTests(unittest.TestCase):
-    """gms_rt_shell_exec authorized one-shot gate (added v0.8.0)."""
+    """gms_rt_shell_exec approval-token gate (replaces authorized=true, v0.9.0)."""
 
     def _capture_run(self):
         captured = {}
@@ -1002,38 +1023,40 @@ class ShellExecToolTests(unittest.TestCase):
         self.assertTrue(is_err)
         self.assertIn("command", out)
 
-    def test_denies_without_explicit_authorization(self):
-        for bad in (None, False, "true", 1):
-            out, is_err = mcp_server.shell_exec_tool({
-                "device": "D1", "command": "am broadcast -a X", "authorized": bad,
-            })
-            self.assertTrue(is_err, repr(bad))
-            self.assertIn("denied", out)
-            self.assertIn("authorized=true", out)
+    def test_denies_without_approval_token(self):
+        out, is_err = mcp_server.shell_exec_tool({
+            "device": "D1", "command": "am broadcast -a X", "authorized": True,
+        })
+        self.assertTrue(is_err)
+        self.assertIn("denied", out)
+        self.assertIn("approval", out)
 
-    def test_authorized_true_forwards_to_devices_shell(self):
+    def test_approval_token_forwards_to_devices_shell(self):
         captured = self._capture_run()
         _out, is_err = mcp_server.shell_exec_tool({
             "device": "RK3562GMS7",
             "command": "settings put global wifi_on 1",
-            "authorized": True,
+            "approval_token": "tok123",
         })
         self.assertFalse(is_err)
         self.assertEqual(captured["command"], "gms-rt-devices-shell")
         self.assertEqual(
             captured["args"],
-            ["RK3562GMS7", "settings put global wifi_on 1"],
+            [
+                "RK3562GMS7", "--approval-token", "tok123",
+                "settings put global wifi_on 1",
+            ],
         )
         self.assertEqual(captured["timeout"], 120)
 
     def test_rejects_bad_device_id_and_oversized_command(self):
         out, is_err = mcp_server.shell_exec_tool({
-            "device": "D1;reboot", "command": "ls", "authorized": True,
+            "device": "D1;reboot", "command": "ls", "approval_token": "t",
         })
         self.assertTrue(is_err)
         self.assertIn("denied", out)
         out, is_err = mcp_server.shell_exec_tool({
-            "device": "D1", "command": "x" * 2001, "authorized": True,
+            "device": "D1", "command": "x" * 2001, "approval_token": "t",
         })
         self.assertTrue(is_err)
         self.assertIn("exceeds", out)
@@ -1041,12 +1064,12 @@ class ShellExecToolTests(unittest.TestCase):
     def test_timeout_clamped_and_validated(self):
         captured = self._capture_run()
         _out, is_err = mcp_server.shell_exec_tool({
-            "device": "D1", "command": "ls", "authorized": True, "timeout": 9999,
+            "device": "D1", "command": "ls", "approval_token": "t", "timeout": 9999,
         })
         self.assertFalse(is_err)
         self.assertEqual(captured["timeout"], 600)
         out, is_err = mcp_server.shell_exec_tool({
-            "device": "D1", "command": "ls", "authorized": True, "timeout": "x",
+            "device": "D1", "command": "ls", "approval_token": "t", "timeout": "x",
         })
         self.assertTrue(is_err)
         self.assertIn("timeout", out)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
@@ -18,6 +19,53 @@ class ClusterClaimRepositoryMixin:
                 return device
         return None
 
+    def _physical_alias_keys(self, device_key: str) -> list[str]:
+        """R01: every claim key that routes to the same physical device.
+
+        An ADB-Proxy alias row carries adb_proxy_source_worker_id /
+        adb_proxy_source_serial pointing at the source worker's local-USB
+        row; claiming through either route must contend for the same
+        physical hardware. Returns the requested key itself plus every
+        alias key found in the current inventory.
+        """
+        alias_keys = [device_key]
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT transport, properties_json FROM cluster_worker_devices WHERE id=?",
+                (device_key,),
+            ).fetchone()
+            if row is None:
+                return alias_keys
+            try:
+                properties = json.loads(row["properties_json"] or "{}")
+            except json.JSONDecodeError:
+                properties = {}
+            transport = str(row["transport"] or "")
+            if transport == "adb_proxy":
+                source_worker = str(properties.get("adb_proxy_source_worker_id") or "")
+                source_serial = str(properties.get("adb_proxy_source_serial") or "")
+                if source_worker and source_serial:
+                    alias_keys.append(f"{source_worker}:{source_serial}")
+            else:
+                source_serial = device_key.split(":", 1)[1] if ":" in device_key else ""
+                proxy_rows = conn.execute(
+                    "SELECT id, properties_json FROM cluster_worker_devices "
+                    "WHERE transport='adb_proxy'",
+                ).fetchall()
+                for proxy_row in proxy_rows:
+                    try:
+                        proxy_properties = json.loads(proxy_row["properties_json"] or "{}")
+                    except json.JSONDecodeError:
+                        continue
+                    if (
+                        str(proxy_properties.get("adb_proxy_source_worker_id") or "")
+                        == device_key.split(":", 1)[0]
+                        and str(proxy_properties.get("adb_proxy_source_serial") or "")
+                        == source_serial
+                    ):
+                        alias_keys.append(str(proxy_row["id"]))
+        return list(dict.fromkeys(alias_keys))
+
     def _claim_devices(
         self, worker_id: str, devices: list[str]
     ) -> list[dict[str, Any]]:
@@ -31,17 +79,23 @@ class ClusterClaimRepositoryMixin:
                     value if value.startswith(f"{worker_id}:")
                     else f"{worker_id}:{value}"
                 )
-                previous = conn.execute(
-                    """SELECT COALESCE(MAX(generation),0)+1
-                       FROM device_leases WHERE device_id=?""",
-                    (device_key,),
-                ).fetchone()[0]
-                claimed.append({
-                    "device_key": device_key,
-                    "worker_id": worker_id,
-                    "serial": device_key[len(worker_id) + 1:],
-                    "generation_floor": int(previous or 1),
-                })
+                # R01: claim the requested alias AND its physical sibling
+                # keys in the same atomic acquire, so an operation claim on
+                # the source device conflicts with a job on the proxy alias
+                # (and vice versa) instead of letting both run at once.
+                for key in self._physical_alias_keys(device_key):
+                    previous = conn.execute(
+                        """SELECT COALESCE(MAX(generation),0)+1
+                           FROM device_leases WHERE device_id=?""",
+                        (key,),
+                    ).fetchone()[0]
+                    key_worker, _, key_serial = key.partition(":")
+                    claimed.append({
+                        "device_key": key,
+                        "worker_id": key_worker,
+                        "serial": key_serial,
+                        "generation_floor": int(previous or 1),
+                    })
         return claimed
 
     def acquire_device_operation_claim(

@@ -80,6 +80,21 @@ async def device_action(body: ClusterDeviceAction, request: Request):
 
     user = require_authenticated_user(request)
     owner_id = user.id
+    # Agent Service Token enforcement (2026-09-08 audit §四): an agent
+    # principal must hold devices.use_leased for any action and may only
+    # touch devices in its allowed_devices ACL, on workers in its
+    # allowed_workers ACL. Human sessions are unaffected.
+    if user.role == "agent_service":
+        from features.auth import ensure_agent_device_allowed, ensure_agent_worker_allowed
+
+        ensure_agent_worker_allowed(request, body.worker_id)
+        if not user.has_permission("devices.use_leased"):
+            raise HTTPException(
+                403,
+                "Agent token lacks devices.use_leased scope",
+            )
+        for item in body.devices:
+            ensure_agent_device_allowed(request, item)
     # devices.use_leased 语义落地：普通 user（无 devices.lease 权限）对
     # 非只读操作只能作用于自己已通过 claim/reservation 占有的设备；
     # device_operator/admin 才可抢占任意空闲设备。否则权限名的安全承诺

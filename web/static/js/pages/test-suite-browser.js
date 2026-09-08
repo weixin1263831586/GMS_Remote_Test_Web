@@ -264,23 +264,40 @@ async function loadSuiteWorkerSelector() {
 let _browserSuitesCache = [];
 let _browserSuitesWorkerId = '';
 
+// R21: request generation guard for remote suite listing. A slow response
+// for worker A must not overwrite the browser cache after the user has
+// already switched to worker B.
+let _browserSuitesRequestGeneration = 0;
+
 async function loadSuitesForBrowserWorker(force = false) {
     const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
     // Suite Browser 是浏览上下文：只维护 page-local 的选择器，
     // 不改全局 Test Workspace（worker_id），否则浏览 Worker B
     // 的套件会顺手把测试执行上下文切到 B。
     syncSuiteWorkerSelectOnly(workerId);
+    if (!force && _browserSuitesWorkerId === workerId && _browserSuitesCache.length > 0) {
+        return _browserSuitesCache;
+    }
+    // R21: the LOCAL branch used to call loadTestSuites(), which loads by
+    // the GLOBAL EXECUTION worker — browsing "local" while the execution
+    // target was B cached B's suites under the local label.  Fetch the
+    // local suite list directly instead, independent of execution state.
     if (isLocalWorkspaceWorker(workerId)) {
-        if (!force && _browserSuitesWorkerId === workerId && _browserSuitesCache.length > 0) {
+        const generation = ++_browserSuitesRequestGeneration;
+        const url = force ? '/api/test/suites?force_refresh=1' : '/api/test/suites';
+        const response = await apiCall(url);
+        if (generation !== _browserSuitesRequestGeneration) {
+            // A newer request superseded this one; drop the stale result.
             return _browserSuitesCache;
         }
-        // 本机分支：读取执行页数据，但存入浏览器自己的缓存，
-        // 不再回写共享的执行页缓存 (R21)。
-        const suites = await loadTestSuites(force);
-        _browserSuitesCache = suites || [];
+        _browserSuitesCache = (response?.suites || []).map(item => ({
+            tools_path: item.tools_path,
+            test_type: String(item.test_type || '').toLowerCase(),
+            version: item.version,
+            suite_key: item.suite_key || item.tools_path,
+            worker_id: workerId
+        }));
         _browserSuitesWorkerId = workerId;
-        // 恢复执行页缓存归属：loadTestSuites 按"当前执行 worker"缓存，
-        // 浏览本机不改变它。
         return _browserSuitesCache;
     }
     // force 时触发真正的 Worker 端套件扫描，再读回写后的清单。
@@ -293,9 +310,14 @@ async function loadSuitesForBrowserWorker(force = false) {
             debugLog(`[suite-browser] worker refresh failed: ${refreshError.message}`);
         }
     }
+    const generation = ++_browserSuitesRequestGeneration;
     const response = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
     if (!response.ok) throw new Error('加载 Worker 套件失败');
     const payload = await response.json();
+    if (generation !== _browserSuitesRequestGeneration) {
+        // Stale response for a previous worker target.
+        return _browserSuitesCache;
+    }
     _browserSuitesCache = (payload.suites || []).filter(item => item.available).map(item => ({
         tools_path: item.tools_path,
         test_type: String(item.test_type || '').toLowerCase(),
@@ -968,24 +990,18 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
 
     state.suiteBrowser.selectedSuitePath = suite.tools_path;
     state.suiteBrowser.currentPath = path || '';
-    // R14: Suite Browser is a browsing context — selecting a suite must NOT
-    // change the global test-execution worker.  Writing worker_id here made
-    // browsing Worker B's suites silently switch the execution host to B.
-    window.GmsWorkspace?.update({
-        suite_key: suite.suite_key || suite.tools_path,
-        suite_path: suite.tools_path,
-        origin_page: 'test-suites'
-    }, {source: 'suites'});
+    // R14: Suite Browser is a browsing context — selecting a suite here
+    // must NOT touch the global test-execution context at all.  Writing
+    // suite_key/suite_path (and the test page's select) made the
+    // execution page show Worker A with Worker B's suite path after a
+    // browse.  Browsing state stays in state.suiteBrowser only; the
+    // "use for test" flow remains the single way to build an execution
+    // context.
     if (!options.preserveHighlight) {
         state.suiteBrowser.highlightPath = '';
     }
     if (!options.preserveSearchResults) {
         clearSuiteSearchResults();
-    }
-
-    const suiteSelect = document.getElementById('test-suite');
-    if (suiteSelect && suiteSelect.value !== suite.tools_path) {
-        suiteSelect.value = suite.tools_path;
     }
 
     const titleEl = $('suite-browser-title');

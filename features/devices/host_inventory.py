@@ -126,11 +126,8 @@ def _attached_usbip_serial_map() -> dict[tuple[str, str], str]:
                 serial = serial_by_local.get(local or '')
                 if serial:
                     mapping[(entry['host'], entry['busid'])] = serial
-        if len(mapping) != len(entries) and len(entries) == 1 and len(serial_by_local) == 1:
-            # 输出格式变化导致关联失败时的最后兜底：唯一导入 + 唯一序列号。
-            mapping[(entries[0]['host'], entries[0]['busid'])] = next(
-                iter(serial_by_local.values())
-            )
+        # 不做“唯一导入+唯一序列号”的跨主机兜底：BUSID 仅在来源主机
+        # 内唯一，串主机回填会把 B 主机的序列号显示到 A 主机清单。
         return mapping
     except Exception as exc:
         logger.debug("[HostInventory] usbip serial map unavailable: %s", exc)
@@ -164,22 +161,18 @@ def _enumerate(device_host: str) -> dict[str, Any]:
         ).strip()
     except Exception:
         attach_host = ""
-    serials_by_busid: dict[str, set[str]] = {}
-    for _host, busid in serial_map:
-        serials_by_busid.setdefault(busid, set()).add(serial_map[(_host, busid)])
     devices: list[str] = []
     for item in raw_items:
         serial = str(item.get("serial") or "").strip()
         busid = str(item.get("busid") or "").strip()
         if not serial and busid and serial_map:
+            # 仅在 (来源主机, BUSID) 精确命中时回填。BUSID 只在单一
+            # 来源主机内有意义：按“全局唯一 busid”兜底曾把另一台来源
+            # 主机的序列号错误显示到本主机清单（跨主机误归属回归）。
             serial = (
                 serial_map.get((host_token, busid), "")
                 or serial_map.get((attach_host, busid), "")
             )
-            if not serial:
-                candidates = serials_by_busid.get(busid) or set()
-                if len(candidates) == 1:
-                    serial = next(iter(candidates))
         devices.append(serial or busid)
     return {
         "devices": devices,

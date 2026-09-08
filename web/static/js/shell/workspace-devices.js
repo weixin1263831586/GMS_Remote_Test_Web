@@ -832,6 +832,14 @@ async function refreshTestSuites() {
 function renderTestSuitesDropdown() {
     const selectElement = document.getElementById('test-suite');
 
+    // R22: capture the user's current selection BEFORE clearing the DOM.
+    // The old order (innerHTML='' → autoSelectTestSuite) left the select
+    // empty when the guard ran, so currentTestSuiteStillValid('') was
+    // always false and every refresh re-selected the newest version
+    // (r1 → r2). Restore the selection after re-render when it is still
+    // valid for the current test type.
+    const previousSelection = selectElement?.value || '';
+
     // 清空现有选项
     selectElement.innerHTML = '';
 
@@ -869,8 +877,18 @@ function renderTestSuitesDropdown() {
         selectElement.appendChild(group);
     });
 
-    // 渲染完成后，自动根据当前选择的测试类型来选择合适的测试套件
+    // 渲染完成后恢复原选择（仍存在且匹配当前测试类型时），
+    // 否则按当前测试类型自动选择。
     const currentTestType = $('test-type')?.value;
+    if (
+        previousSelection &&
+        typeof currentTestSuiteStillValid === 'function' &&
+        currentTestSuiteStillValid(previousSelection, currentTestType) &&
+        Array.from(selectElement.options).some(option => option.value === previousSelection)
+    ) {
+        selectElement.value = previousSelection;
+        return;
+    }
     if (currentTestType) {
         autoSelectTestSuite(currentTestType);
     }

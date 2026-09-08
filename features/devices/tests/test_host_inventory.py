@@ -133,13 +133,27 @@ class AttachedUsbipSerialBackfillTests(unittest.TestCase):
         self.assertEqual(result["devices"], ["RK3562GMS7", "S2"])
 
     def test_unique_busid_backfills_even_with_unknown_attach_host(self):
-        # usbip port 里的 host 是 attach 用的地址（可能是 Tailscale IP），
-        # 与来源 user@host 不同；BUSID 全局唯一时仍应回填。
+        # usbip port 报告的 host 是 attach 侧地址（可能是 Tailscale IP）。
+        # BUSID 只在来源主机内唯一：映射键的主机无法确认等于本来源
+        # 主机时，不允许把其他来源主机的序列号回填到本主机（回归修复），
+        # 保留 BUSID 展示。
         manager = _fake_usbip_manager(devices=[{"busid": "1-1", "serial": ""}])
         with patch.object(host_inventory, "usbip_manager", manager), patch.object(
             host_inventory,
             "_attached_usbip_serial_map",
             return_value={("100.82.1.32", "1-1"): "c3d9b8674f4b94f6"},
+        ):
+            host_inventory._refresh("hcq@10.0.0.5")
+            result = host_inventory.host_local_device_inventory("hcq@10.0.0.5")
+        self.assertEqual(result["devices"], ["1-1"])
+
+    def test_same_host_busid_backfills_serial(self):
+        # (来源主机, BUSID) 精确同主机命中时仍回填序列号。
+        manager = _fake_usbip_manager(devices=[{"busid": "1-1", "serial": ""}])
+        with patch.object(host_inventory, "usbip_manager", manager), patch.object(
+            host_inventory,
+            "_attached_usbip_serial_map",
+            return_value={("10.0.0.5", "1-1"): "c3d9b8674f4b94f6"},
         ):
             host_inventory._refresh("hcq@10.0.0.5")
             result = host_inventory.host_local_device_inventory("hcq@10.0.0.5")
@@ -204,19 +218,22 @@ class AttachedUsbipSerialMapTests(unittest.TestCase):
         self.assertEqual(mapping, {("10.0.0.5", "1-1"): "c3d9b8674f4b94f6"})
 
     def test_single_entry_fallback_when_join_fails(self):
+        # 管道格式没有 local_busid 且 status 不可读时无法关联：不再做
+        # “唯一导入+唯一序列号”兜底（可能把其他主机的 serial 套进来），
+        # 返回部分成功关联的映射，未关联条目保持未知。
         outputs = [
             _shell_result(
                 "Port 00: <Port in Use>\n"
                 "    1-1 | 2207:0006 | SSI 17 | Remote USB/IP host 10.0.0.5\n"
             ),
             _shell_result("3-1 c3d9b8674f4b94f6\n"),
-            _shell_result(""),  # status 不可读：格式兜底生效
+            _shell_result(""),  # status 不可读：无法由 port 关联 local_busid
         ]
         with patch.object(
             host_inventory, "_run_on_test_host", self._run(outputs),
         ):
             mapping = host_inventory._attached_usbip_serial_map()
-        self.assertEqual(mapping, {("10.0.0.5", "1-1"): "c3d9b8674f4b94f6"})
+        self.assertEqual(mapping, {})
 
     def test_port_command_failure_returns_empty(self):
         with patch.object(
