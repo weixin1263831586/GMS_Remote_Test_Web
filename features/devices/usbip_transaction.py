@@ -68,6 +68,8 @@ def parse_usbip_port_entries(output: str) -> list[dict[str, str]]:
                 'port': port_match.group(1),
                 'busid': '',
                 'host': '',
+                # URL 格式行额外携带本地（vhci 侧）BUSID；管道格式没有。
+                'local_busid': '',
             }
             entries.append(current)
             continue
@@ -85,6 +87,7 @@ def parse_usbip_port_entries(output: str) -> list[dict[str, str]]:
             current.update({
                 'busid': url_match.group('busid'),
                 'host': url_match.group('host').strip('[]'),
+                'local_busid': url_match.group('local_busid'),
             })
     return entries
 

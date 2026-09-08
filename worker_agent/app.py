@@ -1157,8 +1157,12 @@ class WorkerAgent:
             try:
                 if not registered:
                     self.client.register(self.registration())
-                    # 注册后的首次心跳强制重新上报设备清单。
-                    self.last_suite_scan = 0.0
+                    # 注册后的首次心跳强制重新上报设备/套件清单。
+                    # 用 -inf 而不是 0：刚开机的主机 time.monotonic() 可能
+                    # 小于 suite_scan_interval（如 CI 容器 ~40s < 300s），
+                    # `now - 0.0 >= interval` 不成立会导致首次心跳缺失
+                    # suites，Controller 短暂显示"Worker 在线但没有套件"。
+                    self.last_suite_scan = float("-inf")
                     registered = True
                     logger.info("registered as %s", self.config.worker_id)
                 if not recovered:

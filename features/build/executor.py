@@ -171,15 +171,20 @@ class SshTmuxBuildBackend:
     def _run(self, server: dict[str, Any], command: str, timeout: int = 30) -> tuple[int, str, str]:
         import paramiko
 
+        from foundation.ssh_executor import ssh_executor
+
         ssh = paramiko.SSHClient()
         configure_strict_host_keys(ssh)
         try:
             ssh.connect(**self._connect_kwargs(server))
-            _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout, get_pty=False)
-            out = stdout.read().decode(errors="replace")
-            err = stderr.read().decode(errors="replace")
-            code = stdout.channel.recv_exit_status()
-            return code, out, err
+            # 共享 SSH 执行原语：stdout/stderr 并发 drain 后再取退出码。
+            # 此前顺序 read stdout→read stderr→recv_exit_status 在 Android
+            # 大输出构建（ninja/make/merge_target_files）下会因对端 channel
+            # 窗口耗尽而死锁（stderr 填满窗口→远端阻塞→stdout EOF 永不到达）。
+            result = ssh_executor.run(ssh, command, timeout=timeout)
+            if result.code == -1:
+                raise BuildExecutionError(f"构建服务器命令执行失败：{result.stderr}")
+            return result.code, result.stdout, result.stderr
         except BuildExecutionError:
             raise
         except paramiko.AuthenticationException as exc:
