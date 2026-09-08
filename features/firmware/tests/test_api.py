@@ -13,7 +13,13 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.firmware import api, firmware_api, runtime, shares_api
+from features.firmware import (
+    api,
+    firmware_api,
+    gsi_sn_burn,
+    runtime,
+    shares_api,
+)
 from foundation.command_result import CommandResult
 
 
@@ -210,7 +216,7 @@ class FirmwareApiTests(unittest.TestCase):
         fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_FOUND__\n")
         runtime.configure_runtime(ssh_manager=fake_ssh)
 
-        resolved, error = firmware_api._resolve_gsi_remote_image(
+        resolved, error = gsi_sn_burn._resolve_gsi_remote_image(
             fake_ssh,
             "/home/hcq/GMS-Suite",
             "vendor_boot-debug.img",
@@ -228,7 +234,7 @@ class FirmwareApiTests(unittest.TestCase):
         fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_MISSING__\n")
         runtime.configure_runtime(ssh_manager=fake_ssh)
 
-        resolved, error = firmware_api._resolve_gsi_remote_image(
+        resolved, error = gsi_sn_burn._resolve_gsi_remote_image(
             fake_ssh,
             "/home/hcq/GMS-Suite",
             "vendor_boot-debug.img",

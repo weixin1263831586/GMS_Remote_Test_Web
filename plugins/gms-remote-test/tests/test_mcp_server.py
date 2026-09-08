@@ -9,11 +9,13 @@ is driven through the real subprocess entry point.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
@@ -763,6 +765,7 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
                 "firmware_path": "/a/update.img",
                 "device": "RK3562GMS7",
                 "approval_token": "tok",
+                "wait": True,
             }
         )
         self.assertFalse(is_error)
@@ -778,7 +781,7 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
         _text, is_error = mcp_server.burn_firmware_tool({
             "firmware_path": "/a/update.img", "device": "D1,D2",
             "wipe_data": False, "wait_online": True, "wait_online_max": 900,
-            "approval_token": "tok",
+            "approval_token": "tok", "wait": True,
         })
         self.assertFalse(is_error)
         self.assertEqual(
@@ -801,10 +804,118 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
         text, is_error = mcp_server.burn_firmware_tool({
             "firmware_path": "/a/img", "device": "D1",
             "wait_online": True, "wait_online_max": "soon",
-            "approval_token": "tok",
+            "approval_token": "tok", "wait": True,
         })
         self.assertTrue(is_error)
         self.assertIn("wait_online_max", text)
+
+
+class AsyncBurnOperationTests(unittest.TestCase):
+    """wait=false 后台烧录（15.txt §十一）：start → operation_id → status。"""
+
+    def setUp(self):
+        _reset_catalog_cache()
+        self.addCleanup(_reset_catalog_cache)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._ops_patcher = patch.dict(
+            os.environ, {"GMS_BURN_OPS_DIR": self._tmp.name}
+        )
+        self._ops_patcher.start()
+        self.addCleanup(self._ops_patcher.stop)
+
+    def test_async_start_returns_operation_id_immediately(self):
+        # wait=false 必须走异步路径：不再调用 run_cli（同步等待），
+        # 而是后台启动并立即返回 operation_id。用 stub CLI 保证确定性。
+        stub_dir = Path(self._tmp.name) / "bin-async"
+        stub_dir.mkdir(exist_ok=True)
+        stub = stub_dir / "fake-cli-async"
+        stub.write_text("#!/bin/sh\necho '{\"ok\":true,\"exit_code\":0}'\n")
+        stub.chmod(0o755)
+        original_argv = mcp_server.build_argv
+        mcp_server.build_argv = lambda command, args: [str(stub), *args]
+        self.addCleanup(lambda: setattr(mcp_server, "build_argv", original_argv))
+
+        text, is_error = mcp_server.burn_firmware_tool({
+            "firmware_path": "/a/img", "device": "D1",
+            "approval_token": "tok", "wait": False,
+        })
+        self.assertFalse(is_error)
+        payload = json.loads(text)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"], "running")
+        self.assertRegex(payload["operation_id"], r"^burn-[0-9a-f-]+$")
+        self.assertIn("gms_rt_burn_status", payload["hint"])
+
+    def test_start_and_poll_full_lifecycle(self):
+        import time as _time
+
+        # stub "CLI"：写 envelope 到 stdout 后退出。
+        stub_dir = Path(self._tmp.name) / "bin"
+        stub_dir.mkdir(exist_ok=True)
+        stub = stub_dir / "fake-cli"
+        stub.write_text("#!/bin/sh\necho '{\"ok\":true,\"exit_code\":0,\"data\":{\"burned\":true}}'\n")
+        stub.chmod(0o755)
+
+        original_argv = mcp_server.build_argv
+        mcp_server.build_argv = (
+            lambda command, args: [str(stub), *args]
+        )
+        self.addCleanup(lambda: setattr(mcp_server, "build_argv", original_argv))
+
+        text, is_error = mcp_server.start_burn_operation(
+            "gms-rt-burn-firmware", ["/a/img", "D1", "true"]
+        )
+        self.assertFalse(is_error)
+        payload = json.loads(text)
+        operation_id = payload["operation_id"]
+        self.assertEqual(payload["status"], "running")
+        # operation_id 只包含安全字符，防止路径穿越。
+        self.assertRegex(operation_id, r"^burn-[0-9a-f-]+$")
+
+        # 进程存活期间 → running（带 recent_output）。
+        status_text, status_error = mcp_server.burn_status_tool(
+            {"operation_id": operation_id}
+        )
+        self.assertFalse(status_error)
+        status = json.loads(status_text)
+        self.assertIn(status["status"], {"running", "finished"})
+
+        # 进程退出后 → finished，并提取 envelope。
+        _time.sleep(0.3)
+        deadline = _time.time() + 5
+        final = None
+        while _time.time() < deadline:
+            status_text, status_error = mcp_server.burn_status_tool(
+                {"operation_id": operation_id}
+            )
+            self.assertFalse(status_error)
+            status = json.loads(status_text)
+            if status["status"] == "finished":
+                final = status
+                break
+            _time.sleep(0.1)
+        self.assertIsNotNone(final, status_text)
+        self.assertEqual(final["result"]["data"]["burned"], True)
+        self.assertEqual(final["exit_code"], 0)
+
+    def test_burn_status_rejects_path_traversal(self):
+        for evil in ("../escape", "a/b", "", "burn-../../etc"):
+            text, is_error = mcp_server.burn_status_tool({"operation_id": evil})
+            self.assertTrue(is_error, evil)
+            self.assertIn("operation_id", text)
+
+    def test_burn_status_unknown_operation(self):
+        text, is_error = mcp_server.burn_status_tool(
+            {"operation_id": "burn-00000000-000000-abcdef"}
+        )
+        self.assertTrue(is_error)
+        self.assertIn("not found", text)
+
+    def test_burn_status_rejects_non_burn_prefix(self):
+        _text, is_error = mcp_server.burn_status_tool({"operation_id": "xyz-1"})
+        self.assertTrue(is_error)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

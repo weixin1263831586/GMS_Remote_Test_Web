@@ -26,6 +26,7 @@ from .request_security import (
     websocket_origin_allowed,
 )
 from .service import (
+    AGENT_ROLE,
     AUTH_COOKIE_NAME,
     ROLE_PERMISSIONS,
     AuthService,
@@ -35,6 +36,7 @@ from .service import (
 
 
 __all__ = [
+    "AGENT_ROLE",
     "AUTH_COOKIE_NAME",
     "ROLE_PERMISSIONS",
     "AuthService",

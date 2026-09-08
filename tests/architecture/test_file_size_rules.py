@@ -35,7 +35,7 @@ MIGRATION_LINE_LIMITS = {
     'features/reports/analysis_api.py': 712,
     'features/reports/api_helpers.py': 775,
     'features/reports/weekly_report_api.py': 1123,
-    'features/system/api.py': 1143,  # +11: R26 multi-tab websocket connections
+    'features/system/api.py': 1184,  # +41: R26 multi-tab websocket connections, §十二 jq binary endpoint
     'features/system/api_docs_list.py': 985,
     'features/system/integrations.py': 613,
     'features/system/assets.py': 604,  # +10: auth deps on opengrok/favicon
@@ -51,7 +51,7 @@ MIGRATION_LINE_LIMITS = {
     'features/devices/tests/test_usbip_reconnect.py': 3121,
     'features/devices/usbip_linux_source.py': 818,
     'features/devices/usbip.py': 1631,
-    'features/firmware/firmware_api.py': 1054,
+    'features/firmware/firmware_api.py': 1082,  # +28: §五 agent burn approval-token gate
     'features/system/vnc.py': 613,
 }
 

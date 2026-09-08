@@ -59,6 +59,7 @@
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20260813-upload-generation" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20260813-ai-status" defer></script>
+    <script src="/static/js/pages/agent-access.js?v=20260908-agent-service-token" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20260828-apk-scroll-containers" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260826-auth-ready" defer></script>
@@ -1937,6 +1938,40 @@
                         <div class="suite-empty">等待任务</div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Agent 接入管理（2026-09-08 audit §二/§三：Service Token + 配对码） -->
+            <div id="agent-access-panel" style="margin-top: 10px; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: none;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div style="font-size: 13px; font-weight: 600;">🔑 Agent 接入管理</div>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn-xs" onclick="agentAccessReload()">刷新</button>
+                        <button class="btn-xs btn-primary" onclick="agentAccessToggleCreate()">＋ 创建配对码</button>
+                        <button class="btn-xs" onclick="agentAccessToggle(false)">收起</button>
+                    </div>
+                </div>
+                <div id="agent-access-summary" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
+                    编译服务器上的 Codex / Kimi / kkagent 通过一次性配对码换取 Agent Service Token（0600 文件），
+                    之后经 Authorization: Bearer 调用平台，全程不需要平台密码。
+                </div>
+                <div id="agent-access-enroll-form" style="display: none; border: 1px dashed var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px;">
+                        <input id="agent-access-name" class="combo-box" placeholder="名称，如 kimi-build03" style="flex: 1; min-width: 160px; height: 28px; font-size: 12px;" />
+                        <input id="agent-access-workers" class="combo-box" placeholder="允许的 Worker（逗号分隔，* 不限）" style="flex: 1; min-width: 200px; height: 28px; font-size: 12px;" />
+                        <input id="agent-access-devices" class="combo-box" placeholder="允许的设备（逗号分隔，* 不限）" style="flex: 1; min-width: 200px; height: 28px; font-size: 12px;" />
+                        <input id="agent-access-days" class="combo-box" type="number" min="1" max="365" value="90" title="有效期（天）" style="width: 90px; height: 28px; font-size: 12px;" />
+                        <span style="font-size: 11px; color: var(--text-secondary);">天</span>
+                    </div>
+                    <div id="agent-access-scopes" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;"></div>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <button class="btn-xs btn-primary" onclick="agentAccessCreateEnrollment()">生成配对码（5 分钟有效）</button>
+                        <span id="agent-access-code-result" class="mono" style="font-size: 12px; font-weight: 600; user-select: all;"></span>
+                    </div>
+                </div>
+                <div id="agent-access-tokens" style="max-height: 220px; overflow-y: auto;"></div>
+            </div>
+            <div id="agent-access-entry" style="margin-top: 8px; display: none;">
+                <button class="btn-xs" onclick="agentAccessToggle(true)">🔑 Agent 接入管理</button>
             </div>
         </div>
 

@@ -96,8 +96,14 @@ gms-rt-auth-status --json --non-interactive
 `--client auto` additionally registers the MCP server with Codex/Kimi and
 writes per-agent env profiles. Agents authenticate with an Agent Service
 Token instead of a password: mint a one-shot enrollment code in the web UI
-and run `gms-rt-agent-enroll CODE` once; the token file (0600) is referenced
+(and run `gms-rt-agent-enroll CODE` once); the token file (0600) is referenced
 by `GMS_AUTH_TOKEN_FILE` and no platform password ever reaches the agent.
+
+Admins can drive the whole enrollment lifecycle from a terminal:
+`gms-rt-agent-enroll-code` mints a one-shot pairing code (admin + elevation),
+`gms-rt-agent-tokens` lists issued tokens (metadata only — raw tokens are
+never stored server-side), and `gms-rt-agent-token-revoke <ID>` instantly
+cuts an agent off.
 
 The installer binds the standalone commands to that Controller. Use
 `--server https://OTHER-CONTROLLER:5001` for a one-off override. A local
@@ -119,18 +125,29 @@ gms-rt-jobs-wait JOB_ID --max-wait 21600 --json --non-interactive
 gms-rt-jobs-events JOB_ID -1 500 --json --non-interactive
 ```
 
-Firmware burning is elevated and mutating. Check readiness first, obtain
-explicit user authorization, establish elevation, then execute:
+Firmware burning is destructive and mutating. Agents never hold admin
+passwords: the burn path is gated by a server-side one-shot approval token
+bound to tool + device + burn command (5-minute TTL, single use), minted by
+the user under their own session:
 
 ```bash
-printf '%s\n' "$ADMIN_PASSWORD" |
-  gms-rt-auth-elevate "$ADMIN_USERNAME" --password-stdin --non-interactive --json
-gms-rt-system-doctor firmware --json --non-interactive
-gms-rt-burn-firmware /path/to/update.img DEVICE true --json --non-interactive
+# 1. User (human session) mints the approval — the agent only learns the token:
+gms-rt-approval-create --tool gms_rt_burn_firmware --device RK3572GMS1 \
+  --command "burn_firmware:RK3572GMS1" --json --non-interactive
+# 2. Agent executes the burn with that approval token; without it the
+#    server rejects any agent burn with 403:
+gms-rt-burn-firmware /path/to/update.img RK3572GMS1 true \
+  --approval-token "$APPROVAL_TOKEN" --json --non-interactive
 # GSI requires direct SSH transfer to the test host (no HTTP fallback):
 gms-rt-system-doctor gsi --json --non-interactive
 gms-rt-burn-gsi /path/to/system.img DEVICE true --json --non-interactive
 ```
+
+Over MCP, prefer the asynchronous model (single tool calls stay short for
+clients that cap them at 60s, e.g. Kimi):
+`gms_rt_burn_firmware(wait=false)` returns an `operation_id` immediately;
+poll `gms_rt_burn_status(operation_id=...)` every 20-30s until
+`status: "finished"`. `wait=true` keeps the legacy synchronous wait.
 
 ## JSON envelope
 

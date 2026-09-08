@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.9.0"
+GMS_RT_VERSION="0.10.0"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -96,14 +96,28 @@ GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/sta
 # at a 0600 token file, every request carries Authorization: Bearer <token>
 # instead of the session cookie. The CLI never prints the token and agents
 # only ever learn the path. Token auth is mutually exclusive with the
-# cookie jar: with a token file set, login is unnecessary and the cookie
-# jar is not read.
+# cookie jar (4.txt P0-1): Bearer mode never reads or writes the cookie jar,
+# so a request can never carry both an agent token and a leftover human
+# session cookie (the server treats that combination as a privilege mix).
+# Human mode stays Cookie only.
 GMS_AUTH_TOKEN_FILE="${GMS_AUTH_TOKEN_FILE:-}"
-CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
 _gms_bearer_token=""  # cached per process; reloaded by _refresh_tls_args
+_gms_bearer_header_file=""  # 0600 header file (4.txt P1c: token stays out of argv)
 _gms_refresh_bearer_token() {
     if [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
         if [ ! -r "$GMS_AUTH_TOKEN_FILE" ]; then
+            _gms_bearer_token=""
+            return 1
+        fi
+        # P1 (4.txt): reject token files whose permissions are too loose or
+        # whose owner is not the current user — same hard rule as the
+        # Worker Token files.
+        local _mode _owner
+        _mode=$(stat -c '%a' "$GMS_AUTH_TOKEN_FILE" 2>/dev/null || printf '600')
+        _owner=$(stat -c '%u' "$GMS_AUTH_TOKEN_FILE" 2>/dev/null || printf "$(id -u)")
+        if [ "$((_mode & 077))" != "0" ] || [ "$_owner" != "$(id -u)" ]; then
+            error "Agent token file $GMS_AUTH_TOKEN_FILE must be 0600 and owned by the current user (got mode $_mode owner $_owner)"
+            GMS_RT_ERROR_SEEN=1
             _gms_bearer_token=""
             return 1
         fi
@@ -112,6 +126,17 @@ _gms_refresh_bearer_token() {
         _gms_bearer_token=""
     fi
     return 0
+}
+# Recomputed before every curl call (function mode may toggle the token file
+# at runtime). Bearer mode ⇒ cookie args emptied entirely; cookie mode ⇒
+# standard -b/-c jar args.
+CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
+_gms_apply_credential_mode() {
+    if [ -n "$_gms_bearer_token" ]; then
+        CURL_AUTH_ARGS=()
+    else
+        CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
+    fi
 }
 # Serialises cookie-jar writes across concurrent CLI processes.
 GMS_COOKIE_LOCK_FILE="${GMS_AUTH_COOKIE_JAR}.lock"
@@ -154,11 +179,30 @@ _refresh_tls_args() {
     fi
     # Agent token: pick up the file fresh on every call (callers may export
     # GMS_AUTH_TOKEN_FILE after sourcing this script in function mode).
+    # 4.txt P1c: the token must never appear in curl's argv (visible via
+    # /proc/<pid>/cmdline to same-user processes on shared build servers).
+    # Instead of -H "Authorization: Bearer <token>" we write the header to a
+    # 0600 temp file and let curl read it with -H @file.
     CURL_BEARER_ARGS=()
     if _gms_refresh_bearer_token && [ -n "$_gms_bearer_token" ]; then
-        CURL_BEARER_ARGS=(-H "Authorization: Bearer $_gms_bearer_token")
+        if [ -z "$_gms_bearer_header_file" ] || [ ! -f "$_gms_bearer_header_file" ]; then
+            _gms_bearer_header_file=$(mktemp "${TMPDIR:-/tmp}/gms-bearer-header.XXXXXX") \
+                || { error "无法创建 Bearer header 临时文件"; GMS_RT_ERROR_SEEN=1; return; }
+            chmod 600 "$_gms_bearer_header_file"
+        fi
+        printf 'Authorization: Bearer %s\n' "$_gms_bearer_token" \
+            > "$_gms_bearer_header_file"
+        CURL_BEARER_ARGS=(-H "@${_gms_bearer_header_file}")
+        # Bearer-only mode: never also send the cookie jar (4.txt P0-1).
+        CURL_AUTH_ARGS=()
     else
         CURL_BEARER_ARGS=()
+        CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
+        # Credential mode flipped back to cookie: drop any stale header file.
+        if [ -n "$_gms_bearer_header_file" ]; then
+            rm -f "$_gms_bearer_header_file"
+            _gms_bearer_header_file=""
+        fi
     fi
 }
 _refresh_tls_args
@@ -558,10 +602,13 @@ gms-rt-agent-enroll() {
     _refresh_tls_args
     local data response
     data=$(jq -cn --arg code "$code" '{code: $code}')
-    # Enrollment is a cookie-free, token-free call by design.
+    # Enrollment is a cookie-free, token-free call by design. The one-shot
+    # pairing code is a credential too — push it via stdin, not argv
+    # (4.txt P1c applies to any secret that would land in /proc cmdline).
     response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST "${API_BASE}/auth/agent-enroll" \
-        -H "Content-Type: application/json" -d "$data" \
-        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
+        -H "Content-Type: application/json" --data-binary "@-" \
+        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT" \
+        <<< "$data")
     local http_status body
     body=$(_body_from_http_response "$response")
     http_status=$(_status_from_http_response "$response")
@@ -604,6 +651,7 @@ gms-rt-auth-credential-mode() {
 # Create a one-shot approval token (must run under a human session).
 gms-rt-approval-create() {
     local tool="" device="" command=""
+    local firmware_sha256="" wipe_data="true" burn_mode="auto"
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --tool) shift; tool="${1:-}" ;;
@@ -612,19 +660,32 @@ gms-rt-approval-create() {
             --device=*) device="${1#*=}" ;;
             --command) shift; command="${1:-}" ;;
             --command=*) command="${1#*=}" ;;
+            # 4.txt P1 精确绑定：burn 审批绑定 固件SHA256+wipe_data+burn_mode；
+            # 服务端从这些字段派生命令串，--command 对 burn 工具被忽略。
+            --firmware-sha256) shift; firmware_sha256="${1:-}" ;;
+            --firmware-sha256=*) firmware_sha256="${1#*=}" ;;
+            --wipe-data) shift; wipe_data="${1:-true}" ;;
+            --wipe-data=*) wipe_data="${1#*=}" ;;
+            --burn-mode) shift; burn_mode="${1:-auto}" ;;
+            --burn-mode=*) burn_mode="${1#*=}" ;;
             *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
         esac
         shift
     done
-    [ -n "$tool" ] && [ -n "$device" ] && [ -n "$command" ] || {
-        error "Usage: gms-rt-approval-create --tool <gms_rt_tool> --device <serial> --command <command>"
+    [ -n "$tool" ] && [ -n "$device" ] || {
+        error "Usage: gms-rt-approval-create --tool <gms_rt_tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]"
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return 1
     _refresh_tls_args
     local data response
-    data=$(jq -cn --arg tool "$tool" --arg device "$device" --arg command "$command" \
-        '{tool: $tool, device: $device, command: $command}')
+    data=$(jq -cn \
+        --arg tool "$tool" --arg device "$device" --arg command "$command" \
+        --arg sha "$firmware_sha256" \
+        --argjson wipe "$([ "$wipe_data" = "false" ] && echo false || echo true)" \
+        --arg mode "$burn_mode" \
+        '{tool: $tool, device: $device, command: $command,
+          firmware_sha256: $sha, wipe_data: $wipe, burn_mode: $mode}')
     response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST "${API_BASE}/auth/approval-tokens" \
         -H "Content-Type: application/json" -d "$data" \
         -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
@@ -636,6 +697,95 @@ gms-rt-approval-create() {
         return "$GMS_RT_EXIT_PERMISSION"
     fi
     echo "$body" | jq '.approval // .'
+}
+
+# List Agent Service Tokens (admin session required). The raw token is
+# never stored server-side, so listings only show metadata.
+gms-rt-agent-tokens() {
+    check_jq || return 1
+    _refresh_tls_args
+    local response
+    response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
+        "${CURL_AUTH_ARGS[@]}" -sS -X GET "${API_BASE}/auth/agent-tokens" \
+        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
+    local http_status body
+    body=$(_body_from_http_response "$response")
+    http_status=$(_status_from_http_response "$response")
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Failed to list agent tokens: $(extract_api_error "$body")"
+        return "$GMS_RT_EXIT_PERMISSION"
+    fi
+    echo "$body" | jq '.tokens // []'
+}
+
+# Mint a one-shot enrollment code (admin + elevation required). Admins run
+# this on the Controller host; the build server then runs
+# gms-rt-agent-enroll <CODE> once to exchange it for a Service Token.
+gms-rt-agent-enroll-code() {
+    local name="" scopes="" workers="*" devices="*" expires_days="90"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --name) shift; name="${1:-}" ;;
+            --name=*) name="${1#*=}" ;;
+            --scopes) shift; scopes="${1:-}" ;;
+            --scopes=*) scopes="${1#*=}" ;;
+            --workers) shift; workers="${1:-}" ;;
+            --workers=*) workers="${1#*=}" ;;
+            --devices) shift; devices="${1:-}" ;;
+            --devices=*) devices="${1#*=}" ;;
+            --expires-days) shift; expires_days="${1:-}" ;;
+            --expires-days=*) expires_days="${1#*=}" ;;
+            *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
+        esac
+        shift
+    done
+    [ -n "$name" ] || {
+        error "Usage: gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N]"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    check_jq || return 1
+    _refresh_tls_args
+    local data response
+    data=$(jq -cn --arg name "$name" --arg scopes "$scopes" \
+        --arg workers "$workers" --arg devices "$devices" --argjson days "$expires_days" \
+        '{name: $name, scopes: ($scopes | split(",") | map(select(length > 0))),
+          allowed_workers: $workers, allowed_devices: $devices, expires_days: $days}')
+    response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
+        "${CURL_AUTH_ARGS[@]}" -sS -X POST "${API_BASE}/auth/agent-enrollment-codes" \
+        -H "Content-Type: application/json" -d "$data" \
+        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
+    local http_status body
+    body=$(_body_from_http_response "$response")
+    http_status=$(_status_from_http_response "$response")
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Enrollment code creation failed: $(extract_api_error "$body")"
+        return "$GMS_RT_EXIT_PERMISSION"
+    fi
+    # The one-shot code is secret material: print once, never log it twice.
+    echo "$body" | jq '.enrollment'
+}
+
+# Revoke an Agent Service Token by id (admin + elevation required).
+gms-rt-agent-token-revoke() {
+    local token_id="${1:-}"
+    [ -n "$token_id" ] || {
+        error "Usage: gms-rt-agent-token-revoke <TOKEN_ID>"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    check_jq || return 1
+    _refresh_tls_args
+    local response
+    response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
+        "${CURL_AUTH_ARGS[@]}" -sS -X DELETE "${API_BASE}/auth/agent-tokens/$(_urlencode "$token_id")" \
+        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
+    local http_status body
+    body=$(_body_from_http_response "$response")
+    http_status=$(_status_from_http_response "$response")
+    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Revoke failed: $(extract_api_error "$body")"
+        return "$GMS_RT_EXIT_PERMISSION"
+    fi
+    echo "$body" | jq '{ok: true, revoked: .revoked}'
 }
 
 # ==============================================================================
@@ -1875,8 +2025,9 @@ gms-rt-devices-shell() {
             '{token: $token, tool: "gms_rt_shell_exec", device: $device, command: $command}')
         consume_response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST \
             "${API_BASE}/auth/approval-tokens/consume" \
-            -H "Content-Type: application/json" -d "$consume_data" \
-            -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
+            -H "Content-Type: application/json" \
+            --data-binary "@-" -w $'\nHTTP_STATUS:%{http_code}' \
+            --max-time "$CURL_TIMEOUT" <<< "$consume_data")
         unset consume_data approval_token
         local consume_status
         consume_status=$(_status_from_http_response "$consume_response")
@@ -3708,6 +3859,11 @@ _gms_rt_command_usage() {
     case "$1" in
         gms-rt-auth-login) printf '%s' 'gms-rt-auth-login [username] [--password-stdin]' ;;
         gms-rt-auth-elevate) printf '%s' 'gms-rt-auth-elevate [admin_username] [--password-stdin]' ;;
+        gms-rt-agent-enroll) printf '%s' 'gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE]' ;;
+        gms-rt-agent-tokens) printf '%s' 'gms-rt-agent-tokens' ;;
+        gms-rt-agent-enroll-code) printf '%s' 'gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N]' ;;
+        gms-rt-agent-token-revoke) printf '%s' 'gms-rt-agent-token-revoke <TOKEN_ID>' ;;
+        gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <gms_rt_tool> --device <serial> --command <command>' ;;
         gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-gsi) printf '%s' 'gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-serial) printf '%s' 'gms-rt-burn-serial <device_id> <serial>' ;;
@@ -3737,6 +3893,11 @@ _gms_rt_command_usage() {
 
 _gms_rt_command_summary() {
     case "$1" in
+        gms-rt-agent-enroll) printf '%s' 'Exchange a one-shot enrollment code for an Agent Service Token stored as a 0600 file' ;;
+        gms-rt-agent-tokens) printf '%s' 'List Agent Service Tokens (admin; metadata only, raw tokens are never stored)' ;;
+        gms-rt-agent-enroll-code) printf '%s' 'Mint a one-shot enrollment code for a build server agent (admin + elevation)' ;;
+        gms-rt-agent-token-revoke) printf '%s' 'Revoke an Agent Service Token by id (admin + elevation)' ;;
+        gms-rt-approval-create) printf '%s' 'Create a one-shot approval token for a destructive agent action (human session only)' ;;
         gms-rt-system-capabilities) printf '%s' 'Print the CLI contract, global options, and exit codes' ;;
         gms-rt-system-command-describe) printf '%s' 'Describe one CLI command for machine execution' ;;
         gms-rt-system-commands) printf '%s' 'Print the machine-readable command inventory' ;;
@@ -3786,6 +3947,7 @@ gms-rt-system-commands() {
                 + "|reports-delete|terminal-push|test-(start|stop|clean)|usbip-(install|connect|disconnect)"
                 + "|vpn-(connect|disconnect)|adb-forward-(start|stop)|desktop-vnc-(start|stop)|users-set-username"
                 + "|jobs-cancel|system-update"
+                + "|agent-enroll-code|agent-token-revoke"
             )
             then "mutating"
             else "read_only"
@@ -3801,6 +3963,7 @@ gms-rt-system-commands() {
                 "burn-|config-update|devices-bootloader-(lock|unlock)|adb-forward-"
                 + "|desktop-|terminal-(open|push)|usbip-(install|connect|disconnect)"
                 + "|users-list|test-suites-result"
+                + "|agent-(enroll-code|token-revoke)"
             )),
             requires_explicit_authorization: (($name | mode) == "mutating"),
             supports_json: true,

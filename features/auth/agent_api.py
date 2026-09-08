@@ -153,16 +153,28 @@ async def auth_create_approval_token(request: Request, req: dict):
             f"tool 必须是 {sorted(_APPROVAL_TOOLS)} 之一", status_code=400
         )
     required, _description = _APPROVAL_TOOLS[tool]
-    if required == "elevated_admin" and not (
-        caller.role == "admin" or is_elevated(request)
-    ):
-        return error_response(
-            "烧录审批需要管理员提权会话", status_code=403
-        )
+    if required == "elevated_admin":
+        # 4.txt P1d：烧录审批必须二次认证（step-up）。admin 角色本身不能
+        # 绕过提权——必须存在活的提权会话才能签发烧录审批。
+        if not is_elevated(request):
+            return error_response("烧录审批需要管理员提权会话", status_code=403)
     try:
-        record = auth_service.create_approval_token(
-            user=caller, tool=tool, device=device, command=command
-        )
+        if tool == auth_service.BURN_TOOL:
+            # 4.txt P1 精确绑定：烧录审批绑定 固件SHA256 + wipe_data +
+            # burn_mode + 规范化设备列表，命令串由服务端派生，客户端传入
+            # 的 command 字段被忽略。
+            record = auth_service.create_approval_token(
+                user=caller,
+                tool=tool,
+                device=device,
+                firmware_sha256=str(req.get("firmware_sha256") or ""),
+                wipe_data=req.get("wipe_data") is not False,
+                burn_mode=str(req.get("burn_mode") or "auto"),
+            )
+        else:
+            record = auth_service.create_approval_token(
+                user=caller, tool=tool, device=device, command=command
+            )
     except ValueError as exc:
         return error_response(str(exc), status_code=400)
     return {"success": True, "approval": record}
@@ -189,6 +201,19 @@ async def auth_consume_approval_token(request: Request, req: dict):
         return error_response("token/tool/device 必填", status_code=400)
     if tool not in _APPROVAL_TOOLS:
         return error_response(f"未知工具: {tool}", status_code=400)
+    if tool == auth_service.BURN_TOOL:
+        # 4.txt P1 精确绑定：burn 消费时命令串同样由服务端从
+        # 固件SHA256+wipe_data+burn_mode+设备列表派生；客户端传来的
+        # command 字段不参与匹配，伪造的 command 无法通过校验。
+        try:
+            command = auth_service.derive_burn_command(
+                device=device,
+                firmware_sha256=str(req.get("firmware_sha256") or ""),
+                wipe_data=req.get("wipe_data") is not False,
+                burn_mode=str(req.get("burn_mode") or "auto"),
+            )
+        except ValueError as exc:
+            return error_response(str(exc), status_code=400)
     # Agent token device ACL applies at approval time so a token scoped to
     # specific devices cannot be driven against anything else.
     record = getattr(request.state, "agent_token_record", None)

@@ -34,6 +34,28 @@ class ApiHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if self.path == "/api/auth/agent-tokens":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "tokens": [
+                        {
+                            "id": "agt_deadbeef",
+                            "name": "codex-build01",
+                            "owner_user_id": "usr-1",
+                            "scopes": ["devices.read", "tests.execute"],
+                            "allowed_workers": "w1,w2",
+                            "allowed_devices": "*",
+                            "created_at": "2026-09-08T00:00:00+00:00",
+                            "expires_at": "2026-12-07T00:00:00+00:00",
+                            "revoked_at": None,
+                            "last_used_at": None,
+                        }
+                    ],
+                },
+            )
+            return
         if self.path == "/api/devices/list?force_refresh=true":
             self._write_json(
                 200,
@@ -154,6 +176,20 @@ class ApiHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if self.path == "/api/auth/agent-enrollment-codes":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "enrollment": {
+                        "code": "7K3M-FG9A-WX21",
+                        "name": parsed_body.get("name") or "agent",
+                        "expires_at": "2026-09-08T00:05:00+00:00",
+                        "ttl_minutes": 5,
+                    },
+                },
+            )
+            return
         if self.path in {"/api/adb-forward/start", "/api/adb-forward/stop"}:
             self._write_json(200, {"success": True})
             return
@@ -188,8 +224,12 @@ class ApiHandler(BaseHTTPRequestHandler):
         self._write_json(404, {"detail": "Not found"})
 
     def do_DELETE(self) -> None:
+        self.__class__.requests.append((self.path, {}))
         if self.path.startswith("/api/reports/delete?timestamp="):
             self._write_json(200, {"success": True, "deleted": True})
+            return
+        if self.path == "/api/auth/agent-tokens/agt_deadbeef":
+            self._write_json(200, {"success": True, "revoked": "agt_deadbeef"})
             return
         self._write_json(404, {"detail": "Not found"})
 
