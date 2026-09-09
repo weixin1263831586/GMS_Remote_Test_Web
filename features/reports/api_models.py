@@ -23,5 +23,6 @@ class ReportDiagnosisRequest(BaseModel):
     source_code: str = ""
     test_type: str = ""
     suite_version: str = ""
+    android_version: str = ""
     module: str = ""
     class_names: list[str] = Field(default_factory=list)

@@ -597,7 +597,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
         search_terms.extend(keywords[:3])
 
         source_search_coros = [
-            asyncio.to_thread(analyzer.rk_codesearch, term, failure_location, 5)
+            asyncio.to_thread(analyzer.rk_codesearch, term, failure_location, 5, request.android_version or '')
             for term in search_terms if term
         ]
         if source_search_coros:
@@ -619,6 +619,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             "module": request.module,
             "report_name": request.report_name,
             "failure_index": request.failure_index,
+            "android_version": request.android_version or "",
             "source_path": request.source_path,
             "source_attached": bool(request.source_code),
             "failure_location": failure_location,

@@ -1147,6 +1147,7 @@ async function runReportDiagnosis(failureIndex = 0) {
             failure_index: failureIndex,
             test_type: report.details?.test_type || '',
             suite_version: report.details?.suite_version || '',
+            android_version: report.details?.android_version || '',
             source_path: failure.source_path || failure.file_path || report.source_path || ''
         });
         if (!result.success) {
@@ -1749,6 +1750,7 @@ async function enhanceReportDiagnosisWithSource(filePath, sourceCode) {
             failure_index: data.failure_index || 0,
             test_type: data.suite_target?.test_type || '',
             suite_version: data.suite_target?.suite_version || '',
+            android_version: data.android_version || '',
             source_path: filePath,
             source_code: sourceCode
         });

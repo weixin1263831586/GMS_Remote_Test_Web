@@ -1,21 +1,47 @@
 #!/usr/bin/env python3
+import sys
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 import argparse
+import functools
 import html
 import json
 import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
-DEFAULT_BASE_URL = "http://10.10.10.203:8080/source"
-CONFIG_PATH = Path(__file__).resolve().parent / "config/config.json"
+DEFAULT_BASE_URL = "https://codeindex.rock-chips.com/source"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config/config.json"
 PATH_EXTENSIONS = (".java", ".kt", ".aidl", ".cpp", ".cc", ".c", ".h", ".hpp")
 DEFINITION_KEYWORDS = ("class", "interface", "enum", "object", "struct", "typedef")
 DEFAULT_LIMIT = 15
+MAX_MATCHES_PER_FILE = 8
+MAX_PARALLEL_REQUESTS = 8
+MAX_FILES_PER_REQUEST = 200
+# Backend caps hits per file during collection; keep headroom above the
+# display cap so definition-line classification still sees the key lines.
+MAX_HITS_PER_FILE = 20
+MATCH_KIND_RANK = {
+    "member-definition": 0,
+    "class-definition": 0,
+    "package": 1,
+    "member-reference": 2,
+    "class-reference": 2,
+    "text": 3,
+}
 FILE_TYPE_MAP = {
     "c": "C",
     "cxx": "C++",
@@ -32,7 +58,17 @@ KEYWORD_MODE_MAP = {
 }
 
 
+_CONFIG_CACHE = None
+
+
 def load_config():
+    global _CONFIG_CACHE
+    if _CONFIG_CACHE is None:
+        _CONFIG_CACHE = _load_config()
+    return _CONFIG_CACHE
+
+
+def _load_config():
     data = {}
     if CONFIG_PATH.exists():
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -58,7 +94,7 @@ def parse_default_limit(value):
 def request(path, params=None, accept="application/json"):
     cfg = load_config()
     if not cfg["token"]:
-        raise ValueError("missing code search token; set commands/rk_codesearch/config/config.json or RK_CODESEARCH_TOKEN")
+        raise ValueError("missing code search token; set config/config.json or RK_CODESEARCH_TOKEN")
 
     url = f"{cfg['base_url']}{path}"
     if params:
@@ -92,6 +128,9 @@ def parse_projects(projects, default_projects):
     return []
 
 
+SEARCH_FIELDS = {"smart", "full", "def", "symbol", "path"}
+
+
 def normalize_search_field(search_field):
     field = (search_field or "smart").strip().lower()
     field_map = {
@@ -110,7 +149,7 @@ def normalize_search_field(search_field):
     return field_map[field]
 
 
-def build_search_params(query, search_field, projects, file_type):
+def build_search_params(query, search_field, projects, file_type, path_scope="", max_files=None):
     cfg = load_config()
     if not query:
         raise ValueError("search requires --query")
@@ -118,29 +157,75 @@ def build_search_params(query, search_field, projects, file_type):
     if field == "smart":
         raise ValueError("smart search does not map to one request")
 
-    params = {field: query}
+    path_terms = normalize_path_scope(path_scope)
+    if field == "path":
+        # OpenGrok path terms are AND-ed: merge scope terms into the query.
+        params = {field: f"{query} {path_terms}".strip()}
+    else:
+        params = {field: query}
+        if path_terms:
+            # full/def/symbol combine with path= as a separate AND filter.
+            params["path"] = path_terms
+
     selected_projects = parse_projects(projects, cfg.get("default_projects", []))
 
     if selected_projects:
         params["projects"] = selected_projects
     if file_type:
         params["type"] = normalize_file_type(file_type)
+    # Cap what the backend collects/highlights per request: the raw match-line
+    # total of broad terms dominates latency, and we only display `limit` files.
+    params["maxresults"] = max_files or MAX_FILES_PER_REQUEST
+    params["maxHitsPerFile"] = MAX_HITS_PER_FILE
     return params
 
 
+def plan_fetch_cap(limit):
+    """Files to fetch per index request inside multi-request plans: enough to
+    keep dedup/ranking meaningful after aggregation, bounded by the hard cap."""
+    return max(50, min(resolve_limit(limit) * 4, MAX_FILES_PER_REQUEST))
+
+
+def plain_fetch_cap(limit):
+    """Files to fetch for single-request fields."""
+    return max(30, min(resolve_limit(limit) * 2, MAX_FILES_PER_REQUEST))
+
+
 def parse_keywords(keywords):
+    """Split keywords on commas; double-quoted phrases keep their spaces."""
     normalized = (keywords or "").strip()
     if not normalized:
         return []
-    items = [item.strip() for item in normalized.split(",")]
     values = []
-    for item in items:
+    for item in normalized.split(","):
+        item = item.strip()
         if not item:
             continue
+        phrase = re.fullmatch(r'"([^"]+)"', item)
+        if phrase:
+            values.append(phrase.group(1))
+            continue
+        if '"' in item:
+            raise ValueError('double quotes must wrap the whole phrase, e.g. "bind to service"')
         if re.search(r"\s", item):
-            raise ValueError("keywords items must not contain spaces; separate tokens with commas")
+            raise ValueError(
+                'multi-word phrases must be wrapped in double quotes, e.g. '
+                '"bind to service"; separate keywords with commas'
+            )
         values.append(item)
     return values
+
+
+def is_phrase(item):
+    return bool(re.search(r"\s", item))
+
+
+def ensure_quoted(term):
+    """Wrap in double quotes unless already quoted; used for phrase full-text."""
+    stripped = (term or "").strip()
+    if stripped.startswith('"') and stripped.endswith('"'):
+        return stripped
+    return f'"{stripped}"'
 
 
 def normalize_keyword_mode(keyword_mode):
@@ -152,13 +237,28 @@ def normalize_keyword_mode(keyword_mode):
 
 
 def build_effective_query(keywords, keyword_mode):
+    """Return (query, is_multi_keyword)."""
     keyword_items = parse_keywords(keywords)
-    if keyword_items:
-        if len(keyword_items) == 1:
-            return keyword_items[0], False
-        operator = normalize_keyword_mode(keyword_mode)
-        return f" {operator} ".join(keyword_items), True
-    raise ValueError("search requires --keywords")
+    if not keyword_items:
+        raise ValueError("search requires --keywords")
+
+    def render(item):
+        return f'"{item}"' if is_phrase(item) else item
+
+    if len(keyword_items) == 1:
+        return render(keyword_items[0]), False
+    operator = normalize_keyword_mode(keyword_mode)
+    return f" {operator} ".join(render(item) for item in keyword_items), True
+
+
+def normalize_path_scope(path_scope):
+    """Normalize a path scope into space-separated AND terms.
+
+    'frameworks/base/' -> 'frameworks base'; surrounding quotes are stripped.
+    """
+    value = (path_scope or "").strip().strip('"').strip("'").replace("\\", "/")
+    parts = [part for part in value.split("/") if part]
+    return " ".join(parts)
 
 
 def normalize_file_type(file_type):
@@ -179,24 +279,39 @@ def looks_like_path(query):
     return "/" in (query or "") or "\\" in (query or "")
 
 
+@functools.lru_cache(maxsize=256)
 def analyze_query(query):
+    # Returns a shared read-only dict; callers must not mutate it.
     raw = (query or "").strip()
     slash_normalized = raw.replace("\\", "/")
-    dot_parts = [part for part in raw.split(".") if part]
 
-    package_parts = []
-    symbol_parts = []
-    switched = False
-    for part in dot_parts:
-        if not switched and re.fullmatch(r"[a-z_]\w*", part):
-            package_parts.append(part)
-            continue
-        switched = True
-        symbol_parts.append(part)
+    # Path-like queries (contain '/') are NOT FQNs: 'foo/bar/Baz.java' would
+    # otherwise parse as class 'foo' + member 'bar' and fan out wild searches.
+    if looks_like_path(raw):
+        dot_parts = []
+        package_parts = []
+        segments = [part for part in slash_normalized.split("/") if part]
+        # Anchor classification/ranking on the filename stem, e.g.
+        # 'a/b/Baz.java' -> 'Baz', so the target file outranks incidental
+        # path-token matches (Android.bp etc.).
+        stem = segments[-1].rsplit(".", 1)[0] if segments else ""
+        symbol_parts = [stem] if stem else []
+    else:
+        dot_parts = [part for part in raw.split(".") if part]
 
-    if not symbol_parts and dot_parts:
-        symbol_parts = [dot_parts[-1]]
-        package_parts = dot_parts[:-1]
+        package_parts = []
+        symbol_parts = []
+        switched = False
+        for part in dot_parts:
+            if not switched and re.fullmatch(r"[a-z_]\w*", part):
+                package_parts.append(part)
+                continue
+            switched = True
+            symbol_parts.append(part)
+
+        if not symbol_parts and dot_parts:
+            symbol_parts = [dot_parts[-1]]
+            package_parts = dot_parts[:-1]
 
     class_name = symbol_parts[0] if symbol_parts else ""
     member_name = symbol_parts[1] if len(symbol_parts) > 1 else ""
@@ -230,49 +345,62 @@ def build_smart_plan(query, file_type):
     plan = []
     seen = set()
 
-    def add(field, term, weight, category):
+    def add(field, term, weight, category, priority="primary"):
         key = (field, term)
         if not term or key in seen:
             return
         seen.add(key)
-        plan.append({"field": field, "query": term, "weight": weight, "category": category})
+        plan.append({
+            "field": field,
+            "query": term,
+            "weight": weight,
+            "category": category,
+            "priority": priority,
+        })
+
+    # Exact phrases (already quoted by build_effective_query): only the full
+    # field understands them; def/symbol/path are single-term fields and a
+    # double-wrapped quote would degrade the backend query to token OR.
+    if is_phrase(query.strip().strip('"')):
+        add("full", ensure_quoted(query), 70, "text")
+        add("full", info["last_token"], 50, "text", priority="secondary")
+        return plan
+
+    # Path-like queries first: 'a/b/C.java' must not be treated as an FQN
+    # (it would fan out to wild symbol/full searches on path segments).
+    if looks_like_path(query):
+        add("path", info["path_normalized"], 140, "path")
+        add("full", f"\"{query}\"", 90, "text")
+        add("full", query, 60, "text", priority="secondary")
+        return plan
 
     if info["looks_like_member_query"]:
+        # One path=class request covers every file extension (token match);
+        # normalized_symbol_path is kept for FQN queries that pin the package.
         add("path", info["normalized_symbol_path"], 170, "path")
-        for extension in PATH_EXTENSIONS:
-            add("path", f"{info['class_name']}{extension}", 165, "path")
+        add("path", info["class_name"], 165, "path")
         add("full", f"\"{query}\"", 160, "member-definition")
         add("def", info["class_name"], 150, "class-definition")
         add("symbol", info["member_name"], 130, "member-reference")
         add("full", f"\"{info['class_name']}.{info['member_name']}\"", 120, "member-reference")
-        add("full", info["member_name"], 90, "member-reference")
+        add("full", info["member_name"], 90, "member-reference", priority="secondary")
         return plan
 
     if info["looks_like_class_query"]:
         add("path", info["normalized_symbol_path"], 150, "path")
         if "." not in info["last_token"]:
-            for extension in PATH_EXTENSIONS:
-                add("path", f"{info['last_token']}{extension}", 145, "path")
+            add("path", info["last_token"], 145, "path")
         add("def", info["class_name"], 130, "class-definition")
         add("symbol", info["class_name"], 110, "class-reference")
         add("full", f"\"{query}\"", 90, "class-reference")
-        add("full", query, 60, "class-reference")
-        return plan
-
-    if looks_like_path(query):
-        add("path", info["path_normalized"], 140, "path")
-        add("full", f"\"{query}\"", 90, "text")
-        add("full", query, 60, "text")
+        add("full", query, 60, "class-reference", priority="secondary")
         return plan
 
     add("def", query, 120, "definition")
-    add("symbol", query, 100, "reference")
+    add("symbol", query, 100, "reference", priority="secondary")
     add("path", query, 80, "path")
-    if not file_type and re.fullmatch(r"[A-Za-z_]\w*", query or ""):
-        for extension in PATH_EXTENSIONS:
-            add("path", f"{query}{extension}", 78, "path")
-    add("full", f"\"{query}\"", 70, "text")
-    add("full", query, 50, "text")
+    add("full", f"\"{query}\"", 70, "text", priority="secondary")
+    add("full", query, 50, "text", priority="secondary")
     return plan
 
 
@@ -335,6 +463,11 @@ def should_include_result(path, matches, original_query):
     if package_path and package_path in lower_path:
         return True
 
+    # For Class.member queries, the class's own file is exactly where the
+    # member is defined; keep it even when no line spells out "Class.member".
+    if info["class_name"] and info["member_name"] and path_matches_class_file(path, info["class_name"]):
+        return True
+
     for match in matches:
         line = clean_line(match.get("line", "")).lower()
         if not line:
@@ -381,7 +514,24 @@ def classify_match(line, info):
 
 def classify_result(path, matches, original_query):
     info = analyze_query(original_query)
-    if info["class_name"] and path_matches_class_file(path, info["class_name"]) and not info["member_name"]:
+    lower_path = path.lower()
+    # Class.member: only the class's own file can rank as a definition.
+    if info["class_name"] and info["member_name"]:
+        if path_matches_class_file(path, info["class_name"]):
+            if any(
+                is_method_definition_line(clean_line(match.get("line", "")).lower(), info["member_name"])
+                for match in matches
+            ):
+                return "definition"
+            # The def-plan hit on the class file: this is where the member lives.
+            return "definition" if matches else "member-reference"
+        categories = [
+            classify_match(clean_line(match.get("line", "")), info) for match in matches
+        ]
+        if "member-reference" in categories:
+            return "member-reference"
+        return "text"
+    if info["class_name"] and path_matches_class_file(path, info["class_name"]):
         return "definition"
 
     categories = [classify_match(clean_line(match.get("line", "")), info) for match in matches]
@@ -394,8 +544,8 @@ def classify_result(path, matches, original_query):
     return "text"
 
 
-def fetch_search(field, query, projects, file_type):
-    params = build_search_params(query, field, projects, file_type)
+def fetch_search(field, query, projects, file_type, path_scope="", max_files=None):
+    params = build_search_params(query, field, projects, file_type, path_scope, max_files)
     return json.loads(request("/api/v1/search", params))
 
 
@@ -409,10 +559,12 @@ def resolve_limit(limit):
     return load_config().get("default_limit", DEFAULT_LIMIT)
 
 
-def print_results(result_items, total_time_ms, total_result_count, limit, project_scope_label=None):
+def print_results(result_items, total_time_ms, total_result_count, limit, project_scope_label=None, raw_counts=None):
     resolved_limit = resolve_limit(limit)
     print(f"time_ms: {total_time_ms}")
     print(f"result_count: {total_result_count}")
+    if raw_counts is not None and raw_counts != total_result_count:
+        print(f"# result_count counts deduplicated files; raw match lines across all index queries: {raw_counts}")
     print(f"returned_files: {min(resolved_limit, len(result_items))}")
     if project_scope_label:
         print(f"project_scope: {project_scope_label}")
@@ -428,7 +580,7 @@ def print_results(result_items, total_time_ms, total_result_count, limit, projec
         print(f"[{item['kind']}] {display_path}")
         if project:
             print(f"  project: {project}")
-        for match in item["matches"]:
+        for match in order_matches(item["matches"], item.get("query_hint")):
             line_no = match.get("lineNumber", "")
             line = clean_line(match.get("line", ""))
             if line_no:
@@ -438,88 +590,50 @@ def print_results(result_items, total_time_ms, total_result_count, limit, projec
         print()
 
 
-def run_smart_search_plan(query, projects, file_type):
-    aggregated = {}
-    total_time_ms = 0
-    total_result_count = 0
+def order_matches(matches, query_hint=None):
+    """Order matches: query-term definition lines first, then exact query-term
+    hits, then the rest; each group by line number; cap per file."""
+    hint = (query_hint or "").lower().split(".")[-1]
 
-    for plan_item in build_smart_plan(query, file_type):
-        data = fetch_search(plan_item["field"], plan_item["query"], projects, file_type)
-        total_time_ms += data.get("time") or 0
-        total_result_count += data.get("resultCount") or 0
-        for path, matches in (data.get("results") or {}).items():
-            if not should_include_result(path, matches, query):
-                continue
-            score = score_result(path, matches, query, plan_item)
-            current = aggregated.get(path)
-            if current is None:
-                aggregated[path] = {
-                    "path": path,
-                    "matches": matches,
-                    "score": score,
-                    "kind": classify_result(path, matches, query),
-                }
-                continue
+    def is_def_line(line):
+        return any(re.search(rf"\b{kw}\s+\w+", line) for kw in DEFINITION_KEYWORDS)
 
-            current["matches"] = merge_matches(current["matches"], matches)
-            current["score"] = max(current["score"], score)
-            current["kind"] = classify_result(path, current["matches"], query)
-
-    sorted_items = sorted(
-        aggregated.values(),
-        key=lambda item: (kind_rank(item["kind"]), -item["score"], item["path"]),
-    )
-    return {
-        "items": sorted_items,
-        "time_ms": total_time_ms,
-        "result_count": total_result_count,
-    }
-
-
-def run_targeted_search_plan(query, projects, file_type, mode):
-    info = analyze_query(query)
-    aggregated = {}
-    total_time_ms = 0
-    total_result_count = 0
-    plan = []
-
-    def add(field, term, weight):
-        if term:
-            plan.append({"field": field, "query": term, "weight": weight, "category": mode})
-
-    if mode == "def":
-        if info["looks_like_member_query"]:
-            add("path", info["normalized_symbol_path"], 220)
-            for extension in PATH_EXTENSIONS:
-                add("path", f"{info['class_name']}{extension}", 210)
-            add("full", f"\"{query}\"", 205)
-            add("def", info["member_name"], 190)
-            add("def", info["class_name"], 170)
-        elif info["looks_like_class_query"]:
-            add("path", info["normalized_symbol_path"], 210)
-            for extension in PATH_EXTENSIONS:
-                add("path", f"{info['class_name']}{extension}", 200)
-            add("def", info["class_name"], 190)
-            add("full", f"\"{query}\"", 160)
+    def sort_key(match):
+        line = strip_html_tags(match.get("line", "")).lower()
+        exact = bool(hint and hint in line)
+        try:
+            line_no = int(match.get("lineNumber") or 0)
+        except (TypeError, ValueError):
+            line_no = 0
+        if exact and is_def_line(line):
+            rank = 0
+        elif exact:
+            rank = 1
         else:
-            add("def", query, 180)
-    elif mode == "symbol":
-        if info["looks_like_member_query"]:
-            add("symbol", info["member_name"], 180)
-            add("full", f"\"{info['class_name']}.{info['member_name']}\"", 170)
-            add("full", info["member_name"], 150)
-        elif info["looks_like_class_query"]:
-            add("symbol", info["class_name"], 170)
-            add("full", f"\"{query}\"", 150)
-        else:
-            add("symbol", query, 160)
-    else:
-        raise ValueError(f"unsupported targeted search mode: {mode}")
+            rank = 2
+        return (rank, line_no)
 
-    for plan_item in plan:
-        data = fetch_search(plan_item["field"], plan_item["query"], projects, file_type)
-        total_time_ms += data.get("time") or 0
-        total_result_count += data.get("resultCount") or 0
+    return sorted(matches, key=sort_key)[:MAX_MATCHES_PER_FILE]
+
+
+def execute_plan(plan, query, projects, file_type, path_scope, mode=None, early_stop=False, max_files=None):
+    """Run plan requests in parallel and aggregate per-file results.
+
+    mode: 'def'/'symbol' filtering for targeted plans, None for smart plans.
+    early_stop: skip low-priority requests once a definition hit is already
+        aggregated with enough coverage (used by smart plans).
+    max_files: per-request backend cap (maxresults).
+    Returns {"items", "time_ms", "result_count"} where result_count is the
+    number of aggregated files (deduplicated), plus "raw_counts" sum.
+    """
+    aggregated = {}
+    total_raw_counts = 0
+
+    def aggregate(plan_item, data):
+        # Runs on the main thread only (futures are consumed via
+        # as_completed below), so no locking is needed.
+        nonlocal total_raw_counts
+        total_raw_counts += data.get("resultCount") or 0
         for path, matches in (data.get("results") or {}).items():
             if not should_include_result(path, matches, query):
                 continue
@@ -537,6 +651,7 @@ def run_targeted_search_plan(query, projects, file_type, mode):
                     "matches": matches,
                     "score": score,
                     "kind": kind,
+                    "query_hint": query.replace('"', "").strip(),
                 }
                 continue
 
@@ -544,18 +659,104 @@ def run_targeted_search_plan(query, projects, file_type, mode):
             current["score"] = max(current["score"], score)
             current["kind"] = classify_result(path, current["matches"], query)
 
+    def has_definition_coverage():
+        return any(item["kind"] == "definition" for item in aggregated.values())
+
+    def run_batch(batch):
+        with ThreadPoolExecutor(max_workers=min(len(batch), MAX_PARALLEL_REQUESTS)) as pool:
+            futures = {
+                pool.submit(
+                    fetch_search, item["field"], item["query"], projects, file_type, path_scope,
+                    max_files,
+                ): item
+                for item in batch
+            }
+            # Consume in completion order (not submission order) so a single
+            # slow request cannot delay aggregation of the ones already done.
+            for future in as_completed(futures):
+                item = futures[future]
+                try:
+                    data = future.result()
+                except Exception as exc:  # one failing field must not kill the search
+                    print(f"warning: {item['field']} search failed: {exc}", file=sys.stderr)
+                    continue
+                aggregate(item, data)
+
+    # Primaries must run before secondaries, otherwise every plan item lands
+    # in the first parallel batch and the early-stop check below never fires.
+    ordered = (
+        [item for item in plan if item.get("priority", "primary") == "primary"]
+        + [item for item in plan if item.get("priority") == "secondary"]
+    )
+    wall_start = time.monotonic()
+    remaining = ordered
+    while remaining:
+        batch, remaining = remaining[:MAX_PARALLEL_REQUESTS], remaining[MAX_PARALLEL_REQUESTS:]
+        run_batch(batch)
+        # Definition-first: once a definition is aggregated, reference-only
+        # lookups (secondary) add little for the fuzzy-locate use case.
+        if early_stop and remaining and has_definition_coverage():
+            remaining = [item for item in remaining if item.get("priority") != "secondary"]
     return {
         "items": sorted(
             aggregated.values(),
             key=lambda item: (kind_rank(item["kind"]), -item["score"], item["path"]),
         ),
-        "time_ms": total_time_ms,
-        "result_count": total_result_count,
+        # wall clock of the whole plan (parallel batches), not the sum of
+        # per-request server times
+        "time_ms": int((time.monotonic() - wall_start) * 1000),
+        "result_count": len(aggregated),
+        "raw_counts": total_raw_counts,
     }
 
 
-def run_plain_search_plan(query, projects, file_type, search_field):
-    data = fetch_search(search_field, query, projects, file_type)
+def run_smart_search_plan(query, projects, file_type, path_scope="", limit=None):
+    return execute_plan(
+        build_smart_plan(query, file_type), query, projects, file_type, path_scope,
+        mode=None, early_stop=True, max_files=plan_fetch_cap(limit),
+    )
+
+
+def run_targeted_search_plan(query, projects, file_type, mode, path_scope="", limit=None):
+    info = analyze_query(query)
+    plan = []
+
+    def add(field, term, weight):
+        if term:
+            plan.append({"field": field, "query": term, "weight": weight, "category": mode})
+
+    if mode == "def":
+        if info["looks_like_member_query"]:
+            add("path", info["normalized_symbol_path"], 220)
+            add("path", info["class_name"], 210)
+            add("full", f"\"{query}\"", 205)
+            add("def", info["member_name"], 190)
+            add("def", info["class_name"], 170)
+        elif info["looks_like_class_query"]:
+            add("path", info["normalized_symbol_path"], 210)
+            add("path", info["class_name"], 200)
+            add("def", info["class_name"], 190)
+            add("full", f"\"{query}\"", 160)
+        else:
+            add("def", query, 180)
+    elif mode == "symbol":
+        if info["looks_like_member_query"]:
+            add("symbol", info["member_name"], 180)
+            add("full", f"\"{info['class_name']}.{info['member_name']}\"", 170)
+            add("full", info["member_name"], 150)
+        elif info["looks_like_class_query"]:
+            add("symbol", info["class_name"], 170)
+            add("full", f"\"{query}\"", 150)
+        else:
+            add("symbol", query, 160)
+    else:
+        raise ValueError(f"unsupported targeted search mode: {mode}")
+
+    return execute_plan(plan, query, projects, file_type, path_scope, mode=mode, max_files=plan_fetch_cap(limit))
+
+
+def run_plain_search_plan(query, projects, file_type, search_field, path_scope="", max_files=None):
+    data = fetch_search(search_field, query, projects, file_type, path_scope, max_files)
     return {
         "items": [
             {"path": path, "matches": matches, "score": 0, "kind": classify_result(path, matches, query)}
@@ -563,18 +764,19 @@ def run_plain_search_plan(query, projects, file_type, search_field):
         ],
         "time_ms": data.get("time"),
         "result_count": data.get("resultCount"),
+        "raw_counts": data.get("resultCount"),
     }
 
 
-def smart_search(query, projects, file_type, limit, allow_global_fallback=False):
+def smart_search(query, projects, file_type, limit, allow_global_fallback=False, path_scope=""):
     result, project_scope_label = run_search_with_fallback(
-        run_smart_search_plan,
+        lambda q, p, t: run_smart_search_plan(q, p, t, path_scope, limit),
         query,
         projects,
         file_type,
         allow_global_fallback=allow_global_fallback,
     )
-    print_results(result["items"], result["time_ms"], result["result_count"], limit, project_scope_label=project_scope_label)
+    print_results(result["items"], result["time_ms"], result["result_count"], limit, project_scope_label=project_scope_label, raw_counts=result.get("raw_counts"))
 
 
 def run_search_with_fallback(plan_runner, query, projects, file_type, allow_global_fallback=False):
@@ -599,43 +801,64 @@ def run_search_with_fallback(plan_runner, query, projects, file_type, allow_glob
     return result, project_scope_label
 
 
-def plain_search(query, search_field, projects, file_type, limit, allow_global_fallback=False):
+def plain_search(query, search_field, projects, file_type, limit, allow_global_fallback=False, path_scope=""):
     if search_field in {"def", "symbol"}:
         result, project_scope_label = run_search_with_fallback(
-            lambda q, p, t: run_targeted_search_plan(q, p, t, search_field),
+            lambda q, p, t: run_targeted_search_plan(q, p, t, search_field, path_scope, limit),
             query,
             projects,
             file_type,
             allow_global_fallback=allow_global_fallback,
         )
-        print_results(result["items"], result["time_ms"], result["result_count"], limit, project_scope_label=project_scope_label)
+        print_results(result["items"], result["time_ms"], result["result_count"], limit, project_scope_label=project_scope_label, raw_counts=result.get("raw_counts"))
         return
 
     result, project_scope_label = run_search_with_fallback(
-        lambda q, p, t: run_plain_search_plan(q, p, t, search_field),
+        lambda q, p, t: run_plain_search_plan(q, p, t, search_field, path_scope, plain_fetch_cap(limit)),
         query,
         projects,
         file_type,
         allow_global_fallback=allow_global_fallback,
     )
-    print_results(result["items"], result["time_ms"], result["result_count"], limit, project_scope_label=project_scope_label)
+    print_results(result["items"], result["time_ms"], result["result_count"], limit, project_scope_label=project_scope_label, raw_counts=result.get("raw_counts"))
 
 
-def search(keywords, keyword_mode, search_field, projects, file_type, limit):
+def search(keywords, keyword_mode, search_field, projects, file_type, limit, path_scope=""):
+    # Validate cheap arguments up front so bad input fails loudly instead of
+    # being swallowed by the per-request error handling inside plan workers.
+    if file_type:
+        normalize_file_type(file_type)
+    if path_scope and normalize_search_field(search_field) not in SEARCH_FIELDS:
+        raise ValueError("unsupported search field")
+
     effective_query, is_multi_keyword = build_effective_query(keywords, keyword_mode)
     field = normalize_search_field(search_field)
     if is_multi_keyword and field == "smart":
         field = "full"
+    # def/symbol are single-term index fields; an exact phrase only makes
+    # sense as a full-text search.
+    if field in {"def", "symbol"} and is_phrase(effective_query.strip().strip('"')):
+        field = "full"
 
     if field == "smart":
-        smart_search(effective_query, projects, file_type, limit, allow_global_fallback=is_multi_keyword)
+        smart_search(
+            effective_query, projects, file_type, limit,
+            allow_global_fallback=is_multi_keyword, path_scope=path_scope,
+        )
         return
 
-    plain_search(effective_query, field, projects, file_type, limit, allow_global_fallback=is_multi_keyword)
+    plain_search(
+        effective_query, field, projects, file_type, limit,
+        allow_global_fallback=is_multi_keyword, path_scope=path_scope,
+    )
 
 
 def clean_line(value):
     return html.unescape(re.sub(r"<[^>]+>", "", value))
+
+
+def strip_html_tags(value):
+    return re.sub(r"<[^>]+>", "", value)
 
 
 def kind_rank(kind):
@@ -666,6 +889,9 @@ def split_project_path(path):
 
 def is_method_definition_line(lower_line, member_name):
     if re.search(rf"\.\s*{re.escape(member_name)}\s*\(", lower_line):
+        return False
+    if re.search(rf"=\s*{re.escape(member_name)}\s*\(", lower_line):
+        # assignment like `final Foo f = getService();`, not a definition
         return False
     if re.search(
         rf"\b(public|private|protected|internal|open|override|static|final|abstract|synchronized|native|suspend|fun)\b.*\b{re.escape(member_name)}\s*\(",
@@ -700,6 +926,7 @@ def main():
     parser.add_argument("--search-field")
     parser.add_argument("--project")
     parser.add_argument("--type")
+    parser.add_argument("--path", help="restrict results to paths containing these /-separated terms, e.g. frameworks/base")
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()
 
@@ -707,7 +934,15 @@ def main():
         list_projects()
         return
     if args.action == "search":
-        search(args.keywords, args.keyword_mode, args.search_field, args.project, args.type, args.limit)
+        search(
+            args.keywords,
+            args.keyword_mode,
+            args.search_field,
+            args.project,
+            args.type,
+            args.limit,
+            path_scope=args.path or "",
+        )
         return
 
     raise ValueError(f"unsupported action: {args.action}")

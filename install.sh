@@ -232,7 +232,7 @@ package_web_app() {
             "${package_root}/configs/automation_profiles.json" \
             "${package_root}/configs/build_servers.json" \
             "${package_root}/configs/cluster.json" \
-            "${package_root}/skills/rk_codesearch/config/config.json"
+            "${package_root}/plugins/codesearch/config/config.json"
         python3 "${PROJECT_DIR}/scripts/verify_release_tree.py" "${package_root}"
         tar -czf "${archive}" -C "${stage}" "${root_name}"
     )
@@ -340,7 +340,7 @@ copy_project() {
             --exclude 'docs/refactor-parity-audit.md' \
             --exclude 'docs/refactor-verification.md' \
             --exclude 'docs/wiki-knowledge-base-plan.md' \
-            --exclude 'skills/rk_codesearch/config/config.json' \
+            --exclude 'plugins/codesearch/config/config.json' \
             --exclude 'configs/config_runtime.json' \
             --exclude 'configs/client_ssh_credentials.local.json' \
             --exclude 'configs/redmine_auth.json' \
