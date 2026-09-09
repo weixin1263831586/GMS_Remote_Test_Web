@@ -318,19 +318,32 @@ class ReportAnalyzer:
         class_name: str,
         failure_location: dict | None = None,
         max_results: int = 5,
+        android_version: str = '',
     ) -> list[dict[str, str]]:
         """
         Args:
             class_name: 类名 (如 com.android.cts.permission.PermissionTest)
             failure_location: 从堆栈提取的失败位置 {file_name, file_type, line_number}
             max_results: 最大返回结果数
+            android_version: 报告的 Android 版本（如 "15"），用于按版本映射选择 OpenGrok 项目
 
         Returns:
             List[Dict]: 搜索结果列表，每个包含 {project, path, line, type, file_type}
         """
         web_app_dir = Path(__file__).resolve().parents[2]
-        codesearch_dir = web_app_dir / 'skills' / 'rk_codesearch'
-        codesearch_script = str(codesearch_dir / 'run.py')
+        codesearch_dir = web_app_dir / 'plugins' / 'codesearch'
+        codesearch_script = str(codesearch_dir / 'scripts' / 'codesearch.py')
+
+        # 优先用调用方传入的版本，其次用挂载报告的版本；按版本映射选择搜索项目
+        opengrok_config = {}
+        with suppress(Exception):
+            opengrok_config = ConfigManager().load_config().get('opengrok', {})
+        base_url = opengrok_config.get('base_url', '')
+        version_project = get_opengrok_project_for_android_version(
+            android_version or (self.report.android_version if self.report else ''),
+            opengrok_config,
+        )
+        project_args = ['--project', version_project] if version_project else []
 
         try:
             # 如果有精确失败位置，优先使用
@@ -342,7 +355,7 @@ class ReportAnalyzer:
                 simple_name = file_name.split('$')[0]
 
                 result = self._run_codesearch(
-                    ['python3', codesearch_script, 'search', '--keywords', simple_name, '--search-field', 'path', '--limit', '10'],
+                    ['python3', codesearch_script, 'search', '--keywords', simple_name, '--search-field', 'path', '--limit', '10', *project_args],
                     str(codesearch_dir),
                 )
                 if result:
@@ -367,14 +380,10 @@ class ReportAnalyzer:
                                 'project': project,
                                 'is_exact_location': True,
                             }
-                            with suppress(Exception):
-                                opengrok_config = ConfigManager().load_config().get('opengrok', {})
-                                base_url = opengrok_config.get('base_url', '')
-                                selected_project = project or get_opengrok_project_for_android_version(
-                                    self.report.android_version if self.report else '', opengrok_config
-                                )
-                                if base_url and selected_project:
-                                    self._attach_opengrok_url(item, base_url, selected_project)
+                            # 链接项目优先取报告版本对应项目，避免搜索默认项目覆盖版本语义
+                            selected_project = version_project or project
+                            if base_url and selected_project:
+                                self._attach_opengrok_url(item, base_url, selected_project)
                             return [item][:max_results]
                     # Fall through to class name search
 
@@ -382,21 +391,13 @@ class ReportAnalyzer:
             simple_class_name = class_name.split('.')[-1]
 
             result = self._run_codesearch(
-                ['python3', codesearch_script, 'search', '--keywords', simple_class_name, '--search-field', 'def', '--limit', str(max_results)],
+                ['python3', codesearch_script, 'search', '--keywords', simple_class_name, '--search-field', 'def', '--limit', str(max_results), *project_args],
                 str(codesearch_dir),
             )
             if not result:
                 return []
 
-            # 预加载OpenGrok配置
-            opengrok_config = {}
-            with suppress(Exception):
-                opengrok_config = ConfigManager().load_config().get('opengrok', {})
-
-            selected_project = get_opengrok_project_for_android_version(
-                self.report.android_version if self.report else '', opengrok_config
-            )
-            base_url = opengrok_config.get('base_url', '')
+            selected_project = version_project
 
             search_results = []
             lines = result.stdout.strip().split('\n')

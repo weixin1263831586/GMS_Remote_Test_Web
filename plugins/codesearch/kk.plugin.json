@@ -1,0 +1,19 @@
+{
+  "name": "codesearch",
+  "version": "0.8.1",
+  "description": "Self-contained client for searching remote source indexes (bundles codesearch).",
+  "keywords": ["code-search", "opengrok", "aosp", "mcp"],
+  "mcpServers": {
+    "search": {
+      "transport": "stdio",
+      "command": "python3",
+      "args": ["./scripts/mcp_server.py"],
+      "cwd": "./"
+    }
+  },
+  "interface": {
+    "displayName": "Code Search",
+    "shortDescription": "Search indexed source trees and locate definitions and references",
+    "developerName": "kkagent"
+  }
+}

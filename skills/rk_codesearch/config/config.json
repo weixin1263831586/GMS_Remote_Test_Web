@@ -1,8 +1,0 @@
-{
-  "base_url": "http://10.10.10.203:8080/source",
-  "token": "",
-  "default_projects": [
-    "Android16"
-  ],
-  "default_limit": 15
-}

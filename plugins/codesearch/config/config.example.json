@@ -1,0 +1,8 @@
+{
+  "base_url": "https://codeindex.rock-chips.com/source",
+  "token": "${RK_CODESEARCH_TOKEN:}",
+  "default_projects": [
+    "Android17"
+  ],
+  "default_limit": 15
+}
