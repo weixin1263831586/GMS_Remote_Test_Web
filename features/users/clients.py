@@ -54,9 +54,19 @@ def get_client_id_from_request(request) -> str:
 
 
 def owner_id_from_request(request) -> str:
-    """Return an account id, or the stable anonymous client id in development."""
+    """Return an account id, or the stable anonymous client id in development.
+
+    Agent Service Token principals inherit their token's owner account
+    (``owner_user_id``) instead of the synthetic ``agent:<token_id>`` id, so
+    owner-scoped data (Redmine credentials, evidence stores, ...) configured
+    under the enrolling account is visible to its agents.
+    """
     user = get_authenticated_user(request)
-    return user.id if user else get_client_display_id_from_request(request)
+    if user is not None:
+        record = getattr(request.state, 'agent_token_record', None)
+        owner_user_id = str((record or {}).get('owner_user_id') or '').strip()
+        return owner_user_id or user.id
+    return get_client_display_id_from_request(request)
 
 
 def get_client_ip(request) -> str:

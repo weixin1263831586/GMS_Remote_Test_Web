@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 
+
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -514,7 +515,6 @@ def classify_match(line, info):
 
 def classify_result(path, matches, original_query):
     info = analyze_query(original_query)
-    lower_path = path.lower()
     # Class.member: only the class's own file can rank as a definition.
     if info["class_name"] and info["member_name"]:
         if path_matches_class_file(path, info["class_name"]):

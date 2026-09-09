@@ -1,0 +1,4 @@
+interface:
+  display_name: "GMS Remote Test"
+  short_description: "Operate and maintain the authenticated GMS test platform"
+  default_prompt: "Use $gms-remote-test to diagnose the target Controller and safely perform the requested remote device, firmware, or test operation. Discover commands first, use --json --non-interactive, follow durable job IDs to completion, honor exit codes, and require explicit authorization before mutations."

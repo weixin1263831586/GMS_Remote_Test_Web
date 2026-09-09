@@ -15,16 +15,23 @@ bundles a copy of the CLI; changes there are downstream.
 | `references/agent-integration.md` | CLI-in-agent bootstrap for Codex/Claude/Kimi. |
 | `references/agent-workflows.md` | Battle-tested workflows, error-recovery recipes, elevation matrix. |
 | `agents/openai.yaml` | Codex-style interface hints. |
-| `agents/kkagent.yaml` | kkagent plugin prompt hints. |
+| `references/project-maintenance.md` | Repository-maintenance playbook. |
+
+Note: there is deliberately no `agents/kkagent.yaml`. kkagent's Skill
+parser does not consume per-agent YAML metadata; a file that looks
+authoritative but is never read is worse than none (10.txt §十一). The
+kkagent prompt path is the plugin manifest's `interface` block.
 
 ## Change flow
 
 1. Edit `scripts/gms-remote-test.sh` (or docs) here.
 2. `bash -n scripts/gms-remote-test.sh`
-3. Downstream sync: `plugins/gms-remote-test/scripts/sync_cli.sh`
-4. Plugin tests: `python3 plugins/gms-remote-test/tests/test_mcp_server.py`
+3. Downstream sync: `plugins/gms-remote-test/scripts/sync_package.sh`
+4. Plugin tests: `python3 plugins/gms-remote-test/tests/test_mcp_server.py
+   && python3 plugins/gms-remote-test/tests/test_packaging.py`
 5. Bump `GMS_RT_VERSION` in the CLI when command behavior changes, and the
-   plugin version when plugin-visible behavior changes.
+   three manifest versions (kk/kimi/.codex-plugin) together when
+   plugin-visible behavior changes.
 
 ## CLI invariants (preserve)
 
@@ -33,7 +40,8 @@ bundles a copy of the CLI; changes there are downstream.
   documented meanings. Error paths must surface the server error body
   (see `jobs-wait` 404 handling) instead of an empty envelope.
 - `--non-interactive` never prompts; passwords only via `--password-stdin`
-  or `GMS_REMOTE_TEST_PASSWORD` in controlled environments.
+  or `GMS_REMOTE_TEST_PASSWORD` in controlled **human** environments —
+  never in agent context (agents use the Agent Service Token).
 - Human-facing formatting (tables, emoji) is terminal-only; the `--json`
   path emits machine data (`reports-list`, `test-suites` follow this).
 - Shell tooling must tolerate response-shape variance, not fail a success

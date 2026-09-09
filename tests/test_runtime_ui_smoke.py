@@ -669,9 +669,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 }
                 """
             )
-            # 入口位于 page-agent 内，需切到该页才能看到（页面容器本身
-            # 依赖活动页切换显隐）。
-            page.evaluate("() => switchPage('agent', null)")
+            # 入口位于 page-users 右上角（Agent 接入管理已从对话Agent页迁移）。
+            page.evaluate("() => switchPage('users', null)")
             expect(entry).to_be_visible()
 
             # 真实登录（cookie 落到同一浏览器上下文）后重载，走真实 API。
@@ -695,7 +694,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.wait_for_selector(".sidebar-item[data-page]")
             self.close_initial_modals(page)
             self.show_all_sidebar_pages(page)
-            page.click(".sidebar-item[data-page='agent']")
+            page.click(".sidebar-item[data-page='users']")
+            # 用户管理页在未提权时会自动弹出 elevate-modal（loadUsersList
+            # 的提权流程），先关掉再点 Agent 接入入口。
+            self.close_initial_modals(page)
             page.click("#agent-access-entry button")
             page.wait_for_function(
                 "document.querySelectorAll("
@@ -721,6 +723,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "reports.read",
                     "resources.read_own",
                     "resources.write_own",
+                    "redmine.read",
+                    "artifacts.read_own",
+                    "apk.analyze_own",
+                    "sdk.read",
                 ]),
             )
             self.assertTrue(

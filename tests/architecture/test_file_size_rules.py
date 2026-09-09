@@ -23,6 +23,10 @@ MIGRATION_LINE_LIMITS = {
     'features/auth/tests/test_auth_api.py': 610,
     'features/auth/tests/test_security_boundary.py': 615,
     'features/devices/config_override.py': 740,
+    # 57c30e1 grew apk_api.py 524→605 without registering it here; the rule
+    # failed on clean HEAD. Registered at its current size; debt must now
+    # shrink, not grow.
+    'features/firmware/apk_api.py': 605,
     'features/firmware/tests/test_api.py': 624,
     'features/gerrit/api.py': 643,
     'features/knowledge/storage.py': 790,

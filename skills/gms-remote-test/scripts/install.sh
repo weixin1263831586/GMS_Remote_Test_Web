@@ -12,13 +12,6 @@ case "$DEFAULT_VERIFY_KEY_B64" in __GMS_*) DEFAULT_VERIFY_KEY_B64='' ;; esac
 case "$DEFAULT_SIGNATURE_REQUIRED" in __GMS_*) DEFAULT_SIGNATURE_REQUIRED='0' ;; esac
 VERIFY_KEY_B64="${GMS_INSTALL_VERIFY_KEY_B64:-$DEFAULT_VERIFY_KEY_B64}"
 SIGNATURE_REQUIRED="${GMS_INSTALL_REQUIRE_SIGNATURE:-$DEFAULT_SIGNATURE_REQUIRED}"
-# GMS_SKILLS_DIR is the agent-neutral override. Keep the Codex-specific name
-# for backward compatibility with existing installations.
-SKILLS_DIR="${GMS_SKILLS_DIR:-${GMS_CODEX_SKILLS_DIR:-${CODEX_HOME:-${HOME}/.codex}/skills}}"
-TARGET_DIR="${SKILLS_DIR}/${SKILL_NAME}"
-BIN_DIR="${GMS_BIN_DIR:-${HOME}/.local/bin}"
-RUNTIME_BIN_DIR="${GMS_RUNTIME_BIN_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/gms-remote-test/bin}"
-PROFILE_FILE="${GMS_PROFILE_FILE:-${HOME}/.profile}"
 
 fail() {
     printf 'Error: %s\n' "$*" >&2
@@ -28,6 +21,57 @@ fail() {
 info() {
     printf '%s\n' "$*"
 }
+
+# ---------------------------------------------------------------------------
+# Argument parsing FIRST (10.txt §十二): --client must be parsed before the
+# skill directory is resolved, otherwise --client kimi/kkagent installs the
+# Skill into ~/.codex/skills. Keep the Codex-specific env names for backward
+# compatibility, but the per-client roots below always win over the default.
+# ---------------------------------------------------------------------------
+CLIENT_MODE="${GMS_INSTALL_CLIENT:-}"
+POSITIONAL=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --client)
+            [ $# -ge 2 ] || fail "--client 需要参数: auto|codex|kimi|kkagent"
+            CLIENT_MODE="$1"; CLIENT_MODE="${2:-}"; shift 2 ;;
+        --client=*)
+            CLIENT_MODE="${1#*=}"; shift ;;
+        *)
+            POSITIONAL+=("$1"); shift ;;
+    esac
+done
+case "${CLIENT_MODE:-auto}" in
+    auto|codex|kimi|kkagent) ;;
+    *) fail "未知 --client: ${CLIENT_MODE}（支持 auto|codex|kimi|kkagent）" ;;
+esac
+
+resolve_client_skill_dir() {
+    # Each client gets its own native skill root; explicit overrides win.
+    case "${CLIENT_MODE:-auto}" in
+        kimi)    printf '%s\n' "${GMS_SKILLS_DIR:-${KIMI_CODE_HOME:-${HOME}/.kimi-code}/skills}" ;;
+        kkagent) printf '%s\n' "${GMS_SKILLS_DIR:-${KKAGENT_HOME:-${HOME}/.kkagent}/skills}" ;;
+        codex)   printf '%s\n' "${GMS_SKILLS_DIR:-${GMS_CODEX_SKILLS_DIR:-${CODEX_HOME:-${HOME}/.codex}/skills}}" ;;
+        auto)
+            # auto keeps the historical default (Codex) when nothing else is
+            # detected; the auto-configuration section below still installs
+            # per-agent MCP registrations for every detected client.
+            if [ -d "${KKAGENT_HOME:-${HOME}/.kkagent}" ] && [ ! -d "${CODEX_HOME:-${HOME}/.codex}" ] && [ ! -d "${KIMI_CODE_HOME:-${HOME}/.kimi-code}" ]; then
+                printf '%s\n' "${GMS_SKILLS_DIR:-${KKAGENT_HOME:-${HOME}/.kkagent}/skills}"
+            elif [ -d "${KIMI_CODE_HOME:-${HOME}/.kimi-code}" ] && [ ! -d "${CODEX_HOME:-${HOME}/.codex}" ]; then
+                printf '%s\n' "${GMS_SKILLS_DIR:-${KIMI_CODE_HOME:-${HOME}/.kimi-code}/skills}"
+            else
+                printf '%s\n' "${GMS_SKILLS_DIR:-${GMS_CODEX_SKILLS_DIR:-${CODEX_HOME:-${HOME}/.codex}/skills}}"
+            fi
+            ;;
+    esac
+}
+
+SKILLS_DIR="$(resolve_client_skill_dir)"
+TARGET_DIR="${SKILLS_DIR}/${SKILL_NAME}"
+BIN_DIR="${GMS_BIN_DIR:-${HOME}/.local/bin}"
+RUNTIME_BIN_DIR="${GMS_RUNTIME_BIN_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/gms-remote-test/bin}"
+PROFILE_FILE="${GMS_PROFILE_FILE:-${HOME}/.profile}"
 
 # 4.txt P1a：TOML basic string 转义。Bash %q 是 shell 转义而非 TOML 转义，
 # 生成未加引号的裸值会让 Codex 解析 config.toml 失败。
@@ -474,6 +518,10 @@ install_agent_profile() {
         printf 'export GMS_REMOTE_TEST_SERVER=%q\n' "$SERVER_URL"
         printf 'export GMS_RT_PROFILE=%q\n' "$profile_name"
         printf 'export GMS_AUTH_TOKEN_FILE=%q\n' "$token_file"
+        # Service-token mode is mandatory for agents: the MCP server then
+        # refuses to register the password/elevation/self-approval tools
+        # (10.txt §五). Never write a platform password into agent context.
+        printf 'export GMS_AGENT_AUTH_MODE=service-token\n'
         if [ -n "${GMS_INSTALL_CA_CERT:-}" ]; then
             printf 'export GMS_CURL_CA_CERT=%q\n' "$GMS_INSTALL_CA_CERT"
         fi
@@ -481,34 +529,42 @@ install_agent_profile() {
     chmod 600 "${GMS_MCP_DIR}/${agent}.env"
     # 日志必须走 stderr：本函数的 stdout 被 command substitution 捕获，
     # 混入任何进度日志都会污染 profile_name（4.txt P0-5）。
-    info "Agent env profile: ${GMS_MCP_DIR}/${agent}.env (source it in the agent's launch env)" >&2
+    info "Agent env profile: ${GMS_MCP_DIR}/${agent}.env (loaded automatically by mcp_launcher.sh)" >&2
     printf '%s\n' "$profile_name"
+}
+
+# 10.txt §七/§八: the plugin is a self-contained Skill+MCP package; the MCP
+# registration should launch through mcp_launcher.sh so the per-agent env
+# profile is loaded by the runtime, not by the user's shell.
+find_reconcile_script() {
+    if [ -f "${SOURCE_DIR}/scripts/agent_mcp_config.py" ]; then
+        printf '%s\n' "${SOURCE_DIR}/scripts/agent_mcp_config.py"
+    elif [ -f "${GMS_MCP_DIR}/agent_mcp_config.py" ]; then
+        printf '%s\n' "${GMS_MCP_DIR}/agent_mcp_config.py"
+    else
+        printf '%s\n' ""
+    fi
 }
 
 configure_codex_mcp() {
     local profile_name="$1"
     local codex_config="${CODEX_HOME:-${HOME}/.codex}/config.toml"
     mkdir -p "$(dirname "$codex_config")"
-    if [ -f "$codex_config" ] && grep -q 'mcp_servers.gms_remote_test' "$codex_config"; then
-        info "Codex MCP already configured: $codex_config"
-        return 0
-    fi
-    # 4.txt P1a：不要用 Bash %q 拼 TOML（%q 是 shell 转义，生成的
-    # 未加引号裸值不是合法 TOML 字符串）。toml_str 产出规范的 "..." 值。
+    # 10.txt §十五: reconcile（比较→只更新 gms 块），不是"发现即跳过"。
     local token_file="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${profile_name}.token"
-    {
-        printf '\n[mcp_servers.gms_remote_test]\n'
-        printf 'command = "python3"\n'
-        printf 'args = [%s]\n' "$(toml_str "$GMS_MCP_SERVER")"
-        printf '\n[mcp_servers.gms_remote_test.env]\n'
-        printf 'GMS_REMOTE_TEST_SERVER = %s\n' "$(toml_str "$SERVER_URL")"
-        printf 'GMS_RT_PROFILE = %s\n' "$(toml_str "$profile_name")"
-        printf 'GMS_AUTH_TOKEN_FILE = %s\n' "$(toml_str "$token_file")"
-        if [ -n "${GMS_INSTALL_CA_CERT:-}" ]; then
-            printf 'GMS_CURL_CA_CERT = %s\n' "$(toml_str "$GMS_INSTALL_CA_CERT")"
+    local reconcile_script
+    reconcile_script="$(find_reconcile_script)"
+    if [ -n "${reconcile_script}" ]; then
+        if python3 "${reconcile_script}" codex "$codex_config" "$GMS_MCP_SERVER" \
+            "$SERVER_URL" "$profile_name" "$token_file" "${GMS_INSTALL_CA_CERT:-}"; then
+            :
+        else
+            fail "Codex MCP reconcile 失败（见上方原因）。用户配置未被修改或已备份。"
         fi
-    } >> "$codex_config"
-    info "Codex MCP registered: $codex_config"
+    else
+        info "Skipped Codex MCP registration (agent_mcp_config.py not available)"
+    fi
+    info "Codex MCP reconciled: $codex_config"
 }
 
 configure_kimi_mcp() {
@@ -516,41 +572,24 @@ configure_kimi_mcp() {
     local kimi_config="${KIMI_CODE_HOME:-${HOME}/.kimi-code}/mcp.json"
     mkdir -p "$(dirname "$kimi_config")"
     if command -v python3 >/dev/null 2>&1; then
-        # 4.txt P1a：token 路径必须传绝对路径（argv[6]）。env 值里的 "~"
-        # 不会被 tilde 展开，CLI 的 [ -r "$GMS_AUTH_TOKEN_FILE" ] 会失败。
+        # 4.txt P1a：token 路径必须传绝对路径。env 值里的 "~" 不会被 tilde
+        # 展开，CLI 的 [ -r "$GMS_AUTH_TOKEN_FILE" ] 会失败。
+        # 10.txt §十四/§十五: reconcile 通过 agent_mcp_config.py 完成——
+        # 损坏的 mcp.json 必须 FAIL（先备份，绝不覆盖），已存在的 gms 块
+        # 与目标状态比较后原地更新（Controller 迁移/CA 轮换不再是死配置）。
         local kimi_token_file="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${profile_name}.token"
-        python3 - "$kimi_config" "$GMS_MCP_SERVER" "$SERVER_URL" "$profile_name" "${GMS_INSTALL_CA_CERT:-}" "$kimi_token_file" <<'PY'
-import json, sys
-from pathlib import Path
-
-config_path = Path(sys.argv[1])
-config = {}
-if config_path.exists():
-    try:
-        config = json.loads(config_path.read_text())
-    except ValueError:
-        config = {}
-servers = config.setdefault("mcpServers", {})
-if "gms" in servers:
-    print("Kimi MCP already configured:", config_path)
-    raise SystemExit(0)
-server = {
-    "command": "python3",
-    "args": [sys.argv[2]],
-    "env": {
-        "GMS_REMOTE_TEST_SERVER": sys.argv[3],
-        "GMS_RT_PROFILE": sys.argv[4],
-        "GMS_AUTH_TOKEN_FILE": sys.argv[6],
-    },
-}
-ca = sys.argv[5]
-if ca:
-    server["env"]["GMS_CURL_CA_CERT"] = ca
-servers["gms"] = server
-config_path.parent.mkdir(parents=True, exist_ok=True)
-config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
-print("Kimi MCP registered:", config_path)
-PY
+        local reconcile_script
+        reconcile_script="$(find_reconcile_script)"
+        if [ -n "${reconcile_script}" ]; then
+            if python3 "${reconcile_script}" kimi "$kimi_config" "$GMS_MCP_SERVER" \
+                "$SERVER_URL" "$profile_name" "$kimi_token_file" "${GMS_INSTALL_CA_CERT:-}"; then
+                :
+            else
+                fail "Kimi MCP reconcile 失败（见上方原因）。用户配置未被修改或已备份。"
+            fi
+        else
+            info "Skipped Kimi MCP registration (agent_mcp_config.py not available)"
+        fi
     else
         info "Skipped Kimi MCP registration (python3 required)"
     fi
@@ -560,9 +599,23 @@ mkdir -p "$GMS_MCP_DIR"
 # MCP server source: prefer a sibling plugin checkout, else the installed skill.
 if [ -f "${SOURCE_DIR}/scripts/mcp_server.py" ]; then
     install -m 755 "${SOURCE_DIR}/scripts/mcp_server.py" "$GMS_MCP_SERVER" 2>/dev/null || true
-    # The MCP adapter drives the CLI beside it.
-    cp "${SOURCE_DIR}/scripts/gms-remote-test.sh" "${GMS_MCP_DIR}/" 2>/dev/null || true
-    chmod 755 "${GMS_MCP_DIR}/gms-remote-test.sh" 2>/dev/null || true
+    # The MCP adapter drives the CLI beside it; agent_mcp_config.py powers
+    # the reconcile calls above; mcp_launcher.sh loads per-agent env profiles.
+    for runtime_file in gms-remote-test.sh agent_mcp_config.py mcp_launcher.sh; do
+        [ -f "${SOURCE_DIR}/scripts/${runtime_file}" ] || continue
+        cp "${SOURCE_DIR}/scripts/${runtime_file}" "${GMS_MCP_DIR}/" 2>/dev/null || true
+        chmod 755 "${GMS_MCP_DIR}/${runtime_file}" 2>/dev/null || true
+    done
+    if [ -d "${SOURCE_DIR}/scripts/gms_agent" ]; then
+        rm -rf "${GMS_MCP_DIR}/gms_agent"
+        cp -R "${SOURCE_DIR}/scripts/gms_agent" "${GMS_MCP_DIR}/gms_agent"
+        find "${GMS_MCP_DIR}/gms_agent" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+    fi
+    # Skill docs ride along so the plugin/skill payload stays one unit.
+    if [ -f "${SOURCE_DIR}/SKILL.md" ]; then
+        mkdir -p "${GMS_MCP_DIR}/skills/gms-remote-test"
+        cp "${SOURCE_DIR}/SKILL.md" "${GMS_MCP_DIR}/skills/gms-remote-test/" 2>/dev/null || true
+    fi
 fi
 
 case "${CLIENT_MODE:-skip}" in
@@ -570,7 +623,27 @@ case "${CLIENT_MODE:-skip}" in
     kimi)   P=$(install_agent_profile kimi);   configure_kimi_mcp "$P" ;;
     kkagent)
         P=$(install_agent_profile kkagent)
-        info "kkagent: point the gms MCP server at ${GMS_MCP_SERVER} with env from ${GMS_MCP_DIR}/kkagent.env"
+        # 10.txt §十三: --client kkagent must actually register something,
+        # not just print a hint. Install the bundled self-contained plugin
+        # payload (manifest + skill + scripts) into ~/.kkagent/plugins.
+        KKAGENT_HOME="${KKAGENT_HOME:-${HOME}/.kkagent}"
+        plugin_source=""
+        for candidate in "${SOURCE_DIR}/../" "${SOURCE_DIR}" "${SOURCE_DIR}/plugins/gms-remote-test"; do
+            if [ -f "${candidate}/kk.plugin.json" ] && [ -d "${candidate}/scripts" ]; then
+                plugin_source="$(cd "${candidate}" && pwd)"
+                break
+            fi
+        done
+        if [ -n "${plugin_source}" ] && [ -f "${plugin_source}/kk.plugin.json" ]; then
+            mkdir -p "${KKAGENT_HOME}/plugins"
+            rm -rf "${KKAGENT_HOME}/plugins/gms-remote-test"
+            cp -R "${plugin_source}" "${KKAGENT_HOME}/plugins/gms-remote-test"
+            find "${KKAGENT_HOME}/plugins/gms-remote-test" -name '__pycache__' -type d \
+                -exec rm -rf {} + 2>/dev/null || true
+            info "kkagent plugin installed: ${KKAGENT_HOME}/plugins/gms-remote-test"
+        else
+            info "kkagent: plugin payload not found; point the gms MCP server at ${GMS_MCP_SERVER} manually"
+        fi
         ;;
     auto)
         if command -v codex >/dev/null 2>&1; then
