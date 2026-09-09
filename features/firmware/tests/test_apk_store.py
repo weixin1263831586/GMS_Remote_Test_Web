@@ -81,3 +81,31 @@ def test_interrupted_analysis_is_rescheduled_only_from_valid_task_paths(tmp_path
     runner.assert_awaited_once()
     assert state.apk_analysis_tasks[invalid_id]["status"] == "error"
     assert store.get(invalid_id)["status"] == "error"
+
+
+def test_resolve_jadx_path_prefers_config_override(monkeypatch):
+    class Manager:
+        @staticmethod
+        def load_config():
+            return {"jadx_path": "/opt/jadx-wrapper/bin/jadx"}
+
+    monkeypatch.setattr(apk.runtime, "config_manager", Manager())
+    monkeypatch.setattr(apk.runtime, "jadx_path", "/fallback/jadx")
+    assert apk._resolve_jadx_path() == "/opt/jadx-wrapper/bin/jadx"
+
+
+def test_resolve_jadx_path_falls_back_without_config(monkeypatch):
+    monkeypatch.setattr(apk.runtime, "config_manager", None)
+    monkeypatch.setattr(apk.runtime, "jadx_path", "/fallback/jadx")
+    assert apk._resolve_jadx_path() == "/fallback/jadx"
+
+
+def test_resolve_jadx_path_ignores_broken_config_manager(monkeypatch):
+    class BrokenManager:
+        @staticmethod
+        def load_config():
+            raise RuntimeError("config unavailable")
+
+    monkeypatch.setattr(apk.runtime, "config_manager", BrokenManager())
+    monkeypatch.setattr(apk.runtime, "jadx_path", "/fallback/jadx")
+    assert apk._resolve_jadx_path() == "/fallback/jadx"

@@ -22,6 +22,7 @@ from fastapi.responses import (
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
 from features.system.api_docs_list import API_DOCS_LIST
+from features.system import jq_binary
 from features.system.skill_archive_signing import (
     sign_skill_archive,
     skill_verify_key_b64,
@@ -544,40 +545,13 @@ async def download_skill_installer(request: Request):
 # itself over the GitHub fallback. Integrity is double-checked: the endpoint
 # only serves the pinned file pinned path, and the installer verifies the
 # SHA-256 it receives in the X-GMS-SHA256 header before installing.
-_JQ_BIN_PATH = os.path.join(PROJECT_ROOT, "tools", "jq-linux-amd64")
+# R13: implementation lives in features/system/jq_binary.py (size budget).
 
 
 @router.get("/api/system/tools/jq")
 async def download_jq_binary(request: Request):
-    """Serve the pinned jq binary for the skill installer (§十二).
-
-    The Controller is the trust root for the whole agent bootstrap chain
-    (same origin as the ZIP and the Ed25519 signing key), so fetching jq
-    from here keeps air-gapped build servers working without GitHub
-    access. 404 when the pinned file is absent — never a redirect.
-    """
-    try:
-        def _read_jq() -> tuple[bytes, str]:
-            with open(_JQ_BIN_PATH, "rb") as jq_file:
-                data = jq_file.read()
-            digest = hashlib.sha256(data).hexdigest()
-            return data, digest
-
-        data, digest = await asyncio.to_thread(_read_jq)
-    except OSError:
-        logger.warning(
-            "[TOOLS_JQ] pinned jq binary missing: %s", _JQ_BIN_PATH
-        )
-        return error_response("jq 二进制不可用", status_code=404)
-    return Response(
-        content=data,
-        media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": 'attachment; filename="jq"',
-            "X-GMS-SHA256": digest,
-            "Cache-Control": "no-store",
-        },
-    )
+    """Serve the pinned jq binary for the skill installer (§十二)."""
+    return await jq_binary.serve(request)
 
 
 # ==================== Architecture Page ====================

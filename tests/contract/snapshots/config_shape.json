@@ -96,6 +96,7 @@
     "ssh_user": "str"
   },
   "gsi_scripts": "str",
+  "jadx_path": "str",
   "local_server": "str",
   "opengrok": {
     "base_url": "str",

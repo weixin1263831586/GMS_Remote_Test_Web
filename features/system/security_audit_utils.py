@@ -72,6 +72,21 @@ _FIRMWARE_SHARE_DOWNLOAD_PATH = re.compile(
     r'^(/api/firmware-shares/)[^/]+(/download)$'
 )
 
+# R09（2026-09-08 审核）：这些认证入口的请求/响应正文携带一次性配对码
+# 或 Agent Service Token。现有递归脱敏只按"键名"匹配（token/password
+# 等），而配对码放在 `enrollment.code` / 请求体的 `code` 键下，会原样
+# 进入审计。对这些路径记录不解析的占位标记；其他业务接口不受影响，
+# 避免把所有 `code` 字段一刀切屏蔽。
+_AUDIT_CREDENTIAL_BODY_PATHS = frozenset({
+    '/api/auth/agent-enroll',
+    '/api/auth/agent-enrollment-codes',
+})
+AUDIT_CREDENTIAL_BODY_REDACTED = {
+    'captured': True,
+    'redacted': True,
+    'reason': '认证凭据正文不记录',
+}
+
 
 def can_audit_path(path: str) -> bool:
     if path in AUDIT_SKIP_PATHS:
@@ -110,6 +125,10 @@ def sanitize_audit_path(path: str) -> str:
     )
 
 
+def _is_credential_body_path(path: str) -> bool:
+    return str(path or '') in _AUDIT_CREDENTIAL_BODY_PATHS
+
+
 def safe_int(value: str | None, default: int = 0) -> int:
     try:
         return int(value or default)
@@ -131,6 +150,11 @@ async def summarize_audit_request(request: Request, should_audit: bool) -> dict[
     }
 
     if request.method.upper() not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        return summary
+
+    if _is_credential_body_path(request.url.path):
+        # 不读取/不解析正文，避免配对码进入审计；也不需要回放包装。
+        summary['body'] = dict(AUDIT_CREDENTIAL_BODY_REDACTED)
         return summary
 
     if 'multipart/form-data' in content_type:
@@ -163,14 +187,23 @@ async def summarize_audit_request(request: Request, should_audit: bool) -> dict[
     return summary
 
 
-async def summarize_audit_response(response) -> tuple[Any, dict[str, Any]]:
-    """Capture small JSON responses for audit detail and rebuild the response."""
+async def summarize_audit_response(
+    response,
+    path: str = '',
+) -> tuple[Any, dict[str, Any]]:
+    """Capture small JSON responses for audit detail and rebuild the response.
+
+    R09（2026-09-08 审核）：认证入口（配对码兑换/签发）的响应正文换成
+    占位标记，原始配对码与 Service Token 不进入审计，但响应本身仍正常
+    重建返回给客户端。
+    """
     if response is None:
         return response, {}
 
     content_type = (response.headers.get('content-type') or '').lower()
     content_encoding = (response.headers.get('content-encoding') or '').lower()
     content_length = safe_int(response.headers.get('content-length'))
+    redact_body = _is_credential_body_path(path)
 
     summary = {
         'content_type': content_type.split(';')[0] if content_type else '',
@@ -193,18 +226,21 @@ async def summarize_audit_response(response) -> tuple[Any, dict[str, Any]]:
 
     body = b''.join(body_parts)
     summary['content_length'] = len(body)
-    try:
-        parsed = json.loads(body.decode('utf-8'))
-        if isinstance(parsed, dict):
-            summary['body'] = security_audit_logger.sanitize_mapping(parsed)
-        else:
-            summary['body'] = security_audit_logger.sanitize_value('response', parsed)
-    except Exception as e:
-        summary['parse_error'] = str(e)
-        summary['preview'] = security_audit_logger.sanitize_value(
-            'preview',
-            body[:300].decode('utf-8', errors='replace'),
-        )
+    if redact_body:
+        summary['body'] = dict(AUDIT_CREDENTIAL_BODY_REDACTED)
+    else:
+        try:
+            parsed = json.loads(body.decode('utf-8'))
+            if isinstance(parsed, dict):
+                summary['body'] = security_audit_logger.sanitize_mapping(parsed)
+            else:
+                summary['body'] = security_audit_logger.sanitize_value('response', parsed)
+        except Exception as e:
+            summary['parse_error'] = str(e)
+            summary['preview'] = security_audit_logger.sanitize_value(
+                'preview',
+                body[:300].decode('utf-8', errors='replace'),
+            )
 
     headers = dict(response.headers)
     headers.pop('content-length', None)

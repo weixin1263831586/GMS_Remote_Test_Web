@@ -66,6 +66,16 @@ class FakeSshManager:
             return CommandResult(
                 stdout="__GMS_REMOTE_FILE_MISSING__\n", stderr="", code=0,
             )
+        if "sha256sum" in cmd:
+            # R06: agent burn digest is computed on the test host against
+            # the exact remote_firmware bytes (not the Controller FS).
+            import hashlib as _h
+
+            digest = _h.sha256(b"GMS-FAKE-FIRMWARE-BYTES").hexdigest()
+            return CommandResult(
+                stdout=f"{digest}  /fake/remote/firmware.img\n",
+                stderr="", code=0,
+            )
         return CommandResult(stdout="", stderr="", code=0)
 
 

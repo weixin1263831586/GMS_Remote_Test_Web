@@ -237,6 +237,10 @@ async def burn_firmware(
     locked_devices: list[str] = []
     usbip_flash_routes: list[dict] = []
     usbip_reconnect_after_finish = False
+    # R06: multipart 上传分支不产生本地 staging 文件，摘要必须基于测试
+    # 主机上实际烧写的 remote_firmware 字节；显式初始化避免分支差异导致
+    # NameError 500。
+    local_firmware_path = None
     try:
         client_id = runtime.get_client_id_from_request(request)
 
@@ -419,22 +423,35 @@ async def burn_firmware(
                     from features.auth import auth_service as _auth
 
                     burn_mode_for_approval = burn_mode
-                    _firmware_for_digest = (
-                        local_firmware_path
-                        if local_firmware_path
-                        else remote_firmware
+                    # R06: 审批必须绑定"将要烧写的确切字节"。该字节位于
+                    # 测试主机的 remote_firmware（multipart / 本地路径 /
+                    # 远端路径最终都归一到这里），不能再用本机
+                    # os.path.exists/open 读 Controller 文件系统的同名
+                    # 路径——同名路径不代表同一主机的同一文件。改为在
+                    # 测试主机上执行 sha256sum 取真实摘要。
+                    _sha_output = await asyncio.to_thread(
+                        runtime.ssh_manager.execute_command,
+                        ssh,
+                        f"sha256sum {shlex.quote(remote_firmware)}",
+                        timeout=120,
                     )
-                    if not os.path.exists(_firmware_for_digest):
-                        return error_response(
-                            f"Firmware not found: {_firmware_for_digest}"
-                        )
-                    with open(_firmware_for_digest, "rb") as _fw:
-                        _digest = _hashlib.sha256()
-                        for _chunk in iter(
-                            lambda: _fw.read(1024 * 1024), b""
+                    _remote_digest = ""
+                    for _line in (_sha_output.stdout or "").splitlines():
+                        _parts = _line.strip().split(None, 1)
+                        if (
+                            len(_parts) == 2
+                            and _parts[0]
+                            and len(_parts[0]) == 64
+                            and all(c in "0123456789abcdef" for c in _parts[0])
                         ):
-                            _digest.update(_chunk)
-                    firmware_sha256 = _digest.hexdigest()
+                            _remote_digest = _parts[0]
+                            break
+                    if not _remote_digest:
+                        return error_response(
+                            f"无法读取固件摘要，固件不存在或不可读: {remote_firmware}",
+                            status_code=404,
+                        )
+                    firmware_sha256 = _remote_digest
                     _canonical_devices = ",".join(sorted(devices))
                     # Agent token device ACL: a token scoped to specific
                     # devices must not be driven against anything else.

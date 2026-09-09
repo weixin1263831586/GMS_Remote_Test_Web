@@ -3718,6 +3718,7 @@
             "description": "Validation Error"
           }
         },
+        "security": [],
         "summary": "Auth Agent Enroll"
       }
     },
@@ -17137,6 +17138,23 @@
         "summary": "Download Skill Installer"
       }
     },
+    "/api/system/tools/jq": {
+      "get": {
+        "description": "Serve the pinned jq binary for the skill installer (§十二).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Download Jq Binary"
+      }
+    },
     "/api/tailscale/ensure": {
       "post": {
         "description": "检查 Tailscale 连接状态，未连接时尝试启动，返回内网访问地址。",
@@ -18176,6 +18194,69 @@
           }
         },
         "summary": "Search Suite Modules"
+      }
+    },
+    "/api/test/suites/modules/apk": {
+      "get": {
+        "description": "Resolve a test module keyword to its APK/JAR artifact for decompilation.",
+        "parameters": [
+          {
+            "description": "模块关键词，例如 CtsCamera",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "description": "模块关键词，例如 CtsCamera",
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "description": "逗号分隔套件类型，例如 cts,vts,gts,sts",
+            "in": "query",
+            "name": "suite_types",
+            "required": false,
+            "schema": {
+              "default": "cts,vts,gts,sts",
+              "description": "逗号分隔套件类型，例如 cts,vts,gts,sts",
+              "title": "Suite Types",
+              "type": "string"
+            }
+          },
+          {
+            "description": "优先产物类型：apk 或 jar",
+            "in": "query",
+            "name": "prefer",
+            "required": false,
+            "schema": {
+              "default": "apk",
+              "description": "优先产物类型：apk 或 jar",
+              "title": "Prefer",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Suite Module Apk Artifact"
       }
     },
     "/api/test/suites/result": {

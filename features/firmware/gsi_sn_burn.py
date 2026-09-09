@@ -62,9 +62,23 @@ def strip_ansi_codes(text: str) -> str:
 async def _lock_devices(
     request: Request, client_id: str, devices: list, error_prefix="Devices occupied"
 ):
-    """Lock devices for a burn operation (moved from firmware_api.py)."""
+    """Lock devices for a burn operation (moved from firmware_api.py).
+
+    R07: the split-out copy passed four positional arguments while the real
+    runtime binding (workflows/firmware_device.lock_firmware_devices) only
+    accepts keyword parameters — any legitimate request failed with
+    ``TypeError`` at the lock stage, before flashing. Mirror the original
+    wrapper: resolve the display username from the request and call with
+    keyword arguments.
+    """
+    from features.users import get_client_username_from_request
+
+    username = get_client_username_from_request(request)
     return await runtime.lock_firmware_devices(
-        request, client_id, devices, error_prefix
+        client_id=client_id,
+        username=username,
+        devices=devices,
+        error_prefix=error_prefix,
     )
 
 

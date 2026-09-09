@@ -1189,3 +1189,88 @@ class ShellExecToolTests(unittest.TestCase):
         names = {tool["name"] for tool in mcp_server.tools()}
         self.assertIn("gms_rt_shell_exec", names)
         self.assertIn("gms_rt_shell_exec", mcp_server._TOOL_HANDLERS)
+
+
+class ApkToolTests(unittest.TestCase):
+    """gms_rt_apk_* typed tools bridge the suite-module decompilation flow."""
+
+    def setUp(self):
+        _reset_catalog_cache()
+        self.addCleanup(_reset_catalog_cache)
+
+    def _capture_run(self):
+        captured = {}
+
+        def fake_run(command, args=None, stdin_text=None, timeout=None):
+            captured["command"] = command
+            captured["args"] = args
+            return '{"ok":true,"exit_code":0,"data":{}}', False
+
+        original = mcp_server.run_cli
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        return captured
+
+    def test_resolve_requires_query(self):
+        text, is_error = mcp_server.apk_resolve_tool({})
+        self.assertTrue(is_error)
+        self.assertIn("query", text)
+
+    def test_resolve_builds_flag_args(self):
+        captured = self._capture_run()
+        mcp_server.apk_resolve_tool({
+            "query": "CtsCamera", "suite_types": "cts,gts", "prefer": "jar",
+        })
+        self.assertEqual(captured["command"], "gms-rt-apk-resolve")
+        self.assertEqual(
+            captured["args"],
+            ["CtsCamera", "--types", "cts,gts", "--prefer", "jar"],
+        )
+
+    def test_analyze_defaults_to_background_polling(self):
+        captured = self._capture_run()
+        mcp_server.apk_analyze_tool({"query": "CtsCamera"})
+        self.assertEqual(captured["command"], "gms-rt-apk-analyze")
+        self.assertEqual(captured["args"], ["CtsCamera"])
+
+    def test_analyze_wait_mode_passes_max_wait(self):
+        captured = self._capture_run()
+        mcp_server.apk_analyze_tool({
+            "query": "CtsCamera", "wait": True, "max_wait": 600,
+        })
+        self.assertEqual(captured["args"], ["CtsCamera", "--wait", "--max-wait", "600"])
+
+    def test_status_manifest_require_task_id(self):
+        for tool in (mcp_server.apk_status_tool, mcp_server.apk_manifest_tool):
+            text, is_error = tool({})
+            self.assertTrue(is_error)
+            self.assertIn("task_id", text)
+        captured = self._capture_run()
+        mcp_server.apk_status_tool({"task_id": "T1"})
+        self.assertEqual(captured["args"], ["T1"])
+
+    def test_search_requires_query_and_clamps_limit(self):
+        text, is_error = mcp_server.apk_search_tool({"task_id": "T1"})
+        self.assertTrue(is_error)
+        self.assertIn("query", text)
+        captured = self._capture_run()
+        mcp_server.apk_search_tool({"task_id": "T1", "query": "Permission", "limit": 999})
+        self.assertEqual(captured["args"], ["T1", "Permission", "--limit", "50"])
+
+    def test_source_view_flag(self):
+        captured = self._capture_run()
+        mcp_server.apk_source_tool({
+            "task_id": "T1", "path": "com/example/A.java", "view": True,
+        })
+        self.assertEqual(
+            captured["args"], ["T1", "com/example/A.java", "--view"],
+        )
+
+    def test_registered_in_tools_and_handlers(self):
+        names = {tool["name"] for tool in mcp_server.tools()}
+        for name in (
+            "gms_rt_apk_resolve", "gms_rt_apk_analyze", "gms_rt_apk_status",
+            "gms_rt_apk_manifest", "gms_rt_apk_search", "gms_rt_apk_source",
+        ):
+            self.assertIn(name, names)
+            self.assertIn(name, mcp_server._TOOL_HANDLERS)

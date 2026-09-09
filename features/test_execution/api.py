@@ -21,6 +21,7 @@ from .logs_api import (
 )
 from .parse_api import parse_test_args as parse_test_args
 from .parse_api import router as parse_router
+from .suite_module_apk import router as suite_module_apk_router
 from .status_api import get_status as get_status
 from .status_api import router as status_router
 from .status_api import stream_test_logs as stream_test_logs
@@ -92,6 +93,7 @@ for child_router in (
     execution_router,
     logs_router,
     suites_router,
+    suite_module_apk_router,
     transfers_router,
     status_router,
 ):

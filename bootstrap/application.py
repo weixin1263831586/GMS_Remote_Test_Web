@@ -189,9 +189,20 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         if method in {'GET', 'HEAD'} and path in {
             '/api/system/skills',
             '/api/system/skills/install.sh',
+            # R12（2026-09-08 审核）：jq 安装链依赖匿名安装流程——安装脚本
+            # 本身（skills/install.sh）已公开，其下载的 pinned jq 却要求
+            # 登录会让无会话的编译服务器装机必然失败。只读二进制、无凭据
+            # 泄露面（内容为公开 jq 发布物），精确公开该 GET 路径。
+            '/api/system/tools/jq',
         }:
             return True
         if method == 'GET' and _PUBLIC_FIRMWARE_SHARE_DOWNLOAD.fullmatch(path):
+            return True
+        # R05（2026-09-08 审核）：Agent 配对码兑换只持有一次性的 code，
+        # 编译服务器上没有浏览器会话，必须匿名可用；一次性消费、TTL 与
+        # 失败限速由 auth_service.redeem_agent_enrollment 保证。精确匹配
+        # 该 POST 路径，其他方法/路径不因此公开。
+        if method == 'POST' and path == '/api/auth/agent-enroll':
             return True
         return False
 
@@ -287,7 +298,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             if final_audit and response:
                 try:
                     response, response_summary = await summarize_audit_response(
-                        response
+                        response, path
                     )
                 except Exception:
                     response_summary = {'captured': False}

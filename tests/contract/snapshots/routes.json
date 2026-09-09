@@ -2160,6 +2160,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/system/tools/jq"
+  },
+  {
+    "methods": [
       "WEBSOCKET"
     ],
     "path": "/api/system/websocket/{client_id}"
@@ -2331,6 +2337,12 @@
       "GET"
     ],
     "path": "/api/test/suites/modules"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/test/suites/modules/apk"
   },
   {
     "methods": [

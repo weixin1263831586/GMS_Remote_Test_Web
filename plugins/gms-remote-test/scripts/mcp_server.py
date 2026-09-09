@@ -35,6 +35,8 @@ Tools:
 - gms_rt_burn_firmware  burn update.img to devices (requires elevation)
 - gms_rt_test_start / gms_rt_jobs_list / gms_rt_jobs_wait / gms_rt_jobs_events / gms_rt_jobs_status
 - gms_rt_reports_list
+- gms_rt_apk_resolve / gms_rt_apk_analyze / gms_rt_apk_status / gms_rt_apk_manifest
+- gms_rt_apk_search / gms_rt_apk_source  (suite module -> jadx decompilation)
 - gms_rt_shell       read-only device shell (allowlisted diagnostics)
 - gms_rt_logcat      capture device logcat via adb shell logcat -v time (v0.7.0)
 - gms_rt_shell_exec  user-authorized one-shot device shell command (v0.8.0)
@@ -58,7 +60,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.10.0"
+SERVER_VERSION = "0.11.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -1339,8 +1341,6 @@ def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 # describe+run round trip and cannot smuggle destructive flags. Buffer
 # clearing is opt-in via the explicit clear=true argument, which the CLI
 # executes as `logcat -c` followed by the `-v time` capture.
-_LOGCAT_FORBIDDEN_FLAGS = ("-f", "--file")
-_LOGCAT_CLEAR_FLAGS = ("-c", "--clear")
 _LOGCAT_FORBIDDEN_CHARS = frozenset(";|&><`(){}[]$\\'\"\n\r")
 _LOGCAT_MAX_ARGS = 16
 
@@ -1367,28 +1367,68 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             return "args must be a string or a list of logcat arguments", True
     if len(items) > _LOGCAT_MAX_ARGS:
         return f"too many logcat arguments (max {_LOGCAT_MAX_ARGS})", True
+    # R08: 专用 logcat 工具与 gms_rt_shell 的 logcat 分支共用同一套解析
+    # 与正向允许策略。此前这里只做"整 token 匹配 + -f 前缀"检查，组合
+    # 短选项（-dc）、长选项缩写（--cle）和附着值（-df/tmp/x）都会被放行。
+    # 现在把 args 重组为 "logcat ..." 交给 _validate_shell_command 做同源
+    # 判定；clear=true 注入的 -c 由本工具显式放行，args 携带的 -c/--clear
+    # （含缩写）在这里拦截并指引 clear=true 用法。
+    clear_requested = False
+    clear_value = arguments.get("clear")
+    if clear_value is True or (
+        isinstance(clear_value, str) and clear_value.strip().lower() == "true"
+    ):
+        clear_requested = True
     for item in items:
-        if any(ch in _LOGCAT_FORBIDDEN_CHARS for ch in item):
-            return (
-                "denied: logcat arguments must not contain shell "
-                "metacharacters or quotes",
-                True,
-            )
-        if item in _LOGCAT_CLEAR_FLAGS or item == "--clear":
+        if (
+            item == "-c"
+            or item == "--clear"
+            or item.startswith("--cle")
+            or (item.startswith("-") and not item.startswith("--") and "-c" in item[1:])
+        ):
             return (
                 "denied: clearing the logcat buffer needs the explicit "
                 "clear=true argument (runs logcat -c before the capture)",
                 True,
             )
-        # R12: also catch attached-value forms ("-f/path", "--file=path")
-        # that the token-exact check above used to miss.
-        if (
-            item in _LOGCAT_FORBIDDEN_FLAGS
-            or item.startswith("-f")
-            or item.startswith("--file")
+    if items:
+        # since/until 会在后续追加 -t <time>，这里先按最终形态校验：
+        # -t/-T 的值由本工具控制，校验时预留其位置。
+        probe_items = list(items)
+        since_probe = arguments.get("since")
+        if since_probe is not None and str(since_probe).strip() \
+                and "-t" not in probe_items and "-T" not in probe_items:
+            probe_items.extend(["-t", "00-00 00:00:00"])
+        # 校验器按空格切分字符串，无法识别"带空格的单个 argv 值"
+        # （如 -t 的时间戳）；把取值选项的后续 token 替换为占位符，
+        # 值本身的格式已由本工具/校验器另行限制。
+        _VALUE_TAKING = ("--format", "--buffer", "-v", "-b", "-t", "-T",
+                         "-e", "-m", "-n", "-r", "-D", "-G", "-s")
+        masked: list[str] = []
+        expect_value = False
+        for token in probe_items:
+            if expect_value:
+                masked.append("TIME")
+                expect_value = False
+                continue
+            masked.append(token)
+            if token in _VALUE_TAKING:
+                expect_value = True
+        probe_command = "logcat " + " ".join(masked)
+        # 工具会在没有 dump 标志时注入 -d，校验应针对最终 argv 形态。
+        if not any(
+            flag in probe_items
+            for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")
         ):
+            probe_command = "logcat -d " + " ".join(masked)
+        allowed, reason = _validate_shell_command(probe_command)
+        if not allowed:
+            return f"denied: {reason}", True
+    for item in items:
+        if any(ch in _LOGCAT_FORBIDDEN_CHARS for ch in item):
             return (
-                f"denied: {item} writes device files and is not allowed",
+                "denied: logcat arguments must not contain shell "
+                "metacharacters or quotes",
                 True,
             )
 
@@ -1440,10 +1480,9 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     ):
         items = ["-d", *items]
     # clear=true -> CLI runs `logcat -c` first, then captures with -v time.
-    clear_value = arguments.get("clear")
-    if clear_value is True or (
-        isinstance(clear_value, str) and clear_value.strip().lower() == "true"
-    ):
+    # R08: clear 不再需要 args 显式携带，由 clear=true 参数注入并只允许
+    # 出现在最前（首个 token），避免 args 里混入第二个 -c。
+    if clear_requested:
         items = ["-c", *items]
     timeout = 180
     if arguments.get("timeout") is not None:
@@ -2213,6 +2252,159 @@ def tools() -> list[dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+        {
+            "name": "gms_rt_apk_resolve",
+            "description": (
+                "Resolve a test module keyword (e.g. CtsCamera) to its "
+                "APK/JAR artifact in the latest CTS/VTS/GTS/STS suites. "
+                "Returns module, suite path, and the analyze_path consumed "
+                "by gms_rt_apk_analyze. Cheap read-only lookup."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Module keyword, e.g. CtsCamera.",
+                    },
+                    "suite_types": {
+                        "type": "string",
+                        "description": (
+                            "Comma-separated suite types "
+                            "(default cts,vts,gts,sts)."
+                        ),
+                    },
+                    "prefer": {
+                        "type": "string",
+                        "description": "Preferred artifact type: apk (default) or jar.",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_apk_analyze",
+            "description": (
+                "One-shot: resolve a test module to its APK/JAR in the "
+                "latest suites, copy the artifact, and start jadx "
+                "decompilation. Default (wait=false) returns task_id plus "
+                "status=analyzing immediately — poll with gms_rt_apk_status "
+                "(every 10-20s). wait=true blocks until completed/error or "
+                "max_wait (default 300s; MCP clients often cap a single "
+                "tool call at 60s, so prefer wait=false plus polling)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Module keyword, e.g. CtsCamera.",
+                    },
+                    "suite_types": {
+                        "type": "string",
+                        "description": (
+                            "Comma-separated suite types "
+                            "(default cts,vts,gts,sts)."
+                        ),
+                    },
+                    "prefer": {
+                        "type": "string",
+                        "description": "Preferred artifact type: apk (default) or jar.",
+                    },
+                    "wait": {
+                        "type": "boolean",
+                        "description": "Block until a terminal analysis state.",
+                    },
+                    "max_wait": {
+                        "type": "integer",
+                        "description": "Seconds to wait when wait=true (default 300).",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_apk_status",
+            "description": (
+                "Get the state of one APK/JAR decompilation task "
+                "(uploaded/analyzing/completed/error, progress, filename, "
+                "error). Cheap: safe to poll."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "task_id returned by gms_rt_apk_analyze.",
+                    },
+                },
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_apk_manifest",
+            "description": (
+                "Show the parsed AndroidManifest.xml (package, "
+                "permissions, activities) of a completed decompilation "
+                "task."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                },
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_apk_search",
+            "description": (
+                "Search decompiled source files by filename substring "
+                "(min 2 chars, max 50 results). Returns paths consumable "
+                "by gms_rt_apk_source with view=true."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "query": {
+                        "type": "string",
+                        "description": "Filename substring, e.g. Permission.",
+                    },
+                    "limit": {"type": "integer"},
+                },
+                "required": ["task_id", "query"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_apk_source",
+            "description": (
+                "Browse the decompiled source tree (view=false, default) "
+                "or print one file's content (view=true). Without path, "
+                "lists the sources root."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path inside the decompiled sources.",
+                    },
+                    "view": {
+                        "type": "boolean",
+                        "description": "Print file content instead of the listing.",
+                    },
+                },
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
     ]
 
 
@@ -2237,6 +2429,84 @@ def cluster_devices_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-cluster-devices", args)
 
 
+def apk_resolve_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    args: list[str] = []
+    query = str(arguments.get("query") or "").strip()
+    if not query:
+        return "query is required", True
+    args.append(query)
+    suite_types = str(arguments.get("suite_types") or "").strip()
+    if suite_types:
+        args.extend(["--types", suite_types])
+    prefer = str(arguments.get("prefer") or "").strip()
+    if prefer:
+        args.extend(["--prefer", prefer])
+    return run_cli("gms-rt-apk-resolve", args)
+
+
+def apk_analyze_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    args: list[str] = []
+    query = str(arguments.get("query") or "").strip()
+    if not query:
+        return "query is required", True
+    args.append(query)
+    suite_types = str(arguments.get("suite_types") or "").strip()
+    if suite_types:
+        args.extend(["--types", suite_types])
+    prefer = str(arguments.get("prefer") or "").strip()
+    if prefer:
+        args.extend(["--prefer", prefer])
+    if arguments.get("wait"):
+        args.append("--wait")
+        max_wait = arguments.get("max_wait")
+        if max_wait:
+            args.extend(["--max-wait", str(int(max_wait))])
+    return run_cli("gms-rt-apk-analyze", args)
+
+
+def _apk_task_id_argument(arguments: dict[str, Any]) -> str:
+    return str(arguments.get("task_id") or "").strip()
+
+
+def apk_status_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    task_id = _apk_task_id_argument(arguments)
+    if not task_id:
+        return "task_id is required", True
+    return run_cli("gms-rt-apk-status", [task_id])
+
+
+def apk_manifest_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    task_id = _apk_task_id_argument(arguments)
+    if not task_id:
+        return "task_id is required", True
+    return run_cli("gms-rt-apk-manifest", [task_id])
+
+
+def apk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    task_id = _apk_task_id_argument(arguments)
+    query = str(arguments.get("query") or "").strip()
+    if not task_id or not query:
+        return "task_id and query are required", True
+    args: list[str] = [task_id, query]
+    limit = arguments.get("limit")
+    if limit:
+        args.extend(["--limit", str(max(1, min(int(limit), 50)))])
+    return run_cli("gms-rt-apk-search", args)
+
+
+def apk_source_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    task_id = _apk_task_id_argument(arguments)
+    if not task_id:
+        return "task_id is required", True
+    args: list[str] = [task_id]
+    path = str(arguments.get("path") or "").strip()
+    if path:
+        args.append(path)
+    if arguments.get("view"):
+        args.append("--view")
+    return run_cli("gms-rt-apk-source", args)
+
+
 _TOOL_HANDLERS = {
     "gms_rt_run": run_tool,
     "gms_rt_commands": commands_tool,
@@ -2257,6 +2527,12 @@ _TOOL_HANDLERS = {
     "gms_rt_jobs_wait": jobs_wait_tool,
     "gms_rt_jobs_events": jobs_events_tool,
     "gms_rt_reports_list": reports_tool,
+    "gms_rt_apk_resolve": apk_resolve_tool,
+    "gms_rt_apk_analyze": apk_analyze_tool,
+    "gms_rt_apk_status": apk_status_tool,
+    "gms_rt_apk_manifest": apk_manifest_tool,
+    "gms_rt_apk_search": apk_search_tool,
+    "gms_rt_apk_source": apk_source_tool,
     "gms_rt_shell": shell_tool,
     "gms_rt_logcat": logcat_tool,
     "gms_rt_shell_exec": shell_exec_tool,

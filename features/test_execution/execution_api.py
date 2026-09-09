@@ -74,6 +74,10 @@ async def start_test(
 
     local_worker_id = cluster.config.local_worker_id
     requested_worker_id = req.worker_id or local_worker_id
+    # R02: 默认 Worker（请求未显式给出 worker_id）同样必须通过 Agent ACL；
+    # 只在显式 worker_id 上检查会让 Agent 以空 worker_id 越权命中默认 Worker。
+    if principal is not None and requested_worker_id != req.worker_id:
+        ensure_agent_worker_allowed(request, requested_worker_id)
     if requested_worker_id != local_worker_id and not (
         cluster.effective_enabled and cluster.config.remote_dispatch_enabled
     ):
