@@ -21,8 +21,8 @@ from fastapi.responses import (
 )
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
-from features.system.api_docs_list import API_DOCS_LIST
 from features.system import jq_binary
+from features.system.api_docs_list import API_DOCS_LIST
 from features.system.skill_archive_signing import (
     sign_skill_archive,
     skill_verify_key_b64,

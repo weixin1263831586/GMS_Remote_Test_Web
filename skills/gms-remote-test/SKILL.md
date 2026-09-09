@@ -127,6 +127,36 @@ kkagent, prefer the bundled MCP plugin (`gms_rt_*` tools in
 and gates mutating commands. For exact
 request or response fields, inspect the current route and its service call path.
 
+## Analyze a Redmine issue (read-only evidence chain)
+
+When asked to diagnose a Redmine issue (e.g. `.../issues/648526`), follow the
+evidence workflow instead of scraping the web UI:
+
+1. `gms-rt-redmine-issue-fetch <id> --refresh --download all --wait --json`
+   — always refresh; cached analysis summaries are NOT evidence.
+2. `gms-rt-redmine-issue-show SNAP --json` — verify `complete=true` and empty
+   `errors[]`. If partial, report the gaps; never claim completeness.
+3. `gms-rt-redmine-journals SNAP --limit 50 --json` (follow `next_cursor`) —
+   full history without truncation.
+4. `gms-rt-artifact-search SNAP --query '<failure keyword>' --json` — locate
+   the failing assertion across description/journals/artifacts, then read the
+   hit windows with `gms-rt-artifact-read ART --offset N --limit M`.
+5. Screenshots: call the MCP `gms_rt_redmine_image` tool (real image content
+   for vision-capable agents); OCR text is only a search hint.
+6. Only if the deciding assertion lives in the test APK:
+   `gms-rt-apk-analyze-attachment SNAP ART` → poll `gms-rt-apk-status` →
+   `gms-rt-apk-source-search` / `gms-rt-apk-source-read`.
+7. SDK conclusions must be commit-bound: `gms-rt-sdk-sources` →
+   `gms-rt-sdk-search --source S --revision R` → `gms-rt-sdk-read` (returns
+   resolved commit + blob SHA-256). Without a resolved commit, output
+   "candidate direction" only — never "root cause located".
+
+Cite evidence with stable refs: `[redmine:648526/journal:912345]`,
+`[redmine:648526/attachment:776655#sha256=...]`, `[apk:TASK/sources/...:L120]`,
+`[sdk:SRC@<commit>/path:L88]`. Separate facts, inference, and missing
+evidence in the final report. The chain is read-only: never reply to, close,
+reassign, or upload to Redmine from an agent context.
+
 ## Handle failures
 
 - On `Authentication required`, run `gms-rt-auth-status`, then

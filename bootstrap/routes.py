@@ -42,6 +42,8 @@ from features.gerrit.config import (
 from features.gerrit.service import query_gerrit_dual_mode
 from features.gerrit.settings import config_manager as gerrit_config_manager
 from features.redmine import api as redmine
+from features.redmine import apk_import_api as redmine_apk_import
+from features.redmine import evidence_api as redmine_evidence
 from features.redmine import reply_api as redmine_reply
 from features.redmine.api import configure_redmine_service
 from features.redmine.dashboard import (
@@ -54,6 +56,7 @@ from features.reports.dependencies import configure_report_dependencies
 from features.system import api as system
 from features.system import assets, audit, desktop, health_api, integrations
 from features.system import notifications_api as notifications
+from features.system import source_api as system_sources
 from features.system import terminal_api as terminal
 from features.system.api import init_templates
 from features.system.api_help import generate_help_or_continue
@@ -134,9 +137,13 @@ ALL_ROUTERS = [
     knowledge.page_router,
     redmine.router,
     redmine.page_router,
+    redmine_evidence.router,
+    redmine_apk_import.router,
+    redmine_apk_import.apk_router,
     redmine_reply.router,
     reports.router,
     system.router,
+    system_sources.router,
     terminal.router,
     tests.router,
     users.router,
@@ -190,6 +197,18 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             get_or_create_user_state=get_or_create_user_state,
         )
         configure_client_ssh_authenticator(client_manager.detect_username)
+        # SDK 源码 provider（2026-09-08 计划 §12）：provider 列表只来自部署
+        # 配置；result_id 签名密钥从 master secret 派生，重启后仍可验证。
+        from features.system.source_provider import (
+            configure_source_registry,
+            load_provider_configs,
+        )
+        from foundation.secrets import _load_key as _load_master_key
+
+        configure_source_registry(
+            load_provider_configs(config_manager.load_config()),
+            b"gms-sdk-source-v1:" + _load_master_key(),
+        )
         configure_firmware_dependencies(
             config_manager=config_manager,
             ssh_manager=ssh_manager,

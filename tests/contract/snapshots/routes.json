@@ -93,6 +93,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/apk/doctor"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/apk/download/{task_id}"
   },
   {
@@ -112,6 +118,18 @@
       "GET"
     ],
     "path": "/api/apk/search/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/source-read/{task_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/apk/source-search/{task_id}"
   },
   {
     "methods": [
@@ -1680,6 +1698,30 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/artifacts/{artifact_id}/apk-analysis"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/artifacts/{artifact_id}/download"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/artifacts/{artifact_id}/image"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/artifacts/{artifact_id}/text"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/redmine-agent/cases"
@@ -1737,6 +1779,42 @@
       "POST"
     ],
     "path": "/api/redmine-agent/dashboard/projects"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/evidence/{snapshot_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/evidence/{snapshot_id}/artifacts"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/evidence/{snapshot_id}/issue"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/evidence/{snapshot_id}/journals"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/evidence/{snapshot_id}/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/evidence/{snapshot_id}/wait"
   },
   {
     "methods": [
@@ -1815,6 +1893,12 @@
       "GET"
     ],
     "path": "/api/redmine-agent/issues/{issue_id}/evaluation"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/evidence"
   },
   {
     "methods": [
@@ -2049,6 +2133,30 @@
       "GET"
     ],
     "path": "/api/reports/weekly-report/department"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/sdk/read"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/sdk/revision"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/sdk/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/sdk/sources"
   },
   {
     "methods": [
