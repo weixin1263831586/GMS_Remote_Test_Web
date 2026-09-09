@@ -917,9 +917,6 @@ class AsyncBurnOperationTests(unittest.TestCase):
         self.assertTrue(is_error)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
 
 class ShellToolGateTests(unittest.TestCase):
     """gms_rt_shell read-only command gate (added 2026-09-05)."""
@@ -1274,3 +1271,184 @@ class ApkToolTests(unittest.TestCase):
         ):
             self.assertIn(name, names)
             self.assertIn(name, mcp_server._TOOL_HANDLERS)
+
+
+class RedmineEvidenceToolTests(unittest.TestCase):
+    """2026-09-08 plan §10: redmine/apk/sdk typed tools wiring."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._original_cli = mcp_server.cli_script
+        self.cli_path = Path(self._tmp.name) / "gms-remote-test.sh"
+        self.cli_path.write_text('#!/bin/bash\necho \'{"ok":true,"exit_code":0,"data":{}}\'\nexit 0\n')
+        self.cli_path.chmod(0o755)
+        mcp_server.cli_script = lambda: self.cli_path
+
+    def tearDown(self):
+        mcp_server.cli_script = self._original_cli
+
+    def _capture_run(self) -> dict:
+        captured = {}
+
+        def fake_run(command, args=None, **_kwargs):
+            captured["command"] = command
+            captured["args"] = args
+            return "{}", False
+
+        original = mcp_server.run_cli
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        return captured
+
+    def test_fetch_requires_issue(self):
+        text, is_error = mcp_server.redmine_issue_fetch_tool({})
+        self.assertTrue(is_error)
+        self.assertIn("issue", text)
+
+    def test_fetch_maps_arguments(self):
+        captured = self._capture_run()
+        mcp_server.redmine_issue_fetch_tool({
+            "issue": "648526", "download": "all", "wait": True, "max_wait": 60,
+        })
+        self.assertEqual(captured["command"], "gms-rt-redmine-issue-fetch")
+        self.assertEqual(
+            captured["args"],
+            ["648526", "--download", "all", "--wait", "--max-wait", "60"],
+        )
+
+    def test_fetch_rejects_bad_download(self):
+        _, is_error = mcp_server.redmine_issue_fetch_tool({
+            "issue": "1", "download": "everything",
+        })
+        self.assertTrue(is_error)
+
+    def test_journals_pagination_args(self):
+        captured = self._capture_run()
+        mcp_server.redmine_journals_tool({
+            "snapshot_id": "SNAP", "limit": 100, "cursor": "100",
+        })
+        self.assertEqual(
+            captured["args"], ["SNAP", "--limit", "100", "--cursor", "100"],
+        )
+
+    def test_artifact_read_window_args(self):
+        captured = self._capture_run()
+        mcp_server.redmine_artifact_read_tool({
+            "artifact_id": "ART", "offset": 4096, "limit": 8192,
+        })
+        self.assertEqual(
+            captured["args"], ["ART", "--offset", "4096", "--limit", "8192"],
+        )
+
+    def test_image_tool_returns_mcp_image_content(self):
+        captured = self._capture_run()
+
+        def fake_run(command, args=None, **_kwargs):
+            captured["command"] = command
+            captured["args"] = args
+            return json.dumps({
+                "ok": True,
+                "data": {
+                    "artifact_id": "ART",
+                    "mime_type": "image/png",
+                    "base64": "aVZCUg==",
+                    "sha256": "ff" * 32,
+                    "size_bytes": 95,
+                    "scaled": False,
+                },
+            }), False
+
+        mcp_server.run_cli = fake_run
+        result = mcp_server.redmine_image_tool({"artifact_id": "ART"})
+        self.assertIsInstance(result, mcp_server.ToolContent)
+        types = [item["type"] for item in result.items]
+        self.assertEqual(types, ["text", "image"])
+        image = result.items[1]
+        self.assertEqual(image["mimeType"], "image/png")
+        self.assertEqual(image["data"], "aVZCUg==")
+        self.assertFalse(result.is_error)
+        self.assertEqual(captured["command"], "gms-rt-redmine-artifact-image")
+
+    def test_image_tool_requires_artifact(self):
+        result = mcp_server.redmine_image_tool({})
+        self.assertTrue(result.is_error)
+
+    def test_sdk_read_requires_result_id_only(self):
+        # 计划 §12：read 只接受自包含 opaque result_id。
+        text, is_error = mcp_server.sdk_read_tool({})
+        self.assertTrue(is_error)
+        self.assertIn("result_id", text)
+        captured = self._capture_run()
+        mcp_server.sdk_read_tool({
+            "result_id": "src1_AAAA_BBBB", "offset": 10, "limit": 50,
+        })
+        self.assertEqual(captured["args"], ["src1_AAAA_BBBB", "--offset", "10", "--limit", "50"])
+        self.assertEqual(captured["command"], "gms-rt-sdk-read")
+
+    def test_sdk_search_and_read_args(self):
+        captured = self._capture_run()
+        mcp_server.sdk_search_tool({
+            "source": "android14", "revision": "main", "query": "testMethod",
+        })
+        self.assertEqual(
+            captured["args"],
+            ["--source", "android14", "--revision", "main", "--query", "testMethod"],
+        )
+        mcp_server.sdk_read_tool({
+            "result_id": "src_x", "source": "android14", "path": "a.java",
+            "commit": "c" * 40, "offset": 10, "limit": 100,
+        })
+        self.assertEqual(
+            captured["args"][-4:], ["--offset", "10", "--limit", "100"],
+        )
+
+    def test_apk_attachment_and_source_tools(self):
+        captured = self._capture_run()
+        mcp_server.apk_analyze_attachment_tool({
+            "snapshot_id": "SNAP", "artifact_id": "ART",
+        })
+        self.assertEqual(
+            captured["args"], ["SNAP", "ART"],
+        )
+        mcp_server.apk_source_search_tool({
+            "task_id": "T1", "query": "AssertionError", "path": "com/example",
+        })
+        self.assertEqual(
+            captured["args"],
+            ["T1", "AssertionError", "--path", "com/example"],
+        )
+        mcp_server.apk_source_read_tool({
+            "task_id": "T1", "path": "a.java", "offset": 5, "limit": 50,
+        })
+        self.assertEqual(
+            captured["args"], ["T1", "a.java", "--offset", "5", "--limit", "50"],
+        )
+
+    def test_registered_in_tools_and_handlers(self):
+        names = {tool["name"] for tool in mcp_server.tools()}
+        for name in (
+            "gms_rt_redmine_issue_fetch", "gms_rt_redmine_issue",
+            "gms_rt_redmine_journals", "gms_rt_redmine_attachments",
+            "gms_rt_redmine_artifact_search", "gms_rt_redmine_artifact_read",
+            "gms_rt_redmine_image", "gms_rt_apk_analyze_attachment",
+            "gms_rt_apk_source_search", "gms_rt_apk_source_read",
+            "gms_rt_sdk_sources", "gms_rt_sdk_search", "gms_rt_sdk_read",
+        ):
+            self.assertIn(name, names)
+            self.assertIn(name, mcp_server._TOOL_HANDLERS)
+
+    def test_schemas_use_closed_objects(self):
+        for tool in mcp_server.tools():
+            if tool["name"].startswith(("gms_rt_redmine_", "gms_rt_sdk_")) or tool["name"] in (
+                "gms_rt_apk_source_search", "gms_rt_apk_source_read",
+                "gms_rt_apk_analyze_attachment",
+            ):
+                self.assertEqual(
+                    tool["inputSchema"].get("additionalProperties"), False,
+                    tool["name"],
+                )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

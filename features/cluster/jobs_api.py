@@ -10,7 +10,6 @@ from features.auth import (
     require_permission_when_auth_required,
 )
 from features.users import owner_id_from_request
-
 from foundation.job_env import filter_job_env
 
 from .api import _authenticate, _require_cluster_enabled, service

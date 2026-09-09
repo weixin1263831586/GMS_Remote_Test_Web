@@ -894,27 +894,36 @@ async def get_credentials_status(request: Request):
     """报告登录用户的 Redmine 凭据是否已配置（不回传明文）。
 
     凭据统一落盘到 configs/config_runtime.json，与统计端点读取的配置一致。
+    API Key 只报告是否存在（计划 §5.3），绝不回传内容。
     """
     manager = get_redmine_config_for_request(request)
     creds = manager.load_redmine_credentials() or {}
-    return {"success": True, "data": {"configured": bool(creds.get("password")),
-                                       "username": creds.get("username", "")}}
+    has_api_key = bool(getattr(manager, "load_redmine_api_key", lambda: "")())
+    return {"success": True, "data": {"configured": bool(creds.get("password")) or has_api_key,
+                                       "username": creds.get("username", ""),
+                                       "api_key_configured": has_api_key}}
 
 
 @router.post("/config/credentials")
 async def save_credentials(request: Request):
     """保存 Redmine 凭据到登录用户的运行时配置。
 
-    凭据随登录用户落盘，看板/统计端点据此读取。密码经 Fernet 加密落盘。
+    凭据随登录用户落盘，看板/统计端点据此读取。密码与可选的 API Key
+    均经 Fernet 加密落盘（0600）。
     """
     body = await request.json()
     username = str(body.get("username") or "").strip()
     password = str(body.get("password") or "")
-    if not username or not password:
-        return JSONResponse(status_code=400, content={"success": False, "error": "用户名和密码不能为空"})
+    api_key = str(body.get("api_key") or "").strip()
+    if not (username and password) and not api_key:
+        return JSONResponse(status_code=400, content={"success": False, "error": "需要用户名/密码或 API Key"})
     manager = get_redmine_config_for_request(request)
-    if not manager.save_redmine_credentials(username, password):
+    if username and password and not manager.save_redmine_credentials(username, password):
         return JSONResponse(status_code=500, content={"success": False, "error": "保存凭据失败"})
+    if api_key or "api_key" in body:
+        if not getattr(manager, "save_redmine_api_key", lambda _k: False)(api_key):
+            if api_key:
+                return JSONResponse(status_code=500, content={"success": False, "error": "保存 API Key 失败"})
     _clear_stats_caches()
     return {"success": True}
 

@@ -6,9 +6,6 @@ import with service.py (which mixes the AgentTokenServiceMixin in).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 
 # Agent Service Token principal role (2026-09-08 audit §四): agent tokens are
 # not a role ladder step; their power comes entirely from AGENT_SCOPES.
@@ -78,28 +75,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
 DEFAULT_AGENT_TOKEN_DAYS = 90
 APPROVAL_TOKEN_TTL_SECONDS = 300
 
-@dataclass(frozen=True)
-class CurrentUser:
-    id: str
-    username: str
-    role: str
-    display_name: str = ""
-    # Agent Service Token scopes granted to this principal beyond the role
-    # defaults. Human principals keep this empty; role-based admin gates are
-    # decided by ``role`` and never lifted by scopes.
-    extra_permissions: frozenset[str] = frozenset()
+# ``CurrentUser`` moved to ``principal.py``; re-exported here for the
+# historical ``from .constants import CurrentUser`` import paths.
+from .principal import CurrentUser  # noqa: E402,F401
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "username": self.username,
-            "role": self.role,
-            "display_name": self.display_name,
-            "permissions": sorted(self.effective_permissions()),
-        }
-
-    def effective_permissions(self) -> frozenset[str]:
-        return ROLE_PERMISSIONS.get(self.role, frozenset()) | set(self.extra_permissions)
-
-    def has_permission(self, permission: str) -> bool:
-        return "*" in self.effective_permissions() or permission in self.effective_permissions()

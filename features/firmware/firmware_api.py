@@ -418,7 +418,6 @@ async def burn_firmware(
                 # exactly once. An approval minted for firmware A is
                 # rejected for firmware B; reuse fails on used_at.
                 if agent_burn:
-                    import hashlib as _hashlib
 
                     from features.auth import auth_service as _auth
 

@@ -63,10 +63,10 @@ def create_apk_task(task_id, apk_path, filename, owner_id: str):
             'filename': filename, 'timestamp': time.time(), 'error': None,
             'owner_id': owner_id,
         }
-        _persist_apk_task_locked(task_id)
+        persist_apk_task_locked(task_id)
 
 
-def _persist_apk_task_locked(task_id: str) -> None:
+def persist_apk_task_locked(task_id: str) -> None:
     if runtime.apk_task_store is None:
         return
     task = runtime.global_state.apk_analysis_tasks.get(task_id)
@@ -98,7 +98,7 @@ def normalize_apk_filename(filename: str | None) -> str:
     return f"{stem}{ext.lower()}"
 
 
-def _normalize_apk_task_id(upload_id: str | None) -> str:
+def normalize_apk_task_id(upload_id: str | None) -> str:
     """Use UUID task directories only; never trust path-like upload IDs."""
     if not upload_id:
         return str(uuid.uuid4())
@@ -118,14 +118,14 @@ def cleanup_files(paths: list[str]):
             logger.warning(f"Failed to remove temporary APK file {path}: {e}")
 
 
-def _get_apk_task(
+def get_apk_task(
     task_id: str,
     require_completed: bool = True,
     owner_id: str | None = None,
 ):
     """获取APK分析任务，返回 (task, error_response)"""
     try:
-        task_id = _normalize_apk_task_id(task_id)
+        task_id = normalize_apk_task_id(task_id)
     except ValueError as e:
         return None, ApiResponse.error(str(e), status_code=400)
 
@@ -252,7 +252,42 @@ def _resolve_jadx_path() -> str:
     return runtime.jadx_path
 
 
-async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
+def _resolve_jadx_java_home() -> str:
+    """Resolve an explicit JAVA_HOME for JADX.
+
+    JADX 1.4.0 在较新 JDK 上启动失败（缺 default.policy）。部署可以用
+    config key ``jadx_java_home`` 或环境变量 ``GMS_JADX_JAVA_HOME`` 指定一个
+    已验证的 JDK 11 目录；两者都未设置时返回空串（沿用当前 PATH）。
+    """
+    manager = runtime.config_manager
+    if manager is not None:
+        try:
+            configured = str(manager.load_config().get("jadx_java_home") or "").strip()
+        except Exception:
+            configured = ""
+        if configured:
+            return configured
+    return os.environ.get("GMS_JADX_JAVA_HOME", "").strip()
+
+
+def _jadx_subprocess_env() -> dict[str, str] | None:
+    """构造 JADX 子进程环境：验证 java 可执行后才注入 JAVA_HOME/PATH。"""
+    java_home = _resolve_jadx_java_home()
+    if not java_home:
+        return None
+    java_bin = os.path.join(java_home, "bin", "java")
+    if not (os.path.isfile(java_bin) and os.access(java_bin, os.X_OK)):
+        raise FileNotFoundError(
+            "jadx_java_home 配置的 bin/java 不存在或不可执行: 缺少 "
+            f"{os.path.basename(java_home)}/bin/java；请修正 jadx_java_home"
+        )
+    env = dict(os.environ)
+    env["JAVA_HOME"] = java_home
+    env["PATH"] = os.path.join(java_home, "bin") + os.pathsep + env.get("PATH", "")
+    return env
+
+
+async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
     """后台运行 jadx 反编译"""
     try:
         with runtime.global_state.apk_analysis_tasks_lock:
@@ -260,7 +295,7 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
                 runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'analyzing'
                 runtime.global_state.apk_analysis_tasks[task_id]['progress'] = 10
                 runtime.global_state.apk_analysis_tasks[task_id]['error'] = None
-                _persist_apk_task_locked(task_id)
+                persist_apk_task_locked(task_id)
 
         jadx_threads = min(max(os.cpu_count() or 2, 2), 8)
         cmd = [
@@ -278,6 +313,7 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_jadx_subprocess_env(),
         )
         try:
             _stdout, stderr = await asyncio.wait_for(
@@ -300,7 +336,7 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
                         'progress': 0,
                         'error': 'Analysis interrupted by Controller shutdown',
                     })
-                    _persist_apk_task_locked(task_id)
+                    persist_apk_task_locked(task_id)
             raise
 
         if process.returncode != 0:
@@ -309,7 +345,7 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
                     runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
                     decoded_error = stderr.decode('utf-8', errors='replace')
                     runtime.global_state.apk_analysis_tasks[task_id]['error'] = decoded_error[-500:] if decoded_error else 'jadx 反编译失败'
-                    _persist_apk_task_locked(task_id)
+                    persist_apk_task_locked(task_id)
             return
 
         with runtime.global_state.apk_analysis_tasks_lock:
@@ -317,19 +353,19 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
                 runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'completed'
                 runtime.global_state.apk_analysis_tasks[task_id]['progress'] = 100
                 runtime.global_state.apk_analysis_tasks[task_id]['output_dir'] = output_dir
-                _persist_apk_task_locked(task_id)
+                persist_apk_task_locked(task_id)
     except subprocess.TimeoutExpired:
         with runtime.global_state.apk_analysis_tasks_lock:
             if task_id in runtime.global_state.apk_analysis_tasks:
                 runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
                 runtime.global_state.apk_analysis_tasks[task_id]['error'] = 'jadx 反编译超时（超过600秒）'
-                _persist_apk_task_locked(task_id)
+                persist_apk_task_locked(task_id)
     except Exception as e:
         with runtime.global_state.apk_analysis_tasks_lock:
             if task_id in runtime.global_state.apk_analysis_tasks:
                 runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
                 runtime.global_state.apk_analysis_tasks[task_id]['error'] = str(e)
-                _persist_apk_task_locked(task_id)
+                persist_apk_task_locked(task_id)
 
 
 def recover_apk_analysis_tasks() -> list[asyncio.Task]:
@@ -347,7 +383,7 @@ def recover_apk_analysis_tasks() -> list[asyncio.Task]:
         output_dir = str(task.get('output_dir') or '')
         try:
             task_root = os.path.realpath(
-                safe_join(runtime.apk_upload_dir, _normalize_apk_task_id(task_id))
+                safe_join(runtime.apk_upload_dir, normalize_apk_task_id(task_id))
             )
             resolved_apk = os.path.realpath(apk_path)
             safe_output = safe_join(
@@ -371,11 +407,11 @@ def recover_apk_analysis_tasks() -> list[asyncio.Task]:
                     'status': 'error',
                     'error': 'Interrupted analysis files failed integrity validation',
                 })
-                _persist_apk_task_locked(task_id)
+                persist_apk_task_locked(task_id)
             continue
         shutil.rmtree(safe_output, ignore_errors=True)
         task_handle = asyncio.create_task(
-            _run_jadx_analysis(task_id, apk_path, safe_output)
+            run_jadx_analysis(task_id, apk_path, safe_output)
         )
         runtime.global_state.background_tasks.add(task_handle)
         task_handle.add_done_callback(runtime.global_state.background_tasks.discard)

@@ -26,7 +26,7 @@ downloads, DELETE requests, and log streams.
 | Devices | `gms-rt-devices-list`, `gms-rt-devices-info`, `gms-rt-devices-wait`, `gms-rt-devices-reboot`, `gms-rt-devices-remount`, `gms-rt-devices-shell`, `gms-rt-devices-logcat`, `gms-rt-devices-push`, `gms-rt-devices-wifi`, `gms-rt-devices-scrcpy`, `gms-rt-devices-user-locked` |
 | Bootloader | `gms-rt-devices-bootloader-lock`, `gms-rt-devices-bootloader-unlock`, `gms-rt-devices-bootloader-status` |
 | Reports | `gms-rt-reports-list`, `gms-rt-reports-analyze`, `gms-rt-reports-download`, `gms-rt-reports-delete` |
-| APK analysis | `gms-rt-apk-resolve`, `gms-rt-apk-analyze`, `gms-rt-apk-status`, `gms-rt-apk-tasks`, `gms-rt-apk-manifest`, `gms-rt-apk-permissions`, `gms-rt-apk-source`, `gms-rt-apk-search`, `gms-rt-apk-definition`, `gms-rt-apk-download` |
+| APK analysis | `gms-rt-apk-resolve`, `gms-rt-apk-analyze`, `gms-rt-apk-status`, `gms-rt-apk-tasks`, `gms-rt-apk-manifest`, `gms-rt-apk-permissions`, `gms-rt-apk-source`, `gms-rt-apk-search`, `gms-rt-apk-definition`, `gms-rt-apk-download`, `gms-rt-apk-analyze-attachment`, `gms-rt-apk-source-search`, `gms-rt-apk-source-read` |
 | Desktop and terminal | `gms-rt-desktop-validate`, `gms-rt-desktop-vnc-start`, `gms-rt-desktop-vnc-status`, `gms-rt-desktop-vnc-stop`, `gms-rt-terminal-open`, `gms-rt-terminal-push` |
 | Firmware | `gms-rt-burn-firmware`, `gms-rt-burn-gsi`, `gms-rt-burn-serial` |
 | Connectivity | `gms-rt-ssh-ping`, `gms-rt-ssh-route`, `gms-rt-ssh-sshd`, `gms-rt-vpn-connect`, `gms-rt-vpn-disconnect`, `gms-rt-vpn-status`, `gms-rt-usbip-install`, `gms-rt-usbip-connect`, `gms-rt-usbip-disconnect`, `gms-rt-usbip-status`, `gms-rt-adb-forward-status`, `gms-rt-adb-forward-start`, `gms-rt-adb-forward-stop` |
@@ -35,6 +35,60 @@ downloads, DELETE requests, and log streams.
 | Config and files | `gms-rt-config-read`, `gms-rt-config-update`, `gms-rt-files-progress` |
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
 | Code search | `gms-rt-opengrok-search` |
+| Redmine evidence | `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
+| SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |
+
+## Redmine evidence workflow (read-only, 2026-09-08 plan)
+
+The evidence chain is read-only against Redmine and owner-scoped on the
+Controller. Snapshots keep raw issue JSON (SHA-256 pinned), full journals
+(no truncation), and attachment originals with per-artifact audit status.
+
+```bash
+# 1. Create/refresh a full snapshot (refresh always contacts Redmine)
+gms-rt-redmine-issue-fetch 648526 --refresh --download all --wait --json --non-interactive
+#    (--refresh is the default; --no-refresh may reuse a fresh ready snapshot)
+
+# 2. Inspect completeness (complete=false means gaps — check errors[])
+gms-rt-redmine-issue-show SNAP --json --non-interactive
+
+# 3. Read journals in pages (limit<=100, follow next_cursor)
+gms-rt-redmine-journals SNAP --limit 50 --json --non-interactive
+
+# 4. List artifacts (kind/size/sha256/status per attachment)
+gms-rt-redmine-attachments SNAP --json --non-interactive
+
+# 5. Search across description/journals/artifact text
+gms-rt-artifact-search SNAP --query 'AssertionError' --json --non-interactive
+
+# 6. Read long text by window (offset/limit chars)
+gms-rt-artifact-read ART --offset 0 --limit 65536 --json --non-interactive
+
+# 7. Optional: import an .apk artifact into JADX, then search its source
+gms-rt-apk-analyze-attachment SNAP ART --json --non-interactive
+gms-rt-apk-status TASK --json --non-interactive
+gms-rt-apk-source-search TASK --query 'testMethod' --json --non-interactive
+gms-rt-apk-source-read TASK com/example/Test.java --offset 0 --limit 400 --json --non-interactive
+
+# 8. Bind SDK conclusions to an exact commit (admin-configured sources)
+gms-rt-sdk-sources --json --non-interactive
+gms-rt-sdk-search --source SRC --revision REV --query SYMBOL --json --non-interactive
+gms-rt-sdk-read --result-id RID --source SRC --path P --commit SHA --json --non-interactive
+```
+
+Citation format for analysis output:
+
+```text
+[redmine:648526/journal:912345]
+[redmine:648526/attachment:776655#sha256=<prefix>]
+[apk:TASK/sources/com/example/Test.java:L120]
+[sdk:SRC@<commit>/path/to/File.java:L88]
+```
+
+Agent scopes: `redmine.read`, `artifacts.read_own`, `apk.analyze_own`,
+`sdk.read`. Missing credentials, private issues, partial downloads, or
+unknown SDK revisions surface as explicit errors — never as
+`complete=true`.
 
 ## Examples
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+
 ALLOWED_JOB_ENV_KEYS: frozenset[str] = frozenset({
     "GMS_TRANSPORT_REQUIREMENT",
     "GMS_COPY_ROUTE_NETWORK",

@@ -108,6 +108,33 @@ class RedmineConfig:
                 return {}
         return {}
 
+    def load_redmine_api_key(self) -> str:
+        """读取加密保存的 Redmine API Key（计划 §5.3；不进入任何日志/响应）。"""
+        saved = self.manager.get_runtime_config().get("redmine_auth") or {}
+        encrypted = saved.get("encrypted_api_key")
+        if not encrypted:
+            return ""
+        try:
+            return decrypt_secret(str(encrypted))
+        except Exception:
+            return ""
+
+    def save_redmine_api_key(self, api_key: str) -> bool:
+        """加密保存 Redmine API Key；文件权限 0600，与密码凭据共存。"""
+        api_key = str(api_key or "").strip()
+        runtime = self.manager.get_runtime_config()
+        saved = dict(runtime.get("redmine_auth") or {})
+        if api_key:
+            saved["encrypted_api_key"] = encrypt_secret(api_key)
+        else:
+            saved.pop("encrypted_api_key", None)
+        saved["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        runtime["redmine_auth"] = saved
+        persisted = self.manager.save_runtime(runtime)
+        if persisted:
+            Path(self.manager.runtime_config_path).chmod(0o600)
+        return persisted
+
     def save_redmine_credentials(
         self,
         username: str,

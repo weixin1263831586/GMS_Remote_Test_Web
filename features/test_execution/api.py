@@ -21,7 +21,6 @@ from .logs_api import (
 )
 from .parse_api import parse_test_args as parse_test_args
 from .parse_api import router as parse_router
-from .suite_module_apk import router as suite_module_apk_router
 from .status_api import get_status as get_status
 from .status_api import router as status_router
 from .status_api import stream_test_logs as stream_test_logs
@@ -34,6 +33,7 @@ from .suite_helpers import (
 from .suite_helpers import (
     resolve_suite_diagnosis_target as resolve_suite_diagnosis_target,
 )
+from .suite_module_apk import router as suite_module_apk_router
 from .suites_api import (
     create_suite_apk_analysis_task as create_suite_apk_analysis_task,
 )

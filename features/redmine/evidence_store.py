@@ -152,7 +152,7 @@ class EvidenceStore:
         if not updates:
             return
         assignments = ", ".join(f"{key} = ?" for key in updates)
-        values = list(updates.values()) + [snapshot_id]
+        values = [*list(updates.values()), snapshot_id]
         with self._lock, self._connect() as conn:
             conn.execute(
                 f"UPDATE redmine_evidence_snapshots SET {assignments} WHERE snapshot_id = ?",
@@ -255,7 +255,7 @@ class EvidenceStore:
         if not updates:
             return
         assignments = ", ".join(f"{key} = ?" for key in updates)
-        values = list(updates.values()) + [str(artifact_id)]
+        values = [*list(updates.values()), str(artifact_id)]
         with self._lock, self._connect() as conn:
             conn.execute(
                 f"UPDATE redmine_evidence_artifacts SET {assignments} WHERE artifact_id = ?",

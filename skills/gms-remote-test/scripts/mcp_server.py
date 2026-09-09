@@ -60,7 +60,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.11.0"
+SERVER_VERSION = "0.12.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -1656,7 +1656,7 @@ def tools() -> list[dict[str, Any]]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string"},
+                    "command": {"type": "string", "minLength": 0, "maxLength": 2048},
                 },
                 "required": ["command"],
                 "additionalProperties": False,
@@ -1733,7 +1733,7 @@ def tools() -> list[dict[str, Any]]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "username": {"type": "string"},
+                    "username": {"type": "string", "minLength": 0, "maxLength": 2048},
                     "password_stdin": {
                         "type": "string",
                         "description": "Secret forwarded on stdin; never log it.",
@@ -2042,7 +2042,7 @@ def tools() -> list[dict[str, Any]]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "job_id": {"type": "string"},
+                    "job_id": {"type": "string", "minLength": 0, "maxLength": 2048},
                 },
                 "required": ["job_id"],
                 "additionalProperties": False,
@@ -2057,8 +2057,8 @@ def tools() -> list[dict[str, Any]]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "job_id": {"type": "string"},
-                    "max_wait": {"type": "integer"},
+                    "job_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "max_wait": {"type": "integer", "minimum": 0, "maximum": 21600},
                 },
                 "required": ["job_id"],
                 "additionalProperties": False,
@@ -2070,9 +2070,9 @@ def tools() -> list[dict[str, Any]]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "job_id": {"type": "string"},
-                    "after": {"type": "integer"},
-                    "limit": {"type": "integer"},
+                    "job_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "after": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 400},
                 },
                 "required": ["job_id"],
                 "additionalProperties": False,
@@ -2354,7 +2354,7 @@ def tools() -> list[dict[str, Any]]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "task_id": {"type": "string"},
+                    "task_id": {"type": "string", "minLength": 0, "maxLength": 2048},
                 },
                 "required": ["task_id"],
                 "additionalProperties": False,
@@ -2370,12 +2370,12 @@ def tools() -> list[dict[str, Any]]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "task_id": {"type": "string"},
+                    "task_id": {"type": "string", "minLength": 0, "maxLength": 2048},
                     "query": {
                         "type": "string",
                         "description": "Filename substring, e.g. Permission.",
                     },
-                    "limit": {"type": "integer"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 400},
                 },
                 "required": ["task_id", "query"],
                 "additionalProperties": False,
@@ -2391,7 +2391,7 @@ def tools() -> list[dict[str, Any]]:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "task_id": {"type": "string"},
+                    "task_id": {"type": "string", "minLength": 0, "maxLength": 2048},
                     "path": {
                         "type": "string",
                         "description": "Relative path inside the decompiled sources.",
@@ -2402,6 +2402,250 @@ def tools() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_redmine_issue_fetch",
+            "description": (
+                "Create or refresh a FULL evidence snapshot of a Redmine "
+                "issue (raw JSON, untruncated journals, attachments with "
+                "SHA-256). Read-only against Redmine. Returns snapshot_id; "
+                "with wait=true polls every ~3s until ready/partial/failed "
+                "(bounded by max_wait, default 300s)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "issue": {
+                        "type": "string",
+                        "description": "Numeric issue id or /issues/<id> URL.",
+                    },
+                    "download": {
+                        "type": "string",
+                        "enum": ["none", "analyzable", "all"],
+                        "description": "Attachment download policy (default all).",
+                    },
+                    "no_refresh": {
+                        "type": "boolean",
+                        "description": "Reuse a recent ready snapshot (cache_hit flag).",
+                    },
+                    "wait": {"type": "boolean"},
+                    "max_wait": {"type": "integer", "minimum": 0, "maximum": 21600},
+                },
+                "required": ["issue"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_redmine_issue",
+            "description": (
+                "Show one evidence snapshot: status, completeness flags, "
+                "journal/attachment counts, content SHA-256, and the "
+                "description head."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                },
+                "required": ["snapshot_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_redmine_journals",
+            "description": (
+                "Read COMPLETE journals (no 2,000-char truncation) with "
+                "cursor pagination: limit<=100, next_cursor for the next "
+                "page. Check data.total vs returned."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 400},
+                    "cursor": {"type": "string", "minLength": 0, "maxLength": 512},
+                },
+                "required": ["snapshot_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_redmine_attachments",
+            "description": (
+                "List evidence artifacts with artifact_id, kind, size, "
+                "SHA-256, and per-artifact status/error. Use "
+                "gms_rt_redmine_artifact_read for text windows."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                },
+                "required": ["snapshot_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_redmine_artifact_search",
+            "description": (
+                "Search a fixed-string query across the description, all "
+                "journals, and downloaded artifact text. Returns evidence "
+                "refs (journal_id/artifact_id + snippet)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "query": {"type": "string", "minLength": 0, "maxLength": 256},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 400},
+                },
+                "required": ["snapshot_id", "query"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_redmine_artifact_read",
+            "description": (
+                "Read a text/log artifact by character window "
+                "(offset+limit, max 262144 chars). Response carries "
+                "total_chars and truncated."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "offset": {"type": "integer", "minimum": 0},
+                    "limit": {"type": "integer", "minimum": 1},
+                },
+                "required": ["artifact_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_redmine_image",
+            "description": (
+                "Return one image artifact as MCP image content (base64) "
+                "plus its metadata (sha256, size, scaled flag). Oversized "
+                "images return an error with a download hint; originals "
+                "are never silently cropped."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                },
+                "required": ["artifact_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_apk_analyze_attachment",
+            "description": (
+                "Import a Redmine .apk evidence artifact into the JADX "
+                "analysis pipeline (owner-scoped, resource intensive). "
+                "Returns task_id; poll with gms_rt_apk_status every ~5s."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "artifact_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                },
+                "required": ["snapshot_id", "artifact_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_apk_source_search",
+            "description": (
+                "Search decompiled source CONTENT (not filenames) for a "
+                "fixed query. Returns path:line:column + snippet."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "query": {"type": "string", "minLength": 0, "maxLength": 256},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 400},
+                    "path": {"type": "string", "description": "Path substring filter."},
+                },
+                "required": ["task_id", "query"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_apk_source_read",
+            "description": (
+                "Read a line window of one decompiled source file "
+                "(task-relative path, offset+limit, max 4000 lines)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "path": {"type": "string", "minLength": 0, "maxLength": 512},
+                    "offset": {"type": "integer", "minimum": 0},
+                    "limit": {"type": "integer", "minimum": 1},
+                },
+                "required": ["task_id", "path"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_sdk_sources",
+            "description": (
+                "List admin-configured SDK source providers and their "
+                "default revisions. Sources and roots are server-side only."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_sdk_search",
+            "description": (
+                "Search an SDK source pinned to a revision (branch, tag, "
+                "or commit). Every match carries the resolved commit and a "
+                "signed result_id for gms_rt_sdk_read."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "revision": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "query": {"type": "string", "minLength": 0, "maxLength": 256},
+                    "path": {"type": "string", "description": "Path substring filter."},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 400},
+                },
+                "required": ["source", "revision", "query"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_sdk_read",
+            "description": (
+                "Read a commit-pinned SDK source window using the "
+                "self-contained opaque result_id from gms_rt_sdk_search. "
+                "source/path/commit are bound inside the token; the client "
+                "never passes free-form paths. Returns the resolved commit "
+                "and blob SHA-256 for traceable citations."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "result_id": {
+                        "type": "string",
+                        "minLength": 8,
+                        "maxLength": 2048,
+                    },
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 10000000},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 4000},
+                },
+                "required": ["result_id"],
                 "additionalProperties": False,
             },
         },
@@ -2507,6 +2751,205 @@ def apk_source_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-apk-source", args)
 
 
+class ToolContent:
+    """Rich tool result: multiple MCP content items (text + image)."""
+
+    def __init__(self, items: list[dict[str, Any]], is_error: bool = False):
+        self.items = items
+        self.is_error = is_error
+
+
+# --------------------------------------------------------------------------
+# Redmine evidence / APK / SDK typed tools (2026-09-08 plan §9-§12)
+# --------------------------------------------------------------------------
+
+def _int_arg(arguments: dict[str, Any], name: str, default: int, minimum: int, maximum: int) -> int:
+    value = arguments.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(parsed, maximum))
+
+
+def redmine_issue_fetch_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    issue = str(arguments.get("issue") or arguments.get("issue_id") or "").strip()
+    if not issue:
+        return "issue (id or URL) is required", True
+    args: list[str] = [issue]
+    download = str(arguments.get("download") or "").strip()
+    if download:
+        if download not in ("none", "analyzable", "all"):
+            return "download must be none, analyzable, or all", True
+        args.extend(["--download", download])
+    if arguments.get("no_refresh"):
+        args.append("--no-refresh")
+    if arguments.get("wait"):
+        args.append("--wait")
+        args.extend(["--max-wait", str(_int_arg(arguments, "max_wait", 300, 5, 3600))])
+    return run_cli("gms-rt-redmine-issue-fetch", args)
+
+
+def redmine_issue_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    snapshot_id = str(arguments.get("snapshot_id") or "").strip()
+    if not snapshot_id:
+        return "snapshot_id is required", True
+    return run_cli("gms-rt-redmine-issue-show", [snapshot_id])
+
+
+def redmine_journals_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    snapshot_id = str(arguments.get("snapshot_id") or "").strip()
+    if not snapshot_id:
+        return "snapshot_id is required", True
+    args: list[str] = [snapshot_id]
+    limit = arguments.get("limit")
+    if limit:
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 50, 1, 100))])
+    cursor = str(arguments.get("cursor") or "").strip()
+    if cursor:
+        args.extend(["--cursor", cursor])
+    return run_cli("gms-rt-redmine-journals", args)
+
+
+def redmine_attachments_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    snapshot_id = str(arguments.get("snapshot_id") or "").strip()
+    if not snapshot_id:
+        return "snapshot_id is required", True
+    return run_cli("gms-rt-redmine-attachments", [snapshot_id])
+
+
+def redmine_artifact_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    snapshot_id = str(arguments.get("snapshot_id") or "").strip()
+    query = str(arguments.get("query") or "").strip()
+    if not snapshot_id or not query:
+        return "snapshot_id and query are required", True
+    args: list[str] = [snapshot_id, query]
+    if arguments.get("limit"):
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 50, 1, 200))])
+    return run_cli("gms-rt-artifact-search", args)
+
+
+def redmine_artifact_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    artifact_id = str(arguments.get("artifact_id") or "").strip()
+    if not artifact_id:
+        return "artifact_id is required", True
+    args: list[str] = [artifact_id]
+    if arguments.get("offset") is not None:
+        args.extend(["--offset", str(_int_arg(arguments, "offset", 0, 0, 10_000_000))])
+    if arguments.get("limit"):
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 65536, 1, 262144))])
+    return run_cli("gms-rt-artifact-read", args)
+
+
+def redmine_image_tool(arguments: dict[str, Any]) -> ToolContent:
+    """Fetch an evidence artifact image and return MCP image content.
+
+    The Controller endpoint enforces size limits and returns base64 with the
+    original artifact metadata; oversized images surface as tool errors with
+    a download hint instead of being silently cropped (plan §10).
+    """
+    artifact_id = str(arguments.get("artifact_id") or "").strip()
+    if not artifact_id:
+        return ToolContent(
+            [{"type": "text", "text": "artifact_id is required"}], is_error=True
+        )
+    text, is_error = run_cli("gms-rt-redmine-artifact-image", [artifact_id])
+    if is_error:
+        return ToolContent([{"type": "text", "text": text}], is_error=True)
+    # The CLI envelope carries data.base64/mime_type; convert to image content.
+    try:
+        envelope = json.loads(text)
+        data = envelope.get("data") or {}
+        image_b64 = str(data.get("base64") or "")
+        mime = str(data.get("mime_type") or "image/png")
+    except (ValueError, AttributeError):
+        return ToolContent([{"type": "text", "text": text}], is_error=False)
+    if not image_b64:
+        return ToolContent(
+            [{"type": "text", "text": "controller returned no image payload"}],
+            is_error=True,
+        )
+    meta = {
+        k: v for k, v in data.items()
+        if k in ("artifact_id", "size_bytes", "sha256", "scaled", "derived_sha256")
+    }
+    return ToolContent([
+        {"type": "text", "text": json.dumps(meta, ensure_ascii=False)},
+        {"type": "image", "mimeType": mime, "data": image_b64},
+    ])
+
+
+def apk_analyze_attachment_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    snapshot_id = str(arguments.get("snapshot_id") or "").strip()
+    artifact_id = str(arguments.get("artifact_id") or "").strip()
+    if not snapshot_id or not artifact_id:
+        return "snapshot_id and artifact_id are required", True
+    return run_cli(
+        "gms-rt-apk-analyze-attachment", [snapshot_id, artifact_id]
+    )
+
+
+def apk_source_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    task_id = str(arguments.get("task_id") or "").strip()
+    query = str(arguments.get("query") or "").strip()
+    if not task_id or not query:
+        return "task_id and query are required", True
+    args: list[str] = [task_id, query]
+    if arguments.get("limit"):
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 50, 1, 200))])
+    path_filter = str(arguments.get("path") or "").strip()
+    if path_filter:
+        args.extend(["--path", path_filter])
+    return run_cli("gms-rt-apk-source-search", args)
+
+
+def apk_source_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    task_id = str(arguments.get("task_id") or "").strip()
+    path = str(arguments.get("path") or "").strip()
+    if not task_id or not path:
+        return "task_id and path are required", True
+    args: list[str] = [task_id, path]
+    if arguments.get("offset") is not None:
+        args.extend(["--offset", str(_int_arg(arguments, "offset", 0, 0, 10_000_000))])
+    if arguments.get("limit"):
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 400, 1, 4000))])
+    return run_cli("gms-rt-apk-source-read", args)
+
+
+def sdk_sources_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    return run_cli("gms-rt-sdk-sources")
+
+
+def sdk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    source = str(arguments.get("source") or "").strip()
+    revision = str(arguments.get("revision") or "").strip()
+    query = str(arguments.get("query") or "").strip()
+    if not source or not revision or not query:
+        return "source, revision, and query are required", True
+    args = ["--source", source, "--revision", revision, "--query", query]
+    if arguments.get("limit"):
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 50, 1, 200))])
+    path_filter = str(arguments.get("path") or "").strip()
+    if path_filter:
+        args.extend(["--path", path_filter])
+    return run_cli("gms-rt-sdk-search", args)
+
+
+def sdk_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    result_id = str(arguments.get("result_id") or "").strip()
+    if not result_id:
+        return "missing required field: result_id", True
+    # 计划 §12：只传 result_id；source/path/commit 已绑定在 token 内。
+    args: list[str] = [result_id]
+    if arguments.get("offset") is not None:
+        args.extend(["--offset", str(_int_arg(arguments, "offset", 0, 0, 10_000_000))])
+    if arguments.get("limit"):
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 400, 1, 4000))])
+    return run_cli("gms-rt-sdk-read", args)
+
+
 _TOOL_HANDLERS = {
     "gms_rt_run": run_tool,
     "gms_rt_commands": commands_tool,
@@ -2533,6 +2976,19 @@ _TOOL_HANDLERS = {
     "gms_rt_apk_manifest": apk_manifest_tool,
     "gms_rt_apk_search": apk_search_tool,
     "gms_rt_apk_source": apk_source_tool,
+    "gms_rt_redmine_issue_fetch": redmine_issue_fetch_tool,
+    "gms_rt_redmine_issue": redmine_issue_tool,
+    "gms_rt_redmine_journals": redmine_journals_tool,
+    "gms_rt_redmine_attachments": redmine_attachments_tool,
+    "gms_rt_redmine_artifact_search": redmine_artifact_search_tool,
+    "gms_rt_redmine_artifact_read": redmine_artifact_read_tool,
+    "gms_rt_redmine_image": redmine_image_tool,
+    "gms_rt_apk_analyze_attachment": apk_analyze_attachment_tool,
+    "gms_rt_apk_source_search": apk_source_search_tool,
+    "gms_rt_apk_source_read": apk_source_read_tool,
+    "gms_rt_sdk_sources": sdk_sources_tool,
+    "gms_rt_sdk_search": sdk_search_tool,
+    "gms_rt_sdk_read": sdk_read_tool,
     "gms_rt_shell": shell_tool,
     "gms_rt_logcat": logcat_tool,
     "gms_rt_shell_exec": shell_exec_tool,
@@ -2577,6 +3033,15 @@ def handle(message: dict[str, Any]) -> None:
             text, is_error = handler(arguments)
         except Exception as error:  # MCP boundary: convert failures to tool errors.
             text, is_error = f"gms-rt tool failed: {error}", True
+        if isinstance(text, ToolContent):
+            response(
+                request_id,
+                {
+                    "content": text.items,
+                    "isError": is_error or text.is_error,
+                },
+            )
+            return
         response(
             request_id,
             {

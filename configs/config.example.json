@@ -42,6 +42,18 @@
   "script_path": "/home/operator/GMS-Suite/run_GMS_Test_Auto.sh",
   "gsi_scripts": "/home/operator/GMS-Suite/run_GSI_Burn.sh",
   "scrcpy_path": "/home/operator/Software/scrcpy-linux-x86_64-v3.3.4/scrcpy",
+  "jadx_path": "${GMS_JADX_PATH:tools/jadx/bin/jadx}",
+  "jadx_java_home": "${GMS_JADX_JAVA_HOME:}",
+  "sdk_sources": {
+    "providers": [
+      {
+        "source_id": "example-android",
+        "provider": "local_git",
+        "repo_root": "/srv/git/android-example",
+        "default_revision": "main"
+      }
+    ]
+  },
   "opengrok": {
     "base_url": "http://192.0.2.30:8080/source",
     "default_project": "Android16",

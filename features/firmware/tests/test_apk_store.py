@@ -70,7 +70,7 @@ def test_interrupted_analysis_is_rescheduled_only_from_valid_task_paths(tmp_path
 
     async def exercise():
         runner = AsyncMock(return_value=None)
-        with patch("features.firmware.apk._run_jadx_analysis", new=runner):
+        with patch("features.firmware.apk.run_jadx_analysis", new=runner):
             recovered = apk.recover_apk_analysis_tasks()
             await asyncio.gather(*recovered)
         return runner, recovered

@@ -56,6 +56,19 @@ authenticate outside the agent session.
 | `gms_rt_jobs_wait` | Wait for a durable job to reach a terminal state; trimmed like `jobs_status`. |
 | `gms_rt_jobs_events` | Read incremental job events (`after` sequence + `limit`). |
 | `gms_rt_reports_list` | List finished test reports. |
+| `gms_rt_redmine_issue_fetch` | Create/refresh a full Redmine evidence snapshot (raw JSON, untruncated journals, hashed attachments); start/status pattern with optional bounded `wait`. |
+| `gms_rt_redmine_issue` | Snapshot status + completeness + description head. |
+| `gms_rt_redmine_journals` | Complete journals, cursor-paginated (limit<=100). |
+| `gms_rt_redmine_attachments` | Artifact inventory (kind, size, sha256, per-artifact status). |
+| `gms_rt_redmine_artifact_search` | Fixed-string search over description/journals/artifact text with evidence refs. |
+| `gms_rt_redmine_artifact_read` | Read artifact text by character window. |
+| `gms_rt_redmine_image` | Return an image artifact as MCP image content (base64) + metadata; oversized originals error with a download hint. |
+| `gms_rt_apk_analyze_attachment` | Import a Redmine `.apk` artifact into the JADX pipeline (owner-scoped, resource-intensive). |
+| `gms_rt_apk_source_search` | Search decompiled source content (path:line:column + snippet). |
+| `gms_rt_apk_source_read` | Read a line window of one decompiled file. |
+| `gms_rt_sdk_sources` | List admin-configured SDK source providers. |
+| `gms_rt_sdk_search` | Search an SDK source pinned to a revision; matches carry resolved commit + signed result id. |
+| `gms_rt_sdk_read` | Read commit-pinned source windows; returns commit and blob SHA-256. |
 
 ## Token discipline (what the adapter does for you)
 

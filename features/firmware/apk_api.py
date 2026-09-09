@@ -8,25 +8,26 @@ import os
 import re
 import shutil
 import xml.etree.ElementTree as ET
+from typing import Any
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from features.auth import require_authenticated_user
+from features.auth import require_agent_scope, require_authenticated_user
 from features.firmware.apk import (
     ANDROID_NS,
     JAVA_IDENTIFIER_RE,
     _build_apk_symbol_index,
-    _get_apk_task,
     _get_apk_upload_lock,
-    _normalize_apk_task_id,
-    _persist_apk_task_locked,
     _read_manifest_xml,
-    _run_jadx_analysis,
     _score_apk_symbol_candidate,
     cleanup_files,
     create_apk_task,
+    get_apk_task,
     normalize_apk_filename,
+    normalize_apk_task_id,
+    persist_apk_task_locked,
+    run_jadx_analysis,
     safe_join,
 )
 from foundation.errors import handle_api_errors
@@ -46,6 +47,13 @@ def _owner_id(request: Request) -> str:
     return require_authenticated_user(request).id
 
 
+def _require_apk_scope(request: Request) -> None:
+    """APK 全链路统一 scope（2026-09-08 计划 §11）：上传/分析/读取结果
+    都要求 ``apk.analyze_own``；人类角色默认已持有，Agent Token 需显式授权。
+    """
+    require_agent_scope("apk.analyze_own")(request)
+
+
 def _task_id_in_use(task_id: str) -> bool:
     with runtime.global_state.apk_analysis_tasks_lock:
         return task_id in runtime.global_state.apk_analysis_tasks
@@ -62,13 +70,14 @@ async def upload_apk(
     file_name: str | None = Form(None),
 ):
     """Upload APK file for analysis."""
+    _require_apk_scope(request)
     if not file:
         return ApiResponse.error("No file provided", status_code=400)
     owner_id = _owner_id(request)
 
     try:
         filename = normalize_apk_filename(file_name or file.filename)
-        task_id = _normalize_apk_task_id(upload_id)
+        task_id = normalize_apk_task_id(upload_id)
         task_dir = safe_join(runtime.apk_upload_dir, task_id)
         apk_path = safe_join(task_dir, filename)
     except ValueError as e:
@@ -200,7 +209,8 @@ async def upload_apk(
 @handle_api_errors
 async def analyze_apk(task_id: str, request: Request):
     """Start jadx decompilation analysis."""
-    task, err = _get_apk_task(
+    _require_apk_scope(request)
+    task, err = get_apk_task(
         task_id, require_completed=False, owner_id=_owner_id(request)
     )
     if err:
@@ -219,14 +229,14 @@ async def analyze_apk(task_id: str, request: Request):
     if not os.path.exists(apk_path):
         return ApiResponse.error("APK file not found, please re-upload", status_code=404)
 
-    output_dir = safe_join(runtime.apk_upload_dir, _normalize_apk_task_id(task_id), "jadx_output")
+    output_dir = safe_join(runtime.apk_upload_dir, normalize_apk_task_id(task_id), "jadx_output")
 
     with runtime.global_state.apk_analysis_tasks_lock:
         t = runtime.global_state.apk_analysis_tasks[task_id]
         t.update({"status": "analyzing", "progress": 5, "output_dir": output_dir, "error": None})
-        _persist_apk_task_locked(task_id)
+        persist_apk_task_locked(task_id)
 
-    task = asyncio.create_task(_run_jadx_analysis(task_id, apk_path, output_dir))
+    task = asyncio.create_task(run_jadx_analysis(task_id, apk_path, output_dir))
     runtime.global_state.background_tasks.add(task)
     task.add_done_callback(runtime.global_state.background_tasks.discard)
     return ApiResponse.success({"task_id": task_id, "status": "analyzing"})
@@ -236,7 +246,8 @@ async def analyze_apk(task_id: str, request: Request):
 @handle_api_errors
 async def get_apk_status(task_id: str, request: Request):
     """Get APK analysis status."""
-    task, err = _get_apk_task(
+    _require_apk_scope(request)
+    task, err = get_apk_task(
         task_id, require_completed=False, owner_id=_owner_id(request)
     )
     if err:
@@ -255,7 +266,8 @@ async def get_apk_status(task_id: str, request: Request):
 @handle_api_errors
 async def get_apk_manifest(task_id: str, request: Request):
     """Get parsed AndroidManifest.xml."""
-    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
+    _require_apk_scope(request)
+    task, err = get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -293,7 +305,8 @@ async def get_apk_manifest(task_id: str, request: Request):
 @handle_api_errors
 async def get_apk_permissions(task_id: str, request: Request):
     """Get APK permission list."""
-    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
+    _require_apk_scope(request)
+    task, err = get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -324,7 +337,8 @@ async def get_apk_source(
     view: bool = False,
 ):
     """Browse decompiled source tree or view file content."""
-    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
+    _require_apk_scope(request)
+    task, err = get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -381,7 +395,8 @@ async def search_apk_source_files(
     limit: int = 20,
 ):
     """Search decompiled source files by filename without loading the full tree in the browser."""
-    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
+    _require_apk_scope(request)
+    task, err = get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -419,7 +434,8 @@ async def find_apk_symbol_definition(
     line: int = 0,
 ):
     """Find a best-effort Java symbol definition in decompiled APK sources."""
-    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
+    _require_apk_scope(request)
+    task, err = get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -444,7 +460,8 @@ async def find_apk_symbol_definition(
 @handle_api_errors
 async def download_apk_source(task_id: str, request: Request):
     """Download decompiled source ZIP."""
-    task, err = _get_apk_task(task_id, owner_id=_owner_id(request))
+    _require_apk_scope(request)
+    task, err = get_apk_task(task_id, owner_id=_owner_id(request))
     if err:
         return err
 
@@ -472,10 +489,73 @@ async def download_apk_source(task_id: str, request: Request):
     )
 
 
+@router.get("/api/apk/doctor")
+@handle_api_errors
+async def apk_doctor(request: Request):
+    """JADX/Java 环境健康检查（计划 §11.3）。
+
+    不返回完整环境变量集合；只报告 jadx 路径、版本探测结果和修复建议。
+    """
+    _require_apk_scope(request)
+
+    from features.firmware.apk import _jadx_subprocess_env, _resolve_jadx_java_home, _resolve_jadx_path
+
+    result: dict[str, Any] = {
+        "jadx_path": _resolve_jadx_path(),
+        "jadx_java_home": _resolve_jadx_java_home(),
+        "jadx_version": "",
+        "java_version": "",
+        "java_home_valid": True,
+        "ok": True,
+        "error": "",
+    }
+    env = None
+    try:
+        env = _jadx_subprocess_env()
+    except FileNotFoundError as exc:
+        result.update({"java_home_valid": False, "ok": False, "error": str(exc)})
+        return ApiResponse.success(result)
+
+    async def _probe(binary: str, args: list[str]) -> str:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                binary, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(process.communicate(), timeout=20)
+            except asyncio.TimeoutError:
+                process.terminate()
+                await process.wait()
+                return ""
+            return stdout.decode("utf-8", errors="replace").strip()[:400]
+        except (OSError, ValueError):
+            return ""
+
+    java_bin = "java"
+    if env and env.get("JAVA_HOME"):
+        java_bin = os.path.join(env["JAVA_HOME"], "bin", "java")
+    result["java_version"] = await _probe(java_bin, ["-version"])
+    result["jadx_version"] = await _probe(result["jadx_path"], ["--version"])
+    if not result["java_version"]:
+        result["ok"] = False
+        result["error"] = (
+            "无法运行 java；请配置 jadx_java_home（config.json）或 GMS_JADX_JAVA_HOME "
+            "指向可用的 JDK（JADX 1.4.0 需要 JDK 11）"
+        )
+    elif not result["jadx_version"]:
+        result["ok"] = False
+        result["error"] = f"无法运行 jadx（{result['jadx_path']}）；请检查 jadx_path 配置"
+    return ApiResponse.success(result)
+
+
 @router.get("/api/apk/tasks")
 @handle_api_errors
 async def list_apk_tasks(request: Request):
     """List all APK analysis tasks."""
+    _require_apk_scope(request)
     with runtime.global_state.apk_analysis_tasks_lock:
         tasks = [
             {
@@ -498,8 +578,9 @@ async def list_apk_tasks(request: Request):
 @handle_api_errors
 async def delete_apk_task(task_id: str, request: Request):
     """Delete APK analysis task and its files."""
+    _require_apk_scope(request)
     try:
-        safe_task_id = _normalize_apk_task_id(task_id)
+        safe_task_id = normalize_apk_task_id(task_id)
     except ValueError as e:
         return ApiResponse.error(str(e), status_code=400)
 
