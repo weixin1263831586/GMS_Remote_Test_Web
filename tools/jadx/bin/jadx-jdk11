@@ -1,0 +1,9 @@
+#!/bin/bash
+# Deployment-local jadx wrapper.
+#
+# The bundled jadx wrapper honors $JAVA_HOME. The local jdk17-root extract
+# fails with "Failed to load default.policy" (sun.security.provider.PolicyFile),
+# so pin jadx to the system Java 11 runtime, which is verified to decompile
+# CTS APK/JAR artifacts correctly. Referenced by configs/config.json: jadx_path.
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+exec "/home/hcq/GMS_Remote_Test/web_app/tools/jadx/bin/jadx" "$@"
