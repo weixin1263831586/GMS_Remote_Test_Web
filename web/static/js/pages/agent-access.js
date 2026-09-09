@@ -3,18 +3,21 @@
 // 配对码 5 分钟有效且单次使用；原始 token 只在创建响应中出现一次，
 // 服务端仅保存 SHA-256 哈希。
 //
-// 入口：对话Agent 页面底部的 "Agent 接入管理" 面板（仅 admin + 提权会话可见）。
+// 入口：用户管理页面右上角的 "Agent 接入管理" 按钮（仅 admin 可见）。
+// 点击后覆盖用户管理内容显示 Agent 接入管理视图，返回按钮切回。
 
 let agentAccessLoaded = false;
 let agentAccessScopesCache = null;
 
 function agentAccessToggle(show) {
     const panel = document.getElementById('agent-access-panel');
-    const entry = document.getElementById('agent-access-entry');
-    if (!panel || !entry) return;
-    const visible = show !== undefined ? show : panel.style.display === 'none';
-    panel.style.display = visible ? 'block' : 'none';
-    entry.style.display = visible ? 'none' : 'block';
+    const mainView = document.getElementById('users-main-view');
+    if (!panel || !mainView) return;
+    const visible = show !== undefined
+        ? show
+        : panel.style.display === 'none';
+    panel.style.display = visible ? '' : 'none';
+    mainView.style.display = visible ? 'none' : '';
     if (visible) agentAccessReload();
 }
 
@@ -24,13 +27,12 @@ function agentAccessIsAdmin() {
 }
 
 function agentAccessEnsureVisibleForRole() {
-    // 只有管理员（登录后）显示入口；普通用户完全不暴露该面板。
+    // 只有管理员（登录后）显示入口；普通用户完全不暴露该弹框。
     if (!state.authReady) return;
     const enabled = agentAccessIsAdmin();
     const entry = document.getElementById('agent-access-entry');
-    const panel = document.getElementById('agent-access-panel');
-    if (!entry || !panel) return;
-    entry.style.display = enabled && panel.style.display === 'none' ? 'block' : 'none';
+    if (!entry) return;
+    entry.style.display = enabled ? 'flex' : 'none';
 }
 
 async function agentAccessReload() {

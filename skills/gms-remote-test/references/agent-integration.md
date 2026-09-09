@@ -21,7 +21,7 @@ tool boundary.
 | `gms_rt_describe(command)` | `gms-rt-system-command-describe` |
 | `gms_rt_devices()` | `gms-rt-devices-list` |
 | `gms_rt_auth_status()` | `gms-rt-auth-status` |
-| `gms_rt_auth_login(u, password_stdin)` | `gms-rt-auth-login --password-stdin` |
+| `gms_rt_agent_enroll(code)` | `gms-rt-agent-enroll` (service token — the agent auth path; `gms_rt_auth_login`/`gms_rt_auth_elevate` are human-session tools only) |
 | `gms_rt_test_start(device, type, module?, case?, suite?, retry?, wait?, max_wait?)` | `gms-rt-test-start` (incl. `--retry`) |
 | `gms_rt_jobs_list(limit?)` | `gms-rt-jobs-list` |
 | `gms_rt_jobs_status(job_id)` | `gms-rt-jobs-status` |
@@ -47,17 +47,26 @@ gms-rt-system-commands --json
 gms-rt-auth-status --json --non-interactive
 ```
 
-Authenticate outside the agent when practical. When unattended login is
-necessary, pass the secret through stdin:
+Authenticate outside the agent when practical. **Agents use an Agent
+Service Token, never a password**: mint a one-shot enrollment code in the
+web UI and run:
 
 ```bash
-printf '%s\n' "$PASSWORD" |
-  gms-rt-auth-login "$USERNAME" --password-stdin --non-interactive --json
+GMS_RT_PROFILE=<agent-host-user> gms-rt-agent-enroll "$CODE" --json --non-interactive
 gms-rt-system-doctor test --json --non-interactive
 gms-rt-devices-list --json --non-interactive
 ```
 
-For an explicitly authorized sensitive operation:
+The human user, in their own shell, may authenticate a session with a
+password when interactivity is genuinely needed:
+
+```bash
+printf '%s\n' "$PASSWORD" |
+  gms-rt-auth-login "$USERNAME" --password-stdin --non-interactive --json
+```
+
+For an explicitly authorized sensitive operation, the human runs the
+elevation in their own session:
 
 ```bash
 printf '%s\n' "$ADMIN_PASSWORD" |
@@ -65,7 +74,8 @@ printf '%s\n' "$ADMIN_PASSWORD" |
     --password-stdin --non-interactive --json
 ```
 
-Never put passwords directly in prompts or command arguments.
+Never put passwords directly in prompts, command arguments, or AI-agent
+context.
 
 ## Execution rules
 
@@ -99,11 +109,23 @@ gms-rt-system-health --json --non-interactive
 gms-rt-auth-status --json --non-interactive
 ```
 
-`--client auto` additionally registers the MCP server with Codex/Kimi and
-writes per-agent env profiles. Agents authenticate with an Agent Service
+`--client auto` additionally installs the self-contained Skill+MCP plugin
+for every detected agent (Codex/Kimi/kkagent), reconciles each client's MCP
+registration (update-in-place; corrupt client configs fail with a backup
+rather than being overwritten), and writes per-agent env profiles. The
+profiles are loaded automatically by `scripts/mcp_launcher.sh`, which is
+what the plugin manifests use to start the MCP server — nothing to `source`.
+Agents authenticate with an Agent Service
 Token instead of a password: mint a one-shot enrollment code in the web UI
-(and run `gms-rt-agent-enroll CODE` once); the token file (0600) is referenced
+(and run `gms-rt-agent-enroll CODE` once, or `python3 gms-agent enroll CODE`
+after a registry install); the token file (0600) is referenced
 by `GMS_AUTH_TOKEN_FILE` and no platform password ever reaches the agent.
+
+Enterprise deployment path (Agent Package Registry): the Controller also
+serves the runtime itself — `curl ... /api/agent/install -o gms-agent &&
+python3 gms-agent install --server https://CONTROLLER:5001`, then
+`gms-agent update` / `gms-agent rollback <version>` / `gms-agent status`
+for upgrades with instant rollback (`versions/<ver>/` + `current` symlink).
 
 Admins can drive the whole enrollment lifecycle from a terminal:
 `gms-rt-agent-enroll-code` mints a one-shot pairing code (admin + elevation),

@@ -6,17 +6,21 @@ CLI wrapper.
 
 ## Authentication
 
-| Command | Purpose |
-|---|---|
-| `gms-rt-auth-status` | Inspect authentication requirement and current session |
-| `gms-rt-auth-login [username]` | Create and save a server session |
-| `gms-rt-auth-logout` | Revoke and remove the saved session |
-| `gms-rt-auth-elevate [username]` | Re-authenticate an administrator for sensitive operations |
-| `gms-rt-auth-elevation-reset` | Clear administrator elevation |
+| Command | Purpose | Context |
+|---|---|---|
+| `gms-rt-auth-status` | Inspect authentication requirement and current session | agent + human |
+| `gms-rt-agent-enroll CODE` | Exchange a one-shot code for a 0600 Agent Service Token file | **agent** |
+| `gms-rt-auth-login [username]` | Create and save a server session (password via stdin) | **human only** |
+| `gms-rt-auth-logout` | Revoke and remove the saved session | agent + human |
+| `gms-rt-auth-elevate [username]` | Re-authenticate an administrator for sensitive operations (password via stdin) | **human only** |
+| `gms-rt-auth-elevation-reset` | Clear administrator elevation | agent + human |
 
-The backend authenticates normal API calls with the `gms_session` cookie. The
-helper sends the saved cookie through every HTTP path, including uploads,
-downloads, DELETE requests, and log streams.
+The backend authenticates normal API calls with the `gms_session` cookie or
+an Agent Service Token (`GMS_AUTH_TOKEN_FILE`). The helper sends the saved
+cookie / token through every HTTP path, including uploads, downloads, DELETE
+requests, and log streams. AI agents must never hold or type platform or
+admin passwords: `gms-rt-auth-login` and `gms-rt-auth-elevate` are run by the
+human user in their own shell.
 
 ## Command groups
 
@@ -93,7 +97,6 @@ unknown SDK revisions surface as explicit errors — never as
 ## Examples
 
 ```bash
-gms-rt-auth-login admin
 gms-rt-system-doctor device --json --non-interactive
 gms-rt-devices-list --json
 gms-rt-devices-wait DEVICE-1 --state online --max-wait 300 --json --non-interactive
@@ -112,16 +115,16 @@ gms-rt-apk-source TASK_ID com/example/Foo.java --view
 gms-rt-apk-search TASK_ID Permission --limit 20
 ```
 
-For unattended authentication, avoid command-line password arguments:
-
-```bash
-printf '%s\n' "$PASSWORD" |
-  gms-rt-auth-login admin --password-stdin --non-interactive --json
-```
-
 Install the command first with the Controller-hosted installer described in
 `SKILL.md`. Run `gms-rt-system-update` to refresh both the Skill and standalone CLI
 command links.
+
+Unattended (agent) authentication uses the Agent Service Token, never a
+password:
+
+```bash
+GMS_RT_PROFILE=<agent-host-user> gms-rt-agent-enroll "$CODE" --json --non-interactive
+```
 
 ## Agent contract
 

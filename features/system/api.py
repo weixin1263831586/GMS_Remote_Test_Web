@@ -21,7 +21,7 @@ from fastapi.responses import (
 )
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
-from features.system import jq_binary
+from features.system import agent_package_registry, jq_binary
 from features.system.api_docs_list import API_DOCS_LIST
 from features.system.skill_archive_signing import (
     sign_skill_archive,
@@ -552,6 +552,30 @@ async def download_skill_installer(request: Request):
 async def download_jq_binary(request: Request):
     """Serve the pinned jq binary for the skill installer (§十二)."""
     return await jq_binary.serve(request)
+
+
+# ==================== Agent Package Registry (10.txt §十三, Phase 3) ====================
+# The Controller is the single production distribution source for the GMS
+# Agent Runtime; implementation lives in agent_package_registry.py (size
+# budget). Endpoints:
+#   GET /api/agent/install                                 bootstrap installer
+#   GET /api/agent/packages/gms-remote-test/manifest      latest version + SHA-256
+#   GET /api/agent/packages/gms-remote-test/{version}     distribution zip
+
+
+@router.get("/api/agent/install")
+async def agent_install_bootstrap(request: Request):
+    return await agent_package_registry.agent_bootstrap_installer(request)
+
+
+@router.get("/api/agent/packages/gms-remote-test/manifest")
+async def agent_package_manifest_endpoint(request: Request):
+    return await agent_package_registry.agent_package_manifest(request)
+
+
+@router.get("/api/agent/packages/gms-remote-test/{version}")
+async def agent_package_download_endpoint(version: str, request: Request):
+    return await agent_package_registry.agent_package_download(version, request)
 
 
 # ==================== Architecture Page ====================

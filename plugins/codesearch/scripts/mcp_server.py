@@ -117,8 +117,7 @@ def run_codesearch(arguments: list[str]) -> tuple[str, bool]:
             command,
             cwd=os.getcwd(),
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=DEFAULT_TIMEOUT_SECONDS,
             check=False,
         )

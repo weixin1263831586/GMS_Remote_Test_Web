@@ -27,15 +27,25 @@ Blockers come back as a list with a matching exit code (3 auth, 4 elevation,
 
 ## 2. Session bootstrap
 
+Agents authenticate with an Agent Service Token only — never a password:
+
 ```
-gms_rt_auth_login(username, password_stdin)   # password only via stdin
-gms_rt_auth_status                            # authenticated:true
+GMS_RT_PROFILE=<agent-host-user> gms_rt_agent_enroll(code="<one-shot code>")
+gms_rt_auth_status               # authenticated via GMS_AUTH_TOKEN_FILE
 ```
 
-Wrong/no session → every protected call returns `exit_code:3` with hint
-`authenticate with gms_rt_auth_login`. One login persists in the cookie jar
-for the process lifetime (default
+The enrollment code is minted by an admin in the web UI (5-minute TTL);
+the token lands in a 0600 file referenced by `GMS_AUTH_TOKEN_FILE`. After
+that, every protected call authenticates without any password. If
+`GMS_AUTH_TOKEN_FILE` is missing or expired, ask the user for a new
+one-shot code — never fall back to `gms_rt_auth_login`.
+
+Wrong/no session → every protected call returns `exit_code:3` with a hint
+pointing at enrollment (`gms_rt_agent_enroll`). The human user, in their
+own shell, may instead run `gms-rt-auth-login` (password via stdin); one
+login persists in the cookie jar for the process lifetime (default
 `${XDG_STATE_HOME:-$HOME/.local/state}/gms-remote-test/session.cookies`).
+An agent never performs that call.
 
 ## 3. Run a test (full lifecycle)
 
@@ -68,8 +78,7 @@ Verified behaviors:
 | Agent tries `auth-elevate` via `gms_rt_run` | denied (not agent-safe) | denied |
 | Human elevates via CLI (outside agent) | **5/5 unlocked**: `users-list`, `adb-forward-status`, `desktop-validate`, `desktop-vnc-status`, `test-suites-result` | still denied (8/8 verified) |
 | After `auth-elevation-reset` or expiry | blocked again (exit 4) | denied |
-
-Human elevation (run outside the agent, never inside):
+Human elevation (run by the user outside the agent, never inside):
 
 ```bash
 printf '%s\n' "$ADMIN_PASSWORD" |
@@ -164,17 +173,18 @@ gms_rt_logcat(device="RK3562GMS7")                        # full dump, -v time
 gms_rt_logcat(device="RK3562GMS7", args="-b crash")       # crash buffer dump
 gms_rt_logcat(device="RK3562GMS7", args=["-t", "500"])    # last 500 lines
 gms_rt_logcat(device="RK3562GMS7", args="-s ActivityManager")
-gms_rt_logcat(device="RK3562GMS7", clear=true)            # logcat -c, then fresh -v time dump
 ```
 
 - Agents always get one-shot dump mode: the tool (and the CLI under
   `--non-interactive`) appends `-d` when no dump flag (`-d/-t/-T/-g/-L/-p`)
   is present, so the call terminates instead of streaming.
-- `-c`/`--clear` (CLI) or `clear=true` (tool) runs `logcat -c` first —
-  clears the device log buffer, then captures only fresh `-v time` logs.
-  Useful for "clear, reproduce, capture" triage; destructive to existing
-  buffer content, so the tool requires the explicit `clear` argument
-  (raw `-c` inside `args` is redirected to it).
+- **Clearing the buffer is human-only (R17, 10.txt §六).** `logcat -c`
+  destroys diagnostic evidence (your platform's incident data). The MCP
+  tool denies `clear=true`, raw `-c`, `--clear` and combined short forms
+  (`-dc`) in args alike. The "clear, reproduce, capture" triage flow is a
+  human step: the user runs `gms-rt-devices-logcat DEVICE -c` in their own
+  CLI session, then the agent captures the fresh dump. If triage needs the
+  old buffer, it is gone — that is exactly why the agent must not clear.
 - Denied: `-f`/`--file` (write device files) and any argument containing
   shell metacharacters; exit code 2 usage errors follow.
 - Human interactive use (`gms-rt-devices-logcat DEVICE` without flags)
@@ -196,7 +206,7 @@ gms_rt_run(system-docs)            # API endpoints, one line each (~80% smaller)
 | exit_code | meaning | next action |
 |---|---|---|
 | 2 | usage | `gms_rt_describe` the command; check arg order |
-| 3 | auth | `gms_rt_auth_login` |
+| 3 | auth | agent: `gms_rt_agent_enroll` (service token); human: `gms-rt-auth-login` |
 | 4 | permission/elevation | ask the human to elevate; do not self-elevate |
 | 5 | conflict/busy | `gms_rt_jobs_list`, wait and retry |
 | 6 | network/timeout | safe to retry with backoff (bounded) |

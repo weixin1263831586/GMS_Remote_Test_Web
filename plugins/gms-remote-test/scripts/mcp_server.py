@@ -21,8 +21,21 @@ Token discipline (v0.3.0):
 Security boundary: the generic runner only executes commands the CLI marks
 agent_safe_unattended (read-only, non-interactive). Mutating/high-risk
 operations must go through the dedicated typed tools (gms_rt_test_start,
-gms_rt_auth_login, ...) or a human-run CLI, never prompt text. Interactive
-commands (terminal-open, terminal-push, devices-scrcpy) are denied outright.
+gms_rt_shell_exec with an approval token, ...) or a human-run CLI, never
+prompt text. Interactive commands (terminal-open, terminal-push,
+devices-scrcpy) are denied outright.
+
+Authentication model (2026-09-09 audit, 10.txt §四/§五):
+- Agents authenticate exclusively with an Agent Service Token
+  (GMS_AUTH_TOKEN_FILE, 0600, enrolled via gms_rt_agent_enroll). No
+  platform or admin password ever flows through MCP.
+- gms_rt_auth_login / gms_rt_auth_elevate are HUMAN-session tools. They are
+  not registered at all when the server runs in service-token mode
+  (GMS_AGENT_AUTH_MODE=service-token, set by the installer); even when
+  registered, only call them with credentials the user explicitly provided.
+- gms_rt_approval_create requires the user's human session; agents only
+  relay the minted one-shot token into gms_rt_shell_exec /
+  gms_rt_burn_firmware.
 
 Tools:
 - gms_rt_run         run any agent-safe gms-rt-* command (escape hatch)
@@ -30,19 +43,20 @@ Tools:
 - gms_rt_commands    compact command inventory (token-cheap discovery)
 - gms_rt_devices     list devices
 - gms_rt_auth_status inspect the CLI session's authentication state
-- gms_rt_auth_login  establish the CLI session (username + password_stdin)
-- gms_rt_auth_elevate step-up admin re-auth (unlocks burn and elevated ops)
-- gms_rt_burn_firmware  burn update.img to devices (requires elevation)
+- gms_rt_agent_enroll  exchange a one-shot code for the 0600 service token
+- gms_rt_auth_login / gms_rt_auth_elevate  human-session tools (hidden in
+  service-token mode)
+- gms_rt_burn_firmware  burn update.img to devices (approval-token gated)
 - gms_rt_test_start / gms_rt_jobs_list / gms_rt_jobs_wait / gms_rt_jobs_events / gms_rt_jobs_status
 - gms_rt_reports_list
 - gms_rt_apk_resolve / gms_rt_apk_analyze / gms_rt_apk_status / gms_rt_apk_manifest
 - gms_rt_apk_search / gms_rt_apk_source  (suite module -> jadx decompilation)
 - gms_rt_shell       read-only device shell (allowlisted diagnostics)
-- gms_rt_logcat      capture device logcat via adb shell logcat -v time (v0.7.0)
-- gms_rt_shell_exec  user-authorized one-shot device shell command (v0.8.0)
-
-Passwords are never handled here beyond forwarding on stdin to
-gms-rt-auth-login; the CLI stores the session cookie itself.
+- gms_rt_logcat      capture device logcat via adb shell logcat -v time
+  (v0.13.0: dump-mode only — clearing the buffer destroys diagnostic
+  evidence and is human-only via the CLI; clear=true and raw -c are denied)
+- gms_rt_shell_exec  one-shot device shell command (server-issued approval
+  token required; v0.8.0+)
 """
 
 from __future__ import annotations
@@ -55,17 +69,37 @@ import shlex
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.12.0"
+SERVER_VERSION = "0.13.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
 # The catalog only changes across gms-rt-system-update; refresh it lazily.
 SAFETY_CACHE_TTL_SECONDS = 300
+
+# Agent authentication mode (2026-09-09 audit, 10.txt §五). When set to
+# "service-token" (the installer writes it into every agent MCP env), the
+# password-based tools (gms_rt_auth_login, gms_rt_auth_elevate) and the
+# human-session approval mint (gms_rt_approval_create) are NOT registered:
+# an agent context then cannot even express a password login or a
+# self-minted approval. Agents enroll once via gms_rt_agent_enroll and
+# authenticate with GMS_AUTH_TOKEN_FILE.
+_SERVICE_TOKEN_MODE = (
+    str(os.environ.get("GMS_AGENT_AUTH_MODE", "")).strip().lower()
+    == "service-token"
+)
+
+# Tools hidden in service-token mode (human-session credential tools).
+_HUMAN_SESSION_TOOLS = (
+    "gms_rt_auth_login",
+    "gms_rt_auth_elevate",
+    "gms_rt_approval_create",
+)
 
 # Commands that must never be executed through the generic runner even if a
 # caller asks for them; interactive editors and raw shells are out of scope.
@@ -80,6 +114,84 @@ _DENIED_COMMANDS = {
 _INJECTED_FLAGS = ("--json", "--non-interactive")
 
 _CATALOG_CACHE: dict[str, Any] = {"loaded_at": 0.0, "commands": None}
+
+# ---------------------------------------------------------------------------
+# Phase 2 (10.txt §五): direct-HTTP fast path through the gms_agent SDK.
+#
+# The MCP server is a protocol adapter, not a second business layer. When the
+# CLI command maps 1:1 to a Controller REST endpoint (read-only listing and
+# status commands), the SDK call skips the subprocess + jq pipeline entirely
+# and returns the same JSON envelope. Anything not in the table — or any SDK
+# failure — falls back to the historical CLI path, so behavior never changes
+# for commands the SDK does not cover yet.
+# ---------------------------------------------------------------------------
+_SDK_CLI_ROUTES: dict[str, tuple[str, str]] = {
+    # CLI command -> (HTTP method, Controller /api endpoint)
+    "gms-rt-cluster-workers": ("GET", "/cluster/workers"),
+    "gms-rt-cluster-devices": ("GET", "/cluster/devices"),
+    "gms-rt-jobs-list": ("GET", "/cluster/jobs"),
+    "gms-rt-jobs-status": ("GET", "/cluster/jobs/{job_id}"),
+    "gms-rt-jobs-events": ("GET", "/cluster/jobs/{job_id}/events"),
+    "gms-rt-reports-list": ("GET", "/reports/list"),
+    "gms-rt-devices": ("GET", "/devices/list"),
+    "gms-rt-auth-status": ("GET", "/auth/status"),
+    "gms-rt-agent-status": ("GET", "/auth/agent-status"),
+}
+
+_sdk_client = None
+
+
+def _sdk_fast_call(command: str, args: list[str]) -> tuple[str, bool] | None:
+    """Try the SDK fast path for one CLI command; None means fall back."""
+    global _sdk_client
+    route = _SDK_CLI_ROUTES.get(normalize_command(command))
+    if route is None:
+        return None
+    method, endpoint = route
+    params: dict[str, Any] = {}
+    positional: list[str] = []
+    index = 0
+    while index < len(args):
+        token = str(args[index])
+        if token.startswith("--"):
+            if "=" in token:
+                key, _, value = token[2:].partition("=")
+            else:
+                key = token[2:]
+                index += 1
+                value = str(args[index]) if index < len(args) else ""
+            params[key.replace("-", "_")] = value
+        elif token == "--json" or token == "--non-interactive":
+            pass
+        else:
+            positional.append(token)
+        index += 1
+
+    try:
+        if _sdk_client is None:
+            from gms_agent import GmsClient
+
+            _sdk_client = GmsClient()
+        if "{job_id}" in endpoint:
+            if not positional:
+                return None
+            endpoint = endpoint.format(job_id=urllib.parse.quote(positional[0], safe=""))
+            positional = positional[1:]
+        # jobs-list / jobs-events carry the numeric filters as positionals.
+        if normalize_command(command) == "gms-rt-jobs-list" and positional:
+            params.setdefault("limit", positional.pop(0))
+        if normalize_command(command) == "gms-rt-jobs-events" and positional:
+            params.setdefault("after", positional.pop(0))
+            if positional:
+                params.setdefault("limit", positional.pop(0))
+        envelope = _sdk_client.request(method, endpoint, params=params or None)
+    except Exception:
+        # SDK unavailable/misconfigured/endpoint mismatch: silently fall back
+        # to the CLI path, which remains the authoritative implementation.
+        return None
+    envelope["command"] = normalize_command(command)
+    return json.dumps(envelope, ensure_ascii=False), False
+
 
 
 def cli_script() -> Path:
@@ -142,11 +254,14 @@ def build_argv(command: str, args: list[str] | str | None) -> list[str]:
 # without consulting documentation. Keys are the CLI's documented exit codes.
 _EXIT_HINTS = {
     2: "check usage with gms_rt_describe",
-    3: "authenticate with gms_rt_auth_login",
-    4: "needs admin elevation (gms_rt_auth_elevate with admin credentials, "
-       "or human-run gms-rt-auth-elevate)",
+    3: "authenticate with the Agent Service Token: enroll once with "
+    "gms_rt_agent_enroll (one-shot code from the web UI), then every call "
+    "authenticates via GMS_AUTH_TOKEN_FILE — no password",
+    4: "needs admin elevation — a human step: ask the user to run "
+    "gms-rt-auth-elevate in their own CLI session (agents never hold "
+    "admin credentials)",
     5: "conflict/busy or selection unavailable: check gms_rt_jobs_list and "
-       "diagnostics, retry when free",
+    "diagnostics, retry when free",
     6: "network/timeout: safe to retry (bounded)",
     7: "operation failed: inspect diagnostics",
 }
@@ -356,6 +471,13 @@ def run_cli(
             "session and is not available through this MCP tool",
             True,
         )
+    args_list = args if isinstance(args, list) else ([args] if args else [])
+    sdk_result = _sdk_fast_call(command, args_list)
+    if sdk_result is not None:
+        text = _compact_envelope(sdk_result[0])
+        if text is None:
+            text = sdk_result[0]
+        return text, is_error_text(text)
     try:
         argv = build_argv(command, args)
     except ValueError as error:
@@ -555,6 +677,14 @@ def auth_status_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 def auth_login_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    if _SERVICE_TOKEN_MODE:
+        return (
+            "denied: this MCP server runs in service-token mode "
+            "(GMS_AGENT_AUTH_MODE=service-token). Agents authenticate via "
+            "GMS_AUTH_TOKEN_FILE — enroll once with gms_rt_agent_enroll; "
+            "password login belongs to a human CLI session.",
+            True,
+        )
     username = str(arguments.get("username") or "").strip()
     password = arguments.get("password_stdin")
     if not username:
@@ -562,9 +692,10 @@ def auth_login_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if not isinstance(password, str) or not password:
         return (
             "Missing required argument: password_stdin (never place the "
-            "password in args or prompts). Prefer GMS_AUTH_TOKEN_FILE "
-            "agent-token auth instead: enroll once with "
-            "gms-rt-agent-enroll, then no password ever flows through MCP.",
+            "password in args or prompts). This is a HUMAN-session tool: "
+            "agents must use GMS_AUTH_TOKEN_FILE instead — enroll once "
+            "with gms_rt_agent_enroll, then no password ever flows "
+            "through MCP.",
             True,
         )
     return run_cli(
@@ -588,6 +719,15 @@ def agent_enroll_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 def approval_create_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Create a one-shot approval token (must run under a human session)."""
+    if _SERVICE_TOKEN_MODE:
+        return (
+            "denied: gms_rt_approval_create is hidden in service-token mode "
+            "because it must run under the user's own human session "
+            "(cookie), never an agent token. Ask the user to run "
+            "'gms-rt-approval-create ...' in their own CLI session, then "
+            "pass the returned token as approval_token.",
+            True,
+        )
     tool = str(arguments.get("tool") or "").strip()
     device = str(arguments.get("device") or "").strip()
     command = str(arguments.get("command") or "")
@@ -619,6 +759,14 @@ def approval_create_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 def auth_elevate_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Re-authenticate as admin (step-up) for the current CLI session."""
+    if _SERVICE_TOKEN_MODE:
+        return (
+            "denied: this MCP server runs in service-token mode "
+            "(GMS_AGENT_AUTH_MODE=service-token). Elevation is a human "
+            "step: ask the user to run gms-rt-auth-elevate in their own "
+            "CLI session (agents never hold admin credentials).",
+            True,
+        )
     username = str(arguments.get("username") or "").strip()
     password = arguments.get("password_stdin")
     if not username:
@@ -1339,10 +1487,18 @@ def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 # (dump mode under --non-interactive). This typed tool adds an adapter-side
 # argument gate (dump flag, no -f, no metacharacters) so agents skip the
 # describe+run round trip and cannot smuggle destructive flags. Buffer
-# clearing is opt-in via the explicit clear=true argument, which the CLI
-# executes as `logcat -c` followed by the `-v time` capture.
+# clearing (logcat -c) destroys diagnostic evidence — this platform's CTS/
+# GTS/VTS incident data — so it is human-only via the CLI since v0.13.0
+# (10.txt §六): the tool denies clear=true and any -c/--clear form in args.
 _LOGCAT_FORBIDDEN_CHARS = frozenset(";|&><`(){}[]$\\'\"\n\r")
 _LOGCAT_MAX_ARGS = 16
+
+
+def _is_clear_request(arguments: dict[str, Any]) -> bool:
+    value = arguments.get("clear")
+    return value is True or (
+        isinstance(value, str) and value.strip().lower() == "true"
+    )
 
 
 def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -1368,17 +1524,19 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if len(items) > _LOGCAT_MAX_ARGS:
         return f"too many logcat arguments (max {_LOGCAT_MAX_ARGS})", True
     # R08: 专用 logcat 工具与 gms_rt_shell 的 logcat 分支共用同一套解析
-    # 与正向允许策略。此前这里只做"整 token 匹配 + -f 前缀"检查，组合
-    # 短选项（-dc）、长选项缩写（--cle）和附着值（-df/tmp/x）都会被放行。
-    # 现在把 args 重组为 "logcat ..." 交给 _validate_shell_command 做同源
-    # 判定；clear=true 注入的 -c 由本工具显式放行，args 携带的 -c/--clear
-    # （含缩写）在这里拦截并指引 clear=true 用法。
-    clear_requested = False
-    clear_value = arguments.get("clear")
-    if clear_value is True or (
-        isinstance(clear_value, str) and clear_value.strip().lower() == "true"
-    ):
-        clear_requested = True
+    # 与正向允许策略。组合短选项（-dc）、长选项缩写（--cle）和附着值
+    # （-df/tmp/x）都会被拦截。R17（10.txt §六）：清空 logcat 缓冲会销毁
+    # 诊断证据，MCP Agent 侧一律拒绝——无论来自 clear=true 还是 args 里
+    # 的 -c/--clear（含缩写/组合形式）；清日志是人工 CLI 步骤
+    # （gms-rt-devices-logcat DEVICE -c）。
+    if _is_clear_request(arguments):
+        return (
+            "denied: clearing the device log buffer (logcat -c) destroys "
+            "diagnostic evidence and is human-only. Ask the user to run "
+            "'gms-rt-devices-logcat DEVICE -c' in their own CLI session, "
+            "then capture the fresh dump here without the clear flag.",
+            True,
+        )
     for item in items:
         if (
             item == "-c"
@@ -1387,8 +1545,11 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             or (item.startswith("-") and not item.startswith("--") and "-c" in item[1:])
         ):
             return (
-                "denied: clearing the logcat buffer needs the explicit "
-                "clear=true argument (runs logcat -c before the capture)",
+                "denied: clearing the logcat buffer destroys diagnostic "
+                "evidence and is human-only. Ask the user to run "
+                "'gms-rt-devices-logcat DEVICE -c' in their own CLI "
+                "session; this tool captures dumps only (no -c anywhere "
+                "in args).",
                 True,
             )
     if items:
@@ -1479,11 +1640,8 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         flag in items for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")
     ):
         items = ["-d", *items]
-    # clear=true -> CLI runs `logcat -c` first, then captures with -v time.
-    # R08: clear 不再需要 args 显式携带，由 clear=true 参数注入并只允许
-    # 出现在最前（首个 token），避免 args 里混入第二个 -c。
-    if clear_requested:
-        items = ["-c", *items]
+    # R17 (10.txt §六): no -c is ever injected from the adapter — buffer
+    # clearing is human-only and every clear form was rejected above.
     timeout = 180
     if arguments.get("timeout") is not None:
         try:
@@ -1580,6 +1738,20 @@ def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 def tools() -> list[dict[str, Any]]:
+    all_tools = _all_tools()
+    if not _SERVICE_TOKEN_MODE:
+        return all_tools
+    # Service-token mode: the human-session credential tools are not even
+    # advertised, so an agent context cannot express a password login or
+    # self-mint an approval (2026-09-09 audit, 10.txt §五).
+    return [
+        tool
+        for tool in all_tools
+        if tool.get("name") not in _HUMAN_SESSION_TOOLS
+    ]
+
+
+def _all_tools() -> list[dict[str, Any]]:
     return [
         {
             "name": "gms_rt_run",
@@ -1609,9 +1781,12 @@ def tools() -> list[dict[str, Any]]:
                     "password_stdin": {
                         "type": "string",
                         "description": (
-                            "Optional secret forwarded on stdin (only for "
-                            "gms-rt-auth-login / gms-rt-auth-elevate; typed "
-                            "tools are preferred). Never log it."
+                            "Optional secret forwarded on stdin — HUMAN "
+                            "sessions only (gms-rt-auth-login / "
+                            "gms-rt-auth-elevate with the user's explicit "
+                            "credentials). Agents authenticate via "
+                            "GMS_AUTH_TOKEN_FILE and never pass passwords. "
+                            "Never log it."
                         ),
                     },
                     "timeout": {
@@ -1726,9 +1901,12 @@ def tools() -> list[dict[str, Any]]:
             "name": "gms_rt_auth_login",
             "description": (
                 "Log in to the Controller and persist the CLI session "
-                "cookie (gms-rt-auth-login USERNAME --password-stdin). Only "
-                "call with credentials the user explicitly provided; the "
-                "password travels via stdin and is never logged."
+                "cookie (gms-rt-auth-login USERNAME --password-stdin). "
+                "HUMAN-session tool: only call with credentials the user "
+                "explicitly provided, and prefer the Agent Service Token "
+                "(gms_rt_agent_enroll + GMS_AUTH_TOKEN_FILE) so no password "
+                "ever flows through MCP. Not registered in service-token "
+                "mode; the password travels via stdin and is never logged."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1748,11 +1926,12 @@ def tools() -> list[dict[str, Any]]:
             "description": (
                 "Step-up re-authentication as admin for the current CLI "
                 "session (gms-rt-auth-elevate USERNAME --password-stdin). "
-                "Unlocks elevated operations such as firmware burn. Only "
-                "call with admin credentials the user explicitly provided; "
-                "the password travels via stdin and is never logged. "
-                "Prefer GMS_AUTH_TOKEN_FILE agent-token auth so no password "
-                "ever flows through MCP."
+                "Unlocks elevated operations such as firmware burn. "
+                "HUMAN-session tool: only call with admin credentials the "
+                "user explicitly provided, and prefer GMS_AUTH_TOKEN_FILE "
+                "agent-token auth so no password ever flows through MCP. "
+                "Not registered in service-token mode; the password "
+                "travels via stdin and is never logged."
             ),
             "inputSchema": {
                 "type": "object",
@@ -2126,9 +2305,10 @@ def tools() -> list[dict[str, Any]]:
                 "Capture device logcat via `adb shell logcat -v time` "
                 "(gms-rt-devices-logcat). Runs in one-shot dump mode (-d) "
                 "for unattended agents; -f (write device files) and shell "
-                "metacharacters are denied. Pass clear=true to run "
-                "`logcat -c` first (clears the buffer, then captures only "
-                "fresh logs). Optional logcat args, e.g. '-b crash', "
+                "metacharacters are denied. Clearing the log buffer is "
+                "human-only (logcat -c destroys diagnostic evidence): this "
+                "tool denies clear=true and raw -c/--clear in args. "
+                "Optional logcat args, e.g. '-b crash', "
                 "'-t 500', '-s ActivityManager'. Use for device log "
                 "diagnosis; other log management needs the human CLI."
             ),
@@ -2174,10 +2354,9 @@ def tools() -> list[dict[str, Any]]:
                     "clear": {
                         "type": "boolean",
                         "description": (
-                            "Run `logcat -c` before the capture: clears the "
-                            "device log buffer so only fresh logs are "
-                            "returned (destructive to existing buffer "
-                            "content)."
+                            "Deprecated/denied: clearing the device log "
+                            "buffer destroys diagnostic evidence and is "
+                            "human-only; every clear request is rejected."
                         ),
                     },
                     "timeout": {

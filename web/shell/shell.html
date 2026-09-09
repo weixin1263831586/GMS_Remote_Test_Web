@@ -1171,48 +1171,86 @@
 
         <!-- 用户管理页面 -->
         <div class="container page-content" id="page-users">
-            <div class="section-title">👥 用户管理</div>
-
-            <!-- 用户统计卡片 -->
-            <div class="users-stats" style="display: flex; gap: 15px; margin-bottom: 10px;">
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-users-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">用户总数</div>
-                </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="active-users-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">在线用户数</div>
-                </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="testing-users-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">测试中用户</div>
+            <div style="position: relative; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">👥 用户管理</div>
+                <div class="device-group-toolbar" id="agent-access-entry" style="position: absolute; top: -4px; right: 0; display: none;">
+                    <button class="btn-xs" onclick="agentAccessToggle(true)">🔑 Agent 接入管理</button>
                 </div>
             </div>
 
-            <!-- 用户列表 -->
-            <div class="users-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
-                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                    <thead>
-                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">用户标识</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 150px;">IP地址</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">来源</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">直连设备</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">状态</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">连接时间</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">最后活跃</th>
-                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 300px;">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="users-table-body">
-                        <tr>
-                            <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                                加载中...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div id="users-main-view">
+                <!-- 用户统计卡片 -->
+                <div class="users-stats" style="display: flex; gap: 15px; margin-bottom: 10px;">
+                    <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                        <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-users-count">-</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">用户总数</div>
+                    </div>
+                    <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                        <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="active-users-count">-</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">在线用户数</div>
+                    </div>
+                    <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                        <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="testing-users-count">-</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">测试中用户</div>
+                    </div>
+                </div>
+
+                <!-- 用户列表 -->
+                <div class="users-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                        <thead>
+                            <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">用户标识</th>
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 150px;">IP地址</th>
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">来源</th>
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">直连设备</th>
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">状态</th>
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">连接时间</th>
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">最后活跃</th>
+                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 300px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <tr>
+                                <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                    加载中...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Agent 接入管理视图（2026-09-08 audit §二/§三：Service Token + 配对码；覆盖用户管理内容） -->
+            <div id="agent-access-panel" style="display: none;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div class="section-title" style="margin: 0;">🔑 Agent 接入管理</div>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn-xs" onclick="agentAccessReload()">刷新</button>
+                        <button class="btn-xs btn-primary" onclick="agentAccessToggleCreate()">＋ 创建配对码</button>
+                        <button class="btn-xs" onclick="agentAccessToggle(false)">← 返回用户管理</button>
+                    </div>
+                </div>
+                <div id="agent-access-summary" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
+                    编译服务器上的 Codex / Kimi / kkagent 通过一次性配对码换取 Agent Service Token（0600 文件），
+                    之后经 Authorization: Bearer 调用平台，全程不需要平台密码。
+                </div>
+                <div id="agent-access-enroll-form" style="display: none; border: 1px dashed var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px;">
+                        <input id="agent-access-name" class="combo-box" placeholder="Agent 标识名，如 kimi-build03（=编译机上的 Agent 名，便于审计区分）" style="flex: 1; min-width: 240px; height: 28px; font-size: 12px;" />
+                        <input id="agent-access-workers" class="combo-box" placeholder="允许的 Worker（逗号分隔，* 不限）" style="flex: 1; min-width: 200px; height: 28px; font-size: 12px;" />
+                        <input id="agent-access-devices" class="combo-box" placeholder="允许的设备（逗号分隔，* 不限）" style="flex: 1; min-width: 200px; height: 28px; font-size: 12px;" />
+                        <input id="agent-access-days" class="combo-box" type="number" min="1" max="365" value="90" title="有效期（天）" style="width: 90px; height: 28px; font-size: 12px;" />
+                        <span style="font-size: 11px; color: var(--text-secondary);">天</span>
+                    </div>
+                    <div id="agent-access-scopes" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;"></div>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <button class="btn-xs btn-primary" onclick="agentAccessCreateEnrollment()">生成配对码（5 分钟有效）</button>
+                        <span id="agent-access-code-result" class="mono" style="font-size: 12px; font-weight: 600; user-select: all;"></span>
+                    </div>
+                </div>
+                <div id="agent-access-tokens" style="max-height: 320px; overflow-y: auto;"></div>
             </div>
         </div>
 
@@ -1940,39 +1978,7 @@
                 </div>
             </div>
 
-            <!-- Agent 接入管理（2026-09-08 audit §二/§三：Service Token + 配对码） -->
-            <div id="agent-access-panel" style="margin-top: 10px; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: none;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <div style="font-size: 13px; font-weight: 600;">🔑 Agent 接入管理</div>
-                    <div style="display: flex; gap: 6px;">
-                        <button class="btn-xs" onclick="agentAccessReload()">刷新</button>
-                        <button class="btn-xs btn-primary" onclick="agentAccessToggleCreate()">＋ 创建配对码</button>
-                        <button class="btn-xs" onclick="agentAccessToggle(false)">收起</button>
-                    </div>
-                </div>
-                <div id="agent-access-summary" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
-                    编译服务器上的 Codex / Kimi / kkagent 通过一次性配对码换取 Agent Service Token（0600 文件），
-                    之后经 Authorization: Bearer 调用平台，全程不需要平台密码。
-                </div>
-                <div id="agent-access-enroll-form" style="display: none; border: 1px dashed var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
-                    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px;">
-                        <input id="agent-access-name" class="combo-box" placeholder="名称，如 kimi-build03" style="flex: 1; min-width: 160px; height: 28px; font-size: 12px;" />
-                        <input id="agent-access-workers" class="combo-box" placeholder="允许的 Worker（逗号分隔，* 不限）" style="flex: 1; min-width: 200px; height: 28px; font-size: 12px;" />
-                        <input id="agent-access-devices" class="combo-box" placeholder="允许的设备（逗号分隔，* 不限）" style="flex: 1; min-width: 200px; height: 28px; font-size: 12px;" />
-                        <input id="agent-access-days" class="combo-box" type="number" min="1" max="365" value="90" title="有效期（天）" style="width: 90px; height: 28px; font-size: 12px;" />
-                        <span style="font-size: 11px; color: var(--text-secondary);">天</span>
-                    </div>
-                    <div id="agent-access-scopes" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;"></div>
-                    <div style="display: flex; gap: 6px; align-items: center;">
-                        <button class="btn-xs btn-primary" onclick="agentAccessCreateEnrollment()">生成配对码（5 分钟有效）</button>
-                        <span id="agent-access-code-result" class="mono" style="font-size: 12px; font-weight: 600; user-select: all;"></span>
-                    </div>
-                </div>
-                <div id="agent-access-tokens" style="max-height: 220px; overflow-y: auto;"></div>
-            </div>
-            <div id="agent-access-entry" style="margin-top: 8px; display: none;">
-                <button class="btn-xs" onclick="agentAccessToggle(true)">🔑 Agent 接入管理</button>
-            </div>
+            <!-- Agent 接入管理已迁移至用户管理页面（右上角入口） -->
         </div>
 
         <!-- 个人知识库 页面 -->

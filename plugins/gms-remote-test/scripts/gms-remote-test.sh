@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.12.0"
+GMS_RT_VERSION="0.13.0"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -113,7 +113,7 @@ _gms_refresh_bearer_token() {
         # whose owner is not the current user — same hard rule as the
         # Worker Token files.
         local _mode _owner
-        _mode=$(stat -c '%a' "$GMS_AUTH_TOKEN_FILE" 2>/dev/null || printf '600')
+        _mode=$(stat -c '%04a' "$GMS_AUTH_TOKEN_FILE" 2>/dev/null || printf '0600')
         _owner=$(stat -c '%u' "$GMS_AUTH_TOKEN_FILE" 2>/dev/null || printf "$(id -u)")
         if [ "$((_mode & 077))" != "0" ] || [ "$_owner" != "$(id -u)" ]; then
             error "Agent token file $GMS_AUTH_TOKEN_FILE must be 0600 and owned by the current user (got mode $_mode owner $_owner)"

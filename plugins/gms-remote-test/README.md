@@ -34,9 +34,12 @@ Restart kkagent afterwards so the new MCP server process is spawned.
   use `GMS_CURL_INSECURE=1` only in controlled self-signed deployments
   (optional)
 
-No credentials are stored in the plugin. Authenticate inside the agent with
-`gms_rt_auth_login` (the password travels on stdin and is never logged), or
-authenticate outside the agent session.
+No credentials are stored in the plugin. Agents authenticate with an Agent
+Service Token: mint a one-shot enrollment code in the web UI and run
+`gms-rt-agent-enroll CODE` once; the 0600 token file is referenced by
+`GMS_AUTH_TOKEN_FILE` and no platform password ever reaches the agent.
+Password login (`gms-rt-auth-login`) and admin elevation
+(`gms-rt-auth-elevate`) belong to a human CLI session outside the agent.
 
 ## Tools
 
@@ -47,8 +50,8 @@ authenticate outside the agent session.
 | `gms_rt_describe` | Describe one command: usage, risk mode, auth/elevation requirements, agent-safety; served from cache with close-match suggestions. |
 | `gms_rt_devices` | List devices with state, serials, transport. |
 | `gms_rt_auth_status` | Inspect the CLI session's authentication state. |
-| `gms_rt_auth_login` | Establish the CLI session (username + `password_stdin`). |
-| `gms_rt_auth_elevate` | Admin step-up re-auth for the current session (admin credentials via `password_stdin`); unlocks elevated operations. |
+| `gms_rt_auth_login` | Establish the CLI session (username + `password_stdin`). Human context only — agents use the Agent Service Token; hidden entirely when the server runs in service-token mode. |
+| `gms_rt_auth_elevate` | Admin step-up re-auth for the current session (admin credentials via `password_stdin`); unlocks elevated operations. Human context only — hidden in service-token mode. |
 | `gms_rt_burn_firmware` | Burn `update.img` to device(s); requires elevation, wipes `/data` by default, optional `--wait-online`. |
 | `gms_rt_test_start` | Start a test on a device (or `retry=<timestamp>` a failed report); returns `cluster_job_id`, optional `--wait`. |
 | `gms_rt_jobs_list` | List durable test jobs (cheap pre-flight / busy check); rendered one line per job. |
@@ -101,22 +104,22 @@ authenticate outside the agent session.
 
 ```text
 gms_rt_auth_status                          # check the session
-gms_rt_auth_login  username=admin  password_stdin=...   # only if needed
-gms_rt_auth_elevate username=<admin> password_stdin=... # only for burn/elevated ops
+# Agents authenticate via GMS_AUTH_TOKEN_FILE (service token) — no login
+# call and no password. gms_rt_auth_login is for a human session only.
 gms_rt_commands                             # discover commands (compact)
 gms_rt_describe   command=devices-wait      # risk/usage details
 gms_rt_devices
 gms_rt_test_start  device=RK3572  type=CTS  module=...  wait=true
 gms_rt_jobs_status  job_id=<cluster_job_id> # cheap polling (trimmed output)
 gms_rt_jobs_events  job_id=<cluster_job_id> after=<last_seq>
-gms_rt_burn_firmware firmware_path=update.img device=RK3562GMS7   # requires elevation
+gms_rt_burn_firmware firmware_path=update.img device=RK3562GMS7 approval_token=...   # user-minted approval token
 gms_rt_shell       device=RK3562GMS7 command="getprop ro.build.fingerprint"
 gms_rt_logcat      device=RK3562GMS7            # adb shell logcat -v time (dump mode)
 gms_rt_logcat      device=RK3562GMS7 args="-b crash -t 500"
-gms_rt_logcat      device=RK3562GMS7 clear=true  # logcat -c first, then fresh dump
 gms_rt_logcat      device=RK3562GMS7 since="09-07 10:52:00.000"  # dump entries at/after time (device-side -t filter)
 gms_rt_logcat      device=RK3562GMS7 since="09-07 10:52:00" until="09-07 11:00:00.000"  # bounded time window
-gms_rt_shell_exec  device=RK3562GMS7 command="settings put global wifi_on 1" authorized=true   # user-approved one-shot only
+# clearing the log buffer (logcat -c) is human-only via the CLI; the MCP tool denies clear=true
+gms_rt_shell_exec  device=RK3562GMS7 command="settings put global wifi_on 1" approval_token="..."   # one-shot, user-minted approval token only
 gms_rt_reports_list
 ```
 
@@ -141,25 +144,41 @@ dedicated typed MCP tools with explicit confirmation, or a human-run CLI.
 Firmware burn is reachable only through `gms_rt_burn_firmware` (typed) after
 `gms_rt_auth_elevate` with admin credentials the user explicitly provided.
 Arbitrary device shell commands are reachable only through
-`gms_rt_shell_exec`, which requires `authorized=true` (explicit user
-approval of the exact one-shot command) on every single call. The read-only
-`gms_rt_shell` allowlist and dump-mode `gms_rt_logcat` need no extra
-authorization. Passwords are only accepted via `password_stdin` and are
-forwarded on stdin, never logged.
+`gms_rt_shell_exec`, which requires a server-issued one-shot
+`approval_token` (minted by the user via `gms_rt_approval_create` in their
+own human session; bound to tool + device + SHA256(command), 5-minute TTL,
+single use) on every single call — a client-declared `authorized=true`
+boolean was never a security boundary and is no longer accepted. The
+read-only `gms_rt_shell` allowlist needs no extra authorization.
+`gms_rt_logcat` is dump-mode only: clearing the device log buffer
+(`logcat -c`) is destructive to diagnostic evidence and stays human-only
+via the CLI (`gms-rt-devices-logcat DEVICE -c`); the MCP tool denies
+`clear=true`. Agent Service Token (`GMS_AUTH_TOKEN_FILE`) is the preferred
+authentication for agents; the password-based `gms_rt_auth_login` /
+`gms_rt_auth_elevate` tools are for a human session only and are not even
+registered when the MCP server runs in service-token mode
+(`GMS_AGENT_AUTH_MODE=service-token`, set by the installer).
 
-## Maintaining the bundled CLI
+## Maintaining the bundled payload
 
-The CLI is a copy, kept in sync by hand:
+Everything in this plugin except the manifests and docs is a generated
+release copy of `skills/gms-remote-test/`, kept in sync by:
 
 ```bash
-plugins/gms-remote-test/scripts/sync_cli.sh
+plugins/gms-remote-test/scripts/sync_package.sh
 ```
 
-Run it after `skills/gms-remote-test/scripts/gms-remote-test.sh` changes, and
-bump `version` in `kk.plugin.json` when the behavior of exposed tools changes.
+It syncs the CLI, the MCP adapter, the launcher (`mcp_launcher.sh`), the
+MCP reconcile helper (`agent_mcp_config.py`), the `gms-agent` installer CLI,
+the `gms_agent/` Python SDK, `SKILL.md`, `references/`, `agents/`, and
+validates the six-way version contract against
+`agent/gms-remote-test/package.yaml` (the single version source).
+Version bumps go through `python tools/release_agent.py --version X.Y.Z`,
+which rewrites every declaration and re-runs the sync; distribution
+archives are built with `python tools/build_agent_package.py`.
 
 ## Tests
 
 ```bash
-python3 plugins/gms-remote-test/tests/test_mcp_server.py   # 59 tests, no network needed
+python3 -m pytest plugins/gms-remote-test/tests -q   # MCP + packaging + SDK + reconcile, no network needed
 ```

@@ -106,7 +106,9 @@ class CompactEnvelopeTests(unittest.TestCase):
             {
                 "ok": False,
                 "exit_code": 3,
-                "hint": "authenticate with gms_rt_auth_login",
+                "hint": "authenticate with the Agent Service Token: enroll once with "
+                "gms_rt_agent_enroll (one-shot code from the web UI), then every call "
+                "authenticates via GMS_AUTH_TOKEN_FILE — no password",
                 "data": {"error": "Authentication required"},
                 "diagnostics": "need login",
             },
@@ -1043,19 +1045,16 @@ class LogcatToolTests(unittest.TestCase):
             self.assertTrue(is_err, bad)
             self.assertIn("denied", out)
 
-    def test_logcat_clear_true_prepends_clear_flag(self):
-        captured = self._capture_run()
-        _out, is_err = mcp_server.logcat_tool(
-            {"device": "D1", "args": ["-b", "crash"], "clear": True}
-        )
-        self.assertFalse(is_err)
-        self.assertEqual(captured["args"], ["D1", "-c", "-d", "-b", "crash"])
-
-    def test_logcat_clear_accepts_string_true(self):
-        captured = self._capture_run()
-        _out, is_err = mcp_server.logcat_tool({"device": "D1", "clear": "true"})
-        self.assertFalse(is_err)
-        self.assertEqual(captured["args"], ["D1", "-c", "-d"])
+    def test_logcat_clear_true_is_denied(self):
+        # 10.txt §六: clearing the log buffer destroys CTS/GTS diagnostic
+        # evidence, so the MCP tool refuses clear=true in every spelling;
+        # clearing is a human CLI step (logcat -c).
+        for value in (True, "true"):
+            out, is_err = mcp_server.logcat_tool(
+                {"device": "D1", "args": ["-b", "crash"], "clear": value}
+            )
+            self.assertTrue(is_err, value)
+            self.assertIn("denied", out)
 
     def test_logcat_clear_false_by_default(self):
         captured = self._capture_run()
@@ -1063,14 +1062,12 @@ class LogcatToolTests(unittest.TestCase):
         self.assertFalse(is_err)
         self.assertEqual(captured["args"], ["D1", "-d"])
 
-    def test_logcat_raw_clear_flag_is_redirected(self):
-        # Raw -c in args is denied with a pointer to the explicit
-        # clear=true argument.
+    def test_logcat_raw_clear_flag_is_denied(self):
+        # Raw -c/--clear in args is denied with a pointer to the human CLI.
         for bad in ("-c", "--clear"):
             out, is_err = mcp_server.logcat_tool({"device": "D1", "args": [bad]})
             self.assertTrue(is_err, bad)
             self.assertIn("denied", out)
-            self.assertIn("clear=true", out)
 
     def test_logcat_denies_metacharacters(self):
         for bad in ("a;b", "x|y", "$(id)", "`id`", "p'q", 'p"q'):
