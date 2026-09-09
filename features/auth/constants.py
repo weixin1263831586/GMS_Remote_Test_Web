@@ -29,6 +29,13 @@ AGENT_SCOPES: dict[str, str] = {
     "reports.read": "read finished test reports",
     "resources.read_own": "read own resources",
     "resources.write_own": "write own resources",
+    # Redmine evidence / APK analysis / SDK source scopes (2026-09-08 plan:
+    # redmine-cli-agent-implementation-plan.md §5.1). Read-only analysis chain;
+    # Redmine stays GET-only this phase.
+    "redmine.read": "read Redmine issues/attachments visible to the owner identity",
+    "artifacts.read_own": "read own evidence artifacts and derived text",
+    "apk.analyze_own": "run JADX analysis on own artifacts and read results",
+    "sdk.read": "search/read admin-configured SDK source providers",
 }
 
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
@@ -37,6 +44,13 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "resources.read_own",
         "resources.write_own",
         "devices.use_leased",
+        # Human operators use the evidence/APK/SDK readers through their own
+        # Redmine identity and per-owner storage (2026-09-08 plan §5.1); agent
+        # tokens must be granted the matching scopes explicitly.
+        "redmine.read",
+        "artifacts.read_own",
+        "apk.analyze_own",
+        "sdk.read",
     }),
     "device_operator": frozenset({
         "tests.execute",
@@ -45,6 +59,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "devices.use_leased",
         "devices.inventory",
         "devices.lease",
+        "redmine.read",
+        "artifacts.read_own",
+        "apk.analyze_own",
+        "sdk.read",
     }),
     "admin": frozenset({"*"}),
     "worker_service": frozenset({

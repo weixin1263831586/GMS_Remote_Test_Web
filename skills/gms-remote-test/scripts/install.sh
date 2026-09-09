@@ -277,7 +277,14 @@ install_portable_jq() {
         fail "缺少 sha256sum/shasum，无法校验 jq"
     fi
     chmod 755 "$temporary"
+    # R12: 校验通过不代表可用——在当前主机实际执行 --version，失败
+    # （架构不匹配、动态依赖缺失）立即报错，不落地半可用的 jq。
+    if ! "$temporary" --version >/dev/null 2>&1; then
+        rm -f -- "$temporary"
+        fail "下载的 jq 1.8.1 (${asset}) 在本机无法执行；请手动安装 jq (sudo apt-get install jq)"
+    fi
     mv "$temporary" "$target"
+    info "installed $("$target" --version) -> $target"
 }
 
 install_jq_from_controller() {
@@ -285,6 +292,15 @@ install_jq_from_controller() {
     # jq binary from the same origin that already provides the signed skill
     # ZIP — no GitHub access needed. The downloaded file is verified against
     # the X-GMS-SHA256 response header before it is installed.
+    # R12: the Controller pins the linux-amd64 build only — other platforms
+    # go straight to the GitHub fallback, which publishes per-arch assets.
+    local os_name machine
+    os_name=$(uname -s)
+    machine=$(uname -m)
+    if [ "$os_name" != "Linux" ] || [ "$machine" != "x86_64" ]; then
+        info "Controller 固定 jq 仅提供 linux-amd64（当前 ${os_name}/${machine}），改用 GitHub 发布物"
+        return 1
+    fi
     local target="${RUNTIME_BIN_DIR}/jq"
     local temporary="${target}.tmp.$$"
     local expected actual
@@ -315,8 +331,15 @@ install_jq_from_controller() {
         return 1
     }
     chmod 755 "$temporary"
+    # R12: 摘要匹配只证明传输完整，不证明本机可执行（Controller 端点
+    # 已做 ELF/架构体检，这里是最后一道防线）；失败即回退 GitHub。
+    if ! "$temporary" --version >/dev/null 2>&1; then
+        rm -f -- "$temporary"
+        warning "Controller jq 无法在本机执行（--version 失败）; falling back"
+        return 1
+    fi
     mv "$temporary" "$target"
-    info "jq installed from Controller (verified): $target"
+    info "jq installed from Controller (verified): $target ($("$target" --version))"
     return 0
 }
 

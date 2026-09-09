@@ -132,7 +132,17 @@ class ClusterClaimRepositoryMixin:
         if not expected:
             return False
         source_id = f"job:{job_id}"
-        records = [self.claims.active_claim(device_id) for device_id in expected]
+        # R03: 任务占用的物理 claim 集合包含 ADB Proxy alias 的源设备 key
+        # （_claim_devices 建任务时同时占用了 proxy 和源端两个 key）。
+        # 续租必须覆盖全集：只按 device_leases 里的目标 key 续租会让源端
+        # claim 在一个 TTL 后过期，另一用户即可通过本地固件锁入口抢到
+        # 源设备，而 proxy job 的目标 claim 仍然有效。
+        full_keys = set(expected)
+        for device_id in sorted(expected):
+            full_keys.update(self._physical_alias_keys(device_id))
+        records = [
+            self.claims.active_claim(key) for key in sorted(full_keys)
+        ]
         if any(record is None for record in records):
             return False
         if any(
@@ -140,11 +150,12 @@ class ClusterClaimRepositoryMixin:
             for record in records
         ):
             return False
-        return self.claims.renew(
-            source_id,
-            self.claim_lease_ttl_seconds,
-            device_keys=sorted(expected),
-        ) == len(expected)
+        # 不带 device_keys 过滤，按 source_id 续租全部活跃行，把历史
+        # alias key 一并续住；行数必须覆盖全集，否则视为 fencing 丢失。
+        renewed = self.claims.renew(
+            source_id, self.claim_lease_ttl_seconds
+        )
+        return renewed >= len(full_keys)
 
     @staticmethod
     def claim_fencing_tokens(

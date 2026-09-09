@@ -636,6 +636,104 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_agent_access_panel_renders_real_scopes_after_delayed_auth(self):
+        """R10（2026-09-08 审核）真实浏览器验收。
+
+        - 匿名加载：Agent 接入管理入口隐藏；
+        - 登录态经 gms:auth-ready 事件补发（慢登录/重登路径）：入口立即显示；
+        - 真实登录 + 真实 /api/auth/agent-scopes 契约（{scope: 描述} 对象）：
+          权限复选框按对象键渲染并保留默认勾选集。
+        """
+        page = self.browser.new_page(
+            viewport={"width": 1440, "height": 960},
+            bypass_csp=True,
+        )
+        page.set_default_timeout(8000)
+        page.set_default_navigation_timeout(15000)
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(error))
+        try:
+            # 匿名打开（不预登录）：入口必须保持隐藏。
+            page.goto(self.base_url, wait_until="domcontentloaded")
+            expect(page.locator("#auth-gate")).to_be_visible()
+            entry = page.locator("#agent-access-entry")
+            expect(entry).to_be_hidden()
+
+            # 慢登录恢复路径：不整页刷新，登录态晚于 800ms 就绪检查到达。
+            page.evaluate(
+                """
+                () => {
+                  state.currentUser = {role: 'admin', is_admin: true};
+                  state.authReady = true;
+                  window.dispatchEvent(new CustomEvent('gms:auth-ready'));
+                }
+                """
+            )
+            # 入口位于 page-agent 内，需切到该页才能看到（页面容器本身
+            # 依赖活动页切换显隐）。
+            page.evaluate("() => switchPage('agent', null)")
+            expect(entry).to_be_visible()
+
+            # 真实登录（cookie 落到同一浏览器上下文）后重载，走真实 API。
+            # 该页面跳过了 new_page() 的预登录，这里按同一约定先确保
+            # 管理员账号存在（首次运行走 setup）。
+            status = page.request.get(f"{self.base_url}/api/auth/status")
+            self.assertTrue(status.ok, status.text())
+            endpoint = (
+                "setup" if status.json().get("setup_required") else "login"
+            )
+            authenticated = page.request.post(
+                f"{self.base_url}/api/auth/{endpoint}",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                    "display_name": "UI Smoke Admin",
+                },
+            )
+            self.assertTrue(authenticated.ok, authenticated.text())
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_selector(".sidebar-item[data-page]")
+            self.close_initial_modals(page)
+            self.show_all_sidebar_pages(page)
+            page.click(".sidebar-item[data-page='agent']")
+            page.click("#agent-access-entry button")
+            page.wait_for_function(
+                "document.querySelectorAll("
+                "'#agent-access-scopes .agent-access-scope').length > 0"
+            )
+            scopes = page.evaluate(
+                "() => Array.from(document.querySelectorAll("
+                "'#agent-access-scopes .agent-access-scope'))"
+                ".map((input) => input.value)"
+            )
+            # AGENT_SCOPES 服务端契约：对象键集合（修复前是 0 个复选框）。
+            self.assertEqual(
+                sorted(scopes),
+                sorted([
+                    "system.read",
+                    "devices.read",
+                    "devices.lease",
+                    "devices.use_leased",
+                    "devices.inventory",
+                    "tests.execute",
+                    "tests.cancel",
+                    "jobs.read",
+                    "reports.read",
+                    "resources.read_own",
+                    "resources.write_own",
+                ]),
+            )
+            self.assertTrue(
+                page.evaluate(
+                    "document.querySelector("
+                    "'#agent-access-scopes input[value=\"tests.execute\"]'"
+                    ").checked"
+                )
+            )
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_desktop_prompts_before_protected_vnc_requests(self):
         page = self.new_page()
         protected_responses = []

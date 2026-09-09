@@ -28,6 +28,12 @@ tool boundary.
 | `gms_rt_jobs_wait(job_id, max_wait?)` | `gms-rt-jobs-wait` |
 | `gms_rt_jobs_events(job_id, after?, limit?)` | `gms-rt-jobs-events` |
 | `gms_rt_reports_list()` | `gms-rt-reports-list` |
+| `gms_rt_apk_resolve(query, suite_types?, prefer?)` | `gms-rt-apk-resolve` |
+| `gms_rt_apk_analyze(query, suite_types?, prefer?, wait?, max_wait?)` | `gms-rt-apk-analyze` (module artifact → jadx) |
+| `gms_rt_apk_status(task_id)` | `gms-rt-apk-status` |
+| `gms_rt_apk_manifest(task_id)` | `gms-rt-apk-manifest` |
+| `gms_rt_apk_search(task_id, query, limit?)` | `gms-rt-apk-search` |
+| `gms_rt_apk_source(task_id, path?, view?)` | `gms-rt-apk-source` |
 
 Install locally with `plugins/gms-remote-test/scripts/install_local.sh` and
 restart kkagent. Verified playbooks live in

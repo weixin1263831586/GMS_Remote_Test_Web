@@ -44,16 +44,31 @@ async function agentAccessReload() {
                 ? Promise.resolve({ scopes: agentAccessScopesCache })
                 : apiCall('/api/auth/agent-scopes', 'GET'),
         ]);
-        if (scopesResp && Array.isArray(scopesResp.scopes)) {
-            agentAccessScopesCache = scopesResp.scopes;
-            agentAccessRenderScopeCheckboxes();
-        }
+        // R10：服务端返回 {scope: 描述} 对象，统一规范化后再渲染。
+        agentAccessScopesCache = agentAccessNormalizeScopes(
+            scopesResp && scopesResp.scopes
+        );
+        agentAccessRenderScopeCheckboxes();
         agentAccessRenderTokens(tokensResp.tokens || []);
         agentAccessLoaded = true;
     } catch (error) {
         debugLog('[AgentAccess] load failed:', error);
         container.innerHTML = '<div class="suite-empty">加载失败（需要管理员会话）</div>';
     }
+}
+
+function agentAccessNormalizeScopes(raw) {
+    // R10（2026-09-08 审核）：服务端 AGENT_SCOPES 是 {scope: 描述} 对象；
+    // 兼容对象、字符串数组与 {name} 对象数组三种形态，统一成 name 数组。
+    if (Array.isArray(raw)) {
+        return raw
+            .map((entry) => (typeof entry === 'string' ? entry : entry && entry.name))
+            .filter((name) => typeof name === 'string' && name);
+    }
+    if (raw && typeof raw === 'object') {
+        return Object.keys(raw).filter((name) => typeof name === 'string' && name);
+    }
+    return [];
 }
 
 function agentAccessRenderScopeCheckboxes() {
@@ -64,9 +79,7 @@ function agentAccessRenderScopeCheckboxes() {
         'system.read', 'devices.read', 'devices.lease', 'devices.use_leased',
         'tests.execute', 'tests.cancel', 'jobs.read', 'reports.read',
     ];
-    agentAccessScopesCache.forEach((entry) => {
-        const name = typeof entry === 'string' ? entry : entry.name;
-        if (!name) return;
+    agentAccessScopesCache.forEach((name) => {
         const label = document.createElement('label');
         label.style.cssText = 'font-size:11px;display:flex;align-items:center;gap:3px;';
         const input = document.createElement('input');
@@ -170,6 +183,9 @@ async function agentAccessRevoke(tokenId) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // 角色信息就绪后决定是否显示入口按钮。
-    setTimeout(agentAccessEnsureVisibleForRole, 800);
+    // R10（2026-09-08 审核）：入口可见性跟随登录状态事件，而不是只在
+    // 加载后 800ms 检查一次——登录较慢或稍后登录（auth-ready 晚于检查）
+    // 时入口也能显示；退出后重登同样通过事件同步。
+    runAfterAuthReady(agentAccessEnsureVisibleForRole);
+    window.addEventListener('gms:auth-ready', agentAccessEnsureVisibleForRole);
 });

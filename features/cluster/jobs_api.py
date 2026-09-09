@@ -11,6 +11,8 @@ from features.auth import (
 )
 from features.users import owner_id_from_request
 
+from foundation.job_env import filter_job_env
+
 from .api import _authenticate, _require_cluster_enabled, service
 from .execution_spec import (
     build_argv_from_spec,
@@ -128,6 +130,17 @@ def create_job(
         raise HTTPException(503, "local Worker Agent is offline")
     data = body.model_dump()
     data["trace_id"] = str(getattr(request.state, "trace_id", "") or "")
+    # R01: job env 到达 Worker 后会进入 Bash 启动环境，未列入白名单的键
+    # （BASH_ENV/ENV/SHELLOPTS/解释器搜索路径等）可扩大 Worker OS 执行能力，
+    # 必须在入队前拒绝，而不是等到 Worker 端静默丢弃。
+    allowed_env, rejected_env_keys = filter_job_env(data.get("env"))
+    if rejected_env_keys:
+        raise HTTPException(
+            400,
+            "env contains keys outside the job allowlist: "
+            + ", ".join(sorted(rejected_env_keys)),
+        )
+    data["env"] = allowed_env
     # 所有者必须取自认证账户，不接受浏览器传入值。
     data["owner_id"] = _request_owner_id(request)
     data["owner_username"] = _request_owner_username(request)
@@ -142,6 +155,19 @@ def create_job(
                 data["devices"] = selected_devices
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+    # R02: Agent Token 的 Worker/设备 ACL 在最终身份解析完成后统一授权，
+    # 覆盖显式 worker、auto 调度与默认 Worker 三条路径。
+    from features.auth import ensure_agent_device_allowed, ensure_agent_worker_allowed
+
+    ensure_agent_worker_allowed(request, data["worker_id"])
+    worker_prefix = f"{data['worker_id']}:"
+    for device_id in data["devices"]:
+        ensure_agent_device_allowed(request, device_id)
+        serial = str(device_id or "")
+        # 设备既可能按裸序列号、也可能按 "worker:serial" 提交；两种形态
+        # 都要落在 ACL 内，避免换一种写法绕过设备白名单。
+        if serial.startswith(worker_prefix):
+            ensure_agent_device_allowed(request, serial[len(worker_prefix):])
     spec = data.get("execution_spec")
     if spec and spec.get("test_type"):
         requested_path = str(spec.get("suite_path") or "")

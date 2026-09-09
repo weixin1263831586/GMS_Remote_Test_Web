@@ -24,6 +24,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 
 import paramiko
 
@@ -36,6 +37,13 @@ logger = logging.getLogger(__name__)
 _READ_CHUNK = 65536
 _POLL_INTERVAL = 0.01
 _EXIT_DRAIN_GRACE_SECONDS = 0.05
+# R11：退出状态就绪后允许的尾部 drain 上限——远端在 exit 之后仍持续
+# 输出（如派生进程继承 channel）不能把执行器拖住。
+_EXIT_TAIL_DRAIN_SECONDS = 10.0
+# R11：单条命令在内存中捕获的每流输出上限；超出部分丢弃并打标记，
+# 防止高输出任务把 Controller/Worker 内存打爆。
+_MAX_CAPTURED_STREAM_BYTES = 8 * 1024 * 1024
+_TRUNCATION_MARKER = "\n...[GMS: output truncated]"
 
 
 class SSHExecutor:
@@ -48,8 +56,25 @@ class SSHExecutor:
        ``recv_ready()/recv()`` 分离——历史实现两个读取任务争抢同一个
        stdout channel，stderr 日志错乱/丢失；
     3. 异常一律折叠为 ``CommandResult(stdout='', stderr=<msg>, code=-1)``，
-       调用方统一以 ``code == -1`` 判错（流式路径额外回调一条 error 日志）。
+       调用方统一以 ``code == -1`` 判错（流式路径额外回调一条 error 日志）；
+    4. R11（2026-09-08 审核）：执行结束（成功/超时/取消/异常）都在
+       ``finally`` 中关闭 channel。注意这只释放本地 SSH channel 并向远端
+       发送 EOF——脱离会话的远端进程（nohup/setsid）不会因此被终止；
+       对需要强终止的长任务，应使用可追踪的远端任务/进程组协议，不能
+       把"channel 已关闭"等同于"远端进程已退出"；
+    5. R11：总体 deadline 在持续 drain 期间同样生效，退出后的尾部 drain
+       与内存中的输出捕获均有上限；可选 ``should_cancel`` 回调提供协作
+       式取消（检查点返回 True 时停止执行并关闭 channel）。
     """
+
+    def __init__(
+        self,
+        exit_tail_drain_seconds: float = _EXIT_TAIL_DRAIN_SECONDS,
+        max_captured_stream_bytes: int = _MAX_CAPTURED_STREAM_BYTES,
+    ):
+        # 默认值即生产语义；测试用小值验证尾部 drain 上限与截断标记。
+        self._exit_tail_drain_seconds = float(exit_tail_drain_seconds)
+        self._max_captured_stream_bytes = int(max_captured_stream_bytes)
 
     def run(
         self,
@@ -57,8 +82,10 @@ class SSHExecutor:
         command: str,
         timeout: int = 30,
         get_pty: bool = False,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> CommandResult:
         """Blocking execution on an established SSH client."""
+        channel = None
         try:
             _stdin, stdout, _stderr = ssh.exec_command(
                 command, timeout=timeout, get_pty=get_pty,
@@ -69,8 +96,25 @@ class SSHExecutor:
             # chunk 的多字节字符误判为非 UTF-8 而产生乱码。
             stdout_chunks: list[bytes] = []
             stderr_chunks: list[bytes] = []
+            stdout_bytes = 0
+            stderr_bytes = 0
+            stdout_truncated = False
+            stderr_truncated = False
             deadline = time.monotonic() + timeout if timeout and timeout > 0 else None
             exit_seen_at: float | None = None
+            max_captured = self._max_captured_stream_bytes
+
+            def _over_deadline() -> bool:
+                # 总体 deadline 在持续 drain 期间同样生效（R11），不能只
+                # 在外层轮询处检查——高输出会一直走 recv 分支绕过它。
+                return (
+                    deadline is not None
+                    and exit_seen_at is None
+                    and time.monotonic() >= deadline
+                )
+
+            def _cancel_requested() -> bool:
+                return should_cancel is not None and should_cancel()
 
             # stdout/stderr share one SSH channel window. Reading one stream to
             # EOF before touching the other can deadlock when the unconsumed
@@ -80,13 +124,33 @@ class SSHExecutor:
                 while channel.recv_ready():
                     data = channel.recv(_READ_CHUNK)
                     if data:
-                        stdout_chunks.append(data)
+                        if stdout_bytes + len(data) <= max_captured:
+                            stdout_chunks.append(data)
+                            stdout_bytes += len(data)
+                        else:
+                            stdout_truncated = True
                     made_progress = True
+                    if _over_deadline():
+                        raise TimeoutError(
+                            f"SSH command timed out after {timeout} seconds"
+                        )
+                    if _cancel_requested():
+                        raise RuntimeError("SSH command cancelled by caller")
                 while channel.recv_stderr_ready():
                     data = channel.recv_stderr(_READ_CHUNK)
                     if data:
-                        stderr_chunks.append(data)
+                        if stderr_bytes + len(data) <= max_captured:
+                            stderr_chunks.append(data)
+                            stderr_bytes += len(data)
+                        else:
+                            stderr_truncated = True
                     made_progress = True
+                    if _over_deadline():
+                        raise TimeoutError(
+                            f"SSH command timed out after {timeout} seconds"
+                        )
+                    if _cancel_requested():
+                        raise RuntimeError("SSH command cancelled by caller")
 
                 now = time.monotonic()
                 if channel.exit_status_ready():
@@ -98,21 +162,44 @@ class SSHExecutor:
                         and now - exit_seen_at >= _EXIT_DRAIN_GRACE_SECONDS
                     ):
                         break
+                    if now - exit_seen_at >= self._exit_tail_drain_seconds:
+                        # exit 之后仍有数据到达（远端派生进程持有 channel）：
+                        # 尾部 drain 到上限为止，避免执行器被无限拖住。
+                        logger.warning(
+                            "[SSH] tail drain exceeded %.1fs after exit; "
+                            "closing channel anyway",
+                            self._exit_tail_drain_seconds,
+                        )
+                        break
                 else:
                     exit_seen_at = None
 
-                if deadline is not None and now >= deadline and exit_seen_at is None:
-                    raise TimeoutError(f"SSH command timed out after {timeout} seconds")
+                if _over_deadline():
+                    raise TimeoutError(
+                        f"SSH command timed out after {timeout} seconds"
+                    )
+                if _cancel_requested():
+                    raise RuntimeError("SSH command cancelled by caller")
                 if not made_progress:
                     time.sleep(_POLL_INTERVAL)
 
             stdout_text = CommonUtils.decode_ssh_output(b"".join(stdout_chunks))
             stderr_text = CommonUtils.decode_ssh_output(b"".join(stderr_chunks))
+            if stdout_truncated:
+                stdout_text += _TRUNCATION_MARKER
+            if stderr_truncated:
+                stderr_text += _TRUNCATION_MARKER
             exit_code = channel.recv_exit_status()
             return CommandResult(stdout=stdout_text, stderr=stderr_text, code=exit_code)
         except Exception as e:
             logger.error(f"[SSH] Command execution error: {e}")
             return CommandResult(stdout="", stderr=str(e), code=-1)
+        finally:
+            # R11：无论成功、超时、取消还是异常，都释放本地 channel，
+            # 不再让调用方认为已结束的命令继续占用 SSH 资源。
+            if channel is not None:
+                with suppress(Exception):
+                    channel.close()
 
     async def run_async(
         self,
@@ -131,6 +218,7 @@ class SSHExecutor:
         log_callback: Callable[[str, str], Awaitable[None]],
         timeout: int = 300,
         get_pty: bool = False,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> CommandResult:
         """Streaming execution with per-line log callback.
 
@@ -139,9 +227,13 @@ class SSHExecutor:
           ``get_pty=True``，此时 stderr 合并进 stdout，统一按 ``info`` 回调；
         - 逐行回调的同时捕获全文，结束后返回带 stdout/stderr/exit code
           的 :class:`CommandResult`；
-        - 退出状态就绪后仍继续 drain 缓冲数据，避免尾部输出丢失。
+        - 退出状态就绪后仍继续 drain 缓冲数据，避免尾部输出丢失；
+        - R11：超时/取消/异常路径在 ``finally`` 中关闭 channel；持续高
+          输出同样受总体 deadline 约束；内存捕获有上限（超出打标记），
+          退出后的尾部 drain 有时限。
         """
         logger.info(f"[SSH] Executing command: {command[:100]}")
+        channel = None
         try:
             _stdin, stdout, _stderr = await asyncio.to_thread(
                 ssh.exec_command,
@@ -157,15 +249,33 @@ class SSHExecutor:
             # run() 的整流解码约束一致，见其注释）。
             stdout_pending = b""
             stderr_pending = b""
+            stdout_bytes = 0
+            stderr_bytes = 0
+            stdout_truncated = False
+            stderr_truncated = False
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout if timeout and timeout > 0 else None
             exit_seen_at: float | None = None
+
+            def _over_deadline() -> bool:
+                # 总体 deadline 在持续 drain 期间同样生效（R11）。
+                return (
+                    deadline is not None
+                    and exit_seen_at is None
+                    and loop.time() >= deadline
+                )
+
+            def _cancel_requested() -> bool:
+                return should_cancel is not None and should_cancel()
+
+            max_captured = self._max_captured_stream_bytes
 
             async def consume_chunk(
                 data: bytes,
                 pending: bytes,
                 captured: list[str],
                 log_type: str,
+                capture: bool = True,
             ) -> bytes:
                 pending += data
                 while True:
@@ -175,7 +285,10 @@ class SSHExecutor:
                     raw, pending = pending[:newline], pending[newline + 1:]
                     line = raw.decode("utf-8", errors="replace")
                     if line.strip():
-                        captured.append(line)
+                        # R11：超过捕获上限后仍逐行回调（实时日志不中断），
+                        # 但不再把行留在内存里。
+                        if capture:
+                            captured.append(line)
                         await log_callback(line.strip(), log_type)
                 return pending
 
@@ -187,17 +300,39 @@ class SSHExecutor:
                 while channel.recv_ready():
                     data = await asyncio.to_thread(channel.recv, _READ_CHUNK)
                     if data:
+                        if stdout_bytes + len(data) <= max_captured:
+                            stdout_bytes += len(data)
+                        else:
+                            stdout_truncated = True
                         stdout_pending = await consume_chunk(
                             data, stdout_pending, stdout_lines, "info",
+                            capture=not stdout_truncated,
                         )
                     made_progress = True
+                    if _over_deadline():
+                        raise TimeoutError(
+                            f"SSH command timed out after {timeout} seconds"
+                        )
+                    if _cancel_requested():
+                        raise RuntimeError("SSH command cancelled by caller")
                 while channel.recv_stderr_ready():
                     data = await asyncio.to_thread(channel.recv_stderr, _READ_CHUNK)
                     if data:
+                        if stderr_bytes + len(data) <= max_captured:
+                            stderr_bytes += len(data)
+                        else:
+                            stderr_truncated = True
                         stderr_pending = await consume_chunk(
                             data, stderr_pending, stderr_lines, "error",
+                            capture=not stderr_truncated,
                         )
                     made_progress = True
+                    if _over_deadline():
+                        raise TimeoutError(
+                            f"SSH command timed out after {timeout} seconds"
+                        )
+                    if _cancel_requested():
+                        raise RuntimeError("SSH command cancelled by caller")
 
                 now = loop.time()
                 if channel.exit_status_ready():
@@ -209,11 +344,24 @@ class SSHExecutor:
                         and now - exit_seen_at >= _EXIT_DRAIN_GRACE_SECONDS
                     ):
                         break
+                    if now - exit_seen_at >= self._exit_tail_drain_seconds:
+                        # exit 之后仍有数据到达（远端派生进程持有 channel）：
+                        # 尾部 drain 到上限为止，避免执行器被无限拖住。
+                        logger.warning(
+                            "[SSH] stream tail drain exceeded %.1fs after "
+                            "exit; closing channel anyway",
+                            self._exit_tail_drain_seconds,
+                        )
+                        break
                 else:
                     exit_seen_at = None
 
-                if deadline is not None and now >= deadline and exit_seen_at is None:
-                    raise TimeoutError(f"SSH command timed out after {timeout} seconds")
+                if _over_deadline():
+                    raise TimeoutError(
+                        f"SSH command timed out after {timeout} seconds"
+                    )
+                if _cancel_requested():
+                    raise RuntimeError("SSH command cancelled by caller")
                 if not made_progress:
                     await asyncio.sleep(_POLL_INTERVAL)
 
@@ -228,6 +376,10 @@ class SSHExecutor:
 
             stdout_text = "\n".join(stdout_lines)
             stderr_text = "\n".join(stderr_lines)
+            if stdout_truncated:
+                stdout_text += _TRUNCATION_MARKER
+            if stderr_truncated:
+                stderr_text += _TRUNCATION_MARKER
 
             # drain 完成后再取退出码，并移入线程避免阻塞事件循环。
             exit_code = await asyncio.to_thread(channel.recv_exit_status)
@@ -238,8 +390,17 @@ class SSHExecutor:
 
         except Exception as e:
             logger.error(f"[SSH] Error executing command: {e}")
-            await log_callback(f"SSH 执行错误: {e!s}", "error")
+            with suppress(Exception):
+                await log_callback(f"SSH 执行错误: {e!s}", "error")
             return CommandResult(stdout="", stderr=str(e), code=-1)
+        finally:
+            # R11：无论成功、超时、取消还是异常，都释放本地 channel。
+            # 注意：这只是关闭 SSH channel（向远端送 EOF），不能保证
+            # 脱离会话的远端进程退出；需要强终止的长任务须使用进程组
+            # 级别的远端取消协议。
+            if channel is not None:
+                with suppress(Exception):
+                    await asyncio.to_thread(channel.close)
 
 
 # 全局执行器实例（无状态，可在同步与异步上下文共用）

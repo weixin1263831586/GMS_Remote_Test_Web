@@ -233,6 +233,25 @@ def _score_apk_symbol_candidate(candidate: dict[str, Any], current_path: str, cu
     return score, -candidate.get('line', 0)
 
 
+def _resolve_jadx_path() -> str:
+    """Resolve the jadx binary path.
+
+    Deployments may override it via the optional ``jadx_path`` config key —
+    some hosts ship a JDK that jadx cannot run with, and the wrapper script
+    around a working JDK is a deployment-local concern. Falls back to the
+    value bound at startup (``tools/jadx/bin/jadx``) when unset.
+    """
+    manager = runtime.config_manager
+    if manager is not None:
+        try:
+            configured = str(manager.load_config().get("jadx_path") or "").strip()
+        except Exception:
+            configured = ""
+        if configured:
+            return configured
+    return runtime.jadx_path
+
+
 async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
     """后台运行 jadx 反编译"""
     try:
@@ -245,7 +264,7 @@ async def _run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
 
         jadx_threads = min(max(os.cpu_count() or 2, 2), 8)
         cmd = [
-            runtime.jadx_path,
+            _resolve_jadx_path(),
             '-d', output_dir,
             '-j', str(jadx_threads),
             '-m', 'simple',

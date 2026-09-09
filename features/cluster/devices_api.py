@@ -4,15 +4,30 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from features.auth import CurrentUser, require_authenticated_user_when_auth_required
+from features.auth import (
+    CurrentUser,
+    ensure_agent_worker_allowed,
+    require_authenticated_user_when_auth_required,
+)
 
 from .api import service
 
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _agent_acl_parts(record: dict | None, kind: str) -> tuple[str, set[str]]:
+    """Return (raw ACL string, normalized value set) for allowed_{kind}."""
+
+    allowed = str((record or {}).get(f"allowed_{kind}") or "").strip()
+    if not allowed:
+        allowed = "*"
+    return allowed, {
+        part.strip() for part in allowed.split(",") if part.strip()
+    }
 
 
 def _annotate_adb_proxy_source(devices: list[dict]) -> list[dict]:
@@ -62,17 +77,51 @@ def _annotate_adb_proxy_source(devices: list[dict]) -> list[dict]:
 
 @router.get("/devices")
 def list_devices(
+    request: Request,
     worker_id: str = Query(default=""),
     _user: CurrentUser | None = Depends(
         require_authenticated_user_when_auth_required
     ),
 ):
     svc = service()
+    user = _user
+    # R02: Agent Token 读取设备清单受 devices.read scope 和 Worker/设备
+    # ACL 双重约束；人类会话保持原有行为不变。
+    if (
+        user is not None
+        and getattr(request.state, "auth_method", None) == "agent_token"
+    ):
+        if not user.has_permission("devices.read"):
+            raise HTTPException(
+                403,
+                detail={
+                    "message": "Agent token scope 'devices.read' required",
+                    "scope_required": "devices.read",
+                },
+            )
+        if worker_id:
+            ensure_agent_worker_allowed(request, worker_id)
     if not svc.effective_enabled:
         if worker_id and worker_id != svc.config.local_worker_id:
             raise HTTPException(409, "cluster mode is disabled")
         worker_id = svc.config.local_worker_id
     devices = svc.repository.list_devices(worker_id)
+    if (
+        user is not None
+        and getattr(request.state, "auth_method", None) == "agent_token"
+    ):
+        record = getattr(request.state, "agent_token_record", None)
+        workers_raw, workers_set = _agent_acl_parts(record, "workers")
+        devices_raw, devices_set = _agent_acl_parts(record, "devices")
+        if workers_raw != "*" or devices_raw != "*":
+            devices = [
+                item
+                for item in devices
+                if (workers_raw == "*"
+                    or str(item.get("worker_id") or "") in workers_set)
+                and (devices_raw == "*"
+                     or str(item.get("serial") or "") in devices_set)
+            ]
     worker_statuses = {
         str(worker.get("id") or ""): str(worker.get("status") or "offline")
         for worker in svc.list_workers()
