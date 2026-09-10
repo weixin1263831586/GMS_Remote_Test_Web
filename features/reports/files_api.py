@@ -41,6 +41,19 @@ from .downloads import (
 )
 
 
+def _principal_has_reports_read(principal: object) -> bool:
+    """11.txt P1: reports.read gate (mirror of analysis_api helper).
+
+    Agent principals must carry the reports.read scope; human roles get it
+    from ROLE_PERMISSIONS and admin via '*'. getattr fallback keeps unit
+    tests that stub a bare principal object working.
+    """
+    has_permission = getattr(principal, "has_permission", None)
+    if not callable(has_permission):
+        return True
+    return bool(has_permission("reports.read"))
+
+
 router = APIRouter()
 REPORT_FILE_VIEW_MAX_BYTES = 1024 * 1024
 
@@ -151,9 +164,21 @@ async def list_reports(
     """Get test report list from database."""
     import time
     start_time = time.time()
+    # 11.txt P1: agent principals must hold reports.read to read reports
+    # (human roles carry it via ROLE_PERMISSIONS; dev-mode anonymous passes).
+    # Inline has_permission check (not the require_agent_scope dependency) so
+    # unit tests can stub the auth seam the same way as everywhere else.
     principal = report_request_user(request)
     if principal is None and authentication_required():
         principal = require_authenticated_user(request)
+    if not _principal_has_reports_read(principal):
+        return error_response(
+            {
+                "message": "Agent token scope 'reports.read' required",
+                "scope_required": "reports.read",
+            },
+            status_code=403,
+        )
 
     try:
         display_id = (
@@ -252,7 +277,17 @@ async def download_report(
     path: str = Query(None, include_in_schema=False),
 ):
     """Unified report interface: list files, download ZIP, or view file content."""
-    require_authenticated_user(request)
+    principal = require_authenticated_user(request)
+    # 11.txt P1: report file browsing/download needs reports.read for agent
+    # principals (human roles carry it via ROLE_PERMISSIONS; admin via '*').
+    if not _principal_has_reports_read(principal):
+        return error_response(
+            {
+                "message": "Agent token scope 'reports.read' required",
+                "scope_required": "reports.read",
+            },
+            status_code=403,
+        )
     FileUtils = dependencies.file_utils
     try:
         if path:
@@ -396,3 +431,97 @@ async def download_report(
             "[DOWNLOAD] Request failed: %s", redact_sensitive_text(e), exc_info=True
         )
         return error_response("Report download failed", 500)
+
+
+@router.get("/api/reports/failure-summary")
+async def report_failure_summary(
+    request: Request,
+    report_id: str = Query(default=""),
+    report_timestamp: str = Query(default=""),
+    max_cases: Annotated[int, Query(ge=1, le=100)] = 20,
+    stack_head_lines: Annotated[int, Query(ge=0, le=100)] = 15,
+):
+    """Structured failure summary for one report (11.txt P1 §4).
+
+    Parses test_result.xml server-side so agents stop paging through
+    hundred-MB raw logs with offset windows: returns the failed-case list
+    (module, name, reason, stack-trace head). Same reports.read gate as
+    list/download; ownership is enforced through the same access helpers.
+    """
+    principal = require_authenticated_user(request)
+    if not _principal_has_reports_read(principal):
+        return error_response(
+            {
+                "message": "Agent token scope 'reports.read' required",
+                "scope_required": "reports.read",
+            },
+            status_code=403,
+        )
+    if not report_id and not report_timestamp:
+        return error_response("report_id or report_timestamp is required", 400)
+    try:
+        report = (
+            test_report_db.get_report(
+                report_id,
+                owner_id=None if principal.role == "admin" else principal.id,
+                include_all=principal.role == "admin",
+            )
+            if report_id and hasattr(test_report_db, "get_report")
+            else get_accessible_report_by_timestamp(
+                test_report_db, request, report_timestamp
+            )
+        )
+        if not report or not can_access_report(request, report):
+            return error_response("Report not found", 404)
+
+        result_dir = str(report.get("result_dir") or "").strip()
+        if not result_dir or not os.path.isdir(result_dir):
+            return error_response("Report result directory is unavailable", 404)
+        xml_path = os.path.join(result_dir, "test_result.xml")
+        if not os.path.isfile(xml_path):
+            return error_response(
+                "test_result.xml not found in the report result directory", 404
+            )
+
+        def _parse() -> list[dict]:
+            from .xml_parser import XMLReportParser
+
+            failures = XMLReportParser().parse_file(xml_path).failures
+            cases: list[dict] = []
+            for failure in failures[:max_cases]:
+                stack_trace = str(failure.stack_trace or "")
+                stack_head = ""
+                if stack_trace and stack_head_lines > 0:
+                    stack_head = "\n".join(
+                        stack_trace.splitlines()[:stack_head_lines]
+                    )
+                cases.append(
+                    {
+                        "module": failure.module,
+                        "name": failure.name,
+                        "reason": failure.reason,
+                        "stack_head": stack_head,
+                    }
+                )
+            return cases
+
+        import asyncio as _asyncio
+
+        cases = await _asyncio.to_thread(_parse)
+        return JSONResponse(
+            content={
+                "success": True,
+                "report_timestamp": report.get("timestamp"),
+                "report_name": report.get("report_name"),
+                "failed": len(cases),
+                "truncated": len(cases) >= max_cases,
+                "cases": cases,
+            }
+        )
+    except Exception as e:
+        logger.error(
+            "[FAILURE_SUMMARY] Request failed: %s",
+            redact_sensitive_text(e),
+            exc_info=True,
+        )
+        return error_response("Failure summary failed", 500)

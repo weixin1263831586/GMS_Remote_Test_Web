@@ -42,6 +42,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         # / jobs.read API gates keep accepting humans while agents need scopes.
         "tests.cancel",
         "jobs.read",
+        "reports.read",
         "resources.read_own",
         "resources.write_own",
         "devices.use_leased",
@@ -57,6 +58,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "tests.execute",
         "tests.cancel",  # 11.txt P1: see "user" above
         "jobs.read",
+        "reports.read",  # 11.txt P1: see "user" above
         "resources.read_own",
         "resources.write_own",
         "devices.use_leased",

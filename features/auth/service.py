@@ -29,6 +29,15 @@ from .schema import initialize_auth_schema
 AUTH_COOKIE_NAME = "gms_session"
 PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
+# 11.txt P3-1: fixed dummy hash for the unknown-username login branch —
+# precomputed once at import (format matches _verify_password's parser) so
+# that branch runs exactly one PBKDF2 like the known-user branch.
+_UNKNOWN_USER_DUMMY_HASH = "$".join((
+    PASSWORD_ALGORITHM,
+    str(PASSWORD_ITERATIONS),
+    "30313233343536373839616263646566",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+))
 # The browser cookie is intentionally a session cookie and is discarded when
 # the browser closes. Keep the server-side absolute ceiling effectively
 # non-expiring so a long-running GMS test or terminal session is not interrupted
@@ -242,13 +251,13 @@ class AuthService(
                 ((username or "").strip(),),
             ).fetchone()
         if not row:
-            # 11.txt P3-1: run a fixed-salt dummy PBKDF2 verify for unknown
+            # 11.txt P3-1: run ONE fixed-salt dummy PBKDF2 verify for unknown
             # users so the response time matches the known-user path and the
-            # endpoint stops leaking username existence through timing.
-            self._verify_password(
-                password or "",
-                self._hash_password("timing-equalizer", salt="0" * 32),
-            )
+            # endpoint stops leaking username existence through timing. The
+            # hash is precomputed at import: verifying (1 PBKDF2) mirrors the
+            # known-user branch exactly — hashing here instead would double
+            # the work and merely INVERT the timing signal.
+            self._verify_password(password or "", _UNKNOWN_USER_DUMMY_HASH)
             return None
         if not self._verify_password(password or "", row["password_hash"]):
             return None

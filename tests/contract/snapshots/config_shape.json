@@ -1,4 +1,5 @@
 {
+  "_comment": "str",
   "ai_models": {
     "enabled": "bool",
     "primary_provider": "str",
@@ -52,32 +53,8 @@
       "query_limit": "int",
       "query_page_size": "int"
     },
-    "department_profiles": [
-      {
-        "id": "str",
-        "list_limit": "int",
-        "max_history_changes": "int",
-        "name": "str",
-        "owners": [
-          "str"
-        ],
-        "query_limit": "int",
-        "query_page_size": "int"
-      }
-    ],
-    "personal_profiles": [
-      {
-        "department": "str",
-        "department_id": "str",
-        "id": "str",
-        "list_limit": "int",
-        "max_history_changes": "int",
-        "name": "str",
-        "owner": "str",
-        "query_limit": "int",
-        "query_page_size": "int"
-      }
-    ],
+    "department_profiles": [],
+    "personal_profiles": [],
     "query_limit": "int",
     "rest_password": "str",
     "rest_username": "str",
@@ -88,6 +65,7 @@
     "ssh_user": "str"
   },
   "gsi_scripts": "str",
+  "jadx_java_home": "str",
   "jadx_path": "str",
   "local_server": "str",
   "opengrok": {
@@ -175,7 +153,12 @@
   ],
   "static_routes": {
     "enabled": "bool",
-    "routes": []
+    "routes": [
+      {
+        "destination": "str",
+        "gateway": "str"
+      }
+    ]
   },
   "suites_path": "str",
   "ubuntu_host": "str",

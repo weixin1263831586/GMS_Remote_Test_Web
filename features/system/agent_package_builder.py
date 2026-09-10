@@ -30,7 +30,7 @@ from pathlib import Path
 
 
 PACKAGE_ROOT_NAME = "gms-remote-test"
-PAYLOAD_DIRS = ("scripts", "skills", "tests")
+PAYLOAD_DIRS = ("scripts", "skills", "tests", "docs")
 CLIENT_MANIFESTS: dict[str, list[str]] = {
     "universal": ["kk.plugin.json", "kimi.plugin.json", ".codex-plugin/plugin.json"],
     "kimi": ["kimi.plugin.json"],

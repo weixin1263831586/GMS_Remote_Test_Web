@@ -5953,6 +5953,223 @@ body.apk-resizing {
     font-size: 10px;
 }
 
+/* ==================== 用户与 Agent 接入管理 ==================== */
+.users-page-header {
+    position: relative;
+    flex-shrink: 0;
+    min-height: 18px;
+    margin-bottom: 6px;
+}
+
+.users-page-header > .section-title {
+    margin: 0;
+}
+
+.users-view-tabs {
+    position: absolute;
+    top: -4px;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--darker-bg);
+    overflow: hidden;
+}
+
+.users-view-tabs .btn-xs {
+    height: 26px;
+    min-height: 26px;
+    padding: 3px 9px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transition: none;
+}
+
+#agent-access-entry {
+    display: flex;
+    align-items: stretch;
+    border-left: 1px solid var(--border-color);
+}
+
+#agent-access-entry > .btn-xs {
+    flex: 1;
+}
+
+.users-view-tabs .btn-xs:hover {
+    border: 0;
+    background: var(--lighter-bg);
+    box-shadow: none;
+    transform: none;
+}
+
+.users-view-tabs .btn-xs.active {
+    color: var(--text-primary);
+    background: var(--light-bg);
+    box-shadow: none;
+}
+
+#users-main-view,
+#agent-access-panel {
+    flex: 1;
+    min-height: 0;
+}
+
+#users-main-view,
+#agent-access-panel {
+    display: flex;
+    flex-direction: column;
+}
+
+.users-stats,
+.agent-access-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.user-stat-card,
+.agent-access-stat {
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: inherit;
+    background: var(--light-bg);
+    box-shadow: var(--shadow-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.user-stat-card:hover,
+.user-stat-card.active,
+.agent-access-stat:hover,
+.agent-access-stat.active {
+    border-color: var(--primary-light);
+}
+
+.user-stat-card.active,
+.agent-access-stat.active {
+    background: color-mix(in srgb, var(--primary-color) 10%, var(--light-bg));
+}
+
+.user-stat-value,
+.user-stat-label,
+.agent-access-stat strong,
+.agent-access-stat span {
+    display: block;
+}
+
+.user-stat-value,
+.agent-access-stat strong {
+    font-size: 24px;
+    line-height: 1.1;
+    font-weight: 750;
+}
+
+.user-stat-value.total { color: var(--primary-color); }
+.user-stat-value.online { color: var(--success-color); }
+.user-stat-value.testing { color: var(--warning-color); }
+.agent-access-stat:nth-child(1) strong { color: var(--primary-color); }
+.agent-access-stat:nth-child(2) strong { color: var(--success-color); }
+.agent-access-stat:nth-child(3) strong { color: var(--danger-color); }
+
+.user-stat-label,
+.agent-access-stat span {
+    margin-top: 5px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.users-list-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.users-filter-group,
+.users-list-meta,
+.agent-access-list-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+#users-search-input {
+    width: min(320px, 36vw);
+}
+
+#users-status-filter {
+    width: 112px;
+}
+
+.users-list-meta {
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+#users-visible-count::after {
+    content: '\00b7';
+    margin-left: 7px;
+}
+
+.users-table-wrap {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--light-bg);
+}
+
+.users-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.users-table thead {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+}
+
+.users-table th {
+    padding: 5px 6px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    background: var(--darker-bg);
+    font-size: 13px;
+    text-align: center;
+}
+
+.users-table tbody tr {
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.12s ease;
+}
+
+.users-table tbody tr:hover {
+    background: color-mix(in srgb, var(--primary-color) 5%, transparent);
+}
+
+.users-table tbody tr:last-child td {
+    border-bottom: 0 !important;
+}
+
+.users-col-identity { width: 200px; }
+.users-col-ip { width: 150px; }
+.users-col-source { width: 100px; }
+.users-col-status { width: 100px; }
+.users-col-time { width: 100px; }
+.users-col-actions { width: 300px; }
+
 .user-actions-grid {
     display: grid;
     grid-template-columns: 44px 44px;
@@ -5981,6 +6198,407 @@ body.apk-resizing {
     color: var(--text-secondary);
 }
 
+#agent-access-panel {
+    overflow: auto;
+}
+
+.agent-access-create-card,
+.agent-access-code-card {
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+    background: var(--light-bg);
+    box-shadow: var(--shadow-sm);
+}
+
+.agent-access-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 30px;
+    margin-bottom: 9px;
+    padding: 0 1px;
+}
+
+#agent-access-summary {
+    flex: 1 1 300px;
+    min-width: 160px;
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#agent-access-create-toggle {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.agent-access-list-label {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex: 0 0 285px;
+    min-width: 0;
+    padding-left: 12px;
+    border-left: 1px solid var(--border-color);
+}
+
+.agent-access-list-label strong,
+.agent-access-list-label span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-access-list-label strong {
+    flex: 0 0 auto;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.agent-access-list-label span {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.agent-access-toolbar .agent-access-list-actions {
+    flex: 0 0 auto;
+}
+
+.agent-access-stat {
+    appearance: none;
+}
+
+.agent-access-create-card {
+    margin-bottom: 10px;
+    padding: 13px;
+}
+
+.agent-access-card-heading,
+.agent-access-scope-heading,
+.agent-access-form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.agent-access-card-heading {
+    margin-bottom: 12px;
+}
+
+.agent-access-card-heading strong,
+.agent-access-card-heading span {
+    display: block;
+}
+
+.agent-access-card-heading strong {
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.agent-access-card-heading span,
+.agent-access-form-hint {
+    margin-top: 3px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.agent-access-form-grid {
+    display: grid;
+    grid-template-columns: minmax(190px, 1fr) minmax(190px, 1fr) 110px;
+    gap: 10px;
+}
+
+.agent-access-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.agent-access-field-wide {
+    grid-column: 1 / -1;
+}
+
+.agent-access-field > span:first-child {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.agent-access-field em {
+    color: var(--warning-color);
+    font-size: 10px;
+    font-style: normal;
+}
+
+.agent-access-field small {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+.agent-access-field input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.agent-access-input-suffix {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.agent-access-input-suffix b {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.agent-access-scope-fieldset {
+    min-width: 0;
+    margin: 12px 0;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+}
+
+.agent-access-scope-heading {
+    margin-bottom: 8px;
+}
+
+.agent-access-scope-heading legend {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 650;
+}
+
+.agent-access-scope-heading > div {
+    display: flex;
+    gap: 4px;
+}
+
+.agent-access-scope-heading .btn-xxs {
+    min-width: 42px;
+}
+
+.agent-access-scopes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.agent-access-scope-option {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 1px 6px;
+    min-width: 0;
+    padding: 7px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--darker-bg);
+    cursor: pointer;
+}
+
+.agent-access-scope-option:has(input:checked) {
+    border-color: var(--primary-light);
+    background: color-mix(in srgb, var(--primary-color) 9%, var(--darker-bg));
+}
+
+.agent-access-scope-option input {
+    grid-row: 1 / 3;
+    margin: 2px 0 0;
+}
+
+.agent-access-scope-option strong {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-family: monospace;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-access-scope-option small {
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: 10px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-access-code-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding: 12px 14px;
+    border-color: var(--success-color);
+}
+
+.agent-access-code-card[hidden] {
+    display: none;
+}
+
+.agent-access-code-card span,
+.agent-access-code-card strong,
+.agent-access-code-card small {
+    display: block;
+}
+
+.agent-access-code-card span {
+    color: var(--success-color);
+    font-size: 10px;
+    font-weight: 650;
+}
+
+.agent-access-code-card strong {
+    margin: 3px 0;
+    color: var(--text-primary);
+    font-size: 16px;
+    letter-spacing: 1px;
+    user-select: all;
+}
+
+.agent-access-code-card small {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+#agent-access-search {
+    width: 180px;
+}
+
+#agent-access-status-filter {
+    width: 105px;
+}
+
+.agent-access-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--light-bg);
+}
+
+.agent-access-table {
+    width: 100%;
+    min-width: 1180px;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+}
+
+.agent-access-table thead {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+}
+
+.agent-access-table th {
+    padding: 8px 7px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    background: var(--darker-bg);
+    font-size: 12px;
+    font-weight: 650;
+    text-align: center;
+}
+
+.agent-access-table td {
+    padding: 8px 7px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.35;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.agent-access-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.agent-access-table tbody tr:hover {
+    background: color-mix(in srgb, var(--primary-color) 5%, transparent);
+}
+
+.agent-token-cell-identity,
+.agent-token-cell-scopes,
+.agent-token-cell-acl {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-token-cell-identity {
+    text-align: left !important;
+}
+
+.agent-token-cell-identity strong {
+    font-size: 12px;
+}
+
+.agent-token-cell-identity code {
+    margin-left: 5px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.agent-token-status {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    padding: 3px 7px;
+    border-radius: 999px;
+    color: var(--success-color);
+    background: color-mix(in srgb, var(--success-color) 12%, transparent);
+    font-size: 11px;
+}
+
+.agent-token-status.expired,
+.agent-token-status.revoked {
+    color: var(--danger-color);
+    background: color-mix(in srgb, var(--danger-color) 10%, transparent);
+}
+
+.agent-token-cell-scopes,
+.agent-token-cell-acl,
+.agent-token-cell-date {
+    color: var(--text-secondary);
+    font-size: 11px !important;
+}
+
+.agent-access-table .btn-danger {
+    min-width: 52px;
+    min-height: 24px;
+    padding: 2px 8px;
+}
+
+.agent-access-empty {
+    height: 90px;
+    color: var(--text-secondary) !important;
+    text-align: center !important;
+}
+
+.agent-token-col-identity { width: 200px; }
+.agent-token-col-status { width: 72px; }
+.agent-token-col-scopes { width: 235px; }
+.agent-token-col-worker { width: 130px; }
+.agent-token-col-device { width: 155px; }
+.agent-token-col-owner { width: 82px; }
+.agent-token-col-validity { width: 150px; }
+.agent-token-col-used { width: 105px; }
+.agent-token-col-action { width: 62px; }
+
 @media (max-width: 980px) {
     #page-agent > div:nth-child(2) {
         grid-template-columns: 1fr !important;
@@ -5991,6 +6609,25 @@ body.apk-resizing {
     .agent-message {
         max-width: 94%;
     }
+
+    .agent-access-scopes {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .agent-access-toolbar {
+        flex-wrap: wrap;
+    }
+
+    #agent-access-summary {
+        flex-basis: calc(100% - 130px);
+    }
+
+    .agent-access-list-label {
+        flex: 1 1 285px;
+        padding-left: 0;
+        border-left: 0;
+    }
+
 }
 
 /* Compact shell layout: keep every interactive control reachable on narrow clients. */
@@ -6036,6 +6673,43 @@ body.apk-resizing {
 
     .container {
         padding: 8px;
+    }
+
+    .users-list-toolbar,
+    .agent-access-toolbar,
+    .agent-access-code-card {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .users-stats,
+    .agent-access-stats {
+        grid-template-columns: 1fr !important;
+    }
+
+    .users-filter-group,
+    .users-list-meta,
+    .agent-access-list-actions {
+        flex-wrap: wrap;
+    }
+
+    #users-search-input,
+    #agent-access-search {
+        width: 100%;
+        flex: 1 1 100%;
+    }
+
+    .agent-access-form-grid,
+    .agent-access-scopes {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-access-code-card .btn-xs {
+        width: 100%;
+    }
+
+    .agent-access-list-label {
+        width: 100%;
     }
 
     .main-container > .page-content:not(#page-test) {

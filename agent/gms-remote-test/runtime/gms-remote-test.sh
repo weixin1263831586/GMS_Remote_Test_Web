@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.15.2"
+GMS_RT_VERSION="0.15.3"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -34,6 +34,20 @@ GMS_PORT="${GMS_PORT:-5001}"
 if [ -n "${GMS_REMOTE_TEST_SERVER:-}" ]; then
     SERVER_URL="$GMS_REMOTE_TEST_SERVER"
 else
+    # gms-agent installs record the Controller URL (and the TLS policy for
+    # self-signed deployments) in the client profile env — source the first
+    # configured profile instead of guessing a local server.
+    for _gms_profile_env in "${HOME}/.local/share/gms-remote-test/mcp"/*.env; do
+        if [ -f "$_gms_profile_env" ]; then
+            # shellcheck disable=SC1090
+            . "$_gms_profile_env"
+            break
+        fi
+    done
+    SERVER_URL="${GMS_REMOTE_TEST_SERVER:-}"
+fi
+
+if [ -z "$SERVER_URL" ]; then
     # Check if we're running on the server machine (use dynamic IP detection)
     # Try to get local IP using the same method as get_local_ip() in Python
     LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -436,7 +450,20 @@ api_call() {
                 if [ "$is_auth_endpoint" = "1" ]; then
                     :
                 else
-                    diagnostic "权限不足或需要管理员提权。请运行: gms-rt-auth-elevate [username]"
+                    # 11.txt 中优先级 §5: 透传服务端 403 body 里的
+                    # scope_required / agent_forbidden，让 agent 能区分
+                    # 「缺 scope」（可自查 agent-scopes / 申请新 token）与
+                    # 「human-only 端点」（跑 auth-elevate 也没有意义）。
+                    local _scope_required _agent_forbidden
+                    _scope_required=$(printf '%s' "$body" | jq -r '.detail.scope_required // .scope_required // empty' 2>/dev/null || true)
+                    _agent_forbidden=$(printf '%s' "$body" | jq -r '.detail.agent_forbidden // .agent_forbidden // empty' 2>/dev/null || true)
+                    if [ -n "$_agent_forbidden" ] && [ "$_agent_forbidden" != "false" ]; then
+                        diagnostic "该端点仅限人工会话（agent token 被服务端拒绝）。agent 无法自行提权，请联系管理员评估。"
+                    elif [ -n "$_scope_required" ]; then
+                        diagnostic "当前 token 缺少 scope '$_scope_required'。scope 目录: GET /api/auth/agent-scopes；请在 Web UI 重新注册并勾选该 scope。"
+                    else
+                        diagnostic "权限不足或需要管理员提权。请运行: gms-rt-auth-elevate [username]"
+                    fi
                 fi
                 ;;
         esac
@@ -2006,6 +2033,55 @@ gms-rt-devices-remount() {
 # Capture one device screenshot via the controller UI-control endpoint.
 # 供 MCP image tool 使用：返回 {base64, mime_type, ...}（无 data: 前缀），
 # agent 端可直接转 MCP image content；人类终端请用 devices-scrcpy。
+gms-rt-devices-ui-dump() {
+    # 11.txt P0 §2: uiautomator dump 的平台化版本——POST /devices/ui/layout
+    # 返回控件树 JSON（bounds/text/clickable），替代 ssh→uiautomator dump→
+    # scp→本地解析的四步绕行。只读、单命令。
+    local device_id="$1"
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-ui-dump DEVICE_ID"; return "$GMS_RT_EXIT_USAGE"; }
+    check_jq
+    local response
+    response=$(api_call "/devices/ui/layout" "POST" "{\"serial\":\"$device_id\"}")
+    if ! echo "$response" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "UI dump failed: $(extract_api_error "$response")"
+        return "$GMS_RT_EXIT_OPERATION"
+    fi
+    echo "$response" | jq '{serial, source, elements}'
+}
+
+gms-rt-devices-snapshot() {
+    # 11.txt P1 §5: 一次调用聚合设备状态快照——fingerprint、前台 activity、
+    # 锁屏状态、device owner/admin 列表。之前要逐条 shell + dumpsys 拼装。
+    # 复用 gms-rt-devices-shell（本地 adb / SSH 直连，同 gms_rt_shell 白名单
+    # 语义之外的平台诊断路径），每条独立失败降级为 null，不拖垮整个快照。
+    local device_id="$1"
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-snapshot DEVICE_ID"; return "$GMS_RT_EXIT_USAGE"; }
+    check_jq
+    _snapshot_probe() {
+        local output
+        output=$(gms-rt-devices-shell "$device_id" "$1" 2>/dev/null) || return 0
+        printf '%s' "$output" | head -3
+    }
+    local prop_fp activity keyguard owners
+    prop_fp=$(_snapshot_probe "getprop ro.build.fingerprint")
+    activity=$(_snapshot_probe "dumpsys activity activities | grep -m1 topResumedActivity")
+    keyguard=$(_snapshot_probe "dumpsys window | grep -m1 mDreamingLockscreen")
+    owners=$(_snapshot_probe "dpm list-owners")
+    jq -n \
+        --arg device "$device_id" \
+        --arg fingerprint "$prop_fp" \
+        --arg activity "$activity" \
+        --arg keyguard "$keyguard" \
+        --arg owners "$owners" \
+        '{
+            device: $device,
+            fingerprint: ($fingerprint | if length > 0 then . else null end),
+            focused_activity: ($activity | if length > 0 then . else null end),
+            lockscreen: ($keyguard | if length > 0 then . else null end),
+            device_owners: ($owners | if length > 0 then . else null end)
+        }'
+}
+
 gms-rt-devices-screencap() {
     local device_id="$1"
     [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-screencap DEVICE_ID"; return "$GMS_RT_EXIT_USAGE"; }
@@ -3594,6 +3670,73 @@ gms-rt-jobs-cancel() {
     api_call "/cluster/jobs/$(_urlencode "$job_id")/cancel" "POST" "{}" | jq '.'
 }
 
+gms-rt-jobs-follow() {
+    # 11.txt P1 §3: one call instead of jobs_status + jobs_events ping-pong.
+    # Returns current status + incremental events since a cursor; when the
+    # job already finished it appends a compact failed-case summary (parsed
+    # server-side from test_result.xml) so agents never page raw logs.
+    local job_id="${1:-}"
+    local after=-1
+    local limit=100
+    [ -n "$job_id" ] || {
+        error "Usage: gms-rt-jobs-follow <job_id> [--after SEQUENCE] [--limit N]"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    shift
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --after) shift; [ "$#" -gt 0 ] && after="$1" || return "$GMS_RT_EXIT_USAGE" ;;
+            --after=*) after="${1#*=}" ;;
+            --limit) shift; [ "$#" -gt 0 ] && limit="$1" || return "$GMS_RT_EXIT_USAGE" ;;
+            --limit=*) limit="${1#*=}" ;;
+            *) error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE" ;;
+        esac
+        shift
+    done
+    if ! [[ "$after" =~ ^-?[0-9]+$ ]] || ! [[ "$limit" =~ ^[1-9][0-9]*$ ]]; then
+        error "--after must be an integer and --limit a positive integer"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    local status_json events_json next_cursor
+    status_json=$(api_call "/cluster/jobs/$(_urlencode "$job_id")")
+    local call_status=$?
+    if [ "$call_status" -ne 0 ]; then
+        printf '%s\n' "$status_json"
+        return "$call_status"
+    fi
+    events_json=$(api_call "/cluster/jobs/$(_urlencode "$job_id")/events?after=${after}&limit=${limit}")
+    call_status=$?
+    if [ "$call_status" -ne 0 ]; then
+        events_json='{"events":[]}'
+    fi
+    next_cursor=$(echo "$events_json" | jq -r '.next_cursor // (.events | if length > 0 then (map(.sequence // .seq) | max) else "'"$after"'" end) // "'"$after"'"' 2>/dev/null)
+    local status
+    status=$(echo "$status_json" | jq -r '.job.status // empty')
+    local summary_json='null'
+    case "$status" in
+        completed|failed|cancelled)
+            # Terminal state: attach the failed-case summary (server parses
+            # test_result.xml). Errors degrade to null, never fail the call.
+            summary_json=$(api_call "/reports/failure-summary?cluster_job_id=$(_urlencode "$job_id")" 2>/dev/null \
+                | jq '{failed: (.failed // null), cases: (.cases // null)}' 2>/dev/null) \
+                || summary_json='null'
+            ;;
+    esac
+    jq -n \
+        --argjson status "$status_json" \
+        --argjson events "$events_json" \
+        --argjson after "$after" \
+        --argjson next_cursor "${next_cursor:-$after}" \
+        --argjson failure_summary "$summary_json" \
+        '{
+            job: ($status.job // $status),
+            events_since_cursor: ($events.events // []),
+            cursor: {before: $after, after: $next_cursor},
+            failure_summary: $failure_summary
+        }'
+}
+
 gms-rt-jobs-wait() {
     local job_id="${1:-}"
     [ -n "$job_id" ] || {
@@ -4765,6 +4908,9 @@ _gms_rt_command_usage() {
         gms-rt-devices-wait) printf '%s' 'gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]' ;;
         gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [command]' ;;
         gms-rt-devices-screencap) printf '%s' 'gms-rt-devices-screencap <device_id>' ;;
+        gms-rt-devices-ui-dump) printf '%s' 'gms-rt-devices-ui-dump <device_id>' ;;
+        gms-rt-devices-snapshot) printf '%s' 'gms-rt-devices-snapshot <device_id>' ;;
+        gms-rt-jobs-follow) printf '%s' 'gms-rt-jobs-follow <job_id> [--after SEQUENCE] [--limit N]' ;;
         gms-rt-devices-logcat) printf '%s' 'gms-rt-devices-logcat <device_id> [-c] [logcat args]' ;;
         gms-rt-devices-push) printf '%s' 'gms-rt-devices-push <device_id> <local_file> <remote_path>' ;;
         gms-rt-jobs-list) printf '%s' 'gms-rt-jobs-list [limit]' ;;
@@ -5154,6 +5300,8 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-logcat             - Capture device logcat (adb shell logcat -v time; -c clears buffer first)
   gms-rt-devices-push               - Push file to device (adb push)
   gms-rt-devices-screencap          - Capture device screenshot as base64 PNG
+  gms-rt-devices-ui-dump            - Dump UI layout tree as JSON elements
+  gms-rt-devices-snapshot           - One-shot device state snapshot (fp/activity/lock/owners)
 
 ${YELLOW}File Management:${NC}
   gms-rt-files-progress          - Get upload progress
@@ -5218,6 +5366,7 @@ ${YELLOW}Durable Test Jobs:${NC}
   gms-rt-jobs-status             - Get one durable test job
   gms-rt-jobs-events             - Read job events incrementally
   gms-rt-jobs-wait               - Wait for a job to finish
+  gms-rt-jobs-follow             - Status + incremental events + failure summary in one call
   gms-rt-jobs-cancel             - Cancel a durable test job
 
 ${YELLOW}USB/IP Connection:${NC}
