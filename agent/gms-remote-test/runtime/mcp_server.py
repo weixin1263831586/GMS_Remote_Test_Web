@@ -57,6 +57,8 @@ Tools:
   evidence and is human-only via the CLI; clear=true and raw -c are denied)
 - gms_rt_shell_exec  one-shot device shell command (server-issued approval
   token required; v0.8.0+)
+- gms_rt_devices_screencap  capture one device screenshot as MCP image
+  content (base64 PNG; read-only UI diagnosis)
 """
 
 from __future__ import annotations
@@ -75,7 +77,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.15.1"
+SERVER_VERSION = "0.15.2"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -89,8 +91,16 @@ SAFETY_CACHE_TTL_SECONDS = 300
 # an agent context then cannot even express a password login or a
 # self-minted approval. Agents enroll once via gms_rt_agent_enroll and
 # authenticate with GMS_AUTH_TOKEN_FILE.
+#
+# 15.txt 审核 P1-1: two independent signals put the server into
+# service-token mode. mcp_launcher.py now FORCES GMS_AGENT_AUTH_MODE
+# (setdefault() let an ambient auth-mode variable leak through) and stamps
+# GMS_AGENT_PROCESS=1, which only the launcher sets — either signal alone
+# is sufficient, so a forged auth-mode env var alone cannot widen the tool
+# catalog on a launcher-launched agent.
 _SERVICE_TOKEN_MODE = (
-    str(os.environ.get("GMS_AGENT_AUTH_MODE", "")).strip().lower()
+    str(os.environ.get("GMS_AGENT_PROCESS", "")).strip() == "1"
+    or str(os.environ.get("GMS_AGENT_AUTH_MODE", "")).strip().lower()
     == "service-token"
 )
 
@@ -538,6 +548,10 @@ def run_cli(
         data = parsed_envelope.get("data")
         if isinstance(data, dict):
             for key, value in list(data.items()):
+                # base64 图片载荷(device screencap / evidence images)必须
+                # 原样保留:截断会产生无效 base64,下游解码直接损坏。
+                if key == "base64":
+                    continue
                 if isinstance(value, str) and len(value) > MAX_OUTPUT_BYTES:
                     data[key] = (
                         value[: MAX_OUTPUT_BYTES // 2]
@@ -2707,6 +2721,26 @@ def _all_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "gms_rt_devices_screencap",
+            "description": (
+                "Capture one Android device screenshot and return it as "
+                "MCP image content (base64 PNG) with device metadata. "
+                "Read-only UI diagnosis; the device must be visible to the "
+                "controller and not leased by another client."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "device": {
+                        "type": "string",
+                        "description": "Device serial, e.g. RK3562GMS7.",
+                    },
+                },
+                "required": ["device"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_redmine_image",
             "description": (
                 "Return one image artifact as MCP image content (base64) "
@@ -3026,6 +3060,42 @@ def redmine_artifact_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-artifact-read", args)
 
 
+def devices_screencap_tool(arguments: dict[str, Any]) -> ToolContent:
+    """Capture one device screenshot and return MCP image content.
+
+    Read-only UI diagnosis for agents: replaces the manual
+    screencap -> pull -> read-file loop. The device must be visible to the
+    controller; a device currently leased by another client is rejected
+    server-side with a conflict error.
+    """
+    device = str(arguments.get("device") or "").strip()
+    if not device:
+        return ToolContent(
+            [{"type": "text", "text": "device (serial) is required"}], is_error=True
+        )
+    text, is_error = run_cli("gms-rt-devices-screencap", [device])
+    if is_error:
+        return ToolContent([{"type": "text", "text": text}], is_error=True)
+    # The CLI envelope carries data.base64/mime_type; convert to image content.
+    try:
+        envelope = json.loads(text)
+        data = envelope.get("data") or {}
+        image_b64 = str(data.get("base64") or "")
+        mime = str(data.get("mime_type") or "image/png")
+    except (ValueError, AttributeError):
+        return ToolContent([{"type": "text", "text": text}], is_error=False)
+    if not image_b64:
+        return ToolContent(
+            [{"type": "text", "text": "controller returned no image payload"}],
+            is_error=True,
+        )
+    meta = {"device_id": str(data.get("device_id") or device)}
+    return ToolContent([
+        {"type": "text", "text": json.dumps(meta, ensure_ascii=False)},
+        {"type": "image", "mimeType": mime, "data": image_b64},
+    ])
+
+
 def redmine_image_tool(arguments: dict[str, Any]) -> ToolContent:
     """Fetch an evidence artifact image and return MCP image content.
 
@@ -3166,6 +3236,7 @@ _TOOL_HANDLERS = {
     "gms_rt_redmine_artifact_search": redmine_artifact_search_tool,
     "gms_rt_redmine_artifact_read": redmine_artifact_read_tool,
     "gms_rt_redmine_image": redmine_image_tool,
+    "gms_rt_devices_screencap": devices_screencap_tool,
     "gms_rt_apk_analyze_attachment": apk_analyze_attachment_tool,
     "gms_rt_apk_source_search": apk_source_search_tool,
     "gms_rt_apk_source_read": apk_source_read_tool,
@@ -3213,18 +3284,23 @@ def handle(message: dict[str, Any]) -> None:
             )
             return
         try:
-            text, is_error = handler(arguments)
+            result = handler(arguments)
         except Exception as error:  # MCP boundary: convert failures to tool errors.
-            text, is_error = f"gms-rt tool failed: {error}", True
-        if isinstance(text, ToolContent):
-            response(
-                request_id,
-                {
-                    "content": text.items,
-                    "isError": is_error or text.is_error,
-                },
-            )
-            return
+            text = f"gms-rt tool failed: {error}"
+            is_error = True
+        else:
+            # ToolContent-returning tools (device screencap, evidence images)
+            # come back as rich content; tuple returns stay the text path.
+            if isinstance(result, ToolContent):
+                response(
+                    request_id,
+                    {
+                        "content": result.items,
+                        "isError": result.is_error,
+                    },
+                )
+                return
+            text, is_error = result
         response(
             request_id,
             {

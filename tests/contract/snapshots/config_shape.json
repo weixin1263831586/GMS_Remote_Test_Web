@@ -7,21 +7,13 @@
         "api_format": "str",
         "api_key": "str",
         "base_url": "str",
+        "capabilities": [
+          "str"
+        ],
+        "display_name": "str",
         "enabled": "bool",
-        "max_tokens": "int",
-        "model": "str",
-        "name": "str",
-        "temperature": "float"
-      },
-      "zhipu": {
-        "api_format": "str",
-        "api_key": "str",
-        "base_url": "str",
-        "enabled": "bool",
-        "max_tokens": "int",
-        "model": "str",
-        "name": "str",
-        "temperature": "float"
+        "max_context_size": "int",
+        "model": "str"
       }
     }
   },

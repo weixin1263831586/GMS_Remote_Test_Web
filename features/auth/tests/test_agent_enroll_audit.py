@@ -25,6 +25,27 @@ from features.auth import auth_service
 from features.system import security_audit_logger
 
 
+_ED25519_TEST_KEY_PEM: bytes | None = None
+
+
+def _test_ed25519_key_pem() -> bytes:
+    """15.txt 审核 P2: production fixtures must supply an agent-package
+    signing key now that production validation requires one."""
+    global _ED25519_TEST_KEY_PEM
+    if _ED25519_TEST_KEY_PEM is None:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+
+        _ED25519_TEST_KEY_PEM = Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    return _ED25519_TEST_KEY_PEM
+
+
 class AgentEnrollmentPublicAccessTests(unittest.TestCase):
     """R05: full-app entry point with GMS_AUTH_REQUIRED=true."""
 
@@ -44,6 +65,19 @@ class AgentEnrollmentPublicAccessTests(unittest.TestCase):
             f"{security_audit_logger.log_path}.lock"
         )
         security_audit_logger._head_hash = None
+        (Path(self.tmp.name) / "cluster.json").write_text("{}", encoding="utf-8")
+        (Path(self.tmp.name) / "worker_tokens.json").write_text(
+            json.dumps(
+                {
+                    "worker_tokens": {
+                        "r05-r09-test-worker": "worker-token-for-r05-r09-tests-0001"
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        signing_key_path = Path(self.tmp.name) / "agent_signing_key.pem"
+        signing_key_path.write_bytes(_test_ed25519_key_pem())
         self.environment = unittest.mock.patch.dict(
             "os.environ",
             {
@@ -56,6 +90,7 @@ class AgentEnrollmentPublicAccessTests(unittest.TestCase):
                 "GMS_AUTOMATION_WEBHOOK_TOKEN": "webhook-token-r05-r09-tests-0001",
                 "GMS_AUTOMATION_OWNER_ID": "service-automation",
                 "GMS_BOOTSTRAP_TOKEN": "bootstrap-token-for-r05-r09-tests-001",
+                "GMS_SKILL_SIGNING_KEY_FILE": str(signing_key_path),
                 "GMS_CLUSTER_CONFIG": str(
                     Path(self.tmp.name) / "cluster.json"
                 ),
@@ -65,17 +100,6 @@ class AgentEnrollmentPublicAccessTests(unittest.TestCase):
                 "GMS_ALLOWED_ORIGINS": "https://testserver",
                 "TRUSTED_HOSTS": "testserver",
             },
-        )
-        (Path(self.tmp.name) / "cluster.json").write_text("{}", encoding="utf-8")
-        (Path(self.tmp.name) / "worker_tokens.json").write_text(
-            json.dumps(
-                {
-                    "worker_tokens": {
-                        "r05-r09-test-worker": "worker-token-for-r05-r09-tests-0001"
-                    }
-                }
-            ),
-            encoding="utf-8",
         )
         self.environment.start()
         self.addCleanup(self.environment.stop)

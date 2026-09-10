@@ -173,6 +173,20 @@ async def stop_test(
     if response:
         return response
 
+    # 11.txt P1: tests.cancel was defined but never enforced server-side.
+    # Mirror the start_test pattern: agent principals must hold the scope;
+    # human roles carry tests.cancel via ROLE_PERMISSIONS (dev-mode anonymous
+    # callers keep working because the principal is None there).
+    from features.auth import get_authenticated_user
+
+    principal = None
+    try:
+        principal = get_authenticated_user(request)
+    except AttributeError:
+        principal = None  # stub request without state (unit tests)
+    if principal is not None and not principal.has_permission("tests.cancel"):
+        return error_response("缺少 tests.cancel 权限", status_code=403)
+
     owner_id = runtime.get_client_id_from_request(request)
     try:
         from foundation.cluster_port import (

@@ -128,9 +128,14 @@ def main() -> int:
     if client:
         load_profile(client)
 
-    # Agents must never run in password mode even if the profile is missing:
-    # the MCP server itself refuses to register password tools without this.
-    os.environ.setdefault("GMS_AGENT_AUTH_MODE", "service-token")
+    # 15.txt 审核 P1-1: FORCE service-token — setdefault() let an ambient
+    # GMS_AGENT_AUTH_MODE=human/password from the parent shell leak through
+    # and re-enable the password/elevation tools. Agents must never run in
+    # password mode even if the profile is missing. GMS_AGENT_PROCESS=1 is
+    # stamped ONLY here, so the MCP server gets an independent second
+    # signal that cannot be widened by forging the auth-mode variable.
+    os.environ["GMS_AGENT_AUTH_MODE"] = "service-token"
+    os.environ["GMS_AGENT_PROCESS"] = "1"
 
     os.execv(
         sys.executable,

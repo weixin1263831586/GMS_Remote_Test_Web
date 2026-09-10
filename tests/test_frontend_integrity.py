@@ -308,14 +308,21 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("return await new Promise((resolve, reject)", chunks)
         self.assertIn("const uploadError = error instanceof Error", chunks)
         self.assertIn("formData.append('chunk_size', chunkSize)", chunks)
-        self.assertIn("chunk-upload.js?v=20260910-elevation-retry", shell)
+        self.assertIn("chunk-upload.js?v=20260910-elev-recovery", shell)
         self.assertNotIn("普通固件烧写需要 ADB 设备", firmware)
-        self.assertIn("firmware-burn.js?v=20260910-elevation-retry", shell)
+        self.assertIn("firmware-burn.js?v=20260910-elev-recovery", shell)
         # 提权过期（403 elevation_required）时：分片不再整块重试，
         # 烧录页弹出管理员提权后续传，elevation 状态检查失败不 fail-open。
         self.assertIn("chunkUploadHttpError", chunks)
         self.assertIn("error.elevationRequired", chunks)
-        self.assertIn("uploadError?.elevationRequired", firmware)
+        # 15.txt 审核 P2: elevation-expiry recovery lives in chunk-upload.js
+        # (uploadChunksWithElevationRecovery); the firmware page only wires
+        # the re-elevation prompt callback, keeping it under its size budget.
+        self.assertIn("uploadChunksWithElevationRecovery", chunks)
+        self.assertIn("elevationRequired", chunks)
+        self.assertIn("uploadError?.elevationRequired", chunks)
+        self.assertIn("uploadChunksWithElevationRecovery", firmware)
+        self.assertIn("onReElevate", firmware)
         self.assertIn("继续固件上传（管理员验证已过期）", firmware)
         elevation = read_text("web/static/js/pages/auth-elevation.js")
         self.assertIn(
@@ -386,14 +393,14 @@ class FrontendIntegrityTests(unittest.TestCase):
             navigation,
         )
         self.assertIn(
-            'curl -kfsSL "https://server:5001/api/system/skills/install.sh" | bash',
+            'curl -kfsSL "https://server:5001/api/agent/install.sh" | bash',
             api_constants,
         )
         self.assertIn(
             "{% if request.url.scheme == 'https' %}-kfsSL{% else %}-fsSL{% endif %}",
             shell,
         )
-        self.assertIn("apiPath === '/api/system/skills/install.sh'", navigation)
+        self.assertIn("apiPath === '/api/agent/install.sh'", navigation)
         self.assertIn("apiPath === '/api/system/skills'", navigation)
         self.assertIn("全部独立gms-rt-*命令", api_constants)
 

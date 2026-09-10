@@ -1455,5 +1455,55 @@ class RedmineEvidenceToolTests(unittest.TestCase):
                 )
 
 
+class ServiceTokenBoundaryTests(unittest.TestCase):
+    """15.txt 审核 P1-1: the tool-catalog boundary is service-token mode.
+
+    mcp_launcher.py must FORCE GMS_AGENT_AUTH_MODE (a plain setdefault let
+    an ambient auth-mode variable from the parent shell re-enable the
+    password/elevation tools) and stamp GMS_AGENT_PROCESS=1 — the server
+    treats EITHER signal as sufficient, so forging one alone cannot widen
+    the catalog on a launcher-launched agent.
+    """
+
+    @staticmethod
+    def _service_token_mode(env: dict[str, str]) -> str:
+        # Strip inherited GMS_AGENT* vars so the host's own profile can
+        # never leak into the assertion.
+        clean = {
+            key: value for key, value in os.environ.items()
+            if not key.startswith("GMS_AGENT")
+        }
+        clean.update(env)
+        code = (
+            f"import sys; sys.path.insert(0, {str(RUNTIME_DIR)!r}); "
+            "import mcp_server; print(int(mcp_server._SERVICE_TOKEN_MODE))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env=clean,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    def test_forced_auth_mode_enables_service_token_mode(self):
+        self.assertEqual(
+            self._service_token_mode({"GMS_AGENT_AUTH_MODE": "service-token"}), "1"
+        )
+
+    def test_launcher_process_stamp_alone_enables_service_token_mode(self):
+        self.assertEqual(self._service_token_mode({"GMS_AGENT_PROCESS": "1"}), "1")
+
+    def test_no_agent_signals_stays_human_mode(self):
+        self.assertEqual(self._service_token_mode({}), "0")
+
+    def test_launcher_forces_auth_mode_and_stamps_process(self):
+        source = (RUNTIME_DIR / "mcp_launcher.py").read_text(encoding="utf-8")
+        self.assertNotIn('setdefault("GMS_AGENT_AUTH_MODE"', source)
+        self.assertIn('os.environ["GMS_AGENT_AUTH_MODE"] = "service-token"', source)
+        self.assertIn('os.environ["GMS_AGENT_PROCESS"] = "1"', source)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

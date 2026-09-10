@@ -41,7 +41,7 @@ MIGRATION_LINE_LIMITS = {
     'features/reports/weekly_report_api.py': 1123,
     'features/system/api.py': 1185,  # +41 R26 websocket/jq; +1 11.txt installer wrapper 重写(净)
     'features/system/api_docs_list.py': 985,
-    'features/system/integrations.py': 613,
+    'features/system/integrations.py': 619,  # +6: 11.txt P1 _HUMAN_ONLY vpn/ssh POST
     'features/system/assets.py': 604,  # +10: auth deps on opengrok/favicon
     'features/system/icon_fetcher.py': 870,
     'features/users/config_api.py': 617,

@@ -4494,7 +4494,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     const install = buildSkillInstallCommand();
                     const installApi = generateCurlCommand({
                         method: 'GET',
-                        path: '/api/system/skills/install.sh',
+                        path: '/api/agent/install.sh',
                     }, {});
                     const archiveApi = generateCurlCommand({
                         method: 'GET',
@@ -4515,7 +4515,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
 
             expected = (
-                f'curl -fsSL "{self.base_url}/api/system/skills/install.sh" | bash'
+                f'curl -fsSL "{self.base_url}/api/agent/install.sh" | bash'
             )
             self.assertEqual(result["install"], expected)
             self.assertEqual(result["installApi"]["full"], expected)

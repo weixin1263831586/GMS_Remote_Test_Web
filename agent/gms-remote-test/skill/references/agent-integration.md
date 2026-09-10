@@ -95,19 +95,21 @@ context.
 
 ## Build server workflow
 
-Install from the Controller while logged in to the build server. Do NOT use
-`curl -k` — it defeats the entire bootstrap trust chain (an attacker able to
-MITM install.sh could also swap the embedded Ed25519 public key). Install a
-trusted CA first, or use the pinned key flow:
+Install from the Controller while logged in to the build server:
 
 ```bash
-curl --cacert /etc/gms/controller-ca.pem -fsSL \
-  "https://CONTROLLER:5001/api/system/skills/install.sh" -o /tmp/gms-agent-install.sh
-bash /tmp/gms-agent-install.sh --client auto
+curl -kfsSL "https://CONTROLLER:5001/api/agent/install.sh" | bash -s -- --client auto
 export PATH="$HOME/.local/bin:$PATH"
 gms-rt-system-health --json --non-interactive
 gms-rt-auth-status --json --non-interactive
 ```
+
+`bash -s -- <CODE>` (one-shot enrollment code from the web UI) exchanges the
+code for a 0600 Agent Service Token in the same run. Self-signed deployments:
+without `GMS_INSTALL_CA_CERT` the wrapper skips TLS verification (with a
+warning) — content integrity is still enforced by the gms-agent manifest
+SHA-256 + Ed25519 signature; strict-CA environments export
+`GMS_INSTALL_CA_CERT` before installing.
 
 `--client auto` additionally installs the self-contained Skill+MCP plugin
 for every detected agent (Codex/Kimi/kkagent), reconciles each client's MCP

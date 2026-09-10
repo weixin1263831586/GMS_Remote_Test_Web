@@ -241,7 +241,16 @@ class AuthService(
                 "SELECT * FROM platform_users WHERE username = ? AND disabled = 0",
                 ((username or "").strip(),),
             ).fetchone()
-        if not row or not self._verify_password(password or "", row["password_hash"]):
+        if not row:
+            # 11.txt P3-1: run a fixed-salt dummy PBKDF2 verify for unknown
+            # users so the response time matches the known-user path and the
+            # endpoint stops leaking username existence through timing.
+            self._verify_password(
+                password or "",
+                self._hash_password("timing-equalizer", salt="0" * 32),
+            )
+            return None
+        if not self._verify_password(password or "", row["password_hash"]):
             return None
         return self._row_to_user(row)
 

@@ -238,6 +238,7 @@ def _verify_manifest_signature(manifest: dict, signature_b64: str, verify_key_b6
 
     try:
         from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     except ImportError as error:
@@ -247,7 +248,12 @@ def _verify_manifest_signature(manifest: dict, signature_b64: str, verify_key_b6
         ) from error
     try:
         pem = base64.b64decode(verify_key_b64)
-        public_key = serialization.load_pem_public_key(pem)
+        try:
+            # cryptography < 3.1 requires an explicit backend; newer
+            # releases accept (and ignore) it as well.
+            public_key = serialization.load_pem_public_key(pem, backend=default_backend())
+        except TypeError:
+            public_key = serialization.load_pem_public_key(pem)
         if not isinstance(public_key, Ed25519PublicKey):
             return False
         public_key.verify(
@@ -333,7 +339,7 @@ def fetch_registry_package(
     SHA-256 AND an optional Ed25519 signature (signed by the Controller's
     release key, GMS_SKILL_SIGNING_KEY_FILE). The client pins the release
     public key via GMS_AGENT_VERIFY_KEY_B64 (base64 SubjectPublicKeyInfo
-    PEM, exactly what /api/system/skills/install.sh embeds) or trusts the
+    PEM, exactly what the /api/agent/install bootstrap embeds) or trusts the
     pin baked in at bootstrap time (GMS_AGENT_VERIFY_KEY_B64 replacement —
     see agent_bootstrap_installer). When a key is configured, an absent or
     invalid signature is a hard failure.
@@ -799,8 +805,8 @@ def install_cli_dispatcher() -> list[Path]:
         gms-rt-devices-list ...           (argv0 via per-command symlink)
 
     and the installer creates one symlink per command function found in the
-    INSTALLED dispatcher plus the `gms-agent` entry point, mirroring what the
-    retired skills/install.sh provided.
+    INSTALLED dispatcher plus the `gms-agent` entry point — the surface the
+    one-line /api/agent/install.sh flow relies on.
     """
     bin_dir = Path(os.environ.get("GMS_BIN_DIR", Path.home() / ".local/bin"))
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -894,6 +900,86 @@ def activate_clients(clients: list[str], server: str, ca_cert: str) -> None:
             reconcile_mcp(client, server, name, ca_cert)
 
 
+def reactivate_clients(
+    server: str,
+    ca_cert: str,
+    previous_target: Path | None = None,
+) -> list[str]:
+    """Transactional whole-package re-activation for update/rollback
+    (15.txt 审核 P1-2/P1-3).
+
+    Per-client Controller URL/CA are re-read from the existing profile and
+    resolved ONCE (profile value, else the command-line/environment
+    fallback) so write_profile and reconcile_mcp can never disagree — the
+    old rollback path passed the UNresolved ``server_i`` to
+    reconcile_mcp(), writing an empty server into the MCP config.
+
+    ``previous_target`` is the versions/<v>/ directory the caller came
+    FROM (before install_runtime flipped current). Activation failure
+    triggers compensating rollback: current flips back there and the
+    clients are re-activated from it, so the host returns to a consistent
+    whole-package state instead of the mixed runtime/skill/plugin state a
+    plain abort would leave. When omitted, the current link at entry is
+    restored (plain activation retry semantics).
+    """
+    clients = configured_clients()
+    if not clients:
+        return []
+    restore_target = previous_target or (
+        Path(os.readlink(CURRENT_LINK)) if CURRENT_LINK.is_symlink() else None
+    )
+    restore_version = restore_target.name if restore_target else installed_version()
+    try:
+        for client in clients:
+            profile_server, profile_ca = profile_server_and_ca(client)
+            resolved_server = profile_server or server
+            resolved_ca = profile_ca or ca_cert
+            if not resolved_server:
+                raise RuntimeError(
+                    f"{client}: 无法确定 Controller URL（profile 与环境均未提供）"
+                )
+            print(f"Re-activating {client}:")
+            name = write_profile(client, resolved_server, resolved_ca)
+            install_skill(client, CURRENT_LINK)
+            if client == "kkagent":
+                install_plugin_for_kkagent(CURRENT_LINK)
+            else:
+                reconcile_mcp(client, resolved_server, name, resolved_ca)
+    except (SystemExit, Exception) as error:
+        # reconcile_mcp reports failures via SystemExit(1); everything else
+        # via ordinary exceptions. Both mean "this activation is broken" —
+        # compensate back to the previous whole-package state and re-raise.
+        print(
+            f"Error: 激活失败（{error}）；回滚到 {restore_version or restore_target}",
+            file=sys.stderr,
+        )
+        if restore_target is not None and (restore_target / "scripts" / "gms-remote-test.sh").is_file():
+            flip_current(restore_target)
+            try:
+                for client in clients:
+                    profile_server, profile_ca = profile_server_and_ca(client)
+                    server_c = profile_server or server
+                    if not server_c:
+                        print(
+                            f"  MCP ({client}): 无法确定 Controller URL，补偿仅刷新本地文件",
+                            file=sys.stderr,
+                        )
+                    install_skill(client, CURRENT_LINK)
+                    if client == "kkagent":
+                        install_plugin_for_kkagent(CURRENT_LINK)
+                    elif server_c:
+                        name = write_profile(client, server_c, profile_ca or ca_cert)
+                        reconcile_mcp(client, server_c, name, profile_ca or ca_cert)
+            except (Exception, SystemExit) as rollback_error:  # best effort
+                print(
+                    f"Error: 补偿回滚也失败（{rollback_error}）；"
+                    f"请手动执行 gms-agent rollback {restore_version}",
+                    file=sys.stderr,
+                )
+        raise
+    return clients
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     with lifecycle_lock():
         return _cmd_install_locked(args)
@@ -942,9 +1028,15 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
         activate_clients(clients, server, ca_cert)
 
     print("\nDetected & configured:", ", ".join(clients) if clients else "(none)")
-    print("Next: create an enrollment code in the Controller web UI, then run:")
-    print("  gms-agent enroll <CODE>")
-    return 0
+
+    enroll_code = (getattr(args, "enroll_code", "") or "").strip()
+    if not enroll_code:
+        print("Next: create an enrollment code in the Controller web UI, then run:")
+        print("  gms-agent enroll <CODE>")
+        return 0
+    print("\nEnrolling provided one-shot code ...")
+    args.code = enroll_code
+    return cmd_enroll(args)
 
 
 # ---------------------------------------------------------------------------
@@ -1014,17 +1106,24 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
 
     # Whole-package activation: refresh skill / kkagent plugin / MCP config
     # from the NEW version for every previously configured client.
-    clients = configured_clients()
-    if clients:
-        for client in clients:
-            server_i, ca_i = profile_server_and_ca(client)
-            name = write_profile(client, server_i or server, ca_i or ca_cert)
-            install_skill(client, CURRENT_LINK)
-            if client == "kkagent":
-                install_plugin_for_kkagent(CURRENT_LINK)
-            else:
-                reconcile_mcp(client, server_i or server, name, ca_i or ca_cert)
-        print(f"Re-activated: {', '.join(clients)}")
+    # 15.txt 审核 P1-3: transactional — a client activation failure flips
+    # current back to the PRE-update version and re-activates the clients
+    # from it (no mixed runtime/skill/plugin state), then the error
+    # propagates.
+    try:
+        reactivated = reactivate_clients(
+            server, ca_cert, previous_target=VERSIONS_DIR / current
+        )
+    except (SystemExit, Exception):
+        # reactivate_clients already compensated back to the whole-package
+        # {current} state and printed the underlying error.
+        print(
+            f"Error: 部分客户端激活失败；已整体回滚到 {current}（运行时与客户端一致）",
+            file=sys.stderr,
+        )
+        return 1
+    if reactivated:
+        print(f"Re-activated: {', '.join(reactivated)}")
     print("Profiles and tokens preserved. Restart agents to pick up the new runtime.")
     print(f"Rollback anytime: gms-agent rollback {current}")
     return 0
@@ -1041,21 +1140,35 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     if not (target / "scripts" / "gms-remote-test.sh").is_file():
         print(f"Error: 未安装版本 {version}", file=sys.stderr)
         return 2
+    # Rollback never requires the global GMS_REMOTE_TEST_SERVER: TOML
+    # profiles are the authoritative per-client store. The env value is
+    # only a tolerant fallback; a client with NEITHER fails the activation
+    # below (with compensation) instead of writing an empty server.
+    fallback_server = os.environ.get("GMS_REMOTE_TEST_SERVER", "").rstrip("/")
+    rollback_from = installed_version()
     flip_current(target)
     print(f"Rolled back: {CURRENT_LINK} -> {target}")
     # Rollback is whole-package too: skill/plugin/MCP must follow the
-    # symlink back to <version> (10.txt §十).
-    clients = configured_clients()
-    for client in clients:
-        server_i, ca_i = profile_server_and_ca(client)
-        name = write_profile(client, server_i or server_url_from_env(), ca_i)
-        install_skill(client, CURRENT_LINK)
-        if client == "kkagent":
-            install_plugin_for_kkagent(CURRENT_LINK)
-        else:
-            reconcile_mcp(client, server_i, name, ca_i)
-    if clients:
-        print(f"Re-activated from {version}: {', '.join(clients)}")
+    # symlink back to <version> (10.txt §十). 15.txt 审核 P1-2: per-client
+    # profile values are resolved ONCE inside reactivate_clients(), so
+    # reconcile_mcp can no longer receive an empty server while
+    # write_profile got the environment fallback.
+    previous_target = VERSIONS_DIR / rollback_from if rollback_from else None
+    try:
+        reactivated = reactivate_clients(
+            fallback_server, "", previous_target=previous_target
+        )
+    except (SystemExit, Exception):
+        # Compensation already restored the pre-rollback whole-package
+        # state and printed the underlying error.
+        print(
+            f"Error: 回滚后客户端重激活失败；已恢复到回滚前状态 {rollback_from}，"
+            f"请检查后重试 gms-agent rollback {version}",
+            file=sys.stderr,
+        )
+        return 1
+    if reactivated:
+        print(f"Re-activated from {version}: {', '.join(reactivated)}")
     return 0
 
 

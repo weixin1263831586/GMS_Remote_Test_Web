@@ -23,10 +23,8 @@ class ReleasePackagingTests(unittest.TestCase):
             config["ai_models"]["providers"]["glm_local"]["api_key"],
             "${GMS_LOCAL_AI_API_KEY:}",
         )
-        self.assertEqual(
-            config["ai_models"]["providers"]["zhipu"]["api_key"],
-            "${GMS_ZHIPU_API_KEY:}",
-        )
+        # 11.txt P1-2: zhipu provider 已下线（config.example.json 只保留
+        # glm_local），测试断言与配置契约同步，而不是反向恢复键。
 
         runtime_example = json.loads(
             Path("configs/runtime.example.json").read_text(encoding="utf-8")

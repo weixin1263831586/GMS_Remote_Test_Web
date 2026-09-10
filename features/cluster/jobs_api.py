@@ -43,7 +43,13 @@ def _request_owner_username(request: Request) -> str:
 
 
 def _require_job_access(request: Request, job: dict) -> None:
+    # 11.txt P1: agent principals must hold jobs.read even for single-job
+    # reads; ownership filtering below stays unchanged.
+    from features.auth import require_agent_scope
+
     user = get_authenticated_user(request)
+    if user is not None:
+        require_agent_scope("jobs.read")(request)
     if user is None:
         if authentication_required():
             require_authenticated_user(request)
@@ -283,8 +289,14 @@ def list_jobs(
     limit: int = Query(default=100, ge=1, le=500),
     include_active: bool = Query(default=False),
 ):
+    # 11.txt P1: enforce the jobs.read scope for agent principals (human
+    # roles carry jobs.read via ROLE_PERMISSIONS; dev-mode anonymous passes).
+    from features.auth import require_agent_scope
+
     user = get_authenticated_user(request)
-    if user is None and authentication_required():
+    if user is not None:
+        require_agent_scope("jobs.read")(request)
+    elif authentication_required():
         user = require_authenticated_user(request)
     owner_id = user.id if user and user.role != "admin" else ""
     can_monitor_cross_owner = bool(

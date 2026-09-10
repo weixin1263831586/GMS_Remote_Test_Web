@@ -25,7 +25,7 @@ MIGRATION_BYTE_LIMITS = {
     'web/static/js/pages/report-analysis.js': 116723,      # target: < 50 KB
     'web/static/js/pages/firmware-burn.js': 128896,        # target: < 50 KB
     'web/static/js/pages/api-docs.js': 50139,
-    'web/static/js/shell/weekly-report.js': 83309,         # target: < 50 KB
+    'web/static/js/shell/weekly-report.js': 83553,         # +244: 11.txt XSS 转义一致性; target: < 50 KB
 }
 
 # Default budgets for anything not listed above.

@@ -6,8 +6,9 @@ gms-agent install/update/rollback/enroll. What remains here:
 
 * SkillInstallerTests      — /api/system/skills zip download semantics
                              (traversal guard, gms-remote-test root)
-* DeprecatedInstallerTests — /api/system/skills/install.sh now serves a
-                             short forwarder to the gms-agent bootstrap
+
+The retired /api/system/skills/install.sh wrapper was removed; the one-line
+install path is GET /api/agent/install.sh (see agent_package_registry).
 """
 
 from __future__ import annotations
@@ -59,37 +60,3 @@ class SkillInstallerTests(unittest.TestCase):
         client = TestClient(_build_app(), base_url="https://testserver")
         response = client.get("/api/system/skills", params={"skill_name": "other-skill"})
         self.assertEqual(response.status_code, 404)
-
-
-class DeprecatedInstallerTests(unittest.TestCase):
-    """Controller 渲染 install.sh wrapper 时必须拒绝可疑 Host（3d1e089 防护保留）."""
-
-    def _installer(self, host: str):
-        client = TestClient(_build_app(), base_url="http://placeholder")
-        return client.get(
-            "/api/system/skills/install.sh", headers={"Host": host}
-        )
-
-    def test_normal_hosts_render_forwarder(self):
-        # 11.txt: the endpoint is a deprecated forwarder to the gms-agent
-        # bootstrap; it must still render a server-bound script.
-        for host in ("172.16.14.233:5001", "gms.example.local", "[::1]:5001"):
-            with self.subTest(host=host):
-                response = self._installer(host)
-                self.assertEqual(response.status_code, 200)
-                self.assertIn("/api/agent/install", response.text)
-                self.assertIn("gms-agent", response.text)
-                self.assertIn("install --server", response.text)
-                # The retired bash installer must NOT be resurrected here.
-                self.assertNotIn("GMS_SKILL_DOWNLOAD_URL", response.text)
-
-    def test_shell_metacharacter_host_is_rejected(self):
-        for host in ("evil'; id; '", "a b", "h/../../../etc", "h?x=1", "h#f"):
-            with self.subTest(host=host):
-                response = self._installer(host)
-                self.assertEqual(response.status_code, 400)
-                self.assertIn("服务地址", response.json()["error"])
-
-
-if __name__ == "__main__":
-    unittest.main()

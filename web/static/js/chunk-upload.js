@@ -385,6 +385,34 @@ async function uploadFileRegular(file, url, options = {}) {
     });
 }
 
+/**
+ * 带管理员提权恢复的分片上传（15.txt 审核 P2：从 firmware-burn.js 抽出，
+ * 该页因此超出了前端尺寸预算）。大文件分片上传可能超过 30 分钟的管理员
+ * 提权 TTL：过期后分片请求返回 403 elevation_required，此处弹框（由调用
+ * 方通过 onReElevate 提供）重新提权后按断点续传重试一次，已上传分片不
+ * 会浪费。非提权类错误、或调用方取消提权时，原错误原样抛出。
+ */
+async function uploadChunksWithElevationRecovery(file, url, options = {}) {
+    const { onReElevate = null, ...uploadOptions } = options;
+    try {
+        return await uploadFileInChunks(file, url, uploadOptions);
+    } catch (uploadError) {
+        if (!uploadError?.elevationRequired) {
+            throw uploadError;
+        }
+        const granted = typeof onReElevate === 'function' && await onReElevate();
+        if (!granted) {
+            throw uploadError;
+        }
+        return uploadFileInChunks(file, url, {
+            ...uploadOptions,
+            resume: true,
+            checkExisting: true
+        });
+    }
+}
+
 // 导出到全局
 window.uploadFileInChunks = uploadFileInChunks;
 window.uploadFileWithProgress = uploadFileWithProgress;
+window.uploadChunksWithElevationRecovery = uploadChunksWithElevationRecovery;
