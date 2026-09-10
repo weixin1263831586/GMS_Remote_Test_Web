@@ -20,7 +20,7 @@ from features.system.tests.skill_cli_mock_server import ApiHandler
 
 
 ROOT = Path(__file__).resolve().parents[3]
-HELPER = ROOT / "skills" / "gms-remote-test" / "scripts" / "gms-remote-test.sh"
+HELPER = ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-remote-test.sh"
 
 
 class AgentAdminCliTests(unittest.TestCase):

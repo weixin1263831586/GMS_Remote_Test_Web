@@ -98,10 +98,10 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertTrue(status.json()["bootstrap_token_required"])
         self.assertEqual(health.status_code, 200)
         self.assertEqual(installer.status_code, 200)
-        self.assertIn(
-            "https://testserver/api/system/skills?skill_name=gms-remote-test",
-            installer.text,
-        )
+        # 11.txt: the endpoint is a deprecated forwarder to the gms-agent
+        # bootstrap — server-bound, no leftover template placeholders.
+        self.assertIn("https://testserver/api/agent/install", installer.text)
+        self.assertIn("--server https://testserver", installer.text)
         self.assertNotIn("__GMS_REMOTE_TEST_SERVER__", installer.text)
         self.assertEqual(skill_archive.status_code, 200)
         self.assertEqual(skill_archive.headers["content-type"], "application/zip")

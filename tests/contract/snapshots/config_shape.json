@@ -165,6 +165,16 @@
   },
   "scrcpy_path": "str",
   "script_path": "str",
+  "sdk_sources": {
+    "providers": [
+      {
+        "default_revision": "str",
+        "provider": "str",
+        "repo_root": "str",
+        "source_id": "str"
+      }
+    ]
+  },
   "sidebar_order": [
     "str"
   ],

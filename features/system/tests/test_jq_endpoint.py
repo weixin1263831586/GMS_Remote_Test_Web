@@ -106,28 +106,11 @@ class JqBinaryEndpointTests(unittest.TestCase):
         # Executable bit preserved for direct install.
         self.assertTrue(response.content[:4] == b"\x7fELF")
 
-    def test_installer_prefers_controller_before_github(self):
-        """install.sh 优先级必须是 Controller → GitHub，而非虚假的 python3 fallback。"""
-        installer = (
-            Path(__file__).resolve().parents[3]
-            / "skills"
-            / "gms-remote-test"
-            / "scripts"
-            / "install.sh"
-        )
-        text = installer.read_text(encoding="utf-8")
-        self.assertIn("install_jq_from_controller", text)
-        self.assertIn("/api/system/tools/jq", text)
-        # 旧的虚假承诺必须消失：python3 不是可用的 JSON fallback。
-        self.assertNotIn(
-            "the CLI will use its JSON fallback",
-            text,
-        )
-        # Controller 尝试必须先于 GitHub fallback。
-        self.assertLess(
-            text.index("install_jq_from_controller"),
-            text.index("install_portable_jq ||"),
-        )
+    # 11.txt: the legacy bash installer (and its jq download priority
+    # checks) is retired — installs flow through the gms-agent bootstrap,
+    # which downloads the pinned jq via the same /api/system/tools/jq
+    # endpoint when the CLI needs it. The old installer-text assertions
+    # died with scripts/install.sh.
 
 
 if __name__ == "__main__":

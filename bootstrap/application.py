@@ -199,9 +199,10 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         if method == 'GET' and _PUBLIC_FIRMWARE_SHARE_DOWNLOAD.fullmatch(path):
             return True
         # R05（2026-09-08 审核）：Agent 配对码兑换只持有一次性的 code，
-        # 编译服务器上没有浏览器会话，必须匿名可用；一次性消费、TTL 与
-        # 失败限速由 auth_service.redeem_agent_enrollment 保证。精确匹配
-        # 该 POST 路径，其他方法/路径不因此公开。
+        # 编译服务器上没有浏览器会话，必须匿名可用；一次性消费与 TTL
+        # 由 auth_service.redeem_agent_enrollment 保证，失败限速由
+        # /api/auth/agent-enroll 端点调用 record_auth_failure 保证。
+        # 精确匹配该 POST 路径，其他方法/路径不因此公开。
         if method == 'POST' and path == '/api/auth/agent-enroll':
             return True
         return False

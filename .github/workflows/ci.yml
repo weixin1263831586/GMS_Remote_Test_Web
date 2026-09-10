@@ -1,7 +1,14 @@
 name: CI
 
-# 门禁流程（对应 2026-08 代码审核第五节的最低门禁建议 + 2026-08-27 凭据泄漏评审）：
-# secret scan → lint → 全量单测（含 worker_agent）→ 安全/架构测试 → 前端完整性 → 发布打包校验
+# 门禁流程（对应 2026-08 代码审核第五节的最低门禁建议 + 2026-08-27 凭据泄漏评审
+# + 10.txt §二十八：门禁拆分为并行 job，Agent Package gate 不再被无关
+# UI/单测失败连坐跳过）：
+#   secret-scan ─┐
+#   lint ────────┤
+#   unit ────────┤
+#   security ────┼─→ release-ready（汇总）
+#   agent-pkg ───┤
+#   browser-e2e ─┘
 on:
   push:
     branches: [main]
@@ -13,15 +20,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    name: lint-and-test
+  secret-scan:
+    name: secret-scan
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           # Gitleaks 需要 parent^..HEAD 的完整历史；fetch-depth: 1 会导致
-          # "fatal: ambiguous argument" 并连锁跳过 Ruff/pytest 等后续步骤。
+          # "fatal: ambiguous argument" 并连锁跳过后续步骤。
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -37,22 +44,61 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install ruff
+      - name: Ruff lint
+        run: ruff check .
+
+  unit:
+    name: unit-and-feature
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           # requirements-dev.txt 包含 requirements.txt + pytest/httpx
           # （TestClient 硬依赖）等测试专用依赖，生产部署不装它。
           pip install -r requirements-dev.txt
-          pip install ruff
-
-      - name: Ruff lint
-        run: ruff check .
-
       - name: Unit + feature + worker_agent tests
         # tests/e2e 依赖 Playwright 浏览器，由独立 browser-e2e job 执行，
         # 避免 browser 故障与 unit 故障混在一起。
         run: pytest tests features worker_agent/tests --ignore=tests/e2e -q
+      - name: Soak tests (self-skipping without real devices)
+        run: pytest tests/soak -q
 
+  security:
+    name: security-and-architecture
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
       - name: Security and architecture tests
         run: |
           pytest tests/architecture -q
@@ -60,27 +106,43 @@ jobs:
                  features/auth/tests/test_auth_api.py \
                  features/system/tests/test_skill_installer.py \
                  -q
-
       - name: Frontend integrity
         run: pytest tests/test_frontend_integrity.py -q
-
-      - name: Agent plugin gate (2026-09-08 audit §一 + 10.txt §十六)
-        # plugins/gms-remote-test is a generated release payload synced from
-        # skills/gms-remote-test (single source of truth) with a six-way
-        # version contract (package.yaml / three manifests / CLI / MCP).
-        # The git diff covers the WHOLE plugin directory, so a stale MCP or
-        # skill copy can no longer sneak into main (10.txt §十六: the old
-        # gate diffed only the CLI script and missed mcp_server.py drift).
-        run: |
-          bash plugins/gms-remote-test/scripts/sync_package.sh .
-          git diff --exit-code -- plugins/gms-remote-test/
-          python -m pytest plugins/gms-remote-test/tests -q
-
       - name: Release tree validation
         run: pytest tests/test_release_packaging.py -q
 
-      - name: Soak tests (self-skipping without real devices)
-        run: pytest tests/soak -q
+  agent-package:
+    name: agent-package-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Agent plugin gate (2026-09-08 audit §一 + 11.txt)
+        # plugins/gms-remote-test is a generated release payload synced from
+        # agent/gms-remote-test (single source of truth, 11.txt) with a
+        # six-way version contract (package.yaml / three manifests / CLI /
+        # MCP). The git diff covers the WHOLE plugin directory, so a stale
+        # MCP or skill copy can no longer sneak into main (10.txt §十六).
+        run: |
+          python tools/sync_agent_package.py .
+          git diff --exit-code -- plugins/gms-remote-test/
+          python -m pytest agent/gms-remote-test/tests -q
+      - name: Agent package lifecycle + registry contract (10.txt §三十六)
+        # install/update/rollback/bootstrap lifecycle, single-root ZIP
+        # contract between the registry and the release builder.
+        run: |
+          python -m pytest features/system/tests/test_agent_package_lifecycle.py \
+                 features/system/tests/test_agent_package_builder.py -q
+      - name: Release archive builds for every client variant
+        run: python tools/build_agent_package.py --out dist
 
   browser-e2e:
     name: browser-e2e
@@ -105,5 +167,23 @@ jobs:
 
       - name: Browser E2E and smoke tests
         run: pytest tests/e2e tests/test_runtime_ui_smoke.py -q
+
+  release-ready:
+    name: release-ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [secret-scan, lint, unit, security, agent-package, browser-e2e]
+    if: always()
+    steps:
+      - name: Require every gate green
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "Gate results: ${RESULTS}"
+          if echo "${RESULTS}" | grep -Ev '"(success|skipped)"' | grep -q .; then
+            echo "::error::One or more gates did not pass."
+            exit 1
+          fi
+          echo "All required gates passed."
 
 # 真机链路由 nightly-soak.yml 在隔离实验台 runner 上执行。

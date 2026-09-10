@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build distributable agent packages from the generated plugin payload.
 
-The repository keeps one source of truth (skills/gms-remote-test/), one
-generated release payload (plugins/gms-remote-test/, produced by
-sync_package.sh) and one declared version (agent/gms-remote-test/package.yaml).
+The repository keeps one source of truth (agent/gms-remote-test/, synced
+into the generated plugins/gms-remote-test/ by
+tools/sync_agent_package.py) and one declared version
+(agent/gms-remote-test/package.yaml).
 This tool turns the payload into per-client distribution archives:
 
   dist/gms-remote-test/<version>/universal/gms-remote-test-<version>.zip
@@ -13,9 +14,14 @@ This tool turns the payload into per-client distribution archives:
   dist/gms-remote-test/<version>/codex/…zip     (manifests: .codex-plugin)
   dist/gms-remote-test/<version>/kkagent/…zip   (manifests: kk only)
 
-Every archive carries a SHA-256; tools/build_agent_package.py --print-manifest
-emits the JSON manifest that the Controller Agent Package Registry embeds in
-its manifest endpoint (10.txt §十三).
+Archive construction is DELEGATED to the canonical builder
+(features/system/agent_package_builder.py) — the exact same code path the
+Controller registry serves from — so the released zip and the served zip
+are byte-identical by construction (10.txt §七/§八).
+
+Every archive carries a SHA-256; --print-manifest emits the JSON manifest
+that the Controller Agent Package Registry embeds in its manifest
+endpoint (10.txt §十三).
 
 Usage:
     python tools/build_agent_package.py [--out dist]
@@ -27,7 +33,6 @@ import argparse
 import hashlib
 import json
 import sys
-import zipfile
 from pathlib import Path
 
 
@@ -35,14 +40,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PLUGIN_DIR = REPO_ROOT / "plugins" / "gms-remote-test"
 PACKAGE_YAML = REPO_ROOT / "agent" / "gms-remote-test" / "package.yaml"
 
-# Payload contents: everything synced by sync_package.sh plus the manifests.
-PAYLOAD_DIRS = ["scripts", "skills", "tests"]
-CLIENT_MANIFESTS = {
-    "universal": ["kk.plugin.json", "kimi.plugin.json", ".codex-plugin/plugin.json"],
-    "kimi": ["kimi.plugin.json"],
-    "codex": [".codex-plugin/plugin.json"],
-    "kkagent": ["kk.plugin.json"],
-}
+sys.path.insert(0, str(REPO_ROOT))
+from features.system.agent_package_builder import CLIENT_MANIFESTS, build_package_bytes  # noqa: E402
+# 11.txt: the canonical generated plugin payload (synced from
+# agent/gms-remote-test by tools/sync_agent_package.py) is the packaging
+# input — builder and registry share the exact same tree.
 
 
 def read_version() -> str:
@@ -50,40 +52,6 @@ def read_version() -> str:
         if line.startswith("version: "):
             return line.split(":", 1)[1].strip()
     raise SystemExit(f"Error: no version in {PACKAGE_YAML}")
-
-
-def _add_file(archive: zipfile.ZipFile, path: Path, arcname: str) -> None:
-    info = zipfile.ZipInfo(arcname)
-    info.external_attr = 0o755 << 16 if path.suffix in {".sh"} or not path.suffix else 0o644 << 16
-    archive.writestr(info, path.read_bytes())
-
-
-def build_zip(client: str, version: str, out_dir: Path) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = out_dir / f"gms-remote-test-{version}-{client}.zip"
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for dirname in PAYLOAD_DIRS:
-            base = PLUGIN_DIR / dirname
-            if not base.is_dir():
-                continue
-            for path in sorted(base.rglob("*")):
-                if path.is_file() and "__pycache__" not in path.parts:
-                    _add_file(archive, path, f"gms-remote-test/{path.relative_to(PLUGIN_DIR)}")
-        for manifest in CLIENT_MANIFESTS[client]:
-            path = PLUGIN_DIR / manifest
-            if not path.is_file():
-                print(f"Error: missing manifest {manifest} for {client}", file=sys.stderr)
-                raise SystemExit(1)
-            _add_file(archive, path, f"gms-remote-test/{manifest}")
-    return zip_path
-
-
-def sha256_of(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def main() -> int:
@@ -102,12 +70,20 @@ def main() -> int:
         "clients": sorted(CLIENT_MANIFESTS),
     }
     artifacts = {}
-    for client in ("universal", "kimi", "codex", "kkagent"):
-        zip_path = build_zip(client, version, out_root / client)
+    for client in sorted(CLIENT_MANIFESTS):
+        try:
+            data = build_package_bytes(PLUGIN_DIR, version, client=client)
+        except FileNotFoundError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            return 1
+        out_dir = out_root / client
+        out_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = out_dir / f"gms-remote-test-{version}-{client}.zip"
+        zip_path.write_bytes(data)
         artifacts[client] = {
-            "path": str(zip_path.relative_to(REPO_ROOT)),
-            "sha256": sha256_of(zip_path),
-            "size": zip_path.stat().st_size,
+            "path": str(zip_path),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
         }
     manifest["artifacts"] = artifacts
 
@@ -119,7 +95,7 @@ def main() -> int:
     else:
         for client, artifact in artifacts.items():
             print(f"  {client}: {artifact['path']} (sha256 {artifact['sha256'][:16]}...)")
-        print(f"Manifest written: {manifest_path.relative_to(REPO_ROOT)}")
+        print(f"Manifest written: {manifest_path}")
     return 0
 
 

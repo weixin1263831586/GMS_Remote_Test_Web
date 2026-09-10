@@ -75,7 +75,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.13.0"
+SERVER_VERSION = "0.15.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -151,9 +151,15 @@ def _sdk_fast_call(command: str, args: list[str]) -> tuple[str, bool] | None:
     params: dict[str, Any] = {}
     positional: list[str] = []
     index = 0
+    # Boolean flags the dispatcher injects itself; must never consume the
+    # next positional (code review 2026-08: they previously fell into the
+    # "--" branch and swallowed a positional argument).
+    _PASSTHROUGH_FLAGS = {"--json", "--non-interactive"}
     while index < len(args):
         token = str(args[index])
-        if token.startswith("--"):
+        if token in _PASSTHROUGH_FLAGS:
+            pass
+        elif token.startswith("--"):
             if "=" in token:
                 key, _, value = token[2:].partition("=")
             else:
@@ -161,8 +167,6 @@ def _sdk_fast_call(command: str, args: list[str]) -> tuple[str, bool] | None:
                 index += 1
                 value = str(args[index]) if index < len(args) else ""
             params[key.replace("-", "_")] = value
-        elif token == "--json" or token == "--non-interactive":
-            pass
         else:
             positional.append(token)
         index += 1
