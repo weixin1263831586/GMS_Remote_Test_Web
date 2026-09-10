@@ -70,10 +70,23 @@ def sync_one(source: Path, target: Path) -> bool:
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(source.read_bytes())
-    if source.suffix == ".sh" or not source.suffix:
+    if _is_executable_source(source):
         target.chmod(0o755)
     print(f"Synced {target.name}")
     return True
+
+
+def _is_executable_source(source: Path) -> bool:
+    """11.txt 审核 P0-4: the manifests exec ./scripts/mcp_launcher.py
+    directly, so shebang-carrying .py launchers must keep the executable
+    bit in the generated tree (not just .sh / extension-less files)."""
+    if source.suffix == ".sh" or not source.suffix:
+        return True
+    try:
+        with source.open("rb") as handle:
+            return handle.read(2) == b"#!"
+    except OSError:
+        return False
 
 
 def sync_tree(source_dir: Path, target_dir: Path) -> None:

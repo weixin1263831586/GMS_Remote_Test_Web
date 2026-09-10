@@ -16,7 +16,12 @@ from pathlib import Path
 import pytest
 
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "runtime"
+_BASE = Path(__file__).resolve().parents[1]
+SCRIPTS = _BASE / (
+    "runtime"
+    if (_BASE / "runtime" / "gms_agent" / "__init__.py").is_file()
+    else "scripts"
+)
 sys.path.insert(0, str(SCRIPTS))
 
 from gms_agent import GmsApiError, GmsClient  # noqa: E402
@@ -100,6 +105,7 @@ def test_request_403_raises_permission_error(server, monkeypatch):
 def test_token_file_is_read_never_password(monkeypatch, tmp_path):
     token_file = tmp_path / "agent.token"
     token_file.write_text("secret-token\n")
+    token_file.chmod(0o600)
     monkeypatch.setenv("GMS_REMOTE_TEST_SERVER", "https://controller:5001")
     monkeypatch.setenv("GMS_AUTH_TOKEN_FILE", str(token_file))
     client = GmsClient()
@@ -110,6 +116,19 @@ def test_token_file_is_read_never_password(monkeypatch, tmp_path):
     params = set(inspect.signature(GmsClient.__init__).parameters)
     assert "password" not in params
     assert "username" not in params
+
+
+def test_token_file_with_loose_permissions_is_rejected(monkeypatch, tmp_path):
+    # 11.txt P1-11: the CLI requires a 0600 token file; the SDK/MCP fast
+    # path must fail closed the same way instead of silently reading a
+    # credential any local user could have read.
+    token_file = tmp_path / "loose.token"
+    token_file.write_text("secret-token\n")
+    token_file.chmod(0o644)
+    monkeypatch.setenv("GMS_REMOTE_TEST_SERVER", "https://controller:5001")
+    monkeypatch.setenv("GMS_AUTH_TOKEN_FILE", str(token_file))
+    client = GmsClient()
+    assert client.token == ""
 
 
 def test_mcp_fast_path_falls_back_without_server(monkeypatch):

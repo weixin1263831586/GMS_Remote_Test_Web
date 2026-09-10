@@ -10,7 +10,11 @@ from pathlib import Path
 
 SCRIPT = (
     Path(__file__).resolve().parents[1]
-    / "runtime"
+    / (
+        "runtime"
+        if (Path(__file__).resolve().parents[1] / "runtime" / "agent_mcp_config.py").is_file()
+        else "scripts"
+    )
     / "agent_mcp_config.py"
 )
 spec = importlib.util.spec_from_file_location("agent_mcp_config", SCRIPT)
@@ -36,6 +40,15 @@ def test_kimi_fresh_registration(tmp_path):
     data = json.loads(config.read_text())
     assert data["mcpServers"]["gms"]["args"] == [MCP]
     assert data["mcpServers"]["gms"]["env"]["GMS_CURL_CA_CERT"] == CA
+
+
+def test_desired_env_forces_service_token_mode(tmp_path):
+    # 11.txt P0-3: the reconciled MCP env must pin GMS_AGENT_AUTH_MODE —
+    # mcp_server.py refuses to register password/elevation/approval-mint
+    # tools only when this variable is set to "service-token".
+    env = desired_env(CA)
+    assert env["GMS_AGENT_AUTH_MODE"] == "service-token"
+    assert "GMS_AGENT_AUTH_MODE" in mod.DESIRED_ENV_KEYS
 
 
 def test_kimi_updates_stale_gms_block_preserving_others(tmp_path):

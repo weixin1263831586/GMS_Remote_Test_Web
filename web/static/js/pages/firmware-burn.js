@@ -582,7 +582,7 @@ async function submitFirmwareBurn() {
             notifyOperationResult('固件上传已启动', '固件分片上传任务已开始', 'info', 'firmware-burn');
             addLogEntry(`固件上传任务已启动，设备: ${devices.join(', ')}`, 'success');
 
-            uploadResult = await uploadFileInChunks(
+            const runChunkUpload = () => uploadFileInChunks(
                 selectedFirmwareFile,
                 `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`,
                 {
@@ -621,6 +621,22 @@ async function submitFirmwareBurn() {
                     }
                 }
             );
+            try {
+                uploadResult = await runChunkUpload();
+            } catch (uploadError) {
+                // 大固件分片上传可能超过 30 分钟的管理员提权 TTL；过期后
+                // 分片请求返回 403 elevation_required。弹框重新提权后
+                // 断点续传一次，已上传分片不会浪费。
+                if (!uploadError?.elevationRequired) {
+                    throw uploadError;
+                }
+                addLogEntry('管理员提权已过期，固件上传已暂停', 'warning');
+                const granted = await requestElevatedAccess('继续固件上传（管理员验证已过期）');
+                if (!granted) {
+                    throw uploadError;
+                }
+                uploadResult = await runChunkUpload();
+            }
             cleanupUploadState();
             if (uploadResult.staged) {
                 updateUploadProgress(

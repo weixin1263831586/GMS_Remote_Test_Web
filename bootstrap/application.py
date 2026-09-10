@@ -104,6 +104,14 @@ _PUBLIC_FIRMWARE_SHARE_DOWNLOAD = re.compile(
     r'^/api/firmware-shares/(?:[0-9a-f]{12}|[0-9a-f]{32})/download$'
 )
 
+# 11.txt 审核 P0-1：一行安装链路（/api/agent/install → manifest → 包下载）
+# 必须在生产认证开启时匿名可用——编译服务器没有浏览器会话。三个路径都只
+# 服务公开发布物（bootstrap 脚本、版本清单、包 ZIP），无凭据泄露面；完整性
+# 由包 SHA-256 + Ed25519 manifest 签名（bootstrap 内嵌发布公钥）保证。
+_PUBLIC_AGENT_PACKAGE_VERSION = re.compile(
+    r'^/api/agent/packages/gms-remote-test/\d+\.\d+\.\d+$'
+)
+
 
 def _is_service_authenticated_path(path: str, method: str) -> bool:
     normalized_method = method.upper()
@@ -195,6 +203,12 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             # 泄露面（内容为公开 jq 发布物），精确公开该 GET 路径。
             '/api/system/tools/jq',
         }:
+            return True
+        if method in {'GET', 'HEAD'} and (
+            path == '/api/agent/install'
+            or path == '/api/agent/packages/gms-remote-test/manifest'
+            or _PUBLIC_AGENT_PACKAGE_VERSION.fullmatch(path)
+        ):
             return True
         if method == 'GET' and _PUBLIC_FIRMWARE_SHARE_DOWNLOAD.fullmatch(path):
             return True
