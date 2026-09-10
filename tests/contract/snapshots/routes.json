@@ -69,6 +69,24 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/agent/install"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/agent/packages/gms-remote-test/manifest"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/agent/packages/gms-remote-test/{version}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/agent/sessions/{session_id}"
   },
   {

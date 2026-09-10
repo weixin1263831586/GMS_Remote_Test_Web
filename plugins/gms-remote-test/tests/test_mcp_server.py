@@ -18,8 +18,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-PLUGIN_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PLUGIN_DIR / "scripts"))
+# In the source tree (11.txt) this test lives under agent/gms-remote-test/
+# tests/ and imports the runtime from agent/gms-remote-test/runtime; the
+# synced copy under plugins/gms-remote-test/tests/ uses scripts/.
+_TEST_DIR = Path(__file__).resolve().parent
+_AGENT_PKG = _TEST_DIR.parent
+if (_AGENT_PKG / "runtime" / "mcp_server.py").is_file():
+    RUNTIME_DIR = _AGENT_PKG / "runtime"
+else:  # generated-plugin copy
+    RUNTIME_DIR = _TEST_DIR.parent / "scripts"
+sys.path.insert(0, str(RUNTIME_DIR))
 
 import mcp_server  # noqa: E402
 
@@ -535,7 +543,7 @@ class JsonRpcLoopTests(unittest.TestCase):
         """Run the server main() against a scripted stdin and collect replies."""
         stdin_lines = "\n".join(json.dumps(m) for m in messages) + "\n"
         completed = subprocess.run(
-            [sys.executable, str(PLUGIN_DIR / "scripts" / "mcp_server.py")],
+            [sys.executable, str(RUNTIME_DIR / "mcp_server.py")],
             input=stdin_lines,
             capture_output=True,
             text=True,

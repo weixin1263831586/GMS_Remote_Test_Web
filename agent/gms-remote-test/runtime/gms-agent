@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""gms-agent — one installer, one updater, one enrollment (10.txt §十三~§十六).
+
+The single user-facing entry point of the GMS Agent Runtime on a build
+server. Users should never need to know about ~/.codex/config.toml,
+~/.kimi-code/mcp.json, ~/.kkagent/plugins, GMS_AUTH_TOKEN_FILE or
+GMS_RT_PROFILE — those become implementation details:
+
+    gms-agent install [--client auto|codex|kimi|kkagent] [--server URL] [--yes]
+        Detect installed agent clients and activate the whole package
+        (runtime + skill + client registration) from either a local
+        package tree (--package / extracted archive / plugin payload) or,
+        when downloaded standalone via GET /api/agent/install, straight
+        from the Controller Agent Package Registry.
+
+    gms-agent update
+        Check the Controller Agent Package Registry for a newer version,
+        download + verify (SHA-256 + manifest/package version contract),
+        install into versions/<new>/ (immutable per version) and re-activate
+        every configured client from the new package — skill, kkagent
+        plugin and MCP registrations refresh together with the runtime
+        (whole-package activation, not runtime-only).
+
+    gms-agent rollback <version>
+        Flip `current` back to an installed version AND re-activate all
+        configured clients from that version.
+
+    gms-agent enroll <CODE>
+        Exchange a one-shot enrollment code for an Agent Service Token
+        (0600) and wire it into every configured client profile.
+
+    gms-agent status
+        Show installed version, detected clients, profile and auth state.
+
+Package layout contract (single root, produced by
+features/system/agent_package_builder.py and tools/build_agent_package.py):
+
+    gms-remote-test/
+      scripts/          gms-remote-test.sh, mcp_server.py, gms-agent, ...
+      skills/gms-remote-test/
+      tests/
+      kk.plugin.json  kimi.plugin.json  .codex-plugin/plugin.json
+
+Identity model: one host token shared by the client profiles (audit still
+separates the client via GMS_AGENT_CLIENT metadata); per-client tokens can
+be introduced later by enrolling with dedicated profiles.
+"""
+
+# Thin argparse shell (10.txt §三十四: the lifecycle logic lives in
+# gms_agent.package_manager; this file stays the stable entry point so
+# bootstrap downloads and existing muscle memory keep working).
+#
+# STANDALONE bootstrap (downloaded via GET /api/agent/install): this file
+# ships alone, without the gms_agent package next to it. In that mode the
+# shell delegates the ENTIRE run to the full gms-agent inside the registry
+# package (download → verify → exec), instead of importing a module it does
+# not carry. Two-layer lifecycle, exactly 10.txt §四.
+import os
+import runpy
+import sys
+import urllib.request
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
+    # ---- standalone bootstrap: minimal, dependency-free fetch-and-exec ----
+    # The embedded Controller URL replaces __GMS_AGENT_DEFAULT_SERVER__ at
+    # download time; GMS_AGENT_VERIFY_KEY_B64 replaces
+    # __GMS_AGENT_VERIFY_KEY_B64__ (release public-key pin, 10.txt §二十).
+
+    def _bootstrap_server() -> str:
+        # --server wins over the embedded default (same precedence the full
+        # gms-agent applies), then $GMS_REMOTE_TEST_SERVER, then the URL the
+        # Controller embedded at bootstrap download time.
+        argv = sys.argv[1:]
+        for index, token in enumerate(argv):
+            if token == "--server" and index + 1 < len(argv):
+                return argv[index + 1].rstrip("/")
+            if token.startswith("--server="):
+                return token.split("=", 1)[1].rstrip("/")
+        url = (
+            os.environ.get("GMS_REMOTE_TEST_SERVER", "")
+            or "__GMS_AGENT_DEFAULT_SERVER__"
+        )
+        if not url or url.startswith("__GMS_"):
+            print(
+                "Error: GMS_REMOTE_TEST_SERVER 未设置（gms-agent 不会猜测 Controller 地址）",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        return url.rstrip("/")
+
+    def _standalone_main() -> int:
+        # Fetch the FULL registry package, extract to a temp staging tree
+        # (SHA-256 + Ed25519 manifest verification run INSIDE the package's
+        # gms-agent — no duplicated trust logic here), then exec that
+        # gms-agent with all original arguments. Lifecycle stays two-layer:
+        # this shim only bootstraps; the package gms-agent owns everything.
+        import hashlib
+        import json
+        import shutil
+        import tempfile
+        import zipfile
+
+        server = _bootstrap_server()
+        registry_base = f"{server}/api/agent/packages/gms-remote-test"
+        try:
+            with urllib.request.urlopen(f"{registry_base}/manifest", timeout=60) as response:
+                manifest = json.loads(response.read())
+            artifact = (manifest.get("artifacts") or {}).get("universal") or {}
+            artifact_url, expected_sha = artifact.get("url"), str(artifact.get("sha256", ""))
+            if not isinstance(artifact_url, str) or not expected_sha:
+                raise RuntimeError("清单缺少 universal 包或 SHA-256")
+            with urllib.request.urlopen(artifact_url, timeout=600) as response:
+                data = response.read()
+            if hashlib.sha256(data).hexdigest() != expected_sha:
+                raise RuntimeError("包 SHA-256 校验失败；拒绝安装")
+            extract_dir = Path(tempfile.mkdtemp(prefix="gms-agent-bootstrap-"))
+            archive_path = extract_dir / "package.zip"
+            archive_path.write_bytes(data)
+            with zipfile.ZipFile(archive_path) as archive:
+                archive.extractall(extract_dir)
+            archive_path.unlink(missing_ok=True)
+            inner = extract_dir / "gms-remote-test"
+            root = inner if (inner / "scripts" / "gms-agent").is_file() else extract_dir
+            print("Bootstrapping: fetched the full gms-agent from the Controller.")
+            sys.argv = [str(root / "scripts" / "gms-agent"), *sys.argv[1:]]
+            sys.path.insert(0, str(root / "scripts"))
+            runpy.run_path(str(root / "scripts" / "gms-agent"), run_name="__main__")
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            return 0
+        except SystemExit:
+            raise
+        except (OSError, ValueError, RuntimeError, zipfile.BadZipFile) as error:
+            print(f"Error: bootstrap 失败: {error}", file=sys.stderr)
+            return 6
+
+    # Only bootstrap when executed as a script; a bare import (tests loading
+    # the standalone copy to inspect local_package_root) must not trigger
+    # a network fetch.
+    if __name__ == "__main__":
+        raise SystemExit(_standalone_main())
+
+    # Imported as a module (no gms_agent package available): expose the
+    # minimal surface the lifecycle tests assert on.
+    def local_package_root(arg_package: str, script_dir: Path | None = None):  # noqa: F811
+        from pathlib import Path as _P
+
+        if arg_package:
+            root = _P(arg_package).resolve()
+            for scripts_dir in ("scripts", "runtime"):
+                marker = root / scripts_dir / "gms-remote-test.sh"
+                if marker.is_file():
+                    return root
+            return None
+        base = _P(script_dir).resolve() if script_dir else SCRIPT_DIR
+        for scripts_dir in ("scripts", "runtime"):
+            if (base.parent / scripts_dir / "gms-remote-test.sh").is_file():
+                return base.parent
+        return None
+
+    def cli_version_in(root):  # noqa: F811
+        for scripts_dir in ("scripts", "runtime"):
+            marker = Path(root) / scripts_dir / "gms-remote-test.sh"
+            if marker.is_file():
+                for line in marker.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("GMS_RT_VERSION="):
+                        return line.split("=", 1)[1].strip().strip('"') or None
+        return None
+
+    def runtime_version() -> str:  # noqa: F811
+        return cli_version_in(SCRIPT_DIR.parent) or "unknown"
+
+from gms_agent.package_manager import (  # noqa: E402
+    activate_clients,
+    artifact_url_ok,
+    client_skill_root,
+    cmd_enroll,
+    cmd_install,
+    cmd_rollback,
+    cmd_status,
+    cmd_update,
+    cli_version_in,
+    configured_clients,
+    detect_clients,
+    fetch_registry_package,
+    install_cli_dispatcher,
+    install_plugin_for_kkagent,
+    install_runtime,
+    install_skill,
+    installed_version,
+    local_package_root,
+    package_tree_sha256,
+    profile_name,
+    profile_server_and_ca,
+    reconcile_mcp,
+    runtime_version,
+    safe_extract,
+    write_profile,
+)
+from gms_agent.package_manager import MAX_ARCHIVE_FILES, MAX_ARCHIVE_BYTES  # noqa: E402,F401
+import gms_agent.package_manager as _pm  # noqa: E402
+import shutil as _shutil  # noqa: E402,F401  (re-export for tests/compat)
+
+# Lifecycle functions read module globals from package_manager; tests and
+# embedders patch states through this handle (see test_agent_package_lifecycle).
+pm = _pm
+shutil = _shutil
+
+import argparse  # noqa: E402
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="gms-agent", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_install = sub.add_parser("install", help="install runtime + skill + MCP for detected clients")
+    p_install.add_argument("--client", default="auto", choices=["auto", "codex", "kimi", "kkagent"])
+    p_install.add_argument("--server", default="", help="Controller base URL (default $GMS_REMOTE_TEST_SERVER)")
+    p_install.add_argument("--package", default="", help="package root to install (default: this archive; standalone script bootstraps from the registry)")
+    p_install.set_defaults(func=cmd_install)
+
+    p_update = sub.add_parser("update", help="update from the Controller Agent Package Registry")
+    p_update.add_argument("--server", default="")
+    p_update.add_argument("--force", action="store_true")
+    p_update.set_defaults(func=cmd_update)
+
+    p_rollback = sub.add_parser("rollback", help="switch `current` (and every client) back to an installed version")
+    p_rollback.add_argument("version")
+    p_rollback.set_defaults(func=cmd_rollback)
+
+    p_enroll = sub.add_parser("enroll", help="exchange a one-shot enrollment code for a service token")
+    p_enroll.add_argument("code")
+    p_enroll.add_argument("--server", default="")
+    p_enroll.set_defaults(func=cmd_enroll)
+
+    p_status = sub.add_parser("status", help="show installation state")
+    p_status.set_defaults(func=cmd_status)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

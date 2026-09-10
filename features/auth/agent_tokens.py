@@ -250,8 +250,14 @@ class AgentTokenServiceMixin:
         allowed_devices: str | list[str] | None = None,
         expires_days: int | None = DEFAULT_AGENT_TOKEN_DAYS,
     ) -> dict[str, Any]:
-        """Mint a one-shot enrollment code; the raw code is returned once."""
-        code = "-".join(secrets.token_hex(2).upper() for _ in range(3))
+        """Mint a one-shot enrollment code; the raw code is returned once.
+
+        Entropy: token_hex(3)×3 = 144 bits. The endpoint is anonymous and
+        rate-limited per IP, but the code itself must still resist offline
+        guessing — a leaked DB hash must not be brute-forceable (code review
+        2026-08: 24-bit groups were rejected as too small).
+        """
+        code = "-".join(secrets.token_hex(3).upper() for _ in range(3))
         now = _utcnow()
         expires_at = now + timedelta(minutes=self.ENROLLMENT_TTL_MINUTES)
         with self._lock, self._connect() as conn:

@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 
-SCRIPTS = Path(__file__).resolve().parents[3] / "skills" / "gms-remote-test" / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[1] / "runtime"
 sys.path.insert(0, str(SCRIPTS))
 
 from gms_agent import GmsApiError, GmsClient  # noqa: E402
@@ -120,6 +120,32 @@ def test_mcp_fast_path_falls_back_without_server(monkeypatch):
     monkeypatch.delenv("GMS_REMOTE_TEST_SERVER", raising=False)
     # No server configured -> SDK client cannot be built -> None (CLI path).
     assert mcp._sdk_fast_call("gms-rt-jobs-list", ["100"]) is None
+
+
+def test_mcp_fast_path_passthrough_flags_do_not_swallow_args(monkeypatch):
+    """Regression (code review 2026-08): ``--json``/``--non-interactive``
+    used to fall into the generic ``--`` branch and consume the NEXT
+    positional as their value (e.g. a job id), corrupting the request."""
+    spec = importlib.util.spec_from_file_location("mcp_server_under_test_flags", SCRIPTS / "mcp_server.py")
+    mcp = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("mcp_server_under_test_flags", mcp)
+    spec.loader.exec_module(mcp)
+    captured: dict = {}
+
+    class FakeClient:
+        def request(self, method, endpoint, params=None):
+            captured["method"] = method
+            captured["endpoint"] = endpoint
+            captured["params"] = params
+            return {"ok": True}
+
+    monkeypatch.setattr(mcp, "_sdk_client", FakeClient())
+
+    envelope = mcp._sdk_fast_call("gms-rt-jobs-status", ["--json", "job-123"])
+    assert envelope is not None
+    assert captured["endpoint"].endswith("/cluster/jobs/job-123")
+    # No bogus query parameter produced by the flag handling.
+    assert captured["params"] in (None, {})
 
 
 def test_mcp_fast_path_rejects_denied_commands():

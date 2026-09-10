@@ -217,5 +217,99 @@ class EnrollmentAuditRedactionTests(AgentEnrollmentPublicAccessTests):
         self.assertNotIn("认证凭据正文不记录", audit_text.split("/api/auth/login", 1)[1])
 
 
+class _FixedIPASGIWrapper:
+    """Wrap an ASGI app so every request's client address is the fixed IP."""
+
+    def __init__(self, app, ip: str):
+        self.app = app
+        self.ip = ip
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            scope = dict(scope)
+            scope["client"] = (self.ip, 50000)
+        await self.app(scope, receive, send)
+
+
+class EnrollmentRateLimitAndEntropyTests(AgentEnrollmentPublicAccessTests):
+    """配对码暴力枚举防护（10.txt 2026-08 评审）：
+
+    - 兑换端点按来源 IP 持久限速（复用登录限速基础设施）
+    - 配对码熵提升到 token_hex(3)×3（144 bit），拒绝 24-bit 旧格式
+    """
+
+    def test_brute_force_is_rate_limited_per_ip(self):
+        bare = TestClient(create_app(), base_url="https://testserver")
+        self.addCleanup(bare.close)
+        # AUTH_MAX_ACCOUNT_IP_FAILURES / AUTH_MAX_IP_FAILURES default to 5/30;
+        # drive account_ip over its threshold with wrong codes.
+        for _ in range(5):
+            resp = bare.post(
+                "/api/auth/agent-enroll", json={"code": "DEAD-BEEF-0000"}
+            )
+            self.assertEqual(resp.status_code, 403)
+        resp = bare.post("/api/auth/agent-enroll", json={"code": "DEAD-BEEF-0000"})
+        self.assertEqual(resp.status_code, 429, resp.text)
+        self.assertTrue(int(resp.headers.get("Retry-After", "0")) >= 1)
+
+    def test_rate_limit_does_not_block_a_valid_code_afterwards(self):
+        # A blocked IP must stay blocked even with the correct code — the
+        # limiter gates attempts, not outcomes.
+        bare = TestClient(create_app(), base_url="https://testserver")
+        self.addCleanup(bare.close)
+        code = self._mint_code()
+        for _ in range(5):
+            bare.post("/api/auth/agent-enroll", json={"code": "0000-0000-0000"})
+        resp = bare.post("/api/auth/agent-enroll", json={"code": code})
+        self.assertEqual(resp.status_code, 429)
+        # The unused code is still redeemable from a DIFFERENT source IP.
+        other = TestClient(
+            _FixedIPASGIWrapper(create_app(), "10.9.8.7"),
+            base_url="https://testserver",
+        )
+        self.addCleanup(other.close)
+        resp = other.post("/api/auth/agent-enroll", json={"code": code})
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+    def test_successful_redemption_clears_failure_counter(self):
+        bare = TestClient(create_app(), base_url="https://testserver")
+        self.addCleanup(bare.close)
+        code = self._mint_code()
+        # A few failures below the threshold, then the valid code — the
+        # account_ip counter must be cleared so a legitimate retry after a
+        # typo storm is not punished later.
+        for _ in range(3):
+            bare.post("/api/auth/agent-enroll", json={"code": "1111-1111-1111"})
+        resp = bare.post("/api/auth/agent-enroll", json={"code": code})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        retry_after = auth_service.auth_retry_after(
+            "agent-enroll", "code", bare.headers.get("x-forwarded-for", "testclient")
+        )
+        self.assertEqual(retry_after, 0)
+
+    def test_enrollment_code_entropy(self):
+        record = auth_service.create_agent_enrollment(
+            name="entropy-check",
+            creator=self._admin_user(),
+            scopes=["system.read"],
+        )
+        code = record["code"]
+        # token_hex(3)×3 → 6 hex chars per group (48 bit each, 144 total).
+        groups = code.split("-")
+        self.assertEqual(len(groups), 3)
+        for group in groups:
+            self.assertEqual(len(group), 6)
+            self.assertRegex(group, r"^[0-9A-F]{6}$")
+        # And the old 24-bit-total format is gone.
+        self.assertNotEqual(len(groups[0]), 4)
+
+    def _admin_user(self):
+        from features.auth import CurrentUser
+
+        return CurrentUser(
+            id="admin-id", username="admin", role="admin", display_name=""
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

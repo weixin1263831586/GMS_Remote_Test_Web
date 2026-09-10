@@ -39,7 +39,7 @@ MIGRATION_LINE_LIMITS = {
     'features/reports/analysis_api.py': 712,
     'features/reports/api_helpers.py': 775,
     'features/reports/weekly_report_api.py': 1123,
-    'features/system/api.py': 1184,  # +41: R26 multi-tab websocket connections, §十二 jq binary endpoint
+    'features/system/api.py': 1185,  # +41 R26 websocket/jq; +1 11.txt installer wrapper 重写(净)
     'features/system/api_docs_list.py': 985,
     'features/system/integrations.py': 613,
     'features/system/assets.py': 604,  # +10: auth deps on opengrok/favicon

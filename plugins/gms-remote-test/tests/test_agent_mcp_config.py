@@ -9,10 +9,8 @@ from pathlib import Path
 
 
 SCRIPT = (
-    Path(__file__).resolve().parents[3]
-    / "skills"
-    / "gms-remote-test"
-    / "scripts"
+    Path(__file__).resolve().parents[1]
+    / "runtime"
     / "agent_mcp_config.py"
 )
 spec = importlib.util.spec_from_file_location("agent_mcp_config", SCRIPT)

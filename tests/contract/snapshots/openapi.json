@@ -1628,6 +1628,11 @@
       },
       "ReportDiagnosisRequest": {
         "properties": {
+          "android_version": {
+            "default": "",
+            "title": "Android Version",
+            "type": "string"
+          },
           "class_names": {
             "items": {
               "type": "string"
@@ -3157,6 +3162,72 @@
         "summary": "Agent Chat"
       }
     },
+    "/api/agent/install": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Agent Install Bootstrap"
+      }
+    },
+    "/api/agent/packages/gms-remote-test/manifest": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Agent Package Manifest Endpoint"
+      }
+    },
+    "/api/agent/packages/gms-remote-test/{version}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent Package Download Endpoint"
+      }
+    },
     "/api/agent/sessions/{session_id}": {
       "get": {
         "description": "Get Agent session status.",
@@ -3841,7 +3912,7 @@
     },
     "/api/auth/agent-enroll": {
       "post": {
-        "description": "Exchange an enrollment code for an Agent Service Token.\n\nIntentionally does not require a session: the build server only holds the\none-shot code. Scopes/ACLs/expiry come from the enrollment record.",
+        "description": "Exchange an enrollment code for an Agent Service Token.\n\nIntentionally does not require a session: the build server only holds the\none-shot code. Scopes/ACLs/expiry come from the enrollment record.\nAnonymous brute-force of the pairing code is throttled per source IP by\nthe same persistent limiter the login endpoint uses (code review\n2026-08: the endpoint must not rely on TTL/one-shot alone).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -17948,16 +18019,16 @@
     },
     "/api/system/skills": {
       "get": {
-        "description": "下载指定技能目录的 zip 文件\n\nArgs:\n    skill_name: 技能名称，默认为 gms-remote-test\n\nReturns:\n    ZIP 文件下载",
+        "description": "下载技能 zip（兼容端点，11.txt 目录重构后的包装）\n\n旧结构 zips skills/<name>/；新结构的技能源位于\nagent/gms-remote-test/skill/（内容即旧 skills/gms-remote-test/ 主体）。\n这里将 skill/ 内容以 gms-remote-test/ 根打包，保持下载语义不变。\n唯一合法的 skill_name 是 gms-remote-test。\n\nReturns:\n    ZIP 文件下载",
         "parameters": [
           {
-            "description": "技能名称",
+            "description": "技能名称（兼容参数：当前唯一技能源是 agent/gms-remote-test/skill/）",
             "in": "query",
             "name": "skill_name",
             "required": false,
             "schema": {
               "default": "gms-remote-test",
-              "description": "技能名称",
+              "description": "技能名称（兼容参数：当前唯一技能源是 agent/gms-remote-test/skill/）",
               "title": "Skill Name",
               "type": "string"
             }
@@ -17989,7 +18060,7 @@
     },
     "/api/system/skills/install.sh": {
       "get": {
-        "description": "Return a Controller-bound one-command installer for gms-remote-test.",
+        "description": "Deprecated wrapper (11.txt 收口): forward to the gms-agent bootstrap.\n\nThe legacy bash installer is retired; the only install lifecycle is\nGET /api/agent/install → gms-agent install/update/rollback/enroll. This\nendpoint now emits a short forwarder so old curl recipes still end at\nthe right place instead of resurrecting the retired installer logic.",
         "responses": {
           "200": {
             "content": {

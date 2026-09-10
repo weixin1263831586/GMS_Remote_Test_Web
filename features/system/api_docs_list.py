@@ -651,7 +651,7 @@ API_DOCS_LIST = [
         "category": "system",
         "skill": "gms-rt-system-skills"
     },
-    dict(method="GET", path="/api/system/skills/install.sh", description="获取Skill和独立gms-rt-*命令一键安装脚本", params=[], category="system"),
+    dict(method="GET", path="/api/system/skills/install.sh", description="（已弃用）旧安装器转发器：输出引导到 /api/agent/install 的 gms-agent 安装脚本", params=[], category="system"),
 
     # ==================== API文档 ====================
     {

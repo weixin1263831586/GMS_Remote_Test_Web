@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""One-version release bump for the GMS agent package (10.txt §四).
+"""One-version release bump for the GMS agent package (11.txt).
 
 The release version is declared exactly once, in
 ``agent/gms-remote-test/package.yaml``. This script propagates it to every
 generated declaration:
 
-  * skills/gms-remote-test/scripts/gms-remote-test.sh  (GMS_RT_VERSION)
-  * skills/gms-remote-test/scripts/mcp_server.py       (SERVER_VERSION)
-  * plugins/gms-remote-test/kk.plugin.json             ("version")
-  * plugins/gms-remote-test/kimi.plugin.json           ("version")
-  * plugins/gms-remote-test/.codex-plugin/plugin.json  ("version")
+  * agent/gms-remote-test/runtime/gms-remote-test.sh  (GMS_RT_VERSION)
+  * agent/gms-remote-test/runtime/mcp_server.py       (SERVER_VERSION)
+  * agent/gms-remote-test/manifests/kk.plugin.json    ("version")
+  * agent/gms-remote-test/manifests/kimi.plugin.json  ("version")
+  * agent/gms-remote-test/manifests/codex.plugin.json ("version")
 
-After bumping, run plugins/gms-remote-test/scripts/sync_package.sh to
-regenerate the plugin payload (this script also does it for you).
+After bumping it regenerates the plugin payload via
+tools/sync_agent_package.py (plugins/gms-remote-test/ is generated — never
+edited directly).
 
 Usage:
     python tools/release_agent.py --version 0.14.0
@@ -28,15 +29,16 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PACKAGE_YAML = REPO_ROOT / "agent" / "gms-remote-test" / "package.yaml"
-CLI_SCRIPT = REPO_ROOT / "skills" / "gms-remote-test" / "scripts" / "gms-remote-test.sh"
-MCP_SERVER = REPO_ROOT / "skills" / "gms-remote-test" / "scripts" / "mcp_server.py"
+AGENT_DIR = REPO_ROOT / "agent" / "gms-remote-test"
+PACKAGE_YAML = AGENT_DIR / "package.yaml"
+CLI_SCRIPT = AGENT_DIR / "runtime" / "gms-remote-test.sh"
+MCP_SERVER = AGENT_DIR / "runtime" / "mcp_server.py"
 MANIFESTS = [
-    REPO_ROOT / "plugins" / "gms-remote-test" / "kk.plugin.json",
-    REPO_ROOT / "plugins" / "gms-remote-test" / "kimi.plugin.json",
-    REPO_ROOT / "plugins" / "gms-remote-test" / ".codex-plugin" / "plugin.json",
+    AGENT_DIR / "manifests" / "kk.plugin.json",
+    AGENT_DIR / "manifests" / "kimi.plugin.json",
+    AGENT_DIR / "manifests" / "codex.plugin.json",
 ]
-SYNC_SCRIPT = REPO_ROOT / "plugins" / "gms-remote-test" / "scripts" / "sync_package.sh"
+SYNC_SCRIPT = REPO_ROOT / "tools" / "sync_agent_package.py"
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
@@ -81,8 +83,7 @@ def collect_versions() -> dict[str, str]:
     mcp_match = re.search(r'^SERVER_VERSION = "([^"]*)"$', MCP_SERVER.read_text(encoding="utf-8"), re.M)
     versions = {"package.yaml": read_package_version()}
     for path in MANIFESTS:
-        key = str(path.relative_to(REPO_ROOT))
-        versions[key] = manifest_version(path)
+        versions[str(path.relative_to(REPO_ROOT))] = manifest_version(path)
     versions[str(CLI_SCRIPT.relative_to(REPO_ROOT))] = cli_match.group(1) if cli_match else ""
     versions[str(MCP_SERVER.relative_to(REPO_ROOT))] = mcp_match.group(1) if mcp_match else ""
     return versions
@@ -123,7 +124,7 @@ def main() -> int:
         bump_manifest(manifest, args.version)
 
     print(f"Bumped agent package to {args.version}; regenerating plugin payload ...")
-    result = subprocess.run(["bash", str(SYNC_SCRIPT), str(REPO_ROOT)])
+    result = subprocess.run([sys.executable, str(SYNC_SCRIPT), str(REPO_ROOT)])
     return result.returncode
 
 

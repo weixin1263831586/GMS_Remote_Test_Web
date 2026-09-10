@@ -100,20 +100,31 @@ async def auth_create_agent_enrollment(
 
 
 @router.post("/agent-enroll")
-async def auth_agent_enroll(req: dict):
+async def auth_agent_enroll(request: Request, req: dict):
     """Exchange an enrollment code for an Agent Service Token.
 
     Intentionally does not require a session: the build server only holds the
     one-shot code. Scopes/ACLs/expiry come from the enrollment record.
+    Anonymous brute-force of the pairing code is throttled per source IP by
+    the same persistent limiter the login endpoint uses (code review
+    2026-08: the endpoint must not rely on TTL/one-shot alone).
     """
+    source_ip = str(request.client.host if request.client else "unknown")
+    retry_after = auth_service.auth_retry_after("agent-enroll", "code", source_ip)
+    if retry_after:
+        response = error_response("配对码尝试过于频繁，请稍后重试", status_code=429)
+        response.headers["Retry-After"] = str(max(1, retry_after))
+        return response
     try:
         record = auth_service.redeem_agent_enrollment(str(req.get("code") or ""))
     except (ValueError, TypeError):
         record = None
     if record is None:
+        auth_service.record_auth_failure("agent-enroll", "code", source_ip)
         return error_response(
             "配对码无效、已使用或已过期", status_code=403
         )
+    auth_service.clear_auth_failures("agent-enroll", "code", source_ip)
     return {"success": True, "token": record}
 
 

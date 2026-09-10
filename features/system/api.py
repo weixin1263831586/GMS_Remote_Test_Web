@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from urllib.parse import quote, urlparse, urlsplit
+from urllib.parse import urlparse, urlsplit
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -25,7 +25,6 @@ from features.system import agent_package_registry, jq_binary
 from features.system.api_docs_list import API_DOCS_LIST
 from features.system.skill_archive_signing import (
     sign_skill_archive,
-    skill_verify_key_b64,
 )
 from features.system.state import global_state
 from features.system.terminal_auxiliary import (
@@ -400,11 +399,17 @@ async def proxy_gms_assistant_public_api(path: str, request: Request):
 
 
 # ==================== Skills Download ====================
+# 11.txt: agent/gms-remote-test is the single source root. The legacy
+# /api/system/skills* endpoints remain as compatibility wrappers over the
+# agent package source (skill content now lives in agent/.../skill/). The
+# modern install path is GET /api/agent/install (bootstrap → gms-agent).
 
 def _skill_directory(skill_name: str) -> str | None:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", skill_name or ""):
         return None
-    skills_base_dir = os.path.realpath(os.path.join(PROJECT_ROOT, "skills"))
+    skills_base_dir = os.path.realpath(
+        os.path.join(PROJECT_ROOT, "agent", "gms-remote-test", "skill")
+    )
     skills_dir = os.path.realpath(os.path.join(skills_base_dir, skill_name))
     if not skills_dir.startswith(skills_base_dir + os.sep):
         return None
@@ -412,11 +417,19 @@ def _skill_directory(skill_name: str) -> str | None:
 
 
 @router.get("/api/system/skills")
-async def download_skills_zip(request: Request, skill_name: str = Query("gms-remote-test", description="技能名称")):
-    """下载指定技能目录的 zip 文件
+async def download_skills_zip(
+    request: Request,
+    skill_name: str = Query(
+        "gms-remote-test",
+        description="技能名称（兼容参数：当前唯一技能源是 agent/gms-remote-test/skill/）",
+    ),
+):
+    """下载技能 zip（兼容端点，11.txt 目录重构后的包装）
 
-    Args:
-        skill_name: 技能名称，默认为 gms-remote-test
+    旧结构 zips skills/<name>/；新结构的技能源位于
+    agent/gms-remote-test/skill/（内容即旧 skills/gms-remote-test/ 主体）。
+    这里将 skill/ 内容以 gms-remote-test/ 根打包，保持下载语义不变。
+    唯一合法的 skill_name 是 gms-remote-test。
 
     Returns:
         ZIP 文件下载
@@ -424,17 +437,29 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
     try:
         logger.info(f"[SKILLS_DOWNLOAD] 请求下载技能包: {skill_name}")
 
-        skills_dir = _skill_directory(skill_name)
-
-        if not skills_dir or not os.path.isdir(skills_dir):
-            logger.error(f"[SKILLS_DOWNLOAD] 技能目录不存在：{skills_dir}")
+        if skill_name != "gms-remote-test":
+            return JSONResponse(
+                content={'success': False, 'error': f'未知技能：{skill_name}'},
+                status_code=404
+            )
+        # 新源：agent/gms-remote-test/skill/（arcname 根为 gms-remote-test/）
+        skills_dir = os.path.realpath(
+            os.path.join(PROJECT_ROOT, "agent", "gms-remote-test", "skill")
+        )
+        if not os.path.isdir(skills_dir):
+            logger.error(f"[SKILLS_DOWNLOAD] 技能源目录不存在：{skills_dir}")
             return JSONResponse(
                 content={'success': False, 'error': f'技能目录不存在：{skill_name}'},
                 status_code=404
             )
 
         zip_filename = f"{skill_name}-skills.zip"
-        result = FileUtils.create_zip_from_directory(skills_dir, zip_filename)
+        # 11.txt: skill 源位于 agent/gms-remote-test/skill/，打包时以
+        # gms-remote-test/ 为 arcname 根，保持旧下载语义（解压出
+        # gms-remote-test/ 目录）不变。
+        result = FileUtils.create_zip_from_multiple_directories(
+            {skills_dir: skill_name}, zip_filename
+        )
 
         if result is None:
             return JSONResponse(
@@ -471,29 +496,14 @@ async def download_skills_zip(request: Request, skill_name: str = Query("gms-rem
 
 @router.get("/api/system/skills/install.sh")
 async def download_skill_installer(request: Request):
-    """Return a Controller-bound one-command installer for gms-remote-test."""
-    installer_path = os.path.join(
-        PROJECT_ROOT,
-        "skills",
-        "gms-remote-test",
-        "scripts",
-        "install.sh",
-    )
-    try:
-        def read_installer() -> str:
-            with open(installer_path, encoding="utf-8") as installer_file:
-                return installer_file.read()
+    """Deprecated wrapper (11.txt 收口): forward to the gms-agent bootstrap.
 
-        template = await asyncio.to_thread(read_installer)
-    except OSError:
-        logger.exception("[SKILLS_INSTALLER] installer script is unavailable")
-        return error_response("技能安装脚本不可用", status_code=500)
-
+    The legacy bash installer is retired; the only install lifecycle is
+    GET /api/agent/install → gms-agent install/update/rollback/enroll. This
+    endpoint now emits a short forwarder so old curl recipes still end at
+    the right place instead of resurrecting the retired installer logic.
+    """
     server_url = str(request.base_url).rstrip("/")
-    # base_url 直接反映 Host 头（反代配置不当时可被外部控制）。模板把它嵌进
-    # 安装器脚本，值会流向 curl 的下载地址与 CLI 的 API_BASE——虽然经过
-    # shell 引号转义不会执行，但会让安装器指向攻击者主机。这里校验
-    # scheme 与 hostname/port 字符集，拒绝携带 shell 元字符的值。
     parsed_base = urlsplit(server_url)
     base_host = parsed_base.hostname or ""
     if (
@@ -508,27 +518,20 @@ async def download_skill_installer(request: Request):
     ):
         logger.warning("[SKILLS_INSTALLER] rejected suspicious base_url: %r", server_url)
         return error_response("无法从当前请求确定有效的服务地址", status_code=400)
-    download_url = (
-        f"{server_url}/api/system/skills?"
-        f"skill_name={quote('gms-remote-test')}"
-    )
-    verify_key_b64 = skill_verify_key_b64()
 
     def shell_literal(value: str) -> str:
         return value.replace("'", "'\"'\"'")
 
-    content = template.replace(
-        "__GMS_REMOTE_TEST_SERVER__",
-        shell_literal(server_url),
-    ).replace(
-        "__GMS_SKILL_DOWNLOAD_URL__",
-        shell_literal(download_url),
-    ).replace(
-        "__GMS_SKILL_VERIFY_KEY_B64__",
-        shell_literal(verify_key_b64),
-    ).replace(
-        "__GMS_SKILL_SIGNATURE_REQUIRED__",
-        "1" if verify_key_b64 else "0",
+    bootstrap_url = f"{server_url}/api/agent/install"
+    content = (
+        "#!/usr/bin/env bash\n"
+        "# DEPRECATED: the legacy skills installer is retired (11.txt).\n"
+        "# The single install path is the gms-agent bootstrap.\n"
+        "set -euo pipefail\n"
+        f"echo 'This installer is deprecated; fetching the gms-agent bootstrap ...'\n"
+        f"curl -fsSL {shell_literal(bootstrap_url)} -o gms-agent\n"
+        "python3 gms-agent install --server "
+        f"{shell_literal(server_url)} \"$@\"\n"
     )
     return Response(
         content=content,
