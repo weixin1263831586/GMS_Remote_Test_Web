@@ -65,10 +65,18 @@ def payload_files(plugin_dir: Path, client: str = "universal") -> list[tuple[Pat
 
 
 def _archive_mode(path: Path) -> int:
-    # Executable bit: shell scripts and extension-less executables
-    # (gms-agent). Everything else 0644.
+    # Executable bit: shell scripts, extension-less executables (gms-agent)
+    # and any file carrying a POSIX shebang (mcp_launcher.py is executed
+    # DIRECTLY as "./scripts/mcp_launcher.py" by the plugin manifests —
+    # 11.txt 审核 P0-4). Everything else 0644.
     if path.suffix == ".sh" or not path.suffix:
         return 0o755 << 16
+    try:
+        with path.open("rb") as handle:
+            if handle.read(2) == b"#!":
+                return 0o755 << 16
+    except OSError:
+        pass
     return 0o644 << 16
 
 

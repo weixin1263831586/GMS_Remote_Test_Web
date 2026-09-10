@@ -28,6 +28,7 @@ DESIRED_ENV_KEYS = (
     "GMS_REMOTE_TEST_SERVER",
     "GMS_RT_PROFILE",
     "GMS_AUTH_TOKEN_FILE",
+    "GMS_AGENT_AUTH_MODE",
     "GMS_CURL_CA_CERT",
 )
 
@@ -48,6 +49,10 @@ def _desired_env(server_url: str, profile: str, token_file: str, ca_cert: str) -
         "GMS_REMOTE_TEST_SERVER": server_url,
         "GMS_RT_PROFILE": profile,
         "GMS_AUTH_TOKEN_FILE": token_file,
+        # 11.txt 审核 P0-3：注册进客户端配置的 MCP 环境必须显式声明
+        # service-token 模式——否则 mcp_server.py 会注册密码登录/提权/
+        # 自助审批工具，重新打开 10.txt 指出的高危边界。
+        "GMS_AGENT_AUTH_MODE": "service-token",
     }
     if ca_cert:
         env["GMS_CURL_CA_CERT"] = ca_cert

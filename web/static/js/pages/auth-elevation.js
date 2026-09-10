@@ -99,8 +99,10 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限', opti
             state.elevated = false;
             state.elevatedUntil = null;
         } catch (error) {
+            // 状态检查失败不能假定仍有提权（fail-open 会掩盖提权过期，
+            // 导致烧写分片全部 403）。返回 false，让调用方重新走提权弹框。
             debugLog('[Elevation] could not verify the active elevation', error);
-            return true;
+            return false;
         }
     }
     if (!state.currentUser && state.authSetupRequired) {

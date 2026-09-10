@@ -308,9 +308,20 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("return await new Promise((resolve, reject)", chunks)
         self.assertIn("const uploadError = error instanceof Error", chunks)
         self.assertIn("formData.append('chunk_size', chunkSize)", chunks)
-        self.assertIn("chunk-upload.js?v=20260813-firmware-content-id", shell)
+        self.assertIn("chunk-upload.js?v=20260910-elevation-retry", shell)
         self.assertNotIn("普通固件烧写需要 ADB 设备", firmware)
-        self.assertIn("firmware-burn.js?v=20260904-gsi-worker-source", shell)
+        self.assertIn("firmware-burn.js?v=20260910-elevation-retry", shell)
+        # 提权过期（403 elevation_required）时：分片不再整块重试，
+        # 烧录页弹出管理员提权后续传，elevation 状态检查失败不 fail-open。
+        self.assertIn("chunkUploadHttpError", chunks)
+        self.assertIn("error.elevationRequired", chunks)
+        self.assertIn("uploadError?.elevationRequired", firmware)
+        self.assertIn("继续固件上传（管理员验证已过期）", firmware)
+        elevation = read_text("web/static/js/pages/auth-elevation.js")
+        self.assertIn(
+            "返回 false，让调用方重新走提权弹框",
+            elevation,
+        )
 
     def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
         navigation = read_all_frontend_js()

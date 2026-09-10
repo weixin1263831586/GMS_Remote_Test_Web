@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -54,6 +55,30 @@ def _http_exit_code(status: int) -> int:
     return EXIT_OPERATION
 
 
+def _load_token(token_path: Path) -> str:
+    """Read the raw token from a 0600 file (CLI parity, 10.txt §十三).
+
+    11.txt 审核 P1-11: the CLI enforces owner-only permissions on token
+    files; the SDK/MCP fast path read any world-readable file. Fail
+    closed — a mis-permissioned token file is treated as absent and
+    requests go out unauthenticated (→ 401) instead of silently using a
+    credential any local user could have read.
+    """
+    try:
+        path = token_path.expanduser()
+        mode = path.stat().st_mode & 0o777
+        if mode & 0o077:
+            print(
+                f"Error: token file {path} 权限为 {oct(mode)}，要求 0600；"
+                "已拒绝读取（chmod 600 后重试）",
+                file=sys.stderr,
+            )
+            return ""
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 class GmsClient:
     """Minimal stdlib-only HTTP client for the Controller API.
 
@@ -74,12 +99,7 @@ class GmsClient:
         if not self.server_url:
             raise GmsApiError("GMS_REMOTE_TEST_SERVER 未设置", EXIT_USAGE)
         token_path = token_file or os.environ.get("GMS_AUTH_TOKEN_FILE", "")
-        self.token = ""
-        if token_path:
-            try:
-                self.token = Path(token_path).expanduser().read_text(encoding="utf-8").strip()
-            except OSError:
-                self.token = ""
+        self.token = _load_token(Path(token_path)) if token_path else ""
         self.ca_cert = ca_cert or os.environ.get("GMS_CURL_CA_CERT", "")
         self.insecure = insecure or os.environ.get("GMS_CURL_INSECURE", "") == "1"
         self.timeout = timeout

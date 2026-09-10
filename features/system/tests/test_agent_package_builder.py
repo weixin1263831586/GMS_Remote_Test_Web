@@ -86,6 +86,10 @@ class BuilderContractTests(unittest.TestCase):
             }
         self.assertEqual(modes["gms-remote-test/scripts/gms-remote-test.sh"], 0o755)
         self.assertEqual(modes["gms-remote-test/scripts/gms-agent"], 0o755)
+        # 11.txt 审核 P0-4: the plugin manifests exec the launcher directly —
+        # a shebang-carrying .py must ship 0755 or native plugin launch dies
+        # with "Permission denied".
+        self.assertEqual(modes["gms-remote-test/scripts/mcp_launcher.py"], 0o755)
         self.assertEqual(modes["gms-remote-test/skills/gms-remote-test/SKILL.md"], 0o644)
 
     def test_missing_manifest_raises(self):

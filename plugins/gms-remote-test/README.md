@@ -4,9 +4,10 @@ Drive the GMS Remote Test Controller from kkagent as an MCP plugin: device
 inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware
 burn, USB/IP, and VPN — all through the bundled, versioned `gms-rt` CLI.
 
-The plugin is **self-contained**: `scripts/gms-remote-test.sh` is a copy of
-the repository CLI (`skills/gms-remote-test/scripts/gms-remote-test.sh`), so
-installing the plugin directory is enough; no clone of this repository is
+The plugin is **self-contained**: `scripts/gms-remote-test.sh` is a generated
+copy of the repository CLI (`agent/gms-remote-test/runtime/gms-remote-test.sh`
+— 11.txt: `agent/gms-remote-test/` is the single hand-maintained source root),
+so installing the plugin directory is enough; no clone of this repository is
 needed on the consumer machine.
 
 ## Install
@@ -161,17 +162,18 @@ registered when the MCP server runs in service-token mode
 
 ## Maintaining the bundled payload
 
-Everything in this plugin except the manifests and docs is a generated
-release copy of `skills/gms-remote-test/`, kept in sync by:
+Everything in this plugin except the manifests and docs is a GENERATED
+release copy of `agent/gms-remote-test/` (11.txt: never edit this directory
+directly), kept in sync by:
 
 ```bash
-plugins/gms-remote-test/scripts/sync_package.sh
+python tools/sync_agent_package.py
 ```
 
-It syncs the CLI, the MCP adapter, the launcher (`mcp_launcher.sh`), the
-MCP reconcile helper (`agent_mcp_config.py`), the `gms-agent` installer CLI,
-the `gms_agent/` Python SDK, `SKILL.md`, `references/`, `agents/`, and
-validates the six-way version contract against
+It syncs the CLI, the MCP adapter, the launchers (`mcp_launcher.py` /
+`mcp_launcher.sh`), the MCP reconcile helper (`agent_mcp_config.py`), the
+`gms-agent` installer CLI, the `gms_agent/` Python SDK, `SKILL.md`,
+`references/`, `agents/`, and validates the six-way version contract against
 `agent/gms-remote-test/package.yaml` (the single version source).
 Version bumps go through `python tools/release_agent.py --version X.Y.Z`,
 which rewrites every declaration and re-runs the sync; distribution

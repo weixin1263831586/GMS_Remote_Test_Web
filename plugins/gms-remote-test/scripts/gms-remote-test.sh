@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.15.0"
+GMS_RT_VERSION="0.15.1"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -3304,27 +3304,30 @@ gms-rt-system-skills() {
     fi
 }
 
-# Reinstall the latest Skill and CLI command links from the bound Controller.
+# Reinstall the latest package from the bound Controller (11.txt 收口).
 gms-rt-system-update() {
     [ "$#" -eq 0 ] || {
         error "Usage: gms-rt-system-update"
         return "$GMS_RT_EXIT_USAGE"
     }
-    local installer
-    installer="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install.sh"
-    [ -f "$installer" ] || {
-        error "Skill installer not found: $installer"
+    # 11.txt 审核 P0-5：旧实现查找相邻的 install.sh，但该脚本已随包结构
+    # 迁移删除——现代更新生命周期是 `gms-agent update`（registry → 校验 →
+    # versions/<v>/ → 整包重激活）。优先取本脚本旁边的 gms-agent（安装的
+    # runtime 与源码检出都成立），退回已安装的 current 链接。
+    local gms_agent
+    gms_agent="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gms-agent"
+    if [ ! -f "$gms_agent" ]; then
+        gms_agent="${GMS_AGENT_RUNTIME_ROOT:-${HOME}/.local/share/gms-remote-test}/current/scripts/gms-agent"
+    fi
+    if [ ! -f "$gms_agent" ]; then
+        error "gms-agent not found; run the bootstrap install first"
         return "$GMS_RT_EXIT_OPERATION"
-    }
-    # Dispatcher 安装由 wrapper export GMS_REMOTE_TEST_SERVER/GMS_SKILL_DOWNLOAD_URL；
-    # source 模式（.bashrc 直接 source 本脚本）没有 wrapper，且仓库里的 install.sh
-    # 是未渲染模板（__GMS_* 占位符）。这里把当前绑定的 Controller 注入为默认值，
-    # 保证两种安装模式下更新命令都能自举；TLS 配置与当前会话保持一致。
-    GMS_REMOTE_TEST_SERVER="${GMS_REMOTE_TEST_SERVER:-${SERVER_URL%/}}" \
-    GMS_SKILL_DOWNLOAD_URL="${GMS_SKILL_DOWNLOAD_URL:-${SERVER_URL%/}/api/system/skills?skill_name=gms-remote-test}" \
+    fi
+    # TLS 配置与当前会话保持一致：gms-agent 下载层读取
+    # GMS_INSTALL_CA_CERT / GMS_INSTALL_INSECURE。
     GMS_INSTALL_CA_CERT="${GMS_INSTALL_CA_CERT:-${GMS_CURL_CA_CERT:-}}" \
     GMS_INSTALL_INSECURE="${GMS_CURL_INSECURE:-${GMS_INSTALL_INSECURE:-0}}" \
-        bash "$installer"
+        python3 "$gms_agent" update
 }
 
 

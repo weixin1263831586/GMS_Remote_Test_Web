@@ -415,37 +415,38 @@ class SkillCliTests(unittest.TestCase):
 
 
 class SkillUpdateEnvTests(unittest.TestCase):
-    """gms-rt-system-update 必须向 install.sh 注入绑定 Controller 的默认值。
+    """gms-rt-system-update 必须走 gms-agent update 并传导当前 TLS 配置。
 
-    source 模式（.bashrc 直接 source helper）没有 dispatcher wrapper 提供
-    GMS_REMOTE_TEST_SERVER/GMS_SKILL_DOWNLOAD_URL，仓库里的 install.sh 又是
-    未渲染模板（__GMS_* 占位符），缺失注入时更新命令必然失败。
+    11.txt 收口：install.sh 已随包结构迁移删除，更新生命周期改为
+    `gms-agent update`（registry → 校验 → versions/<v>/ → 整包重激活）。
+    命令现在优先取本脚本旁边的 gms-agent，并把会话的
+    GMS_INSTALL_CA_CERT / GMS_INSTALL_INSECURE 传导给 gms-agent 的下载层。
     """
 
-    def test_update_passes_server_and_tls_defaults_to_installer(self):
+    def test_update_invokes_gms_agent_with_tls_passthrough(self):
         with tempfile.TemporaryDirectory() as temporary:
             scripts_dir = Path(temporary) / "scripts"
             scripts_dir.mkdir()
             helper_copy = scripts_dir / "gms-remote-test.sh"
             helper_copy.write_bytes(HELPER.read_bytes())
-            env_dump = Path(temporary) / "installer-env.json"
-            # Stub install.sh：记录收到的关键环境变量后成功退出。
-            (scripts_dir / "install.sh").write_text(
-                "#!/usr/bin/env bash\n"
-                "printf '%s\\n' \"${GMS_REMOTE_TEST_SERVER:-}\" \\\n"
-                "  \"${GMS_SKILL_DOWNLOAD_URL:-}\" \\\n"
-                "  \"${GMS_INSTALL_CA_CERT:-}\" \\\n"
-                "  \"${GMS_INSTALL_INSECURE:-}\" > \"" + str(env_dump) + "\"\n"
-                "exit 0\n",
+            # Stub gms-agent（与真实入口一致：#!/usr/bin/env python3）：
+            # 记录收到的关键环境变量后成功退出。
+            env_dump = Path(temporary) / "agent-env.json"
+            (scripts_dir / "gms-agent").write_text(
+                "#!/usr/bin/env python3\n"
+                'import os, sys\n'
+                'ca = os.environ.get("GMS_INSTALL_CA_CERT", "")\n'
+                'insecure = os.environ.get("GMS_INSTALL_INSECURE", "")\n'
+                'with open(r"' + str(env_dump) + '", "w") as fh:\n'
+                '    fh.write("\\n".join([ca, insecure, *sys.argv[1:]]) + "\\n")\n',
                 encoding="utf-8",
             )
-            (scripts_dir / "install.sh").chmod(0o755)
+            (scripts_dir / "gms-agent").chmod(0o755)
 
             env = os.environ.copy()
             env.update(
                 {
                     "HOME": temporary,
-                    "GMS_REMOTE_TEST_SERVER": "https://controller.example:5001",
                     "GMS_CURL_CA_CERT": "/tmp/trusted-ca.pem",
                     "NO_COLOR": "1",
                 }
@@ -461,16 +462,12 @@ class SkillUpdateEnvTests(unittest.TestCase):
             lines = env_dump.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        server_url, download_url, ca_cert, insecure = lines[:4]
-        self.assertEqual(server_url, "https://controller.example:5001")
-        self.assertEqual(
-            download_url,
-            "https://controller.example:5001/api/system/skills"
-            "?skill_name=gms-remote-test",
-        )
-        # 当前会话的 TLS 配置必须传导给安装器（CA 优先，未配置时回退 0）。
+        ca_cert, insecure, *argv = lines[:3]
+        # 当前会话的 TLS 配置必须传导给 gms-agent（CA 优先，未配置时回退 0）。
         self.assertEqual(ca_cert, "/tmp/trusted-ca.pem")
         self.assertEqual(insecure, "0")
+        # 新生命周期：python3 <scripts>/gms-agent update
+        self.assertTrue(any(arg == "update" for arg in argv), lines[3:])
 
 
 if __name__ == "__main__":

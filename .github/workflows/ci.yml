@@ -131,10 +131,14 @@ jobs:
         # six-way version contract (package.yaml / three manifests / CLI /
         # MCP). The git diff covers the WHOLE plugin directory, so a stale
         # MCP or skill copy can no longer sneak into main (10.txt §十六).
+        # 11.txt 审核 P1-9：生成树的测试也必须运行——其 scripts/ 布局、
+        # launcher 可执行位与自包含性只有在这套测试里才被覆盖。两个测试树
+        # 的文件同名，必须分开两次 pytest 调用收集。
         run: |
           python tools/sync_agent_package.py .
           git diff --exit-code -- plugins/gms-remote-test/
           python -m pytest agent/gms-remote-test/tests -q
+          python -m pytest plugins/gms-remote-test/tests -q
       - name: Agent package lifecycle + registry contract (10.txt §三十六)
         # install/update/rollback/bootstrap lifecycle, single-root ZIP
         # contract between the registry and the release builder.
@@ -180,7 +184,17 @@ jobs:
           RESULTS: ${{ toJSON(needs.*.result) }}
         run: |
           echo "Gate results: ${RESULTS}"
-          if echo "${RESULTS}" | grep -Ev '"(success|skipped)"' | grep -q .; then
+          # 11.txt 审核 P1-8：旧的 `grep -Ev '"(success|skipped)"'` 对单行
+          # JSON 无效——只要整行含 "success" 就会被整体过滤，掩盖真实失败
+          # （["success","failure"] 被判通过）。改为逐元素精确判定。
+          fail=0
+          for result in $(echo "${RESULTS}" | jq -r '.[]'); do
+            case "${result}" in
+              success|skipped) ;;
+              *) echo "::error::Gate result '${result}' is not acceptable."; fail=1 ;;
+            esac
+          done
+          if [ "${fail}" -ne 0 ]; then
             echo "::error::One or more gates did not pass."
             exit 1
           fi

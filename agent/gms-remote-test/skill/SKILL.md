@@ -9,32 +9,34 @@ Use the implementation in the current checkout as the source of truth. Do not re
 
 ## Operate the platform
 
-On another Linux host, install or update the Skill and CLI from the Controller.
-Never pipe the install script through `curl -k`: `-k` breaks the bootstrap
-trust chain (an attacker who can MITM install.sh can also replace the embedded
-signing key). Use a trusted CA bundle instead:
+On another Linux host, install the whole agent package (runtime + Skill +
+MCP registration) from the Controller's Agent Package Registry. Never pipe
+the bootstrap through `curl -k`: `-k` breaks the bootstrap trust chain (an
+attacker who can MITM the bootstrap can also replace the embedded signing
+key). Use a trusted CA bundle instead:
 
 ```bash
 curl --cacert /etc/gms/controller-ca.pem -fsSL \
-  "https://CONTROLLER:5001/api/system/skills/install.sh" -o /tmp/gms-agent-install.sh
-bash /tmp/gms-agent-install.sh --client auto   # auto-detects codex / kimi / kkagent
+  "https://CONTROLLER:5001/api/agent/install" -o gms-agent
+python3 gms-agent install --client auto   # auto-detects codex / kimi / kkagent
 gms-rt-system-health --json --non-interactive
 ```
 
-`--client` installs the self-contained Skill+MCP plugin for the detected
-agent, writes a per-agent env profile (`GMS_RT_PROFILE`,
-`GMS_AUTH_TOKEN_FILE` reference) under `~/.local/share/gms-remote-test/mcp/`
-and reconciles the client's MCP registration (existing gms blocks are
-updated in place; other MCP servers are untouched; a corrupt client config
-fails the install with a backup instead of being overwritten).
+The bootstrap verifies the registry manifest (SHA-256 + Ed25519 signature
+against the release key pinned at download time) before anything extracted
+is executed. `install` installs the self-contained Skill+MCP plugin for the
+detected agents, writes per-agent TOML profiles under
+`~/.config/gms-agent/profiles/` (`GMS_RT_PROFILE`,
+`GMS_AUTH_TOKEN_FILE` reference) and reconciles each client's MCP
+registration (existing gms blocks are updated in place; other MCP servers
+are untouched; a corrupt client config fails the install with a backup
+instead of being overwritten).
 
-The same runtime is also installable through the Agent Package Registry as
-one command: `curl ... /api/agent/install -o gms-agent && python3 gms-agent
-install --server https://CONTROLLER:5001`, later updated with
-`gms-agent update` and rolled back with `gms-agent rollback <version>`.
-Agent MCP manifests launch through `scripts/mcp_launcher.sh`, which loads
-the per-agent env profile automatically — users never need to `source`
-anything before starting the agent.
+Later lifecycles: `gms-agent update` (registry → verify → install →
+whole-package re-activation), `gms-agent rollback <version>`, `gms-agent
+enroll <CODE>` and `gms-agent status`. Agent MCP manifests launch through
+`scripts/mcp_launcher.py`, which loads the per-agent profile automatically —
+users never need to `source` anything before starting the agent.
 
 Before calling protected APIs, inspect and establish the CLI session:
 

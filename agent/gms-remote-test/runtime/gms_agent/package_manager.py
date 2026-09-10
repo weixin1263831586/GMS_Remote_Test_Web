@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -21,6 +22,7 @@ import sys
 import urllib.error
 import urllib.request
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 
@@ -186,8 +188,24 @@ def http_get(url: str, ca_cert: str = "", timeout: int = 60) -> tuple[bytes, dic
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
+
+    class _NoRedirects(urllib.request.HTTPRedirectHandler):
+        # 11.txt 审核 P1-10: urllib follows redirects by default, which lets
+        # a same-origin endpoint bounce the package fetch to another host.
+        # Registry downloads must never leave the pinned origin.
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    if isinstance(context, ssl.SSLContext):
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=context), _NoRedirects()
+        )
+        open_fn = opener.open
+    else:
+        opener = urllib.request.build_opener(_NoRedirects())
+        open_fn = opener.open
     request = urllib.request.Request(url, headers={"User-Agent": "gms-agent-installer"})
-    with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+    with open_fn(request, timeout=timeout) as response:
         return response.read(), dict(response.headers)
 
 
@@ -243,7 +261,13 @@ def _verify_manifest_signature(manifest: dict, signature_b64: str, verify_key_b6
 
 def artifact_url_ok(url: object, server: str) -> bool:
     """Artifact must be http(s) AND same origin as the Controller (no
-    off-host download redirects baked into a tampered manifest)."""
+    off-host download redirects baked into a tampered manifest).
+
+    11.txt 审核 P1-10: netloc-only comparison let a manifest point an
+    https origin at an http artifact URL (downgrade to plaintext). The
+    scheme must match too; http_get() disables redirects so a same-origin
+    endpoint cannot bounce the fetch off-host either.
+    """
     if not isinstance(url, str):
         return False
     from urllib.parse import urlsplit
@@ -252,7 +276,7 @@ def artifact_url_ok(url: object, server: str) -> bool:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return False
     origin = urlsplit(server)
-    return parsed.netloc == origin.netloc
+    return (parsed.scheme, parsed.netloc) == (origin.scheme, origin.netloc)
 
 
 # ---------------------------------------------------------------------------
@@ -584,28 +608,30 @@ def load_profile(profile: str) -> dict[str, str]:
 
 def profile_server_and_ca(client: str) -> tuple[str, str]:
     """Re-read Controller URL / CA from an existing profile (update/rollback
-    re-activation must not need the user to repeat --server). TOML first,
-    legacy .env fallback for hosts installed before 0.14."""
-    legacy_env = MCP_ENV_DIR / f"{client}.env"
+    re-activation must not need the user to repeat --server). TOML first
+    (authoritative store, 10.txt §十八) — 11.txt 审核 P1-12: a stale legacy
+    .env must NOT override the newer TOML value; the .env is only a
+    fallback for hosts installed before 0.14."""
     server, ca = "", ""
-    if legacy_env.is_file():
-        for line in legacy_env.read_text(encoding="utf-8").splitlines():
-            if line.startswith("export GMS_REMOTE_TEST_SERVER="):
-                parts = shlex.split(line.split("=", 1)[1])
-                server = parts[0] if parts else ""
-            elif line.startswith("export GMS_CURL_CA_CERT="):
-                parts = shlex.split(line.split("=", 1)[1])
-                ca = parts[0] if parts else ""
-    if not server:
+    if PROFILE_ROOT.is_dir():
         # Find the TOML profile for this client (profile files are named
         # <client>-<host>-<uid>.toml).
-        if PROFILE_ROOT.is_dir():
-            for candidate in sorted(PROFILE_ROOT.glob(f"{client}-*.toml")):
-                flat = load_profile(candidate.stem)
-                if flat.get("profile"):
-                    server = flat.get("url", "")
-                    ca = flat.get("ca_cert", "")
-                    break
+        for candidate in sorted(PROFILE_ROOT.glob(f"{client}-*.toml")):
+            flat = load_profile(candidate.stem)
+            if flat.get("profile"):
+                server = flat.get("url", "")
+                ca = flat.get("ca_cert", "")
+                break
+    if not server:
+        legacy_env = MCP_ENV_DIR / f"{client}.env"
+        if legacy_env.is_file():
+            for line in legacy_env.read_text(encoding="utf-8").splitlines():
+                if line.startswith("export GMS_REMOTE_TEST_SERVER="):
+                    parts = shlex.split(line.split("=", 1)[1])
+                    server = parts[0] if parts else ""
+                elif line.startswith("export GMS_CURL_CA_CERT="):
+                    parts = shlex.split(line.split("=", 1)[1])
+                    ca = parts[0] if parts else ""
     return server.rstrip("/"), ca
 
 
@@ -635,10 +661,21 @@ def write_profile(client: str, server: str, ca_cert: str) -> str:
 
 
 def configured_clients() -> list[str]:
-    """Clients this host already activated (profile env files exist)."""
-    if not MCP_ENV_DIR.is_dir():
-        return []
-    return [c for c in CLIENTS if (MCP_ENV_DIR / f"{c}.env").is_file()]
+    """Clients this host already activated.
+
+    11.txt 审核 P1-12: activation state is recognized from BOTH stores —
+    the TOML profile (<client>-*.toml) and the legacy <client>.env — so a
+    TOML-only client still gets re-activated by update/rollback.
+    """
+    found = []
+    for client in CLIENTS:
+        has_env = MCP_ENV_DIR.is_dir() and (MCP_ENV_DIR / f"{client}.env").is_file()
+        has_toml = bool(
+            PROFILE_ROOT.is_dir() and list(PROFILE_ROOT.glob(f"{client}-*.toml"))
+        )
+        if has_env or has_toml:
+            found.append(client)
+    return found
 
 
 def install_skill(client: str, runtime_dir: Path) -> Path:
@@ -649,8 +686,53 @@ def install_skill(client: str, runtime_dir: Path) -> Path:
     return target
 
 
+def kkagent_plugin_registry() -> Path:
+    return Path(os.environ.get("KKAGENT_HOME", Path.home() / ".kkagent")) / "plugins" / "installed.json"
+
+
+def register_kkagent_plugin(target: Path) -> None:
+    """Register the copied payload in ~/.kkagent/plugins/installed.json.
+
+    11.txt 审核 P1-6: kkagent discovers local plugins through the registry
+    file, not by directory presence. install_plugin_for_kkagent used to stop
+    at copying the payload, so `--client kkagent` installs were invisible to
+    the host. Mirrors plugins/gms-remote-test/scripts/install_local.sh.
+    """
+    registry = kkagent_plugin_registry()
+    version = ""
+    manifest = target / "kk.plugin.json"
+    if manifest.is_file():
+        try:
+            version = str(json.loads(manifest.read_text(encoding="utf-8")).get("version", ""))
+        except ValueError:
+            version = ""
+    try:
+        data = json.loads(registry.read_text(encoding="utf-8")) if registry.is_file() else {}
+    except (ValueError, OSError):
+        data = {}
+    plugins = data.setdefault("plugins", [])
+    if not isinstance(plugins, list):
+        plugins = data["plugins"] = []
+    now = datetime.now(timezone.utc).isoformat()
+    entry = next((p for p in plugins if isinstance(p, dict) and p.get("id") == "gms-remote-test"), None)
+    if entry is None:
+        entry = {"id": "gms-remote-test", "source": "local", "enabled": True}
+        plugins.append(entry)
+    entry.update({
+        "root": str(target),
+        "source": entry.get("source", "local"),
+        "enabled": entry.get("enabled", True),
+        "updatedAt": now,
+        "version": version,
+    })
+    if "installedAt" not in entry:
+        entry["installedAt"] = now
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def install_plugin_for_kkagent(runtime_dir: Path) -> None:
-    """Register the bundled plugin payload under ~/.kkagent/plugins.
+    """Register the bundled plugin payload under ~/.kkagent/plugins/local.
 
     Canonical layout (agent_package_builder.py): the manifests sit at the
     package ROOT (versions/<v>/kk.plugin.json) — the package root IS the
@@ -666,8 +748,11 @@ def install_plugin_for_kkagent(runtime_dir: Path) -> None:
     if payload is None:
         print("  MCP (kkagent): plugin payload not found in package; skipped", file=sys.stderr)
         return
-    target = kkagent_home / "plugins" / "gms-remote-test"
+    # 11.txt 审核 P1-6: install into plugins/local/<id> — the location the
+    # local-plugin registry (and install_local.sh) use — not bare plugins/.
+    target = kkagent_home / "plugins" / "local" / "gms-remote-test"
     copytree_atomic(payload, target)
+    register_kkagent_plugin(target)
     print(f"  MCP (kkagent): plugin installed at {target}")
 
 
@@ -677,13 +762,16 @@ def reconcile_mcp(client: str, server: str, name: str, ca_cert: str) -> None:
         client_skill_root(client).parent
         / ("mcp.json" if client == "kimi" else "config.toml")
     )
+    # 11.txt 审核 P0-3：注册的启动命令必须是 mcp_launcher.py（它强制
+    # GMS_AGENT_AUTH_MODE=service-token），而不是直接 exec mcp_server.py——
+    # 后者会绕过 launcher 的安全边界，重新暴露密码/提权/审批工具。
     result = subprocess.run(
         [
             sys.executable,
             str(CURRENT_LINK / "scripts" / "agent_mcp_config.py"),
             client,
             str(config_path),
-            str(CURRENT_LINK / "scripts" / "mcp_server.py"),
+            str(CURRENT_LINK / "scripts" / "mcp_launcher.py"),
             server,
             name,
             str(token_file),
@@ -698,23 +786,104 @@ def reconcile_mcp(client: str, server: str, name: str, ca_cert: str) -> None:
     print(f"  MCP ({client}): {result.stdout.strip()}")
 
 
-def install_cli_dispatcher() -> Path:
+def install_cli_dispatcher() -> list[Path]:
+    """Install the CLI dispatcher plus one command link per gms-rt-* function.
+
+    11.txt 审核 P0-5: the shell dispatcher resolves its command from $1 — it
+    never looks at argv[0] — so a fresh install that only drops a single
+    `gms-rt` file leaves every advertised command (gms-rt-system-health,
+    gms-rt-agent-enroll, …) and the gms-agent lifecycle CLI unusable. The
+    dispatcher below therefore accepts BOTH invocation styles:
+
+        gms-rt gms-rt-devices-list ...    (explicit subcommand)
+        gms-rt-devices-list ...           (argv0 via per-command symlink)
+
+    and the installer creates one symlink per command function found in the
+    INSTALLED dispatcher plus the `gms-agent` entry point, mirroring what the
+    retired skills/install.sh provided.
+    """
     bin_dir = Path(os.environ.get("GMS_BIN_DIR", Path.home() / ".local/bin"))
     bin_dir.mkdir(parents=True, exist_ok=True)
+    cli = CURRENT_LINK / "scripts" / "gms-remote-test.sh"
     dispatcher = bin_dir / "gms-rt"
     dispatcher.write_text(
         "#!/usr/bin/env bash\n"
-        f'exec bash "{CURRENT_LINK}/scripts/gms-remote-test.sh" "$@"\n',
+        "# GMS Remote Test CLI dispatcher (generated by gms-agent install).\n"
+        'invoked="${0##*/}"\n'
+        'if [ "$invoked" = "gms-rt" ] && [ "$#" -gt 0 ] && [[ "$1" == gms-rt-* ]]; then\n'
+        f'    exec bash "{cli}" "$@"\n'
+        "fi\n"
+        'if [[ "$invoked" == gms-rt-* ]]; then\n'
+        f'    exec bash "{cli}" "$invoked" "$@"\n'
+        "fi\n"
+        f'    exec bash "{cli}" "$@"\n',
         encoding="utf-8",
     )
     dispatcher.chmod(0o755)
-    return dispatcher
+    created = [dispatcher]
+    links: dict[str, Path] = {"gms-agent": CURRENT_LINK / "scripts" / "gms-agent"}
+    if cli.is_file():
+        for match in re.finditer(r"^(gms-rt-[a-z0-9-]+)\(\)", cli.read_text(encoding="utf-8"), re.M):
+            links.setdefault(match.group(1), cli)
+    for link_name in sorted(links):
+        link = bin_dir / link_name
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(dispatcher)
+        created.append(link)
+    return created
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle file lock (11.txt 审核 P1-7)
+# ---------------------------------------------------------------------------
+
+def lifecycle_lock():
+    """Cross-process advisory lock serializing install/update/rollback.
+
+    Two concurrent updates would race on staging trees, versions/<v>/ and
+    client configs. The lock is a plain 0600 file under STATE_DIR guarded
+    by fcntl.flock (auto-released on process exit — a crashed installer
+    cannot deadlock the next run).
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _lock():
+        import fcntl
+
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        lock_path = STATE_DIR / "lifecycle.lock"
+        handle = open(lock_path, "w")  # noqa: SIM115 — held for the critical section
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            with suppress_oserror():
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+
+    return _lock()
+
+
+class suppress_oserror:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return exc_type is not None and issubclass(exc_type, OSError)
 
 
 def activate_clients(clients: list[str], server: str, ca_cert: str) -> None:
     """Whole-package activation: skill + client registration + profile all
     derive from CURRENT_LINK, so update/rollback refresh them together
-    with the runtime (10.txt §九/§十/§十一)."""
+    with the runtime (10.txt §九/§十/§十一).
+
+    11.txt 审核 P1-7: per-client failures no longer strand the host in a
+    mixed state — the first failure aborts activation (install fails
+    loudly; update keeps the new runtime but reports which client broke
+    and exits non-zero).
+    """
     for client in clients:
         print(f"Configuring {client}:")
         name = write_profile(client, server, ca_cert)
@@ -726,6 +895,11 @@ def activate_clients(clients: list[str], server: str, ca_cert: str) -> None:
 
 
 def cmd_install(args: argparse.Namespace) -> int:
+    with lifecycle_lock():
+        return _cmd_install_locked(args)
+
+
+def _cmd_install_locked(args: argparse.Namespace) -> int:
     server = args.server or server_url_from_env()
     ca_cert = os.environ.get("GMS_INSTALL_CA_CERT", "")
 
@@ -761,8 +935,8 @@ def cmd_install(args: argparse.Namespace) -> int:
             shutil.rmtree(staging_to_cleanup, ignore_errors=True)
     print(f"  Runtime: {CURRENT_LINK} -> {runtime_dir}")
 
-    dispatcher = install_cli_dispatcher()
-    print(f"  CLI: {dispatcher}")
+    cli_links = install_cli_dispatcher()
+    print(f"  CLI: {cli_links[0]} (+{len(cli_links) - 1} gms-rt-*/gms-agent command links)")
 
     if clients:
         activate_clients(clients, server, ca_cert)
@@ -778,6 +952,11 @@ def cmd_install(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 def cmd_update(args: argparse.Namespace) -> int:
+    with lifecycle_lock():
+        return _cmd_update_locked(args)
+
+
+def _cmd_update_locked(args: argparse.Namespace) -> int:
     server = args.server or server_url_from_env()
     ca_cert = os.environ.get("GMS_INSTALL_CA_CERT", "")
     current = installed_version() or runtime_version()
@@ -794,6 +973,29 @@ def cmd_update(args: argparse.Namespace) -> int:
     if latest == current and not args.force:
         print(f"Already up to date: {current}")
         return 0
+
+    def _version_tuple(value: str) -> tuple[int, ...]:
+        parts = []
+        for part in str(value).split("."):
+            digits = ""
+            for char in part:
+                if char.isdigit():
+                    digits += char
+                else:
+                    break
+            parts.append(int(digits or 0))
+        return tuple(parts) or (0,)
+
+    # 11.txt 审核 P1-10: a stale-but-validly-signed manifest must not be
+    # able to DOWNGRADE the host behind the user's back — downgrade is an
+    # explicit `gms-agent rollback <version>` decision.
+    if _version_tuple(latest) < _version_tuple(current) and not args.force:
+        print(
+            f"Error: 清单版本 {latest} 低于已安装版本 {current}；"
+            "拒绝通过 update 降级（如需回退请使用 gms-agent rollback）",
+            file=sys.stderr,
+        )
+        return 5
     print(f"Updating {current} -> {latest}")
 
     try:
@@ -829,6 +1031,11 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def cmd_rollback(args: argparse.Namespace) -> int:
+    with lifecycle_lock():
+        return _cmd_rollback_locked(args)
+
+
+def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     version = args.version
     target = VERSIONS_DIR / version
     if not (target / "scripts" / "gms-remote-test.sh").is_file():

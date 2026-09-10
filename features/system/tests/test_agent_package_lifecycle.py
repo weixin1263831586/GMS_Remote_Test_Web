@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -85,6 +87,10 @@ class LifecycleTests(unittest.TestCase):
             "CURRENT_LINK": self.runtime_root / "current",
             "MCP_ENV_DIR": self.runtime_root / "mcp",
             "STATE_DIR": self.home / ".local" / "state" / "gms-remote-test",
+            # 11.txt: configured_clients() now also scans TOML profiles, so
+            # the sandbox must cover the profile store too — otherwise the
+            # test reads the real host's ~/.config/gms-agent/profiles.
+            "PROFILE_ROOT": self.home / ".config" / "gms-agent" / "profiles",
         }
         for target in (self.agent, self.agent.pm):
             for key, value in sandbox.items():
@@ -259,6 +265,90 @@ class LifecycleTests(unittest.TestCase):
         with unittest.mock.patch.object(self.agent.pm, "reconcile_mcp"):
             self.agent.cmd_rollback(type("Args", (), {"version": "1.0.0"})())
         self.assertIn("marker A", marker_file.read_text(encoding="utf-8"))
+
+    # --- 10. 11.txt P1-10: update refuses to downgrade -------------------
+    def test_update_rejects_downgrade(self):
+        self.agent.install_runtime(
+            build_registry_tree("9.9.9", self.home / "cur"), "9.9.9", "3" * 64
+        )
+        stale_manifest = {
+            "name": "gms-remote-test",
+            "version": "1.0.0",
+            "artifacts": {"universal": {"url": "https://ctrl:5001/x", "sha256": "a" * 64}},
+        }
+        with unittest.mock.patch.object(
+            self.agent.pm, "http_get", return_value=(json.dumps(stale_manifest).encode(), {})
+        ):
+            code = self.agent.cmd_update(
+                type("Args", (), {"server": "https://ctrl:5001", "force": False})()
+            )
+        self.assertEqual(code, 5)
+        self.assertEqual(self.agent.installed_version(), "9.9.9")
+
+    # --- 11. 11.txt P1-10: artifact URL must match scheme as well -------
+    def test_artifact_url_scheme_must_match_controller(self):
+        self.assertFalse(
+            self.agent.artifact_url_ok("http://ctrl:5001/api/x", "https://ctrl:5001")
+        )
+        self.assertTrue(
+            self.agent.artifact_url_ok("https://ctrl:5001/api/x", "https://ctrl:5001")
+        )
+
+    # --- 12. 11.txt P0-5: dispatcher install links every CLI command ----
+    def test_install_cli_dispatcher_creates_all_command_links(self):
+        cli_dir = self.agent.CURRENT_LINK / "scripts"
+        cli_dir.mkdir(parents=True, exist_ok=True)
+        (cli_dir / "gms-remote-test.sh").write_text(
+            '#!/usr/bin/env bash\nGMS_RT_VERSION="9.9.9"\n'
+            "gms-rt-devices-list() { :; }\n"
+            "gms-rt-system-health() { :; }\n"
+            "gms-rt-agent-enroll() { :; }\n",
+            encoding="utf-8",
+        )
+        (cli_dir / "gms-agent").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        bin_dir = self.home / "bin"
+        with unittest.mock.patch.dict(
+            os.environ, {"GMS_BIN_DIR": str(bin_dir)}, clear=False
+        ):
+            created = self.agent.install_cli_dispatcher()
+        names = {path.name for path in created}
+        self.assertIn("gms-rt", names)
+        self.assertIn("gms-agent", names)
+        self.assertIn("gms-rt-devices-list", names)
+        self.assertIn("gms-rt-system-health", names)
+        self.assertIn("gms-rt-agent-enroll", names)
+        # argv0 invocation: each command link is a symlink to the dispatcher;
+        # the dispatcher resolves the command from its own invoked name.
+        self.assertTrue(
+            os.path.islink(bin_dir / "gms-rt-devices-list")
+        )
+        self.assertEqual(
+            (os.stat(bin_dir / "gms-rt").st_mode & 0o777), 0o755
+        )
+
+    # --- 13. 11.txt P1-6: kkagent install registers the local plugin ----
+    def test_kkagent_plugin_registered_in_installed_json(self):
+        kkagent_home = self.home / "kkagent-home"
+        runtime = self.home / "runtime"
+        runtime.mkdir(parents=True)
+        (runtime / "kk.plugin.json").write_text(
+            '{"name": "gms-remote-test", "version": "9.9.9"}\n', encoding="utf-8"
+        )
+        with unittest.mock.patch.dict(
+            os.environ, {"KKAGENT_HOME": str(kkagent_home)}, clear=False
+        ):
+            self.agent.install_plugin_for_kkagent(runtime)
+        target = kkagent_home / "plugins" / "local" / "gms-remote-test"
+        self.assertTrue(target.is_dir())
+        registry = json.loads(
+            (kkagent_home / "plugins" / "installed.json").read_text(encoding="utf-8")
+        )
+        entry = next(
+            p for p in registry["plugins"] if p["id"] == "gms-remote-test"
+        )
+        self.assertEqual(entry["root"], str(target))
+        self.assertEqual(entry["version"], "9.9.9")
+        self.assertTrue(entry["enabled"])
 
 
 if __name__ == "__main__":

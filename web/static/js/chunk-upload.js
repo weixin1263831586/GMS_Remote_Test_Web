@@ -8,6 +8,28 @@ function chunkDebugLog(...args) {
     }
 }
 
+// 把后端错误响应转成带 HTTP 状态的 Error。detail 可能是结构化对象
+// （如 {"message": "Elevation required", "elevation_required": true}），
+// 直接塞给 Error 会显示成 "[object Object]"；这里提取可读文案，并暴露
+// elevationRequired 供调用方触发管理员提权后续传。
+function chunkUploadHttpError(status, result) {
+    const detail = result && result.detail;
+    let message = `HTTP ${status}`;
+    if (typeof detail === 'string' && detail) {
+        message = detail;
+    } else if (detail && typeof detail === 'object') {
+        message = detail.message || JSON.stringify(detail);
+    } else if (result && result.error) {
+        message = result.error;
+    }
+    const error = new Error(message);
+    error.status = status;
+    error.elevationRequired = Boolean(
+        detail && typeof detail === 'object' && detail.elevation_required
+    );
+    return error;
+}
+
 /**
  * 分块上传大文件
  * @param {File} file - 要上传的文件
@@ -93,24 +115,25 @@ async function uploadFileInChunks(file, url, options = {}) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.addEventListener('load', () => {
+                let result = {};
                 try {
-                    const result = JSON.parse(xhr.responseText);
-                    if (xhr.status < 200 || xhr.status >= 300 || result.success === false) {
-                        reject(new Error(result.error || result.detail || `HTTP ${xhr.status}`));
-                        return;
-                    }
-                    resolve({
-                        ...result,
-                        uploaded_chunks: Array.isArray(result.uploaded_chunks) ? result.uploaded_chunks : [],
-                        chunks_uploaded: result.chunks_uploaded || 0,
-                        total_chunks: result.total_chunks || totalChunks,
-                        progress: result.progress || 0,
-                        uploaded_size: result.uploaded_size || 0,
-                        total_size: result.total_size || fileSize,
-                    });
+                    result = JSON.parse(xhr.responseText);
                 } catch (_e) {
-                    reject(new Error(xhr.status >= 400 ? `HTTP ${xhr.status}` : 'Invalid response'));
+                    result = {};
                 }
+                if (xhr.status < 200 || xhr.status >= 300 || result.success === false) {
+                    reject(chunkUploadHttpError(xhr.status, result));
+                    return;
+                }
+                resolve({
+                    ...result,
+                    uploaded_chunks: Array.isArray(result.uploaded_chunks) ? result.uploaded_chunks : [],
+                    chunks_uploaded: result.chunks_uploaded || 0,
+                    total_chunks: result.total_chunks || totalChunks,
+                    progress: result.progress || 0,
+                    uploaded_size: result.uploaded_size || 0,
+                    total_size: result.total_size || fileSize,
+                });
             });
             xhr.addEventListener('error', () => reject(new Error('Network error while checking upload status')));
             xhr.open('POST', url);
@@ -156,34 +179,28 @@ async function uploadFileInChunks(file, url, options = {}) {
 
                 // 上传完成
                 xhr.addEventListener('load', () => {
-                    if (xhr.status === 200) {
-                        try {
-                            const result = JSON.parse(xhr.responseText);
-                            if (result.success) {
-                                if (result.upload_complete || result.message || (result.data && result.data.uploaded)) {
-                                    completionResult = result;
-                                }
-                                uploadedChunks.add(chunkIndex);
-                                if (onProgress) {
-                                    const progress = (uploadedChunks.size / totalChunks) * 100;
-                                    onProgress(progress, uploadedChunks.size, totalChunks);
-                                }
-                                resolve(result);
-                            } else {
-                                reject(new Error(result.error || 'Upload failed'));
-                            }
-                        } catch (e) {
-                            reject(new Error('Invalid response'));
+                    let errorResult = {};
+                    let parsed = true;
+                    try {
+                        errorResult = JSON.parse(xhr.responseText || '{}');
+                    } catch (_error) {
+                        parsed = false;
+                    }
+                    if (xhr.status === 200 && parsed && errorResult.success !== false) {
+                        const result = errorResult;
+                        if (result.upload_complete || result.message || (result.data && result.data.uploaded)) {
+                            completionResult = result;
                         }
+                        uploadedChunks.add(chunkIndex);
+                        if (onProgress) {
+                            const progress = (uploadedChunks.size / totalChunks) * 100;
+                            onProgress(progress, uploadedChunks.size, totalChunks);
+                        }
+                        resolve(result);
+                    } else if (!parsed && xhr.status < 400) {
+                        reject(new Error('Invalid response'));
                     } else {
-                        let message = `HTTP ${xhr.status}`;
-                        try {
-                            const errorResult = JSON.parse(xhr.responseText || '{}');
-                            message = errorResult.error || errorResult.detail || message;
-                        } catch (_error) {
-                            // Keep the HTTP status when the error body is not JSON.
-                        }
-                        reject(new Error(message));
+                        reject(chunkUploadHttpError(xhr.status, errorResult));
                     }
                 });
 
@@ -205,6 +222,13 @@ async function uploadFileInChunks(file, url, options = {}) {
         } catch (error) {
             console.warn(`[ChunkUpload] Chunk ${chunkIndex} failed (attempt ${retry + 1}):`, error);
 
+            // 401/403 是会话/权限问题（如管理员提权过期），重试只会白白
+            // 重传 32MB 分片并刷爆服务端审计日志；立即抛出，由调用方
+            // （固件烧录页）弹出提权框后断点续传。
+            if (error && (error.status === 401 || error.status === 403)) {
+                failedChunks.push(chunkIndex);
+                throw error;
+            }
             if (retry < maxRetries) {
                 await new Promise(resolve => setTimeout(resolve, 1000 * (retry + 1)));
                 return uploadChunk(chunkIndex, retry + 1);
