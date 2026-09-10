@@ -140,6 +140,67 @@ def r16_guard(root: Path, source: Path, version: str, pattern: str, label: str) 
         )
 
 
+def r16_tree_guard(root: Path, source_dir: Path, version: str, label: str) -> None:
+    """Whole-tree same-version content guard (11.txt 审核 P1).
+
+    ``r16_guard`` above only compares two anchor files; a same-version
+    change to ANY other payload file (package_manager.py, mcp_launcher.py,
+    SKILL.md, manifests, docs …) slipped through, so two machines could run
+    different content while both reported the same version and installed
+    hosts skipped re-download ("Already up to date"). This walks the whole
+    payload tree, hashes every file plus its archive-relative path, and
+    compares against HEAD. Only text files enter the anchor comparison, so
+    we hash bytes here (rb) — binary-identical to the release builder's
+    view of the tree.
+    """
+    digests: list[str] = []
+    for path in sorted(source_dir.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(source_dir).as_posix()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digests.append(f"{rel}:{digest}")
+    tree_hash = hashlib.sha256("\n".join(digests).encode()).hexdigest()
+
+    try:
+        listing = subprocess.run(
+            ["git", "-C", str(root), "ls-tree", "-r", "--name-only",
+             f"HEAD:{source_dir.relative_to(root).as_posix()}"],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError:
+        return  # new tree — nothing to compare against
+    previous_digests: list[str] = []
+    for rel in sorted(listing.stdout.split()):
+        if "__pycache__" in rel:
+            continue
+        show = subprocess.run(
+            ["git", "-C", str(root), "show", f"HEAD:{source_dir.relative_to(root).as_posix()}/{rel}"],
+            capture_output=True, check=True,
+        )
+        previous_digests.append(f"{rel}:{hashlib.sha256(show.stdout).hexdigest()}")
+    previous_hash = hashlib.sha256("\n".join(previous_digests).encode()).hexdigest()
+
+    # Anchors carried a different version on HEAD → drift is expected.
+    anchor = source_dir / "gms-remote-test.sh"
+    try:
+        head_anchor = subprocess.run(
+            ["git", "-C", str(root), "show",
+             f"HEAD:{anchor.relative_to(root).as_posix()}"],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError:
+        return
+    match = re.search(r'^GMS_RT_VERSION="([^"]+)"$', head_anchor.stdout, re.M)
+    if not match or match.group(1) != version:
+        return
+    if tree_hash != previous_hash:
+        fail(
+            f"{label} tree content changed at the same version ({version}). "
+            "Bump the version with tools/release_agent.py, then re-run sync."
+        )
+
+
 GENERATED_MD = """# GENERATED — DO NOT EDIT THIS DIRECTORY DIRECTLY
 
 Everything under `plugins/gms-remote-test/` is a generated release payload.
@@ -208,6 +269,11 @@ def main() -> int:
                   r'^GMS_RT_VERSION="([^"]+)"$', "gms-remote-test.sh")
         r16_guard(root, runtime / "mcp_server.py", mcp_version,
                   r'^SERVER_VERSION = "([^"]+)"$', "mcp_server.py")
+        # 11.txt 审核 P1: the anchor checks above only cover two files; this
+        # whole-tree guard closes the same-version drift hole for every
+        # other payload file (package_manager.py, mcp_launcher.py, skill,
+        # manifests, docs …).
+        r16_tree_guard(root, runtime, cli_version, "runtime/")
 
     # --- generate --------------------------------------------------------
     expected: set[str] = set()
@@ -239,6 +305,10 @@ def main() -> int:
     # docs → plugin root
     sync_one(docs / "README.md", plugin_dir / rel_plugin("README.md"))
     sync_one(docs / "AGENTS.md", plugin_dir / rel_plugin("AGENTS.md"))
+    # 11.txt P0-2: the agent playbook is part of the published payload —
+    # without this line the playbook only ever exists in the source tree
+    # and agents downloading from the registry never see it.
+    sync_one(docs / "AGENT_PLAYBOOK.md", plugin_dir / rel_plugin("docs", "AGENT_PLAYBOOK.md"))
     # GENERATED.md
     generated_md = plugin_dir / "GENERATED.md"
     if not generated_md.is_file() or generated_md.read_text(encoding="utf-8") != GENERATED_MD:

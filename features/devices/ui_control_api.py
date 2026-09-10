@@ -19,6 +19,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from features.auth import ensure_agent_device_allowed
 from foundation.command_result import CommandResult
 from foundation.networking import is_local_host
 from foundation.responses import error_response
@@ -224,6 +225,10 @@ async def ui_screenshot(req: UiControlRequest, request: Request):
     )
     if conflict:
         return conflict
+    # 11.txt P1 补口：screencap MCP 工具直连此端点，agent principal 必须受
+    # allowed_devices ACL 约束（与其他设备操作端点一致，无 ACL 的 agent
+    # 不能绕过租约边界读任意设备画面）。
+    ensure_agent_device_allowed(request, serial)
 
     config = runtime.config_manager.load_config()
     safe_serial = re.sub(r"[^A-Za-z0-9_.-]+", "_", serial)[:120] or "device"
@@ -270,6 +275,9 @@ async def ui_layout(req: UiControlRequest, request: Request):
     )
     if conflict:
         return conflict
+    # 与 screenshot 一致：layout 同样泄漏设备画面内容，agent principal
+    # 必须通过 allowed_devices ACL（11.txt P1 补口）。
+    ensure_agent_device_allowed(request, serial)
 
     config = runtime.config_manager.load_config()
     android = _android_cli_path(config)

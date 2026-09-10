@@ -29,6 +29,7 @@ router = APIRouter()  # mounted onto the /api/auth router in api.py
 
 @router.get("/agent-scopes")
 async def auth_agent_scopes(
+    request: Request,
     user: CurrentUser = Depends(require_authenticated_user_when_auth_required),
 ):
     """Scope 目录（11.txt 中优先级 §4）。
@@ -38,7 +39,10 @@ async def auth_agent_scopes(
     仍由下方 admin 端点把关。匿名/开发模式返回全量目录用于 UI 渲染。
     """
     scopes = dict(AGENT_SCOPES)
-    record = getattr(user, "agent_token_record", None) if user else None
+    # granted 必须来自 request.state（get_authenticated_user 把 token 记录
+    # 写在那里），CurrentUser dataclass 上没有该属性——从 user 对象取永远
+    # 为空，agent 无法自查实际拥有的 scope（11.txt 中优先级 §4）。
+    record = getattr(request.state, "agent_token_record", None) if user is not None else None
     granted = [
         name for name in str((record or {}).get("scopes") or "").split(",") if name
     ]

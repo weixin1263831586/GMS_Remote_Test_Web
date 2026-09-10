@@ -1,24 +1,69 @@
-// ==================== Agent 接入管理（2026-09-08 audit §二/§三） ====================
-// 管理员在 Web 上创建一次性配对码并管理 Agent Service Token。
-// 配对码 5 分钟有效且单次使用；原始 token 只在创建响应中出现一次，
-// 服务端仅保存 SHA-256 哈希。
-//
-// 入口：用户管理页面右上角的 "Agent 接入管理" 按钮（仅 admin 可见）。
-// 点击后覆盖用户管理内容显示 Agent 接入管理视图，返回按钮切回。
+// ==================== Agent 接入管理（2026-09-10 UI/交互整理） ====================
+// 管理员创建一次性配对码并管理 Agent Service Token。原始 token 只在
+// Agent 兑换配对码时返回一次，管理页只展示不敏感的 token 元数据。
 
 let agentAccessLoaded = false;
 let agentAccessScopesCache = null;
+let agentAccessTokensCache = [];
+let agentAccessLoadSequence = 0;
+
+const AGENT_ACCESS_DEFAULT_SCOPES = [
+    'system.read', 'devices.read', 'devices.lease', 'devices.use_leased',
+    'tests.execute', 'tests.cancel', 'jobs.read', 'reports.read',
+];
+
+const AGENT_ACCESS_SCOPE_LABELS = {
+    'system.read': '读取系统与健康状态',
+    'devices.read': '读取设备清单',
+    'devices.lease': '租用与认领设备',
+    'devices.use_leased': '操作已租用设备',
+    'devices.inventory': '管理设备清单',
+    'tests.execute': '启动测试任务',
+    'tests.cancel': '取消自己的测试任务',
+    'jobs.read': '读取任务状态与事件',
+    'reports.read': '读取测试报告',
+    'resources.read_own': '读取自己的资源',
+    'resources.write_own': '写入自己的资源',
+    'redmine.read': '读取授权范围内的 Redmine 数据',
+    'artifacts.read_own': '读取自己的证据与制品',
+    'apk.analyze_own': '分析自己的 APK 制品',
+    'sdk.read': '查询已配置的 SDK 源码',
+};
+
+function agentAccessPanelIsOpen() {
+    const panel = document.getElementById('agent-access-panel');
+    return Boolean(panel && panel.style.display !== 'none');
+}
 
 function agentAccessToggle(show) {
     const panel = document.getElementById('agent-access-panel');
     const mainView = document.getElementById('users-main-view');
     if (!panel || !mainView) return;
-    const visible = show !== undefined
-        ? show
-        : panel.style.display === 'none';
-    panel.style.display = visible ? '' : 'none';
+    const visible = show !== undefined ? Boolean(show) : !agentAccessPanelIsOpen();
+    if (visible && !agentAccessIsAdmin()) {
+        showToast('仅管理员可管理 Agent 接入', 'warning');
+        return;
+    }
+
+    panel.style.display = visible ? 'flex' : 'none';
     mainView.style.display = visible ? 'none' : '';
-    if (visible) agentAccessReload();
+    const pageTitle = document.getElementById('users-page-title');
+    if (pageTitle) pageTitle.textContent = visible ? '🔑 Agent 接入管理' : '👥 用户管理';
+
+    const usersTab = document.getElementById('users-list-tab');
+    const agentTab = document.getElementById('agent-access-tab');
+    usersTab?.classList.toggle('active', !visible);
+    agentTab?.classList.toggle('active', visible);
+    usersTab?.setAttribute('aria-selected', String(!visible));
+    agentTab?.setAttribute('aria-selected', String(visible));
+
+    if (visible) {
+        if (typeof stopUsersAutoRefresh === 'function') stopUsersAutoRefresh();
+        agentAccessReload();
+    } else if (typeof currentPage === 'undefined' || currentPage === 'users') {
+        if (typeof loadUsersList === 'function') loadUsersList();
+        if (typeof startUsersAutoRefresh === 'function') startUsersAutoRefresh();
+    }
 }
 
 function agentAccessIsAdmin() {
@@ -27,48 +72,72 @@ function agentAccessIsAdmin() {
 }
 
 function agentAccessEnsureVisibleForRole() {
-    // 只有管理员（登录后）显示入口；普通用户完全不暴露该弹框。
     if (!state.authReady) return;
     const enabled = agentAccessIsAdmin();
-    const entry = document.getElementById('agent-access-entry');
-    if (!entry) return;
-    entry.style.display = enabled ? 'flex' : 'none';
+    const tabs = document.getElementById('users-view-tabs');
+    if (tabs) tabs.style.display = enabled ? 'flex' : 'none';
+    if (!enabled && agentAccessPanelIsOpen()) agentAccessToggle(false);
 }
 
-async function agentAccessReload() {
+async function agentAccessReload(button) {
     const container = document.getElementById('agent-access-tokens');
-    if (!container) return;
-    container.innerHTML = '<div class="suite-empty">加载中...</div>';
+    const refreshButton = button || document.getElementById('agent-access-refresh');
+    if (!container || refreshButton?.disabled) return;
+    const sequence = ++agentAccessLoadSequence;
+    if (refreshButton) {
+        refreshButton.disabled = true;
+        refreshButton.textContent = '刷新中…';
+    }
+    if (!agentAccessLoaded) {
+        container.innerHTML = '<tr><td colspan="9" class="agent-access-empty">正在加载 Agent Token…</td></tr>';
+    }
     try {
         const [tokensResp, scopesResp] = await Promise.all([
-            apiCall('/api/auth/agent-tokens', 'GET'),
+            apiCall('/api/auth/agent-tokens', 'GET', null, {silentToast: true}),
             agentAccessScopesCache
-                ? Promise.resolve({ scopes: agentAccessScopesCache })
-                : apiCall('/api/auth/agent-scopes', 'GET'),
+                ? Promise.resolve({scopes: agentAccessScopesCache})
+                : apiCall('/api/auth/agent-scopes', 'GET', null, {silentToast: true}),
         ]);
-        // R10：服务端返回 {scope: 描述} 对象，统一规范化后再渲染。
-        agentAccessScopesCache = agentAccessNormalizeScopes(
-            scopesResp && scopesResp.scopes
-        );
+        if (sequence !== agentAccessLoadSequence) return;
+        agentAccessScopesCache = agentAccessNormalizeScopes(scopesResp?.scopes);
+        agentAccessTokensCache = Array.isArray(tokensResp?.tokens) ? tokensResp.tokens : [];
         agentAccessRenderScopeCheckboxes();
-        agentAccessRenderTokens(tokensResp.tokens || []);
+        agentAccessUpdateStats();
+        agentAccessFilterTokens();
         agentAccessLoaded = true;
     } catch (error) {
         debugLog('[AgentAccess] load failed:', error);
-        container.innerHTML = '<div class="suite-empty">加载失败（需要管理员会话）</div>';
+        if (!agentAccessLoaded) {
+            container.innerHTML = `<tr><td colspan="9" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要管理员会话')}</td></tr>`;
+        } else {
+            showToast(`Agent Token 刷新失败：${error.message}`, 'error');
+        }
+    } finally {
+        if (sequence === agentAccessLoadSequence && refreshButton) {
+            refreshButton.disabled = false;
+            refreshButton.textContent = '↻ 刷新';
+        }
     }
 }
 
 function agentAccessNormalizeScopes(raw) {
-    // R10（2026-09-08 审核）：服务端 AGENT_SCOPES 是 {scope: 描述} 对象；
-    // 兼容对象、字符串数组与 {name} 对象数组三种形态，统一成 name 数组。
     if (Array.isArray(raw)) {
-        return raw
-            .map((entry) => (typeof entry === 'string' ? entry : entry && entry.name))
-            .filter((name) => typeof name === 'string' && name);
+        return raw.map(entry => {
+            if (typeof entry === 'string') {
+                return {name: entry, description: AGENT_ACCESS_SCOPE_LABELS[entry] || ''};
+            }
+            const name = entry?.name;
+            return name ? {
+                name,
+                description: AGENT_ACCESS_SCOPE_LABELS[name] || entry.description || '',
+            } : null;
+        }).filter(Boolean);
     }
     if (raw && typeof raw === 'object') {
-        return Object.keys(raw).filter((name) => typeof name === 'string' && name);
+        return Object.entries(raw).map(([name, description]) => ({
+            name,
+            description: AGENT_ACCESS_SCOPE_LABELS[name] || String(description || ''),
+        }));
     }
     return [];
 }
@@ -76,118 +145,266 @@ function agentAccessNormalizeScopes(raw) {
 function agentAccessRenderScopeCheckboxes() {
     const wrap = document.getElementById('agent-access-scopes');
     if (!wrap || !Array.isArray(agentAccessScopesCache)) return;
+    const previousSelection = new Set(Array.from(
+        wrap.querySelectorAll('input:checked'), input => input.value
+    ));
     wrap.innerHTML = '';
-    const defaultScopes = [
-        'system.read', 'devices.read', 'devices.lease', 'devices.use_leased',
-        'tests.execute', 'tests.cancel', 'jobs.read', 'reports.read',
-    ];
-    agentAccessScopesCache.forEach((name) => {
+    agentAccessScopesCache.forEach(scope => {
         const label = document.createElement('label');
-        label.style.cssText = 'font-size:11px;display:flex;align-items:center;gap:3px;';
+        label.className = 'agent-access-scope-option';
+        label.title = scope.description || scope.name;
         const input = document.createElement('input');
         input.type = 'checkbox';
-        input.value = name;
+        input.value = scope.name;
         input.className = 'agent-access-scope';
-        if (defaultScopes.includes(name)) input.checked = true;
-        label.appendChild(input);
-        label.appendChild(document.createTextNode(name));
+        input.checked = previousSelection.size
+            ? previousSelection.has(scope.name)
+            : AGENT_ACCESS_DEFAULT_SCOPES.includes(scope.name);
+        const name = document.createElement('strong');
+        name.textContent = scope.name;
+        const description = document.createElement('small');
+        description.textContent = scope.description || '自定义授权范围';
+        label.append(input, name, description);
         wrap.appendChild(label);
     });
 }
 
-function agentAccessToggleCreate() {
+function agentAccessSetScopeSelection(mode) {
+    document.querySelectorAll('#agent-access-scopes input').forEach(input => {
+        input.checked = mode === 'all'
+            || (mode === 'default' && AGENT_ACCESS_DEFAULT_SCOPES.includes(input.value));
+    });
+}
+
+function agentAccessToggleCreate(force) {
     const form = document.getElementById('agent-access-enroll-form');
+    const toggle = document.getElementById('agent-access-create-toggle');
     if (!form) return;
-    form.style.display = form.style.display === 'none' ? 'block' : 'none';
-    if (form.style.display === 'block' && !agentAccessScopesCache) {
-        agentAccessReload();
+    const shouldOpen = force === undefined ? form.style.display === 'none' : Boolean(force);
+    form.style.display = shouldOpen ? 'block' : 'none';
+    toggle?.setAttribute('aria-expanded', String(shouldOpen));
+    if (shouldOpen) {
+        if (!agentAccessScopesCache) agentAccessReload();
+        window.setTimeout(() => document.getElementById('agent-access-name')?.focus(), 0);
     }
 }
 
 async function agentAccessCreateEnrollment() {
-    const resultEl = document.getElementById('agent-access-code-result');
-    if (!resultEl) return;
-    const name = document.getElementById('agent-access-name')?.value?.trim() || '';
+    const nameInput = document.getElementById('agent-access-name');
+    const submit = document.getElementById('agent-access-create-submit');
+    const name = nameInput?.value?.trim() || '';
     const workers = document.getElementById('agent-access-workers')?.value?.trim() || '*';
     const devices = document.getElementById('agent-access-devices')?.value?.trim() || '*';
-    const days = parseInt(document.getElementById('agent-access-days')?.value || '90', 10);
+    const days = Number.parseInt(document.getElementById('agent-access-days')?.value || '90', 10);
     const scopes = Array.from(
-        document.querySelectorAll('#agent-access-scopes input:checked')
-    ).map((input) => input.value);
+        document.querySelectorAll('#agent-access-scopes input:checked'), input => input.value
+    );
     if (!name) {
-        resultEl.textContent = '⚠ 请填写名称';
+        nameInput?.focus();
+        showToast('请填写 Agent 标识名', 'warning');
         return;
     }
-    resultEl.textContent = '生成中…';
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+        showToast('Token 有效期需为 1–365 天', 'warning');
+        return;
+    }
+    if (scopes.length === 0) {
+        showToast('请至少选择一个授权范围', 'warning');
+        return;
+    }
+    const granted = window.requestElevatedAccess
+        ? await window.requestElevatedAccess(`创建 Agent 配对码：${name}`)
+        : false;
+    if (!granted) return;
+
+    if (submit) {
+        submit.disabled = true;
+        submit.textContent = '生成中…';
+    }
     try {
         const resp = await apiCall('/api/auth/agent-enrollment-codes', 'POST', {
             name,
             scopes,
             allowed_workers: workers,
             allowed_devices: devices,
-            expires_days: Number.isFinite(days) ? days : 90,
-        });
+            expires_days: days,
+        }, {silentToast: true});
         const enrollment = resp.enrollment || {};
-        resultEl.textContent = `配对码: ${enrollment.code}（5 分钟内有效，仅可用一次）`;
+        const code = String(enrollment.code || '');
+        const codeCard = document.getElementById('agent-access-code-card');
+        const codeResult = document.getElementById('agent-access-code-result');
+        if (codeResult) codeResult.textContent = code;
+        const expiry = document.getElementById('agent-access-code-expiry');
+        if (expiry) expiry.textContent = enrollment.expires_at
+            ? `有效至 ${agentAccessFormatDate(enrollment.expires_at)}，只能使用一次`
+            : '5 分钟内有效，只能使用一次';
+        if (codeCard) codeCard.hidden = false;
+        agentAccessToggleCreate(false);
+        if (nameInput) nameInput.value = '';
+        showToast('配对码已生成，请立即复制到目标服务器', 'success');
         agentAccessReload();
     } catch (error) {
         debugLog('[AgentAccess] enrollment failed:', error);
-        resultEl.textContent = '⚠ 创建失败（需要管理员提权会话）';
+        showToast(`配对码创建失败：${error.message}`, 'error');
+    } finally {
+        if (submit) {
+            submit.disabled = false;
+            submit.textContent = '生成配对码';
+        }
     }
+}
+
+async function agentAccessCopyEnrollmentCode() {
+    const code = document.getElementById('agent-access-code-result')?.textContent?.trim();
+    if (!code) return;
+    try {
+        await navigator.clipboard.writeText(code);
+        showToast('配对码已复制', 'success');
+    } catch (error) {
+        debugLog('[AgentAccess] clipboard failed:', error);
+        showToast('复制失败，请手动选择配对码复制', 'warning');
+    }
+}
+
+function agentAccessTokenStatus(token) {
+    if (token.revoked_at) return 'revoked';
+    const expiresAt = token.expires_at ? new Date(token.expires_at) : null;
+    if (expiresAt && !Number.isNaN(expiresAt.getTime()) && expiresAt <= new Date()) return 'expired';
+    return 'active';
+}
+
+function agentAccessUpdateStats() {
+    const active = agentAccessTokensCache.filter(token => agentAccessTokenStatus(token) === 'active').length;
+    const inactive = agentAccessTokensCache.length - active;
+    const total = document.getElementById('agent-token-total-count');
+    const activeCount = document.getElementById('agent-token-active-count');
+    const inactiveCount = document.getElementById('agent-token-inactive-count');
+    if (total) total.textContent = agentAccessTokensCache.length;
+    if (activeCount) activeCount.textContent = active;
+    if (inactiveCount) inactiveCount.textContent = inactive;
+}
+
+function agentAccessSetStatusFilter(status) {
+    const select = document.getElementById('agent-access-status-filter');
+    if (select) select.value = status || '';
+    agentAccessFilterTokens();
+}
+
+function agentAccessFilterTokens() {
+    const query = (document.getElementById('agent-access-search')?.value || '').trim().toLowerCase();
+    const status = document.getElementById('agent-access-status-filter')?.value || '';
+    const tokens = agentAccessTokensCache.filter(token => {
+        const tokenStatus = agentAccessTokenStatus(token);
+        if (status === 'inactive' && tokenStatus === 'active') return false;
+        if (status && status !== 'inactive' && tokenStatus !== status) return false;
+        if (!query) return true;
+        return [token.name, token.id, token.owner_user_id, token.allowed_workers, token.allowed_devices]
+            .join(' ').toLowerCase().includes(query);
+    });
+    document.querySelectorAll('[data-agent-token-status-card]').forEach(card => {
+        card.classList.toggle('active', card.dataset.agentTokenStatusCard === status);
+    });
+    agentAccessRenderTokens(tokens);
 }
 
 function agentAccessRenderTokens(tokens) {
     const container = document.getElementById('agent-access-tokens');
     if (!container) return;
     if (!Array.isArray(tokens) || tokens.length === 0) {
-        container.innerHTML = '<div class="suite-empty">尚无 Agent Service Token</div>';
+        const filtersActive = Boolean(
+            document.getElementById('agent-access-search')?.value
+            || document.getElementById('agent-access-status-filter')?.value
+        );
+        container.innerHTML = `<tr><td colspan="9" class="agent-access-empty">${filtersActive ? '没有匹配的 Agent Token' : '尚无 Agent Service Token'}</td></tr>`;
         return;
     }
-    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[ch]));
-    const rows = tokens.map((token) => {
-        const revoked = token.revoked_at;
-        const expired = token.expires_at && new Date(token.expires_at) < new Date();
-        const status = revoked ? '已吊销' : expired ? '已过期' : '有效';
-        const statusColor = (revoked || expired) ? 'var(--danger-color, #c00)' : 'var(--success-color, #090)';
-        const scopes = Array.isArray(token.scopes) ? token.scopes.join(', ') : token.scopes || '';
-        const revokeButton = revoked
-            ? ''
-            : `<button class="btn-xs" onclick="agentAccessRevoke('${esc(token.id)}')">吊销</button>`;
+    const statusLabels = {active: '有效', expired: '已过期', revoked: '已吊销'};
+    container.innerHTML = tokens.map(token => {
+        const status = agentAccessTokenStatus(token);
+        const scopes = Array.isArray(token.scopes)
+            ? token.scopes
+            : String(token.scopes || '').split(',').filter(Boolean);
+        const scopesText = scopes.length ? scopes.join(', ') : '无授权范围';
+        const revokeButton = status === 'active'
+            ? `<button class="btn-xxs btn-danger" type="button" data-agent-token-id="${agentAccessEscape(token.id)}">吊销</button>`
+            : '—';
         return `
-            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:4px;font-size:12px;">
-                <strong>${esc(token.name)}</strong>
-                <span class="mono" style="color:var(--text-secondary);">${esc(token.id)}</span>
-                <span style="color:${statusColor};font-size:11px;">${status}</span>
-                <span style="color:var(--text-secondary);font-size:11px;">scopes: ${esc(scopes) || '—'}</span>
-                <span style="color:var(--text-secondary);font-size:11px;">workers: ${esc(token.allowed_workers)}</span>
-                <span style="color:var(--text-secondary);font-size:11px;">devices: ${esc(token.allowed_devices)}</span>
-                <span style="color:var(--text-secondary);font-size:11px;">到期: ${esc((token.expires_at || '').slice(0, 10)) || '—'}</span>
-                <span style="flex:1;"></span>
-                ${revokeButton}
-            </div>`;
+            <tr>
+                <td class="agent-token-cell-identity" title="${agentAccessEscape(`${token.name || ''} · ${token.id || ''}`)}">
+                    <strong title="${agentAccessEscape(token.name || '')}">${agentAccessEscape(token.name || '未命名 Agent')}</strong>
+                    <code title="${agentAccessEscape(token.id || '')}">${agentAccessEscape(token.id || '—')}</code>
+                </td>
+                <td><span class="agent-token-status ${status}">${statusLabels[status]}</span></td>
+                <td class="agent-token-cell-scopes mono" title="${agentAccessEscape(scopesText)}">${agentAccessEscape(scopesText)}</td>
+                <td class="agent-token-cell-acl mono" title="${agentAccessEscape(token.allowed_workers || '*')}">${agentAccessEscape(token.allowed_workers || '*')}</td>
+                <td class="agent-token-cell-acl mono" title="${agentAccessEscape(token.allowed_devices || '*')}">${agentAccessEscape(token.allowed_devices || '*')}</td>
+                <td title="${agentAccessEscape(token.owner_user_id || '')}">${agentAccessEscape(token.owner_user_id || '—')}</td>
+                <td class="agent-token-cell-date" title="创建：${agentAccessFormatDate(token.created_at)}；到期：${agentAccessFormatDate(token.expires_at)}">${agentAccessFormatShortDate(token.created_at)} → ${agentAccessFormatShortDate(token.expires_at)}</td>
+                <td class="agent-token-cell-date" title="${agentAccessFormatDate(token.last_used_at)}">${agentAccessFormatShortDate(token.last_used_at, true)}</td>
+                <td>${revokeButton}</td>
+            </tr>`;
+    }).join('');
+    container.querySelectorAll('[data-agent-token-id]').forEach(button => {
+        button.addEventListener('click', () => agentAccessRevoke(button.dataset.agentTokenId, button));
     });
-    container.innerHTML = rows.join('');
 }
 
-async function agentAccessRevoke(tokenId) {
-    if (!tokenId || !window.confirm(`确定吊销 Agent Token ${tokenId}？该编译服务器上的 Agent 将立即失去访问权。`)) {
-        return;
+function agentAccessFormatShortDate(value, includeTime = false) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString('zh-CN', includeTime
+        ? {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}
+        : {year: '2-digit', month: '2-digit', day: '2-digit'});
+}
+
+function agentAccessFormatDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString('zh-CN', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+    });
+}
+
+function agentAccessEscape(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch]));
+}
+
+async function agentAccessRevoke(tokenId, button) {
+    if (!tokenId) return;
+    const token = agentAccessTokensCache.find(item => item.id === tokenId);
+    const confirmed = await showConfirmDialog(
+        '吊销 Agent Token',
+        `确定吊销 ${token?.name || tokenId} 吗？该 Agent 将立即失去平台访问权。`
+    );
+    if (!confirmed) return;
+    const granted = window.requestElevatedAccess
+        ? await window.requestElevatedAccess(`吊销 Agent Token：${token?.name || tokenId}`)
+        : false;
+    if (!granted) return;
+    if (button) {
+        button.disabled = true;
+        button.textContent = '吊销中…';
     }
     try {
-        await apiCall(`/api/auth/agent-tokens/${encodeURIComponent(tokenId)}`, 'DELETE');
-        agentAccessReload();
+        await apiCall(`/api/auth/agent-tokens/${encodeURIComponent(tokenId)}`, 'DELETE', null, {silentToast: true});
+        showToast('Agent Token 已吊销', 'success');
+        await agentAccessReload();
     } catch (error) {
         debugLog('[AgentAccess] revoke failed:', error);
-        alert('吊销失败（需要管理员提权会话）');
+        showToast(`吊销失败：${error.message}`, 'error');
+        if (button) {
+            button.disabled = false;
+            button.textContent = '吊销';
+        }
     }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // R10（2026-09-08 审核）：入口可见性跟随登录状态事件，而不是只在
-    // 加载后 800ms 检查一次——登录较慢或稍后登录（auth-ready 晚于检查）
-    // 时入口也能显示；退出后重登同样通过事件同步。
     runAfterAuthReady(agentAccessEnsureVisibleForRole);
     window.addEventListener('gms:auth-ready', agentAccessEnsureVisibleForRole);
 });

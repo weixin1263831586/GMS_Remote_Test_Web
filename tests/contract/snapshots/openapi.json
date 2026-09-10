@@ -17049,6 +17049,78 @@
         "summary": "Extract Redmine Attachment"
       }
     },
+    "/api/reports/failure-summary": {
+      "get": {
+        "description": "Structured failure summary for one report (11.txt P1 §4).\n\nParses test_result.xml server-side so agents stop paging through\nhundred-MB raw logs with offset windows: returns the failed-case list\n(module, name, reason, stack-trace head). Same reports.read gate as\nlist/download; ownership is enforced through the same access helpers.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "report_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "report_timestamp",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Report Timestamp",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_cases",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Max Cases",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stack_head_lines",
+            "required": false,
+            "schema": {
+              "default": 15,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Stack Head Lines",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Failure Summary"
+      }
+    },
     "/api/reports/list": {
       "get": {
         "description": "Get test report list from database.",

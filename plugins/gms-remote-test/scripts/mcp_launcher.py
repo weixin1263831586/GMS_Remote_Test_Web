@@ -110,6 +110,8 @@ def _read_toml_flat(path: Path) -> dict[str, str]:
         "GMS_CURL_CA_CERT": controller.get("ca_cert", ""),
         "GMS_AUTH_TOKEN_FILE": auth.get("token_file", ""),
     }
+    if controller.get("insecure", "").lower() == "true":
+        mapping["GMS_CURL_INSECURE"] = "1"
     return {k: v for k, v in mapping.items() if v}
 
 

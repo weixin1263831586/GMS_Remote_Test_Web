@@ -939,13 +939,33 @@ class ShellToolGateTests(unittest.TestCase):
             "settings get secure user_setup_complete",
             "ls /system/etc",
             "pidof com.google.android.setupwizard",
+            # 11.txt §3: ONE restricted pipe — readonly head, filter tail.
+            "dumpsys window | grep focus",
+            "getprop | grep build",
+            "ps -A | wc -l",
+            "logcat -d -v threadtime | tail -50",
         ):
             allowed, reason = mcp_server._validate_shell_command(cmd)
             self.assertTrue(allowed, f"{cmd!r} should be allowed: {reason}")
 
+    def test_gate_pipe_restrictions(self):
+        """11.txt §3: pipe is single, tail-filtered, and fully validated."""
+        for cmd in (
+            "getprop | grep x | wc -l",      # more than one pipe
+            "getprop | sh",                  # tail not a filter binary
+            "getprop | xargs echo",          # tail not a filter binary
+            "getprop | grep x; reboot",      # forbidden char in segment
+            "getprop |",                     # empty tail segment
+            "| grep x",                      # empty head segment
+            "getprop || grep x",             # '||' is chaining, not a pipe
+            "input tap 1 2 | grep x",        # head must pass the full gate
+            "getprop | grep sh -c x",        # tail itself fully validated
+        ):
+            allowed, _reason = mcp_server._validate_shell_command(cmd)
+            self.assertFalse(allowed, f"{cmd!r} should be denied")
+
     def test_gate_denies_chaining_and_mutation(self):
         for cmd in (
-            "dumpsys window | grep focus",
             "logcat -b all",
             "settings put secure x y",
             "wm density 480",

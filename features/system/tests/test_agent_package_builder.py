@@ -65,8 +65,11 @@ class BuilderContractTests(unittest.TestCase):
                 names = archive.namelist()
             # Manifest entries live directly at the package root (or in
             # .codex-plugin/), unlike payload files which always sit under
-            # scripts/ skills/ tests/.
-            payload_prefixes = ("gms-remote-test/scripts/", "gms-remote-test/skills/", "gms-remote-test/tests/")
+            # scripts/ skills/ tests/ docs/.
+            payload_prefixes = (
+                "gms-remote-test/scripts/", "gms-remote-test/skills/",
+                "gms-remote-test/tests/", "gms-remote-test/docs/",
+            )
             manifests = sorted(
                 name for name in names if not name.startswith(payload_prefixes)
             )

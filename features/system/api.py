@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import urlparse
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect

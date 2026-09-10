@@ -59,6 +59,48 @@ def _build_archive(version: str) -> bytes:
     return build_package_bytes(AGENT_PACKAGE_DIR, version, client="universal")
 
 
+# 11.txt 审核 P1: same-version content immutability. Without this cache the
+# registry rebuilds the zip from the live working tree on EVERY request, so
+# the same version string could serve different bytes after an edit (and
+# installed hosts that already see that version never re-download). The
+# FIRST build after process start pins (sha256, archive) for that version;
+# any later rebuild whose sha256 differs is refused (500) instead of being
+# served — same version, same bytes, for every client, forever.
+_IMMUTABLE_CACHE: dict[str, tuple[str, bytes]] = {}
+
+
+def _immutable_archive(version: str) -> bytes:
+    cached = _IMMUTABLE_CACHE.get(version)
+    if cached is not None:
+        pinned_sha, pinned_archive = cached
+        fresh = build_package_bytes(AGENT_PACKAGE_DIR, version, client="universal")
+        fresh_sha = hashlib.sha256(fresh).hexdigest()
+        if fresh_sha != pinned_sha:
+            logger.error(
+                "agent package drift: version %s already published as %s but "
+                "working tree now builds to %s; bump the version and re-sync",
+                version, pinned_sha[:16], fresh_sha[:16],
+            )
+            raise DriftedVersionError(version, pinned_sha, fresh_sha)
+        return pinned_archive
+    archive = build_package_bytes(AGENT_PACKAGE_DIR, version, client="universal")
+    _IMMUTABLE_CACHE[version] = (hashlib.sha256(archive).hexdigest(), archive)
+    return archive
+
+
+class DriftedVersionError(RuntimeError):
+    """A version was rebuilt with different content than the pinned serve."""
+
+    def __init__(self, version: str, pinned_sha: str, fresh_sha: str):
+        super().__init__(
+            f"version {version} content drifted (pinned {pinned_sha[:16]}, "
+            f"rebuild {fresh_sha[:16]})"
+        )
+        self.version = version
+        self.pinned_sha = pinned_sha
+        self.fresh_sha = fresh_sha
+
+
 def _artifact_url(request: Request, version: str) -> str:
     return str(request.base_url).rstrip("/") + f"/api/agent/packages/gms-remote-test/{version}"
 
@@ -96,7 +138,10 @@ async def agent_package_manifest(request: Request):
     if not version or not AGENT_PACKAGE_DIR.is_dir():
         return error_response("agent package payload 未生成", status_code=404)
     try:
-        archive = _build_archive(version)
+        archive = _immutable_archive(version)
+    except DriftedVersionError as error:
+        logger.error("agent package build failed: %s", error)
+        return error_response(str(error), status_code=500)
     except FileNotFoundError as error:
         logger.error("agent package build failed: %s", error)
         return error_response(f"agent package 构建失败: {error}", status_code=500)
@@ -135,7 +180,9 @@ async def agent_package_download(version: str, request: Request):
             f"版本 {version} 不存在（当前发布版本: {declared or '未知'}）", status_code=404
         )
     try:
-        archive = _build_archive(version)
+        archive = _immutable_archive(version)
+    except DriftedVersionError as error:
+        return error_response(str(error), status_code=500)
     except FileNotFoundError as error:
         return error_response(f"agent package 构建失败: {error}", status_code=500)
     return Response(

@@ -2138,6 +2138,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/reports/failure-summary"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/reports/list"
   },
   {

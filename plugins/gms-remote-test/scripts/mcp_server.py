@@ -77,7 +77,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.15.2"
+SERVER_VERSION = "0.15.3"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -1131,6 +1131,46 @@ def jobs_events_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-jobs-events", args)
 
 
+def jobs_follow_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """11.txt P1 §3: one-call status+events+failure-summary follow."""
+    job_id = str(arguments.get("job_id") or "").strip()
+    if not job_id:
+        return "Missing required argument: job_id", True
+    args = [job_id]
+    if arguments.get("after") is not None:
+        try:
+            args.extend(["--after", str(int(arguments["after"]))])
+        except (TypeError, ValueError):
+            return "after must be an integer (sequence offset)", True
+    if arguments.get("limit") is not None:
+        try:
+            args.extend(["--limit", str(max(1, min(400, int(arguments["limit"]))))])
+        except (TypeError, ValueError):
+            return "limit must be an integer between 1 and 400", True
+    return run_cli("gms-rt-jobs-follow", args)
+
+
+def test_suites_list_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """11.txt 中优先级 §7: discover suite names for gms_rt_test_start."""
+    return run_cli("gms-rt-test-suites", [])
+
+
+def devices_ui_dump_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """11.txt P0 §2: structured UI layout tree (uiautomator dump path)."""
+    device = str(arguments.get("device") or "").strip()
+    if not device:
+        return "device (serial) is required", True
+    return run_cli("gms-rt-devices-ui-dump", [device])
+
+
+def devices_snapshot_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """11.txt P1 §5: one-shot device state snapshot."""
+    device = str(arguments.get("device") or "").strip()
+    if not device:
+        return "device (serial) is required", True
+    return run_cli("gms-rt-devices-snapshot", [device])
+
+
 def describe_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     command = str(arguments.get("command") or "").strip()
     if not command:
@@ -1249,6 +1289,11 @@ _SHELL_READONLY_BINARIES = frozenset({
     # already readable via cat, kernel ring buffer, and device_config reads.
     "pgrep", "grep", "wc", "head", "tail", "dmesg", "id", "printenv",
     "device_config", "cmd", "am",
+    # 11.txt 高优先级 §3: high-frequency read-only diagnostics. Only the
+    # explicit subcommands in _SHELL_CMD_READONLY_SUBCOMMANDS run; pm/dpm/
+    # content also stay in _SHELL_SMUGGLING_BINARIES so they can never be
+    # ARGUMENTS to another command (and can never be a pipe filter).
+    "pm", "dpm", "content",
 })
 # Characters that enable chaining/redirection/substitution; none of the
 # allowlisted read-only commands need them.
@@ -1270,11 +1315,33 @@ _SHELL_SMUGGLING_BINARIES = frozenset({
     "pm", "input", "svc", "reboot", "sync", "dd", "rm", "mv",
     "cp", "mkdir", "touch", "chmod", "chown", "kill",
 })
-# 'cmd' / 'am' read-only subcommand allowlist (exact prefix match).
+# 'cmd' / 'am' / 'pm' / 'dpm' / 'content' read-only subcommand allowlist
+# (exact prefix match on the joined argument string).
+# 11.txt 高优先级 §3: these are the high-frequency diagnostics agents were
+# forced to SSH for (device-owner inspection, intent resolution, package
+# inventory). Everything mutating (pm trim-caches/clear, dpm force-*,
+# content insert/update/delete) stays OUT of the list.
 _SHELL_CMD_READONLY_SUBCOMMANDS = {
-    "cmd": ("list", "help"),
+    "cmd": (
+        "list", "help",
+        "package list", "package path", "package dump", "package help",
+        "package query-activities", "package query-services",
+        "package query-receivers", "package query-content-providers",
+    ),
     "am": ("stack list", "get-current-user", "get-standby-bucket"),
+    "pm": (
+        "list users", "list packages", "list permissions",
+        "list permission-groups", "list features", "list libraries",
+        "list instrumentation", "list jobs", "path", "help",
+    ),
+    "dpm": ("list-owners",),
+    "content": ("query",),
 }
+# 11.txt 高优先级 §3: the only binaries allowed on the RIGHT side of the
+# single restricted pipe ("readonly_cmd | filter_cmd"). grep/wc/head/tail
+# are already individually allowlisted as leading binaries; this set gates
+# their use as pipe filters.
+_SHELL_FILTER_BINARIES = frozenset({"grep", "wc", "head", "tail"})
 # device_config subcommands that mutate device state.
 _SHELL_DEVICE_CONFIG_MUTATING = frozenset({
     "put", "delete", "edit", "reset", "set-sync-disabled-for-test",
@@ -1326,15 +1393,8 @@ def _is_long_option_prefix(token: str, long_name: str) -> bool:
     return long_name.startswith(body) and body  # non-empty prefix of long_name
 
 
-def _validate_shell_command(command: str) -> tuple[bool, str]:
-    """Return (allowed, reason) for a proposed device shell command.
-
-    R12: the gate is STRUCTURED and POSITIVE per binary. Every option token
-    (including clustered short flags like ``-dc`` and abbreviated long
-    options like ``--cle`` that getopt_long accepts) is expanded and then
-    must match an explicit per-binary allowlist; anything unrecognized is
-    denied instead of passing through a blacklist.
-    """
+def _validate_single_shell_command(command: str) -> tuple[bool, str]:
+    """Validate ONE pipe-free command against the structured allowlist."""
     if not command or not command.strip():
         return False, "empty command"
     if len(command) > _SHELL_MAX_COMMAND_CHARS:
@@ -1469,6 +1529,38 @@ def _validate_shell_command(command: str) -> tuple[bool, str]:
         if any(arg in ("set", "add", "del", "flush", "up", "down") for arg in rest):
             return False, "network configuration commands are not allowed"
     return True, ""
+
+
+def _validate_shell_command(command: str) -> tuple[bool, str]:
+    """Return (allowed, reason) for a proposed device shell command.
+
+    R12: the gate is STRUCTURED and POSITIVE per binary; every option token
+    must match an explicit per-binary allowlist. 11.txt 高优先级 §3 adds ONE
+    restricted pipe: ``<readonly command> | <grep|wc|head|tail ...>`` —
+    both sides must independently pass the full structured allowlist, so
+    this covers ~90% of the SSH-bypass motive (log/text post-filtering)
+    without opening chaining, redirection, or output capture.
+    """
+    segments = [segment.strip() for segment in command.split("|")]
+    if len(segments) > 2:
+        return False, "at most one pipe is allowed"
+    if len(segments) == 2:
+        if not segments[0] or not segments[1]:
+            return False, "empty pipe segment (note: '||' chaining is denied)"
+        ok, reason = _validate_single_shell_command(segments[0])
+        if not ok:
+            return False, f"pipe head: {reason}"
+        ok, reason = _validate_single_shell_command(segments[1])
+        if not ok:
+            return False, f"pipe tail: {reason}"
+        tail_binary = segments[1].split()[0]
+        if tail_binary not in _SHELL_FILTER_BINARIES:
+            return False, (
+                f"only {', '.join(sorted(_SHELL_FILTER_BINARIES))} are allowed "
+                f"as pipe filters, got '{tail_binary}'"
+            )
+        return True, ""
+    return _validate_single_shell_command(command)
 
 
 def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -2272,6 +2364,82 @@ def _all_tools() -> list[dict[str, Any]]:
                     "limit": {"type": "integer", "minimum": 1, "maximum": 400},
                 },
                 "required": ["job_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_jobs_follow",
+            "description": (
+                "One-call job follow (11.txt P1): current status + events "
+                "since a cursor + a compact failed-case summary when the job "
+                "already reached a terminal state (server-parsed from "
+                "test_result.xml, no raw log paging)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "after": {
+                        "type": "integer", "minimum": 0, "maximum": 1000000000,
+                        "description": "Event sequence cursor from a previous call (default -1).",
+                    },
+                    "limit": {
+                        "type": "integer", "minimum": 1, "maximum": 400,
+                        "description": "Max events returned per call (default 100).",
+                    },
+                },
+                "required": ["job_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_test_suites_list",
+            "description": (
+                "List the test suites available on the controller "
+                "(CTS/GTS/VTS/STS). Use the returned names as the `suite` "
+                "argument of gms_rt_test_start instead of guessing."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_devices_ui_dump",
+            "description": (
+                "Dump the current UI layout tree of one device as structured "
+                "JSON elements (bounds/text/clickable). Read-only UI "
+                "diagnosis for CTS-V/GTS interface issues."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "device": {
+                        "type": "string",
+                        "description": "Device serial, e.g. RK3562GMS7.",
+                    },
+                },
+                "required": ["device"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_devices_snapshot",
+            "description": (
+                "One-shot device state snapshot (11.txt P1 §5): build "
+                "fingerprint, focused activity, keyguard/lock state, and "
+                "active device-admin/device-owner list in a single call."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "device": {
+                        "type": "string",
+                        "description": "Device serial, e.g. RK3562GMS7.",
+                    },
+                },
+                "required": ["device"],
                 "additionalProperties": False,
             },
         },
@@ -3222,6 +3390,10 @@ _TOOL_HANDLERS = {
     "gms_rt_jobs_status": jobs_status_tool,
     "gms_rt_jobs_wait": jobs_wait_tool,
     "gms_rt_jobs_events": jobs_events_tool,
+    "gms_rt_jobs_follow": jobs_follow_tool,
+    "gms_rt_test_suites_list": test_suites_list_tool,
+    "gms_rt_devices_ui_dump": devices_ui_dump_tool,
+    "gms_rt_devices_snapshot": devices_snapshot_tool,
     "gms_rt_reports_list": reports_tool,
     "gms_rt_apk_resolve": apk_resolve_tool,
     "gms_rt_apk_analyze": apk_analyze_tool,

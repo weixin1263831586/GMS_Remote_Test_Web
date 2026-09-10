@@ -687,8 +687,16 @@ async def deploy_worker(
             sftp = ssh.open_sftp()
             remote_archive = "/tmp/gms-worker-setup.tar.gz"
             remote_credential = f"/tmp/gms-worker-gts-{worker_id}.json"
+            # 11.txt P3-3: the worker token is uploaded as a 0600 file and
+            # passed to the installer BY PATH — the token string must not
+            # appear in the remote command argv (visible via ps to any
+            # same-host user for the whole 900s install).
+            remote_token = f"/tmp/gms-worker-token-{worker_id}"
             try:
                 sftp.put(str(archive_path), remote_archive)
+                with sftp.open(remote_token, "w") as token_file:
+                    sftp.chmod(remote_token, 0o600)
+                    token_file.write((token + "\n").encode("utf-8"))
                 sftp.put(str(gts_credential), remote_credential)
                 sftp.chmod(remote_credential, 0o600)
             finally:
@@ -701,13 +709,14 @@ async def deploy_worker(
             install = (
                 "set -e; "
                 f"cleanup() {{ rm -f {shlex.quote(remote_archive)} "
+                f"{shlex.quote(remote_token)} "
                 f"{shlex.quote(remote_credential)}; }}; trap cleanup EXIT; "
                 "rm -rf ~/gms-worker-setup && mkdir -p ~/gms-worker-setup && "
                 f"tar -xzf {shlex.quote(remote_archive)} -C ~/gms-worker-setup && "
                 "cd ~/gms-worker-setup && "
                 f"GMS_DEFAULT_MAX_JOBS={ClusterConfig.load().default_max_jobs} "
                 f"bash scripts/install_cluster_worker.sh {shlex.quote(worker_id)} "
-                f"{shlex.quote(controller_url)} {shlex.quote(token)} "
+                f"{shlex.quote(controller_url)} {shlex.quote(remote_token)} "
                 f"{shlex.quote(controller_ca_arg)} "
                 f"{shlex.quote(suite_root)} {shlex.quote(hostname)} "
                 f"{shlex.quote(remote_credential)}"

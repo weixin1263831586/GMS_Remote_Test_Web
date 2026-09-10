@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260828-password-toggle-icons">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260910-user-agent-layout-v8">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260910-elev-recovery" defer></script>
@@ -59,7 +59,7 @@
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20260813-upload-generation" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20260813-ai-status" defer></script>
-    <script src="/static/js/pages/agent-access.js?v=20260908-agent-access-scopes" defer></script>
+    <script src="/static/js/pages/agent-access.js?v=20260910-agent-access-ui" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20260828-apk-scroll-containers" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260826-auth-ready" defer></script>
@@ -1171,44 +1171,64 @@
 
         <!-- 用户管理页面 -->
         <div class="container page-content" id="page-users">
-            <div style="position: relative; margin-bottom: 6px;">
-                <div class="section-title" style="margin: 0;">👥 用户管理</div>
-                <div class="device-group-toolbar" id="agent-access-entry" style="position: absolute; top: -4px; right: 0; display: none;">
-                    <button class="btn-xs" onclick="agentAccessToggle(true)">🔑 Agent 接入管理</button>
+            <div class="users-page-header">
+                <div class="section-title" id="users-page-title">👥 用户管理</div>
+                <div class="users-view-tabs" id="users-view-tabs" role="tablist" aria-label="用户管理视图" style="display: none;">
+                    <button id="users-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" onclick="agentAccessToggle(false)">用户列表</button>
+                    <div id="agent-access-entry">
+                        <button id="agent-access-tab" class="btn-xs" type="button" role="tab" aria-selected="false" onclick="agentAccessToggle(true)">🔑 Agent 接入</button>
+                    </div>
                 </div>
             </div>
 
             <div id="users-main-view">
                 <!-- 用户统计卡片 -->
-                <div class="users-stats" style="display: flex; gap: 15px; margin-bottom: 10px;">
-                    <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                        <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-users-count">-</div>
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">用户总数</div>
+                <div class="users-stats">
+                    <button class="user-stat-card" type="button" data-user-status-card="" onclick="setUsersStatusFilter('')">
+                        <span class="user-stat-value total" id="total-users-count">-</span>
+                        <span class="user-stat-label">全部用户</span>
+                    </button>
+                    <button class="user-stat-card" type="button" data-user-status-card="online" onclick="setUsersStatusFilter('online')">
+                        <span class="user-stat-value online" id="active-users-count">-</span>
+                        <span class="user-stat-label">空闲在线</span>
+                    </button>
+                    <button class="user-stat-card" type="button" data-user-status-card="testing" onclick="setUsersStatusFilter('testing')">
+                        <span class="user-stat-value testing" id="testing-users-count">-</span>
+                        <span class="user-stat-label">正在测试</span>
+                    </button>
+                </div>
+
+                <div class="users-list-toolbar">
+                    <div class="users-filter-group">
+                        <input id="users-search-input" class="combo-box" type="search" placeholder="搜索用户、IP 或设备" aria-label="搜索用户" oninput="filterUsersList()">
+                        <select id="users-status-filter" class="combo-box" aria-label="按状态筛选用户" onchange="filterUsersList()">
+                            <option value="">全部状态</option>
+                            <option value="online">在线</option>
+                            <option value="testing">测试中</option>
+                            <option value="offline">离线</option>
+                        </select>
                     </div>
-                    <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                        <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="active-users-count">-</div>
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">在线用户数</div>
-                    </div>
-                    <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                        <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="testing-users-count">-</div>
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">测试中用户</div>
+                    <div class="users-list-meta">
+                        <span id="users-visible-count">—</span>
+                        <span id="users-last-updated">尚未刷新</span>
+                        <button id="users-refresh-button" class="btn-xs" type="button" onclick="refreshUsersList(this)">↻ 刷新</button>
                     </div>
                 </div>
 
                 <!-- 用户列表 -->
-                <div class="users-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
-                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                <div class="users-table-wrap">
+                    <table class="users-table">
                         <thead>
-                            <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 200px;">用户标识</th>
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 150px;">IP地址</th>
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">来源</th>
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">直连设备</th>
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">占用设备</th>
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">状态</th>
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">连接时间</th>
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">最后活跃</th>
-                                <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 300px;">操作</th>
+                            <tr>
+                                <th class="users-col-identity">用户标识</th>
+                                <th class="users-col-ip">IP 地址</th>
+                                <th class="users-col-source">来源</th>
+                                <th>直连设备</th>
+                                <th>占用设备</th>
+                                <th class="users-col-status">状态</th>
+                                <th class="users-col-time">连接时间</th>
+                                <th class="users-col-time">最后活跃</th>
+                                <th class="users-col-actions">操作</th>
                             </tr>
                         </thead>
                         <tbody id="users-table-body">
@@ -1224,33 +1244,113 @@
 
             <!-- Agent 接入管理视图（2026-09-08 audit §二/§三：Service Token + 配对码；覆盖用户管理内容） -->
             <div id="agent-access-panel" style="display: none;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <div class="section-title" style="margin: 0;">🔑 Agent 接入管理</div>
-                    <div style="display: flex; gap: 6px;">
-                        <button class="btn-xs" onclick="agentAccessReload()">刷新</button>
-                        <button class="btn-xs btn-primary" onclick="agentAccessToggleCreate()">＋ 创建配对码</button>
-                        <button class="btn-xs" onclick="agentAccessToggle(false)">← 返回用户管理</button>
+                <div class="agent-access-stats" aria-label="Agent Token 统计">
+                    <button class="agent-access-stat" type="button" data-agent-token-status-card="" onclick="agentAccessSetStatusFilter('')">
+                        <strong id="agent-token-total-count">—</strong><span>Token 总数</span>
+                    </button>
+                    <button class="agent-access-stat" type="button" data-agent-token-status-card="active" onclick="agentAccessSetStatusFilter('active')">
+                        <strong id="agent-token-active-count">—</strong><span>当前有效</span>
+                    </button>
+                    <button class="agent-access-stat" type="button" data-agent-token-status-card="inactive" onclick="agentAccessSetStatusFilter('inactive')">
+                        <strong id="agent-token-inactive-count">—</strong><span>已失效</span>
+                    </button>
+                </div>
+
+                <div class="agent-access-toolbar">
+                    <div id="agent-access-summary" title="一次性配对码 5 分钟有效；Agent 换取 Service Token 后，仅可使用授权范围内的能力，平台密码不会下发。">
+                        一次性配对码 5 分钟有效；Agent 换取 Service Token 后，仅可使用授权范围内的能力，平台密码不会下发。
+                    </div>
+                    <button id="agent-access-create-toggle" class="btn-xs btn-primary" type="button" onclick="agentAccessToggleCreate()">＋ 创建配对码</button>
+                    <div class="agent-access-list-label">
+                        <strong>Service Token</strong>
+                        <span>只展示 Token 元数据；原始 Token 不会再次显示</span>
+                    </div>
+                    <div class="agent-access-list-actions">
+                        <input id="agent-access-search" class="combo-box" type="search" placeholder="搜索名称或 Token ID" aria-label="搜索 Agent Token" oninput="agentAccessFilterTokens()">
+                        <select id="agent-access-status-filter" class="combo-box" aria-label="按状态筛选 Agent Token" onchange="agentAccessFilterTokens()">
+                            <option value="">全部状态</option>
+                            <option value="active">有效</option>
+                            <option value="inactive">已失效</option>
+                            <option value="expired">已过期</option>
+                            <option value="revoked">已吊销</option>
+                        </select>
+                        <button id="agent-access-refresh" class="btn-xs" type="button" onclick="agentAccessReload(this)">↻ 刷新</button>
                     </div>
                 </div>
-                <div id="agent-access-summary" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
-                    编译服务器上的 Codex / Kimi / kkagent 通过一次性配对码换取 Agent Service Token（0600 文件），
-                    之后经 Authorization: Bearer 调用平台，全程不需要平台密码。
-                </div>
-                <div id="agent-access-enroll-form" style="display: none; border: 1px dashed var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
-                    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px;">
-                        <input id="agent-access-name" class="combo-box" placeholder="Agent 标识名，如 kimi-build03（=编译机上的 Agent 名，便于审计区分）" style="flex: 1; min-width: 240px; height: 28px; font-size: 12px;" />
-                        <input id="agent-access-workers" class="combo-box" placeholder="允许的 Worker（逗号分隔，* 不限）" style="flex: 1; min-width: 200px; height: 28px; font-size: 12px;" />
-                        <input id="agent-access-devices" class="combo-box" placeholder="允许的设备（逗号分隔，* 不限）" style="flex: 1; min-width: 200px; height: 28px; font-size: 12px;" />
-                        <input id="agent-access-days" class="combo-box" type="number" min="1" max="365" value="90" title="有效期（天）" style="width: 90px; height: 28px; font-size: 12px;" />
-                        <span style="font-size: 11px; color: var(--text-secondary);">天</span>
+
+                <form id="agent-access-enroll-form" class="agent-access-create-card" style="display: none;" onsubmit="event.preventDefault(); agentAccessCreateEnrollment();">
+                    <div class="agent-access-card-heading">
+                        <div>
+                            <strong>创建 Agent 配对码</strong>
+                            <span>配对码 5 分钟内有效，只能使用一次</span>
+                        </div>
+                        <button class="btn-xs" type="button" onclick="agentAccessToggleCreate(false)">取消</button>
                     </div>
-                    <div id="agent-access-scopes" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;"></div>
-                    <div style="display: flex; gap: 6px; align-items: center;">
-                        <button class="btn-xs btn-primary" onclick="agentAccessCreateEnrollment()">生成配对码（5 分钟有效）</button>
-                        <span id="agent-access-code-result" class="mono" style="font-size: 12px; font-weight: 600; user-select: all;"></span>
+                    <div class="agent-access-form-grid">
+                        <label class="agent-access-field agent-access-field-wide">
+                            <span>Agent 标识名 <em>必填</em></span>
+                            <input id="agent-access-name" class="combo-box" maxlength="64" required placeholder="例如 codex-build03" autocomplete="off">
+                            <small>建议包含 Agent 类型和主机名，便于审计区分。</small>
+                        </label>
+                        <label class="agent-access-field">
+                            <span>允许的 Worker</span>
+                            <input id="agent-access-workers" class="combo-box mono" value="*" placeholder="* 或逗号分隔的 Worker ID">
+                        </label>
+                        <label class="agent-access-field">
+                            <span>允许的设备</span>
+                            <input id="agent-access-devices" class="combo-box mono" value="*" placeholder="* 或逗号分隔的设备序列号">
+                        </label>
+                        <label class="agent-access-field agent-access-days-field">
+                            <span>Token 有效期</span>
+                            <span class="agent-access-input-suffix"><input id="agent-access-days" class="combo-box" type="number" min="1" max="365" value="90"><b>天</b></span>
+                        </label>
                     </div>
+                    <fieldset class="agent-access-scope-fieldset">
+                        <div class="agent-access-scope-heading">
+                            <legend>授权范围</legend>
+                            <div>
+                                <button class="btn-xxs" type="button" onclick="agentAccessSetScopeSelection('default')">推荐</button>
+                                <button class="btn-xxs" type="button" onclick="agentAccessSetScopeSelection('all')">全选</button>
+                                <button class="btn-xxs" type="button" onclick="agentAccessSetScopeSelection('none')">清空</button>
+                            </div>
+                        </div>
+                        <div id="agent-access-scopes" class="agent-access-scopes"></div>
+                    </fieldset>
+                    <div class="agent-access-form-actions">
+                        <button id="agent-access-create-submit" class="btn-xs btn-primary" type="submit">生成配对码</button>
+                        <span class="agent-access-form-hint">生成前会要求管理员提权确认</span>
+                    </div>
+                </form>
+
+                <div id="agent-access-code-card" class="agent-access-code-card" hidden>
+                    <div>
+                        <span>一次性配对码</span>
+                        <strong id="agent-access-code-result" class="mono"></strong>
+                        <small id="agent-access-code-expiry">5 分钟内有效，请立即在目标服务器完成接入</small>
+                    </div>
+                    <button class="btn-xs btn-primary" type="button" onclick="agentAccessCopyEnrollmentCode()">复制配对码</button>
                 </div>
-                <div id="agent-access-tokens" style="max-height: 320px; overflow-y: auto;"></div>
+
+                <div class="agent-access-table-wrap">
+                    <table class="agent-access-table">
+                        <thead>
+                            <tr>
+                                <th class="agent-token-col-identity">Agent / Token ID</th>
+                                <th class="agent-token-col-status">状态</th>
+                                <th class="agent-token-col-scopes">授权范围</th>
+                                <th class="agent-token-col-worker">Worker</th>
+                                <th class="agent-token-col-device">设备</th>
+                                <th class="agent-token-col-owner">所有者</th>
+                                <th class="agent-token-col-validity">有效期</th>
+                                <th class="agent-token-col-used">最近使用</th>
+                                <th class="agent-token-col-action">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agent-access-tokens">
+                            <tr><td colspan="9" class="agent-access-empty">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -4411,6 +4511,7 @@
         // ==================== 用户管理功能 ====================
         let usersRefreshInterval = null;
         let usersHasLoaded = false;
+        let usersListCache = [];
         let usersLocalDevicesReloadTimer = null;
         // 用户取消提权后置位：自动刷新不再每 10 秒重复探测/弹框；
         // 提权成功或列表加载成功时清除。
@@ -4473,6 +4574,8 @@
                 usersAccessDenied = false;
                 if (data.users) {
                     displayUsersList(data.users);
+                    const updated = document.getElementById('users-last-updated');
+                    if (updated) updated.textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit', second: '2-digit'})}`;
                 }
             } catch (e) {
                 console.error('[Users] Error loading users:', e);
@@ -4487,6 +4590,25 @@
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
             tbody.innerHTML = `<tr><td colspan="9" class="users-empty-message">${escapeHtml(message)}</td></tr>`;
+            const visible = document.getElementById('users-visible-count');
+            if (visible) visible.textContent = '列表不可用';
+        }
+
+        async function refreshUsersList(button) {
+            const refreshButton = button || document.getElementById('users-refresh-button');
+            if (refreshButton?.disabled) return;
+            if (refreshButton) {
+                refreshButton.disabled = true;
+                refreshButton.textContent = '刷新中…';
+            }
+            try {
+                await loadUsersList();
+            } finally {
+                if (refreshButton) {
+                    refreshButton.disabled = false;
+                    refreshButton.textContent = '↻ 刷新';
+                }
+            }
         }
 
         // 移除配置型用户（从 config_runtime.client_hosts 删除）。二次确认后调 DELETE。
@@ -4517,7 +4639,10 @@
             if (usersRefreshInterval) return;
             usersRefreshInterval = setInterval(() => {
                 // 用户已取消提权时不再反复探测；重新进入页面会再次提示。
-                if (currentPage === 'users' && !document.hidden && !usersAccessDenied) {
+                if (currentPage === 'users'
+                    && !document.hidden
+                    && !usersAccessDenied
+                    && !window.agentAccessPanelIsOpen?.()) {
                     loadUsersList();
                 }
             }, 10000);
@@ -4529,26 +4654,92 @@
                 clearInterval(usersRefreshInterval);
                 usersRefreshInterval = null;
             }
+            if (usersLocalDevicesReloadTimer) {
+                clearTimeout(usersLocalDevicesReloadTimer);
+                usersLocalDevicesReloadTimer = null;
+            }
+        }
+
+        function getActiveUserClusterJob(user) {
+            return (user.cluster_jobs || []).find(job =>
+                ['created','queued','leasing','assigned','dispatching','running','stopping','collecting','worker_lost'].includes(job.status));
+        }
+
+        function getUserDisplayStatus(user) {
+            return getActiveUserClusterJob(user)
+                ? 'testing'
+                : (user.status || (user.running ? 'testing' : 'offline'));
+        }
+
+        function setUsersStatusFilter(status) {
+            const select = document.getElementById('users-status-filter');
+            if (select) select.value = status || '';
+            filterUsersList();
+        }
+
+        function filterUsersList() {
+            const search = (document.getElementById('users-search-input')?.value || '').trim().toLowerCase();
+            const status = document.getElementById('users-status-filter')?.value || '';
+            const filtered = usersListCache.filter(user => {
+                if (status && getUserDisplayStatus(user) !== status) return false;
+                if (!search) return true;
+                const localDevices = user.local_devices?.devices || [];
+                const clusterWorkers = (user.cluster_jobs || []).map(job => job.worker_id || '');
+                const searchable = [
+                    user.client_id, user.username, user.ip, user.source_label,
+                    ...(user.devices || []), ...localDevices, ...clusterWorkers,
+                ].join(' ').toLowerCase();
+                return searchable.includes(search);
+            });
+            document.querySelectorAll('[data-user-status-card]').forEach(card => {
+                card.classList.toggle('active', card.dataset.userStatusCard === status);
+            });
+            const visible = document.getElementById('users-visible-count');
+            if (visible) visible.textContent = `显示 ${filtered.length} / ${usersListCache.length}`;
+            renderUsersList(filtered);
         }
 
         function displayUsersList(users) {
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
+            usersListCache = Array.isArray(users) ? users : [];
 
             // 更新统计数据
-            const totalCount = users.length;
-            const activeCount = users.filter(u => u.status === 'online').length;
-            const testingCount = users.filter(u => u.status === 'testing').length;
+            const totalCount = usersListCache.length;
+            const activeCount = usersListCache.filter(u => getUserDisplayStatus(u) === 'online').length;
+            const testingCount = usersListCache.filter(u => getUserDisplayStatus(u) === 'testing').length;
 
             document.getElementById('total-users-count').textContent = totalCount;
             document.getElementById('active-users-count').textContent = activeCount;
             document.getElementById('testing-users-count').textContent = testingCount;
+            filterUsersList();
 
+            // 有用户直连设备仍在后台 SSH 枚举（显示"枚举中…"）时，
+            // 3 秒后补一次加载，不等 10 秒轮询。
+            if (currentPage === 'users'
+                && !window.agentAccessPanelIsOpen?.()
+                && usersListCache.some(user => user.local_devices === null)) {
+                clearTimeout(usersLocalDevicesReloadTimer);
+                usersLocalDevicesReloadTimer = setTimeout(() => {
+                    if (currentPage === 'users' && !document.hidden && !window.agentAccessPanelIsOpen?.()) {
+                        loadUsersList();
+                    }
+                }, 3000);
+            }
+        }
+
+        function renderUsersList(users) {
+            const tbody = document.getElementById('users-table-body');
+            if (!tbody) return;
             if (users.length === 0) {
+                const filtersActive = Boolean(
+                    document.getElementById('users-search-input')?.value
+                    || document.getElementById('users-status-filter')?.value
+                );
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                            暂无用户
+                        <td colspan="9" class="users-empty-message">
+                            ${filtersActive ? '没有匹配当前筛选条件的用户' : '暂无用户'}
                         </td>
                     </tr>
                 `;
@@ -4558,9 +4749,8 @@
 
             // 渲染用户列表
             tbody.innerHTML = users.map(user => {
-                const activeClusterJob = (user.cluster_jobs || []).find(job =>
-                    ['created','queued','leasing','assigned','dispatching','running','stopping','collecting','worker_lost'].includes(job.status));
-                const normalizedStatus = activeClusterJob ? 'testing' : (user.status || (user.running ? 'testing' : 'offline'));
+                const activeClusterJob = getActiveUserClusterJob(user);
+                const normalizedStatus = getUserDisplayStatus(user);
                 const statusLabels = { testing: '测试中', online: '在线', offline: '离线' };
                 const statusColors = {
                     testing: 'var(--warning-color)',
@@ -4598,7 +4788,7 @@
                     : '<span class="user-action-placeholder" aria-hidden="true">-</span>';
 
                 return `
-                    <tr style="border-bottom: 1px solid var(--border-color);">
+                    <tr>
                         <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
                             ${escapeHtml(user.client_id || '')}
                         </td>
@@ -4648,18 +4838,6 @@
                 ));
             });
             usersHasLoaded = true;
-
-            // 有用户直连设备仍在后台 SSH 枚举（显示"枚举中…"）时，
-            // 3 秒后补一次加载，不等 10 秒轮询。
-            if (currentPage === 'users'
-                && users.some(user => user.local_devices === null)) {
-                clearTimeout(usersLocalDevicesReloadTimer);
-                usersLocalDevicesReloadTimer = setTimeout(() => {
-                    if (currentPage === 'users' && !document.hidden) {
-                        loadUsersList();
-                    }
-                }, 3000);
-            }
         }
 
         function formatTime(isoString) {
@@ -7493,8 +7671,13 @@
             }
 
             if (pageName === 'users') {
-                loadUsersList();
-                startUsersAutoRefresh();
+                if (window.agentAccessPanelIsOpen?.()) {
+                    stopUsersAutoRefresh();
+                    agentAccessReload();
+                } else {
+                    loadUsersList();
+                    startUsersAutoRefresh();
+                }
             } else {
                 stopUsersAutoRefresh();
             }

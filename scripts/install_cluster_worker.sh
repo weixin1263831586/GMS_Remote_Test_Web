@@ -8,8 +8,16 @@ fi
 
 WORKER_ID="$1"
 CONTROLLER_URL="$2"
-TOKEN="$3"
+TOKEN_ARG="$3"
 CONTROLLER_CERT="$4"
+# 11.txt P3-3: TOKEN_ARG may be the literal token (legacy) or the path of a
+# 0600 file uploaded next to the archive (preferred — keeps the secret out
+# of the remote process argv, where same-host users could read it via ps).
+if [[ -r "${TOKEN_ARG}" && -f "${TOKEN_ARG}" && $(stat -c '%s' "${TOKEN_ARG}") -lt 4096 ]]; then
+    TOKEN="$(cat "${TOKEN_ARG}")"
+else
+    TOKEN="${TOKEN_ARG}"
+fi
 SUITE_ROOT="${5:-${HOME}/GMS-Suite}"
 WORKER_ADDRESS="${6:-}"
 GTS_CREDENTIAL_FILE="${7:-${GMS_GTS_CREDENTIAL_FILE:-}}"

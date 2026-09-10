@@ -169,12 +169,33 @@ def server_url_from_env() -> str:
         or "__GMS_AGENT_DEFAULT_SERVER__"
     )
     if not url or url.startswith("__GMS_"):
+        # update/rollback on an already-installed host: the profile recorded
+        # the Controller URL at activation time — reuse it instead of failing.
+        profile_server, _ = profile_server_and_ci_or_none()
+        if profile_server:
+            return profile_server.rstrip("/")
         print(
-            "Error: GMS_REMOTE_TEST_SERVER 未设置（gms-agent 不会猜测 Controller 地址）",
+            "Error: GMS_REMOTE_TEST_SERVER 未设置且未找到已安装 profile"
+            "（gms-agent 不会猜测 Controller 地址）",
             file=sys.stderr,
         )
         raise SystemExit(2)
     return url.rstrip("/")
+
+
+def profile_server_and_ci_or_none() -> tuple[str, str]:
+    """Best-effort (server, ca) lookup across installed client profiles.
+
+    Never raises: update/rollback only need a hint where the Controller is;
+    a corrupt/unreadable profile store simply yields ("", "")."""
+    try:
+        for client in CLIENTS:
+            server, ca = profile_server_and_ca(client)
+            if server:
+                return server, ca
+    except Exception:
+        pass
+    return "", ""
 
 
 def http_get(url: str, ca_cert: str = "", timeout: int = 60) -> tuple[bytes, dict[str, str]]:
@@ -545,7 +566,10 @@ def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def write_profile_toml(profile: str, client: str, server: str, ca_cert: str) -> Path:
+def write_profile_toml(
+    profile: str, client: str, server: str, ca_cert: str,
+    insecure: bool | None = None,
+) -> Path:
     """Write ~/.config/gms-agent/profiles/<profile>.toml (0600).
 
     Data-only TOML — no shell semantics, no `source`ing, no quoting
@@ -563,6 +587,12 @@ def write_profile_toml(profile: str, client: str, server: str, ca_cert: str) -> 
     ]
     if ca_cert:
         lines.append(f'ca_cert = "{_toml_escape(ca_cert)}"')
+    if insecure is None:
+        insecure = os.environ.get("GMS_INSTALL_INSECURE", "") == "1"
+    if insecure:
+        # Install ran without a trusted CA (self-signed deployment); the
+        # launcher maps this to GMS_CURL_INSECURE=1 for the runtime.
+        lines.append("insecure = true")
     lines += [
         "",
         "[auth]",
@@ -641,13 +671,27 @@ def profile_server_and_ca(client: str) -> tuple[str, str]:
     return server.rstrip("/"), ca
 
 
+def _profile_insecure(name: str) -> bool:
+    """Sticky insecure flag: once a profile was written with the
+    TLS-fallback policy, later re-activations (update/rollback)
+    keep it even when GMS_INSTALL_INSECURE is unset."""
+    path = PROFILE_ROOT / f"{name}.toml"
+    if path.is_file():
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if line == "insecure = true":
+                return True
+    return os.environ.get("GMS_INSTALL_INSECURE", "") == "1"
+
+
 def write_profile(client: str, server: str, ca_cert: str) -> str:
     """Write the client profile in BOTH formats during migration (10.txt §十八):
     TOML is the authoritative store (read by mcp_launcher.py / SDK); the
     legacy <client>.env is kept for the shell launcher fallback until it is
     retired."""
     name = profile_name(client)
-    write_profile_toml(name, client, server, ca_cert)
+    insecure = _profile_insecure(name)
+    write_profile_toml(name, client, server, ca_cert, insecure)
     token_file = STATE_DIR / f"{name}.token"
     MCP_ENV_DIR.mkdir(parents=True, exist_ok=True)
     # shlex.quote (NOT json.dumps): this file is `source`d by shell code;
@@ -660,6 +704,8 @@ def write_profile(client: str, server: str, ca_cert: str) -> str:
     ]
     if ca_cert:
         lines.append(f"export GMS_CURL_CA_CERT={shlex.quote(ca_cert)}")
+    if insecure:
+        lines.append("export GMS_CURL_INSECURE=1")
     env_file = MCP_ENV_DIR / f"{client}.env"
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     env_file.chmod(0o600)

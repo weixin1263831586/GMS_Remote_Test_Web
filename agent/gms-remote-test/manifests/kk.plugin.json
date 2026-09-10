@@ -1,6 +1,6 @@
 {
   "name": "gms-remote-test",
-  "version": "0.15.2",
+  "version": "0.15.3",
   "description": "Operate the GMS Remote Test platform through the bundled gms-rt CLI: device inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware burn, USB/IP, VPN. Self-contained; requires GMS_REMOTE_TEST_SERVER. Authenticates via GMS_AUTH_TOKEN_FILE (Agent Service Token, 0600 file) so no platform password ever flows through the model; adds read-only device shell (gms_rt_shell), typed logcat capture (gms_rt_logcat), one-shot approved device shell (gms_rt_shell_exec with server-side approval tokens), admin step-up elevation (gms_rt_auth_elevate) and typed firmware burn (gms_rt_burn_firmware, approval-token gated); jobs output is rendered one line per job.",
   "keywords": [
     "gms",

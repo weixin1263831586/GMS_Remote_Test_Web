@@ -12,14 +12,14 @@ MIGRATION_LINE_LIMITS = {
     'features/assistant/universal_ai.py': 971,
     'features/automation/executors.py': 1051,
     'features/automation/service.py': 736,
-    'features/cluster/deployment_api.py': 767,
+    'features/cluster/deployment_api.py': 776,  # +9: 11.txt P3-3 worker token 改 0600 文件传递
     # 这些模块使用显式上限，后续拆分时继续收紧。
     'features/cluster/api.py': 723,
     'features/cluster/tests/test_api_hardening.py': 744,
     'features/cluster/tests/test_cluster.py': 667,
     'features/auth/service.py': 637,
     'features/auth/agent_tokens.py': 456,
-    'features/auth/constants.py': 87,
+    'features/auth/constants.py': 89,  # +2: 11.txt P1 reports.read 人类角色
     'features/auth/tests/test_auth_api.py': 610,
     'features/auth/tests/test_security_boundary.py': 615,
     'features/devices/config_override.py': 740,
@@ -36,7 +36,7 @@ MIGRATION_LINE_LIMITS = {
     'features/redmine/client.py': 724,
     'features/redmine/knowledge_service.py': 636,
     'features/redmine/tests/test_dashboard_stats.py': 1093,
-    'features/reports/analysis_api.py': 712,
+    'features/reports/analysis_api.py': 752,  # +40: 11.txt P1 reports.read 门禁 helper
     'features/reports/api_helpers.py': 775,
     'features/reports/weekly_report_api.py': 1123,
     'features/system/api.py': 1185,  # +41 R26 websocket/jq; +1 11.txt installer wrapper 重写(净)

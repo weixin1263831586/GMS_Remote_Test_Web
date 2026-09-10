@@ -48,6 +48,20 @@ from .knowledge_ranking import android_version_from_request, rank_kb_hits
 from .uploads import ReportUploadTooLargeError, stage_report_uploads
 
 
+def _principal_has_reports_read(principal: object) -> bool:
+    """11.txt P1: reports.read gate shared by list/analyze/diagnose.
+
+    Agent principals must carry the reports.read scope; human roles get it
+    from ROLE_PERMISSIONS and admin via '*'. The getattr fallback keeps unit
+    tests that stub a bare principal object working (no has_permission →
+    treated as permitted, exactly like the pre-gate behavior).
+    """
+    has_permission = getattr(principal, "has_permission", None)
+    if not callable(has_permission):
+        return True
+    return bool(has_permission("reports.read"))
+
+
 router = APIRouter()
 
 _MAINLINE_DB_PATH = settings.data_root / 'mainline_known_issues.sqlite3'
@@ -136,6 +150,16 @@ async def analyze_reports(
 ):
     """Unified report analysis API."""
     principal = require_authenticated_user(request)
+    # 11.txt P1: reading reports (incl. analysis) requires reports.read for
+    # agent principals; human roles carry it via ROLE_PERMISSIONS.
+    if not _principal_has_reports_read(principal):
+        return error_response(
+            {
+                "message": "Agent token scope 'reports.read' required",
+                "scope_required": "reports.read",
+            },
+            status_code=403,
+        )
     try:
         if mode == AnalysisMode.SAVED:
             if not report_id and not report_timestamp:
@@ -453,7 +477,16 @@ async def analyze_suite_log_dir(
 @router.post("/api/reports/diagnose")
 async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request: Request):
     """Diagnose one report failure and locate matching suite APK/JAR source."""
-    require_authenticated_user(http_request)
+    principal = require_authenticated_user(http_request)
+    # 11.txt P1: same reports.read gate as list/analyze (agent principals).
+    if not _principal_has_reports_read(principal):
+        return error_response(
+            {
+                "message": "Agent token scope 'reports.read' required",
+                "scope_required": "reports.read",
+            },
+            status_code=403,
+        )
     try:
         failure_location = StackTraceUtils.extract_failure_location(request.stack_trace or "", request.test_name)
         class_names = [c for c in (request.class_names or []) if c]
@@ -651,6 +684,14 @@ async def delete_report(
 ):
     """Delete test report (owner or admin only)."""
     principal = require_authenticated_user(request)
+    # 11.txt P1: report deletion is a human-operator write action — agent
+    # tokens are refused outright (no agent scope covers destructive report
+    # operations; MCP exposes no delete tool either).
+    if getattr(request.state, "auth_method", None) == "agent_token":
+        return error_response(
+            {"message": "Agent tokens cannot delete reports", "agent_forbidden": True},
+            status_code=403,
+        )
     try:
         if not report_id and not timestamp:
             return error_response("report_id is required", 400)
