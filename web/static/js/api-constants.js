@@ -212,14 +212,14 @@ const API_DETAILS_MAP = {
         usage: '下载技能包用于离线部署或备份',
         curl_example: 'curl -s -OJ "http://server:5001/api/system/skills"'
     },
-    '/api/system/skills/install.sh': {
+    '/api/agent/install.sh': {
         title: '一键安装GMS Remote Test CLI',
         description: '自动安装或更新Skill和全部独立gms-rt-*命令',
         method: 'GET',
         params: [],
         response: 'Shell安装脚本',
         usage: '在其他主机或编译服务器一键安装',
-        curl_example: 'curl -kfsSL "https://server:5001/api/system/skills/install.sh" | bash'
+        curl_example: 'curl -kfsSL "https://server:5001/api/agent/install.sh" | bash'
     },
     '/api/system/docs': {
         title: '获取API文档',

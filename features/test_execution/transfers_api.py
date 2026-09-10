@@ -11,8 +11,8 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.auth import (
-    require_authenticated_user_when_auth_required,
     require_elevated_admin_when_auth_required,
+    require_human_principal_when_auth_required,
 )
 from features.devices import ssh_connection_failed_response
 from foundation.archives import (
@@ -70,7 +70,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 下载/解压是日常操作，只需登录；添加本地路径修改主机配置，需要管理员提权。
-_WRITE_AUTH = [Depends(require_authenticated_user_when_auth_required)]
+# 11.txt P1: 套件下载/解压会占用磁盘/CPU/带宽且可写主机路径——Agent Token
+# 一律拒绝（human-only）；agent 需要套件信息时走只读的 suites 列表接口。
+_WRITE_AUTH = [Depends(require_human_principal_when_auth_required)]
 _ADD_LOCAL_ELEVATION = [Depends(require_elevated_admin_when_auth_required)]
 
 

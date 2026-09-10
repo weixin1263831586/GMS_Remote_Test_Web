@@ -63,6 +63,31 @@ def require_authenticated_user_when_auth_required(
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
+def require_human_principal_when_auth_required(
+    request: Request,
+) -> CurrentUser | None:
+    """Authenticate like today, but refuse Agent Service Token principals.
+
+    11.txt P1: the MCP tool allowlist is not a security boundary — an agent
+    token can call REST endpoints directly with its Bearer credential. VPN,
+    SSH helpers and suite management are human-operator surfaces: without a
+    matching agent scope they must fail closed here, server-side.
+    """
+
+    user = require_authenticated_user_when_auth_required(request)
+    if user is not None and getattr(
+        request.state, "auth_method", None
+    ) == "agent_token":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Agent tokens cannot call this endpoint",
+                "agent_forbidden": True,
+            },
+        )
+    return user
+
+
 def principal_owner_id(request: Request) -> str:
     """Return the immutable account id used by newly-created resources."""
 

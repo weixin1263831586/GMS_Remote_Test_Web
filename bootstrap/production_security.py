@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from features.auth import authentication_required, secure_cookies_enabled
 from features.cluster import worker_tokens
 from features.system.metrics import metrics_token
+from features.system.skill_archive_signing import skill_verify_key_b64
 from foundation.runtime_settings import allowed_origins, is_production_environment
 from foundation.secrets import validate_secret_configuration
 from foundation.security_audit import security_audit_logger
@@ -35,6 +36,16 @@ def validate_production_security_configuration() -> None:
 
     validate_secret_configuration()
     security_audit_logger.validate_configuration()
+    # 15.txt 审核 P2: the agent package trust chain must not silently
+    # degrade to SHA-only in production — manifest SHA and artifact come
+    # from the same Controller, so only the Ed25519 signature forms a real
+    # release trust chain. configs/runtime.json supplies the key via
+    # GMS_SKILL_SIGNING_KEY_FILE (see configs/runtime.example.json).
+    if not skill_verify_key_b64().strip():
+        raise RuntimeError(
+            "GMS_SKILL_SIGNING_KEY_FILE must contain an Ed25519 signing key "
+            "in production (agent package distribution is signed)"
+        )
     _require_secret("GMS_METRICS_TOKEN", metrics_token())
     _require_secret(
         "GMS_AUTOMATION_WEBHOOK_TOKEN",

@@ -83,12 +83,22 @@ async def upload_file(
     """File upload - supports chunked upload and resume."""
     # HEAD request: check uploaded chunks for resume
     if check_chunks and upload_id:
-        session_dir = os.path.join(upload_temp_root(), upload_id)
+        # 11.txt P2-1: upload_id 不可信——必须消毒后再拼路径，防止
+        # upload_id=../../x 的目录穿越读/写（对齐固件链路 safe_upload_token）。
+        from foundation.uploads import safe_upload_token
+
+        session_dir = os.path.join(
+            upload_temp_root(), safe_upload_token(upload_id)
+        )
         chunks_file = os.path.join(session_dir, "uploaded_chunks.json")
 
         if os.path.exists(chunks_file):
-            with open(chunks_file) as f:
-                uploaded_chunks = json.load(f)
+            try:
+                with open(chunks_file) as f:
+                    uploaded_chunks = json.load(f)
+            except (OSError, ValueError) as exc:
+                logger.warning(f"Invalid chunk state for {upload_id}: {exc}")
+                uploaded_chunks = []
             return JSONResponse(content={"success": True, "uploaded_chunks": uploaded_chunks})
         else:
             return JSONResponse(content={"success": True, "uploaded_chunks": []})
@@ -200,6 +210,12 @@ async def _upload_file_chunk(
     try:
         if not upload_id or not file_name:
             return error_response("upload_id and file_name are required for chunk upload", 400)
+
+        # 11.txt P2-1: 消毒 upload_id，杜绝 session_dir 目录穿越写入；
+        # 恶意形态会被重写为安全 token（与固件分片上传同一防御）。
+        from foundation.uploads import safe_upload_token
+
+        upload_id = safe_upload_token(upload_id)
 
         import time
         start_time = time.time()

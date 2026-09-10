@@ -10,7 +10,10 @@ import subprocess
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import require_authenticated_user_when_auth_required
+from features.auth import (
+    require_authenticated_user_when_auth_required,
+    require_human_principal_when_auth_required,
+)
 from features.devices import DeviceSSHConnection
 from features.system.models import VPNConnectRequest
 from features.system.network import (
@@ -46,6 +49,9 @@ router = APIRouter()
 
 # VPN 连接/断开、SSH ping 是登录用户的日常操作，只需认证无需管理员权限。
 _AUTH_REQUIRED = [Depends(require_authenticated_user_when_auth_required)]
+# 11.txt P1: VPN 隧道直接影响 build 集群的可达性——Agent Token（哪怕带全
+# scope）一律拒绝，保持 human-only；MCP 侧不暴露这些端点，此处是兜底边界。
+_HUMAN_ONLY = [Depends(require_human_principal_when_auth_required)]
 
 configure_network_dependencies(
     ssh_manager=ssh_manager,
@@ -265,7 +271,7 @@ async def check_ssh_route(request: Request):
         })
 
 
-@router.post("/api/ssh/ping", dependencies=_AUTH_REQUIRED)
+@router.post("/api/ssh/ping", dependencies=_HUMAN_ONLY)
 async def ping_route_test(request: Request):
     """测试测试主机和客户端的网络连通性"""
     try:
@@ -446,7 +452,7 @@ async def get_vpn_status():
         })
 
 
-@router.post("/api/vpn/connect", dependencies=_AUTH_REQUIRED)
+@router.post("/api/vpn/connect", dependencies=_HUMAN_ONLY)
 async def connect_vpn(
     req: VPNConnectRequest | None = Body(default=None)
 ):
@@ -556,7 +562,7 @@ async def connect_vpn(
         )
 
 
-@router.post("/api/vpn/disconnect", dependencies=_AUTH_REQUIRED)
+@router.post("/api/vpn/disconnect", dependencies=_HUMAN_ONLY)
 async def disconnect_vpn():
     """断开VPN（使用nmcli）"""
     try:

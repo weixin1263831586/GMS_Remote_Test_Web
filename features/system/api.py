@@ -494,55 +494,6 @@ async def download_skills_zip(
         return error_response("技能包下载失败", status_code=500)
 
 
-@router.get("/api/system/skills/install.sh")
-async def download_skill_installer(request: Request):
-    """Deprecated wrapper (11.txt 收口): forward to the gms-agent bootstrap.
-
-    The legacy bash installer is retired; the only install lifecycle is
-    GET /api/agent/install → gms-agent install/update/rollback/enroll. This
-    endpoint now emits a short forwarder so old curl recipes still end at
-    the right place instead of resurrecting the retired installer logic.
-    """
-    server_url = str(request.base_url).rstrip("/")
-    parsed_base = urlsplit(server_url)
-    base_host = parsed_base.hostname or ""
-    if (
-        parsed_base.scheme not in {"http", "https"}
-        or parsed_base.path not in {"", "/"}
-        or parsed_base.query
-        or parsed_base.fragment
-        or parsed_base.username
-        or parsed_base.password
-        or not re.fullmatch(r"[A-Za-z0-9.\-_:]+", base_host)
-        or not (parsed_base.port is None or 0 < parsed_base.port < 65536)
-    ):
-        logger.warning("[SKILLS_INSTALLER] rejected suspicious base_url: %r", server_url)
-        return error_response("无法从当前请求确定有效的服务地址", status_code=400)
-
-    def shell_literal(value: str) -> str:
-        return value.replace("'", "'\"'\"'")
-
-    bootstrap_url = f"{server_url}/api/agent/install"
-    content = (
-        "#!/usr/bin/env bash\n"
-        "# DEPRECATED: the legacy skills installer is retired (11.txt).\n"
-        "# The single install path is the gms-agent bootstrap.\n"
-        "set -euo pipefail\n"
-        f"echo 'This installer is deprecated; fetching the gms-agent bootstrap ...'\n"
-        f"curl -fsSL {shell_literal(bootstrap_url)} -o gms-agent\n"
-        "python3 gms-agent install --server "
-        f"{shell_literal(server_url)} \"$@\"\n"
-    )
-    return Response(
-        content=content,
-        media_type="text/x-shellscript",
-        headers={
-            "Content-Disposition": 'inline; filename="install-gms-remote-test.sh"',
-            "Cache-Control": "no-store",
-        },
-    )
-
-
 # 2026-09-08 audit §十二: enterprise build servers often cannot reach
 # github.com, so the installer prefers a jq binary served by the Controller
 # itself over the GitHub fallback. Integrity is double-checked: the endpoint
@@ -562,6 +513,7 @@ async def download_jq_binary(request: Request):
 # Agent Runtime; implementation lives in agent_package_registry.py (size
 # budget). Endpoints:
 #   GET /api/agent/install                                 bootstrap installer
+#   GET /api/agent/install.sh                              one-line curl|bash installer
 #   GET /api/agent/packages/gms-remote-test/manifest      latest version + SHA-256
 #   GET /api/agent/packages/gms-remote-test/{version}     distribution zip
 
@@ -569,6 +521,12 @@ async def download_jq_binary(request: Request):
 @router.get("/api/agent/install")
 async def agent_install_bootstrap(request: Request):
     return await agent_package_registry.agent_bootstrap_installer(request)
+
+
+@router.get("/api/agent/install.sh")
+async def agent_install_sh_endpoint(request: Request):
+    """一行安装器: curl -kfsSL .../api/agent/install.sh | bash -s -- [配对码]"""
+    return await agent_package_registry.agent_install_sh(request)
 
 
 @router.get("/api/agent/packages/gms-remote-test/manifest")

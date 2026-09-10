@@ -6,7 +6,8 @@ server. Users should never need to know about ~/.codex/config.toml,
 ~/.kimi-code/mcp.json, ~/.kkagent/plugins, GMS_AUTH_TOKEN_FILE or
 GMS_RT_PROFILE — those become implementation details:
 
-    gms-agent install [--client auto|codex|kimi|kkagent] [--server URL] [--yes]
+    gms-agent install [--client auto|codex|kimi|kkagent] [--server URL]
+        [--enroll-code CODE] [--yes]
         Detect installed agent clients and activate the whole package
         (runtime + skill + client registration) from either a local
         package tree (--package / extracted archive / plugin payload) or,
@@ -185,6 +186,7 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
                     raise RuntimeError("清单缺少 Ed25519 签名；已配置验证密钥时签名强制")
                 try:
                     from cryptography.exceptions import InvalidSignature
+                    from cryptography.hazmat.backends import default_backend
                     from cryptography.hazmat.primitives import serialization
                     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
                         Ed25519PublicKey,
@@ -200,9 +202,17 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
                     str(artifact.get("size", "")),
                 ]).encode("utf-8")
                 try:
-                    public_key = serialization.load_pem_public_key(
-                        base64.b64decode(verify_key)
-                    )
+                    try:
+                        # cryptography < 3.1 requires an explicit backend;
+                        # newer releases accept (and ignore) it as well.
+                        public_key = serialization.load_pem_public_key(
+                            base64.b64decode(verify_key),
+                            backend=default_backend(),
+                        )
+                    except TypeError:
+                        public_key = serialization.load_pem_public_key(
+                            base64.b64decode(verify_key)
+                        )
                     if not isinstance(public_key, Ed25519PublicKey):
                         raise RuntimeError("验证密钥类型错误；拒绝安装")
                     public_key.verify(base64.b64decode(signature), payload)
@@ -353,6 +363,8 @@ def main() -> int:
     p_install.add_argument("--client", default="auto", choices=["auto", "codex", "kimi", "kkagent"])
     p_install.add_argument("--server", default="", help="Controller base URL (default $GMS_REMOTE_TEST_SERVER)")
     p_install.add_argument("--package", default="", help="package root to install (default: this archive; standalone script bootstraps from the registry)")
+    p_install.add_argument("--enroll-code", default="", dest="enroll_code",
+                           help="one-shot enrollment code; exchanged for the agent service token right after install")
     p_install.set_defaults(func=cmd_install)
 
     p_update = sub.add_parser("update", help="update from the Controller Agent Package Registry")

@@ -350,6 +350,104 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(entry["version"], "9.9.9")
         self.assertTrue(entry["enabled"])
 
+    # --- 14. 15.txt P1-2: reconcile_mcp gets the RESOLVED server --------
+    def test_reactivate_clients_resolves_profile_server_for_mcp(self):
+        # The rollback bug: write_profile received server_i or env-fallback
+        # but reconcile_mcp received the raw (possibly empty) profile value.
+        # reactivate_clients() must resolve ONCE for both.
+        old = build_registry_tree("1.0.0", self.home / "p1", mutate_marker="A")
+        self.agent.install_runtime(old, "1.0.0", "1" * 64)
+        self.agent.write_profile("kimi", "https://ctrl-from-profile:5001", "")
+        kimi_root = self.home / "kimi-home" / "skills"
+        kimi_root.mkdir(parents=True)
+        self.agent.pm.client_skill_root = lambda client: kimi_root  # type: ignore[method-assign]
+        captured = {}
+
+        def fake_reconcile(client, server, name, ca_cert):
+            captured["server"] = server
+            captured["ca"] = ca_cert
+
+        with unittest.mock.patch.object(
+            self.agent.pm, "reconcile_mcp", side_effect=fake_reconcile
+        ), unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("GMS_REMOTE_TEST_SERVER", None)
+            reactivated = self.agent.pm.reactivate_clients("", "")
+        self.assertEqual(reactivated, ["kimi"])
+        self.assertEqual(captured["server"], "https://ctrl-from-profile:5001")
+
+    # --- 15. 15.txt P1-3: activation failure triggers compensation ------
+    def test_reactivate_clients_compensates_back_to_previous_version(self):
+        old = build_registry_tree("1.0.0", self.home / "p1", mutate_marker="A")
+        self.agent.install_runtime(old, "1.0.0", "1" * 64)
+        self.agent.write_profile("kimi", "https://ctrl:5001", "")
+        kimi_root = self.home / "kimi-home" / "skills"
+        kimi_root.mkdir(parents=True)
+        self.agent.pm.client_skill_root = lambda client: kimi_root  # type: ignore[method-assign]
+        new = build_registry_tree("2.0.0", self.home / "p2", mutate_marker="B")
+        self.agent.install_runtime(new, "2.0.0", "2" * 64)
+        self.assertEqual(self.agent.installed_version(), "2.0.0")
+
+        calls = {"n": 0}
+
+        def failing_install_skill(client, runtime_dir):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("activation boom")
+            return kimi_root / "gms-remote-test"
+
+        with (
+            unittest.mock.patch.object(
+                self.agent.pm, "install_skill", side_effect=failing_install_skill
+            ),
+            unittest.mock.patch.object(self.agent.pm, "reconcile_mcp"),self.assertRaises(RuntimeError)
+        ):
+            self.agent.pm.reactivate_clients(
+                "https://ctrl:5001",
+                "",
+                previous_target=self.agent.VERSIONS_DIR / "1.0.0",
+            )
+        # current flipped back to the previous version and the client was
+        # re-activated FROM it — no mixed runtime/skill state.
+        # (install_skill is mocked here, so verify the compensation ran by
+        # call count; the content-level check lives in the SystemExit test
+        # where install_skill stays real.)
+        self.assertEqual(self.agent.installed_version(), "1.0.0")
+        self.assertEqual(calls["n"], 2)
+
+    def test_reactivate_clients_compensates_on_reconcile_systemexit(self):
+        # reconcile_mcp signals failure via SystemExit(1) — the REAL failure
+        # type in production. Compensation must catch it, not let the host
+        # end up with a fresh runtime and stale client wiring.
+        old = build_registry_tree("1.0.0", self.home / "p1", mutate_marker="A")
+        self.agent.install_runtime(old, "1.0.0", "1" * 64)
+        self.agent.write_profile("kimi", "https://ctrl:5001", "")
+        kimi_root = self.home / "kimi-home" / "skills"
+        kimi_root.mkdir(parents=True)
+        self.agent.pm.client_skill_root = lambda client: kimi_root  # type: ignore[method-assign]
+        new = build_registry_tree("2.0.0", self.home / "p2", mutate_marker="B")
+        self.agent.install_runtime(new, "2.0.0", "2" * 64)
+
+        calls = {"n": 0}
+
+        def failing_reconcile(client, server, name, ca_cert):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise SystemExit(1)
+
+        with (
+            unittest.mock.patch.object(
+                self.agent.pm, "reconcile_mcp", side_effect=failing_reconcile
+            ),self.assertRaises(SystemExit)
+        ):
+            self.agent.pm.reactivate_clients(
+                "https://ctrl:5001",
+                "",
+                previous_target=self.agent.VERSIONS_DIR / "1.0.0",
+            )
+        self.assertEqual(self.agent.installed_version(), "1.0.0")
+        marker_file = kimi_root / "gms-remote-test" / "SKILL.md"
+        self.assertIn("marker A", marker_file.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

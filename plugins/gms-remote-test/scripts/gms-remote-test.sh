@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.15.1"
+GMS_RT_VERSION="0.15.2"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -101,6 +101,25 @@ GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/sta
 # session cookie (the server treats that combination as a privilege mix).
 # Human mode stays Cookie only.
 GMS_AUTH_TOKEN_FILE="${GMS_AUTH_TOKEN_FILE:-}"
+# Default-path discovery (2026-09-10): gms-rt-agent-enroll writes
+# ${XDG_STATE_HOME}/gms-remote-test/${GMS_RT_PROFILE}.token when --out is not
+# given, but this variable previously stayed empty, so a fresh shell/CLI (or
+# an MCP server whose registration env lacks the variable) silently fell back
+# to cookie mode and every call failed with "Authentication required". Pick
+# up the enrolled token from the standard path unless the caller set an
+# explicit location; the 0600 + owner checks in _gms_refresh_bearer_token
+# still apply, so a looser or foreign file is rejected as before.
+if [ -z "$GMS_AUTH_TOKEN_FILE" ]; then
+    _gms_default_token="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.token"
+    if [ -r "$_gms_default_token" ]; then
+        _gms_default_mode="$(stat -c '%04a' "$_gms_default_token" 2>/dev/null || printf '0600')"
+        if [ "$((_gms_default_mode & 077))" = "0" ]; then
+            GMS_AUTH_TOKEN_FILE="$_gms_default_token"
+        fi
+        unset _gms_default_mode
+    fi
+    unset _gms_default_token
+fi
 _gms_bearer_token=""  # cached per process; reloaded by _refresh_tls_args
 _gms_bearer_header_file=""  # 0600 header file (4.txt P1c: token stays out of argv)
 _gms_refresh_bearer_token() {
@@ -398,8 +417,19 @@ api_call() {
                     # 登录/提权本身失败：真实原因已在响应 body 里输出到
                     # stdout，这里不重复追加误导性的"请先登录"。
                     :
+                elif [ -n "$GMS_AUTH_TOKEN_FILE" ]; then
+                    if [ -r "$GMS_AUTH_TOKEN_FILE" ]; then
+                        # Bearer 模式仍 401：token 本身失效/被吊销（或 scope
+                        # 不够——scope 不足走 PERMISSION 分支）。指引重新
+                        # 注册而不是密码登录（agent 上下文禁止密码登录）。
+                        diagnostic "需要登录。当前 token ($GMS_AUTH_TOKEN_FILE) 已失效或被吊销, 请重新注册: gms-rt-agent-enroll <CODE>"
+                    else
+                        diagnostic "需要登录。token 文件不可读: $GMS_AUTH_TOKEN_FILE"
+                    fi
                 else
-                    diagnostic "需要登录。请先运行: gms-rt-auth-login [username]"
+                    # 未启用 Bearer 模式（cookie 会话缺失）。service-token
+                    # 部署下 agent 永远不该走 auth-login（human-only）。
+                    diagnostic "需要登录。未配置 GMS_AUTH_TOKEN_FILE, agent 请注册: gms-rt-agent-enroll <CODE>; 人工会话: gms-rt-auth-login [username]"
                 fi
                 ;;
             "$GMS_RT_EXIT_PERMISSION")
@@ -1973,6 +2003,23 @@ gms-rt-devices-remount() {
 }
 
 # Show device screen
+# Capture one device screenshot via the controller UI-control endpoint.
+# 供 MCP image tool 使用：返回 {base64, mime_type, ...}（无 data: 前缀），
+# agent 端可直接转 MCP image content；人类终端请用 devices-scrcpy。
+gms-rt-devices-screencap() {
+    local device_id="$1"
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-screencap DEVICE_ID"; return "$GMS_RT_EXIT_USAGE"; }
+    check_jq
+    local response
+    response=$(api_call "/devices/ui/screenshot" "POST" "{\"serial\":\"$device_id\"}")
+    if ! echo "$response" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Screenshot failed: $(extract_api_error "$response")"
+        return "$GMS_RT_EXIT_OPERATION"
+    fi
+    # 剥掉 data URL 前缀，输出与 gms-rt-redmine-artifact-image 同构的载荷。
+    echo "$response" | jq '{device_id: .serial, mime_type: "image/png", base64: (.image | sub("^data:image/png;base64,"; ""))}'
+}
+
 gms-rt-devices-scrcpy() {
     local devices="$1"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-scrcpy DEVICE1 [DEVICE2 ...]"; return 1; }
@@ -4717,6 +4764,7 @@ _gms_rt_command_usage() {
             ;;
         gms-rt-devices-wait) printf '%s' 'gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]' ;;
         gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [command]' ;;
+        gms-rt-devices-screencap) printf '%s' 'gms-rt-devices-screencap <device_id>' ;;
         gms-rt-devices-logcat) printf '%s' 'gms-rt-devices-logcat <device_id> [-c] [logcat args]' ;;
         gms-rt-devices-push) printf '%s' 'gms-rt-devices-push <device_id> <local_file> <remote_path>' ;;
         gms-rt-jobs-list) printf '%s' 'gms-rt-jobs-list [limit]' ;;
@@ -4769,6 +4817,7 @@ _gms_rt_command_summary() {
         gms-rt-system-capabilities) printf '%s' 'Print the CLI contract, global options, and exit codes' ;;
         gms-rt-system-command-describe) printf '%s' 'Describe one CLI command for machine execution' ;;
         gms-rt-system-commands) printf '%s' 'Print the machine-readable command inventory' ;;
+        gms-rt-system-selfcheck) printf '%s' 'One-shot read-only agent environment report (auth, health, devices, suites, hints)' ;;
         gms-rt-system-doctor) printf '%s' 'Check controller, session, tools, devices, and suites for an operation scope' ;;
         gms-rt-system-help) printf '%s' 'Show the human-readable CLI command list' ;;
         gms-rt-system-update) printf '%s' 'Reinstall the latest Skill and CLI command links' ;;
@@ -4959,6 +5008,105 @@ gms-rt-system-capabilities() {
         }'
 }
 
+# ==============================================================================
+# Agent-facing environment self-check
+# ==============================================================================
+
+# One-shot read-only environment report for agents: credential mode, identity,
+# server health, device inventory and locally visible test suites. Every
+# section degrades gracefully; hints carry actionable next steps so an agent
+# can recover (e.g. re-enroll) without a human walkthrough.
+gms-rt-system-selfcheck() {
+    check_jq || return 1
+    local auth_json health_json devices_json hints_json suites_json
+    local auth_ok=false health_ok=false devices_ok=false
+    local hints=()
+
+    if [ "$GMS_RT_OUTPUT" != "json" ]; then
+        echo "🔍 Environment self-check..."
+    fi
+
+    # api_call 失败时输出可能为空；--argjson 对空串直接崩溃，所以每个
+    # 数据源都必须保证最终是合法 JSON（空串视为失败并兜底）。
+    # 注意：echo '' | jq -e . 退出码为 0，空串不会被 jq 拦下，必须显式判空。
+    _gms_rt_selfcheck_is_json() {
+        [ -n "$1" ] && echo "$1" | jq -e type >/dev/null 2>&1
+    }
+
+    # --- authentication / identity --------------------------------------------
+    auth_ok=true
+    auth_json=$(api_call "/auth/status" 2>/dev/null)
+    _gms_rt_selfcheck_is_json "$auth_json" || { auth_ok=false; auth_json='{}'; }
+    local credential_mode
+    credential_mode=$(gms-rt-auth-credential-mode 2>/dev/null) || credential_mode='{"mode":"unknown"}'
+    _gms_rt_selfcheck_is_json "$credential_mode" || credential_mode='{"mode":"unknown"}'
+    if [ "$auth_ok" != true ]; then
+        case "$(echo "$credential_mode" | jq -r '.mode // empty')" in
+            agent_token)
+                hints+=("agent token check failed: re-enroll with 'gms-rt-agent-enroll <CODE>' (mint the code in the web UI, 5-minute TTL)")
+                ;;
+            *)
+                hints+=("not authenticated: run 'gms-rt-auth-login <username> --password-stdin' or set GMS_AUTH_TOKEN_FILE")
+                ;;
+        esac
+    fi
+
+    # --- server health ----------------------------------------------------------
+    health_ok=true
+    health_json=$(api_call "/system/health" 2>/dev/null)
+    _gms_rt_selfcheck_is_json "$health_json" || { health_ok=false; health_json='{}'; }
+    if [ "$health_ok" != true ]; then
+        hints+=("server ${SERVER_URL} unreachable or unhealthy: verify the web app is running and GMS_REMOTE_TEST_SERVER is correct; for a self-signed TLS deployment export GMS_CURL_INSECURE=1 or GMS_CURL_CA_CERT=/path/to/ca.crt")
+    fi
+
+    # --- device inventory (optional scope) --------------------------------------
+    devices_ok=true
+    devices_json=$(api_call "/devices/list" 2>/dev/null)
+    _gms_rt_selfcheck_is_json "$devices_json" || { devices_ok=false; devices_json='[]'; }
+    if [ "$devices_ok" != true ]; then
+        hints+=("device inventory unavailable: the current credential may lack the devices.read scope")
+    fi
+
+    # --- locally visible test suites --------------------------------------------
+    local suite_dirs=() candidate
+    for candidate in \
+        "${GMS_SUITE_DIR:-$HOME/GMS-Suite}" \
+        "$HOME/CTS-Suite" \
+        "$HOME"/android-cts-verifier* \
+        "$HOME"/android-gts-*; do
+        [ -d "$candidate" ] && suite_dirs+=("$candidate")
+    done
+    suites_json=$(printf '%s\n' "${suite_dirs[@]:-}" | jq -R 'select(length > 0)' | jq -s '.')
+    hints_json=$(printf '%s\n' "${hints[@]:-}" | jq -R 'select(length > 0)' | jq -s '.')
+
+    # /devices/list 可能返回数组或 {devices: [...]} 包裹对象，两种都接受。
+    jq -n \
+        --arg server "$SERVER_URL" \
+        --arg version "$GMS_RT_VERSION" \
+        --argjson credential "$credential_mode" \
+        --argjson auth "$auth_json" \
+        --argjson health "$health_json" \
+        --argjson devices "$devices_json" \
+        --argjson suites "$suites_json" \
+        --argjson hints "$hints_json" \
+        --argjson auth_ok "$auth_ok" \
+        --argjson health_ok "$health_ok" \
+        --argjson devices_ok "$devices_ok" \
+        '{
+            schema_version: 1,
+            cli_version: $version,
+            server: $server,
+            credential: $credential,
+            auth: {ok: $auth_ok, status: (if $auth_ok then $auth else null end)},
+            server_health: {ok: $health_ok, status: (if $health_ok then $health else null end)},
+            devices: (if $devices_ok
+                then {ok: true, items: (if ($devices | type) == "array" then $devices else ($devices.devices // []) end)}
+                else {ok: false} end),
+            local_suites: $suites,
+            hints: $hints
+        }'
+}
+
 gms-rt-system-help() {
     cat << EOF
 ${BLUE}GMS Remote Test API Helper (FastAPI Port 5001)${NC}
@@ -5005,7 +5153,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-shell              - Open interactive ADB shell
   gms-rt-devices-logcat             - Capture device logcat (adb shell logcat -v time; -c clears buffer first)
   gms-rt-devices-push               - Push file to device (adb push)
-  gms-rt-devices-scrcpy             - Show device screen
+  gms-rt-devices-screencap          - Capture device screenshot as base64 PNG
 
 ${YELLOW}File Management:${NC}
   gms-rt-files-progress          - Get upload progress
@@ -5028,6 +5176,7 @@ ${YELLOW}System:${NC}
   gms-rt-system-docs             - Get API documentation
   gms-rt-system-doctor           - Validate a remote CLI host and operation scope
   gms-rt-system-health           - Check server health
+  gms-rt-system-selfcheck        - One-shot agent environment report (auth, health, devices, suites)
   gms-rt-system-help             - Show this command list
   gms-rt-system-skills           - Download skills directory as ZIP
   gms-rt-system-update           - Update the Skill and all CLI command links

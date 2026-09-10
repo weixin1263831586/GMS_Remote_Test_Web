@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,6 +50,102 @@ class BootstrapTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, 'TRUSTED_HOSTS'),
         ):
             create_app()
+
+    def test_production_requires_agent_package_signing_key(self):
+        """15.txt 审核 P2: production must fail closed without an Ed25519
+        agent-package signing key — SHA-only serving is dev-only fallback."""
+        import tempfile
+
+        from cryptography.fernet import Fernet
+
+        from bootstrap.production_security import (
+            validate_production_security_configuration,
+        )
+
+        with tempfile.TemporaryDirectory() as data_root:
+            production_env = {
+                'GMS_ENV': 'production',
+                'GMS_AUTH_REQUIRED': 'true',
+                'GMS_SECURE_COOKIES': 'true',
+                'GMS_BOOTSTRAP_TOKEN': 'b' * 48,
+                'GMS_SECRET_KEY': Fernet.generate_key().decode('ascii'),
+                'GMS_AUDIT_HMAC_KEY': 'a' * 64,
+                'GMS_DATA_ROOT': data_root,
+            }
+            # The module-level audit singleton bound to the repo's real
+            # data root at import time — swap in a fresh, empty one so the
+            # audit-chain gate passes and the SIGNING gate is what fires.
+            from foundation.security_audit import SecurityAuditLogger
+
+            fresh_audit = SecurityAuditLogger(
+                str(Path(data_root) / 'audit.jsonl')
+            )
+            with (
+                patch.dict(os.environ, production_env),
+                patch(
+                    'bootstrap.production_security.security_audit_logger',
+                    fresh_audit,
+                ),
+            ):
+                os.environ.pop('GMS_SKILL_SIGNING_KEY_FILE', None)
+                with self.assertRaisesRegex(
+                    RuntimeError, 'GMS_SKILL_SIGNING_KEY_FILE'
+                ):
+                    validate_production_security_configuration()
+
+    def test_production_signing_key_lets_validation_proceed(self):
+        """With the Ed25519 key configured, the signing gate is transparent:
+        validation continues and fails on the NEXT production requirement."""
+        import tempfile
+
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+
+        from bootstrap.production_security import (
+            validate_production_security_configuration,
+        )
+
+        key_pem = Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        with tempfile.NamedTemporaryFile(
+            'wb', suffix='.pem', delete=False
+        ) as handle:
+            handle.write(key_pem)
+            key_path = handle.name
+        self.addCleanup(os.unlink, key_path)
+
+        with tempfile.TemporaryDirectory() as data_root:
+            production_env = {
+                'GMS_ENV': 'production',
+                'GMS_AUTH_REQUIRED': 'true',
+                'GMS_SECURE_COOKIES': 'true',
+                'GMS_BOOTSTRAP_TOKEN': 'b' * 48,
+                'GMS_SECRET_KEY': Fernet.generate_key().decode('ascii'),
+                'GMS_AUDIT_HMAC_KEY': 'a' * 64,
+                'GMS_SKILL_SIGNING_KEY_FILE': key_path,
+                'GMS_DATA_ROOT': data_root,
+            }
+            from foundation.security_audit import SecurityAuditLogger
+
+            fresh_audit = SecurityAuditLogger(
+                str(Path(data_root) / 'audit.jsonl')
+            )
+            with (
+                patch.dict(os.environ, production_env),
+                patch(
+                    'bootstrap.production_security.security_audit_logger',
+                    fresh_audit,
+                ),
+                self.assertRaisesRegex(RuntimeError, 'GMS_METRICS_TOKEN'),
+            ):
+                # Signing gate passed → the next unmet requirement fires.
+                validate_production_security_configuration()
 
     def test_create_app_preserves_metadata(self):
         app = create_app()

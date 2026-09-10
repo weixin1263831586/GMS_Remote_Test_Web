@@ -5,46 +5,15 @@ import logging
 from typing import Any
 
 from features.auth import get_authenticated_user
-from foundation.networking import parse_host_address
+
+# 11.txt P2: get_client_ip 及其可信代理逻辑下沉到 foundation.networking，
+# features/users 与 features/auth 共用同一实现，避免 feature 间依赖环。
+from foundation.networking import get_client_ip, parse_host_address
 
 from . import runtime
 
 
 logger = logging.getLogger(__name__)
-_DEFAULT_TRUSTED_PROXIES = ('127.0.0.0/8', '::1/128')
-
-
-def _trusted_proxy_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
-    configured: Any = None
-    try:
-        config = runtime.config_manager.load_config()
-        configured = config.get('trusted_proxies')
-    except Exception:
-        pass
-    values = configured if isinstance(configured, list) else _DEFAULT_TRUSTED_PROXIES
-    networks = []
-    for value in values:
-        try:
-            networks.append(ipaddress.ip_network(str(value).strip(), strict=False))
-        except ValueError:
-            logger.warning('Ignoring invalid trusted proxy network: %s', value)
-    return networks
-
-
-def _is_trusted_proxy(host: str, networks) -> bool:
-    try:
-        address = ipaddress.ip_address(str(host or '').strip())
-    except ValueError:
-        return False
-    return any(address in network for network in networks)
-
-
-def _valid_ip(value: str) -> str | None:
-    candidate = str(value or '').strip().strip('[]')
-    try:
-        return str(ipaddress.ip_address(candidate))
-    except ValueError:
-        return None
 
 
 def get_client_id_from_request(request) -> str:
@@ -67,27 +36,6 @@ def owner_id_from_request(request) -> str:
         owner_user_id = str((record or {}).get('owner_user_id') or '').strip()
         return owner_user_id or user.id
     return get_client_display_id_from_request(request)
-
-
-def get_client_ip(request) -> str:
-    """Resolve client IP without trusting forwarding headers from browsers."""
-    peer = request.client.host if request.client else 'unknown'
-    networks = _trusted_proxy_networks()
-    if not _is_trusted_proxy(peer, networks):
-        return _valid_ip(peer) or peer
-
-    forwarded = request.headers.get('X-Forwarded-For', '').strip()
-    if forwarded:
-        chain = [item for item in (_valid_ip(part) for part in forwarded.split(',')) if item]
-        # Walk from the nearest hop towards the browser. The first address not
-        # belonging to a trusted proxy is the authoritative client.
-        for candidate in reversed(chain):
-            if not _is_trusted_proxy(candidate, networks):
-                return candidate
-    real_ip = _valid_ip(request.headers.get('X-Real-IP', ''))
-    if real_ip:
-        return real_ip
-    return _valid_ip(peer) or peer
 
 
 def get_client_username_from_request(request, fallback: str | None = None) -> str:

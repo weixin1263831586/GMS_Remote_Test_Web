@@ -196,9 +196,8 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             return True
         if method in {'GET', 'HEAD'} and path in {
             '/api/system/skills',
-            '/api/system/skills/install.sh',
             # R12（2026-09-08 审核）：jq 安装链依赖匿名安装流程——安装脚本
-            # 本身（skills/install.sh）已公开，其下载的 pinned jq 却要求
+            # 本身（/api/agent/install.sh）已公开，其下载的 pinned jq 却要求
             # 登录会让无会话的编译服务器装机必然失败。只读二进制、无凭据
             # 泄露面（内容为公开 jq 发布物），精确公开该 GET 路径。
             '/api/system/tools/jq',
@@ -206,6 +205,9 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             return True
         if method in {'GET', 'HEAD'} and (
             path == '/api/agent/install'
+            # 一行安装器（curl | bash），与 bootstrap 同级公开：内容同样是
+            # 公开发布物（绑定了本请求 base URL 的薄包装），无凭据泄露面。
+            or path == '/api/agent/install.sh'
             or path == '/api/agent/packages/gms-remote-test/manifest'
             or _PUBLIC_AGENT_PACKAGE_VERSION.fullmatch(path)
         ):

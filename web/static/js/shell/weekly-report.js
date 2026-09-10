@@ -119,7 +119,10 @@ async function generateWeeklyReport() {
         const resp = await fetch(url);
         const result = await resp.json().catch(() => ({ success: false }));
         if (!result.success) {
-            if (content) content.innerHTML = `<div style="color: var(--danger-color); padding: 12px;">生成失败：${result.error || result.message || '未知错误'}</div>`;
+            // 11.txt: server-provided error strings must be escaped before
+            // innerHTML insertion (consistency with _esc elsewhere).
+            const msg = _esc(result.error || result.message || '未知错误');
+            if (content) content.innerHTML = `<div style="color: var(--danger-color); padding: 12px;">生成失败：${msg}</div>`;
             return;
         }
         const data = _normalizeReportData(result);
@@ -130,7 +133,8 @@ async function generateWeeklyReport() {
         // 默认自动生成 AI 总结（静默：失败不弹 toast，显示错误条供重试）
         generateWeeklyReportAi(true);
     } catch (err) {
-        if (content) content.innerHTML = `<div style="color: var(--danger-color); padding: 12px;">生成失败：${err.message}</div>`;
+        const msg = _esc(err && err.message || err || '未知错误');
+        if (content) content.innerHTML = `<div style="color: var(--danger-color); padding: 12px;">生成失败：${msg}</div>`;
     }
 }
 

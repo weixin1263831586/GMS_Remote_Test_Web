@@ -3174,7 +3174,25 @@
             "description": "Successful Response"
           }
         },
+        "security": [],
         "summary": "Agent Install Bootstrap"
+      }
+    },
+    "/api/agent/install.sh": {
+      "get": {
+        "description": "一行安装器: curl -kfsSL .../api/agent/install.sh | bash -s -- [配对码]",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [],
+        "summary": "Agent Install Sh Endpoint"
       }
     },
     "/api/agent/packages/gms-remote-test/manifest": {
@@ -3189,6 +3207,7 @@
             "description": "Successful Response"
           }
         },
+        "security": [],
         "summary": "Agent Package Manifest Endpoint"
       }
     },
@@ -3989,6 +4008,7 @@
     },
     "/api/auth/agent-scopes": {
       "get": {
+        "description": "Scope 目录（11.txt 中优先级 §4）。\n\nscope 名单本身不敏感（静态字典），对任何已认证 principal 开放只读，\n让 agent 遇到 403 时能自查缺哪个 scope；管理操作（创建/吊销 token）\n仍由下方 admin 端点把关。匿名/开发模式返回全量目录用于 UI 渲染。",
         "responses": {
           "200": {
             "content": {
@@ -18056,23 +18076,6 @@
         },
         "security": [],
         "summary": "Download Skills Zip"
-      }
-    },
-    "/api/system/skills/install.sh": {
-      "get": {
-        "description": "Deprecated wrapper (11.txt 收口): forward to the gms-agent bootstrap.\n\nThe legacy bash installer is retired; the only install lifecycle is\nGET /api/agent/install → gms-agent install/update/rollback/enroll. This\nendpoint now emits a short forwarder so old curl recipes still end at\nthe right place instead of resurrecting the retired installer logic.",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [],
-        "summary": "Download Skill Installer"
       }
     },
     "/api/system/tools/jq": {

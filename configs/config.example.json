@@ -146,27 +146,17 @@
   },
   "ai_models": {
     "enabled": true,
-    "primary_provider": "zhipu",
+    "primary_provider": "glm_local",
     "providers": {
       "glm_local": {
-        "name": "GLM Local",
+        "model": "glm-5.3-flash",
         "enabled": true,
         "api_key": "${GMS_LOCAL_AI_API_KEY:}",
-        "model": "GLM-5.2",
         "base_url": "http://192.0.2.50:3000",
         "api_format": "openai",
-        "temperature": 0.3,
-        "max_tokens": 4000
-      },
-      "zhipu": {
-        "name": "GLM (Z.ai)",
-        "enabled": true,
-        "api_key": "${GMS_ZHIPU_API_KEY:}",
-        "model": "GLM-5.1",
-        "base_url": "https://api.z.ai/api/anthropic",
-        "api_format": "anthropic",
-        "temperature": 0.3,
-        "max_tokens": 4000
+        "max_context_size": 500000,
+        "capabilities": ["thinking", "tool_use", "image_in"],
+        "display_name": "glm-5.3-flash"
       }
     }
   },

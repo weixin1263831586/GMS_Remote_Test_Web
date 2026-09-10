@@ -189,18 +189,18 @@ async function firmwareShareApi(path, options = {}, elevationRetried = false) {
     return data;
 }
 
-// ---- 远端固件主机密码：会话级缓存 + 弹框 ----
-function _shareFirmwarePwdKey(host) {
-    return `firmware_share_pwd_${host || 'default'}`;
-}
+// ---- 远端固件主机密码：仅内存缓存（11.txt P2: 不进 sessionStorage，
+// 避免 DOM XSS 读取明文密码）；刷新后需重新输入。----
+const _firmwareSharePasswords = {};
 function getShareFirmwarePassword(host) {
-    return sessionStorage.getItem(_shareFirmwarePwdKey(host)) || '';
+    return _firmwareSharePasswords[host || 'default'] || '';
 }
 function setShareFirmwarePassword(host, password) {
+    const key = host || 'default';
     if (password) {
-        sessionStorage.setItem(_shareFirmwarePwdKey(host), password);
+        _firmwareSharePasswords[key] = password;
     } else {
-        sessionStorage.removeItem(_shareFirmwarePwdKey(host));
+        delete _firmwareSharePasswords[key];
     }
 }
 
@@ -552,22 +552,23 @@ async function submitFirmwareBurn() {
 
         let firmwareUploadId = '';
         let firmwareFingerprint = '';
+        const persistUploadState = (startedAt, progress, uploadedSize) => saveFirmwareUploadState(
+            selectedFirmwareFile.name,
+            selectedFirmwareFile.size,
+            startedAt,
+            progress,
+            uploadedSize,
+            selectedFirmwareFile.size,
+            firmwareUploadId,
+            selectedFirmwareFile.lastModified || 0,
+            firmwareFingerprint
+        );
         if (selectedFirmwareFile) {
             const identity = await getReusableFirmwareUploadId(selectedFirmwareFile);
             firmwareUploadId = identity.uploadId;
             firmwareFingerprint = identity.fingerprint;
             // 设置上传状态标记，防止刷新导致进度丢失
-            saveFirmwareUploadState(
-                selectedFirmwareFile.name,
-                selectedFirmwareFile.size,
-                Date.now(),
-                0,
-                0,
-                selectedFirmwareFile.size,
-                firmwareUploadId,
-                selectedFirmwareFile.lastModified || 0,
-                firmwareFingerprint
-            );
+            persistUploadState(Date.now(), 0, 0);
 
             // 添加beforeunload事件监听，警告用户不要刷新
             window.addEventListener('beforeunload', warnBeforeRefresh);
@@ -582,7 +583,8 @@ async function submitFirmwareBurn() {
             notifyOperationResult('固件上传已启动', '固件分片上传任务已开始', 'info', 'firmware-burn');
             addLogEntry(`固件上传任务已启动，设备: ${devices.join(', ')}`, 'success');
 
-            const runChunkUpload = () => uploadFileInChunks(
+            // 提权过期恢复统一在 chunk-upload.js（uploadChunksWithElevationRecovery）。
+            uploadResult = await uploadChunksWithElevationRecovery(
                 selectedFirmwareFile,
                 `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`,
                 {
@@ -606,37 +608,15 @@ async function submitFirmwareBurn() {
                             selectedFirmwareFile.size,
                             Math.round((uploadedChunks / totalChunks) * selectedFirmwareFile.size)
                         );
-                        saveFirmwareUploadState(
-                            selectedFirmwareFile.name,
-                            selectedFirmwareFile.size,
-                            startedAt,
-                            progress,
-                            uploadedSize,
-                            selectedFirmwareFile.size,
-                            uploadId,
-                            selectedFirmwareFile.lastModified || 0,
-                            firmwareFingerprint
-                        );
+                        persistUploadState(startedAt, progress, uploadedSize);
                         updateUploadProgress(progress, selectedFirmwareFile.name, uploadedSize, selectedFirmwareFile.size);
-                    }
+                    },
+                    onReElevate: async () => {
+                        addLogEntry('管理员提权已过期，固件上传已暂停', 'warning');
+                        return requestElevatedAccess('继续固件上传（管理员验证已过期）');
+                    },
                 }
             );
-            try {
-                uploadResult = await runChunkUpload();
-            } catch (uploadError) {
-                // 大固件分片上传可能超过 30 分钟的管理员提权 TTL；过期后
-                // 分片请求返回 403 elevation_required。弹框重新提权后
-                // 断点续传一次，已上传分片不会浪费。
-                if (!uploadError?.elevationRequired) {
-                    throw uploadError;
-                }
-                addLogEntry('管理员提权已过期，固件上传已暂停', 'warning');
-                const granted = await requestElevatedAccess('继续固件上传（管理员验证已过期）');
-                if (!granted) {
-                    throw uploadError;
-                }
-                uploadResult = await runChunkUpload();
-            }
             cleanupUploadState();
             if (uploadResult.staged) {
                 updateUploadProgress(
@@ -657,8 +637,7 @@ async function submitFirmwareBurn() {
                     finalizeForm
                 );
                 if (!uploadResult.success) {
-                    // finalize 阶段失败（如管理员提权过期、设备被占用）时
-                    // 立即中止，不再进入后续的烧写结果处理。
+                    // finalize 失败（提权过期、设备被占用等）立即中止。
                     addLogEntry(`固件烧写失败: ${uploadResult.error || '未知错误'}`, 'error');
                     unlockDevicesInUI(devices);
                     return;

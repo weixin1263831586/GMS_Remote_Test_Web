@@ -13,6 +13,7 @@ from foundation.responses import error_response
 from .access import (
     get_authenticated_user,
     is_elevated,
+    require_authenticated_user_when_auth_required,
     require_elevated_admin,
     require_role,
 )
@@ -28,9 +29,20 @@ router = APIRouter()  # mounted onto the /api/auth router in api.py
 
 @router.get("/agent-scopes")
 async def auth_agent_scopes(
-    _admin: CurrentUser = Depends(require_role("admin")),
+    user: CurrentUser = Depends(require_authenticated_user_when_auth_required),
 ):
-    return {"success": True, "scopes": AGENT_SCOPES}
+    """Scope 目录（11.txt 中优先级 §4）。
+
+    scope 名单本身不敏感（静态字典），对任何已认证 principal 开放只读，
+    让 agent 遇到 403 时能自查缺哪个 scope；管理操作（创建/吊销 token）
+    仍由下方 admin 端点把关。匿名/开发模式返回全量目录用于 UI 渲染。
+    """
+    scopes = dict(AGENT_SCOPES)
+    record = getattr(user, "agent_token_record", None) if user else None
+    granted = [
+        name for name in str((record or {}).get("scopes") or "").split(",") if name
+    ]
+    return {"success": True, "scopes": scopes, "granted": granted}
 
 
 @router.get("/agent-tokens")
@@ -109,7 +121,12 @@ async def auth_agent_enroll(request: Request, req: dict):
     the same persistent limiter the login endpoint uses (code review
     2026-08: the endpoint must not rely on TTL/one-shot alone).
     """
-    source_ip = str(request.client.host if request.client else "unknown")
+    # 11.txt P2: use the trusted-proxy-aware resolver — behind nginx/Traefik
+    # every enrollment would otherwise share the proxy's IP and one build
+    # server's failures rate-limit all the others.
+    from foundation.networking import get_client_ip
+
+    source_ip = get_client_ip(request)
     retry_after = auth_service.auth_retry_after("agent-enroll", "code", source_ip)
     if retry_after:
         response = error_response("配对码尝试过于频繁，请稍后重试", status_code=429)

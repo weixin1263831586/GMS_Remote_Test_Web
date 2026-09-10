@@ -11,13 +11,38 @@ from starlette.websockets import WebSocketDisconnect
 
 from bootstrap.application import create_app
 from features.auth import auth_service
-from features.cluster import ClusterRepository, ClusterService
-from features.cluster import api as cluster_api
-from features.devices import create_pair_grant
 from features.system import security_audit_logger
 
 
-class SecurityBoundaryTests(unittest.TestCase):
+_ED25519_TEST_KEY_PEM: bytes | None = None
+
+
+def _test_ed25519_key_pem() -> bytes:
+    """15.txt 审核 P2: production fixtures must supply an agent-package
+    signing key now that production validation requires one."""
+    global _ED25519_TEST_KEY_PEM
+    if _ED25519_TEST_KEY_PEM is None:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+
+        _ED25519_TEST_KEY_PEM = Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    return _ED25519_TEST_KEY_PEM
+
+
+class SecurityBoundaryFixtureTests(unittest.TestCase):
+    """Production-mode bootstrap fixture shared by boundary test modules.
+
+    11.txt P1-3: split from the former monolithic SecurityBoundaryTests —
+    test_security_boundary.py keeps the browser/session boundary tests while
+    service-token tests live in test_service_token_boundary.py.
+    """
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.original_db_path = auth_service.db_path
@@ -42,6 +67,8 @@ class SecurityBoundaryTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        signing_key_path = Path(self.tmp.name) / "agent_signing_key.pem"
+        signing_key_path.write_bytes(_test_ed25519_key_pem())
         self.environment = patch.dict(
             "os.environ",
             {
@@ -54,6 +81,7 @@ class SecurityBoundaryTests(unittest.TestCase):
                 "GMS_AUTOMATION_WEBHOOK_TOKEN": "webhook-token-for-security-tests-00001",
                 "GMS_AUTOMATION_OWNER_ID": "service-automation",
                 "GMS_BOOTSTRAP_TOKEN": "bootstrap-token-for-security-tests-0001",
+                "GMS_SKILL_SIGNING_KEY_FILE": str(signing_key_path),
                 "GMS_CLUSTER_CONFIG": str(self.cluster_config_path),
                 "GMS_WORKER_TOKENS_FILE": str(self.tokens_path),
                 "GMS_ALLOWED_ORIGINS": "https://testserver",
@@ -83,11 +111,23 @@ class SecurityBoundaryTests(unittest.TestCase):
             json={"username": "admin", "password": "strongpass1"},
         )
 
+    def _pair_grant(self, source_worker_id: str, target_worker_id: str) -> str:
+        from features.cluster import api as cluster_api
+        from features.devices import create_pair_grant
+
+        return create_pair_grant(
+            source_worker_id,
+            target_worker_id,
+            cluster_api.cluster_service.config.local_worker_id,
+        )
+
+
+class SecurityBoundaryTests(SecurityBoundaryFixtureTests):
     def test_anonymous_access_is_default_deny_with_explicit_public_routes(self):
         client_identity = self.client.get("/api/users/current")
         status = self.client.get("/api/auth/status")
         health = self.client.get("/api/system/health")
-        installer = self.client.get("/api/system/skills/install.sh")
+        installer = self.client.get("/api/agent/install.sh")
         skill_archive = self.client.get("/api/system/skills")
 
         self.assertEqual(client_identity.status_code, 200)
@@ -98,10 +138,11 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertTrue(status.json()["bootstrap_token_required"])
         self.assertEqual(health.status_code, 200)
         self.assertEqual(installer.status_code, 200)
-        # 11.txt: the endpoint is a deprecated forwarder to the gms-agent
-        # bootstrap — server-bound, no leftover template placeholders.
+        # One-line installer bound to this request's base URL: it fetches
+        # the gms-agent bootstrap and runs `install --server <base>`; no
+        # leftover template placeholders.
         self.assertIn("https://testserver/api/agent/install", installer.text)
-        self.assertIn("--server https://testserver", installer.text)
+        self.assertIn("SERVER='https://testserver'", installer.text)
         self.assertNotIn("__GMS_REMOTE_TEST_SERVER__", installer.text)
         self.assertEqual(skill_archive.status_code, 200)
         self.assertEqual(skill_archive.headers["content-type"], "application/zip")
@@ -426,188 +467,6 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertTrue(
             firmware_share.json()["detail"]["elevation_required"]
         )
-
-    def test_worker_token_routes_bypass_browser_session_but_still_validate_token(self):
-        previous_service = cluster_api.cluster_service
-        repository = ClusterRepository(Path(self.tmp.name) / "cluster.sqlite3")
-        cluster_api.cluster_service = ClusterService(repository)
-        registration = {
-            "worker_id": "worker-246",
-            "hostname": "worker-host",
-            "address": "192.0.2.10",
-            "session_id": "session-1",
-        }
-        try:
-            tokens_path = Path(self.tmp.name) / "worker_tokens_246.json"
-            tokens_path.write_text(
-                json.dumps({"worker_tokens": {"worker-246": "worker-secret"}}),
-                encoding="utf-8",
-            )
-            with patch.dict(
-                "os.environ",
-                {"GMS_WORKER_TOKENS_FILE": str(tokens_path)},
-            ):
-                invalid = self.client.post(
-                    "/api/cluster/workers/register",
-                    headers={"Authorization": "Bearer wrong"},
-                    json=registration,
-                )
-                accepted = self.client.post(
-                    "/api/cluster/workers/register",
-                    headers={"Authorization": "Bearer worker-secret"},
-                    json=registration,
-                )
-        finally:
-            cluster_api.cluster_service = previous_service
-
-        self.assertEqual(invalid.status_code, 401)
-        self.assertEqual(invalid.json()["detail"], "invalid worker token")
-        self.assertEqual(accepted.status_code, 200)
-        self.assertEqual(accepted.json()["worker"]["id"], "worker-246")
-
-    def test_worker_adb_proxy_pair_code_uses_service_authentication(self):
-        previous_service = cluster_api.cluster_service
-        repository = ClusterRepository(Path(self.tmp.name) / "cluster.sqlite3")
-        cluster_api.cluster_service = ClusterService(repository)
-        repository.register_worker({
-            "worker_id": "worker-target",
-            "hostname": "target-host",
-            "address": "192.0.2.20",
-        })
-        tokens_path = Path(self.tmp.name) / "worker_tokens_adb_proxy.json"
-        tokens_path.write_text(
-            json.dumps({
-                "worker_tokens": {
-                    "worker-source": "source-worker-secret",
-                    "worker-target": "target-worker-secret",
-                },
-            }),
-            encoding="utf-8",
-        )
-        try:
-            with patch.dict(
-                "os.environ",
-                {"GMS_WORKER_TOKENS_FILE": str(tokens_path)},
-            ):
-                grant = create_pair_grant(
-                    "worker-source",
-                    "worker-target",
-                    cluster_api.cluster_service.config.local_worker_id,
-                )
-                invalid = self.client.post(
-                    "/api/cluster/workers/worker-target/adb-proxy/pair-code",
-                    headers={"Authorization": "Bearer wrong"},
-                    json={
-                        "source_worker_id": "worker-source",
-                        "access_token": grant,
-                    },
-                )
-                accepted = self.client.post(
-                    "/api/cluster/workers/worker-target/adb-proxy/pair-code",
-                    headers={"Authorization": "Bearer target-worker-secret"},
-                    json={
-                        "source_worker_id": "worker-source",
-                        "access_token": grant,
-                    },
-                )
-        finally:
-            cluster_api.cluster_service = previous_service
-
-        self.assertEqual(invalid.status_code, 401)
-        self.assertEqual(invalid.json()["detail"], "invalid worker token")
-        self.assertEqual(accepted.status_code, 200)
-        self.assertRegex(accepted.json()["access_token"], r"^[A-Z2-7]{8}$")
-        self.assertIn("no-store", accepted.headers["cache-control"])
-
-    def test_service_authenticated_successes_are_not_audited_but_failures_are(self):
-        # Worker heartbeat/poll/register are trusted internal traffic on a
-        # hot path (polled every few seconds per worker). Auditing every
-        # success grew security_audit.json to 240+ MB. Only failures must
-        # land in the audit log.
-        import json as _json
-
-        previous_service = cluster_api.cluster_service
-        repository = ClusterRepository(Path(self.tmp.name) / "cluster.sqlite3")
-        cluster_api.cluster_service = ClusterService(repository)
-        registration = {
-            "worker_id": "worker-246",
-            "hostname": "worker-host",
-            "address": "192.0.2.10",
-            "session_id": "session-1",
-        }
-        try:
-            tokens_path = Path(self.tmp.name) / "worker_tokens_246.json"
-            tokens_path.write_text(
-                json.dumps({"worker_tokens": {"worker-246": "worker-secret"}}),
-                encoding="utf-8",
-            )
-            with patch.dict(
-                "os.environ",
-                {"GMS_WORKER_TOKENS_FILE": str(tokens_path)},
-            ):
-                self.client.post(
-                    "/api/cluster/workers/register",
-                    headers={"Authorization": "Bearer worker-secret"},
-                    json=registration,
-                )
-                self.client.post(
-                    "/api/cluster/workers/register",
-                    headers={"Authorization": "Bearer wrong"},
-                    json=registration,
-                )
-        finally:
-            cluster_api.cluster_service = previous_service
-
-        audit_path = security_audit_logger.log_path
-        paths: list[str] = []
-        try:
-            with open(audit_path, encoding="utf-8") as handle:
-                for line in handle:
-                    try:
-                        paths.append(_json.loads(line).get("path", ""))
-                    except Exception:
-                        continue
-        except FileNotFoundError:
-            pass
-        register_successes = [
-            p for p in paths
-            if p == "/api/cluster/workers/register"
-        ]
-        # The successful registration must not have been audited; the failed
-        # one (status 401) must be.
-        self.assertEqual(len(register_successes), 1)
-
-    def test_worker_authenticated_suite_download_is_not_a_public_link(self):
-        previous_service = cluster_api.cluster_service
-        repository = ClusterRepository(Path(self.tmp.name) / "cluster.sqlite3")
-        cluster_api.cluster_service = ClusterService(repository)
-        try:
-            tokens_path = Path(self.tmp.name) / "worker_tokens_246.json"
-            tokens_path.write_text(
-                json.dumps({"worker_tokens": {"worker-246": "worker-secret"}}),
-                encoding="utf-8",
-            )
-            with patch.dict(
-                "os.environ",
-                {"GMS_WORKER_TOKENS_FILE": str(tokens_path)},
-            ):
-                invalid = self.client.get(
-                    "/api/cluster/suite-library-download/safe/archive.zip",
-                    params={"worker_id": "worker-246"},
-                    headers={"Authorization": "Bearer wrong"},
-                )
-                authenticated = self.client.get(
-                    "/api/cluster/suite-library-download/safe/archive.zip",
-                    params={"worker_id": "worker-246"},
-                    headers={"Authorization": "Bearer worker-secret"},
-                )
-        finally:
-            cluster_api.cluster_service = previous_service
-
-        self.assertEqual(invalid.status_code, 401)
-        self.assertEqual(invalid.json()["detail"], "invalid worker token")
-        self.assertEqual(authenticated.status_code, 404)
-
 
 if __name__ == "__main__":
     unittest.main()

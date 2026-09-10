@@ -46,6 +46,7 @@ _AUTH_DEPEND_MARKERS = (
     "require_elevated_admin",
     "require_authenticated_user",
     "require_resource_owner",
+    "require_human_principal",
 )
 
 # Handler-internal helpers that establish or check a principal.
@@ -55,6 +56,7 @@ _AUTH_CALL_MARKERS = (
     "require_elevated_admin",
     "require_authenticated_user",
     "require_resource_owner",
+    "require_human_principal",
     "get_authenticated_user",
     "get_client_id_from_request",
     "owner_id_from_request",

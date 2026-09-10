@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import json
 import logging
 import math
@@ -18,7 +17,12 @@ import uuid
 from fastapi.responses import JSONResponse
 
 from foundation.responses import error_response
-from foundation.uploads import merge_files_to_path, safe_upload_target_path, save_upload_to_path
+from foundation.uploads import (
+    merge_files_to_path,
+    safe_upload_target_path,
+    safe_upload_token,
+    save_upload_to_path,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -27,15 +31,6 @@ MAX_FIRMWARE_UPLOAD_BYTES = 32 * 1024 * 1024 * 1024
 MAX_FIRMWARE_CHUNK_BYTES = 128 * 1024 * 1024
 MAX_FIRMWARE_CHUNKS = 10_000
 MERGE_LOCK_STALE_SECONDS = 60 * 60
-
-
-def safe_upload_token(value: str) -> str:
-    raw = str(value or "").strip()
-    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "_", raw)[:96] or "default"
-    if cleaned != raw:
-        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-        return f"{cleaned}_{digest}"
-    return cleaned
 
 
 def upload_session_dir(root: str, client_id: str, upload_id: str) -> str:

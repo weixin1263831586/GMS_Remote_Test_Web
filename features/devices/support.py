@@ -405,6 +405,12 @@ def update_user_state_field(client_id: str, updates: dict):
 
 def get_device_properties_optimized(device_id: str, ssh) -> dict[str, str]:
     """获取设备属性 - 一次SSH调用获取所有属性(同步,阻塞;调用方应在 to_thread 里跑)。"""
+    # 11.txt 建议项: device_id 进入 shell 字符串前必须过白名单校验
+    # (对齐 ui_control_api.py 的防御;is_safe_device_id 拒绝所有 shell 元字符)。
+    from foundation.security import is_safe_device_id
+
+    if not is_safe_device_id(device_id):
+        raise ValueError(f"unsafe device id: {device_id!r}")
     cmd = f"""adb -s {device_id} shell "
     getprop ro.boot.verifiedbootstate;
     getprop | grep api_level;

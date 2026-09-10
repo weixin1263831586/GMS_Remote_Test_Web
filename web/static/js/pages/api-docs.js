@@ -672,7 +672,7 @@ function getApiDetails(apiPath) {
 function generateCurlCommand(api, details) {
     const apiPath = api.path || '';
     if (api.method === 'GET') {
-        if (apiPath === '/api/system/skills/install.sh') {
+        if (apiPath === '/api/agent/install.sh') {
             const command = buildSkillInstallCommand();
             return {display: command, full: command};
         }
@@ -1032,7 +1032,7 @@ function closeUsageExamplesModal() {
  */
 function buildSkillInstallCommand() {
     const curlOptions = window.location.protocol === 'https:' ? '-kfsSL' : '-fsSL';
-    return `curl ${curlOptions} "${window.location.origin}/api/system/skills/install.sh" | bash`;
+    return `curl ${curlOptions} "${window.location.origin}/api/agent/install.sh" | bash`;
 }
 
 /**

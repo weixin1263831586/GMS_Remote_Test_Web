@@ -68,6 +68,27 @@ def upload_temp_root(namespace: str = "gms_uploads") -> str:
     return str(base / safe_namespace)
 
 
+def safe_upload_token(value: str) -> str:
+    """Sanitize an untrusted upload/session id into a path-safe token.
+
+    11.txt P2-1: upload ids flow from multipart form data straight into
+    os.path.join() staging paths; without this whitelist an id like
+    ``../../x`` escapes the upload root. Untrusted shapes are rewritten to a
+    deterministic safe token (both firmware and terminal chunk pipelines
+    share this defense). Moved here from features/firmware so
+    features/system can reuse it without a cross-feature import.
+    """
+    import hashlib
+    import re
+
+    raw = str(value or "").strip()
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "_", raw)[:96] or "default"
+    if cleaned != raw:
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return f"{cleaned}_{digest}"
+    return cleaned
+
+
 def remote_home_file_path(username: str, filename: str) -> str:
     """Build a remote SFTP path under an SSH user's home directory."""
     safe_username = str(username or "").strip()
