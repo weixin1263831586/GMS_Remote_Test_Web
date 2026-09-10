@@ -6,7 +6,9 @@
 
 当前主要面向 CTS / GTS / VTS / STS 等 Android 兼容性与 GMS 认证测试工作流，同时集成设备共享、测试调度、固件烧录、报告分析、构建任务、自动化、Gerrit / Redmine、知识库和 AI Assistant 等能力。
 
-> 本项目属于测试基础设施工具。生产环境部署前请完整阅读本文的“生产部署”和“安全注意事项”章节，尤其不要将真实密码、Token、API Key、Partner Key 或其他凭据提交到 Git 仓库。
+项目同时提供可独立安装的 **GMS Agent Runtime / MCP Plugin**，用于让 Codex、Kimi、kkagent 等 Agent 在其他 Linux/编译服务器上通过受控 CLI/MCP 接口访问平台能力。Agent 使用独立的 Service Token，不需要接触 Web 登录密码；破坏性操作继续由服务端权限、一次性 Approval Token、设备/Worker ACL 和审计链约束。
+
+> 本项目属于测试基础设施工具。生产环境部署前请完整阅读本文的“生产部署”和“安全模型”章节，尤其不要将真实密码、Token、API Key、Partner Key 或其他凭据提交到 Git 仓库。
 
 ---
 
@@ -20,6 +22,7 @@
 - [快速开始](#快速开始)
 - [生产部署](#生产部署)
 - [Controller 配置](#controller-配置)
+- [Agent Runtime 与 MCP](#agent-runtime-与-mcp)
 - [Worker Agent](#worker-agent)
 - [Windows USBIP 来源主机](#windows-usbip-来源主机)
 - [GMS 测试执行](#gms-测试执行)
@@ -102,12 +105,16 @@
 
 - GMS Assistant
 - AI Provider 路由
+- Codex / Kimi / kkagent 的 MCP Agent Runtime
+- Agent Service Token、一次性 Enrollment / Approval Token
 - Gerrit Dashboard
-- Redmine Dashboard / Agent
+- Redmine Dashboard / Agent / Evidence Snapshot
 - Knowledge Base
-- OpenGrok / Code Search 集成
+- OpenGrok / Code Search 集成，并可按 Android 版本选择源码工程
+- APK 分析、JADX 源码搜索与读取
+- Commit-pinned SDK Source Search / Read
 - Automation / Gerrit Webhook
-- APK 分析与 Android UI 操控相关能力
+- Android UI 操控、Logcat 与设备截图相关能力
 
 ---
 
@@ -116,6 +123,7 @@
 ```mermaid
 flowchart LR
     Browser[Web Browser]
+    Agent[Codex / Kimi / kkagent]
     Controller[FastAPI Controller]
     DB[(Controller Data / SQLite)]
     Worker1[Worker Agent A]
@@ -127,6 +135,7 @@ flowchart LR
     Services[Gerrit / Redmine / AI / OpenGrok]
 
     Browser -->|HTTPS / WebSocket| Controller
+    Agent -->|MCP / gms-rt + Service Token| Controller
     Controller --> DB
 
     Controller -->|Authenticated Commands| Worker1
@@ -143,13 +152,14 @@ flowchart LR
     Controller --> Services
 ```
 
-整个系统可以分为三层：
+整个系统可以分为四个主要角色：
 
 1. **Controller**：负责 Web UI、认证、权限、任务调度、配置、报告、集群状态和外部系统集成。
 2. **Worker Agent**：运行在实际执行 GMS 测试的 Linux 主机上，负责 ADB、Fastboot、Tradefed、USB/IP、固件烧录和本地资源探测。
 3. **Device Source**：Android 设备实际 USB 所在主机。直接 USB/IP 来源工作流当前主要支持 Windows + `usbipd-win`。
+4. **Agent Runtime**：运行在 Codex / Kimi / kkagent 所在主机，通过 `gms-rt` CLI 和 MCP Adapter 调用 Controller；不直接持有平台用户密码，也不绕过 Controller 的权限、审批和审计边界。
 
-Worker 与 Controller 之间通过带 Token 的 HTTP(S) API 进行注册、Heartbeat、命令轮询和 ACK；生产环境要求 Worker 使用 HTTPS Controller URL。
+Worker 与 Controller 之间通过带 Token 的 HTTP(S) API 进行注册、Heartbeat、命令轮询和 ACK；Agent 使用单独的 Agent Service Token。生产环境要求 Worker 与 Agent 均通过受信任的 HTTPS Controller URL 访问平台。
 
 ---
 
@@ -428,12 +438,15 @@ GMS_Remote_Test_Web/
 │   ├── reports/
 │   ├── system/
 │   └── test_execution/
+├── agent/gms-remote-test/    # Agent Runtime 唯一手工维护源码树
+├── plugins/gms-remote-test/  # 由 tools/sync_agent_package.py 生成的插件树
+├── plugins/codesearch/       # Code Search 插件
 ├── worker_agent/             # Worker Agent
 ├── web/                      # Web 静态资源与页面逻辑
 ├── workflows/                # 业务工作流
 ├── configs/                  # 示例配置与本地部署配置
 ├── scripts/                  # 安装、校验、维护脚本
-├── tools/                    # Host Tools / native helper 等
+├── tools/                    # Host Tools / native helper / Agent 打包工具等
 ├── tests/                    # 单元、架构、前端、Soak 等测试
 ├── .github/workflows/        # CI / Nightly Soak
 ├── install.sh                # 安装和发布包生成
@@ -452,6 +465,8 @@ Infrastructure
 ```
 
 跨 Feature 依赖尽量通过公开包边界或 Foundation Port 连接，避免重新形成大型单体模块和循环依赖。
+
+Agent 包另有明确的单一源码规则：`agent/gms-remote-test/` 是唯一允许手工修改的 Agent Package Source Root；`plugins/gms-remote-test/` 是生成结果，不应直接修改。
 
 ---
 
@@ -510,6 +525,10 @@ default-jre
 - Android USB Driver / ADB Interface
 - TCP 22 可被 Controller / Worker 访问
 - TCP 3240 可被 USB/IP Worker 访问
+
+### Agent Client
+
+远端 Codex / Kimi / kkagent 主机不要求 Clone 整个项目。安装后的 Agent Package 自包含 `gms-rt` CLI、MCP Server、SDK、Skill 和对应 Client Manifest。基础依赖为 Linux、Python 3 和 `curl` 或 `wget`；若 Controller 使用私有 CA，还需要准备受信任的 CA Certificate。
 
 ### 网络
 
@@ -732,6 +751,105 @@ Bootstrap Token
 chmod 600 configs/runtime.json
 chmod 600 configs/worker_tokens.json
 ```
+
+---
+
+## Agent Runtime 与 MCP
+
+`agent/gms-remote-test/` 是面向 Codex、Kimi、kkagent 和其他 MCP Client 的统一 Agent Package Source Root。当前版本以 `agent/gms-remote-test/package.yaml` 为唯一版本源；不要在多个 manifest、CLI 或生成目录中分别手工维护版本号。
+
+Agent Package 包含：
+
+```text
+gms-rt CLI
+MCP Server / Launcher
+gms-agent 安装与升级 CLI
+Python SDK
+SKILL.md / references / agent metadata
+Codex / Kimi / kkagent manifests
+Package tests
+```
+
+### 一键安装与 Enrollment
+
+Controller 暴露安装入口：
+
+```text
+/api/agent/install.sh
+```
+
+先由已登录用户在 Web 端生成一次性 Enrollment Code，再在 Agent 主机执行安装。生产环境推荐显式信任 Controller CA，例如：
+
+```bash
+export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt
+curl -fsSL --cacert "$GMS_INSTALL_CA_CERT" \
+  https://CONTROLLER:5001/api/agent/install.sh | bash -s -- <ENROLLMENT_CODE>
+```
+
+受控实验环境若使用自签名证书，可以按部署策略使用 installer 支持的 insecure bootstrap；不要在公网或不可信网络中关闭 TLS 校验。
+
+安装完成后，Agent 通过 `GMS_AUTH_TOKEN_FILE` 指向权限为 `0600` 的 Service Token 文件。Agent 不需要、也不应接收平台用户密码。
+
+常用维护入口：
+
+```bash
+gms-agent update
+gms-agent rollback
+gms-rt-system-selfcheck --json
+```
+
+### Agent 能力范围
+
+当前 Agent Runtime 覆盖：
+
+```text
+设备清单与状态
+CTS / GTS / VTS / STS 测试启动与 Durable Job 查询
+报告与 Artifact
+Redmine Evidence Snapshot / Journal / Attachment
+APK 导入、JADX Source Search / Read
+SDK Source Provider / commit-pinned Search / Read
+ADB Shell 只读能力、Logcat、Screencap
+固件烧录与其他受审批操作
+```
+
+通用 `gms_rt_run` 只允许执行 CLI 标记为 `agent_safe_unattended` 的命令。高风险或修改性操作必须通过专用 typed tool、服务端授权和必要的一次性 Approval Token，不允许依靠客户端传入一个 `authorized=true` 之类的布尔值作为安全边界。
+
+### 包完整性与更新链
+
+生产环境应配置：
+
+```text
+GMS_SKILL_SIGNING_KEY_FILE
+```
+
+Controller 生成 Agent Package Manifest 时会绑定包名、版本、SHA-256 和大小，并使用 Ed25519 签名。Bootstrap 会把对应 Verify Key 固定到安装后的 `gms-agent`；后续下载要求同源 URL、禁止重定向，并验证 SHA-256、Ed25519 签名和安全解包约束。
+
+开发 Agent Package 时只修改：
+
+```text
+agent/gms-remote-test/
+```
+
+然后同步生成插件：
+
+```bash
+python tools/sync_agent_package.py
+```
+
+版本发布使用：
+
+```bash
+python tools/release_agent.py --version X.Y.Z
+```
+
+构建分发包使用：
+
+```bash
+python tools/build_agent_package.py
+```
+
+`plugins/gms-remote-test/` 是生成结果，CI 的 Agent Package Gate 会校验生成树、版本契约和打包结果是否与源码树同步。
 
 ---
 
@@ -1172,11 +1290,17 @@ Assistant 用于测试平台内的辅助分析和工具调用。涉及设备操�
 - 最小权限
 - 不在仓库中保存 Gerrit Password
 
-### Redmine
+### Redmine Evidence
 
-支持 Redmine Dashboard / Agent、Issue 数据分析和相关自动化能力。
+除 Redmine Dashboard / Agent 外，平台支持把 Issue Description、完整 Journal、Attachment Metadata 与可读 Artifact 建立 owner-scoped Evidence Snapshot。Agent 可先刷新快照，再分页读取 Journal、搜索 Artifact 文本、读取图片或把 APK 导入 JADX Pipeline，减少直接反复访问 Redmine 与丢失证据上下文的风险。
 
-### OpenGrok / Knowledge
+### OpenGrok / Code Search / SDK Source
+
+Code Search 已迁移到 `plugins/codesearch/`，诊断工作流可以根据 Android 版本选择对应 OpenGrok Project。
+
+对于不适合通过 OpenGrok 暴露的本地 SDK / Android Source，Controller 还提供管理员配置的只读 SDK Source Provider。搜索结果固定到解析后的 Git Commit，并返回签名 Result ID；后续 Read 继续基于同一 Commit/Blob，避免 Agent 在源码变化后把不同 Revision 的搜索结果拼在一起。
+
+### Knowledge
 
 可将 Android 源码搜索、知识库和测试问题分析连接到统一 Web 工作台。
 
@@ -1232,13 +1356,23 @@ GMS_WORKER_TOKENS_FILE
 
 私密 Token 文件应保持 `0600`。
 
+### Agent Service Token
+
+Agent 与人工 Web/CLI Session 分离。Agent 通过一次性 Enrollment Code 换取 Service Token，Token 保存到权限为 `0600` 的本地文件，并按服务端 Scope、Device ACL、Worker ACL 和 owner 边界授权。
+
+不要把 Web 用户名/密码写入 Agent 配置、SKILL.md、MCP Manifest 或环境模板。需要破坏性操作时，应使用用户主动创建、绑定具体工具/设备/操作摘要且短时有效的一次性 Approval Token。
+
+### Agent Package Signing
+
+Production 环境应配置 `GMS_SKILL_SIGNING_KEY_FILE`。未签名的 Agent Manifest / Bootstrap 在生产模式下应 fail closed；客户端安装/升级链必须验证 SHA-256 和 Ed25519 签名，并保持 Artifact URL 与 Controller 同源。
+
 ### HTTPS
 
 生产 Worker 强制要求 HTTPS Controller。
 
 标准安装器会为本地部署生成 HTTPS Certificate，并配置 Worker CA。
 
-实际企业环境建议使用组织 CA 或正式 TLS Certificate。
+Agent 主机同样应信任 Controller 的 CA；实际企业环境建议使用组织 CA 或正式 TLS Certificate。
 
 ### Trusted Host / Origin
 
@@ -1263,6 +1397,8 @@ configs/worker_tokens.json
 SSH Private Key
 Gerrit / Redmine Password
 AI API Key
+Agent Service Token / Enrollment Code / Approval Token
+Agent Signing Private Key
 GMS / GTS Partner Key
 Google Credential JSON
 ```
@@ -1300,6 +1436,7 @@ Unit / Feature / Worker Tests
 Security Tests
 Architecture Tests
 Frontend Integrity
+Agent Package Gate
 Release Tree Validation
 Soak Tests
 ```
@@ -1310,6 +1447,14 @@ Soak Tests
 source .venv/bin/activate
 ruff check .
 pytest tests features worker_agent/tests -q
+```
+
+Agent Package 同步与测试：
+
+```bash
+python tools/sync_agent_package.py --check
+python tools/build_agent_package.py --check
+python3 -m pytest plugins/gms-remote-test/tests -q
 ```
 
 架构测试：
@@ -1385,6 +1530,8 @@ cd gms-web-app
 ```
 
 发布打包流程会过滤本地运行配置、Secret、测试数据、缓存、开发文件和不应该进入生产包的 Host Tools，并执行 release tree validation。
+
+Agent Runtime 使用独立的版本/同步/签名链，不应通过手工复制 `plugins/gms-remote-test/` 内单个文件发布；以 `package.yaml` + `release_agent.py` + `build_agent_package.py` 生成的完整 Package 为准。
 
 ---
 
@@ -1482,6 +1629,7 @@ Worker Token
 Trusted Hosts
 Allowed Origins
 Secret / Audit Key
+Agent Signing Key
 ```
 
 ### 7. noVNC 页面打开但黑屏或无法连接
@@ -1512,6 +1660,26 @@ workspace_root
 ```
 
 并确认构建账号对 Workspace 具有正确权限。
+
+### 9. Agent 安装后无法访问 Controller
+
+优先检查：
+
+```text
+GMS_REMOTE_TEST_SERVER
+GMS_AUTH_TOKEN_FILE
+Service Token 文件权限
+Controller CA / GMS_CURL_CA_CERT
+DNS / VPN / Tailscale 路由
+```
+
+执行：
+
+```bash
+gms-rt-system-selfcheck --json
+```
+
+不要通过长期设置 insecure TLS 来掩盖 CA、证书 SAN 或网络配置问题。
 
 ---
 
@@ -1571,6 +1739,24 @@ Foundation Port
 - 将所有逻辑重新堆到 `app.py`
 - 在前端页面中复制相同的设备 / Job 真值状态
 
+### Agent Package
+
+Agent Runtime 开发必须遵循：
+
+```text
+只手工修改 agent/gms-remote-test/
+不要直接修改 plugins/gms-remote-test/
+版本只从 agent/gms-remote-test/package.yaml 发布
+修改后运行 sync/build/package tests
+```
+
+推荐提交前执行：
+
+```bash
+python tools/sync_agent_package.py --check
+python3 -m pytest plugins/gms-remote-test/tests -q
+```
+
 ### Secret
 
 提交前建议执行：
@@ -1579,7 +1765,7 @@ Foundation Port
 python scripts/check_source_secrets.py .
 ```
 
-并确保真实部署配置未被 `git add`。
+并确保真实部署配置、Agent Token、Signing Private Key 和其他 Secret 未被 `git add`。
 
 ---
 
@@ -1624,6 +1810,18 @@ Browser ─ Controller ─ Worker / CTS Host
 
 这种模式下 Android 设备无需启用 `adb tcpip`，测试仍由 Worker 本地 ADB / Fastboot / Tradefed 访问 USB/IP 导入的 USB 设备。
 
+### Agent / 编译服务器
+
+```text
+Codex / Kimi / kkagent
+        │ MCP / gms-rt
+        │ HTTPS + Service Token
+        ▼
+     Controller ─ Worker ─ Android Device
+```
+
+Agent 可以部署在其他编译服务器或开发机上，不要求共享 Controller 的用户密码，也不需要把整个 Web 项目复制到 Agent 主机。
+
 ---
 
 ## 项目定位
@@ -1641,6 +1839,7 @@ GMS Remote Test Web 的目标不是替代 CTS / GTS / VTS / STS，而是为它�
 + Report
 + Automation
 + Assistant
++ Agent Runtime / MCP
 ```
 
-最终希望把原本依赖人工登录多台 Ubuntu / Windows 主机完成的测试操作，收敛为一个可审计、可调度、可恢复、可扩展的 Web 平台。
+最终希望把原本依赖人工登录多台 Ubuntu / Windows 主机完成的测试操作，收敛为一个可审计、可调度、可恢复、可扩展，并可安全提供给自动化 Agent 调用的统一测试平台。
