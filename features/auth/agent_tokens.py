@@ -252,8 +252,7 @@ class AgentTokenServiceMixin:
     ) -> dict[str, Any]:
         """Mint a one-shot enrollment code; the raw code is returned once.
 
-        Entropy: token_hex(3)×3 = 3×24 = 72 bits (11.txt audit: the docstring
-        previously claimed 144). 72 bits plus the 5-minute TTL and per-IP
+        Entropy: token_hex(3)×3 = 3×24 = 72 bits. 72 bits plus the 5-minute TTL and per-IP
         rate limiting keeps online guessing impractical; the code is stored
         hashed so a leaked DB row is not directly usable. The endpoint is
         anonymous and rate-limited per IP, but the code itself must still

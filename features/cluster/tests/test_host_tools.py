@@ -34,6 +34,7 @@ def test_only_non_sensitive_host_tool_helpers_are_tracked():
     assert tracked == [
         "tools/GMS-Host-Tools/README.md",
         "tools/GMS-Host-Tools/env.sh",
+        "tools/GMS-Host-Tools/manifest.json",
         "tools/GMS-Host-Tools/verify.sh",
     ]
 
@@ -113,10 +114,14 @@ def test_host_tools_archives_contain_every_required_runtime(tmp_path):
     shutil.copytree(HOST_TOOLS / "jdk-11", tmp_path / "jdk-11")
     lib_dir = tmp_path / "jdk-11/lib"
     parts = sorted(lib_dir.glob("modules.part.*"))
-    assert parts
-    with (lib_dir / "modules").open("wb") as output:
-        for part in parts:
-            output.write(part.read_bytes())
+    if parts:
+        # Shard bundle: merge exactly as the worker installer does.
+        with (lib_dir / "modules").open("wb") as output:
+            for part in parts:
+                output.write(part.read_bytes())
+    else:
+        # Downloaded bundle ships a single merged lib/modules file.
+        assert (lib_dir / "modules").is_file()
     extract_archive(HOST_TOOLS / "platform-tools-gms-linux.zip", tmp_path)
 
     required = (

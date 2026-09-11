@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to configs/automation_profiles.json for local deployment. Server/template/workspace references below must point at entries from your build_servers.json.",
+  "_comment": "Copy to configs/local/automation_profiles.json for local deployment. Server/template/workspace references below must point at entries from your build_servers.json.",
   "profiles": [
     {
       "id": "example-cts-smoke",

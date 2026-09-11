@@ -17,16 +17,16 @@ SOFTWARE_ROOT="${RUN_HOME}/Software"
     echo "Invalid project root: ${PROJECT_ROOT}" >&2
     exit 2
 }
-[[ -d "${HOST_TOOLS}/jdk-11" ]] || {
-    echo "Missing bundled jdk-11" >&2
+[[ -x "${HOST_TOOLS}/jdk-11/bin/java" ]] || {
+    echo "jdk-11 not provisioned; set GMS_HOST_TOOLS_JDK_URL and GMS_HOST_TOOLS_JDK_SHA256" >&2
     exit 1
 }
 [[ -f "${HOST_TOOLS}/platform-tools-gms-linux.zip" ]] || {
-    echo "Missing bundled platform-tools archive" >&2
+    echo "platform-tools not provisioned; check GMS_HOST_TOOLS_PLATFORM_URL" >&2
     exit 1
 }
-[[ -d "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4" ]] || {
-    echo "Missing bundled scrcpy" >&2
+[[ -f "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4.tar.gz" ]] || {
+    echo "Missing bundled scrcpy tarball" >&2
     exit 1
 }
 
@@ -52,9 +52,9 @@ PY
 
 python3 "${PROJECT_ROOT}/scripts/extract_zip_preserve_mode.py" \
     "${HOST_TOOLS}/platform-tools-gms-linux.zip" "${SOFTWARE_ROOT}"
-rsync -a --delete \
-    "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4/" \
-    "${SOFTWARE_ROOT}/scrcpy-linux-x86_64-v3.3.4/"
+rm -rf "${SOFTWARE_ROOT}/scrcpy-linux-x86_64-v3.3.4"
+tar -xzf "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4.tar.gz" \
+    -C "${SOFTWARE_ROOT}"
 install -m 755 "${HOST_TOOLS}/env.sh" \
     "${SOFTWARE_ROOT}/GMS-Host-Tools/env.sh"
 install -m 755 "${HOST_TOOLS}/verify.sh" \

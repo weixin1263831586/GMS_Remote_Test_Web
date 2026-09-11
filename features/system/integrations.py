@@ -49,7 +49,7 @@ router = APIRouter()
 
 # VPN 连接/断开、SSH ping 是登录用户的日常操作，只需认证无需管理员权限。
 _AUTH_REQUIRED = [Depends(require_authenticated_user_when_auth_required)]
-# 11.txt P1: VPN 隧道直接影响 build 集群的可达性——Agent Token（哪怕带全
+# VPN 隧道直接影响 build 集群的可达性——Agent Token（哪怕带全
 # scope）一律拒绝，保持 human-only；MCP 侧不暴露这些端点，此处是兜底边界。
 _HUMAN_ONLY = [Depends(require_human_principal_when_auth_required)]
 

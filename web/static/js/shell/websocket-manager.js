@@ -362,12 +362,21 @@ function handleServerEvent(eventType, payload) {
     debugLog('[EventBus] Received:', eventType, payload);
     switch (eventType) {
         case 'worker.updated':
-            // Heartbeats from every Worker emit this event. The selector
-            // belongs to the test page, so refreshing it while the user is
-            // on desktop/terminal/reports turns every heartbeat into an
-            // unnecessary /api/cluster/workers request.
+            // Heartbeats from every Worker emit this event. Keep the full
+            // Worker-list request scoped to the test page; the host-directory
+            // helper only requests when this Worker is missing or its status
+            // changed, so steady heartbeats stay request-free.
             if (currentPage === 'test' && typeof loadClusterWorkers === 'function') {
                 loadClusterWorkers(true).catch(() => {});
+            }
+            if (
+                window.GmsWorkspace?.get?.().scope_mode === 'cluster'
+                && typeof window.refreshClusterHostDirectoryForWorker === 'function'
+            ) {
+                window.refreshClusterHostDirectoryForWorker(
+                    payload?.worker_id,
+                    payload?.status
+                ).catch(() => {});
             }
             break;
         case 'worker.availability_changed': {
@@ -376,6 +385,15 @@ function handleServerEvent(eventType, payload) {
             // the tab is hidden, a browser notification.
             const workerId = String(payload?.worker_id || '');
             if (!workerId) break;
+            if (
+                window.GmsWorkspace?.get?.().scope_mode === 'cluster'
+                && typeof window.refreshClusterHostDirectoryForWorker === 'function'
+            ) {
+                window.refreshClusterHostDirectoryForWorker(
+                    workerId,
+                    payload?.status
+                ).catch(() => {});
+            }
             const name = String(payload?.name || '');
             const label = name && name !== workerId ? `${name}（${workerId}）` : workerId;
             if (payload?.status === 'offline') {
@@ -417,5 +435,3 @@ function handleServerEvent(eventType, payload) {
             debugLog('[EventBus] Unknown event type:', eventType);
     }
 }
-
-

@@ -13,9 +13,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from foundation.config_paths import runtime_config_path, user_tools_path
+from foundation.config_paths import (
+    example_config_path,
+    runtime_config_path,
+    static_config_path,
+    user_tools_path,
+)
 from foundation.config_persistence import ConfigPersistenceMixin
 from foundation.networking import is_local_host
+from foundation.runtime_config_store import RuntimeConfigStore
 from foundation.runtime_settings import RuntimeSettings
 
 
@@ -99,11 +105,10 @@ class ConfigManager(ConfigPersistenceMixin):
         # 配置文件位于 configs 目录。真实 config.json 属于本机部署数据
         # （不入库）；缺失时回退到随源码携带的 config.example.json，
         # 保证全新 checkout / CI 可直接启动。
-        self.config_path = os.path.join(base_dir, '..', 'configs', 'config.json')
-        self.config_fallback_path = os.path.join(
-            base_dir, '..', 'configs', 'config.example.json'
-        )
+        self.config_path = str(static_config_path(self.project_root))
+        self.config_fallback_path = str(example_config_path(self.project_root))
         self.runtime_config_path = str(runtime_config_path(self.project_root))
+        self._runtime_store = RuntimeConfigStore(self.project_root)
 
         # 缓存相关
         self._cache: dict[str, Any] | None = None
@@ -120,7 +125,7 @@ class ConfigManager(ConfigPersistenceMixin):
 
     def load_config(self, force_reload: bool = False) -> dict[str, Any]:
         """Return the merged static+runtime config, bypassing the cache when force_reload."""
-        with self._cache_lock:
+        with self._runtime_transaction(), self._cache_lock:
             current_time = time.time()
             if not force_reload and self._is_cache_valid(current_time):
                 return self._cache.copy() if self._cache else {}
@@ -148,7 +153,7 @@ class ConfigManager(ConfigPersistenceMixin):
             )
             static_mtime = os.path.getmtime(static_path)
             try:
-                runtime_mtime = os.path.getmtime(self.runtime_config_path)
+                runtime_mtime = self._runtime_stamp()
             except OSError:
                 runtime_mtime = 0
 
@@ -173,7 +178,7 @@ class ConfigManager(ConfigPersistenceMixin):
                 else getattr(self, 'config_fallback_path', self.config_path)
             )
             try:
-                self._runtime_mtime = os.path.getmtime(self.runtime_config_path)
+                self._runtime_mtime = self._runtime_stamp()
             except OSError:
                 self._runtime_mtime = 0
         except Exception as e:
@@ -252,7 +257,8 @@ class ConfigManager(ConfigPersistenceMixin):
     def _load_static_config(self) -> dict[str, Any]:
         """Load and validate the static config from disk (placeholders expanded).
 
-        Falls back to configs/config.example.json when the deployment-local
+        Falls back to configs/examples/config.example.json (or the legacy flat
+        template path) when the deployment-local
         configs/config.json does not exist (fresh checkout / CI)."""
         path = self.config_path
         if not os.path.isfile(path):
@@ -263,6 +269,14 @@ class ConfigManager(ConfigPersistenceMixin):
         try:
             with open(path, encoding='utf-8') as f:
                 config = json.load(f)
+
+                # Deployment identity is shared with static placeholder expansion.
+                # Per-owner managers must never inherit global credentials/state.
+                if self._uses_runtime_store():
+                    from foundation.runtime_config_store import DEPLOYMENT_KEYS
+
+                    deployment = self._runtime_store.read()
+                    config.update({key: value for key, value in deployment.items() if key in DEPLOYMENT_KEYS})
 
                 config_copy = self._replace_placeholders(config)
 
@@ -379,6 +393,8 @@ class ConfigManager(ConfigPersistenceMixin):
         configs/config_runtime.json 保存安装脚本写入的部署身份和用户操作产生的数据，
         覆盖随源码携带的静态默认值（config.json）。
         """
+        if self._uses_runtime_store():
+            return self._runtime_store.read()
         try:
             with open(self.runtime_config_path, encoding='utf-8') as f:
                 data = json.load(f)
@@ -390,6 +406,14 @@ class ConfigManager(ConfigPersistenceMixin):
         except Exception as e:
             logger.error(f"Error loading runtime config {self.runtime_config_path}: {e}")
         return None
+
+    def _uses_runtime_store(self) -> bool:
+        return Path(self.runtime_config_path) == self._runtime_store.paths['preferences']
+
+    def _runtime_stamp(self):
+        if self._uses_runtime_store():
+            return self._runtime_store.stamp()
+        return os.path.getmtime(self.runtime_config_path)
 
     def get_runtime_config(self) -> dict[str, Any]:
         """Public read-only access to the runtime configuration."""

@@ -179,7 +179,7 @@ def main(argv: list[str]) -> int:
         for finding in findings:
             print(f'  - {finding}', file=sys.stderr)
         print(
-            'Move credentials into configs/runtime.json environment entries '
+            'Move credentials into configs/secrets/environment.json entries '
             '(or a real environment); never commit them.',
             file=sys.stderr,
         )

@@ -216,7 +216,7 @@ class ClusterRepository(
         adb_proxy_source_worker_id/adb_proxy_source_serial in its
         properties (worker_agent/device_actions.py:251).  Every inventory
         row with the same proxy metadata — plus the source worker's own
-        local-USB row — is the same physical hardware (R01).
+        local-USB row — is the same physical hardware.
         """
         rows = conn.execute(
             """SELECT id, worker_id, transport, properties_json
@@ -252,7 +252,7 @@ class ClusterRepository(
         device_row: Any,
     ) -> str:
         """Return the conflicting alias device_id if the same physical
-        device is already actively leased through another route (R01)."""
+        device is already actively leased through another route."""
         properties = device_row["properties_json"] if not isinstance(
             device_row, dict
         ) else json.dumps(device_row.get("properties") or {})

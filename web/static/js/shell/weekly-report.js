@@ -119,7 +119,7 @@ async function generateWeeklyReport() {
         const resp = await fetch(url);
         const result = await resp.json().catch(() => ({ success: false }));
         if (!result.success) {
-            // 11.txt: server-provided error strings must be escaped before
+            // Server-provided error strings must be escaped before
             // innerHTML insertion (consistency with _esc elsewhere).
             const msg = _esc(result.error || result.message || '未知错误');
             if (content) content.innerHTML = `<div style="color: var(--danger-color); padding: 12px;">生成失败：${msg}</div>`;
@@ -1192,18 +1192,12 @@ async function ut_startMainlineKnownIssuesSync(button) {
     } catch (e) {
         // 查询失败，继续弹框选择
     }
-    // db 存在，弹框选择扫描方式
-    const modal = document.getElementById('mainline-sync-modal');
-    if (modal) {
-        modal.style.display = 'flex';
-    }
+    // db 存在，弹框选择扫描方式（ModalManager 是 modal 状态唯一真源）
+    ModalManager.open('mainline-sync-modal');
 }
 
 function ut_closeMainlineSyncModal() {
-    const modal = document.getElementById('mainline-sync-modal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
+    ModalManager.close('mainline-sync-modal');
 }
 
 async function ut_confirmMainlineKnownIssuesSync(mode) {

@@ -44,7 +44,7 @@ def _wire_cross_feature_services() -> None:
     register_worker_status_port()
     register_devices_port()
     configure_manager_provider(get_redmine_config_for_request)
-    # R13 依赖倒置：报告附件解析（R04 owner 校验 + ZIP 打包）由 reports
+    # 依赖倒置：报告附件解析（owner 校验 + ZIP 打包）由 reports
     # feature 提供，email 通过 provider 使用——避免 email→reports 直连
     # 闭合跨 feature 依赖环。
     from features.reports.email_attachments import resolve_report_attachments

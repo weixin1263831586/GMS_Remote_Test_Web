@@ -25,7 +25,7 @@ gms_rt_shell_exec with an approval token, ...) or a human-run CLI, never
 prompt text. Interactive commands (terminal-open, terminal-push,
 devices-scrcpy) are denied outright.
 
-Authentication model (2026-09-09 audit, 10.txt §四/§五):
+Authentication model (2026-09-09 audit):
 - Agents authenticate exclusively with an Agent Service Token
   (GMS_AUTH_TOKEN_FILE, 0600, enrolled via gms_rt_agent_enroll). No
   platform or admin password ever flows through MCP.
@@ -77,14 +77,14 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.17.1"
+SERVER_VERSION = "0.18.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
 # The catalog only changes across gms-rt-system-update; refresh it lazily.
 SAFETY_CACHE_TTL_SECONDS = 300
 
-# Agent authentication mode (2026-09-09 audit, 10.txt §五). When set to
+# Agent authentication mode (2026-09-09 audit). When set to
 # "service-token" (the installer writes it into every agent MCP env), the
 # password-based tools (gms_rt_auth_login, gms_rt_auth_elevate) and the
 # human-session approval mint (gms_rt_approval_create) are NOT registered:
@@ -92,7 +92,7 @@ SAFETY_CACHE_TTL_SECONDS = 300
 # self-minted approval. Agents enroll once via gms_rt_agent_enroll and
 # authenticate with GMS_AUTH_TOKEN_FILE.
 #
-# 15.txt 审核 P1-1: two independent signals put the server into
+# Two independent signals put the server into
 # service-token mode. mcp_launcher.py now FORCES GMS_AGENT_AUTH_MODE
 # (setdefault() let an ambient auth-mode variable leak through) and stamps
 # GMS_AGENT_PROCESS=1, which only the launcher sets — either signal alone
@@ -126,7 +126,7 @@ _INJECTED_FLAGS = ("--json", "--non-interactive")
 _CATALOG_CACHE: dict[str, Any] = {"loaded_at": 0.0, "commands": None}
 
 # ---------------------------------------------------------------------------
-# Phase 2 (10.txt §五): direct-HTTP fast path through the gms_agent SDK.
+# Phase 2: direct-HTTP fast path through the gms_agent SDK.
 #
 # The MCP server is a protocol adapter, not a second business layer. When the
 # CLI command maps 1:1 to a Controller REST endpoint (read-only listing and
@@ -527,7 +527,7 @@ def run_cli(
     except OSError as error:
         return f"failed to launch gms-rt CLI: {error}", True
 
-    # R17: parse the JSON envelope BEFORE truncating. bounded_text() used to
+    # Parse the JSON envelope BEFORE truncating. bounded_text() used to
     # cut the raw stdout first, which turned oversized-but-valid envelopes
     # into invalid JSON that then fell through to the plain-text branch with
     # is_error=False — agents received silently corrupted data.  Now: try the
@@ -544,7 +544,7 @@ def run_cli(
         parsed_envelope = None
     if parsed_envelope is not None:
         # Trim oversized data/output STRING fields, not the envelope text:
-        # the returned value must stay valid JSON (R17).
+        # the returned value must stay valid JSON.
         for key in ("output", "diagnostics"):
             value = parsed_envelope.get(key)
             if isinstance(value, str) and len(value) > MAX_OUTPUT_BYTES:
@@ -839,7 +839,7 @@ def approval_create_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if not tool or not device:
         return "Missing required arguments: tool, device", True
     args = ["--tool", tool, "--device", device, "--command", command]
-    # 4.txt P1 精确绑定：burn 审批必须绑定固件 SHA256（服务端据此派生
+    # burn 审批必须绑定固件 SHA256（服务端据此派生
     # 命令串），否则服务端 400。
     if tool == "gms_rt_burn_firmware":
         sha = str(arguments.get("firmware_sha256") or "").strip().lower()
@@ -908,7 +908,7 @@ def _resolve_worker_for_device(
     except ValueError:
         return None, text
     # run_cli returns the compacted CLI envelope {"ok": true, "data": {...}};
-    # 4.txt P1b: the resolver used to read the top level, which is always
+    # The resolver used to read the top level, which is always
     # empty — read worker_id from the data object, with a top-level fallback
     # for non-envelope output.
     data = payload.get("data") if isinstance(payload, dict) else None
@@ -927,7 +927,7 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     one-shot approval token bound to this exact burn (server-enforced; the
     caller-side authorized flag was never a security boundary).
 
-    异步模型（15.txt §十一，Kimi 等客户端单次 tool call 默认 60s）：
+    异步模型（Kimi 等客户端单次 tool call 默认 60s）：
     wait=false（默认）立即后台启动 CLI 并返回 {operation_id, status: "running"}，
     之后用 gms_rt_burn_status 轮询；wait=true 保持旧的同步等待语义（≤timeout）。
     """
@@ -1232,7 +1232,7 @@ def jobs_events_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 def jobs_follow_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
-    """11.txt P1 §3: one-call status+events+failure-summary follow."""
+    """One-call status+events+failure-summary follow."""
     job_id = str(arguments.get("job_id") or "").strip()
     if not job_id:
         return "Missing required argument: job_id", True
@@ -1251,12 +1251,12 @@ def jobs_follow_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 def test_suites_list_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
-    """11.txt 中优先级 §7: discover suite names for gms_rt_test_start."""
+    """Discover suite names for gms_rt_test_start."""
     return run_cli("gms-rt-test-suites", [])
 
 
 def devices_ui_dump_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
-    """11.txt P0 §2: structured UI layout tree (uiautomator dump path)."""
+    """Structured UI layout tree (uiautomator dump path)."""
     device = str(arguments.get("device") or "").strip()
     if not device:
         return "device (serial) is required", True
@@ -1264,7 +1264,7 @@ def devices_ui_dump_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 def devices_snapshot_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
-    """11.txt P1 §5: one-shot device state snapshot."""
+    """One-shot device state snapshot."""
     device = str(arguments.get("device") or "").strip()
     if not device:
         return "device (serial) is required", True
@@ -1389,7 +1389,7 @@ _SHELL_READONLY_BINARIES = frozenset({
     # already readable via cat, kernel ring buffer, and device_config reads.
     "pgrep", "grep", "wc", "head", "tail", "dmesg", "id", "printenv",
     "device_config", "cmd", "am",
-    # 11.txt 高优先级 §3: high-frequency read-only diagnostics. Only the
+    # high-frequency read-only diagnostics. Only the
     # explicit subcommands in _SHELL_CMD_READONLY_SUBCOMMANDS run; pm/dpm/
     # content also stay in _SHELL_SMUGGLING_BINARIES so they can never be
     # ARGUMENTS to another command (and can never be a pipe filter).
@@ -1402,7 +1402,7 @@ _SHELL_FORBIDDEN_CHARS = frozenset(";|&><`(){}[]$\\'\"\n\r\t*?")
 _SHELL_DUMPSYS_MUTATING = frozenset({
     "unplug", "reset", "disable", "enable", "whitelist", "set-debug-app",
     "force-stop", "kill", "suspend", "resume", "reset-role",
-    # battery/simulation setters mutate device state (R12):
+    # battery/simulation setters mutate device state:
     # dumpsys battery set level 1 was previously allowed through.
     "set", "plug", "charge", "nocharge", "persist", "import",
 })
@@ -1417,7 +1417,7 @@ _SHELL_SMUGGLING_BINARIES = frozenset({
 })
 # 'cmd' / 'am' / 'pm' / 'dpm' / 'content' read-only subcommand allowlist
 # (exact prefix match on the joined argument string).
-# 11.txt 高优先级 §3: these are the high-frequency diagnostics agents were
+# these are the high-frequency diagnostics agents were
 # forced to SSH for (device-owner inspection, intent resolution, package
 # inventory). Everything mutating (pm trim-caches/clear, dpm force-*,
 # content insert/update/delete) stays OUT of the list.
@@ -1437,7 +1437,7 @@ _SHELL_CMD_READONLY_SUBCOMMANDS = {
     "dpm": ("list-owners",),
     "content": ("query",),
 }
-# 11.txt 高优先级 §3: the only binaries allowed on the RIGHT side of the
+# The only binaries allowed on the RIGHT side of the
 # single restricted pipe ("readonly_cmd | filter_cmd"). grep/wc/head/tail
 # are already individually allowlisted as leading binaries; this set gates
 # their use as pipe filters.
@@ -1589,7 +1589,7 @@ def _validate_single_shell_command(command: str) -> tuple[bool, str]:
                 "streaming logcat is not allowed; add -d/-t/-T (dump mode)"
             )
     elif binary == "dmesg":
-        # R12: dmesg -c (and -C, including inside clusters like -tc) clear
+        # dmesg -c (and -C, including inside clusters like -tc) clear
         # the kernel ring buffer; positively allow only read-only flags.
         allowed_dmesg = {"-T", "-t", "-r", "-H", "-e", "-n", "--color=never"}
         for token in rest:
@@ -1631,8 +1631,8 @@ def _validate_single_shell_command(command: str) -> tuple[bool, str]:
 def _validate_shell_command(command: str) -> tuple[bool, str]:
     """Return (allowed, reason) for a proposed device shell command.
 
-    R12: the gate is STRUCTURED and POSITIVE per binary; every option token
-    must match an explicit per-binary allowlist. 11.txt 高优先级 §3 adds ONE
+    The gate is STRUCTURED and POSITIVE per binary; every option token
+    must match an explicit per-binary allowlist. The gate allows ONE
     restricted pipe: ``<readonly command> | <grep|wc|head|tail ...>`` —
     both sides must independently pass the full structured allowlist, so
     this covers ~90% of the SSH-bypass motive (log/text post-filtering)
@@ -1683,7 +1683,7 @@ def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             timeout = min(600, max(1, int(arguments["timeout"])))
         except (TypeError, ValueError):
             return "timeout must be an integer (seconds)", True
-    # 12.txt P0: gms-rt-shell is the typed read-only surface — the CLI's
+    # gms-rt-shell is the typed read-only surface — the CLI's
     # service-token approval gate must not block allowlisted probes, while
     # every non-allowlisted command still requires a one-shot approval.
     return run_cli(
@@ -1703,8 +1703,8 @@ def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 # argument gate (dump flag, no -f, no metacharacters) so agents skip the
 # describe+run round trip and cannot smuggle destructive flags. Buffer
 # clearing (logcat -c) destroys diagnostic evidence — this platform's CTS/
-# GTS/VTS incident data — so it is human-only via the CLI since v0.13.0
-# (10.txt §六): the tool denies clear=true and any -c/--clear form in args.
+# GTS/VTS incident data — so it is human-only via the CLI since v0.13.0:
+# the tool denies clear=true and any -c/--clear form in args.
 _LOGCAT_FORBIDDEN_CHARS = frozenset(";|&><`(){}[]$\\'\"\n\r")
 _LOGCAT_MAX_ARGS = 16
 
@@ -1738,9 +1738,9 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             return "args must be a string or a list of logcat arguments", True
     if len(items) > _LOGCAT_MAX_ARGS:
         return f"too many logcat arguments (max {_LOGCAT_MAX_ARGS})", True
-    # R08: 专用 logcat 工具与 gms_rt_shell 的 logcat 分支共用同一套解析
+    # 专用 logcat 工具与 gms_rt_shell 的 logcat 分支共用同一套解析
     # 与正向允许策略。组合短选项（-dc）、长选项缩写（--cle）和附着值
-    # （-df/tmp/x）都会被拦截。R17（10.txt §六）：清空 logcat 缓冲会销毁
+    # （-df/tmp/x）都会被拦截。清空 logcat 缓冲会销毁
     # 诊断证据，MCP Agent 侧一律拒绝——无论来自 clear=true 还是 args 里
     # 的 -c/--clear（含缩写/组合形式）；清日志是人工 CLI 步骤
     # （gms-rt-devices-logcat DEVICE -c）。
@@ -1855,7 +1855,7 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         flag in items for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")
     ):
         items = ["-d", *items]
-    # R17 (10.txt §六): no -c is ever injected from the adapter — buffer
+    # No -c is ever injected from the adapter — buffer
     # clearing is human-only and every clear form was rejected above.
     timeout = 180
     if arguments.get("timeout") is not None:
@@ -1863,7 +1863,7 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             timeout = min(600, max(1, int(arguments["timeout"])))
         except (TypeError, ValueError):
             return "timeout must be an integer (seconds)", True
-    # 12.txt P0: dump-mode logcat is a typed read-only surface; the CLI
+    # dump-mode logcat is a typed read-only surface; the CLI
     # service-token gate must not demand an approval for it (the tool
     # already denies -c and -f, which are the destructive forms).
     text, is_error = run_cli(
@@ -1963,7 +1963,7 @@ def tools() -> list[dict[str, Any]]:
     if _SERVICE_TOKEN_MODE:
         # Service-token mode: the human-session credential tools are not even
         # advertised, so an agent context cannot express a password login or
-        # self-mint an approval (2026-09-09 audit, 10.txt §五).
+        # self-mint an approval (2026-09-09 audit).
         all_tools = [
             tool
             for tool in all_tools
@@ -2697,7 +2697,7 @@ def _all_tools() -> list[dict[str, Any]]:
         {
             "name": "gms_rt_jobs_follow",
             "description": (
-                "One-call job follow (11.txt P1): current status + events "
+                "One-call job follow: current status + events "
                 "since a cursor + a compact failed-case summary when the job "
                 "already reached a terminal state (server-parsed from "
                 "test_result.xml, no raw log paging)."
@@ -2754,7 +2754,7 @@ def _all_tools() -> list[dict[str, Any]]:
         {
             "name": "gms_rt_devices_snapshot",
             "description": (
-                "One-shot device state snapshot (11.txt P1 §5): build "
+                "One-shot device state snapshot: build "
                 "fingerprint, focused activity, keyguard/lock state, and "
                 "active device-admin/device-owner list in a single call."
             ),
@@ -3041,12 +3041,17 @@ def _all_tools() -> list[dict[str, Any]]:
             "description": (
                 "Show the parsed AndroidManifest.xml (package, "
                 "permissions, activities) of a completed decompilation "
-                "task."
+                "task, or only its declared permissions with "
+                "permissions=true. CLI: gms-rt-apk-manifest [--permissions]."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "task_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "permissions": {
+                        "type": "boolean",
+                        "description": "List only declared permissions.",
+                    },
                 },
                 "required": ["task_id"],
                 "additionalProperties": False,
@@ -3055,9 +3060,10 @@ def _all_tools() -> list[dict[str, Any]]:
         {
             "name": "gms_rt_apk_search",
             "description": (
-                "Search decompiled source files by filename substring "
-                "(min 2 chars, max 50 results). Returns paths consumable "
-                "by gms_rt_apk_source with view=true."
+                "Search decompiled sources by filename substring (mode=name, "
+                "default), file content (mode=content, path:line:column + "
+                "snippet), or Java symbol definition (mode=symbol). CLI: "
+                "gms-rt-apk-search <task_id> <query> [--mode ...]."
             ),
             "inputSchema": {
                 "type": "object",
@@ -3065,9 +3071,23 @@ def _all_tools() -> list[dict[str, Any]]:
                     "task_id": {"type": "string", "minLength": 0, "maxLength": 2048},
                     "query": {
                         "type": "string",
-                        "description": "Filename substring, e.g. Permission.",
+                        "description": "Filename substring (name), fixed content query, or symbol name.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["name", "content", "symbol"],
+                        "description": "Search dimension (default name).",
                     },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 400},
+                    "path": {
+                        "type": "string",
+                        "description": "Path substring filter (content/symbol modes only).",
+                    },
+                    "line": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Line hint for symbol mode.",
+                    },
                 },
                 "required": ["task_id", "query"],
                 "additionalProperties": False,
@@ -3076,9 +3096,9 @@ def _all_tools() -> list[dict[str, Any]]:
         {
             "name": "gms_rt_apk_source",
             "description": (
-                "Browse the decompiled source tree (view=false, default) "
-                "or print one file's content (view=true). Without path, "
-                "lists the sources root."
+                "Browse the decompiled source tree. view=true reads one "
+                "file's first window through gms-rt-apk-source-read (use "
+                "gms_rt_apk_source_read for offset/limit paging)."
             ),
             "inputSchema": {
                 "type": "object",
@@ -3090,7 +3110,7 @@ def _all_tools() -> list[dict[str, Any]]:
                     },
                     "view": {
                         "type": "boolean",
-                        "description": "Print file content instead of the listing.",
+                        "description": "Read the file content instead of the listing.",
                     },
                 },
                 "required": ["task_id"],
@@ -3273,7 +3293,8 @@ def _all_tools() -> list[dict[str, Any]]:
             "name": "gms_rt_apk_source_search",
             "description": (
                 "Search decompiled source CONTENT (not filenames) for a "
-                "fixed query. Returns path:line:column + snippet."
+                "fixed query. Returns path:line:column + snippet. CLI: "
+                "gms-rt-apk-search <task_id> <query> --mode content."
             ),
             "inputSchema": {
                 "type": "object",
@@ -3435,7 +3456,10 @@ def apk_manifest_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     task_id = _apk_task_id_argument(arguments)
     if not task_id:
         return "task_id is required", True
-    return run_cli("gms-rt-apk-manifest", [task_id])
+    args: list[str] = [task_id]
+    if arguments.get("permissions"):
+        args.append("--permissions")
+    return run_cli("gms-rt-apk-manifest", args)
 
 
 def apk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -3444,9 +3468,20 @@ def apk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if not task_id or not query:
         return "task_id and query are required", True
     args: list[str] = [task_id, query]
+    mode = str(arguments.get("mode") or "name").strip()
+    if mode not in ("name", "content", "symbol"):
+        return "mode must be name, content, or symbol", True
+    if mode != "name":
+        args.extend(["--mode", mode])
     limit = arguments.get("limit")
     if limit:
         args.extend(["--limit", str(max(1, min(int(limit), 50)))])
+    path_filter = str(arguments.get("path") or "").strip()
+    if path_filter:
+        args.extend(["--path", path_filter])
+    line = arguments.get("line")
+    if line:
+        args.extend(["--line", str(max(0, int(line)))])
     return run_cli("gms-rt-apk-search", args)
 
 
@@ -3454,12 +3489,14 @@ def apk_source_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     task_id = _apk_task_id_argument(arguments)
     if not task_id:
         return "task_id is required", True
-    args: list[str] = [task_id]
     path = str(arguments.get("path") or "").strip()
+    if arguments.get("view"):
+        if not path:
+            return "path is required with view=true", True
+        return run_cli("gms-rt-apk-source-read", [task_id, path])
+    args: list[str] = [task_id]
     if path:
         args.append(path)
-    if arguments.get("view"):
-        args.append("--view")
     return run_cli("gms-rt-apk-source", args)
 
 
@@ -3644,13 +3681,13 @@ def apk_source_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     query = str(arguments.get("query") or "").strip()
     if not task_id or not query:
         return "task_id and query are required", True
-    args: list[str] = [task_id, query]
+    args: list[str] = [task_id, query, "--mode", "content"]
     if arguments.get("limit"):
         args.extend(["--limit", str(_int_arg(arguments, "limit", 50, 1, 200))])
     path_filter = str(arguments.get("path") or "").strip()
     if path_filter:
         args.extend(["--path", path_filter])
-    return run_cli("gms-rt-apk-source-search", args)
+    return run_cli("gms-rt-apk-search", args)
 
 
 def apk_source_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:

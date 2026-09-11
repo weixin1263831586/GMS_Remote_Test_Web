@@ -35,7 +35,7 @@ AGENT_SCOPES: dict[str, str] = {
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "user": frozenset({
         "tests.execute",
-        # 11.txt P1: cancel/list formalize the operator UI so the tests.cancel
+        # cancel/list formalize the operator UI so the tests.cancel
         # / jobs.read API gates keep accepting humans while agents need scopes.
         "tests.cancel",
         "jobs.read",
@@ -51,9 +51,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     }),
     "device_operator": frozenset({
         "tests.execute",
-        "tests.cancel",  # 11.txt P1: see "user" above
+        "tests.cancel",  # see "user" above
         "jobs.read",
-        "reports.read",  # 11.txt P1: see "user" above
+        "reports.read",  # see "user" above
         "devices.use_leased",
         "devices.inventory",
         "devices.lease",

@@ -215,7 +215,7 @@ class ADBProxyService:
         if not expected.issubset({str(item) for item in target_import.get("devices") or []}):
             return grace_status or "degraded_target"
         visible = {
-            # R18: keep the full serial as-is; TCP serials like
+            # Keep the full serial as-is; TCP serials like
             # "10.0.0.5:5555" must NOT be folded to the port (split(':')[-1])
             # or they never match the assignment's serial.  Also expose the
             # host:port-less form to match worker_agent's dual matching.
@@ -529,7 +529,7 @@ class ADBProxyService:
                     # Restore the previous device set with the NEW generation:
                     # the source worker already accepted `generation`, so
                     # replaying the stale previous generation would always be
-                    # rejected by the worker's staleness check (R04).  The
+                    # rejected by the worker's staleness check.  The
                     # restored expected state keeps the larger generation.
                     await _run_worker_command(
                         source_worker_id,
@@ -587,7 +587,7 @@ class ADBProxyService:
                     if restored:
                         # Workers now hold the new generation for the
                         # restored device set; persisting it keeps the
-                        # reconcile check from flagging degraded_source (R04).
+                        # reconcile check from flagging degraded_source.
                         previous_assignment["generation"] = generation
                     assignments[key] = previous_assignment
                 else:
@@ -641,7 +641,7 @@ class ADBProxyService:
         # disconnect does not usually restart the target's ADB daemon, so the
         # full running-jobs check from _require_idle_target is unnecessary.
         # But the Worker DOES restart the shared Hub whenever other imports
-        # remain, and stops the side ADB on the last disconnect (R02), so the
+        # remain, and stops the side ADB on the last disconnect, so the
         # claim guards below must cover this assignment AND every other
         # assignment that shares this target's Hub.  Unrelated local-USB
         # devices on the target are not touched and stay unchecked.
@@ -651,7 +651,7 @@ class ADBProxyService:
             if str(serial or "").strip()
         }
         self._require_proxy_devices_not_claimed(target_worker_id, proxy_devices)
-        # R02: the Worker's target_disconnect restarts the whole Hub whenever
+        # The Worker's target_disconnect restarts the whole Hub whenever
         # OTHER imports remain, and stops the side ADB on the last disconnect.
         # The final stop also tears down the local ADB used by the target's
         # LOCAL-USB devices, so those must be claim-free too — not just the
@@ -673,7 +673,7 @@ class ADBProxyService:
                 target_worker_id, other_proxy_devices
             )
         self._require_local_devices_not_claimed(target_worker_id)
-        # R03: source_stop tears down the source worker's proxy exporter and
+        # source_stop tears down the source worker's proxy exporter and
         # touches its device inventory; the source's OWN devices must also be
         # free of claims, mirroring the target-side host-level guard.
         self._require_local_devices_not_claimed(source_worker_id)
@@ -793,7 +793,7 @@ class ADBProxyService:
             for item in get_cluster_service().repository.list_devices(worker_id)
             if item.get("state") in {"allocated", "reserved", "external_busy"}
             # Protocol state and ownership are independent: an operation
-            # claim can coexist with state='available' (R03).  Any active
+            # claim can coexist with state='available'.  Any active
             # claim counts as busy for host-wide ADB restarts.
             or item.get("claimed")
         ]
@@ -826,7 +826,7 @@ class ADBProxyService:
                 for item in get_cluster_service().repository.list_devices(worker_id)
                 if (
                     item.get("state") in {"allocated", "reserved", "external_busy"}
-                    or item.get("claimed")  # operation claim with state='available' (R03)
+                    or item.get("claimed")  # operation claim with state='available'
                 )
                 and str(item.get("serial") or "") in proxy_devices
             ]
@@ -841,14 +841,14 @@ class ADBProxyService:
 
     @staticmethod
     def _require_local_devices_not_claimed(worker_id: str) -> None:
-        """R02/R03: block host-level ADB teardown on any claimed local device.
-
+        """Block host-level ADB teardown on any claimed local device.
         The last proxy disconnect stops the worker's side ADB (5039) and the
         Hub restart clears 5037 — both are the same ADB instance the
         worker's LOCAL-USB and USB/IP devices use. A disconnect that leaves
         another user's local-device claim running would disrupt their
         session, so ANY actively claimed device on the host (not only the
         proxied serials) must block the operation.
+        See docs/architecture/adr/0005-usbip-firmware-ownership.md.
         """
         from foundation.cluster_port import get_cluster_service
 
@@ -858,7 +858,7 @@ class ADBProxyService:
                 for item in get_cluster_service().repository.list_devices(worker_id)
                 if (
                     item.get("state") in {"allocated", "reserved", "external_busy"}
-                    or item.get("claimed")  # operation claim with state='available' (R03)
+                    or item.get("claimed")  # operation claim with state='available'
                 )
             ]
         except (AttributeError, RuntimeError, TypeError) as exc:

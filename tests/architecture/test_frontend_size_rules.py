@@ -21,11 +21,11 @@ MIGRATION_BYTE_LIMITS = {
     'web/static/css/common.css': 144008,      # agent-access 页面样式(进行中, 并发会话追加 bc3756f +674 行); target: < 50 KB after split
     'web/static/js/navigation.js': 50 * 1024,
     'web/static/js/api-constants.js': 36286,
-    'web/static/js/pages/test-suite-browser.js': 125721,   # target: < 50 KB (R14 browser context isolation + R21 direct local fetch & request generation)
+    'web/static/js/pages/test-suite-browser.js': 125721,   # target: < 50 KB (browser context isolation + direct local fetch & request generation)
     'web/static/js/pages/report-analysis.js': 116723,      # target: < 50 KB
     'web/static/js/pages/firmware-burn.js': 128896,        # target: < 50 KB
     'web/static/js/pages/api-docs.js': 50139,
-    'web/static/js/shell/weekly-report.js': 83553,         # +244: 11.txt XSS 转义一致性; target: < 50 KB
+    'web/static/js/shell/weekly-report.js': 83553,         # +244: XSS 转义一致性; target: < 50 KB
 }
 
 # Default budgets for anything not listed above.

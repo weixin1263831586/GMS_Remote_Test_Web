@@ -17,11 +17,11 @@ This tool turns the payload into per-client distribution archives:
 Archive construction is DELEGATED to the canonical builder
 (features/system/agent_package_builder.py) — the exact same code path the
 Controller registry serves from — so the released zip and the served zip
-are byte-identical by construction (10.txt §七/§八).
+are byte-identical by construction.
 
 Every archive carries a SHA-256; --print-manifest emits the JSON manifest
 that the Controller Agent Package Registry embeds in its manifest
-endpoint (10.txt §十三).
+endpoint.
 
 Usage:
     python tools/build_agent_package.py [--out dist]
@@ -42,7 +42,9 @@ PACKAGE_YAML = REPO_ROOT / "agent" / "gms-remote-test" / "package.yaml"
 
 sys.path.insert(0, str(REPO_ROOT))
 from features.system.agent_package_builder import CLIENT_MANIFESTS, build_package_bytes  # noqa: E402
-# 11.txt: the canonical generated plugin payload (synced from
+
+
+# The canonical generated plugin payload (synced from
 # agent/gms-remote-test by tools/sync_agent_package.py) is the packaging
 # input — builder and registry share the exact same tree.
 

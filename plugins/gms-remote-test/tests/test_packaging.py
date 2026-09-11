@@ -1,7 +1,7 @@
-"""Agent package packaging tests (10.txt §二十一, §七/§八).
+"""Agent package packaging tests.
 
-Gates the self-contained plugin payload: the plugin must carry the Skill
-(10.txt §七), all three manifests must exist and agree on one version, the
+Gates the self-contained plugin payload: the plugin must carry the Skill,
+all three manifests must exist and agree on one version, the
 six version declarations must match package.yaml, and no legacy auth
 semantics may leak into the payload.
 """
@@ -31,7 +31,7 @@ def package_version() -> str:
 
 
 def test_plugin_is_self_contained_skill_plus_mcp():
-    # 10.txt §七: installing the plugin must deliver MCP tools AND the Skill.
+    # Installing the plugin must deliver MCP tools AND the Skill.
     assert (PLUGIN_DIR / "skills" / "gms-remote-test" / "SKILL.md").is_file()
     assert (PLUGIN_DIR / "scripts" / "mcp_server.py").is_file()
     assert (PLUGIN_DIR / "scripts" / "gms-remote-test.sh").is_file()
@@ -39,16 +39,16 @@ def test_plugin_is_self_contained_skill_plus_mcp():
 
 def test_kimi_manifest_declares_skills_and_launcher():
     manifest = json.loads((PLUGIN_DIR / "kimi.plugin.json").read_text(encoding="utf-8"))
-    # 10.txt §八: Kimi native plugin must bundle the skill directory.
+    # Kimi native plugin must bundle the skill directory.
     assert manifest["skills"] == "./skills/"
     command = manifest["mcpServers"]["gms"]["command"]
-    # 10.txt §十八: the launcher is the Python edition (reads TOML profiles).
+    # The launcher is the Python edition (reads TOML profiles).
     assert "mcp_launcher.py" in command, "MCP must launch through the runtime launcher"
     assert manifest["mcpServers"]["gms"]["env"]["GMS_AGENT_CLIENT"] == "kimi"
 
 
 def test_codex_native_manifest_exists():
-    # 10.txt §九: Codex native plugin packaging.
+    # Codex native plugin packaging.
     manifest_path = PLUGIN_DIR / ".codex-plugin" / "plugin.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["name"] == "gms-remote-test"
@@ -71,7 +71,7 @@ def test_six_way_version_contract():
 
 
 def test_plugin_payload_matches_skill_source():
-    # Every generated file must be byte-identical to its source (11.txt):
+    # Every generated file must be byte-identical to its source:
     # runtime/* → scripts/*, skill/* → skills/gms-remote-test/*.
     RUNTIME_DIR = REPO_ROOT / "agent" / "gms-remote-test" / "runtime"
     pairs = [
@@ -97,7 +97,7 @@ def test_sync_package_idempotent():
 
 
 def test_no_legacy_authorized_true_in_payload_docs():
-    # 10.txt P0: agent-facing docs must never teach the retired authorized=true.
+    # Agent-facing docs must never teach the retired authorized=true.
     for doc in PLUGIN_DIR.rglob("*.md"):
         text = doc.read_text(encoding="utf-8")
         # Fold line wraps first, then evaluate per sentence, so historical

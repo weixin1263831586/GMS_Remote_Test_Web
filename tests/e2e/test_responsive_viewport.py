@@ -1,4 +1,4 @@
-"""Responsive viewport matrix E2E (12.txt P1).
+"""Responsive viewport matrix E2E.
 
 For every page and a matrix of viewports (mobile portrait through desktop),
 assert the document never overflows horizontally:
@@ -20,7 +20,7 @@ from tests import test_runtime_ui_smoke as runtime_ui_smoke
 from tests.e2e.test_all_controls import ALL_PAGES
 
 
-# 12.txt §八: minimum viewport matrix — phone portrait, tablet, laptop,
+# Minimum viewport matrix — phone portrait, tablet, laptop,
 # desktop. Tolerance absorbs scrollbar rounding differences across browsers.
 VIEWPORTS = [
     {"width": 360, "height": 800},
@@ -81,7 +81,7 @@ class ResponsiveViewportE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                     )
 
     def test_device_config_modal_controls_reachable_on_narrow_viewport(self):
-        """The dcfg-toolbar must wrap instead of clipping inputs (12.txt §八)."""
+        """The dcfg-toolbar must wrap instead of clipping inputs."""
         page = self.new_page()
         self.addCleanup(page.close)
         page.set_viewport_size(VIEWPORTS[0])  # 360x800 — narrowest

@@ -180,7 +180,7 @@ gms_rt_logcat(device="RK3562GMS7", args="-s ActivityManager")
 - Agents always get one-shot dump mode: the tool (and the CLI under
   `--non-interactive`) appends `-d` when no dump flag (`-d/-t/-T/-g/-L/-p`)
   is present, so the call terminates instead of streaming.
-- **Clearing the buffer is human-only (R17, 10.txt §六).** `logcat -c`
+- **Clearing the buffer is human-only.** `logcat -c`
   destroys diagnostic evidence (your platform's incident data). The MCP
   tool denies `clear=true`, raw `-c`, `--clear` and combined short forms
   (`-dc`) in args alike. The "clear, reproduce, capture" triage flow is a

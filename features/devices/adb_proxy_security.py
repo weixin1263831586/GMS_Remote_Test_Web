@@ -98,7 +98,7 @@ def _local_secret() -> bytes:
             # newline.  Tolerate exactly that shape, but never strip a
             # genuine 32-byte binary key: random bytes can start/end with
             # whitespace (e.g. b"\n"), and stripping them made the file
-            # unreadable forever (R06).
+            # unreadable forever.
             if value != value[:32] + b"\n":
                 raise RuntimeError("ADB Proxy secret file is invalid")
             value = value[:32]

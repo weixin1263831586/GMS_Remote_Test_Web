@@ -248,7 +248,7 @@ if __name__ == "__main__":
 
 class StartClusterTestTransportPolicyTests(unittest.TestCase):
     def test_adb_proxy_device_rejects_physical_usb_module(self):
-        """R08: /api/test/start (workflow path) must enforce the same
+        """The /api/test/start workflow path must enforce the same
         transport compatibility policy as /api/cluster/jobs — a test that
         requires a physical USB channel cannot run on an ADB Proxy device."""
         with tempfile.TemporaryDirectory() as directory:
@@ -283,7 +283,7 @@ class StartClusterTestTransportPolicyTests(unittest.TestCase):
 
 class StartClusterTestDispatchCompensationTests(unittest.TestCase):
     def test_command_failure_fails_job_and_releases_claims(self):
-        """R09: when the dispatch-command write fails after the job was
+        """When the dispatch-command write fails after the job was
         persisted, the job must be transitioned to failed and its claims
         released — instead of leaving an `assigned` job with no commands."""
         from foundation.command_result import CommandResult  # noqa: F401

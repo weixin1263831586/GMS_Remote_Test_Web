@@ -97,7 +97,8 @@ def usbip_attached_ports(ssh_manager, ssh) -> set[str] | None:
 
     Returns ``None`` when the port listing command itself failed: callers
     must treat that as "state unknown", NOT as "no ports attached" —
-    an empty set here used to make failed detaches look successful (R07).
+    an empty set here used to make failed detaches look successful.
+    See docs/architecture/adr/0005-usbip-firmware-ownership.md.
     """
     result = ssh_manager.execute_command(
         ssh, USBIP_PORT_COMMAND, timeout=10
@@ -148,7 +149,7 @@ def detach_ubuntu_usbip_ports(
         )
         # 仅当 detach 命令成功或端口确实已消失时才计入 detached，
         # 否则调用方会误以为端口已释放并继续 attach。
-        # 确认查询失败（None）时状态未知，不计成功，避免假 detach (R07)。
+        # 确认查询失败（None）时状态未知，不计成功，避免假 detach。
         ports_after = usbip_attached_ports(ssh_manager, ssh)
         if ports_after is None:
             logger.warning(

@@ -1,4 +1,4 @@
-"""GMS Windows Source Agent - firmware flash job executor (15.txt architecture).
+"""GMS Windows Source Agent - firmware flash job executor.
 
 常驻运行在 Windows 源主机的交互桌面会话（计划任务 /IT 自启动），监听文件
 队列并驱动 RKDevTool GUI 完成完整固件烧写。
@@ -17,6 +17,8 @@ cls=#32770 可枚举可操作）。
 
 烧写结果判定：轮询 RKDevTool 日志（Log 目录按天滚动）尾部，匹配
 Download Firmware Success / Fail。Controller 端会另做 SFTP 拉取复核。
+
+See docs/architecture/adr/0005-usbip-firmware-ownership.md.
 """
 
 import json

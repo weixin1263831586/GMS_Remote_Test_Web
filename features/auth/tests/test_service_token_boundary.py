@@ -1,7 +1,7 @@
 """Service-token boundary tests.
 
-Split from test_security_boundary.py (11.txt P1-3: the file outgrew the
-reviewable-size gate in tests/architecture/test_file_size_rules.py).
+Split from test_security_boundary.py after the file outgrew the
+reviewable-size gate in tests/architecture/test_file_size_rules.py.
 Covers worker-token routes and service authentication auditing; shares the
 production-bootstrap fixture via SecurityBoundaryFixtureTests.
 """

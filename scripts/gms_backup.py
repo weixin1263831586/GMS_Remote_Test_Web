@@ -211,16 +211,33 @@ def _stage_sources(project_root: Path, run_home: Path | None, stage: Path) -> No
     _copy_tree(data_root, payload / 'project' / 'data')
 
     for relative in (
+        Path('configs/config.json'),
         Path('configs/runtime.json'),
         Path('configs/config_runtime.json'),
         Path('configs/cluster.json'),
+        Path('configs/worker_tokens.json'),
+        Path('configs/build_servers.json'),
+        Path('configs/automation_profiles.json'),
+        Path('configs/user_tools_data.json'),
+        Path('configs/redmine_user_map.json'),
     ):
         source = project_root / relative
+        if relative == Path('configs/config.json') and source.is_symlink():
+            if source.resolve() != (project_root / 'configs/local/deployment.json').resolve():
+                raise BackupError('unexpected configuration compatibility link')
+            continue
         if source.is_file():
             _copy_file(source, payload / 'project' / relative)
     certificate_dir = project_root / 'configs/certs'
-    if certificate_dir.is_dir():
+    if certificate_dir.is_symlink():
+        if certificate_dir.resolve() != (project_root / 'configs/secrets/certs').resolve():
+            raise BackupError('unexpected certificate compatibility link')
+    elif certificate_dir.is_dir():
         _copy_tree(certificate_dir, payload / 'project' / 'configs/certs')
+    for relative in (Path('configs/local'), Path('configs/secrets')):
+        source = project_root / relative
+        if source.is_dir():
+            _copy_tree(source, payload / 'project' / relative)
 
     if run_home:
         ssh_root = run_home / '.ssh'
@@ -240,6 +257,8 @@ def _manifest(stage: Path) -> dict:
                 or relative.startswith('payload/project/data/')
                 or relative == 'payload/project/configs/certs'
                 or relative.startswith('payload/project/configs/certs/')
+                or relative.startswith('payload/project/configs/local')
+                or relative.startswith('payload/project/configs/secrets')
                 or relative == 'payload/run_home/.ssh'
                 or relative.startswith('payload/run_home/.ssh/')
             ):
@@ -510,6 +529,13 @@ def restore_backup(args: argparse.Namespace) -> Path:
                         int(entry.get('uid', 0)),
                         int(entry.get('gid', 0)),
                     )
+            canonical_certs = project_root / 'configs/secrets/certs'
+            legacy_certs = project_root / 'configs/certs'
+            if canonical_certs.is_dir() and not legacy_certs.exists():
+                legacy_certs.symlink_to('secrets/certs', target_is_directory=True)
+            compatibility = project_root / 'configs/config.json'
+            if (project_root / 'configs/local/deployment.json').is_file() and not compatibility.exists():
+                compatibility.symlink_to('local/deployment.json')
         except Exception:
             if current_data.exists():
                 shutil.rmtree(current_data)

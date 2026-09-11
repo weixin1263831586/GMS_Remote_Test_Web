@@ -182,9 +182,16 @@ class RuntimeUiHarness(unittest.TestCase):
         return page
 
     def close_initial_modals(self, page):
+        # 初始窗口内晚到的自动弹框（如客户端身份识别 500ms 延迟弹出）
+        # 最多等 2s；分层弹框（登录层之上再叠 modal）时 Escape 每次只关
+        # 一层，最多按 5 次。全部关不掉视为泄漏，断言失败。
         for _ in range(10):
             if page.locator(".modal.show").count():
-                page.keyboard.press("Escape")
+                for _ in range(5):
+                    if not page.locator(".modal.show").count():
+                        break
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(150)
                 expect(page.locator(".modal.show")).to_have_count(0)
                 return
             page.wait_for_timeout(200)
@@ -637,7 +644,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.close()
 
     def test_agent_access_panel_renders_real_scopes_after_delayed_auth(self):
-        """R10（2026-09-08 审核）真实浏览器验收。
+        """真实浏览器验收。
 
         - 匿名加载：Agent 接入管理入口隐藏；
         - 登录态经 gms:auth-ready 事件补发（慢登录/重登路径）：入口立即显示；
@@ -5682,6 +5689,191 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(result["cluster"]["terminalHeader"], "flex")
             self.assertTrue(result["cluster"]["desktopReady"])
             self.assertTrue(result["cluster"]["terminalReady"])
+        finally:
+            page.close()
+
+    def test_enabling_cluster_refreshes_stale_desktop_host_directory_without_navigation(self):
+        page = self.new_page()
+        host_requests = []
+
+        def serve_cluster_hosts(route):
+            host_requests.append(route.request.url)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "hosts": [{
+                        "worker_id": "ats-worker-controller",
+                        "address": "127.0.0.1",
+                        "ssh_user": "ui-smoke",
+                        "status": "online",
+                    }, {
+                        "worker_id": "worker-a",
+                        "address": "192.0.2.10",
+                        "ssh_user": "worker-a",
+                        "status": "online",
+                    }],
+                }),
+            )
+
+        page.route("**/api/cluster/hosts", serve_cluster_hosts)
+        try:
+            self.goto_shell(page)
+            page.wait_for_function(
+                "typeof toggleClusterMode === 'function' "
+                "&& typeof refreshClusterHostDirectory === 'function'"
+            )
+            host_requests.clear()
+            result = page.evaluate(
+                """
+                async () => {
+                    const originals = {
+                        loadClusterWorkers,
+                        loadDevices,
+                        loadTestSuites,
+                        loadTestReports,
+                        mountHostWorkspacePane,
+                        showToast,
+                    };
+                    let workerRefreshForce = null;
+                    try {
+                        loadClusterWorkers = async force => {
+                            workerRefreshForce = force;
+                            return [];
+                        };
+                        loadDevices = async () => [];
+                        loadTestSuites = async () => [];
+                        loadTestReports = async () => [];
+                        mountHostWorkspacePane = () => {};
+                        showToast = () => {};
+
+                        state.clusterStatus = {
+                            enabled: true,
+                            local_worker_id: 'ats-worker-controller',
+                        };
+                        window.GmsWorkspace.update({
+                            scope_mode: 'single',
+                            worker_id: 'ats-worker-controller',
+                            device_ids: [],
+                        }, {source: 'test-setup', persist: false});
+                        desktopHosts = [{
+                            id: 'default',
+                            worker_id: 'ats-worker-controller',
+                            name: 'Controller',
+                            connection: 'ui-smoke@127.0.0.1',
+                        }];
+                        currentHost = desktopHosts[0];
+                        clusterHostDirectory = {
+                            hosts: [{
+                                worker_id: 'ats-worker-controller',
+                                address: '127.0.0.1',
+                                ssh_user: 'ui-smoke',
+                                status: 'online',
+                            }],
+                            loadedAt: Date.now(),
+                            promise: null,
+                        };
+                        currentPage = 'desktop';
+                        window.hostWorkspaceInitialized = true;
+                        window.terminalWorkspaceInitialized = false;
+                        hostWorkspaceScopeModeInitialized = true;
+                        hostWorkspaceClusterEnabled = false;
+                        hostWorkspace.layout = 'single';
+                        hostWorkspace.panes = [{type: 'desktop', hostId: 'default'}];
+                        hostWorkspace.maximized = null;
+                        hostWorkspace.clusterState = {
+                            layout: 'single',
+                            panes: [{type: 'desktop', hostId: 'default'}],
+                            maximized: null,
+                        };
+                        hostWorkspace.instances.clear();
+                        hostWorkspace.renderedSignature = null;
+                        document.getElementById('host-workspace-grid').replaceChildren();
+                        renderHostWorkspace();
+
+                        const paneBefore = document.querySelector('[data-workspace-pane="0"]');
+                        const body = document.getElementById('host-workspace-body-0');
+                        const retainedFrame = document.createElement('iframe');
+                        body.replaceChildren(retainedFrame);
+                        hostWorkspace.instances.set(0, {
+                            type: 'desktop',
+                            hostId: 'default',
+                            frame: retainedFrame,
+                            disposed: false,
+                        });
+
+                        await toggleClusterMode();
+
+                        const select = document.querySelector(
+                            '[data-workspace-pane="0"] select[aria-label="主机"]'
+                        );
+                        return {
+                            workerRefreshForce,
+                            scopeMode: window.GmsWorkspace.get().scope_mode,
+                            optionValues: Array.from(select.options).map(option => option.value),
+                            paneRetained: paneBefore === document.querySelector('[data-workspace-pane="0"]'),
+                            frameRetained: retainedFrame === document.querySelector('#host-workspace-body-0 iframe'),
+                        };
+                    } finally {
+                        loadClusterWorkers = originals.loadClusterWorkers;
+                        loadDevices = originals.loadDevices;
+                        loadTestSuites = originals.loadTestSuites;
+                        loadTestReports = originals.loadTestReports;
+                        mountHostWorkspacePane = originals.mountHostWorkspacePane;
+                        showToast = originals.showToast;
+                    }
+                }
+                """
+            )
+
+            self.assertTrue(result["workerRefreshForce"])
+            self.assertEqual(result["scopeMode"], "cluster")
+            self.assertIn("cluster:worker-a", result["optionValues"])
+            self.assertTrue(result["paneRetained"])
+            self.assertTrue(result["frameRetained"])
+            self.assertEqual(len(host_requests), 1)
+        finally:
+            page.close()
+
+    def test_cluster_worker_heartbeat_invalidates_missing_host_directory_entry(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof handleServerEvent === 'function'")
+            calls = page.evaluate(
+                """
+                () => {
+                    const originalRefresh = window.refreshClusterHostDirectoryForWorker;
+                    const originalPage = currentPage;
+                    const originalContext = window.GmsWorkspace.get();
+                    const refreshCalls = [];
+                    try {
+                        window.GmsWorkspace.update({
+                            scope_mode: 'cluster',
+                            worker_id: 'ats-worker-controller',
+                        }, {source: 'test-setup', persist: false});
+                        currentPage = 'reports';
+                        window.refreshClusterHostDirectoryForWorker = async (...args) => {
+                            refreshCalls.push(args);
+                        };
+                        handleServerEvent('worker.updated', {
+                            worker_id: 'worker-late',
+                            status: 'online',
+                        });
+                        return refreshCalls;
+                    } finally {
+                        window.refreshClusterHostDirectoryForWorker = originalRefresh;
+                        currentPage = originalPage;
+                        window.GmsWorkspace.update(originalContext, {
+                            source: 'test-cleanup',
+                            persist: false,
+                        });
+                    }
+                }
+                """
+            )
+            self.assertEqual(calls, [["worker-late", "online"]])
         finally:
             page.close()
 

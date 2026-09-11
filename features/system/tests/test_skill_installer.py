@@ -1,6 +1,6 @@
 """Skill archive download endpoint + deprecated installer wrapper tests.
 
-11.txt 收口: the legacy bash installer (skills/.../scripts/install.sh) is
+The legacy bash installer (skills/.../scripts/install.sh) is
 RETIRED — the single install lifecycle is GET /api/agent/install →
 gms-agent install/update/rollback/enroll. What remains here:
 

@@ -505,7 +505,7 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertIn("echo $!", start_cmd)
 
     def test_vid_only_request_not_reused_from_serial_only_instance(self):
-        # P1-4 回归：旧实例带 --serial S1，请求追加 --vid 18d1 时，
+        # 回归：旧实例带 --serial S1，请求追加 --vid 18d1 时，
         # serial-only 实例只导出串号命中的设备，不能声称已覆盖 VID。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
@@ -552,7 +552,7 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertIn("--vid 18d1", start_cmd)
 
     def test_vid_addition_merges_and_restarts(self):
-        # P1-4 主用例：旧实例 --vid 2207，请求 --vid 18d1，必须判定为
+        # 主用例：旧实例 --vid 2207，请求 --vid 18d1，必须判定为
         # 覆盖不足并合并重启，而不是错误复用。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),

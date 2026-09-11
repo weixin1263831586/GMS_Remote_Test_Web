@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from foundation.cluster_port import DEFAULT_LOCAL_WORKER_ID
+from foundation.config_paths import cluster_config_path, example_config_path
 
 
 def configured_max_bytes(env_name: str, configured: int) -> int:
@@ -32,7 +33,10 @@ class ClusterConfig:
 
     @classmethod
     def load(cls) -> ClusterConfig:
-        default_path = Path(__file__).resolve().parents[2] / "configs/cluster.json"
+        root = Path(__file__).resolve().parents[2]
+        default_path = cluster_config_path(root)
+        if not default_path.is_file() and "GMS_CLUSTER_CONFIG" not in os.environ:
+            default_path = example_config_path(root, "cluster.json")
         path = Path(os.getenv("GMS_CLUSTER_CONFIG", default_path))
         raw = {}
         if path.is_file():

@@ -382,7 +382,7 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
             value_to_devices.setdefault(source_host, []).append(device_id)
         # 将 worker_id 映射为友好名称
         worker_names: dict[str, str] = {}
-        # R34: get_cluster_service was not imported here — the NameError was
+        # get_cluster_service was not imported here — the NameError was
         # swallowed by this bare except and the friendly-name backfill
         # silently degraded.  Import explicitly and narrow the guard to the
         # cluster-unavailable case only.
@@ -408,7 +408,8 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
         # 收集每台设备的属性值
         value_to_devices = {}
         if raw_devices:
-            # R28: acquire the pooled SSH connection off the event loop.
+            # 在事件循环外获取池化的 SSH 连接。
+            # See docs/architecture/adr/0004-ssh-execution-boundary.md.
             async with AsyncSSHConnection() as ssh:
                 for device_id in raw_devices:
                     base_info = await asyncio.to_thread(

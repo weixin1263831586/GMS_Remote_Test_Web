@@ -1,4 +1,4 @@
-"""Registry/builder ZIP contract tests (10.txt §七: one ZIP implementation).
+"""Registry/builder ZIP contract tests (one ZIP implementation).
 
 The Controller registry and tools/build_agent_package.py must produce the
 SAME single-root layout — the exact bytes gms-agent's extractor expects.
@@ -89,7 +89,7 @@ class BuilderContractTests(unittest.TestCase):
             }
         self.assertEqual(modes["gms-remote-test/scripts/gms-remote-test.sh"], 0o755)
         self.assertEqual(modes["gms-remote-test/scripts/gms-agent"], 0o755)
-        # 11.txt 审核 P0-4: the plugin manifests exec the launcher directly —
+        # the plugin manifests exec the launcher directly —
         # a shebang-carrying .py must ship 0755 or native plugin launch dies
         # with "Permission denied".
         self.assertEqual(modes["gms-remote-test/scripts/mcp_launcher.py"], 0o755)

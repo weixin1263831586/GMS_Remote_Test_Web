@@ -1,9 +1,10 @@
 """Pinned jq binary distribution (GET /api/system/tools/jq).
 
-Extracted from api.py (2026-09-08 R13 architecture gate) so the system API
-stays under the reviewable-size limit. Air-gapped build servers fetch this
-file from the Controller instead of GitHub; the staged file is validated
-before serving so a broken staging never reaches installers.
+Extracted from api.py so the system API stays under the reviewable-size
+limit (see docs/architecture/adr/0002-feature-foundation-boundary.md).
+Air-gapped build servers fetch this file from the Controller instead of
+GitHub; the staged file is validated before serving so a broken staging
+never reaches installers.
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ async def serve(request: Request) -> Response:
     (same origin as the ZIP and the Ed25519 signing key), so fetching jq
     from here keeps air-gapped build servers working without GitHub
     access. 404 when the pinned file is absent — never a redirect.
-    R12: the staged file is validated (ELF64 / x86-64 / sane size) before
+    The staged file is validated (ELF64 / x86-64 / sane size) before
     serving; the installer additionally runs `jq --version` after download.
     """
     try:

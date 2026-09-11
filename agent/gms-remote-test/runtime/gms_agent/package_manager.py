@@ -1,4 +1,4 @@
-"""gms_agent.package_manager — the GMS agent package lifecycle (10.txt §二十九~§三十六).
+"""gms_agent.package_manager — the GMS agent package lifecycle.
 
 Extracted from the gms-agent single-file installer: registry download +
 Ed25519 manifest verification, safe extraction, immutable versions/<v>/
@@ -14,7 +14,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import stat
 import subprocess
 import sys
@@ -24,6 +23,8 @@ import urllib.request
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+
+from gms_agent import profile_store
 
 
 # SCRIPT_DIR in the module context = the runtime/ directory (parent of the
@@ -39,15 +40,14 @@ RUNTIME_ROOT = Path(
 )
 VERSIONS_DIR = RUNTIME_ROOT / "versions"
 CURRENT_LINK = RUNTIME_ROOT / "current"
-MCP_ENV_DIR = RUNTIME_ROOT / "mcp"
-STATE_DIR = Path(
-    os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")
-) / "gms-remote-test"
+# Profile storage & the service-token STATE_DIR live in gms_agent.profile_store
+# (single source of truth, ADR 0003); this module only owns versions/<v>/ + the
+# current link.
 
 CLIENTS = ("codex", "kimi", "kkagent")
 PACKAGE_SHA_MARKER = ".package-sha256"
 
-# Safe-extract guard rails (10.txt §十九): the registry archive is
+# Safe-extract guard rails: the registry archive is
 # semi-trusted transport (SHA-256 pre-verified) but extraction must still
 # refuse anything that escapes the staging root.
 MAX_ARCHIVE_FILES = 5000
@@ -74,7 +74,7 @@ def cli_version_in(root: Path) -> str | None:
 
     Both layouts carry gms-remote-test.sh one level below the root:
       distribution/generated layout: <root>/scripts/gms-remote-test.sh
-      source layout (11.txt):         <root>/runtime/gms-remote-test.sh
+      source layout:                 <root>/runtime/gms-remote-test.sh
     """
     for scripts_dir in ("scripts", "runtime"):
         marker = root / scripts_dir / "gms-remote-test.sh"
@@ -90,8 +90,8 @@ def local_package_root(arg_package: str, script_dir: Path | None = None) -> Path
 
     Valid package roots contain gms-remote-test.sh one level below them:
     the extracted distribution archive (<root>/scripts/…), the generated
-    plugin payload (plugins/gms-remote-test/) or — in the source tree
-    (11.txt layout) — the agent package root itself
+    plugin payload (plugins/gms-remote-test/) or — in the source tree —
+    the agent package root itself
     (agent/gms-remote-test/, carrying runtime/…). A standalone gms-agent
     downloaded via GET /api/agent/install sits alone in e.g. /tmp and
     matches nothing — install then bootstraps from the registry.
@@ -109,10 +109,10 @@ def local_package_root(arg_package: str, script_dir: Path | None = None) -> Path
 
 def package_tree_sha256(root: Path) -> str:
     """Stable content digest of a package tree (version != content identity
-    is exactly what this pins; see 10.txt §二十一).
+    is exactly what this pins).
 
     The digest is computed over the CANONICAL distribution paths so a
-    source-layout tree (agent/gms-remote-test, 11.txt) and its normalized
+    source-layout tree (agent/gms-remote-test) and its normalized
     versions/<v>/ copy produce the same value: runtime/… maps to scripts/…,
     skill/… maps to skills/gms-remote-test/…, manifests/* map to the plugin
     root. Non-runtime scaffolding is excluded from the digest so a source
@@ -211,7 +211,7 @@ def http_get(url: str, ca_cert: str = "", timeout: int = 60) -> tuple[bytes, dic
             context.verify_mode = ssl.CERT_NONE
 
     class _NoRedirects(urllib.request.HTTPRedirectHandler):
-        # 11.txt 审核 P1-10: urllib follows redirects by default, which lets
+        # urllib follows redirects by default, which lets
         # a same-origin endpoint bounce the package fetch to another host.
         # Registry downloads must never leave the pinned origin.
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -290,7 +290,7 @@ def artifact_url_ok(url: object, server: str) -> bool:
     """Artifact must be http(s) AND same origin as the Controller (no
     off-host download redirects baked into a tampered manifest).
 
-    11.txt 审核 P1-10: netloc-only comparison let a manifest point an
+    Historically, netloc-only comparison let a manifest point an
     https origin at an http artifact URL (downgrade to plaintext). The
     scheme must match too; http_get() disables redirects so a same-origin
     endpoint cannot bounce the fetch off-host either.
@@ -307,7 +307,7 @@ def artifact_url_ok(url: object, server: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Safe extraction (10.txt §十九)
+# Safe extraction
 # ---------------------------------------------------------------------------
 
 def safe_extract(archive_path: Path, dest: Path) -> None:
@@ -357,7 +357,7 @@ def fetch_registry_package(
 ) -> tuple[Path, Path, str, str]:
     """Download + verify the registry package; returns (root, staging, version, tree_sha256).
 
-    Integrity chain (10.txt §二十): the manifest carries the artifact
+    Integrity chain: the manifest carries the artifact
     SHA-256 AND an optional Ed25519 signature (signed by the Controller's
     release key, GMS_SKILL_SIGNING_KEY_FILE). The client pins the release
     public key via GMS_AGENT_VERIFY_KEY_B64 (base64 SubjectPublicKeyInfo
@@ -366,7 +366,7 @@ def fetch_registry_package(
     see agent_bootstrap_installer). When a key is configured, an absent or
     invalid signature is a hard failure.
 
-    ``expected_version`` (4.txt 审核 P1-7): when the caller already fetched
+    ``expected_version``: when the caller already fetched
     a manifest for its version decision (cmd_update), the package fetch must
     NOT read the manifest a second time — two reads let a racing registry
     serve "new version" for the comparison and then install a validly-signed
@@ -464,7 +464,7 @@ def flip_current(target: Path) -> None:
 
 
 def normalize_package_tree(source_root: Path) -> Path:
-    """Rewrite a SOURCE-layout package (agent/gms-remote-test, 11.txt) into
+    """Rewrite a SOURCE-layout package (agent/gms-remote-test) into
     the canonical DISTRIBUTION layout (runtime/ → scripts/, skill/ →
     skills/gms-remote-test/, manifests/* → plugin-root manifests).
 
@@ -510,7 +510,7 @@ def install_runtime(source_root: Path, version: str, sha256: str) -> Path:
     flip `current` atomically.
 
     Version directories are content-addressed by the recorded tree SHA: an
-    existing directory with a different digest is an error (10.txt §二十一)
+    existing directory with a different digest is an error
     — release a new version instead of mutating an installed one.
 
     Source-layout trees (agent/gms-remote-test) are normalized to the
@@ -561,132 +561,50 @@ def client_skill_root(client: str) -> Path:
     )
 
 
-def profile_name(client: str) -> str:
-    host = socket.gethostname().split(".")[0]
-    return f"{client}-{host}-{os.getuid()}"
-
-
-def profile_candidates(client: str) -> list[Path]:
-    """List profiles for a client without guessing which one is active."""
-
-    if not PROFILE_ROOT.is_dir():
-        return []
-    return sorted(PROFILE_ROOT.glob(f"{client}-*.toml"))
-
-
 # ---------------------------------------------------------------------------
-# TOML profiles (10.txt §十八: 取代 export env + source 方案)
+# TOML profiles (取代 export env + source 方案)
+#
+# profile 存储/解析/选择收口到 gms_agent.profile_store（ADR 0003）——
+# launcher、
+# lifecycle 与 SDK 共享同一实现；本模块只保留生命周期语义（write_profile 的
+# sticky-insecure 策略、update/rollback 的 fail-closed server 回读）。
 # ---------------------------------------------------------------------------
 
-PROFILE_ROOT = Path(
-    os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
-) / "gms-agent" / "profiles"
-
-
-def _toml_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def write_profile_toml(
-    profile: str, client: str, server: str, ca_cert: str,
-    insecure: bool | None = None,
-) -> Path:
-    """Write ~/.config/gms-agent/profiles/<profile>.toml (0600).
-
-    Data-only TOML — no shell semantics, no `source`ing, no quoting
-    ambiguity (10.txt §十七/§十八). The launcher (mcp_launcher.py) and the
-    SDK read it directly.
-    """
-    token_file = STATE_DIR / f"{profile}.token"
-    PROFILE_ROOT.mkdir(parents=True, exist_ok=True)
-    lines = [
-        f'profile = "{_toml_escape(profile)}"',
-        f'client = "{_toml_escape(client)}"',
-        "",
-        "[controller]",
-        f'url = "{_toml_escape(server)}"',
-    ]
-    if ca_cert:
-        lines.append(f'ca_cert = "{_toml_escape(ca_cert)}"')
-    if insecure is None:
-        insecure = os.environ.get("GMS_INSTALL_INSECURE", "") == "1"
-    if insecure:
-        # Install ran without a trusted CA (self-signed deployment); the
-        # launcher maps this to GMS_CURL_INSECURE=1 for the runtime.
-        lines.append("insecure = true")
-    lines += [
-        "",
-        "[auth]",
-        'mode = "service-token"',
-        f'token_file = "{_toml_escape(str(token_file))}"',
-        "",
-    ]
-    path = PROFILE_ROOT / f"{profile}.toml"
-    path.write_text("\n".join(lines), encoding="utf-8")
-    path.chmod(0o600)
-    return path
-
-
-def read_profile_toml(path: Path) -> dict[str, dict[str, str]]:
-    """Minimal TOML reader for the fixed profile shape (top-level strings
-    + [section] tables with string values). No external deps on py3.10."""
-    result: dict[str, dict[str, str]] = {"": {}}
-    section = ""
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            section = line[1:-1].strip()
-            result.setdefault(section, {})
-            continue
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-            value = value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
-        result[section][key] = value
-    return result
-
-
-def load_profile(profile: str) -> dict[str, str]:
-    """Flat view of a profile TOML: profile/client/server/ca_cert/token_file."""
-    path = PROFILE_ROOT / f"{profile}.toml"
-    if not path.is_file():
-        return {}
-    data = read_profile_toml(path)
-    flat = dict(data.get("", {}))
-    for section in ("controller", "auth"):
-        flat.update(data.get(section, {}))
-    return flat
+# Storage primitives re-exported unchanged so existing callers (and tests)
+# keep one import surface:
+profile_name = profile_store.profile_name
+profile_candidates = profile_store.profile_candidates
+read_profile_toml = profile_store.read_profile_toml
+load_profile = profile_store.load_profile
+write_profile_toml = profile_store.write_profile_toml
 
 
 def profile_server_and_ca(client: str) -> tuple[str, str]:
-    """Re-read Controller URL / CA from an existing profile (update/rollback
-    re-activation must not need the user to repeat --server). The TOML
-    profile (~/.config/gms-agent/profiles/) is the single authoritative
-    store (12.txt P1: the legacy <client>.env fallback was removed together
-    with the launcher's first-.env-wins glob)."""
-    server, ca = "", ""
-    if PROFILE_ROOT.is_dir():
-        # Find the TOML profile for this client (profile files are named
-        # <client>-<host>-<uid>.toml).
-        for candidate in sorted(PROFILE_ROOT.glob(f"{client}-*.toml")):
-            flat = load_profile(candidate.stem)
-            if flat.get("profile"):
-                server = flat.get("url", "")
-                ca = flat.get("ca_cert", "")
-                break
-    return server.rstrip("/"), ca
+    """Re-read Controller URL / CA from the client's TOML profile
+    (update/rollback re-activation must not need the user to repeat
+    --server).
+
+    Fail-closed (ADR 0003): with zero or multiple profiles for this client
+    this returns ("", "") — a multi-Controller host must resolve the
+    ambiguity via GMS_REMOTE_TEST_SERVER / an explicit profile, never via
+    sorted()-first guessing. The legacy <client>.env fallback was removed
+    together with the launcher's first-.env-wins glob."""
+
+    selected = profile_store.resolve_profile(client)
+    if selected is None:
+        return "", ""
+    flat = profile_store.load_profile(selected.stem)
+    if not flat.get("profile"):
+        return "", ""
+    return profile_store.controller_url(flat), profile_store.ca_cert(flat)
 
 
 def _profile_insecure(name: str) -> bool:
     """Sticky insecure flag: once a profile was written with the
     TLS-fallback policy, later re-activations (update/rollback)
     keep it even when GMS_INSTALL_INSECURE is unset."""
-    path = PROFILE_ROOT / f"{name}.toml"
+
+    path = profile_store.profile_path(name)
     if path.is_file():
         for raw_line in path.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
@@ -696,27 +614,28 @@ def _profile_insecure(name: str) -> bool:
 
 
 def write_profile(client: str, server: str, ca_cert: str) -> str:
-    """Write the client profile (TOML only, 12.txt P1).
+    """Write the client profile (TOML only).
 
     ~/.config/gms-agent/profiles/<profile>.toml (0600) is the single
     authoritative store, read by mcp_launcher.py / the SDK / the CLI. The
     legacy <client>.env duplicate was removed: two stores invited
     first-match drift with multiple Controllers.
+
+    See docs/architecture/adr/0003-agent-profile-store.md.
     """
+
     name = profile_name(client)
     insecure = _profile_insecure(name)
-    write_profile_toml(name, client, server, ca_cert, insecure)
+    profile_store.write_profile_toml(name, client, server, ca_cert, insecure)
     return name
 
 
 def configured_clients() -> list[str]:
     """Clients this host already activated (TOML profile present)."""
+
     found = []
     for client in CLIENTS:
-        has_toml = bool(
-            PROFILE_ROOT.is_dir() and list(PROFILE_ROOT.glob(f"{client}-*.toml"))
-        )
-        if has_toml:
+        if profile_store.profile_candidates(client):
             found.append(client)
     return found
 
@@ -825,7 +744,7 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
         candidates = profile_candidates(client_name)
         selected = None
         if profile:
-            candidate = PROFILE_ROOT / f"{profile}.toml"
+            candidate = profile_store.profile_path(profile)
             if candidate in candidates:
                 selected = candidate
         elif len(candidates) == 1:
@@ -930,7 +849,7 @@ def kkagent_plugin_registry() -> Path:
 def register_kkagent_plugin(target: Path) -> None:
     """Register the copied payload in ~/.kkagent/plugins/installed.json.
 
-    11.txt 审核 P1-6: kkagent discovers local plugins through the registry
+    kkagent discovers local plugins through the registry
     file, not by directory presence. install_plugin_for_kkagent used to stop
     at copying the payload, so `--client kkagent` installs were invisible to
     the host. Mirrors plugins/gms-remote-test/scripts/install_local.sh.
@@ -943,7 +862,7 @@ def register_kkagent_plugin(target: Path) -> None:
             version = str(json.loads(manifest.read_text(encoding="utf-8")).get("version", ""))
         except ValueError:
             version = ""
-    # 4.txt 审核 P1-9: a corrupt registry must never be silently replaced
+    # A corrupt registry must never be silently replaced
     # with {} — one bad byte would wipe every OTHER plugin's registration on
     # the next install. Fail closed (back up the broken file, abort) so the
     # user can decide; the write itself goes through temp-file + os.replace
@@ -986,7 +905,7 @@ def register_kkagent_plugin(target: Path) -> None:
         entry["installedAt"] = now
     registry.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, indent=2) + "\n"
-    # Atomic replace (4.txt 审核 P1-9): temp file + os.replace so a crash
+    # Atomic replace: temp file + os.replace so a crash
     # mid-write leaves the previous registry intact.
     tmp = registry.with_name(f".installed.json.{os.getpid()}")
     tmp.write_text(payload, encoding="utf-8")
@@ -1010,7 +929,7 @@ def install_plugin_for_kkagent(runtime_dir: Path) -> None:
     if payload is None:
         print("  MCP (kkagent): plugin payload not found in package; skipped", file=sys.stderr)
         return
-    # 11.txt 审核 P1-6: install into plugins/local/<id> — the location the
+    # Install into plugins/local/<id> — the location the
     # local-plugin registry (and install_local.sh) use — not bare plugins/.
     target = kkagent_home / "plugins" / "local" / "gms-remote-test"
     copytree_atomic(payload, target)
@@ -1019,12 +938,12 @@ def install_plugin_for_kkagent(runtime_dir: Path) -> None:
 
 
 def reconcile_mcp(client: str, server: str, name: str, ca_cert: str) -> None:
-    token_file = STATE_DIR / f"{name}.token"
+    token_file = profile_store.token_file(name)
     config_path = (
         client_skill_root(client).parent
         / ("mcp.json" if client == "kimi" else "config.toml")
     )
-    # 11.txt 审核 P0-3：注册的启动命令必须是 mcp_launcher.py（它强制
+    # 注册的启动命令必须是 mcp_launcher.py（它强制
     # GMS_AGENT_AUTH_MODE=service-token），而不是直接 exec mcp_server.py——
     # 后者会绕过 launcher 的安全边界，重新暴露密码/提权/审批工具。
     result = subprocess.run(
@@ -1051,7 +970,7 @@ def reconcile_mcp(client: str, server: str, name: str, ca_cert: str) -> None:
 def install_cli_dispatcher() -> list[Path]:
     """Install the CLI dispatcher plus one command link per gms-rt-* function.
 
-    11.txt 审核 P0-5: the shell dispatcher resolves its command from $1 — it
+    The shell dispatcher resolves its command from $1 — it
     never looks at argv[0] — so a fresh install that only drops a single
     `gms-rt` file leaves every advertised command (gms-rt-system-health,
     gms-rt-agent-enroll, …) and the gms-agent lifecycle CLI unusable. The
@@ -1099,12 +1018,13 @@ def install_cli_dispatcher() -> list[Path]:
             candidate.unlink()
     for link_name in sorted(links):
         link = bin_dir / link_name
-        # 4.txt 审核 P0-1: the gms-agent lifecycle CLI is a real argparse
+        # The gms-agent lifecycle CLI is a real argparse
         # program (scripts/gms-agent) — linking it to the gms-rt dispatcher
         # made `gms-agent status/enroll/update` die with "Unknown command:
         # status" right after install. Each link must resolve to the target
         # recorded for it: gms-agent → the CLI entry point, gms-rt-* → the
-        # dispatcher (argv0 subcommand resolution).
+        # dispatcher (argv0 subcommand resolution). See
+        # docs/architecture/adr/0003-agent-profile-store.md.
         if link.is_symlink() or link.exists():
             link.unlink()
         link.symlink_to(links[link_name])
@@ -1113,7 +1033,7 @@ def install_cli_dispatcher() -> list[Path]:
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle file lock (11.txt 审核 P1-7)
+# Lifecycle file lock
 # ---------------------------------------------------------------------------
 
 def lifecycle_lock():
@@ -1130,8 +1050,9 @@ def lifecycle_lock():
     def _lock():
         import fcntl
 
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        lock_path = STATE_DIR / "lifecycle.lock"
+        state_dir = profile_store.STATE_DIR
+        state_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = state_dir / "lifecycle.lock"
         handle = open(lock_path, "w")  # noqa: SIM115 — held for the critical section
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -1155,9 +1076,9 @@ class suppress_oserror:
 def activate_clients(clients: list[str], server: str, ca_cert: str) -> None:
     """Whole-package activation: skill + client registration + profile all
     derive from CURRENT_LINK, so update/rollback refresh them together
-    with the runtime (10.txt §九/§十/§十一).
+    with the runtime.
 
-    11.txt 审核 P1-7: per-client failures no longer strand the host in a
+    Per-client failures no longer strand the host in a
     mixed state — the first failure aborts activation (install fails
     loudly; update keeps the new runtime but reports which client broke
     and exits non-zero).
@@ -1177,8 +1098,7 @@ def reactivate_clients(
     ca_cert: str,
     previous_target: Path | None = None,
 ) -> list[str]:
-    """Transactional whole-package re-activation for update/rollback
-    (15.txt 审核 P1-2/P1-3).
+    """Transactional whole-package re-activation for update/rollback.
 
     Per-client Controller URL/CA are re-read from the existing profile and
     resolved ONCE (profile value, else the command-line/environment
@@ -1288,7 +1208,7 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
             sha256 = package_tree_sha256(source_root)
         else:
             # Standalone bootstrap (downloaded via GET /api/agent/install):
-            # no local package — fetch it from the registry (10.txt §四).
+            # no local package — fetch it from the registry.
             print("未检测到本地包；从 Controller Agent Package Registry 引导下载…")
             try:
                 source_root, staging_to_cleanup, version, sha256 = fetch_registry_package(
@@ -1369,7 +1289,7 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
             parts.append(int(digits or 0))
         return tuple(parts) or (0,)
 
-    # 11.txt 审核 P1-10 / 4.txt 审核 P1-7: a stale-but-validly-signed
+    # A stale-but-validly-signed
     # manifest must not be able to DOWNGRADE the host behind the user's
     # back — downgrade is an explicit `gms-agent rollback <version>`
     # decision. This holds for --force too: forcing only bypasses the
@@ -1384,7 +1304,7 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
     print(f"Updating {current} -> {latest}")
 
     try:
-        # 4.txt 审核 P1-7: pin the version decided above into the package
+        # Pin the version decided above into the package
         # fetch so a racing manifest cannot swap the artifact between the
         # comparison and the download (TOCTOU downgrade).
         source_root, staging, version, sha256 = fetch_registry_package(
@@ -1406,7 +1326,7 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
 
     # Whole-package activation: refresh skill / kkagent plugin / MCP config
     # from the NEW version for every previously configured client.
-    # 15.txt 审核 P1-3: transactional — a client activation failure flips
+    # Transactional — a client activation failure flips
     # current back to the PRE-update version and re-activates the clients
     # from it (no mixed runtime/skill/plugin state), then the error
     # propagates.
@@ -1451,7 +1371,7 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     cli_links = install_cli_dispatcher()
     print(f"CLI refreshed: {len(cli_links) - 1} gms-rt-*/gms-agent command links")
     # Rollback is whole-package too: skill/plugin/MCP must follow the
-    # symlink back to <version> (10.txt §十). 15.txt 审核 P1-2: per-client
+    # symlink back to <version>. Per-client
     # profile values are resolved ONCE inside reactivate_clients(), so
     # reconcile_mcp can no longer receive an empty server while
     # write_profile got the environment fallback.
@@ -1482,24 +1402,25 @@ def write_enrollment_token(token: str, profile: str | None = None, client: str |
     """Persist an enrolled Agent Service Token (0600) for every configured
     client profile; returns the written token-file paths.
 
-    4.txt 审核 P0-3: cmd_enroll used to derive the profile from the legacy
+    cmd_enroll used to derive the profile from the legacy
     <client>.env store only, so a TOML-only host crashed with
     FileNotFoundError AFTER the one-shot code had already been redeemed
     server-side — the token was lost with the code. Profile resolution now
-    goes through the TOML store first (authoritative) and falls back to the
-    legacy env store, so enrollment succeeds for both layouts.
+    goes through the TOML store only (gms_agent.profile_store); the legacy
+    env store no longer exists, so a TOML-only host cannot regress.
     """
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    os.chmod(STATE_DIR, 0o700)
+    state_dir = profile_store.STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(state_dir, 0o700)
     written: list[str] = []
     if profile:
-        token_file = STATE_DIR / f"{profile}.token"
+        token_file = profile_store.token_file(profile)
         token_file.write_text(token + "\n", encoding="utf-8")
         token_file.chmod(0o600)
         return [str(token_file)]
     for client_name in configured_clients():
         name = profile_name(client_name)
-        token_file = STATE_DIR / f"{name}.token"
+        token_file = profile_store.token_file(name)
         token_file.write_text(token + "\n", encoding="utf-8")
         token_file.chmod(0o600)
         written.append(str(token_file))
@@ -1549,7 +1470,7 @@ def cmd_enroll(args: argparse.Namespace) -> int:
     # configured client profile (the audit trail separates clients via
     # GMS_AGENT_CLIENT). Enroll once per client identity by re-running with
     # dedicated profiles if per-agent revocation is ever required.
-    # 4.txt 审核 P0-3: resolution must cover TOML-only profiles — the token
+    # Resolution must cover TOML-only profiles — the token
     # is written BEFORE any output so a later failure cannot lose it.
     try:
         written = write_enrollment_token(token)
@@ -1604,7 +1525,7 @@ def cmd_profile(args: argparse.Namespace) -> int:
     action = getattr(args, "profile_action", "list")
     requested_client = getattr(args, "client", "")
     requested_name = getattr(args, "name", "")
-    candidates = sorted(PROFILE_ROOT.glob("*.toml")) if PROFILE_ROOT.is_dir() else []
+    candidates = [profile_store.profile_path(name) for name in profile_store.list_profiles()]
     if requested_client:
         candidates = [
             path
@@ -1638,7 +1559,7 @@ def cmd_profile(args: argparse.Namespace) -> int:
     if not requested_name or not re.fullmatch(r"[A-Za-z0-9_.-]+", requested_name):
         print("Error: a valid profile name is required", file=sys.stderr)
         return 2
-    path = PROFILE_ROOT / f"{requested_name}.toml"
+    path = profile_store.profile_path(requested_name)
     if not path.is_file():
         print(f"Error: profile not found: {requested_name}", file=sys.stderr)
         return 2
@@ -1704,12 +1625,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     for client in configured_clients():
         state = "configured"
         token_ref = ""
-        for candidate in sorted(PROFILE_ROOT.glob(f"{client}-*.toml")) if PROFILE_ROOT.is_dir() else []:
-            flat = load_profile(candidate.stem)
+        candidates = profile_store.profile_candidates(client)
+        if candidates:
+            flat = load_profile(candidates[0].stem)
             token_path = flat.get("token_file", "")
             if token_path:
                 ref = Path(token_path)
                 token_ref = " + token" if ref.is_file() else " + token MISSING"
-            break
         print(f"  {client}: {state}{token_ref}")
     return 0

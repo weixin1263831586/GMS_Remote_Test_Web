@@ -1,4 +1,4 @@
-"""Shared allowlist for job environment variables (R01, 2026-09-08 audit).
+"""Shared allowlist for job environment variables.
 
 A job's ``env`` travels Controller → command payload → Worker subprocess.
 Unfiltered keys such as ``BASH_ENV`` / ``ENV`` / ``SHELLOPTS`` change how the

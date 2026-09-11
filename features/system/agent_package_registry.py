@@ -1,4 +1,4 @@
-"""Agent Package Registry endpoints (10.txt §十三, Phase 3).
+"""Agent Package Registry endpoints (Phase 3).
 
 The Controller becomes the single production distribution source for the
 GMS Agent Runtime. The GitHub repo stays the development source; enterprise
@@ -59,7 +59,7 @@ def _build_archive(version: str) -> bytes:
     return build_package_bytes(AGENT_PACKAGE_DIR, version, client="universal")
 
 
-# 11.txt 审核 P1: same-version content immutability. Without this cache the
+# Same-version content immutability: without this cache the
 # registry rebuilds the zip from the live working tree on EVERY request, so
 # the same version string could serve different bytes after an edit (and
 # installed hosts that already see that version never re-download). The
@@ -106,7 +106,7 @@ def _artifact_url(request: Request, version: str) -> str:
 
 
 def _manifest_signature(version: str, sha256_hex: str, size: int) -> str:
-    """Optional Ed25519 manifest signature (10.txt §二十).
+    """Optional Ed25519 manifest signature (anti-tamper binding).
 
     Signed payload = "name|version|sha256|size" — the fields a tamperer
     would need to swap. Returns "" when no signing key is configured
@@ -120,7 +120,7 @@ def _manifest_signature(version: str, sha256_hex: str, size: int) -> str:
 
 
 def _unsigned_in_production() -> bool:
-    """15.txt 审核 P2: never serve a silent SHA-only fallback in production.
+    """Never serve a silent SHA-only fallback in production.
 
     Startup validation (bootstrap.production_security) already fails fast
     without a signing key; this endpoint-level guard covers a key removed
@@ -147,7 +147,7 @@ async def agent_package_manifest(request: Request):
         return error_response(f"agent package 构建失败: {error}", status_code=500)
     sha256_hex = hashlib.sha256(archive).hexdigest()
     signature = _manifest_signature(version, sha256_hex, len(archive))
-    # 15.txt 审核 P2: production refuses to publish an unsigned manifest —
+    # Production refuses to publish an unsigned manifest —
     # the trust chain (pinned verify key → signature → artifact) must be
     # complete, not a silent SHA-only downgrade.
     if not signature and _unsigned_in_production():
@@ -197,14 +197,14 @@ async def agent_package_download(version: str, request: Request):
 
 
 async def agent_bootstrap_installer(request: Request):
-    """GET /api/agent/install — the single one-command bootstrap (10.txt §十三).
+    """GET /api/agent/install — the single one-command bootstrap.
 
     Serves agent/gms-remote-test/runtime/gms-agent with the Controller URL
     embedded. The downloaded script is STANDALONE (no package around it):
     `install` detects that and bootstraps by downloading the package from
-    the registry (gms-agent fetch_registry_package) — the two-layer
-    bootstrap lifecycle from 10.txt §四. The same base-URL validation as
-    /api/agent/install.sh applies.
+    the registry (gms-agent fetch_registry_package) — a two-layer bootstrap
+    lifecycle: standalone script first, full package on top of it. The same
+    base-URL validation as /api/agent/install.sh applies.
     """
     from urllib.parse import urlsplit
 
@@ -232,8 +232,8 @@ async def agent_bootstrap_installer(request: Request):
     )
     # Pin the release Ed25519 public key into the downloaded bootstrap so
     # its very first registry download verifies the manifest signature
-    # (10.txt §二十: no trust-on-first-use gap). Empty when signing disabled.
-    # 15.txt 审核 P2: production never hands out a SHA-only bootstrap —
+    # (no trust-on-first-use gap). Empty when signing disabled.
+    # Production never hands out a SHA-only bootstrap —
     # without the pinned verify key the first download cannot verify.
     from features.system.skill_archive_signing import skill_verify_key_b64
     from foundation.runtime_settings import is_production_environment

@@ -51,6 +51,8 @@ from .usbip_transport import (
 )
 from .usbip_transport import (
     schedule_usbip_mode_reconnect as _schedule_usbip_mode_reconnect,
+)
+from .usbip_transport import (
     usbip_reconnect as _usbip_reconnect,
 )
 from .usbip_transport import (
@@ -215,10 +217,10 @@ async def burn_firmware(
     if resp:
         return resp
 
-    # Approval Token enforcement (4.txt P0-2/P0-3): agent principals
+    # Approval Token enforcement: agent principals
     # (Bearer token, role=agent_service) burn only with a valid one-shot
     # approval. The token is consumed ONCE per burn operation and binds the
-    # canonical device list (P0-3: one approval covers the whole multi-device
+    # canonical device list (one approval covers the whole multi-device
     # operation; per-device consumption always failed on the second device).
     # Human admin sessions are unaffected.
     from features.auth import AGENT_ROLE, get_authenticated_user
@@ -242,10 +244,10 @@ async def burn_firmware(
     usbip_flash_routes: list[dict] = []
     usbip_reconnect_after_finish = False
     # 分块上传/check 分支会在 devices 解析前提前 return；finally 的
-    # resume/schedule 清理必须能安全遍历空表（R06 同因：分支差异导致
+    # resume/schedule 清理必须能安全遍历空表（分支差异导致
     # finally 引用未绑定变量 → UnboundLocalError 500）。
     devices: list[str] = []
-    # R06: multipart 上传分支不产生本地 staging 文件，摘要必须基于测试
+    # multipart 上传分支不产生本地 staging 文件，摘要必须基于测试
     # 主机上实际烧写的 remote_firmware 字节；显式初始化避免分支差异导致
     # NameError 500。
     local_firmware_path = None
@@ -301,15 +303,18 @@ async def burn_firmware(
         firmware_file = form.get("firmware_file")
         firmware_path = form.get("firmware_path", "").strip()
         # 烧写传输：auto（默认）/ uf（本地 upgrade_tool）。旧的
-        # fastboot/partition/transport-probe-force USB/IP 后端已按 15.txt
-        # 重构移除——USB/IP 设备统一路由到源端（Controller 本机直连）
-        # upgrade_tool uf 执行。
+        # fastboot/partition/transport-probe-force USB/IP 后端已随
+        # 重构移除——USB/IP 设备统一走 source-side flashing：Windows 源端
+        # 由 Source Agent + RKDevTool 执行，烧写前 Controller 将 USB
+        # ownership 从 Worker 交还 Source 主机（见 docs/usbip/
+        # firmware-flashing.md）。
+        # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
         burn_mode = str(form.get("burn_mode", "auto")).strip().lower() or "auto"
         if burn_mode not in {"auto", "uf"}:
             return error_response(
                 "Invalid burn_mode, expected 'auto' or 'uf'"
             )
-        # 4.txt P1 精确绑定：wipe_data 进入审批绑定串；默认 true（与
+        # 精确绑定：wipe_data 进入审批绑定串；默认 true（与
         # CLI/API 文档语义一致）。
         wipe_data = str(form.get("wipe_data", "true")).strip().lower() not in {
             "0", "false", "no"
@@ -418,7 +423,8 @@ async def burn_firmware(
                             upload_id=merged_firmware.get("upload_id", "") if merged_firmware else "",
                         )
 
-                # ---- Agent approval consumption (4.txt P0-3 + P1 精确绑定)
+                # ---- Agent approval consumption (operation 级一次性消费 +
+                # 精确绑定)
                 # Placed AFTER the firmware source is fully resolved and
                 # validated: the approval is bound server-side to the whole
                 # operation (canonical device list + SHA256 of the exact
@@ -430,12 +436,13 @@ async def burn_firmware(
                     from features.auth import auth_service as _auth
 
                     burn_mode_for_approval = burn_mode
-                    # R06: 审批必须绑定"将要烧写的确切字节"。该字节位于
+                    # 审批必须绑定"将要烧写的确切字节"。该字节位于
                     # 测试主机的 remote_firmware（multipart / 本地路径 /
                     # 远端路径最终都归一到这里），不能再用本机
                     # os.path.exists/open 读 Controller 文件系统的同名
                     # 路径——同名路径不代表同一主机的同一文件。改为在
                     # 测试主机上执行 sha256sum 取真实摘要。
+                    # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
                     _sha_output = await asyncio.to_thread(
                         runtime.ssh_manager.execute_command,
                         ssh,
@@ -555,11 +562,15 @@ async def burn_firmware(
                         status_code=409,
                     )
 
-                # ---- 15.txt 重构：USB/IP 设备的完整固件烧写改由设备
-                # 物理源端（Controller 本机直连 USB）执行 upgrade_tool uf。
-                # USB/IP 链路上的 Rockchip 多次重枚举（ADB→Loader→MaskROM）
-                # 无法维持会话，历次 Ubuntu 端方案（fastboot 分区/DI 同会话/
-                # uf+watcher）实测均不可靠，全部移除。
+                # ---- USB/IP 设备的完整固件烧写由设备物理源端执行：
+                # Windows Source 主机由 Source Agent + RKDevTool 烧写
+                # （run_source_flash）；烧写前 Controller 先将 USB ownership
+                # 从 Worker 交还 Source 主机。USB/IP 链路上的 Rockchip
+                # 多次重枚举（ADB→Loader→MaskROM）无法维持会话，历次
+                # Worker/Ubuntu 端方案（fastboot 分区/DI 同会话/uf+watcher）
+                # 实测均不可靠，已全部移除；Linux Source 完整烧写 backend
+                # 尚未实现，探测失败一律 fail closed（见下方 source_os 分流）。
+                # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
                 if usbip_flash_routes:
                     routed_set = {
                         str(dev or "").strip()
@@ -575,7 +586,7 @@ async def burn_firmware(
 
                     route_map = _usbip_device_route_map(usbip_flash_routes)
 
-                    # ---- source_os 分流（12.txt P0/P1）：route 必须显式
+                    # ---- source_os 分流：route 必须显式
                     # 携带来源 OS；Linux source 拒绝进入 Windows backend，
                     # 探测失败同样 fail closed，绝不默默走 Windows。
                     linux_source_hosts = sorted({
@@ -636,9 +647,10 @@ async def burn_firmware(
                         "Starting source-side firmware burn "
                         "(Windows Source Agent + RKDevTool)..."
                     )
-                    # ---- ownership handoff（12.txt P0/P1）：烧写前显式
+                    # ---- ownership handoff：烧写前显式
                     # 释放设备——暂停通用重连 watchdog + target 侧 vhci
                     # detach + fail-closed 复核，保证源主机物理持有设备。
+                    # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
                     released, release_error = await _release_usbip_devices_to_source(
                         ssh, usbip_flash_routes,
                     )
@@ -797,7 +809,7 @@ async def burn_firmware(
                     with contextlib.suppress(Exception):
                         await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Starting firmware burn...", "log_type": "info"})
 
-                # 统一执行层（12.txt P1）：改走 SSHExecutor.run_stream ——
+                # 统一执行层：改走 SSHExecutor.run_stream ——
                 # stdout/stderr 双流并发 drain（get_pty=True 时 stderr 并入
                 # stdout），逐行回调推送 WebSocket，退出后由执行器取状态码。
                 # 历史实现手工轮询单条 channel 会重新引入双流互锁风险。
@@ -908,12 +920,13 @@ async def burn_firmware(
         logger.error(f"Traceback: {traceback.format_exc()}")
         return error_response(str(e), 500)
     finally:
-        # 12.txt 审核修复：ownership handoff 在 release 阶段暂停了通用重连
+        # 审核修复：ownership handoff 在 release 阶段暂停了通用重连
         # watchdog（2h TTL，按 host + device_ids 双键记录，见
         # release_usbip_devices_to_source）。烧写结束（成功/失败/异常）必须
         # 对称恢复：只 resume device_id 会留下 host 级 pause，
         # schedule_usbip_reconnect 会因 host pause 拒绝调度，设备最长
         # 2 小时无法自动回到平台管理。
+        # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
         _resume_hosts = sorted({
             str(route.get("device_host") or "").strip()
             for route in usbip_flash_routes

@@ -1,4 +1,4 @@
-"""Security boundary tests verifying P0/P1 hardening from the 2.txt audit.
+"""Security boundary tests verifying the P0/P1 hardening audit.
 
 Covers:
 - Build command injection prevention (choices + pattern enforcement)

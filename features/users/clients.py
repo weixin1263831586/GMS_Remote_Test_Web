@@ -6,8 +6,9 @@ from typing import Any
 
 from features.auth import get_authenticated_user
 
-# 11.txt P2: get_client_ip 及其可信代理逻辑下沉到 foundation.networking，
+# get_client_ip 及其可信代理逻辑下沉到 foundation.networking，
 # features/users 与 features/auth 共用同一实现，避免 feature 间依赖环。
+# See docs/architecture/adr/0002-feature-foundation-boundary.md.
 from foundation.networking import get_client_ip, parse_host_address
 
 from . import runtime

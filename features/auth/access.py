@@ -68,7 +68,7 @@ def require_human_principal_when_auth_required(
 ) -> CurrentUser | None:
     """Authenticate like today, but refuse Agent Service Token principals.
 
-    11.txt P1: the MCP tool allowlist is not a security boundary — an agent
+    The MCP tool allowlist is not a security boundary — an agent
     token can call REST endpoints directly with its Bearer credential. VPN,
     SSH helpers and suite management are human-operator surfaces: without a
     matching agent scope they must fail closed here, server-side.
@@ -205,7 +205,7 @@ def require_permission_when_auth_required(permission: str):
 
 def is_elevated(request: Request) -> bool:
     """Return whether this request has a live re-authenticated elevation."""
-    # P0-1 (4.txt): elevation lives on a human *cookie* session. An
+    # Elevation lives on a human *cookie* session. An
     # agent_token principal must never inherit the elevation of a leftover
     # browser/CLI cookie that happens to ride along in the same request —
     # that would collapse the agent's scope isolation. Bearer and elevation

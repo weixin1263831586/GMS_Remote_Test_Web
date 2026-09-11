@@ -8,17 +8,16 @@ from __future__ import annotations
 
 import os
 import stat
-from pathlib import Path
 
 import pytest
 
-from foundation.secrets import validate_secret_configuration
-from foundation.security_audit import SecurityAuditLogger
 from features.system.skill_archive_signing import (
     SIGNING_KEY_ENV,
     sign_skill_archive,
     skill_verify_key_b64,
 )
+from foundation.secrets import validate_secret_configuration
+from foundation.security_audit import SecurityAuditLogger
 
 
 def test_master_key_autogenerates_when_file_missing(tmp_path, monkeypatch):

@@ -28,10 +28,11 @@ from .ui_control_api import UiControlRequest, UiTapRequest
 from .usbip import parse_adb_device_states, usbip_manager
 
 
+# 模块内部实现函数（_ 前缀）不再通过 package facade 暴露（ADR 0002：
+# features 域内私有边界）——
+# 它们的使用方只有 management_api 自身与其单测（经 from .management_api
+# import 直连）。跨 Feature 需要的能力走下方显式公开符号。
 _LAZY_API_EXPORTS = {
-    '_build_devices_management_payload': '.management_api',
-    '_build_management_props_command': '.management_api',
-    '_parse_management_device_props': '.management_api',
     'annotate_cluster_usbip_devices': '.integrations_api',
     'connect_wifi': '.operations_api',
     'create_pair_grant': '.adb_proxy_security',
@@ -95,9 +96,6 @@ __all__ = [
     "UiControlRequest",
     "UiTapRequest",
     "WifiConnectRequest",
-    "_build_devices_management_payload",
-    "_build_management_props_command",
-    "_parse_management_device_props",
     "annotate_cluster_usbip_devices",
     "bind_usbip_busid_via_ssh",
     "broadcast_device_lock_update",
@@ -122,8 +120,8 @@ __all__ = [
     "query_usbipd_device_states",
     "reconcile_cluster_usbip_command",
     "reconcile_cluster_usbip_heartbeat",
-    "release_device_locks",
     "record_usbip_source_os",
+    "release_device_locks",
     "resolve_usbip_flash_routes",
     "rockusb_loader_serials",
     "rockusb_loader_vid_pids",

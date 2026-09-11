@@ -16,7 +16,7 @@ class _ConfigManager:
 
 
 def _patch_config(trusted_proxies=None):
-    """Patch the trusted-proxy config seam (11.txt P2: now foundation-level).
+    """Patch the trusted-proxy config seam (now foundation-level).
 
     features.users.clients delegates get_client_ip to
     foundation.networking, so the config source is patched there.

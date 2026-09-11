@@ -315,7 +315,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         # 烧录页弹出管理员提权后续传，elevation 状态检查失败不 fail-open。
         self.assertIn("chunkUploadHttpError", chunks)
         self.assertIn("error.elevationRequired", chunks)
-        # 15.txt 审核 P2: elevation-expiry recovery lives in chunk-upload.js
+        # Elevation-expiry recovery lives in chunk-upload.js
         # (uploadChunksWithElevationRecovery); the firmware page only wires
         # the re-elevation prompt callback, keeping it under its size budget.
         self.assertIn("uploadChunksWithElevationRecovery", chunks)
@@ -754,7 +754,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
 
 class WorkspaceIdentityRegressions(unittest.TestCase):
-    """第二轮评审：serial 含 ":" 不得被误判为 Worker 前缀；
+    """第二轮代码评审遗留回归：serial 含 ":" 不得被误判为 Worker 前缀；
     Reports/Suite 页不得改写全局 Test Worker。"""
 
     def test_workspace_keeps_local_colon_serial(self):
@@ -815,4 +815,77 @@ class WorkspaceIdentityRegressions(unittest.TestCase):
             "deviceId.split(':', 1)[0]",
             text,
             "startTest 归属校验必须走 state.devices inventory，不得按冒号切分",
+        )
+
+    def test_modal_visibility_is_owned_exclusively_by_modal_manager(self):
+        """ModalManager 是 .modal 对话框可见性的唯一真源。
+
+        状态双写（ModalManager.close 之外再写 modal.style.display /
+        classList 'show'）会产生 Escape 后仍残留的 .modal.show（E2E 已复现）。
+
+        静态扫描规则：
+        - 任何 modal 语境目标（变量/选择器含 "modal"）上的
+          .style.display = 与 .classList.add/remove('show') 都违规；
+        - 非 modal 元素（进度条/侧栏项/下载链接等）的 display 操作不算；
+        - 'show' 类的 add/remove 仅在上下文含 toast/dismiss/drawer/
+          tooltip 等非对话框覆盖层时豁免（toast 不是 ModalManager 管辖）；
+        - web/static/js/modal.js 是实现本体，豁免。
+        """
+        allowed_files = {
+            "web/static/js/modal.js",
+            # redmine/gerrit 是 iframe 内独立应用：不加载 modal.js，使用
+            # 页面内自洽的 showModal/hideModal + 专属栈实现（syncRedmine/
+            # GerritModalState），不在平台 Shell 的 ModalManager 管辖内。
+            "features/redmine/ui/page.js",
+            "features/redmine/ui/page.html",
+            "features/gerrit/ui/page.html",
+        }
+        # shell.html 中合法的 display 写入目标（非对话框元素）。
+        allowed_display_targets = {
+            "minimized",  # device-config-minimized：最小化停靠栏
+        }
+        non_modal_overlay_words = ("toast", "dismiss", "drawer", "tooltip", "skeleton")
+        modal_target_re = re.compile(r"modal", re.IGNORECASE)
+        # 只匹配"写入"；(?!=) 排除 `=== ` 比较（读取 display 做判断是合法的）。
+        display_re = re.compile(
+            r"([\w$\)'\]]+)\.style\.display\s*=(?!=)"
+        )
+        show_re = re.compile(r"\.classList\.(?:add|remove|toggle)\(\s*['\"]show['\"]")
+        candidates = ["web/shell/shell.html"]
+        for directory in ("web/static/js", "features"):
+            candidates.extend(str(p) for p in Path(directory).rglob("*.js"))
+        candidates.extend(str(p) for p in Path("features").rglob("*.html"))
+        violations: list[str] = []
+        for path in sorted(set(candidates)):
+            if path in allowed_files:
+                continue
+            text = read_text(path)
+            for pattern in (display_re, show_re):
+                for match in pattern.finditer(text):
+                    line = text[: match.start()].count("\n") + 1
+                    context = text[max(0, match.start() - 160): match.end() + 40]
+                    context_lower = context.lower()
+                    if pattern is display_re:
+                        target = match.group(1)
+                        last_segment = re.split(r"[\W]", target)[-1]
+                        if last_segment in allowed_display_targets:
+                            continue
+                        # 只针对 modal 语境目标（按目标名判断；上下文里
+                        # 出现其他 modal 字样不代表本写入针对对话框）。
+                        if not modal_target_re.search(target):
+                            continue
+                    else:
+                        # toast/dismiss 等非对话框覆盖层豁免
+                        if any(word in context_lower for word in non_modal_overlay_words):
+                            continue
+                        # 目标与上下文都不涉及 modal 时不动（gerrit/redmine
+                        # iframe 内页有自己的栈实现，通过专属类名管理）
+                        if not modal_target_re.search(context):
+                            continue
+                    violations.append(f"{path}:{line}: {match.group(0).strip()}")
+        self.assertEqual(
+            violations,
+            [],
+            "modal 可见性只能由 ModalManager.open/close 控制（web/static/js/modal.js）：\n"
+            + "\n".join(violations),
         )

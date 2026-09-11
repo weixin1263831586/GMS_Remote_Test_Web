@@ -12,8 +12,8 @@ import logging
 
 import paramiko
 
-from foundation.ssh_executor import ssh_executor
 from foundation.command_result import CommandResult
+from foundation.ssh_executor import ssh_executor
 from foundation.ssh_security import configure_strict_host_keys
 
 

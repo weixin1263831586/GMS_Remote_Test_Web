@@ -83,7 +83,7 @@ async def upload_file(
     """File upload - supports chunked upload and resume."""
     # HEAD request: check uploaded chunks for resume
     if check_chunks and upload_id:
-        # 11.txt P2-1: upload_id 不可信——必须消毒后再拼路径，防止
+        # upload_id 不可信——必须消毒后再拼路径，防止
         # upload_id=../../x 的目录穿越读/写（对齐固件链路 safe_upload_token）。
         from foundation.uploads import safe_upload_token
 
@@ -211,7 +211,7 @@ async def _upload_file_chunk(
         if not upload_id or not file_name:
             return error_response("upload_id and file_name are required for chunk upload", 400)
 
-        # 11.txt P2-1: 消毒 upload_id，杜绝 session_dir 目录穿越写入；
+        # 消毒 upload_id，杜绝 session_dir 目录穿越写入；
         # 恶意形态会被重写为安全 token（与固件分片上传同一防御）。
         from foundation.uploads import safe_upload_token
 

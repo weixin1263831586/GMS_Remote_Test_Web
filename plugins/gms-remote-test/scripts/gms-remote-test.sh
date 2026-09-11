@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.17.1"
+GMS_RT_VERSION="0.18.0"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -18,7 +18,7 @@ GMS_RT_EXIT_PERMISSION=4
 GMS_RT_EXIT_CONFLICT=5
 GMS_RT_EXIT_NETWORK=6
 GMS_RT_EXIT_OPERATION=7
-# R30: batch operations where some devices succeeded and others failed.
+# Batch operations where some devices succeeded and others failed.
 # Mapped to GMS_RT_EXIT_OPERATION by _gms_rt_dispatch's envelope case, but
 # keeps the semantic exit code for direct callers.
 GMS_RT_EXIT_PARTIAL=7
@@ -37,7 +37,7 @@ else
     # gms-agent installs record the Controller URL (and the TLS policy for
     # self-signed deployments) in the profile TOML
     # (~/.config/gms-agent/profiles/<profile>.toml — the single authoritative
-    # source). 12.txt P1: the historical "first *.env wins" glob was removed —
+    # source). The historical "first *.env wins" glob was removed —
     # with codex-A → Controller A / codex-B → Controller B, a filesystem-glob
     # first-match is not an Agent routing policy and silently picked the
     # wrong Controller. Use `gms-agent profile` / GMS_RT_PROFILE to select.
@@ -110,7 +110,7 @@ CURL_EXIT_SSL_CERT=60
 # Authentication
 # The current backend authenticates API clients with the gms_session cookie.
 # Keep the cookie outside the repository and allow callers to override its path.
-# R32: multiple agents running under the same Unix user used to share one
+# Multiple agents running under the same Unix user used to share one
 # writable cookie jar with no concurrency protection — concurrent login/
 # logout/parallel requests clobbered each other's sessions.  A profile name
 # (GMS_RT_PROFILE) separates jars per agent; flock serialises writes to the
@@ -122,7 +122,7 @@ GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/sta
 # at a 0600 token file, every request carries Authorization: Bearer <token>
 # instead of the session cookie. The CLI never prints the token and agents
 # only ever learn the path. Token auth is mutually exclusive with the
-# cookie jar (4.txt P0-1): Bearer mode never reads or writes the cookie jar,
+# cookie jar: Bearer mode never reads or writes the cookie jar,
 # so a request can never carry both an agent token and a leftover human
 # session cookie (the server treats that combination as a privilege mix).
 # Human mode stays Cookie only.
@@ -147,8 +147,8 @@ if [ -z "$GMS_AUTH_TOKEN_FILE" ]; then
     unset _gms_default_token
 fi
 _gms_bearer_token=""  # cached per process; reloaded by _refresh_tls_args
-_gms_bearer_header_file=""  # 0600 header file (4.txt P1c: token stays out of argv)
-# Service-token mode gate (12.txt P0): when the CLI runs under an Agent
+_gms_bearer_header_file=""  # 0600 header file (token stays out of argv)
+# Service-token mode gate: when the CLI runs under an Agent
 # Service Token (Bearer), arbitrary device shell MUST carry a one-shot
 # approval token — otherwise an agent with plain terminal access could
 # bypass the MCP-layer approval entirely by calling this CLI directly.
@@ -161,7 +161,7 @@ _gms_refresh_bearer_token() {
             _gms_bearer_token=""
             return 1
         fi
-        # P1 (4.txt): reject token files whose permissions are too loose or
+        # Reject token files whose permissions are too loose or
         # whose owner is not the current user — same hard rule as the
         # Worker Token files.
         local _mode _owner
@@ -201,7 +201,7 @@ _gms_with_cookie_lock() {
     fi
     if command -v flock >/dev/null 2>&1 && [ -f "$GMS_COOKIE_LOCK_FILE" -o -w "$cookie_dir" ]; then
         (
-            # R32: failing to take the lock must NOT fall through to the
+            # Failing to take the lock must NOT fall through to the
             # unprotected command.  `|| true` used to let a lock-starved
             # process run curl anyway, which is exactly the concurrent
             # jar clobber the lock exists to prevent.  Exit non-zero from
@@ -231,7 +231,7 @@ _refresh_tls_args() {
     fi
     # Agent token: pick up the file fresh on every call (callers may export
     # GMS_AUTH_TOKEN_FILE after sourcing this script in function mode).
-    # 4.txt P1c: the token must never appear in curl's argv (visible via
+    # The token must never appear in curl's argv (visible via
     # /proc/<pid>/cmdline to same-user processes on shared build servers).
     # Instead of -H "Authorization: Bearer <token>" we write the header to a
     # 0600 temp file and let curl read it with -H @file.
@@ -245,7 +245,7 @@ _refresh_tls_args() {
         printf 'Authorization: Bearer %s\n' "$_gms_bearer_token" \
             > "$_gms_bearer_header_file"
         CURL_BEARER_ARGS=(-H "@${_gms_bearer_header_file}")
-        # Bearer-only mode: never also send the cookie jar (4.txt P0-1).
+        # Bearer-only mode: never also send the cookie jar.
         CURL_AUTH_ARGS=()
     else
         CURL_BEARER_ARGS=()
@@ -405,7 +405,7 @@ api_call() {
         _record_api_exit_code "$GMS_RT_EXIT_OPERATION"
         return "$GMS_RT_EXIT_OPERATION"
     }
-    # R32: serialise requests that may write the shared cookie jar so
+    # Serialise requests that may write the shared cookie jar so
     # concurrent CLI processes cannot clobber each other's session file.
     if [ "${#extra_args[@]}" -gt 0 ]; then
         response=$(_gms_with_cookie_lock curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
@@ -469,7 +469,7 @@ api_call() {
                 if [ "$is_auth_endpoint" = "1" ]; then
                     :
                 else
-                    # 11.txt 中优先级 §5: 透传服务端 403 body 里的
+                    # 透传服务端 403 body 里的
                     # scope_required / agent_forbidden，让 agent 能区分
                     # 「缺 scope」（可自查 agent-scopes / 申请新 token）与
                     # 「human-only 端点」（跑 auth-elevate 也没有意义）。
@@ -680,7 +680,7 @@ gms-rt-agent-enroll() {
     data=$(jq -cn --arg code "$code" '{code: $code}')
     # Enrollment is a cookie-free, token-free call by design. The one-shot
     # pairing code is a credential too — push it via stdin, not argv
-    # (4.txt P1c applies to any secret that would land in /proc cmdline).
+    # (this applies to any secret that would land in /proc cmdline).
     response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST "${API_BASE}/auth/agent-enroll" \
         -H "Content-Type: application/json" --data-binary "@-" \
         -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT" \
@@ -736,7 +736,7 @@ gms-rt-approval-create() {
             --device=*) device="${1#*=}" ;;
             --command) shift; command="${1:-}" ;;
             --command=*) command="${1#*=}" ;;
-            # 4.txt P1 精确绑定：burn 审批绑定 固件SHA256+wipe_data+burn_mode；
+            # burn 审批精确绑定 固件SHA256+wipe_data+burn_mode；
             # 服务端从这些字段派生命令串，--command 对 burn 工具被忽略。
             --firmware-sha256) shift; firmware_sha256="${1:-}" ;;
             --firmware-sha256=*) firmware_sha256="${1#*=}" ;;
@@ -1989,7 +1989,7 @@ gms-rt-devices-wait() {
 
 # Reboot multiple devices (parallel)
 gms-rt-devices-reboot() {
-    # R30: the help text promises "DEVICE1 [DEVICE2 ...]" but the old
+    # The help text promises "DEVICE1 [DEVICE2 ...]" but the old
     # implementation only consumed $1, silently dropping extra devices.
     # Collect every argument (also accepts the space-separated single-arg
     # form for backwards compatibility).
@@ -2007,7 +2007,7 @@ gms-rt-devices-reboot() {
         local success=$(echo "$response" | jq -r '.data.summary.success // 0')
         local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
 
-        # R30: request-level success:true does not mean every device
+        # Request-level success:true does not mean every device
         # succeeded.  Map partial/full failure to a non-zero exit so
         # agents can tell them apart.
         if [ "$failed" -gt 0 ] 2>/dev/null; then
@@ -2145,7 +2145,7 @@ gms-rt-devices-remount() {
 # 供 MCP image tool 使用：返回 {base64, mime_type, ...}（无 data: 前缀），
 # agent 端可直接转 MCP image content；人类终端请用 devices-scrcpy。
 gms-rt-devices-ui-dump() {
-    # 11.txt P0 §2: uiautomator dump 的平台化版本——POST /devices/ui/layout
+    # uiautomator dump 的平台化版本——POST /devices/ui/layout
     # 返回控件树 JSON（bounds/text/clickable），替代 ssh→uiautomator dump→
     # scp→本地解析的四步绕行。只读、单命令。
     local device_id="$1"
@@ -2161,17 +2161,17 @@ gms-rt-devices-ui-dump() {
 }
 
 gms-rt-devices-snapshot() {
-    # 11.txt P1 §5: 一次调用聚合设备状态快照——fingerprint、前台 activity、
+    # 一次调用聚合设备状态快照——fingerprint、前台 activity、
     # 锁屏状态、device owner/admin 列表。之前要逐条 shell + dumpsys 拼装。
     # 复用 gms-rt-devices-shell（本地 adb / SSH 直连，同 gms_rt_shell 白名单
     # 语义之外的平台诊断路径），每条独立失败降级为 null，不拖垮整个快照。
-    # 12.txt P0: snapshot probes are the documented read-only typed set;
+    # Snapshot probes are the documented read-only typed set;
     # export the typed-readonly marker so the shell gate allows only these
     # fixed probe commands in service-token mode.
     local device_id="$1"
     [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-snapshot DEVICE_ID"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
-    # 12.txt 审核修复：收紧后的 typed-readonly 白名单拒绝管道（元字符
+    # 收紧后的 typed-readonly 白名单拒绝管道（元字符
     # 复核），因此 dumpsys+grep 探针改为在函数侧取全量输出、本地 grep。
     # 每条探针命令仍是固定字符串，探针命令面不因修复而扩大。
     _snapshot_probe() {
@@ -2278,7 +2278,7 @@ gms-rt-devices-shell() {
             error "审批令牌校验失败: $(extract_api_error "$(echo "$consume_response" | sed 's/\nHTTP_STATUS:.*//')")"
             return "$GMS_RT_EXIT_PERMISSION"
         fi
-        # 12.txt P0: approval consumed server-side → unlock the local
+        # Approval consumed server-side → unlock the local
         # adb/SSH execution path exactly once for this invocation.
         _gms_approval_consumed=1
     fi
@@ -2288,7 +2288,7 @@ gms-rt-devices-shell() {
         return "$GMS_RT_EXIT_USAGE"
     fi
 
-    # 12.txt P0: in service-token mode the CLI is no longer a bypass around
+    # In service-token mode the CLI is no longer a bypass around
     # the MCP approval layer. Arbitrary shell (and interactive shell) is
     # denied without a server-consumed one-shot approval token; read-only
     # diagnosis belongs to gms_rt_shell / gms-rt-devices-snapshot.
@@ -2400,7 +2400,7 @@ gms-rt-devices-shell() {
         if [ -n "$shell_command" ]; then
             adb -s "$device_id" shell "$shell_command"
             local adb_status=$?
-            # R15: propagate the real adb exit code — swallowing it made
+            # Propagate the real adb exit code — swallowing it made
             # failed device commands report ok:true / exit_code:0.
             if [ "$adb_status" -ne 0 ]; then
                 GMS_RT_ERROR_SEEN=1
@@ -2477,7 +2477,7 @@ gms-rt-devices-logcat() {
                 return "$GMS_RT_EXIT_USAGE"
             fi
         done
-        # R31: '-T <time>' does NOT imply dump mode in logcat — it keeps
+        # '-T <time>' does NOT imply dump mode in logcat — it keeps
         # following output and would hang a non-interactive call until the
         # timeout.  Only -d/-t/-g/-L/-p/-print terminate on their own, so
         # append -d unless one of those (excluding -T) is present.
@@ -2920,51 +2920,6 @@ gms-rt-apk-analyze-attachment() {
         echo "$response" | jq '.'
         return "$GMS_RT_EXIT_OPERATION"
     fi
-}
-
-gms-rt-apk-source-search() {
-    local task_id=""
-    local query=""
-    local limit=50
-    local path_filter=""
-    local positional=()
-    # 计划 §8 契约：<task_id> --query QUERY；两个位置参数仍向后兼容。
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --query)
-                shift
-                [ $# -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }
-                query="$1"
-                ;;
-            --limit)
-                shift
-                [ $# -gt 0 ] || { error "--limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }
-                limit="$1"
-                ;;
-            --path)
-                shift
-                [ $# -gt 0 ] || { error "--path requires a value"; return "$GMS_RT_EXIT_USAGE"; }
-                path_filter="$1"
-                ;;
-            *) positional+=("$1") ;;
-        esac
-        shift
-    done
-    if [ -z "$task_id" ] && [ "${#positional[@]}" -ge 1 ]; then
-        task_id="${positional[0]}"
-    fi
-    if [ -z "$query" ] && [ "${#positional[@]}" -ge 2 ]; then
-        query="${positional[1]}"
-    fi
-    [ -z "$task_id" ] || [ -z "$query" ] && { error "Usage: gms-rt-apk-source-search <task_id> <query|--query QUERY> [--limit N] [--path FILTER]"; return "$GMS_RT_EXIT_USAGE"; }
-    check_jq
-    local url="/apk/source-search/$task_id?q=$(_urlencode "$query")&limit=$limit"
-    [ -n "$path_filter" ] && url="$url&path_filter=$(_urlencode "$path_filter")"
-    if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        api_call "$url" "GET" | jq '.'
-        return $?
-    fi
-    api_call "$url" "GET" | jq -r '.data | "query: \(.query) matches: \(.total)\(if .limited then " (limited)" else "" end) scanned_files: \(.scanned_files)", (.matches[] | "\(.path):\(.line):\(.column): \(.snippet)")'
 }
 
 gms-rt-apk-source-read() {
@@ -3657,13 +3612,13 @@ gms-rt-system-skills() {
     fi
 }
 
-# Reinstall the latest package from the bound Controller (11.txt 收口).
+# Reinstall the latest package from the bound Controller.
 gms-rt-system-update() {
     [ "$#" -eq 0 ] || {
         error "Usage: gms-rt-system-update"
         return "$GMS_RT_EXIT_USAGE"
     }
-    # 11.txt 审核 P0-5：旧实现查找相邻的 install.sh，但该脚本已随包结构
+    # 旧实现查找相邻的 install.sh，但该脚本已随包结构
     # 迁移删除——现代更新生命周期是 `gms-agent update`（registry → 校验 →
     # versions/<v>/ → 整包重激活）。优先取本脚本旁边的 gms-agent（安装的
     # runtime 与源码检出都成立），退回已安装的 current 链接。
@@ -3901,7 +3856,7 @@ gms-rt-jobs-cancel() {
 }
 
 gms-rt-jobs-follow() {
-    # 11.txt P1 §3: one call instead of jobs_status + jobs_events ping-pong.
+    # 一次调用代替 jobs_status + jobs_events 的 ping-pong。
     # Returns current status + incremental events since a cursor; when the
     # job already finished it appends a compact failed-case summary (parsed
     # server-side from test_result.xml) so agents never page raw logs.
@@ -4722,15 +4677,43 @@ gms-rt-apk-analyze() {
     return "$GMS_RT_EXIT_OPERATION"
 }
 
+# One task id -> status; no task id -> the full task list.
 gms-rt-apk-status() {
-    local task_id="$1"
-    [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-status <task_id>"; return "$GMS_RT_EXIT_USAGE"; }
+    local task_id="${1:-}"
+    shift 2>/dev/null || true
+    [ "$#" -gt 0 ] && { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
+    local response
+    if [ -z "$task_id" ]; then
+        if [ "$GMS_RT_OUTPUT" = "json" ]; then
+            api_call "/apk/tasks" "GET" | jq '.'
+            return $?
+        fi
+        response=$(api_call "/apk/tasks" "GET")
+        if echo "$response" | jq -e '.success' > /dev/null; then
+            local count
+            count=$(echo "$response" | jq '.data.total')
+            if [ "$count" = "0" ]; then
+                success "No APK analysis tasks"
+                return 0
+            fi
+            success "Found $count APK analysis task(s)"
+            printf "%-40s %-14s %-9s %s\n" "TASK" "STATUS" "PROGRESS" "FILE"
+            echo "$response" | jq -r '.data.tasks[] | "\(.task_id)\t\(.status)\t\(.progress)\t\(.filename)"' |
+                while IFS=$'\t' read -r tid status progress filename; do
+                    printf "%-40s %-14s %-9s %s\n" "$tid" "$status" "$progress" "$filename"
+                done
+        else
+            error "Failed to list APK analysis tasks"
+            echo "$response" | jq '.'
+            return "$GMS_RT_EXIT_OPERATION"
+        fi
+        return 0
+    fi
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "/apk/status/$task_id" "GET" | jq '.'
         return $?
     fi
-    local response
     response=$(api_call "/apk/status/$task_id" "GET")
     if echo "$response" | jq -e '.success' > /dev/null; then
         echo "$response" | jq -r '.data | "task: \(.task_id)\nstatus: \(.status)\nprogress: \(.progress)\nfile: \(.filename)" + (if .error then "\nerror: \(.error)" else "" end)'
@@ -4740,60 +4723,44 @@ gms-rt-apk-status() {
     fi
 }
 
-gms-rt-apk-tasks() {
+# Manifest view; --permissions selects the declared-permissions subset.
+gms-rt-apk-manifest() {
+    local task_id=""
+    local permissions=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                echo "Usage: gms-rt-apk-manifest <task_id> [--permissions]"
+                echo "  --permissions  List only the permissions declared by the artifact"
+                return 0
+                ;;
+            --permissions) permissions=1 ;;
+            *)
+                [ -z "$task_id" ] && task_id="$1" || { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; }
+                ;;
+        esac
+        shift
+    done
+    [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-manifest <task_id> [--permissions]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
-    if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        api_call "/apk/tasks" "GET" | jq '.'
+    if [ "$permissions" = "1" ]; then
+        api_call "/apk/permissions/$task_id" "GET" | jq '.'
         return $?
     fi
-    local response
-    response=$(api_call "/apk/tasks" "GET")
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        local count
-        count=$(echo "$response" | jq '.data.total')
-        if [ "$count" = "0" ]; then
-            success "No APK analysis tasks"
-            return 0
-        fi
-        success "Found $count APK analysis task(s)"
-        printf "%-40s %-14s %-9s %s\n" "TASK" "STATUS" "PROGRESS" "FILE"
-        echo "$response" | jq -r '.data.tasks[] | "\(.task_id)\t\(.status)\t\(.progress)\t\(.filename)"' |
-            while IFS=$'\t' read -r tid status progress filename; do
-                printf "%-40s %-14s %-9s %s\n" "$tid" "$status" "$progress" "$filename"
-            done
-    else
-        error "Failed to list APK analysis tasks"
-        echo "$response" | jq '.'
-    fi
-}
-
-gms-rt-apk-manifest() {
-    local task_id="$1"
-    [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-manifest <task_id>"; return "$GMS_RT_EXIT_USAGE"; }
-    check_jq
     api_call "/apk/manifest/$task_id" "GET" | jq '.'
-}
-
-gms-rt-apk-permissions() {
-    local task_id="$1"
-    [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-permissions <task_id>"; return "$GMS_RT_EXIT_USAGE"; }
-    check_jq
-    api_call "/apk/permissions/$task_id" "GET" | jq '.'
 }
 
 gms-rt-apk-source() {
     local task_id=""
     local path=""
-    local view=0
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-apk-source <task_id> [path] [--view]"
-                echo "  path    Relative path inside the decompiled sources (default: tree root)"
-                echo "  --view  Print file content instead of the directory listing"
+                echo "Usage: gms-rt-apk-source <task_id> [path]"
+                echo "  path  Relative path inside the decompiled sources (default: tree root)"
+                echo "File contents: gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]"
                 return 0
                 ;;
-            --view) view=1 ;;
             *)
                 [ -z "$task_id" ] && task_id="$1" || {
                     [ -z "$path" ] || { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; }
@@ -4803,16 +4770,11 @@ gms-rt-apk-source() {
         esac
         shift
     done
-    [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-source <task_id> [path] [--view]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-source <task_id> [path]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
     local url="/apk/source/$task_id"
-    if [ "$view" = "1" ]; then
-        url="$url?view=true"
-        [ -n "$path" ] && url="$url&path=$(_urlencode "$path")"
-    else
-        [ -n "$path" ] && url="$url?path=$(_urlencode "$path")"
-    fi
+    [ -n "$path" ] && url="$url?path=$(_urlencode "$path")"
 
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
@@ -4825,104 +4787,110 @@ gms-rt-apk-source() {
         echo "$response" | jq '.'
         return "$GMS_RT_EXIT_OPERATION"
     fi
-    if [ "$view" = "1" ]; then
-        echo "$response" | jq -r '.data.content'
-    else
-        echo "$response" | jq -r '.data.items[] | "\(.type)\t\(.path)"' |
-            while IFS=$'\t' read -r type item_path; do
-                printf "%-4s %s\n" "$type" "$item_path"
-            done
-    fi
+    echo "$response" | jq -r '.data.items[] | "\(.type)\t\(.path)"' |
+        while IFS=$'\t' read -r type item_path; do
+            printf "%-4s %s\n" "$type" "$item_path"
+        done
 }
 
+# Unified source lookup: filename (name), file content (content), or Java
+# symbol definition (symbol).
 gms-rt-apk-search() {
     local task_id=""
     local query=""
-    local limit=20
+    local mode="name"
+    local limit=""
+    local path_filter=""
+    local symbol_line=0
+    local positional=()
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-apk-search <task_id> <query> [--limit N]"
-                echo "  Search decompiled source files by filename substring (min 2 chars)."
+                echo "Usage: gms-rt-apk-search <task_id> <query> [--mode name|content|symbol] [--limit N] [--path FILTER] [--line N]"
+                echo "  --mode name     Search decompiled file names by substring (default)"
+                echo "  --mode content  Search decompiled file content (path:line:column + snippet)"
+                echo "  --mode symbol   Locate a best-effort Java symbol definition"
                 return 0
+                ;;
+            --mode)
+                shift
+                [ $# -gt 0 ] || { error "--mode requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                case "$1" in
+                    name|content|symbol) mode="$1" ;;
+                    *) error "--mode accepts name, content, or symbol"; return "$GMS_RT_EXIT_USAGE" ;;
+                esac
+                ;;
+            --query)
+                shift
+                [ $# -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                query="$1"
                 ;;
             --limit)
                 shift
                 [ $# -gt 0 ] || { error "--limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }
                 limit="$1"
                 ;;
-            *)
-                if [ -z "$task_id" ]; then
-                    task_id="$1"
-                elif [ -z "$query" ]; then
-                    query="$1"
-                else
-                    error "Unexpected argument: $1"
-                    return "$GMS_RT_EXIT_USAGE"
-                fi
-                ;;
-        esac
-        shift
-    done
-    [ -z "$task_id" ] || [ -z "$query" ] && { error "Task ID and query required. Usage: gms-rt-apk-search <task_id> <query> [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
-    check_jq
-
-    local url="/apk/search/$task_id?q=$(_urlencode "$query")&limit=$limit"
-    if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        api_call "$url" "GET" | jq '.'
-        return $?
-    fi
-    local response
-    response=$(api_call "$url" "GET")
-    if echo "$response" | jq -e '.success' > /dev/null; then
-        echo "$response" | jq -r '.data.items[] | .path'
-    else
-        error "Failed to search decompiled source files"
-        echo "$response" | jq '.'
-    fi
-}
-
-gms-rt-apk-definition() {
-    local task_id=""
-    local symbol=""
-    local symbol_path=""
-    local symbol_line=0
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            -h|--help)
-                echo "Usage: gms-rt-apk-definition <task_id> <symbol> [--path P] [--line N]"
-                echo "  Find a best-effort Java symbol definition in decompiled sources."
-                return 0
-                ;;
             --path)
                 shift
                 [ $# -gt 0 ] || { error "--path requires a value"; return "$GMS_RT_EXIT_USAGE"; }
-                symbol_path="$1"
+                path_filter="$1"
                 ;;
             --line)
                 shift
                 [ $# -gt 0 ] || { error "--line requires a value"; return "$GMS_RT_EXIT_USAGE"; }
                 symbol_line="$1"
                 ;;
-            *)
-                if [ -z "$task_id" ]; then
-                    task_id="$1"
-                elif [ -z "$symbol" ]; then
-                    symbol="$1"
-                else
-                    error "Unexpected argument: $1"
-                    return "$GMS_RT_EXIT_USAGE"
-                fi
-                ;;
+            *) positional+=("$1") ;;
         esac
         shift
     done
-    [ -z "$task_id" ] || [ -z "$symbol" ] && { error "Task ID and symbol required. Usage: gms-rt-apk-definition <task_id> <symbol> [--path P] [--line N]"; return "$GMS_RT_EXIT_USAGE"; }
+    if [ -z "$task_id" ] && [ "${#positional[@]}" -ge 1 ]; then
+        task_id="${positional[0]}"
+    fi
+    if [ -z "$query" ] && [ "${#positional[@]}" -ge 2 ]; then
+        query="${positional[1]}"
+    fi
+    [ -z "$task_id" ] || [ -z "$query" ] && { error "Usage: gms-rt-apk-search <task_id> <query> [--mode name|content|symbol] [--limit N] [--path FILTER] [--line N]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
-    local url="/apk/definition/$task_id?symbol=$(_urlencode "$symbol")&line=$symbol_line"
-    [ -n "$symbol_path" ] && url="$url&path=$(_urlencode "$symbol_path")"
-    api_call "$url" "GET" | jq '.'
+    local url response
+    case "$mode" in
+        name)
+            [ -z "$path_filter" ] || { error "--path applies to content/symbol modes only"; return "$GMS_RT_EXIT_USAGE"; }
+            [ "$symbol_line" = "0" ] || { error "--line applies to symbol mode only"; return "$GMS_RT_EXIT_USAGE"; }
+            limit="${limit:-20}"
+            url="/apk/search/$task_id?q=$(_urlencode "$query")&limit=$limit"
+            if [ "$GMS_RT_OUTPUT" = "json" ]; then
+                api_call "$url" "GET" | jq '.'
+                return $?
+            fi
+            response=$(api_call "$url" "GET")
+            if echo "$response" | jq -e '.success' > /dev/null; then
+                echo "$response" | jq -r '.data.items[] | .path'
+            else
+                error "Failed to search decompiled source files"
+                echo "$response" | jq '.'
+                return "$GMS_RT_EXIT_OPERATION"
+            fi
+            ;;
+        content)
+            [ "$symbol_line" = "0" ] || { error "--line applies to symbol mode only"; return "$GMS_RT_EXIT_USAGE"; }
+            limit="${limit:-50}"
+            url="/apk/source-search/$task_id?q=$(_urlencode "$query")&limit=$limit"
+            [ -n "$path_filter" ] && url="$url&path_filter=$(_urlencode "$path_filter")"
+            if [ "$GMS_RT_OUTPUT" = "json" ]; then
+                api_call "$url" "GET" | jq '.'
+                return $?
+            fi
+            api_call "$url" "GET" | jq -r '.data | "query: \(.query) matches: \(.total)\(if .limited then " (limited)" else "" end) scanned_files: \(.scanned_files)", (.matches[] | "\(.path):\(.line):\(.column): \(.snippet)")'
+            ;;
+        symbol)
+            [ -z "$limit" ] || { error "--limit applies to name/content modes only"; return "$GMS_RT_EXIT_USAGE"; }
+            url="/apk/definition/$task_id?symbol=$(_urlencode "$query")&line=$symbol_line"
+            [ -n "$path_filter" ] && url="$url&path=$(_urlencode "$path_filter")"
+            api_call "$url" "GET" | jq '.'
+            ;;
+    esac
 }
 
 gms-rt-apk-download() {
@@ -5180,13 +5148,10 @@ _gms_rt_command_usage() {
         gms-rt-test-modules) printf '%s' 'gms-rt-test-modules <tools_path|suite_name> [--filter PATTERN]' ;;
         gms-rt-apk-resolve) printf '%s' 'gms-rt-apk-resolve <module_query> [--types cts,vts,gts,sts] [--prefer apk|jar]' ;;
         gms-rt-apk-analyze) printf '%s' 'gms-rt-apk-analyze <module_query> [--types cts,vts,gts,sts] [--prefer apk|jar] [--wait] [--max-wait SECONDS]' ;;
-        gms-rt-apk-status) printf '%s' 'gms-rt-apk-status <task_id>' ;;
-        gms-rt-apk-tasks) printf '%s' 'gms-rt-apk-tasks' ;;
-        gms-rt-apk-manifest) printf '%s' 'gms-rt-apk-manifest <task_id>' ;;
-        gms-rt-apk-permissions) printf '%s' 'gms-rt-apk-permissions <task_id>' ;;
-        gms-rt-apk-source) printf '%s' 'gms-rt-apk-source <task_id> [path] [--view]' ;;
-        gms-rt-apk-search) printf '%s' 'gms-rt-apk-search <task_id> <query> [--limit N]' ;;
-        gms-rt-apk-definition) printf '%s' 'gms-rt-apk-definition <task_id> <symbol> [--path P] [--line N]' ;;
+        gms-rt-apk-status) printf '%s' 'gms-rt-apk-status [task_id]' ;;
+        gms-rt-apk-manifest) printf '%s' 'gms-rt-apk-manifest <task_id> [--permissions]' ;;
+        gms-rt-apk-source) printf '%s' 'gms-rt-apk-source <task_id> [path]' ;;
+        gms-rt-apk-search) printf '%s' 'gms-rt-apk-search <task_id> <query> [--mode name|content|symbol] [--limit N] [--path FILTER] [--line N]' ;;
         gms-rt-apk-download) printf '%s' 'gms-rt-apk-download <task_id> [output.zip]' ;;
         gms-rt-usbip-install) printf '%s' 'gms-rt-usbip-install <user@ip>' ;;
         gms-rt-usbip-connect) printf '%s' 'gms-rt-usbip-connect <user@ip> [password]' ;;
@@ -5203,7 +5168,6 @@ _gms_rt_command_usage() {
         gms-rt-redmine-artifact-image) printf '%s' 'gms-rt-redmine-artifact-image <artifact_id>' ;;
         gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N]' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'gms-rt-apk-analyze-attachment <snapshot_id> <artifact_id>' ;;
-        gms-rt-apk-source-search) printf '%s' 'gms-rt-apk-source-search <task_id> <query> [--limit N] [--path FILTER]' ;;
         gms-rt-apk-source-read) printf '%s' 'gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]' ;;
         gms-rt-sdk-sources) printf '%s' 'gms-rt-sdk-sources' ;;
         gms-rt-sdk-search) printf '%s' 'gms-rt-sdk-search --source ID --revision REV --query TEXT [--path FILTER] [--limit N]' ;;
@@ -5284,13 +5248,10 @@ _gms_rt_command_summary() {
         gms-rt-test-modules) printf '%s' 'List available tradefed modules for a suite (testcases/ directory)' ;;
         gms-rt-apk-resolve) printf '%s' 'Resolve a test module keyword to its APK/JAR artifact in the latest suites' ;;
         gms-rt-apk-analyze) printf '%s' 'Resolve a module artifact, copy it from the suite, and start jadx decompilation' ;;
-        gms-rt-apk-status) printf '%s' 'Get APK analysis task status and progress' ;;
-        gms-rt-apk-tasks) printf '%s' 'List APK analysis tasks visible to the current session' ;;
-        gms-rt-apk-manifest) printf '%s' 'Show the parsed AndroidManifest.xml of a decompiled APK/JAR' ;;
-        gms-rt-apk-permissions) printf '%s' 'List the permissions declared by a decompiled APK' ;;
-        gms-rt-apk-source) printf '%s' 'Browse the decompiled source tree or view one file' ;;
-        gms-rt-apk-search) printf '%s' 'Search decompiled source files by filename substring' ;;
-        gms-rt-apk-definition) printf '%s' 'Find a best-effort Java symbol definition in decompiled sources' ;;
+        gms-rt-apk-status) printf '%s' 'Get one APK analysis task status, or list all tasks when no task id is given' ;;
+        gms-rt-apk-manifest) printf '%s' 'Show the parsed AndroidManifest.xml, or its declared permissions with --permissions' ;;
+        gms-rt-apk-source) printf '%s' 'Browse the decompiled source tree (read file windows with gms-rt-apk-source-read)' ;;
+        gms-rt-apk-search) printf '%s' 'Search decompiled sources by filename (name), file content (content), or Java symbol definition (symbol)' ;;
         gms-rt-apk-download) printf '%s' 'Download the decompiled source ZIP of an analysis task' ;;
         gms-rt-redmine-issue-fetch) printf '%s' 'Create/refresh a full Redmine evidence snapshot (raw JSON, journals, attachments)' ;;
         gms-rt-redmine-issue-show) printf '%s' 'Show snapshot completeness plus issue fields and description head' ;;
@@ -5301,7 +5262,6 @@ _gms_rt_command_summary() {
         gms-rt-redmine-artifact-image) printf '%s' 'Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling)' ;;
         gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'Import a Redmine .apk artifact into the JADX analysis pipeline (owner-scoped)' ;;
-        gms-rt-apk-source-search) printf '%s' 'Search decompiled source file CONTENT (not just filenames) for a query' ;;
         gms-rt-apk-source-read) printf '%s' 'Read a window of one decompiled source file by task-relative path' ;;
         gms-rt-sdk-sources) printf '%s' 'List admin-configured SDK source providers and default revisions' ;;
         gms-rt-sdk-search) printf '%s' 'Search an SDK source at a pinned revision; matches carry commit-bound result ids' ;;
@@ -5706,13 +5666,10 @@ ${YELLOW}Code search:${NC}
 ${YELLOW}APK Analysis:${NC}
   gms-rt-apk-resolve             - Resolve a suite module to its APK/JAR artifact
   gms-rt-apk-analyze             - Start JADX analysis for a resolved suite module
-  gms-rt-apk-status              - Read one APK analysis task status
-  gms-rt-apk-tasks               - List visible APK analysis tasks
-  gms-rt-apk-manifest            - Read a decompiled AndroidManifest.xml
-  gms-rt-apk-permissions         - List permissions declared by a decompiled artifact
-  gms-rt-apk-source              - Browse the decompiled source tree or read one file
-  gms-rt-apk-search              - Search decompiled source filenames
-  gms-rt-apk-definition          - Locate a best-effort Java symbol definition
+  gms-rt-apk-status              - Read one task status, or list all tasks
+  gms-rt-apk-manifest            - Read a decompiled AndroidManifest (--permissions for the permission list)
+  gms-rt-apk-source              - Browse the decompiled source tree
+  gms-rt-apk-search              - Search decompiled names, content, or symbol definitions
   gms-rt-apk-download            - Download the decompiled source ZIP
 
 ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
@@ -5725,7 +5682,6 @@ ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-artifact-read           - Read artifact derived text by char window
   gms-rt-artifact-search         - Search description/journals/artifact text
   gms-rt-apk-analyze-attachment  - Import a Redmine .apk artifact into JADX
-  gms-rt-apk-source-search       - Search decompiled source CONTENT
   gms-rt-apk-source-read         - Read a window of one decompiled file
   gms-rt-sdk-sources             - List configured SDK source providers
   gms-rt-sdk-search              - Search SDK source pinned to a revision
@@ -5979,7 +5935,7 @@ _gms_rt_dispatch() {
         # NOTE: 大输出(如 logcat -d / jobs-events)不能经 shell 变量 + jq --arg 传递,
         # 否则超过单参数上限报 "Argument list too long"。改用 --rawfile 直接读临时文件。
         # 同时对未解析为 JSON 的纯文本输出做尾部截断, 保护调用方(如 AI agent)的上下文。
-        # R16: jq 自身失败（损坏安装/内存不足）绝不能沿用业务命令的成功码——
+        # jq 自身失败（损坏安装/内存不足）绝不能沿用业务命令的成功码——
         # 之前 stub jq 返回 99 时 CLI 仍退出 0 且 stdout 为空，Agent 把
         # “序列化失败”当成功。序列化失败按操作失败上报。
         local envelope

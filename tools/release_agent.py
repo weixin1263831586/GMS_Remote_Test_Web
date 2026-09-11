@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-version release bump for the GMS agent package (11.txt).
+"""One-version release bump for the GMS agent package.
 
 The release version is declared exactly once, in
 ``agent/gms-remote-test/package.yaml``. This script propagates it to every

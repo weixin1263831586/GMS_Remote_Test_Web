@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desired-state reconciler for agent MCP registrations (10.txt §十五).
+"""Desired-state reconciler for agent MCP registrations.
 
 Historically the installer treated an existing registration as done: if
 ``mcp_servers.gms`` was present it skipped, so a migrated Controller URL, a
@@ -51,7 +51,7 @@ def _desired_env(
     env = {
         "GMS_REMOTE_TEST_SERVER": server_url,
         "GMS_RT_PROFILE": profile,
-        # 4.txt 审核 P1-5: pin the client identity in the registered env —
+        # Pin the client identity in the registered env —
         # mcp_launcher.py used to fall back to the kimi→codex→kkagent probe
         # when GMS_AGENT_CLIENT was absent, so a Codex registration on a
         # multi-client host loaded the Kimi profile (wrong Controller URL
@@ -59,9 +59,9 @@ def _desired_env(
         # `client =` field, but the explicit pin is authoritative.
         "GMS_AGENT_CLIENT": client,
         "GMS_AUTH_TOKEN_FILE": token_file,
-        # 11.txt 审核 P0-3：注册进客户端配置的 MCP 环境必须显式声明
+        # 注册进客户端配置的 MCP 环境必须显式声明
         # service-token 模式——否则 mcp_server.py 会注册密码登录/提权/
-        # 自助审批工具，重新打开 10.txt 指出的高危边界。
+        # 自助审批工具，重新打开高危边界。
         "GMS_AGENT_AUTH_MODE": "service-token",
     }
     if ca_cert:
@@ -96,7 +96,7 @@ def reconcile_kimi(
                 raise ValueError("top level is not an object")
             config = parsed
         except (ValueError, OSError) as error:
-            # 10.txt §十四: a single comma error must never let the installer
+            # A single comma error must never let the installer
             # rewrite the user's whole mcp.json down to only-GMS.
             backup = _backup(path)
             raise ReconcileError(

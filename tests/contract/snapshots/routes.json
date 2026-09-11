@@ -9,30 +9,6 @@
     "methods": [
       "GET"
     ],
-    "path": "/@fs/{path:path}"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/@id/{path:path}"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/@react-refresh"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/@vite/{path:path}"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
     "path": "/api/adb-forward/logs"
   },
   {
@@ -2760,6 +2736,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/gms-assistant"
+  },
+  {
+    "methods": [
       "DELETE",
       "GET",
       "OPTIONS",
@@ -2786,12 +2768,6 @@
       "GET"
     ],
     "path": "/metrics"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/node_modules/{path:path}"
   },
   {
     "methods": [
@@ -2851,12 +2827,6 @@
       "GET"
     ],
     "path": "/redoc"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/src/{path:path}"
   },
   {
     "methods": [

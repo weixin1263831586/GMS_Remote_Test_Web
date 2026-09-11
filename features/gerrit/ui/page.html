@@ -585,6 +585,13 @@ function onPersonalProfileChange() {
   saveGerritProfileState();
   loadPersonal(true);
 }
+function onPersonalOwnerInput() {
+  currentPersonalProfileId = '';
+  requestedOwner = '';
+  const select = document.getElementById('personalProfile');
+  if (select) select.value = '';
+  saveGerritProfileState();
+}
 async function loadPersonal(refresh) {
   if (currentTab !== 'personal') return;
   const content = document.getElementById('personalContent');
@@ -597,33 +604,45 @@ async function loadPersonal(refresh) {
   // 否则后端按残留 profile_id（陈伟等）匹配，导致显示成别人的个人看板。
   const profileId = requestedOwner ? '' : ((profileSelect ? profileSelect.value : '') || currentPersonalProfileId || '');
   const selectedProfile = requestedOwner ? null : findPersonalProfile(profileId);
-  const owner = requestedOwner || (selectedProfile ? selectedProfile.owner : '') || (ownerInput ? ownerInput.value : '') || config.default_owner || '';
+  const owner = String(requestedOwner || (selectedProfile ? selectedProfile.owner : '') || (ownerInput ? ownerInput.value : '') || config.default_owner || '').trim();
   if (!requestedOwner && ownerInput && selectedProfile && selectedProfile.owner) ownerInput.value = selectedProfile.owner;
   currentPersonalProfileId = profileId;
   saveGerritProfileState();
   document.getElementById('personalStatus').textContent = '';
-  if (!hadRenderedDashboard) content.innerHTML = placeholderHtml('⏳ 正在统计个人 Gerrit 提交...');
   try {
+    if (!owner && !(config.personal_profiles || []).length) {
+      content.innerHTML = personalPlaceholderHtml('尚未设置 Gerrit 统计邮箱。请填写 owner 邮箱后点击“刷新”，或点击“＋”添加成员；也可在连接设置中保存默认 Owner。');
+      content.dataset.loaded = 'false';
+      requestedOwner = '';
+      trendOwner = '';
+      trendOwners = [];
+      trendProfileId = '';
+      refreshConnBanner({});
+      return;
+    }
+    if (!hadRenderedDashboard) content.innerHTML = personalPlaceholderHtml('⏳ 正在统计个人 Gerrit 提交...');
     const data = await api('/api/gerrit-dashboard/statistics/personal?profile_id=' + encodeURIComponent(profileId) + '&owner=' + encodeURIComponent(owner) + '&refresh=' + (refresh ? 'true' : 'false'));
     if (requestGeneration !== gerritDashboardRequestGeneration.personal) return;
     // owner 跳转后按返回的 profile 回填下拉选项。
     const resolvedProfile = (data.profile || {}).id || '';
-    const reviewQueue = await loadPendingReviewQueue(owner, refresh);
+    const resolvedOwner = String(data.owner || (data.profile || {}).owner || owner).trim();
+    const reviewQueue = await loadPendingReviewQueue(resolvedOwner, refresh);
     if (requestGeneration !== gerritDashboardRequestGeneration.personal) return;
-    if (requestedOwner && resolvedProfile) currentPersonalProfileId = resolvedProfile;
+    currentPersonalProfileId = resolvedProfile;
+    saveGerritProfileState();
     content.innerHTML = renderDashboard(data, reviewQueue);
     content.dataset.loaded = 'true';
     // 数据全空且查询报错时，提示用户检查 Gerrit 路由可达性。
     refreshConnBanner(data);
-    trendOwner = owner;
-    trendOwners = owner ? [owner] : [];
+    trendOwner = resolvedOwner;
+    trendOwners = resolvedOwner ? [resolvedOwner] : [];
     trendScope = 'personal';
     trendProfileId = resolvedProfile || profileId;
     requestedOwner = '';
   } catch (e) {
     if (requestGeneration !== gerritDashboardRequestGeneration.personal) return;
     requestedOwner = '';
-    if (!hadRenderedDashboard) content.innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
+    if (!hadRenderedDashboard) content.innerHTML = personalPlaceholderHtml('<span class="error">' + esc(e.message) + '</span>');
     notifyUser('Gerrit 个人统计失败', e.message, 'error');
     refreshConnBanner({error: e.message, source: ''});
   } finally {
@@ -977,15 +996,19 @@ function compareMembers(a, b) {
   return String(a.name || a.owner || a.id).trim().localeCompare(
     String(b.name || b.owner || b.id).trim(), 'zh');
 }
+function personalPlaceholderHtml(message) {
+  return '<section class="list-section">' + renderSummaryHeader('Gerrit 个人提交汇总', personalControlsHtml(), '')
+    + placeholderHtml(message) + '</section>';
+}
 function personalControlsHtml() {
   const profiles = config.personal_profiles || [];
   const orderedProfiles = profiles.slice().sort(compareMembers);
   // owner 取选中 profile 的邮箱，不回退到第一条。
-  const selectedProfile = findPersonalProfile(currentPersonalProfileId) || orderedProfiles[0] || {};
-  const selectedProfileId = selectedProfile.id || currentPersonalProfileId || '';
+  const selectedProfile = findPersonalProfile(currentPersonalProfileId) || {};
+  const selectedProfileId = selectedProfile.id || '';
   const ownerValue = requestedOwner || selectedProfile.owner || (document.getElementById('owner') ? document.getElementById('owner').value : '') || config.default_owner || '';
-  return '<div class="select-with-add"><select id="personalProfile" onchange="onPersonalProfileChange()">' + orderedProfiles.map(p => '<option value="' + esc(p.id) + '"' + (p.id === selectedProfileId ? ' selected' : '') + '>' + esc((p.department ? p.department + ' / ' : '') + (p.name || p.owner || p.id)) + '</option>').join('') + '</select><button class="select-add-btn" type="button" onclick="showAddPersonalModal()" title="添加成员">＋</button></div>'
-    + '<input id="owner" value="' + esc(ownerValue) + '" placeholder="owner 邮箱">';
+  return '<div class="select-with-add"><select id="personalProfile" onchange="onPersonalProfileChange()"><option value="">按邮箱查询</option>' + orderedProfiles.map(p => '<option value="' + esc(p.id) + '"' + (p.id === selectedProfileId ? ' selected' : '') + '>' + esc((p.department ? p.department + ' / ' : '') + (p.name || p.owner || p.id)) + '</option>').join('') + '</select><button class="select-add-btn" type="button" onclick="showAddPersonalModal()" title="添加成员">＋</button></div>'
+    + '<input id="owner" value="' + esc(ownerValue) + '" placeholder="owner 邮箱" oninput="onPersonalOwnerInput()">';
 }
 function departmentControlsHtml(profileId) {
   return '<div class="select-with-add"><select id="departmentProfile" onchange="loadDepartment(true)" style="min-width:160px">' + departmentOptionsHtml(profileId, true) + '</select><button class="select-add-btn" type="button" onclick="showAddDepartmentModal(&quot;departmentProfile&quot;)" title="添加部门">＋</button></div>'

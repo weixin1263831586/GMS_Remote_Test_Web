@@ -261,7 +261,7 @@ def test_simple_exec_drains_output_before_exit_status():
 
 
 def test_pool_health_check_is_bounded_when_exit_status_never_arrives():
-    """R28: paramiko's recv_exit_status() blocks forever when the remote
+    """paramiko's recv_exit_status() blocks forever when the remote
     never sends an exit status; the health check must poll
     exit_status_ready() with a deadline and treat the timeout as a dead
     connection instead of hanging the event loop."""

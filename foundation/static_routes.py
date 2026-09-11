@@ -1,4 +1,4 @@
-"""启动时按 configs/config.json 的 static_routes 配置自动添加本机路由。
+"""启动时按 configs/local/config.json 的 static_routes 配置自动添加本机路由。
 
 配置格式（static_routes 可整体缺省，缺省时不做任何事）::
 

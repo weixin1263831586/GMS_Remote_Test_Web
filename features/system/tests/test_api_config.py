@@ -3,38 +3,38 @@ import os
 import unittest
 from unittest.mock import mock_open, patch
 
-from features.system import api
+from features.system import api, gms_assistant_proxy
 
 
 class SystemApiConfigTests(unittest.TestCase):
     def test_gms_assistant_upstream_uses_product_config(self):
         config = {"external_services": {"gms_assistant_url": "http://assistant.internal/"}}
         with patch.dict(os.environ, {}, clear=True), patch.object(
-            api.config_manager, "load_config", return_value=config
+            gms_assistant_proxy.config_manager, "load_config", return_value=config
         ):
-            self.assertEqual(api._gms_assistant_upstream(), "http://assistant.internal")
+            self.assertEqual(gms_assistant_proxy._gms_assistant_upstream(), "http://assistant.internal")
 
     def test_gms_assistant_environment_override_wins(self):
         with patch.dict(
             os.environ, {"GMS_ASSISTANT_URL": "https://assistant.example/"}, clear=True
         ):
-            self.assertEqual(api._gms_assistant_upstream(), "https://assistant.example")
+            self.assertEqual(gms_assistant_proxy._gms_assistant_upstream(), "https://assistant.example")
 
     def test_gms_assistant_api_key_prefers_environment(self):
         with patch.dict(
             os.environ, {"GMS_ASSISTANT_API_KEY": "env-secret"}, clear=True
         ), patch.object(
-            api.config_manager, "load_config",
+            gms_assistant_proxy.config_manager, "load_config",
             return_value={"external_services": {"gms_assistant_api_key": "config-secret"}},
         ):
-            self.assertEqual(api._gms_assistant_api_key(), "env-secret")
+            self.assertEqual(gms_assistant_proxy._gms_assistant_api_key(), "env-secret")
 
     def test_gms_assistant_api_key_falls_back_to_config(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(
-            api.config_manager, "load_config",
+            gms_assistant_proxy.config_manager, "load_config",
             return_value={"external_services": {"gms_assistant_api_key": "config-secret"}},
         ):
-            self.assertEqual(api._gms_assistant_api_key(), "config-secret")
+            self.assertEqual(gms_assistant_proxy._gms_assistant_api_key(), "config-secret")
 
     def test_gms_assistant_proxy_removes_external_google_font_stylesheet(self):
         source = """<html><head>
@@ -44,7 +44,7 @@ class SystemApiConfigTests(unittest.TestCase):
               rel="stylesheet">
         </head><body>chat</body></html>"""
 
-        rewritten = api._rewrite_gms_assistant_content(
+        rewritten = gms_assistant_proxy._rewrite_gms_assistant_content(
             source,
             None,
             proxy_base="/gms-assistant",

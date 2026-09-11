@@ -35,10 +35,10 @@ tool boundary.
 | `gms_rt_reports_list()` | `gms-rt-reports-list` |
 | `gms_rt_apk_resolve(query, suite_types?, prefer?)` | `gms-rt-apk-resolve` |
 | `gms_rt_apk_analyze(query, suite_types?, prefer?, wait?, max_wait?)` | `gms-rt-apk-analyze` (module artifact → jadx) |
-| `gms_rt_apk_status(task_id)` | `gms-rt-apk-status` |
-| `gms_rt_apk_manifest(task_id)` | `gms-rt-apk-manifest` |
-| `gms_rt_apk_search(task_id, query, limit?)` | `gms-rt-apk-search` |
-| `gms_rt_apk_source(task_id, path?, view?)` | `gms-rt-apk-source` |
+| `gms_rt_apk_status(task_id)` | `gms-rt-apk-status` (no task id → task list) |
+| `gms_rt_apk_manifest(task_id, permissions?)` | `gms-rt-apk-manifest [--permissions]` |
+| `gms_rt_apk_search(task_id, query, mode?, limit?, path?, line?)` | `gms-rt-apk-search [--mode name\|content\|symbol]` |
+| `gms_rt_apk_source(task_id, path?, view?)` | `gms-rt-apk-source` (view=true → `gms-rt-apk-source-read`) |
 
 For a repository checkout, use `python tools/gms_agent_dev.py install
 --client codex --server https://CONTROLLER:5001`; then run `python

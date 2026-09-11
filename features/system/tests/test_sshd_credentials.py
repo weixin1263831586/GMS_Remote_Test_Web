@@ -50,21 +50,55 @@ class SshdCredentialTests(unittest.TestCase):
                 calls["lookup"] = (device_host, dict(config))
                 return None
 
+        class FakeChannel:
+            """Minimal channel matching ssh_executor's drain protocol."""
+
+            def __init__(self, stdout_chunks):
+                self._stdout = list(stdout_chunks)
+
+            def recv_ready(self):
+                return bool(self._stdout)
+
+            def recv(self, _size):
+                return self._stdout.pop(0) if self._stdout else b""
+
+            def recv_stderr_ready(self):
+                return False
+
+            def recv_stderr(self, _size):
+                return b""
+
+            def exit_status_ready(self):
+                return not self._stdout
+
+            def recv_exit_status(self):
+                return 0
+
+            def close(self):
+                pass
+
         class FakeStdout:
-            def __init__(self, text):
+            def __init__(self, text, channel):
                 self._text = text
+                self.channel = channel
 
             def read(self):
                 return self._text.encode("utf-8")
 
         class FakeSsh:
-            def exec_command(self, cmd, timeout=10):
+            def exec_command(self, cmd, timeout=10, get_pty=False):
                 calls.setdefault("commands", []).append(cmd)
                 if "where sshd.exe" in cmd:
-                    return None, FakeStdout("C:\\Windows\\System32\\OpenSSH\\sshd.exe"), None
+                    stdout = FakeStdout("C:\\Windows\\System32\\OpenSSH\\sshd.exe", None)
+                    stdout.channel = FakeChannel([stdout.read()])
+                    return None, stdout, None
                 if "RUNNING" in cmd:
-                    return None, FakeStdout("RUNNING"), None
-                return None, FakeStdout(""), None
+                    stdout = FakeStdout("RUNNING", None)
+                    stdout.channel = FakeChannel([stdout.read()])
+                    return None, stdout, None
+                stdout = FakeStdout("", None)
+                stdout.channel = FakeChannel([])
+                return None, stdout, None
 
         class FakeDeviceSSHConnection:
             def __init__(self, config):

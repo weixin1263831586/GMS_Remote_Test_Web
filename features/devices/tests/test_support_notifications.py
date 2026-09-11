@@ -119,7 +119,7 @@ class BroadcastDeviceChangeTests(unittest.TestCase):
 
 
 class BroadcastDeviceChangeMultiTabTests(unittest.TestCase):
-    """R26/R27: websocket_connections values are SETS of sockets."""
+    """websocket_connections values are SETS of sockets."""
 
     def test_every_socket_in_set_receives_broadcast_and_owner_notification(self):
         import features.devices.support as support
@@ -128,7 +128,7 @@ class BroadcastDeviceChangeMultiTabTests(unittest.TestCase):
         page_ws = _FakeWebSocket()
         terminal_ws = _FakeWebSocket()
         other_user_ws = _FakeWebSocket()
-        # New R26 shape: {client_id: set[websocket]}.
+        # Multi-tab shape: {client_id: set[websocket]}.
         connections = {
             "user-a": {page_ws, terminal_ws},
             "user-b": {other_user_ws},
@@ -159,7 +159,7 @@ class BroadcastDeviceChangeMultiTabTests(unittest.TestCase):
                           runtime_stub.global_state):
             asyncio.run(run())
 
-        # One persisted notification PER OWNER (R27), not per socket.
+        # One persisted notification PER OWNER, not per socket.
         self.assertEqual(len(stored), 2)
         self.assertEqual(
             {record["owner"] for record in stored}, {"user-a", "user-b"}
@@ -168,7 +168,7 @@ class BroadcastDeviceChangeMultiTabTests(unittest.TestCase):
         self.assertEqual(len(page_ws.sent), 1)
         self.assertEqual(len(terminal_ws.sent), 1)
         self.assertEqual(len(other_user_ws.sent), 1)
-        # Each owner is delivered its OWN notification record (R27).
+        # Each owner is delivered its OWN notification record.
         self.assertEqual(page_ws.sent[0]["notification"]["owner"], "user-a")
         self.assertEqual(other_user_ws.sent[0]["notification"]["owner"], "user-b")
 

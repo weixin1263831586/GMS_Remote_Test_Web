@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stage the pinned jq binary served by GET /api/system/tools/jq.
 #
-# 2026-09-08 audit R12: the endpoint hands this file to air-gapped build
+# The endpoint hands this file to air-gapped build
 # servers, so it must be the official static-ish jq release binary — NOT a
 # distro build that dynamically links libjq.so.1 (such a file only works on
 # hosts that already have libjq installed, which defeats the purpose).

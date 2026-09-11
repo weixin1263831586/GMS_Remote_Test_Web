@@ -43,7 +43,7 @@ def _request_owner_username(request: Request) -> str:
 
 
 def _require_job_access(request: Request, job: dict) -> None:
-    # 11.txt P1: agent principals must hold jobs.read even for single-job
+    # Agent principals must hold jobs.read even for single-job
     # reads; ownership filtering below stays unchanged.
     from features.auth import require_agent_scope
 
@@ -135,9 +135,10 @@ def create_job(
         raise HTTPException(503, "local Worker Agent is offline")
     data = body.model_dump()
     data["trace_id"] = str(getattr(request.state, "trace_id", "") or "")
-    # R01: job env 到达 Worker 后会进入 Bash 启动环境，未列入白名单的键
+    # job env 到达 Worker 后会进入 Bash 启动环境，未列入白名单的键
     # （BASH_ENV/ENV/SHELLOPTS/解释器搜索路径等）可扩大 Worker OS 执行能力，
     # 必须在入队前拒绝，而不是等到 Worker 端静默丢弃。
+    # 参见 docs/architecture/adr/0001-controller-worker-boundary.md。
     allowed_env, rejected_env_keys = filter_job_env(data.get("env"))
     if rejected_env_keys:
         raise HTTPException(
@@ -160,7 +161,7 @@ def create_job(
                 data["devices"] = selected_devices
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
-    # R02: Agent Token 的 Worker/设备 ACL 在最终身份解析完成后统一授权，
+    # Agent Token 的 Worker/设备 ACL 在最终身份解析完成后统一授权，
     # 覆盖显式 worker、auto 调度与默认 Worker 三条路径。
     from features.auth import ensure_agent_device_allowed, ensure_agent_worker_allowed
 
@@ -254,7 +255,7 @@ def create_job(
             for lease in job.get("leases") or []
             if lease.get("status") == "active"
         ]
-        # R09: job creation and command queuing are two separate commits;
+        # Job creation and command queuing are two separate commits;
         # without compensation a command-write failure used to leave an
         # `assigned` job with zero dispatchable commands and an active
         # claim. Fail the job and release its claims so it can be retried.
@@ -289,7 +290,7 @@ def list_jobs(
     limit: int = Query(default=100, ge=1, le=500),
     include_active: bool = Query(default=False),
 ):
-    # 11.txt P1: enforce the jobs.read scope for agent principals (human
+    # Enforce the jobs.read scope for agent principals (human
     # roles carry jobs.read via ROLE_PERMISSIONS; dev-mode anonymous passes).
     from features.auth import require_agent_scope
 

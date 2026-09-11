@@ -28,7 +28,7 @@ if __name__ == '__main__':
         timeout_keep_alive=120,
         access_log=settings.environment != 'production',
         limit_concurrency=500,
-        # 11.txt P2-2: no limit_max_requests. The old 10000-value made uvicorn
+        # no limit_max_requests. The old 10000-value made uvicorn
         # cycle the worker every few hours, dropping every WebSocket and
         # in-flight chunked upload. Memory-leak safety nets live in the
         # lifespan handlers + limit_concurrency instead.

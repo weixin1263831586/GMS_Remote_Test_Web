@@ -1,6 +1,6 @@
 """Source-side firmware flash dispatcher for USB/IP-owned devices.
 
-15.txt 架构结论（实机修正版）：USB/IP detach 后设备回到 Windows 源主机，
+架构结论（实机修正版）：USB/IP detach 后设备回到 Windows 源主机，
 不会出现在 Controller 本机 ADB——因此烧写必须下发到 Windows 源端执行。
 
 Windows 端无 CLI 烧写工具（RKDevTool 仅 GUI），且 SSH 会话启动的 GUI
@@ -16,6 +16,8 @@ Controller 直接自动化。因此采用「文件队列式 Source Agent」：
     4. 校验结果                           轮询自身按天滚动日志判定成败
 
 超时/失败不降级重试，由上层决定设备是否进入隔离状态。
+
+See docs/architecture/adr/0005-usbip-firmware-ownership.md.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""GMS Agent Runtime SDK (10.txt §五, Phase 2).
+"""GMS Agent Runtime SDK.
 
 A thin Python client over the Controller REST API. The MCP server and (over
 time) the gms-rt CLI share this SDK so business validation lives in exactly
@@ -56,9 +56,9 @@ def _http_exit_code(status: int) -> int:
 
 
 def _load_token(token_path: Path) -> str:
-    """Read the raw token from a 0600 file (CLI parity, 10.txt §十三).
+    """Read the raw token from a 0600 file (CLI parity).
 
-    11.txt 审核 P1-11: the CLI enforces owner-only permissions on token
+    The CLI enforces owner-only permissions on token
     files; the SDK/MCP fast path read any world-readable file. Fail
     closed — a mis-permissioned token file is treated as absent and
     requests go out unauthenticated (→ 401) instead of silently using a
@@ -68,7 +68,7 @@ def _load_token(token_path: Path) -> str:
         path = token_path.expanduser()
         stat = path.stat()
         mode = stat.st_mode & 0o777
-        # 4.txt 审核其他项: parity with the CLI — permissions alone don't
+        # Parity with the CLI — permissions alone don't
         # prove ownership; a group/world-readable 0600 file owned by
         # another user (or a file planted in a shared directory) must be
         # rejected exactly like the CLI rejects it.
@@ -94,7 +94,7 @@ class GmsClient:
 
     Authentication: Agent Service Token via ``GMS_AUTH_TOKEN_FILE`` (0600
     file containing the raw token). No password handling anywhere — the SDK
-    is for agents, and agents never see platform passwords (10.txt §五).
+    is for agents, and agents never see platform passwords.
     """
 
     def __init__(

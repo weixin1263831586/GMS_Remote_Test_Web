@@ -1,4 +1,4 @@
-"""GMS Agent Runtime SDK tests (10.txt §五, Phase 2).
+"""GMS Agent Runtime SDK tests (SDK Phase 2).
 
 The SDK must produce CLI-compatible envelopes, map HTTP status codes to the
 CLI's stable exit codes, and the MCP fast path must degrade to the CLI
@@ -119,7 +119,7 @@ def test_token_file_is_read_never_password(monkeypatch, tmp_path):
 
 
 def test_token_file_with_loose_permissions_is_rejected(monkeypatch, tmp_path):
-    # 11.txt P1-11: the CLI requires a 0600 token file; the SDK/MCP fast
+    # The CLI requires a 0600 token file; the SDK/MCP fast
     # path must fail closed the same way instead of silently reading a
     # credential any local user could have read.
     token_file = tmp_path / "loose.token"

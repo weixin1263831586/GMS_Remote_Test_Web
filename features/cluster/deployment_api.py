@@ -26,6 +26,7 @@ from features.auth import (
     require_elevated_admin_when_auth_required,
 )
 from foundation.config import config_manager
+from foundation.config_paths import certificates_path
 from foundation.networking import split_host_port
 from foundation.ssh_security import (
     scan_ssh_host_keys,
@@ -424,7 +425,7 @@ async def deploy_adb_proxy_source(
                 controller_certificate = Path(
                     os.getenv(
                         "GMS_CERT_CRT",
-                        str(project_root / "configs/certs/gms-local.crt"),
+                        str(certificates_path(project_root) / "gms-local.crt"),
                     )
                 )
                 if controller_certificate.is_file():
@@ -634,8 +635,8 @@ async def deploy_worker(
                     arcname="tools/misc.img",
                 )
                 bundle.add(
-                    project_root / "tools/scrcpy-linux-x86_64-v3.3.4",
-                    arcname="tools/scrcpy-linux-x86_64-v3.3.4",
+                    project_root / "tools/scrcpy-linux-x86_64-v3.3.4.tar.gz",
+                    arcname="tools/scrcpy-linux-x86_64-v3.3.4.tar.gz",
                 )
                 _prepare_gms_host_tools(project_root)
                 host_tools = project_root / "tools/GMS-Host-Tools"
@@ -655,11 +656,12 @@ async def deploy_worker(
                         + ", ".join(missing)
                     )
                 jdk_root = host_tools / "jdk-11"
-                module_parts = sorted((jdk_root / "lib").glob("modules.part.*"))
-                if not (jdk_root / "bin/java").is_file() or not module_parts:
+                lib_dir = jdk_root / "lib"
+                if not (jdk_root / "bin/java").is_file() or not (
+                    (lib_dir / "modules").is_file() or any(lib_dir.glob("modules.part.*"))
+                ):
                     raise RuntimeError(
-                        "GMS Host Tools bundle is incomplete: jdk-11 directory "
-                        "or lib/modules.part.*"
+                        "GMS Host Tools bundle is incomplete: jdk-11/lib/modules[.part.*]"
                     )
                 for name in required_host_tools:
                     bundle.add(
@@ -673,7 +675,7 @@ async def deploy_worker(
                 controller_certificate = Path(
                     os.getenv(
                         "GMS_CERT_CRT",
-                        str(project_root / "configs/certs/gms-local.crt"),
+                        str(certificates_path(project_root) / "gms-local.crt"),
                     )
                 )
                 if controller_certificate.is_file():
@@ -684,7 +686,7 @@ async def deploy_worker(
             sftp = ssh.open_sftp()
             remote_archive = "/tmp/gms-worker-setup.tar.gz"
             remote_credential = f"/tmp/gms-worker-gts-{worker_id}.json"
-            # 11.txt P3-3: the worker token is uploaded as a 0600 file and
+            # The worker token is uploaded as a 0600 file and
             # passed to the installer BY PATH — the token string must not
             # appear in the remote command argv (visible via ps to any
             # same-host user for the whole 900s install).

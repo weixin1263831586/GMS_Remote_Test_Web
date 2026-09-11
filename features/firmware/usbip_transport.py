@@ -158,7 +158,7 @@ async def release_usbip_devices_to_source(
     3. 确认 target 侧端口已消失（fail closed：查询失败视为未释放）。
     返回 (released, error)。调用方在 SOURCE_OWNED 状态后才允许下发烧写。
     """
-    from features.devices import parse_usbip_port_entries, USBIP_PORT_COMMAND
+    from features.devices import USBIP_PORT_COMMAND, parse_usbip_port_entries
 
     if not routes:
         return True, ""
@@ -195,7 +195,7 @@ async def release_usbip_devices_to_source(
         )
 
     # 2) fail-closed 复核：目标端口必须已消失；列表不可解析时按未释放
-    # 处理（R07 假 detach 教训），由调用方中止烧写。
+    # 处理（假 detach 教训），由调用方中止烧写。
     verify = await asyncio.to_thread(
         runtime.ssh_manager.execute_command, ssh, USBIP_PORT_COMMAND, timeout=10,
     )

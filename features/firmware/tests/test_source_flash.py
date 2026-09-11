@@ -31,7 +31,7 @@ def _make_ssh():
 
 class WindowsExecTests(unittest.TestCase):
     def test_combines_stdout_and_stderr(self) -> None:
-        ssh, stdout, stderr = _make_ssh()
+        ssh, stdout, _stderr = _make_ssh()
         # 统一执行层：windows_exec 委托 foundation.ssh_executor.run，
         # mock 伪造的是 channel 级接口（recv_ready/recv/recv_stderr_*）——
         # executor 并发 drain 这两个流，而不是顺序 file.read()。

@@ -83,7 +83,7 @@ class DevicesLogcatTests(unittest.TestCase):
         envelope = json.loads(result.stdout)
         self.assertTrue(envelope["ok"])
         # 设备端命令固定为 logcat -v time, 无 dump 标志时自动附加 -d
-        # (R16: 参数逐项加引号, 含空格参数不再被设备端拆散)。
+        # (参数逐项加引号, 含空格参数不再被设备端拆散)。
         self.assertIn("-s SERIAL-1 shell logcat -v time '-d'", calls)
         self.assertIn("fake logcat line", envelope["output"])
 

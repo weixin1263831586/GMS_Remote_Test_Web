@@ -699,7 +699,7 @@ function onTestTypeChange() {
 }
 
 // 自动选择测试套件的函数
-// R22: whether the currently selected suite still exists in the fresh list.
+// Whether the currently selected suite still exists in the fresh list.
 // A refresh must not override the user's manual version pick — but an
 // explicit test-TYPE change must still re-select (the old suite belongs to
 // the previous type), so validity is checked against the requested type.
@@ -717,7 +717,7 @@ function currentTestSuiteStillValid(selectedPath, testType) {
 }
 
 function autoSelectTestSuite(testType) {
-    // R22: a refresh re-render must not override the user's manual suite
+    // A refresh re-render must not override the user's manual suite
     // version.  If the currently selected suite still exists and matches the
     // requested test type, keep it; auto-select the latest only on first
     // entry or when the user explicitly changed the test type.

@@ -1,4 +1,4 @@
-"""Architecture regression guards (12.txt §二/§十/§十一/§十七).
+"""Architecture regression guards.
 
 These tests encode the "no architecture regression" rules called out by the
 2026-09-10 source audit.  They are intentionally static-text based (cheap,
@@ -146,7 +146,7 @@ class AgentLauncherSingleSourceTests(unittest.TestCase):
             missing,
             [],
             "legacy mcp_launcher.sh must stay deleted (python launcher is "
-            "canonical, see 12.txt P1 profile migration): " + ", ".join(missing),
+            "canonical, see docs/architecture/adr/0003-agent-profile-store.md): " + ", ".join(missing),
         )
 
     def test_package_yaml_points_python_launcher(self):
