@@ -188,11 +188,15 @@ jobs:
           # JSON 无效——只要整行含 "success" 就会被整体过滤，掩盖真实失败
           # （["success","failure"] 被判通过）。改为逐元素精确判定。
           fail=0
+          # 4.txt 审核其他项: "every gate green" means success — a skipped
+          # gate (e.g. its `if:` skipped the job after an earlier failure)
+          # used to count as green and masked the failure. Only `success`
+          # is acceptable; anything else (including skipped/cancelled) fails.
           for result in $(echo "${RESULTS}" | jq -r '.[]'); do
-            case "${result}" in
-              success|skipped) ;;
-              *) echo "::error::Gate result '${result}' is not acceptable."; fail=1 ;;
-            esac
+            if [ "${result}" != "success" ]; then
+              echo "::error::Gate result '${result}' is not acceptable (only success counts as green)."
+              fail=1
+            fi
           done
           if [ "${fail}" -ne 0 ]; then
             echo "::error::One or more gates did not pass."

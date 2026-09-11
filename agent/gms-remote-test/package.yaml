@@ -14,7 +14,7 @@
 # declaration (CLI GMS_RT_VERSION, MCP SERVER_VERSION, the three manifests)
 # from this file.
 name: gms-remote-test
-version: 0.15.3
+version: 0.16.0
 description: >-
   GMS Remote Test agent runtime: gms-rt CLI, MCP server and the operational
   Skill for device inventory, CTS/GTS/VTS/STS execution, durable jobs,
@@ -24,7 +24,7 @@ description: >-
 # distribution archive flatten runtime/ into scripts/, see sync_agent_package).
 runtime:
   entrypoint: runtime/mcp_server.py
-  launcher: runtime/mcp_launcher.sh
+  launcher: runtime/mcp_launcher.py
   cli: runtime/gms-remote-test.sh
   agent_cli: runtime/gms-agent
   mcp_config: runtime/agent_mcp_config.py

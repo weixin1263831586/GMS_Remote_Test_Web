@@ -463,19 +463,16 @@ async def deploy_adb_proxy_source(
             )
             previous_token = persist_worker_token(worker_id, token)
             try:
-                stdin, stdout, stderr = ssh.exec_command(
-                    install,
-                    timeout=900,
-                    get_pty=True,
+                # 统一执行层：sudo -S 密码经 input_text 写入 stdin，
+                # stdout/stderr 并发 drain 由 SSHExecutor 保证。
+                from foundation.ssh_executor import ssh_executor
+
+                result = ssh_executor.run(
+                    ssh, install, timeout=900, get_pty=True,
+                    input_text=(password + "\n") if password else None,
                 )
-                if password:
-                    stdin.write(password + "\n")
-                    stdin.flush()
-                exit_code = stdout.channel.recv_exit_status()
-                output = (stdout.read() + stderr.read()).decode(
-                    "utf-8",
-                    errors="replace",
-                )[-12000:]
+                exit_code = result.code
+                output = (result.stdout + result.stderr)[-12000:]
                 if exit_code != 0:
                     raise RuntimeError(
                         output or f"installer exited with {exit_code}"
@@ -725,16 +722,16 @@ async def deploy_worker(
                 install = "sudo -S -p '' -v && " + install
             previous_token = persist_worker_token(worker_id, token)
             try:
-                stdin, stdout, stderr = ssh.exec_command(
-                    install, timeout=900, get_pty=True
+                # 统一执行层：sudo -S 密码经 input_text 写入 stdin，
+                # stdout/stderr 并发 drain 由 SSHExecutor 保证。
+                from foundation.ssh_executor import ssh_executor
+
+                result = ssh_executor.run(
+                    ssh, install, timeout=900, get_pty=True,
+                    input_text=(password + "\n") if password else None,
                 )
-                if password:
-                    stdin.write(password + "\n")
-                    stdin.flush()
-                exit_code = stdout.channel.recv_exit_status()
-                output = (stdout.read() + stderr.read()).decode(
-                    "utf-8", errors="replace"
-                )[-12000:]
+                exit_code = result.code
+                output = (result.stdout + result.stderr)[-12000:]
                 if exit_code != 0:
                     raise RuntimeError(output or f"installer exited with {exit_code}")
             except Exception:

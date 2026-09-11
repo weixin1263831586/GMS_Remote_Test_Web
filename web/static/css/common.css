@@ -283,7 +283,7 @@ body {
 
 .sidebar-nav {
     flex: 1;
-    padding: 8px 4px;
+    padding: 7px 4px;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
@@ -333,13 +333,13 @@ body {
     display: flex;
     align-items: center;
     gap: 3px;
-    padding: 5px 6px 5px 6px;
+    padding: 5px 6px;
     color: var(--text-secondary);
     text-decoration: none;
     font-size: 13px;
     transition: var(--transition-normal);
     border-radius: 7px;
-    margin-bottom: 2px;
+    margin-bottom: 1px;
     cursor: pointer;
     position: relative;
     overflow: hidden;
@@ -910,8 +910,7 @@ body {
     display: inline-block;
 }
 
-/* 主页 ADB 标题行右侧「⭐ 只看关注」使用紧凑的 24px 点击目标，
-   与标题垂直居中且不靠 transform/负边距定位，避免刷新重排时回弹。 */
+/* 主页「⭐ 只看关注」24px 紧凑点击目标，垂直居中不回弹。 */
 .adb-title-row {
     align-items: center !important;
 }
@@ -1052,13 +1051,9 @@ body {
     margin-bottom: 0;
 }
 
+/* 覆写全局滚动条：宽度 6px，thumb 高亮色（track/圆角近全局） */
 .device-column::-webkit-scrollbar {
     width: 6px;
-}
-
-.device-column::-webkit-scrollbar-track {
-    background: var(--darker-bg);
-    border-radius: 3px;
 }
 
 .device-column::-webkit-scrollbar-thumb {
@@ -1494,8 +1489,7 @@ body {
     border-color: var(--primary-color);
 }
 
-/* 测试页日志工具按钮（保存/清除/配置）：覆盖 .btn-xxs 的 min-width:80px，
-   收窄避免占用过多空间。作用域限定在测试按钮区。 */
+/* 测试页日志工具按钮：收窄 .btn-xxs，作用域限定在测试按钮区。 */
 .test-btn-frame .btn-xxs {
     min-width: 0;
     padding: 4px 8px;
@@ -1793,8 +1787,7 @@ select option {
     box-shadow: var(--shadow-md);
 }
 
-/* 共享固件操作列：覆盖 .btn-xxs 的 min-width:80px，让分享/下载/删除 三按钮
-   收窄，避免撑破表格触发水平滚动条。作用域限定，不影响其它页面。 */
+/* 共享固件操作列：收窄 .btn-xxs（默认 min-width:80px），作用域限定。 */
 .firmware-share-actions .btn-xxs {
     min-width: 0;
     padding: 4px 8px;
@@ -1945,7 +1938,11 @@ select option {
     font-weight: 700;
 }
 
-.adb-proxy-section-head {
+/* 与 .dx-title-row/.dx-section-head/.dx-list-head 同一规则体（合并选择器） */
+.adb-proxy-section-head,
+.dx-title-row,
+.dx-section-head,
+.dx-list-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2292,10 +2289,9 @@ body.modal-open {
     display: flex;
 }
 
-/* 结果容器：自适应填满 tab 剩余空间并形成独立滚动区。
-   用 min-height:0 + flex:1 让它随弹框(92vh)伸缩，而不是被钉死在固定像素高度上
-   ——否则 96vw×92vh 的弹框里大部分垂直空间变成不可滚动的死区，结果区只剩一小条能滚。
-   sticky 表头仍在该 overflow:auto 容器内生效。 */
+/* 结果容器：flex:1 + min-height:0 随 92vh 弹框伸缩并独立滚动，
+   不被钉死在固定像素高度（否则弹框大部分垂直空间变成不可滚动的死区）；
+   sticky 表头在该 overflow:auto 容器内生效。 */
 #device-config-modal #dcfg-results,
 #device-config-modal #dcfg-pkg-results,
 #device-config-modal #dcfg-feat-results,
@@ -2326,8 +2322,7 @@ body.modal-open {
     display: flex;
     align-items: center;
     justify-content: center;
-    /* 与 .dcfg-results 同样自适应填满 tab：flex:1 + min-height:0。
-       空状态与有数据状态共享同一可伸缩高度，查询前后弹框不抖动。 */
+    /* 同 .dcfg-results 自适应高度：查询前后弹框不抖动。 */
     flex: 1 1 auto;
     min-height: 0;
     padding: 12px 10px;
@@ -2389,6 +2384,31 @@ body.modal-open {
     align-items: center;
     gap: 3px;
     flex-shrink: 0;
+}
+
+/* 12.txt P1（responsive）：窄 viewport 下 nowrap + overflow:hidden 会把
+ * 240px/200px min-width 的输入框直接裁掉。允许换行并解除 min-width。 */
+@media (max-width: 700px) {
+    #device-config-modal .dcfg-toolbar {
+        flex-wrap: wrap;
+        overflow: visible;
+        min-height: 0;
+        max-height: none;
+    }
+
+    #device-config-modal .dcfg-toolbar input,
+    #device-config-modal .dcfg-toolbar select {
+        flex: 1 1 140px;
+        min-width: 0;
+    }
+
+    #device-config-modal .dcfg-toolbar input#dcfg-package {
+        flex-basis: 100%;
+    }
+
+    #device-config-modal .dcfg-toolbar .dcfg-label {
+        flex-wrap: wrap;
+    }
 }
 
 #device-config-modal .dcfg-stat {
@@ -3769,21 +3789,9 @@ body.modal-open {
     }
 }
 
+/* 覆写全局滚动条：仅宽度不同（hover/track/thumb 颜色同全局） */
 #emoji-picker::-webkit-scrollbar {
     width: 6px;
-}
-
-#emoji-picker::-webkit-scrollbar-track {
-    background: var(--darker-bg);
-}
-
-#emoji-picker::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 3px;
-}
-
-#emoji-picker::-webkit-scrollbar-thumb:hover {
-    background: var(--primary-color);
 }
 
 #emoji-picker button {
@@ -4366,14 +4374,7 @@ body.modal-open {
     min-width: 0;
 }
 
-.dx-title-row,
-.dx-section-head,
-.dx-list-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-}
+/* 规则体已与 .adb-proxy-section-head 合并（1949 行附近） */
 
 .dx-title-row,
 .dx-section-head {
@@ -6741,10 +6742,6 @@ body.apk-resizing {
 
     .input-table td {
         padding: 0 0 8px;
-    }
-
-    .middle-row {
-        grid-template-columns: 1fr;
     }
 
     .device-canvas {

@@ -27,6 +27,7 @@ from typing import Any
 DESIRED_ENV_KEYS = (
     "GMS_REMOTE_TEST_SERVER",
     "GMS_RT_PROFILE",
+    "GMS_AGENT_CLIENT",
     "GMS_AUTH_TOKEN_FILE",
     "GMS_AGENT_AUTH_MODE",
     "GMS_CURL_CA_CERT",
@@ -44,10 +45,19 @@ def _backup(path: Path) -> Path:
     return backup
 
 
-def _desired_env(server_url: str, profile: str, token_file: str, ca_cert: str) -> dict[str, str]:
+def _desired_env(
+    server_url: str, profile: str, token_file: str, ca_cert: str, client: str = ""
+) -> dict[str, str]:
     env = {
         "GMS_REMOTE_TEST_SERVER": server_url,
         "GMS_RT_PROFILE": profile,
+        # 4.txt 审核 P1-5: pin the client identity in the registered env —
+        # mcp_launcher.py used to fall back to the kimi→codex→kkagent probe
+        # when GMS_AGENT_CLIENT was absent, so a Codex registration on a
+        # multi-client host loaded the Kimi profile (wrong Controller URL
+        # and identity). The launcher now also honors GMS_RT_PROFILE's
+        # `client =` field, but the explicit pin is authoritative.
+        "GMS_AGENT_CLIENT": client,
         "GMS_AUTH_TOKEN_FILE": token_file,
         # 11.txt 审核 P0-3：注册进客户端配置的 MCP 环境必须显式声明
         # service-token 模式——否则 mcp_server.py 会注册密码登录/提权/
@@ -56,7 +66,7 @@ def _desired_env(server_url: str, profile: str, token_file: str, ca_cert: str) -
     }
     if ca_cert:
         env["GMS_CURL_CA_CERT"] = ca_cert
-    return env
+    return {k: v for k, v in env.items() if v}
 
 
 def _desired_block(mcp_server_path: str, env: dict[str, str]) -> dict[str, Any]:
@@ -70,10 +80,11 @@ def reconcile_kimi(
     profile: str,
     token_file: str,
     ca_cert: str = "",
+    client: str = "kimi",
 ) -> str:
     """Reconcile ~/.kimi-code/mcp.json. Returns a human-readable action."""
     path = Path(config_path).expanduser()
-    env = _desired_env(server_url, profile, token_file, ca_cert)
+    env = _desired_env(server_url, profile, token_file, ca_cert, client)
     desired = _desired_block(mcp_server_path, env)
 
     config: dict[str, Any] = {}
@@ -118,6 +129,7 @@ def reconcile_codex(
     profile: str,
     token_file: str,
     ca_cert: str = "",
+    client: str = "codex",
 ) -> str:
     """Reconcile the [mcp_servers.gms_remote_test] table of Codex config.toml.
 
@@ -127,7 +139,7 @@ def reconcile_codex(
     preserved byte-for-byte.
     """
     path = Path(config_path).expanduser()
-    env = _desired_env(server_url, profile, token_file, ca_cert)
+    env = _desired_env(server_url, profile, token_file, ca_cert, client)
 
     def toml_str(value: str) -> str:
         escaped = (
@@ -195,9 +207,9 @@ def main() -> int:
     ca_cert = sys.argv[7] if len(sys.argv) > 7 else ""
     try:
         if client == "kimi":
-            print(reconcile_kimi(config, mcp_server, server_url, profile, token_file, ca_cert))
+            print(reconcile_kimi(config, mcp_server, server_url, profile, token_file, ca_cert, client))
         elif client == "codex":
-            print(reconcile_codex(config, mcp_server, server_url, profile, token_file, ca_cert))
+            print(reconcile_codex(config, mcp_server, server_url, profile, token_file, ca_cert, client))
         else:
             print(f"unknown client: {client}", file=sys.stderr)
             return 2

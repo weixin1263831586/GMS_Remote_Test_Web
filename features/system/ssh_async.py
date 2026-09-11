@@ -3,7 +3,7 @@
 SSH 异步管理器 - 异步执行 SSH 命令并实时推送日志
 
 执行实现统一委托给
-:class:`~features.system.ssh_executor.SSHExecutor`（与同步 SSHManager
+:class:`~foundation.ssh_executor.SSHExecutor`（与同步 SSHManager
 共用同一实现，杜绝行为漂移）；本类只保留异步连接管理和既有 API 兼容。
 """
 
@@ -12,7 +12,7 @@ import logging
 
 import paramiko
 
-from features.system.ssh_executor import ssh_executor
+from foundation.ssh_executor import ssh_executor
 from foundation.command_result import CommandResult
 from foundation.ssh_security import configure_strict_host_keys
 

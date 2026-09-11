@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260910-user-agent-layout-v8">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260910-compact-sidebar-v10">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260910-elev-recovery" defer></script>
@@ -45,7 +45,7 @@
     <script src="/static/js/shell/weekly-report.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/arrow-nav.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/shell-terminal.js?v=20260905-extract" defer></script>
-    <script src="/static/js/shell/sidebar-dnd.js?v=20260905-extract" defer></script>
+    <script src="/static/js/shell/sidebar-dnd.js?v=20260910-device-console-order" defer></script>
     <script src="/static/js/shell/workspace-devices.js?v=20260902-diagnostics-scope" defer></script>
     <!-- 加载通知中心 - 必须在app.js之前加载 -->
     <script src="/static/js/notifications.js?v=20260903-toggle-ready" defer></script>
@@ -106,13 +106,14 @@
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
     <script>
         (function() {
-            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'reports', 'report-analysis', 'apk-analysis', 'test-suites', 'api-docs', 'architecture', 'websites', 'tools', 'security-audit', 'gms-assistant', 'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent', 'notes'];
+            const sidebarAllPages = ['test', 'desktop', 'terminal', 'users', 'devices', 'devices-console', 'reports', 'report-analysis', 'apk-analysis', 'test-suites', 'api-docs', 'architecture', 'websites', 'tools', 'security-audit', 'gms-assistant', 'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent', 'notes'];
             const pageTitles = {
                 'test': '测试界面 - GMS远程测试',
                 'desktop': '主机桌面 - GMS远程测试',
                 'terminal': '主机终端 - GMS远程测试',
                 'users': '用户管理 - GMS远程测试',
                 'devices': '设备管理 - GMS远程测试',
+                'devices-console': '设备串口 - GMS 远程测试',
                 'reports': '报告管理 - GMS远程测试',
                 'report-analysis': '报告分析 - GMS远程测试',
                 'apk-analysis': 'APK分析 - GMS远程测试',
@@ -182,6 +183,11 @@
                 savedOrder = localStorage.getItem('gms_sidebar_order');
                 if (savedOrder) {
                     savedOrder = JSON.parse(savedOrder);
+                    if (Array.isArray(savedOrder) && savedOrder.includes('devices') && savedOrder.includes('devices-console')) {
+                        savedOrder = savedOrder.filter(page => page !== 'devices-console');
+                        savedOrder.splice(savedOrder.indexOf('devices') + 1, 0, 'devices-console');
+                        localStorage.setItem('gms_sidebar_order', JSON.stringify(savedOrder));
+                    }
                 }
             } catch (e) {
                 console.error('[Sidebar] Failed to parse saved order:', e);
@@ -530,7 +536,7 @@
             <div class="auth-row">
                 <label for="auth-username">账号</label>
                 <input id="auth-username" name="username" type="text" autocomplete="username" placeholder="管理员账号，或正在读取客户端身份…" aria-describedby="auth-username-help" required>
-                <div class="auth-help" id="auth-username-help">可使用平台管理员账号，或 SSH用户名@客户端IP，例如 hcq@172.16.14.66。</div>
+                <div class="auth-help" id="auth-username-help">可使用平台管理员账号，或 SSH用户名@客户端IP，例如 gms@192.0.2.10。</div>
             </div>
             <div class="auth-row">
                 <label for="auth-password">密码</label>
@@ -598,82 +604,87 @@
                     <span class="sidebar-icon">📱</span>
                     <span class="sidebar-text">设备管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="reports" data-page-order="5">
+                <a href="#" class="sidebar-item" data-page="devices-console" data-page-order="5">
+                    <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+                    <span class="sidebar-icon">🔌</span>
+                    <span class="sidebar-text">设备串口</span>
+                </a>
+                <a href="#" class="sidebar-item" data-page="reports" data-page-order="6">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📊</span>
                     <span class="sidebar-text">报告管理</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="report-analysis" data-page-order="6">
+                <a href="#" class="sidebar-item" data-page="report-analysis" data-page-order="7">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📈</span>
                     <span class="sidebar-text">报告分析</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="apk-analysis" data-page-order="7">
+                <a href="#" class="sidebar-item" data-page="apk-analysis" data-page-order="8">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon"><img src="/static/icons/jadx-icon.webp" alt="APK"></span>
                     <span class="sidebar-text">APK分析</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="test-suites" data-page-order="8">
+                <a href="#" class="sidebar-item" data-page="test-suites" data-page-order="9">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📚</span>
                     <span class="sidebar-text">测试套件</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="api-docs" data-page-order="9">
+                <a href="#" class="sidebar-item" data-page="api-docs" data-page-order="10">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📡</span>
                     <span class="sidebar-text">系统接口</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="architecture" data-page-order="10">
+                <a href="#" class="sidebar-item" data-page="architecture" data-page-order="11">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🏗️</span>
                     <span class="sidebar-text">系统架构</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="websites" data-page-order="11">
+                <a href="#" class="sidebar-item" data-page="websites" data-page-order="12">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🌐</span>
                     <span class="sidebar-text">常用网址</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="tools" data-page-order="12">
+                <a href="#" class="sidebar-item" data-page="tools" data-page-order="13">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🧰</span>
                     <span class="sidebar-text">常用工具</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="13">
+                <a href="#" class="sidebar-item" data-page="security-audit" data-page-order="14">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🛡️</span>
                     <span class="sidebar-text">安全审计</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="gms-assistant" data-page-order="14">
+                <a href="#" class="sidebar-item" data-page="gms-assistant" data-page-order="15">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🎓</span>
                     <span class="sidebar-text">GMS助手</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="automation" data-page-order="15">
+                <a href="#" class="sidebar-item" data-page="automation" data-page-order="16">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">⚙️</span>
                     <span class="sidebar-text">GMS ATS</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="cluster" data-page-order="16">
+                <a href="#" class="sidebar-item" data-page="cluster" data-page-order="17">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🖧</span>
                     <span class="sidebar-text">主机集群</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="redmine-agent" data-page-order="16">
+                <a href="#" class="sidebar-item" data-page="redmine-agent" data-page-order="18">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🧭</span>
                     <span class="sidebar-text">Redmine</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="gerrit-dashboard" data-page-order="17">
+                <a href="#" class="sidebar-item" data-page="gerrit-dashboard" data-page-order="19">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">🔀</span>
                     <span class="sidebar-text">Gerrit看板</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="notes" data-page-order="19">
+                <a href="#" class="sidebar-item" data-page="notes" data-page-order="20">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">📚</span>
                     <span class="sidebar-text">个人知识库</span>
                 </a>
-                <a href="#" class="sidebar-item" data-page="agent" data-page-order="18">
+                <a href="#" class="sidebar-item" data-page="agent" data-page-order="21">
                     <span class="drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
                     <span class="sidebar-icon">💬</span>
                     <span class="sidebar-text">对话Agent</span>
@@ -778,10 +789,11 @@
                             <table class="project-guide-map">
                                 <tbody>
                                     <tr><th>测试界面</th><td>配置并执行 CTS / GTS / VTS / STS；查看系统日志与测试日志。</td><th>设备管理</th><td>查看设备状态、占用关系和远端设备操作入口。</td></tr>
-                                    <tr><th>主机桌面 / 终端</th><td>通过 noVNC 或终端操作当前 Worker 主机。</td><th>测试套件</th><td>下载、添加、解压并检查不同 Worker 上的套件。</td></tr>
-                                    <tr><th>报告管理 / 分析</th><td>检索、下载测试报告，并汇总失败项和趋势。</td><th>GMS ATS</th><td>编排构建、设备预留、烧写、测试与报告全流程。</td></tr>
-                                    <tr><th>主机集群</th><td>查看 Worker 在线状态、能力和任务分配；刷新时保留稳定内容。</td><th>ADB / USB/IP</th><td>在“本地设备/ADB接入”中管理来源、目标、设备与逐端口接入。</td></tr>
-                                    <tr><th>APK / Agent</th><td>恢复 APK 历史任务；以受控计划执行 Agent 支持的查询和操作。</td><th>其他工具</th><td>GMS 助手、Gerrit、Redmine和知识库用于分析与协作。</td></tr>
+                                    <tr><th>设备串口</th><td>查看 Controller 本机 USB 串口、实时控制台和开机早期日志。</td><th>主机桌面 / 终端</th><td>通过 noVNC 或终端操作当前 Worker 主机。</td></tr>
+                                    <tr><th>测试套件</th><td>下载、添加、解压并检查不同 Worker 上的套件。</td><th>报告管理 / 分析</th><td>检索、下载测试报告，并汇总失败项和趋势。</td></tr>
+                                    <tr><th>GMS ATS</th><td>编排构建、设备预留、烧写、测试与报告全流程。</td><th>主机集群</th><td>查看 Worker 在线状态、能力和任务分配；刷新时保留稳定内容。</td></tr>
+                                    <tr><th>ADB / USB/IP</th><td>在“本地设备/ADB接入”中管理来源、目标、设备与逐端口接入。</td><th>APK / Agent</th><td>恢复 APK 历史任务；以受控计划执行 Agent 支持的查询和操作。</td></tr>
+                                    <tr><th>其他工具</th><td>GMS 助手、Gerrit、Redmine和知识库用于分析与协作。</td><th></th><td></td></tr>
                                 </tbody>
                             </table>
                             <div class="project-guide-notice"><strong>安全与日志：</strong>“开始测试”进入测试日志；烧写固件、烧写 GSI、设备信息和其他设备操作进入系统日志。固件上传暂存阶段可重试，进入最终烧写后不可强制停止；异常时保留日志和任务编号。ADB Proxy/USB/IP 断开会核对设备占用，不能用来绕过租约。</div>
@@ -2011,6 +2023,17 @@
             <div class="embedded-frame-shell" data-frame-state="loading">
                 <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
                 <iframe id="cluster-frame" data-src="/cluster"
+                        style="border: none; border-radius: 8px; background: var(--light-bg);">
+                </iframe>
+            </div>
+        </div>
+
+        <!-- 设备串口页面 -->
+        <div class="container page-content" id="page-devices-console">
+            <div class="section-title" style="text-transform:none">🔌 设备串口</div>
+            <div class="embedded-frame-shell" data-frame-state="loading">
+                <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
+                <iframe id="devices-console-frame" data-src="/devices-console" data-wait-for-ready="true"
                         style="border: none; border-radius: 8px; background: var(--light-bg);">
                 </iframe>
             </div>
@@ -7051,6 +7074,7 @@
             'terminal': '主机终端 - GMS远程测试',
             'users': '用户管理 - GMS远程测试',
             'devices': '设备管理 - GMS远程测试',
+            'devices-console': '设备串口 - GMS 远程测试',
             'reports': '报告管理 - GMS远程测试',
             'report-analysis': '报告分析 - GMS远程测试',
             'apk-analysis': 'APK分析 - GMS远程测试',
@@ -7076,6 +7100,7 @@
             terminal: '打开服务器 SSH 终端，执行命令、上传文件、辅助定位环境问题。',
             users: '查看在线用户、客户端 IP、用户名、测试运行状态和设备占用情况。',
             devices: '查看 ADB 设备、型号、Android 版本、电量、来源、锁定状态；支持重启、remount、WiFi、投屏、bootloader 操作。',
+            'devices-console': '枚举 Controller 本机 USB 转串口，绑定设备备注，查看实时控制台并管理开机早期日志。',
             reports: '列出历史测试报告，按用户/时间查看，下载、删除、进入分析。',
             'report-analysis': '上传报告或打开已有报告，解析失败项，做失败诊断、AI 分析和根因线索整理。',
             'apk-analysis': '上传 APK/JAR，反编译源码，查看 Manifest、权限、源码树和文件内容。',
@@ -7532,6 +7557,7 @@
                 'gms-assistant': 'gms-assistant-frame',
                 'automation': 'automation-frame',
                 'cluster': 'cluster-frame',
+                'devices-console': 'devices-console-frame',
                 'redmine-agent': 'redmine-agent-frame',
                 'gerrit-dashboard': 'gerrit-dashboard-frame',
                 'architecture': 'architecture-iframe'

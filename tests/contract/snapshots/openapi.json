@@ -196,6 +196,39 @@
         "title": "ArtifactUploadInit",
         "type": "object"
       },
+      "BindingUpdate": {
+        "properties": {
+          "baudrate": {
+            "default": 1500000,
+            "title": "Baudrate",
+            "type": "integer"
+          },
+          "capture_enabled": {
+            "default": false,
+            "title": "Capture Enabled",
+            "type": "boolean"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Label",
+            "type": "string"
+          },
+          "newline": {
+            "default": "cr",
+            "title": "Newline",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "title": "BindingUpdate",
+        "type": "object"
+      },
       "Body_analyze_reports_api_reports_analyze_post": {
         "properties": {
           "class_names": {
@@ -11158,6 +11191,347 @@
         "summary": "Unlock Bootloader"
       }
     },
+    "/api/devices/console/bindings/{port_key}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port_key",
+            "required": true,
+            "schema": {
+              "title": "Port Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Binding",
+        "tags": [
+          "devices-console"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port_key",
+            "required": true,
+            "schema": {
+              "title": "Port Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindingUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Binding",
+        "tags": [
+          "devices-console"
+        ]
+      }
+    },
+    "/api/devices/console/ports": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Ports",
+        "tags": [
+          "devices-console"
+        ]
+      }
+    },
+    "/api/devices/console/ports/{port_key}/capture/start": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port_key",
+            "required": true,
+            "schema": {
+              "title": "Port Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Capture",
+        "tags": [
+          "devices-console"
+        ]
+      }
+    },
+    "/api/devices/console/ports/{port_key}/capture/stop": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port_key",
+            "required": true,
+            "schema": {
+              "title": "Port Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Capture",
+        "tags": [
+          "devices-console"
+        ]
+      }
+    },
+    "/api/devices/console/ports/{port_key}/logs": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port_key",
+            "required": true,
+            "schema": {
+              "title": "Port Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Logs",
+        "tags": [
+          "devices-console"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port_key",
+            "required": true,
+            "schema": {
+              "title": "Port Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tail",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 10000,
+              "minimum": 1,
+              "title": "Tail",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Logs",
+        "tags": [
+          "devices-console"
+        ]
+      }
+    },
+    "/api/devices/console/ports/{port_key}/logs/download": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port_key",
+            "required": true,
+            "schema": {
+              "title": "Port Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Log",
+        "tags": [
+          "devices-console"
+        ]
+      }
+    },
     "/api/devices/force-release": {
       "post": {
         "description": "Force release platform device occupation locks.",
@@ -20245,6 +20619,23 @@
           }
         },
         "summary": "Cluster Novnc Http Proxy"
+      }
+    },
+    "/devices-console": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Devices Console Page"
       }
     },
     "/gerrit-dashboard": {

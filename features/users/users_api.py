@@ -40,7 +40,7 @@ USER_ONLINE_WINDOW = timedelta(minutes=5)
 
 
 def _is_loopback_device_host(device_host: str) -> bool:
-    """本地回环主机（如本机浏览器写入的 hcq@127.0.0.1）不参与直连设备枚举。"""
+    """本地回环主机（如本机浏览器写入的 user@127.0.0.1）不参与直连设备枚举。"""
     host = str(device_host or "").rsplit("@", 1)[-1].strip().strip("[]")
     if host.lower() == "::1":
         return True

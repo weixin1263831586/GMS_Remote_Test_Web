@@ -1935,7 +1935,12 @@ async def start_usbip(
                     clear_usbip_reconnect_suppression(
                         device_host, reported_serials
                     )
-                    resume_usbip_reconnect(device_ids=reported_serials)
+                    # 对称 resume：pause 按 host + device_ids 双键记录，
+                    # 这里手动重连成功后必须同时清 host 键，否则 firmware
+                    # ownership 的 host 级 pause 会拦住后续 reconnect 调度。
+                    resume_usbip_reconnect(
+                        device_host=device_host, device_ids=reported_serials
+                    )
                 except Exception as e:
                     logger.warning(
                         "[USB/IP] Failed to clear reconnect suppression/pause "

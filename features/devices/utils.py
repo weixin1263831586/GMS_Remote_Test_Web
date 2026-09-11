@@ -98,7 +98,12 @@ class DeviceUtils:
     def kill_process(ssh, process_pattern: str) -> bool:
         """终止匹配 process_pattern 的远程进程。"""
         try:
-            ssh.exec_command(f"pkill -f -- {shlex.quote(process_pattern)}")
+            # 统一执行层：结果不需要，但 drain 由 SSHExecutor 兜底。
+            from foundation.ssh_executor import ssh_executor
+
+            ssh_executor.run(
+                ssh, f"pkill -f -- {shlex.quote(process_pattern)}", timeout=10,
+            )
             return True
         except Exception as e:
             logger.error(f"Error killing process: {e}")
@@ -175,8 +180,10 @@ class DeviceUtils:
                 f"tail -c 2048 {shlex.quote(log_path)} 2>/dev/null | grep -q 'Connected' && "
                 'echo $pid || echo ""'
             )
-            stdout, _, _ = ssh.exec_command(cmd)
-            pid = stdout.read().decode('utf-8', errors='ignore').strip()
+            from foundation.ssh_executor import ssh_executor
+
+            result = ssh_executor.run(ssh, cmd, timeout=15)
+            pid = result.stdout.strip()
             return (bool(pid), pid or None)
         except Exception as e:
             logger.error(f"Error checking scrcpy health for {device_id}: {e}")

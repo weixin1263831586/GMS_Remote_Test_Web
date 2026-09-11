@@ -409,6 +409,7 @@ def ensure_usbip_auto_bind_policies(
             "busids": verified,
             "added_busids": added,
             "existing_busids": existing,
+            "source_os": "windows",
             "version": version,
         }
     finally:

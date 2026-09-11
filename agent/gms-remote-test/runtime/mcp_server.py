@@ -77,7 +77,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.15.3"
+SERVER_VERSION = "0.16.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -477,8 +477,13 @@ def run_cli(
     args: list[str] | str | None = None,
     stdin_text: str | None = None,
     timeout: int | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> tuple[str, bool]:
-    """Run one CLI invocation and return (text, is_error)."""
+    """Run one CLI invocation and return (text, is_error).
+
+    ``env_extra``：附加到子进程环境的一次性标记（如
+    ``GMS_RT_TYPED_READONLY``），仅由本文件内的 typed 工具设置。
+    """
     if normalize_command(command) in _DENIED_COMMANDS:
         return (
             f"denied: {normalize_command(command)} opens an interactive "
@@ -500,6 +505,9 @@ def run_cli(
     effective_timeout = DEFAULT_TIMEOUT_SECONDS if timeout is None else timeout
     if effective_timeout <= 0:
         effective_timeout = DEFAULT_TIMEOUT_SECONDS
+    child_env = None
+    if env_extra:
+        child_env = {**os.environ, **env_extra}
     try:
         completed = subprocess.run(
             argv,
@@ -509,6 +517,7 @@ def run_cli(
             text=True,
             timeout=effective_timeout,
             check=False,
+            env=child_env,
         )
     except subprocess.TimeoutExpired:
         return (
@@ -974,12 +983,18 @@ def start_burn_operation(command: str, args: list[str]) -> tuple[str, bool]:
 def burn_status_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Poll a background burn operation started with wait=false."""
     operation_id = str(arguments.get("operation_id") or "").strip()
+    # First check: cheap charset bound. The second check below must mirror
+    # the generator in start_burn_operation ("burn-<epoch>-<pid>-<hex3>"):
+    # digits are inside [0-9a-f-], so the loose class happens to accept the
+    # generated ids, but the exact pattern keeps the two in visible lockstep.
     if not operation_id or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", operation_id):
         return "Missing or invalid required argument: operation_id", True
     op_dir = _burn_operations_dir() / operation_id
     meta_path = op_dir / "meta.json"
     log_path = op_dir / "output.log"
-    if not meta_path.is_file() or not re.fullmatch(r"burn-[0-9a-f-]+", operation_id):
+    if not meta_path.is_file() or not re.fullmatch(
+        r"burn-[0-9]+-[0-9]+-[0-9a-f]{6}", operation_id
+    ):
         return f"operation not found: {operation_id}", True
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -1525,9 +1540,6 @@ def _validate_single_shell_command(command: str) -> tuple[bool, str]:
                 f"'{binary} {sub}'" for sub in _SHELL_CMD_READONLY_SUBCOMMANDS[binary]
             )
             return False, f"only {allowed} are allowed for '{binary}'"
-    elif binary == "ip" or binary == "ifconfig":
-        if any(arg in ("set", "add", "del", "flush", "up", "down") for arg in rest):
-            return False, "network configuration commands are not allowed"
     return True, ""
 
 
@@ -1586,7 +1598,15 @@ def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             timeout = min(600, max(1, int(arguments["timeout"])))
         except (TypeError, ValueError):
             return "timeout must be an integer (seconds)", True
-    return run_cli("gms-rt-devices-shell", [device, command], timeout=timeout)
+    # 12.txt P0: gms-rt-shell is the typed read-only surface — the CLI's
+    # service-token approval gate must not block allowlisted probes, while
+    # every non-allowlisted command still requires a one-shot approval.
+    return run_cli(
+        "gms-rt-devices-shell",
+        [device, command],
+        timeout=timeout,
+        env_extra={"GMS_RT_TYPED_READONLY": "1"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1758,8 +1778,14 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             timeout = min(600, max(1, int(arguments["timeout"])))
         except (TypeError, ValueError):
             return "timeout must be an integer (seconds)", True
+    # 12.txt P0: dump-mode logcat is a typed read-only surface; the CLI
+    # service-token gate must not demand an approval for it (the tool
+    # already denies -c and -f, which are the destructive forms).
     text, is_error = run_cli(
-        "gms-rt-devices-logcat", [device, *items], timeout=timeout
+        "gms-rt-devices-logcat",
+        [device, *items],
+        timeout=timeout,
+        env_extra={"GMS_RT_TYPED_READONLY": "1"},
     )
     if is_error or until_text is None:
         return text, is_error

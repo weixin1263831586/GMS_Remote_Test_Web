@@ -22,6 +22,7 @@ from features.devices import api as devices
 from features.devices import config_explorer_api as device_config_explorer
 from features.devices import config_override_api as device_config_override
 from features.devices import integrations_api as device_integrations
+from features.devices import serial_console_api as device_serial_console
 from features.devices.dependencies import configure_device_dependencies
 from features.devices.network import run_local_shell_command
 from features.devices.support import get_or_create_user_state
@@ -123,6 +124,8 @@ ALL_ROUTERS = [
     device_config_explorer.router,
     device_config_override.router,
     device_integrations.router,
+    device_serial_console.router,
+    device_serial_console.page_router,
     email.router,
     firmware.router,
     gerrit_dashboard.router,

@@ -38,19 +38,17 @@ config_manager = runtime.config_manager
 _SSH_DEVICE_HOST_RE = re.compile(r"^[^@\s<>\"'`]+@[^@\s<>\"'`]+$")
 
 
-def get_effective_local_server(
-    client_id: str,
-    requested_local_server: str = "",
-    request: Request | None = None,
-) -> str:
+def get_effective_local_server(client_id: str, requested_local_server: str = "",
+                               request: Request | None = None) -> str:
     if requested_local_server:
         return requested_local_server
     if request is not None:
         display_id = get_client_display_id_from_request(request)
         if "@" in display_id:
             return display_id
-    runtime_config = config_manager.get_runtime_config()
-    runtime_local_server = str(runtime_config.get("local_server") or "").strip()
+    runtime_local_server = str(
+        config_manager.get_runtime_config().get("local_server") or ""
+    ).strip()
     if "@" in runtime_local_server:
         return runtime_local_server
     return client_id
@@ -88,8 +86,11 @@ SIDEBAR_PAGES = {
     'security-audit',
     'gms-assistant',
     'automation',
+    'cluster',
+    'devices-console',
     'redmine-agent',
     'gerrit-dashboard',
+    'notes',
     'agent',
 }
 
@@ -151,6 +152,9 @@ def normalize_sidebar_order(raw_order: Any) -> list[str]:
 
     if not order:
         raise HTTPException(status_code=400, detail="order 不能为空")
+    if 'devices' in seen and 'devices-console' in seen:
+        order.remove('devices-console')
+        order.insert(order.index('devices') + 1, 'devices-console')
     return order
 
 
@@ -300,9 +304,8 @@ async def ensure_tailscale_url(
     if status.get('ip'):
         url = _build_tailscale_url(status['ip'], request)
         return JSONResponse(content={
-            'success': True,
-            'public_url': url,
-            'connected': status.get('connected', False)
+            'success': True, 'public_url': url,
+            'connected': status.get('connected', False),
         })
 
     # Tailscale 未连接，尝试自动启动（需要 sudoers 免密配置）
@@ -336,7 +339,7 @@ async def ensure_tailscale_url(
                 return JSONResponse(content={
                     'success': True,
                     'public_url': _build_tailscale_url(status['ip'], request),
-                    'connected': status.get('connected', False)
+                    'connected': status.get('connected', False),
                 })
 
             # 未 authenticated，需要用户手动登录
@@ -385,15 +388,14 @@ def _public_credentials(credentials: list) -> list:
     for cred in credentials or []:
         if not isinstance(cred, dict):
             continue
-        item = {
+        public.append({
             "device_host": str(cred.get("device_host") or "").strip(),
             "username": str(cred.get("username") or "").strip(),
             "host": str(cred.get("host") or cred.get("hostname") or "").strip(),
             "has_password": bool(
                 cred.get("encrypted_password") or cred.get("password")
             ),
-        }
-        public.append(item)
+        })
     return public
 
 
@@ -466,7 +468,6 @@ async def delete_client_ssh_credential(
         )
         if not is_same:
             remaining.append(cred)
-
     if config_manager.save_client_ssh_credentials(remaining):
         return success_response(message="凭据已删除")
     return error_response("删除凭据失败", status_code=500)
@@ -478,11 +479,9 @@ def _load_static_routes_config() -> dict:
     """读取合并后的 static_routes 配置（config.json 默认值 + 运行时覆盖）。"""
     config = config_manager.load_config()
     routes_config = config.get('static_routes')
-    if not isinstance(routes_config, dict):
-        routes_config = {}
+    routes_config = routes_config if isinstance(routes_config, dict) else {}
     routes = routes_config.get('routes')
-    if not isinstance(routes, list):
-        routes = []
+    routes = routes if isinstance(routes, list) else []
     return {
         'enabled': bool(routes_config.get('enabled', False)),
         'routes': [entry for entry in routes if isinstance(entry, dict)],
@@ -585,6 +584,8 @@ async def get_sidebar_order(request: Request):
     preferences = load_navigation_preferences(owner_id)
     order = preferences["order"]
     order = [page for page in order if isinstance(page, str) and page in SIDEBAR_PAGES]
+    if order:
+        order = normalize_sidebar_order(order)
     visible_pages = normalize_sidebar_visible_pages(preferences["visible_pages"])
     return success_response({'order': order, 'visible_pages': visible_pages})
 
@@ -609,9 +610,7 @@ async def save_sidebar_order(
         if not visible_pages:
             return error_response("侧边栏至少需要保留一个可见页面", status_code=400)
         updates['visible_pages'] = visible_pages
-
     if 'order' not in req and 'visible_pages' not in req:
         return error_response("缺少可保存的侧边栏配置", status_code=400)
-
     saved = save_navigation_preferences(owner_id, updates)
     return success_response(saved)

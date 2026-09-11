@@ -8,21 +8,33 @@ function getSidebarPages(nav) {
         .filter(Boolean);
 }
 
+function normalizeDeviceConsoleOrder(order) {
+    const pages = Array.isArray(order) ? [...order] : [];
+    const devicesIndex = pages.indexOf('devices');
+    const consoleIndex = pages.indexOf('devices-console');
+    if (devicesIndex < 0 || consoleIndex < 0 || consoleIndex === devicesIndex + 1) return pages;
+    pages.splice(consoleIndex, 1);
+    pages.splice(pages.indexOf('devices') + 1, 0, 'devices-console');
+    return pages;
+}
+
 function applySidebarOrder(nav, order) {
     const items = Array.from(nav.querySelectorAll('.sidebar-item'));
     const itemByPage = new Map(items.map(item => [item.dataset.page, item]));
     const currentPages = getSidebarPages(nav);
     const currentSet = new Set(currentPages);
     // 只保留 order 里真实存在的页面
-    const orderedPages = order.filter(page => itemByPage.has(page));
+    const orderedPages = normalizeDeviceConsoleOrder(order.filter(page => itemByPage.has(page)));
 
-    // 排序必须覆盖全部页面，否则保留 HTML 默认顺序。
-    if (orderedPages.length !== currentPages.length) {
-        return;
-    }
+    // 排序必须覆盖全部页面，否则保留当前 DOM 顺序。
+    const pagesToApply = orderedPages.length === currentPages.length
+        ? orderedPages
+        : normalizeDeviceConsoleOrder(currentPages);
 
-    orderedPages.forEach(page => {
-        nav.appendChild(itemByPage.get(page));
+    pagesToApply.forEach((page, index) => {
+        const item = itemByPage.get(page);
+        item.style.order = String(index);
+        nav.appendChild(item);
     });
 }
 
@@ -44,7 +56,8 @@ function saveSidebarOrder() {
     const nav = document.getElementById('sidebar-nav');
     if (!nav) return;
 
-    const order = getSidebarPages(nav);
+    const order = normalizeDeviceConsoleOrder(getSidebarPages(nav));
+    applySidebarOrder(nav, order);
 
     // 同时更新 localStorage 和后端
     localStorage.setItem('gms_sidebar_order', JSON.stringify(order));

@@ -32,8 +32,29 @@ def _make_ssh():
 class WindowsExecTests(unittest.TestCase):
     def test_combines_stdout_and_stderr(self) -> None:
         ssh, stdout, stderr = _make_ssh()
-        stdout.read.return_value = b"out"
-        stderr.read.return_value = b"err"
+        # 统一执行层：windows_exec 委托 foundation.ssh_executor.run，
+        # mock 伪造的是 channel 级接口（recv_ready/recv/recv_stderr_*）——
+        # executor 并发 drain 这两个流，而不是顺序 file.read()。
+        # ready 标志必须"一次性"：executor 在 exit 后还会继续轮询
+        # recv_ready()/recv_stderr_ready()，恒真 mock 会把 side_effect
+        # 列表耗尽（StopIteration）并让整条命令报错。
+        channel = stdout.channel
+        _out_pending = [True]
+        _err_pending = [True]
+
+        def _recv_ready() -> bool:
+            seen, _out_pending[0] = _out_pending[0], False
+            return seen
+
+        def _recv_stderr_ready() -> bool:
+            seen, _err_pending[0] = _err_pending[0], False
+            return seen
+
+        channel.recv_ready.side_effect = _recv_ready
+        channel.recv.side_effect = [b"out"]
+        channel.recv_stderr_ready.side_effect = _recv_stderr_ready
+        channel.recv_stderr.side_effect = [b"err"]
+        channel.exit_status_ready.return_value = True
         out, code = windows_exec(ssh, "dir", timeout=10)
         self.assertIn("out", out)
         self.assertIn("err", out)

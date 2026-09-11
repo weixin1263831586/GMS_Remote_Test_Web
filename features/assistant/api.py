@@ -50,6 +50,7 @@ WEBAPP_PAGES = {
     "terminal": ("主机终端", "打开主机终端和上传文件"),
     "users": ("用户管理", "查看在线用户和测试占用"),
     "devices": ("设备管理", "查看 ADB 设备、锁定状态和来源"),
+    "devices-console": ("设备串口", "查看 Controller 本机串口控制台和早期启动日志"),
     "reports": ("报告管理", "查看、下载、删除测试报告"),
     "report-analysis": ("报告分析", "上传或打开报告并诊断失败"),
     "apk-analysis": ("APK分析", "上传、反编译和查看 APK/JAR 源码"),

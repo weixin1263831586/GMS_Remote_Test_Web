@@ -170,8 +170,8 @@ directly), kept in sync by:
 python tools/sync_agent_package.py
 ```
 
-It syncs the CLI, the MCP adapter, the launchers (`mcp_launcher.py` /
-`mcp_launcher.sh`), the MCP reconcile helper (`agent_mcp_config.py`), the
+It syncs the CLI, the MCP adapter, the launcher (`mcp_launcher.py`), the
+MCP reconcile helper (`agent_mcp_config.py`), the
 `gms-agent` installer CLI, the `gms_agent/` Python SDK, `SKILL.md`,
 `references/`, `agents/`, and validates the six-way version contract against
 `agent/gms-remote-test/package.yaml` (the single version source).

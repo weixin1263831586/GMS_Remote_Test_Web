@@ -33,7 +33,7 @@ class AgentTokenServiceTests(unittest.TestCase):
         record = self.service.create_agent_token(
             name="codex-build01",
             owner=self.admin,
-            scopes=["system.read", "devices.read", "tests.execute"],
+            scopes=["devices.read", "devices.read", "tests.execute"],
             allowed_workers=["w1", "w2"],
         )
         token = record["token"]
@@ -65,7 +65,7 @@ class AgentTokenServiceTests(unittest.TestCase):
 
     def test_unknown_and_revoked_tokens_fail_closed(self):
         record = self.service.create_agent_token(
-            name="kimi-build02", owner=self.admin, scopes=["system.read"]
+            name="kimi-build02", owner=self.admin, scopes=["devices.read"]
         )
         self.assertIsNone(self.service.get_agent_token_principal("bogus")[0])
         self.assertTrue(self.service.revoke_agent_token(record["id"]))
@@ -84,7 +84,7 @@ class AgentTokenServiceTests(unittest.TestCase):
 
     def test_expired_token_fails(self):
         record = self.service.create_agent_token(
-            name="shortlived", owner=self.admin, scopes=["system.read"],
+            name="shortlived", owner=self.admin, scopes=["devices.read"],
             expires_days=1,
         )
         # Force expiry by rewriting the row.
@@ -196,7 +196,7 @@ class EnrollmentServiceTests(unittest.TestCase):
         enrollment = self.service.create_agent_enrollment(
             name="codex-build01",
             creator=self.admin,
-            scopes=["system.read", "tests.execute"],
+            scopes=["devices.read", "tests.execute"],
             allowed_workers="w1",
         )
         code = enrollment["code"]

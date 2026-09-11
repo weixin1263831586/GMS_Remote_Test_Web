@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.15.3"
+GMS_RT_VERSION="0.16.0"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -35,16 +35,28 @@ if [ -n "${GMS_REMOTE_TEST_SERVER:-}" ]; then
     SERVER_URL="$GMS_REMOTE_TEST_SERVER"
 else
     # gms-agent installs record the Controller URL (and the TLS policy for
-    # self-signed deployments) in the client profile env — source the first
-    # configured profile instead of guessing a local server.
-    for _gms_profile_env in "${HOME}/.local/share/gms-remote-test/mcp"/*.env; do
-        if [ -f "$_gms_profile_env" ]; then
-            # shellcheck disable=SC1090
-            . "$_gms_profile_env"
-            break
-        fi
-    done
-    SERVER_URL="${GMS_REMOTE_TEST_SERVER:-}"
+    # self-signed deployments) in the profile TOML
+    # (~/.config/gms-agent/profiles/<profile>.toml — the single authoritative
+    # source). 12.txt P1: the historical "first *.env wins" glob was removed —
+    # with codex-A → Controller A / codex-B → Controller B, a filesystem-glob
+    # first-match is not an Agent routing policy and silently picked the
+    # wrong Controller. Use `gms-agent profile` / GMS_RT_PROFILE to select.
+    _gms_profile_toml=""
+    if [ -n "${GMS_RT_PROFILE:-}" ] && [ -n "${HOME:-}" ]; then
+        _gms_profile_toml="${XDG_CONFIG_HOME:-${HOME}/.config}/gms-agent/profiles/${GMS_RT_PROFILE}.toml"
+    fi
+    if [ -n "$_gms_profile_toml" ] && [ -r "$_gms_profile_toml" ]; then
+        # Extract controller.url from the [controller] section (flat parser,
+        # same mapping as mcp_launcher._read_toml_flat).
+        SERVER_URL=$(awk -F'=' '
+            /^\[/ { in_controller = ($0 ~ /^\[controller\]/); next }
+            in_controller && $1 ~ /^[ \t]*url[ \t]*$/ {
+                gsub(/^[ \t]+|[ \t]+$/, "", $2)
+                gsub(/^"|"$/, "", $2)
+                print $2; exit
+            }' "$_gms_profile_toml")
+    fi
+    SERVER_URL="${SERVER_URL:-${GMS_REMOTE_TEST_SERVER:-}}"
 fi
 
 if [ -z "$SERVER_URL" ]; then
@@ -136,6 +148,13 @@ if [ -z "$GMS_AUTH_TOKEN_FILE" ]; then
 fi
 _gms_bearer_token=""  # cached per process; reloaded by _refresh_tls_args
 _gms_bearer_header_file=""  # 0600 header file (4.txt P1c: token stays out of argv)
+# Service-token mode gate (12.txt P0): when the CLI runs under an Agent
+# Service Token (Bearer), arbitrary device shell MUST carry a one-shot
+# approval token — otherwise an agent with plain terminal access could
+# bypass the MCP-layer approval entirely by calling this CLI directly.
+_gms_is_service_token_mode() {
+    [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]
+}
 _gms_refresh_bearer_token() {
     if [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
         if [ ! -r "$GMS_AUTH_TOKEN_FILE" ]; then
@@ -1757,6 +1776,98 @@ gms-rt-devices-list() {
     api_call "/devices/list" | jq '.'
 }
 
+# List Controller serial ports, or read the retained log for one port.
+gms-rt-devices-console() {
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    local port_key=""
+    local tail_lines=500
+    local log_date=""
+    local log_options=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                printf 'Usage: gms-rt-devices-console [port_key] [--tail 1..10000] [--date YYYYMMDD]\n'
+                return 0
+                ;;
+            --tail)
+                shift
+                [ "$#" -gt 0 ] || {
+                    error "--tail requires an integer from 1 to 10000"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                tail_lines="$1"
+                log_options=1
+                ;;
+            --tail=*)
+                tail_lines="${1#*=}"
+                log_options=1
+                ;;
+            --date)
+                shift
+                [ "$#" -gt 0 ] || {
+                    error "--date requires YYYYMMDD"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                log_date="$1"
+                log_options=1
+                ;;
+            --date=*)
+                log_date="${1#*=}"
+                log_options=1
+                ;;
+            -*)
+                error "Unknown option: $1"
+                return "$GMS_RT_EXIT_USAGE"
+                ;;
+            *)
+                [ -z "$port_key" ] || {
+                    error "Only one serial port key may be specified"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                port_key="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [[ "$tail_lines" =~ ^[1-9][0-9]*$ ]] && [ "$tail_lines" -le 10000 ] || {
+        error "--tail requires an integer from 1 to 10000"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    [ -z "$log_date" ] || [[ "$log_date" =~ ^[0-9]{8}$ ]] || {
+        error "--date requires YYYYMMDD"
+        return "$GMS_RT_EXIT_USAGE"
+    }
+    if [ -z "$port_key" ] && [ "$log_options" = "1" ]; then
+        error "port_key is required when --tail or --date is used"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+
+    local response
+    if [ -z "$port_key" ]; then
+        response=$(api_call "/devices/console/ports") || return $?
+        if [ "$GMS_RT_OUTPUT" = "json" ]; then
+            echo "$response" | jq '.'
+            return ${PIPESTATUS[1]}
+        fi
+        if [ "$(echo "$response" | jq -r '.data.count // 0')" = "0" ]; then
+            echo "No Controller serial ports found."
+            return 0
+        fi
+        echo "$response" | jq -r '.data.ports[] | "\(.binding.label // .devname // .port_key)\t\(.online | if . then "online" else "offline" end)\t\(.devname // "-")\t\(.port_key)\t\(.binding.baudrate // "unbound") baud\t\(.error // "")"'
+        return ${PIPESTATUS[1]}
+    fi
+
+    local endpoint="/devices/console/ports/$(_urlencode "$port_key")/logs?tail=$tail_lines"
+    [ -z "$log_date" ] || endpoint="$endpoint&date=$(_urlencode "$log_date")"
+    response=$(api_call "$endpoint") || return $?
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        echo "$response" | jq '.'
+    else
+        echo "$response" | jq -r '.data.content // empty'
+    fi
+}
+
 # Wait until every requested device reaches the requested controller state.
 gms-rt-devices-wait() {
     local devices="${1:-}"
@@ -2054,18 +2165,25 @@ gms-rt-devices-snapshot() {
     # 锁屏状态、device owner/admin 列表。之前要逐条 shell + dumpsys 拼装。
     # 复用 gms-rt-devices-shell（本地 adb / SSH 直连，同 gms_rt_shell 白名单
     # 语义之外的平台诊断路径），每条独立失败降级为 null，不拖垮整个快照。
+    # 12.txt P0: snapshot probes are the documented read-only typed set;
+    # export the typed-readonly marker so the shell gate allows only these
+    # fixed probe commands in service-token mode.
     local device_id="$1"
     [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-snapshot DEVICE_ID"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
+    # 12.txt 审核修复：收紧后的 typed-readonly 白名单拒绝管道（元字符
+    # 复核），因此 dumpsys+grep 探针改为在函数侧取全量输出、本地 grep。
+    # 每条探针命令仍是固定字符串，探针命令面不因修复而扩大。
     _snapshot_probe() {
-        local output
-        output=$(gms-rt-devices-shell "$device_id" "$1" 2>/dev/null) || return 0
-        printf '%s' "$output" | head -3
+        local output filtered
+        output=$(_GMS_RT_TYPED_READONLY=1 gms-rt-devices-shell "$device_id" "$1" 2>/dev/null) || return 0
+        filtered=$(printf '%s\n' "$output" | ${2:-head -3})
+        printf '%s' "$filtered"
     }
     local prop_fp activity keyguard owners
     prop_fp=$(_snapshot_probe "getprop ro.build.fingerprint")
-    activity=$(_snapshot_probe "dumpsys activity activities | grep -m1 topResumedActivity")
-    keyguard=$(_snapshot_probe "dumpsys window | grep -m1 mDreamingLockscreen")
+    activity=$(_snapshot_probe "dumpsys activity activities" "grep -m1 topResumedActivity")
+    keyguard=$(_snapshot_probe "dumpsys window" "grep -m1 mDreamingLockscreen")
     owners=$(_snapshot_probe "dpm list-owners")
     jq -n \
         --arg device "$device_id" \
@@ -2121,6 +2239,7 @@ gms-rt-devices-shell() {
     local approval_token=""
     local shell_args=()
     local pending_approval=0
+    local _gms_approval_consumed=0
     local arg
     for arg in "$@"; do
         if [ "$pending_approval" = "1" ]; then
@@ -2159,11 +2278,122 @@ gms-rt-devices-shell() {
             error "审批令牌校验失败: $(extract_api_error "$(echo "$consume_response" | sed 's/\nHTTP_STATUS:.*//')")"
             return "$GMS_RT_EXIT_PERMISSION"
         fi
+        # 12.txt P0: approval consumed server-side → unlock the local
+        # adb/SSH execution path exactly once for this invocation.
+        _gms_approval_consumed=1
     fi
     local shell_command="${shell_args[*]:-}"
     if [ -z "$shell_command" ] && [ "$GMS_RT_NON_INTERACTIVE" = "1" ]; then
         error "Interactive device shell is disabled by --non-interactive; provide a command"
         return "$GMS_RT_EXIT_USAGE"
+    fi
+
+    # 12.txt P0: in service-token mode the CLI is no longer a bypass around
+    # the MCP approval layer. Arbitrary shell (and interactive shell) is
+    # denied without a server-consumed one-shot approval token; read-only
+    # diagnosis belongs to gms_rt_shell / gms-rt-devices-snapshot.
+    # GMS_RT_TYPED_READONLY=1 marks first-party typed read-only surfaces
+    # (MCP gms_rt_shell / gms_rt_logcat, devices-snapshot probes). The
+    # marker alone NEVER grants arbitrary command execution: when set, the
+    # command must still pass the same fixed read-only allowlist the MCP
+    # adapter enforces — a forged marker can therefore not reach
+    # `reboot`/`settings put`/... directly on the CLI.
+    if _gms_is_service_token_mode && [ "$_gms_approval_consumed" -ne 1 ]; then
+        if [ -z "$shell_command" ]; then
+            error "Service-token 模式禁止交互式设备 shell（审批边界外）；只读诊断请使用 gms-rt-devices-snapshot / gms_rt_shell"
+            return "$GMS_RT_EXIT_PERMISSION"
+        fi
+        if [ "${GMS_RT_TYPED_READONLY:-0}" != "1" ]; then
+            error "Service-token 模式下执行设备命令必须携带一次性审批令牌: gms-rt-devices-shell $device_id --approval-token TOKEN '$shell_command'（请让用户运行 gms-rt-approval-create --tool gms_rt_shell_exec --device $device_id --command '$shell_command' 铸造令牌）"
+            return "$GMS_RT_EXIT_PERMISSION"
+        fi
+        # Typed-readonly allowlist (mirror of the MCP adapter's structured
+        # allowlist). Binaries with mutating subcommands (settings/cmd/am/
+        # pm/dpm/content/device_config/wm/logcat/dmesg/dumpsys) are verified
+        # per-subcommand below — the first token alone is NOT sufficient
+        # (audit round 3: a forged marker previously let `settings put`
+        # through because only the leading binary was checked).
+        local _ro_first
+        _ro_first=${shell_command%% *}
+        # Binaries whose read-only surface is unconditional.
+        case "$_ro_first" in
+            getprop|ls|cat|ps|pidof|stat|uptime|vmstat|df|id|printenv|grep|head|tail|wc|pgrep) ;;
+            settings)
+                case "$shell_command" in
+                    "settings get "*) ;;
+                    *) error "Service-token 只读白名单仅允许 'settings get'"; return "$GMS_RT_EXIT_PERMISSION" ;;
+                esac ;;
+            wm)
+                case "$shell_command" in
+                    "wm size"|"wm density") ;;
+                    *) error "Service-token 只读白名单仅允许 'wm size'/'wm density'"; return "$GMS_RT_EXIT_PERMISSION" ;;
+                esac ;;
+            dumpsys)
+                # Must stay in lockstep with _SHELL_DUMPSYS_MUTATING in
+                # runtime/mcp_server.py (17 words). Any word added there
+                # MUST be added here too — this gate is the CLI mirror of
+                # the MCP typed-readonly allowlist.
+                case " $shell_command " in
+                    *" unplug "*|*" reset "*|*" disable "*|*" enable "*|*" kill "*|*" force-stop "*|*" set "*|\
+                    *" whitelist "*|*" set-debug-app "*|*" suspend "*|*" resume "*|*" reset-role "*|\
+                    *" plug "*|*" charge "*|*" nocharge "*|*" persist "*|*" import "*)
+                        error "dumpsys 参数可能改变设备状态，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
+                esac ;;
+            logcat)
+                case "$shell_command" in
+                    *-c*|*" -f"*) error "logcat -c/-f 属破坏性参数，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
+                esac ;;
+            dmesg)
+                case "$shell_command" in
+                    *-c*|*-C*) error "dmesg -c/-C 清空内核环形缓冲，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
+                esac ;;
+            device_config)
+                case "$shell_command" in
+                    "device_config get "*|"device_config list"*) ;;
+                    *) error "Service-token 只读白名单仅允许 'device_config get/list'"; return "$GMS_RT_EXIT_PERMISSION" ;;
+                esac ;;
+            cmd|am|pm|dpm|content)
+                # 这些二进制的只读子命令集合在 MCP 层枚举
+                # (_SHELL_CMD_READONLY_SUBCOMMANDS)；CLI 端必须逐前缀镜像，
+                # 否则 MCP 放行的命令到 CLI 被拒（工具契约破裂）。
+                # 注意 MCP 是 exact-or-prefix(sub+" ")匹配，CLI 的 glob
+                # "cmd package list"* 等价于 startswith——但 MCP 还接受
+                # joined == sub（无参数形式，如 "pm help"），CLI 用裸 *
+                # 或精确串覆盖这两种形态。
+                case "$shell_command" in
+                    "cmd list"*|"cmd help"*|\
+                    "cmd package list"*|"cmd package path"*|"cmd package dump"*|\
+                    "cmd package help"*|"cmd package query-activities"*|\
+                    "cmd package query-services"*|"cmd package query-receivers"*|\
+                    "cmd package query-content-providers"*|\
+                    "am stack list"*|"am get-current-user"*|"am get-standby-bucket"*|\
+                    "pm list users"*|"pm list packages"*|"pm list permissions"*|\
+                    "pm list permission-groups"*|"pm list features"*|\
+                    "pm list libraries"*|"pm list instrumentation"*|"pm list jobs"*|\
+                    "pm path "*|"pm help"|\
+                    "dpm list-owners"|\
+                    "content query"*) ;;
+                    *) error "只读子命令白名单之外的 '$_ro_first' 需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
+                esac ;;
+            *)
+                error "只读白名单之外的命令需要一次性审批令牌: '$_ro_first'"
+                return "$GMS_RT_EXIT_PERMISSION"
+                ;;
+        esac
+        # Shell metacharacters — full mirror of _SHELL_FORBIDDEN_CHARS in
+        # runtime/mcp_server.py. The command string is finally parsed by the
+        # device-side `sh` (adb shell), so quote/glob/backslash/whitespace
+        # metachars can smuggle a second command just like `;` does.
+        case "$shell_command" in
+            *[\\\"\;\|\&\>\<\`\$\(\)\{\}\[\]\'\*\?]*)
+                error "Service-token 只读路径禁止 shell 元字符: $shell_command"
+                return "$GMS_RT_EXIT_PERMISSION"
+                ;;
+        esac
+        if [[ "$shell_command" == *[$'\t\r\n']* ]]; then
+            error "Service-token 只读路径禁止制表符/换行符: $shell_command"
+            return "$GMS_RT_EXIT_PERMISSION"
+        fi
     fi
 
     if _is_test_host && command -v adb &> /dev/null && adb devices 2>/dev/null | grep -q "$device_id"; then
@@ -4906,6 +5136,7 @@ _gms_rt_command_usage() {
             printf '%s' "$1 <devices>"
             ;;
         gms-rt-devices-wait) printf '%s' 'gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]' ;;
+        gms-rt-devices-console) printf '%s' 'gms-rt-devices-console [port_key] [--tail N] [--date YYYYMMDD]' ;;
         gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [command]' ;;
         gms-rt-devices-screencap) printf '%s' 'gms-rt-devices-screencap <device_id>' ;;
         gms-rt-devices-ui-dump) printf '%s' 'gms-rt-devices-ui-dump <device_id>' ;;
@@ -4970,6 +5201,7 @@ _gms_rt_command_summary() {
         gms-rt-system-version) printf '%s' 'Print the local CLI version' ;;
         gms-rt-devices-wait) printf '%s' 'Wait for selected devices to become visible in the requested state' ;;
         gms-rt-devices-logcat) printf '%s' 'Capture device logcat via adb shell logcat -v time (-c clears the buffer first; dump mode in non-interactive sessions)' ;;
+        gms-rt-devices-console) printf '%s' 'List Controller serial ports or read one port retained console log' ;;
         gms-rt-test-suites-result) printf '%s' 'List tradefed results for a suite path or short suite name' ;;
         gms-rt-test-modules) printf '%s' 'List available tradefed modules for a suite (testcases/ directory)' ;;
         gms-rt-apk-resolve) printf '%s' 'Resolve a test module keyword to its APK/JAR artifact in the latest suites' ;;
@@ -5052,6 +5284,8 @@ gms-rt-system-commands() {
             then {external_side_effects: false, resource_intensive: false, required_scope: "redmine.read"}
             elif test("sdk-")
             then {external_side_effects: false, resource_intensive: false, required_scope: "sdk.read"}
+            elif test("devices-console")
+            then {external_side_effects: false, resource_intensive: false, required_scope: "devices.read"}
             else {external_side_effects: false, resource_intensive: false, required_scope: ""}
             end;
         [inputs | split("\t") as $fields | $fields[0] as $name | {
@@ -5287,6 +5521,7 @@ ${YELLOW}Desktop VNC:${NC}
 
 ${YELLOW}Device Management:${NC}
   gms-rt-devices-list               - List all connected devices
+  gms-rt-devices-console            - List Controller serial ports or read retained serial logs
   gms-rt-devices-info               - Get detailed device information
   gms-rt-devices-wait               - Wait for devices to become ready
   gms-rt-devices-bootloader-lock    - Lock bootloader

@@ -72,7 +72,7 @@ class AgentBearerAuthTests(unittest.TestCase):
 
     def test_create_token_requires_elevation_and_returns_raw_once(self):
         # Elevated admin session from setup works.
-        record = self._create_token(["system.read", "tests.execute"])
+        record = self._create_token(["devices.read", "tests.execute"])
         self.assertIn("token", record)
         # Listing must not include the raw token.
         resp = self.client.get("/api/auth/agent-tokens")
@@ -82,14 +82,14 @@ class AgentBearerAuthTests(unittest.TestCase):
         )
 
     def test_bearer_token_authenticates_without_cookie(self):
-        record = self._create_token(["system.read"])
+        record = self._create_token(["devices.read"])
         headers = {"Authorization": f"Bearer {record['token']}"}
         resp = self.client.get("/api/auth/status", headers=headers)
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload["authenticated"])
         self.assertEqual(payload["user"]["role"], "agent_service")
-        self.assertIn("system.read", payload["user"]["permissions"])
+        self.assertIn("devices.read", payload["user"]["permissions"])
 
     def test_invalid_bearer_token_fails_closed(self):
         headers = {"Authorization": "Bearer not-a-real-token"}
@@ -101,7 +101,7 @@ class AgentBearerAuthTests(unittest.TestCase):
         self.assertIn(resp.status_code, (401, 403))
 
     def test_agent_token_cannot_mint_approvals(self):
-        record = self._create_token(["system.read", "tests.execute", "devices.use_leased"])
+        record = self._create_token(["devices.read", "tests.execute", "devices.use_leased"])
         headers = {"Authorization": f"Bearer {record['token']}"}
         resp = self.client.post(
             "/api/auth/approval-tokens",
@@ -172,7 +172,7 @@ class AgentBearerAuthTests(unittest.TestCase):
             "/api/auth/agent-enrollment-codes",
             json={
                 "name": "codex-build03",
-                "scopes": ["system.read", "tests.execute"],
+                "scopes": ["devices.read", "tests.execute"],
                 "allowed_workers": "w1",
             },
         )

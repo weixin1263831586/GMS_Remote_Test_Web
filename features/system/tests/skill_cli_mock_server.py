@@ -80,6 +80,40 @@ class ApiHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if self.path == "/api/devices/console/ports":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "data": {
+                        "count": 1,
+                        "ports": [
+                            {
+                                "port_key": "usb-FTDI_TEST-if00-port0",
+                                "devname": "/dev/ttyUSB0",
+                                "online": True,
+                                "error": "",
+                                "binding": {"label": "RK3562GMS3", "baudrate": 1500000},
+                            }
+                        ],
+                    },
+                },
+            )
+            return
+        if self.path == "/api/devices/console/ports/usb-FTDI_TEST-if00-port0/logs?tail=200&date=20260910":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "data": {
+                        "date": "20260910",
+                        "content": "U-Boot ready\n",
+                        "lines": 1,
+                        "available_dates": ["20260910"],
+                    },
+                },
+            )
+            return
         if self.path == "/api/system/health":
             self._write_json(200, {"success": True, "status": "healthy"})
             return

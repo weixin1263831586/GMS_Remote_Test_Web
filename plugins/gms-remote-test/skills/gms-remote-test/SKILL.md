@@ -24,7 +24,12 @@ gms-rt-system-health --json --non-interactive
 
 The bootstrap verifies the registry manifest (SHA-256 + Ed25519 signature
 against the release key pinned at download time) before anything extracted
-is executed. `install` installs the self-contained Skill+MCP plugin for the
+is executed. Note (4.txt 审核 P1-8): the Ed25519 check needs the
+`cryptography` package on the installing host — it is preinstalled on
+build servers with the web app, but a bare host that pins a verify key
+(`GMS_AGENT_VERIFY_KEY_B64`) must `pip install cryptography` first or
+install aborts with a clear error (fail closed; without a pinned key only
+SHA-256 is enforced). `install` installs the self-contained Skill+MCP plugin for the
 detected agents, writes per-agent TOML profiles under
 `~/.config/gms-agent/profiles/` (`GMS_RT_PROFILE`,
 `GMS_AUTH_TOKEN_FILE` reference) and reconciles each client's MCP
@@ -47,6 +52,10 @@ gms-rt-auth-status --json
 gms-rt-system-doctor test --json --non-interactive
 gms-rt-devices-list --json
 ```
+
+Use `gms-rt-devices-console` to list serial ports attached to the Controller.
+Pass a stable port key plus optional `--tail` / `--date YYYYMMDD` to read its
+retained console log; interactive serial input remains in the Web UI.
 
 Authentication policy (no exceptions — the SKILL text is the single source
 of truth; do not reintroduce password login for agents):

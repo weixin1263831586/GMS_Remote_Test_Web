@@ -77,7 +77,7 @@ def test_plugin_payload_matches_skill_source():
     pairs = [
         ("scripts/gms-remote-test.sh", RUNTIME_DIR / "gms-remote-test.sh"),
         ("scripts/mcp_server.py", RUNTIME_DIR / "mcp_server.py"),
-        ("scripts/mcp_launcher.sh", RUNTIME_DIR / "mcp_launcher.sh"),
+        ("scripts/mcp_launcher.py", RUNTIME_DIR / "mcp_launcher.py"),
         ("scripts/agent_mcp_config.py", RUNTIME_DIR / "agent_mcp_config.py"),
         ("scripts/gms-agent", RUNTIME_DIR / "gms-agent"),
         ("skills/gms-remote-test/SKILL.md", SKILL_DIR / "SKILL.md"),

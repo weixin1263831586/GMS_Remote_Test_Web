@@ -95,6 +95,11 @@ class SkillCliTests(unittest.TestCase):
             self.assertNotIn(name, commands)
         self.assertEqual(commands["gms-rt-system-update"]["mode"], "mutating")
         self.assertEqual(commands["gms-rt-devices-list"]["mode"], "read_only")
+        self.assertEqual(commands["gms-rt-devices-console"]["mode"], "read_only")
+        self.assertEqual(
+            commands["gms-rt-devices-console"]["required_scope"],
+            "devices.read",
+        )
         self.assertEqual(commands["gms-rt-burn-firmware"]["mode"], "mutating")
         self.assertEqual(commands["gms-rt-terminal-open"]["mode"], "interactive")
         self.assertEqual(
@@ -165,6 +170,29 @@ class SkillCliTests(unittest.TestCase):
         self.assertTrue(envelope["ok"])
         self.assertEqual(envelope["exit_code"], 0)
         self.assertEqual(envelope["data"]["status"], "healthy")
+
+    def test_devices_console_lists_ports_and_reads_retained_log(self):
+        listed = self._run(
+            "gms-rt-devices-console", "--json", "--non-interactive"
+        )
+        logged = self._run(
+            "gms-rt-devices-console",
+            "usb-FTDI_TEST-if00-port0",
+            "--tail",
+            "200",
+            "--date",
+            "20260910",
+            "--json",
+            "--non-interactive",
+        )
+
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertEqual(json.loads(listed.stdout)["data"]["data"]["count"], 1)
+        self.assertEqual(logged.returncode, 0, logged.stderr)
+        self.assertEqual(
+            json.loads(logged.stdout)["data"]["data"]["content"],
+            "U-Boot ready\n",
+        )
 
     def test_permission_error_has_stable_exit_code_and_json(self):
         result = self._run("gms-rt-devices-list", "--json", "--non-interactive")

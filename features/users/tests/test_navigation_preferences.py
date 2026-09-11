@@ -95,6 +95,17 @@ class NavigationPreferencesTests(unittest.TestCase):
         self.assertEqual(response.json()["effective_ubuntu_user"], "tester")
         self.assertEqual(response.json()["effective_suites_path"], "/home/tester/GMS-Suite")
 
+    def test_device_console_is_migrated_next_to_device_management(self):
+        response = self.client.post(
+            "/api/sidebar-order",
+            json={"order": ["devices", "cluster", "devices-console", "reports"]},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["data"]["order"],
+            ["devices", "devices-console", "cluster", "reports"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
