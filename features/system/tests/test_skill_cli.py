@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -100,6 +101,40 @@ class SkillCliTests(unittest.TestCase):
             commands["gms-rt-devices-console"]["required_scope"],
             "devices.read",
         )
+        self.assertEqual(
+            commands["gms-rt-devices-logcat"]["mode"], "interactive"
+        )
+        self.assertFalse(
+            commands["gms-rt-devices-logcat"]["agent_safe_unattended"]
+        )
+        self.assertEqual(commands["gms-rt-approval-create"]["mode"], "mutating")
+        self.assertFalse(
+            commands["gms-rt-approval-create"]["agent_safe_unattended"]
+        )
+        self.assertFalse(commands["gms-rt-agent-enroll"]["requires_auth"])
+        self.assertFalse(commands["gms-rt-agent-enroll"]["agent_safe_unattended"])
+        self.assertFalse(commands["gms-rt-auth-credential-mode"]["requires_auth"])
+        self.assertEqual(
+            commands["gms-rt-test-stop"]["required_scope"], "tests.cancel"
+        )
+        self.assertEqual(
+            commands["gms-rt-jobs-list"]["required_scope"], "jobs.read"
+        )
+        self.assertEqual(
+            commands["gms-rt-reports-list"]["required_scope"], "reports.read"
+        )
+        self.assertTrue(
+            all(
+                not item["usage"].endswith("[arguments]")
+                for item in commands.values()
+            )
+        )
+        self.assertTrue(
+            all(
+                item["summary"] != "GMS Remote Test CLI operation"
+                for item in commands.values()
+            )
+        )
         self.assertEqual(commands["gms-rt-burn-firmware"]["mode"], "mutating")
         self.assertEqual(commands["gms-rt-terminal-open"]["mode"], "interactive")
         self.assertEqual(
@@ -123,6 +158,30 @@ class SkillCliTests(unittest.TestCase):
             "gms-rt-users-list",
         ):
             self.assertTrue(commands[name]["requires_elevation"], name)
+
+    def test_human_help_and_api_catalog_cover_every_command(self):
+        source = HELPER.read_text(encoding="utf-8")
+        implemented = set(re.findall(r"^(gms-rt-[a-z0-9-]+)\(\)", source, re.M))
+        helped = self._run("gms-rt-system-help")
+        self.assertEqual(helped.returncode, 0, helped.stderr)
+        help_names = set(re.findall(r"^\s*(gms-rt-[a-z0-9-]+)", helped.stdout, re.M))
+        catalog_path = (
+            ROOT
+            / "agent"
+            / "gms-remote-test"
+            / "skill"
+            / "references"
+            / "api-catalog.md"
+        )
+        documented = set(
+            re.findall(
+                r"`(gms-rt-[a-z0-9-]+)(?:\s[^`]*)?`",
+                catalog_path.read_text(encoding="utf-8"),
+            )
+        )
+
+        self.assertEqual(help_names, implemented)
+        self.assertEqual(documented, implemented)
 
     def test_command_description_and_per_invocation_server_override(self):
         described = self._run(
@@ -326,6 +385,40 @@ class SkillCliTests(unittest.TestCase):
             ),
             _ApiHandler.requests,
         )
+
+    def test_multi_device_commands_do_not_drop_positional_devices(self):
+        commands = (
+            "gms-rt-devices-bootloader-lock",
+            "gms-rt-devices-bootloader-unlock",
+            "gms-rt-devices-bootloader-status",
+            "gms-rt-devices-info",
+            "gms-rt-devices-remount",
+            "gms-rt-devices-scrcpy",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                _ApiHandler.requests.clear()
+                result = self._run(
+                    command,
+                    "SERIAL-1",
+                    "SERIAL-2",
+                    "--json",
+                    "--non-interactive",
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                expected_path = "/api/devices/" + command.removeprefix(
+                    "gms-rt-devices-"
+                )
+                request_payloads = [
+                    payload
+                    for path, payload in _ApiHandler.requests
+                    if path == expected_path
+                ]
+                self.assertTrue(request_payloads, _ApiHandler.requests)
+                self.assertEqual(
+                    request_payloads[-1]["devices"],
+                    ["SERIAL-1", "SERIAL-2"],
+                )
 
     def test_doctor_devices_wait_and_durable_job_commands(self):
         doctor = self._run(

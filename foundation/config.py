@@ -321,6 +321,10 @@ class ConfigManager(ConfigPersistenceMixin):
 
         def replace_var(match):
             var_expr = match.group(1)
+            # 内置占位符：${PROJECT_ROOT} 展开为当前部署树根目录，
+            # 配置文件随 checkout/部署目录迁移时无需手工改绝对路径。
+            if var_expr == 'PROJECT_ROOT':
+                return PROJECT_ROOT
             # 检查是否有默认值
             if ':' in var_expr:
                 var_name, default_val = var_expr.split(':', 1)

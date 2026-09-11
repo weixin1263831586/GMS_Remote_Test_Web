@@ -77,7 +77,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.16.0"
+SERVER_VERSION = "0.17.1"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -143,9 +143,8 @@ _SDK_CLI_ROUTES: dict[str, tuple[str, str]] = {
     "gms-rt-jobs-status": ("GET", "/cluster/jobs/{job_id}"),
     "gms-rt-jobs-events": ("GET", "/cluster/jobs/{job_id}/events"),
     "gms-rt-reports-list": ("GET", "/reports/list"),
-    "gms-rt-devices": ("GET", "/devices/list"),
+    "gms-rt-devices-list": ("GET", "/devices/list"),
     "gms-rt-auth-status": ("GET", "/auth/status"),
-    "gms-rt-agent-status": ("GET", "/auth/agent-status"),
 }
 
 _sdk_client = None
@@ -699,6 +698,85 @@ def devices_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-devices-list")
 
 
+def context_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Return the compact, secret-free environment readiness report."""
+
+    return run_cli("gms-rt-system-selfcheck")
+
+
+def device_console_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    args: list[str] = []
+    port_key = str(arguments.get("port_key") or "").strip()
+    if port_key:
+        args.append(port_key)
+    if arguments.get("tail") is not None:
+        try:
+            tail = int(arguments["tail"])
+        except (TypeError, ValueError):
+            return "invalid tail: expected an integer from 1 to 10000", True
+        if not 1 <= tail <= 10_000:
+            return "invalid tail: expected an integer from 1 to 10000", True
+        args.extend(["--tail", str(tail)])
+    date = str(arguments.get("date") or "").strip()
+    if date:
+        if not re.fullmatch(r"\d{8}", date):
+            return "invalid date: expected YYYYMMDD", True
+        args.extend(["--date", date])
+    return run_cli("gms-rt-devices-console", args)
+
+
+def device_info_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    devices = arguments.get("devices")
+    if isinstance(devices, str):
+        values = [devices]
+    elif isinstance(devices, list):
+        values = [str(item) for item in devices if str(item).strip()]
+    else:
+        values = []
+    if not values:
+        return "missing required field: devices", True
+    return run_cli("gms-rt-devices-info", values)
+
+
+def device_wait_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    devices = arguments.get("devices")
+    if isinstance(devices, str):
+        values = [devices]
+    elif isinstance(devices, list):
+        values = [str(item) for item in devices if str(item).strip()]
+    else:
+        values = []
+    if not values:
+        return "missing required field: devices", True
+    state = str(arguments.get("state") or "online")
+    if state not in {"online", "fastboot", "any"}:
+        return "invalid state: expected online, fastboot, or any", True
+    args = [*values, "--state", state]
+    if arguments.get("interval") is not None:
+        try:
+            interval = int(arguments["interval"])
+        except (TypeError, ValueError):
+            return "invalid interval: expected an integer from 1 to 300", True
+        if not 1 <= interval <= 300:
+            return "invalid interval: expected an integer from 1 to 300", True
+        args.extend(["--interval", str(interval)])
+    if arguments.get("max_wait") is not None:
+        try:
+            max_wait = int(arguments["max_wait"])
+        except (TypeError, ValueError):
+            return "invalid max_wait: expected an integer from 1 to 86400", True
+        if not 1 <= max_wait <= 86_400:
+            return "invalid max_wait: expected an integer from 1 to 86400", True
+        args.extend(["--max-wait", str(max_wait)])
+    try:
+        timeout = int(arguments.get("timeout", 330))
+    except (TypeError, ValueError):
+        return "invalid timeout: expected an integer from 1 to 86500", True
+    if not 1 <= timeout <= 86_500:
+        return "invalid timeout: expected an integer from 1 to 86500", True
+    return run_cli("gms-rt-devices-wait", args, timeout=timeout)
+
+
 def auth_status_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-auth-status")
 
@@ -1055,6 +1133,13 @@ def jobs_list_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         except (TypeError, ValueError):
             return "limit must be an integer between 1 and 500", True
     return run_cli("gms-rt-jobs-list", args)
+
+
+def jobs_cancel_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    job_id = str(arguments.get("job_id") or "").strip()
+    if not job_id:
+        return "missing required field: job_id", True
+    return run_cli("gms-rt-jobs-cancel", [job_id])
 
 
 def test_start_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -1875,20 +1960,123 @@ def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 def tools() -> list[dict[str, Any]]:
     all_tools = _all_tools()
-    if not _SERVICE_TOKEN_MODE:
-        return all_tools
-    # Service-token mode: the human-session credential tools are not even
-    # advertised, so an agent context cannot express a password login or
-    # self-mint an approval (2026-09-09 audit, 10.txt §五).
-    return [
-        tool
-        for tool in all_tools
-        if tool.get("name") not in _HUMAN_SESSION_TOOLS
-    ]
+    if _SERVICE_TOKEN_MODE:
+        # Service-token mode: the human-session credential tools are not even
+        # advertised, so an agent context cannot express a password login or
+        # self-mint an approval (2026-09-09 audit, 10.txt §五).
+        all_tools = [
+            tool
+            for tool in all_tools
+            if tool.get("name") not in _HUMAN_SESSION_TOOLS
+        ]
+    requested = {
+        value.strip().lower()
+        for value in os.environ.get("GMS_MCP_TOOLSETS", "").split(",")
+        if value.strip()
+    }
+    if requested:
+        always = {
+            "gms_rt_context",
+            "gms_rt_commands",
+            "gms_rt_describe",
+            "gms_rt_auth_status",
+        }
+        all_tools = [
+            tool
+            for tool in all_tools
+            if tool["name"] in always
+            or bool(_TOOLSETS.get(tool["name"], {"core"}) & requested)
+        ]
+    return [_decorate_tool(tool) for tool in all_tools]
+
+
+_TOOLSETS = {
+    "gms_rt_test_start": {"test"},
+    "gms_rt_jobs_list": {"test"},
+    "gms_rt_jobs_status": {"test"},
+    "gms_rt_jobs_wait": {"test"},
+    "gms_rt_jobs_events": {"test"},
+    "gms_rt_jobs_follow": {"test"},
+    "gms_rt_jobs_cancel": {"test"},
+    "gms_rt_test_suites_list": {"test"},
+    "gms_rt_reports_list": {"test"},
+    "gms_rt_burn_firmware": {"admin"},
+    "gms_rt_burn_status": {"admin"},
+    "gms_rt_shell_exec": {"admin"},
+    "gms_rt_approval_create": {"admin"},
+    **{
+        name: {"evidence"}
+        for name in (
+            "gms_rt_apk_resolve",
+            "gms_rt_apk_analyze",
+            "gms_rt_apk_status",
+            "gms_rt_apk_manifest",
+            "gms_rt_apk_search",
+            "gms_rt_apk_source",
+            "gms_rt_redmine_issue_fetch",
+            "gms_rt_redmine_issue",
+            "gms_rt_redmine_journals",
+            "gms_rt_redmine_attachments",
+            "gms_rt_redmine_artifact_search",
+            "gms_rt_redmine_artifact_read",
+            "gms_rt_redmine_image",
+            "gms_rt_apk_analyze_attachment",
+            "gms_rt_apk_source_search",
+            "gms_rt_apk_source_read",
+            "gms_rt_sdk_sources",
+            "gms_rt_sdk_search",
+            "gms_rt_sdk_read",
+        )
+    },
+}
+
+
+def _decorate_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    """Add MCP safety hints without changing existing input contracts."""
+
+    result = dict(tool)
+    name = str(result.get("name", ""))
+    mutating = name in {
+        "gms_rt_test_start",
+        "gms_rt_jobs_cancel",
+        "gms_rt_burn_firmware",
+        "gms_rt_shell_exec",
+        "gms_rt_agent_enroll",
+        "gms_rt_approval_create",
+        "gms_rt_auth_login",
+        "gms_rt_auth_elevate",
+        "gms_rt_apk_analyze",
+        "gms_rt_apk_analyze_attachment",
+    }
+    destructive = name in {"gms_rt_burn_firmware", "gms_rt_shell_exec"}
+    result.setdefault(
+        "annotations",
+        {
+            "readOnlyHint": not mutating,
+            "destructiveHint": destructive,
+            "idempotentHint": not mutating,
+            "openWorldHint": True,
+        },
+    )
+    return result
 
 
 def _all_tools() -> list[dict[str, Any]]:
     return [
+        {
+            "name": "gms_rt_context",
+            "description": (
+                "Run the secret-free GMS environment self-check. Call this first: "
+                "it reports CLI version, selected Controller, credential mode, "
+                "health, visible devices, local suites, and actionable hints. "
+                "CLI equivalent: gms-rt-system-selfcheck."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
         {
             "name": "gms_rt_run",
             "description": (
@@ -1979,11 +2167,107 @@ def _all_tools() -> list[dict[str, Any]]:
                 "List Android devices known to the Controller with state, "
                 "serials, and transport. For cluster deployments prefer "
                 "gms_rt_cluster_devices, which includes the owning worker_id "
-                "needed to target devices unambiguously."
+                "needed to target devices unambiguously. CLI equivalent: "
+                "gms-rt-devices-list. MCP tool names use underscores; CLI "
+                "command names use hyphens."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_device_console",
+            "description": (
+                "List Controller serial-console ports, or read retained logs "
+                "for one stable port key. Interactive serial input remains "
+                "human/Web-UI only. CLI equivalent: gms-rt-devices-console."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "port_key": {
+                        "type": "string",
+                        "description": "Stable port key; omit to list ports.",
+                    },
+                    "tail": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "description": "Return at most this many retained lines.",
+                    },
+                    "date": {
+                        "type": "string",
+                        "pattern": "^[0-9]{8}$",
+                        "description": "Optional retained-log date in YYYYMMDD.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_device_info",
+            "description": (
+                "Read detailed properties for one or more devices. Device "
+                "prefixes must resolve uniquely. CLI equivalent: "
+                "gms-rt-devices-info."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "devices": {
+                        "oneOf": [
+                            {"type": "string", "minLength": 1},
+                            {
+                                "type": "array",
+                                "items": {"type": "string", "minLength": 1},
+                                "minItems": 1,
+                            },
+                        ]
+                    }
+                },
+                "required": ["devices"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_device_wait",
+            "description": (
+                "Wait until one or more devices reach online, fastboot, or "
+                "either state. CLI equivalent: gms-rt-devices-wait."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "devices": {
+                        "oneOf": [
+                            {"type": "string", "minLength": 1},
+                            {
+                                "type": "array",
+                                "items": {"type": "string", "minLength": 1},
+                                "minItems": 1,
+                            },
+                        ]
+                    },
+                    "state": {
+                        "type": "string",
+                        "enum": ["online", "fastboot", "any"],
+                        "default": "online",
+                    },
+                    "interval": {"type": "integer", "minimum": 1, "maximum": 300},
+                    "max_wait": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 86400,
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 86500,
+                    },
+                },
+                "required": ["devices"],
                 "additionalProperties": False,
             },
         },
@@ -2374,6 +2658,23 @@ def _all_tools() -> list[dict[str, Any]]:
                 "properties": {
                     "job_id": {"type": "string", "minLength": 0, "maxLength": 2048},
                     "max_wait": {"type": "integer", "minimum": 0, "maximum": 21600},
+                },
+                "required": ["job_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_jobs_cancel",
+            "description": (
+                "Request cancellation of one durable test job owned by the "
+                "current principal. This is mutating: call only when the user "
+                "explicitly asked to stop that job. Requires tests.cancel. "
+                "CLI equivalent: gms-rt-jobs-cancel."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "minLength": 1, "maxLength": 256}
                 },
                 "required": ["job_id"],
                 "additionalProperties": False,
@@ -3398,10 +3699,14 @@ def sdk_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 _TOOL_HANDLERS = {
+    "gms_rt_context": context_tool,
     "gms_rt_run": run_tool,
     "gms_rt_commands": commands_tool,
     "gms_rt_describe": describe_tool,
     "gms_rt_devices": devices_tool,
+    "gms_rt_device_console": device_console_tool,
+    "gms_rt_device_info": device_info_tool,
+    "gms_rt_device_wait": device_wait_tool,
     "gms_rt_cluster_workers": lambda args: run_cli("gms-rt-cluster-workers"),
     "gms_rt_cluster_devices": cluster_devices_tool,
     "gms_rt_auth_status": auth_status_tool,
@@ -3415,6 +3720,7 @@ _TOOL_HANDLERS = {
     "gms_rt_jobs_list": jobs_list_tool,
     "gms_rt_jobs_status": jobs_status_tool,
     "gms_rt_jobs_wait": jobs_wait_tool,
+    "gms_rt_jobs_cancel": jobs_cancel_tool,
     "gms_rt_jobs_events": jobs_events_tool,
     "gms_rt_jobs_follow": jobs_follow_tool,
     "gms_rt_test_suites_list": test_suites_list_tool,
@@ -3474,7 +3780,8 @@ def handle(message: dict[str, Any]) -> None:
         params = message.get("params") or {}
         name = params.get("name")
         arguments = params.get("arguments") or {}
-        handler = _TOOL_HANDLERS.get(name)
+        registered_names = {tool["name"] for tool in tools()}
+        handler = _TOOL_HANDLERS.get(name) if name in registered_names else None
         if handler is None:
             response(
                 request_id,
@@ -3499,13 +3806,19 @@ def handle(message: dict[str, Any]) -> None:
                 )
                 return
             text, is_error = result
-        response(
-            request_id,
-            {
-                "content": [{"type": "text", "text": text}],
-                "isError": is_error,
-            },
-        )
+        result_payload: dict[str, Any] = {
+            "content": [{"type": "text", "text": text}],
+            "isError": is_error,
+        }
+        # Keep text for every MCP client, and additionally expose valid JSON
+        # as structured content so capable clients do not need to parse it.
+        try:
+            structured = json.loads(text)
+        except (TypeError, ValueError):
+            structured = None
+        if isinstance(structured, dict):
+            result_payload["structuredContent"] = structured
+        response(request_id, result_payload)
         return
     response(
         request_id,

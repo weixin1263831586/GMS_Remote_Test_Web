@@ -6,12 +6,20 @@ import asyncio
 import contextlib
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from features.auth import (
     CurrentUser,
+    require_agent_scope,
     require_authenticated_user_when_auth_required,
     require_permission_when_auth_required,
     validate_websocket_request,
@@ -25,7 +33,20 @@ from .serial_console_storage import DEFAULT_BAUDRATE
 router = APIRouter(prefix="/api/devices/console", tags=["devices-console"])
 page_router = APIRouter()
 
-_READ_ACCESS = [Depends(require_authenticated_user_when_auth_required)]
+
+def _require_console_read(request: Request) -> CurrentUser | None:
+    """Require devices.read for Agent Tokens while preserving human access."""
+
+    user = require_authenticated_user_when_auth_required(request)
+    if (
+        user is not None
+        and getattr(request.state, "auth_method", None) == "agent_token"
+    ):
+        return require_agent_scope("devices.read")(request)
+    return user
+
+
+_READ_ACCESS = [Depends(_require_console_read)]
 _WRITE_ACCESS = [
     Depends(require_permission_when_auth_required("devices.inventory"))
 ]

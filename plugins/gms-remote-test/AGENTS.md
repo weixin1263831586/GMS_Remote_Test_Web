@@ -29,8 +29,9 @@ especially before editing a generated file by hand.
    regenerates this payload via `python tools/sync_agent_package.py`.
 3. Adapter changes: keep every existing tool name and argument contract
    (API compatibility); add tests under `agent/gms-remote-test/tests/`.
-4. `python3 -m pytest agent/gms-remote-test/tests
-   plugins/gms-remote-test/tests -q` must pass before shipping (the sync
+4. Run `python3 -m pytest agent/gms-remote-test/tests -q` and
+   `python3 -m pytest plugins/gms-remote-test/tests -q` as separate
+   processes, then `python tools/audit_gms_agent_contract.py` (the sync
    enforces the six-way version contract).
 
 ## Security boundary (do not weaken)
@@ -80,6 +81,9 @@ especially before editing a generated file by hand.
    `gms_rt_jobs_wait` trim the single-job payload (v0.6.0; ~60-80% smaller
    on real payloads). Error envelopes are never re-rendered.
 6. Typed tools for hot paths so agents skip describe+run round trips.
+7. MCP names use underscores and CLI names use hyphens; typed tool
+   descriptions state the CLI equivalent. Optional `GMS_MCP_TOOLSETS`
+   filtering is enforced on both listing and calls.
 
 ## Verification quick sheet
 

@@ -8,7 +8,8 @@ import time
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -316,6 +317,25 @@ class SerialConsoleApiTests(unittest.TestCase):
             self.client.delete("/api/devices/console/bindings/ttyUSB0").status_code,
             200,
         )
+
+    def test_agent_console_read_requires_devices_read_scope(self):
+        request = SimpleNamespace(state=SimpleNamespace(auth_method="agent_token"))
+        user = object()
+        scope_dependency = Mock(return_value=user)
+        with patch.object(
+            serial_console_api,
+            "require_authenticated_user_when_auth_required",
+            return_value=user,
+        ), patch.object(
+            serial_console_api,
+            "require_agent_scope",
+            return_value=scope_dependency,
+        ) as require_scope:
+            result = serial_console_api._require_console_read(request)
+
+        self.assertIs(result, user)
+        require_scope.assert_called_once_with("devices.read")
+        scope_dependency.assert_called_once_with(request)
 
     def test_embedded_page_inlines_assets(self):
         response = self.client.get("/devices-console")

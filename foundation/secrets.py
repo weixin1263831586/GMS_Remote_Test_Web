@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 from pathlib import Path
@@ -10,6 +11,9 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from foundation.config import settings
 from foundation.runtime_settings import is_production_environment
+
+
+logger = logging.getLogger(__name__)
 
 
 def _production() -> bool:
@@ -42,9 +46,16 @@ def _load_key() -> bytes:
             raise RuntimeError(f"secret key file permissions must be 0600: {path}")
         return _validate_key(path.read_bytes())
 
+    # 部署数据目录（data/）可能被整体重置。密钥文件缺失时自举一个新
+    # 的部署本地密钥，而不是启动即崩溃；生产模式下明确告警，提示旧密
+    # 钥加密过的存量密文将无法解密。文件存在但损坏/权限错误仍按配置
+    # 错误硬失败。
     if _production():
-        raise RuntimeError(
-            "GMS_SECRET_KEY or a mode-0600 GMS_SECRET_KEY_FILE is required in production"
+        logger.warning(
+            "GMS master key file missing (%s); generated a new "
+            "deployment-local key. Secrets encrypted under a previous "
+            "key can no longer be decrypted.",
+            path,
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,8 @@
 # GMS Remote Test — Agent Playbook
 
-面向 AI agent 的运维手册,收录真实踩坑经验。冷启动时先跑 `gms-rt-system-selfcheck`,
-再按需查阅本页。人机通用;命令均为 `gms-rt-*` 全名(MCP 下亦同)。
+面向 AI agent 的运维手册,收录真实踩坑经验。冷启动时先跑
+`gms-rt-system-selfcheck`（MCP 下为 `gms_rt_context`）,再按需查阅本页。
+Shell CLI 使用 `gms-rt-*` 连字符名；MCP 使用 `gms_rt_*` 下划线名。
 
 ## 1. 冷启动 / 环境自检
 

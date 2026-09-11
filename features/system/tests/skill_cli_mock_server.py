@@ -227,6 +227,39 @@ class ApiHandler(BaseHTTPRequestHandler):
         if self.path in {"/api/adb-forward/start", "/api/adb-forward/stop"}:
             self._write_json(200, {"success": True})
             return
+        if self.path in {
+            "/api/devices/bootloader-lock",
+            "/api/devices/bootloader-unlock",
+            "/api/devices/bootloader-status",
+            "/api/devices/info",
+            "/api/devices/remount",
+            "/api/devices/scrcpy",
+        }:
+            devices = parsed_body.get("devices") or []
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "data": {
+                        "summary": {
+                            "total": len(devices),
+                            "success": len(devices),
+                            "failed": 0,
+                        },
+                        "results": [
+                            {
+                                "device": device,
+                                "success": True,
+                                "locked": False,
+                                "overlayfs_enabled": True,
+                                "needs_reboot": False,
+                            }
+                            for device in devices
+                        ],
+                    },
+                },
+            )
+            return
         if self.path == "/api/cluster/jobs/job-complete/cancel":
             self._write_json(
                 200,

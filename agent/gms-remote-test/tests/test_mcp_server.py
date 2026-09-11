@@ -533,6 +533,66 @@ class TypedToolTests(unittest.TestCase):
         self.assertEqual(captured["command"], "gms-rt-jobs-status")
         self.assertEqual(captured["args"], ["J1"])
 
+    def test_context_tool_uses_system_selfcheck(self):
+        captured = self._capture_run()
+        mcp_server.context_tool({})
+        self.assertEqual(captured["command"], "gms-rt-system-selfcheck")
+
+    def test_device_console_tool_builds_exact_cli_arguments(self):
+        captured = self._capture_run()
+        text, is_error = mcp_server.device_console_tool(
+            {"port_key": "usb-FTDI-port0", "tail": 500, "date": "20260911"}
+        )
+        self.assertFalse(is_error, text)
+        self.assertEqual(captured["command"], "gms-rt-devices-console")
+        self.assertEqual(
+            captured["args"],
+            ["usb-FTDI-port0", "--tail", "500", "--date", "20260911"],
+        )
+
+    def test_device_console_tool_rejects_invalid_tail_and_date(self):
+        text, is_error = mcp_server.device_console_tool({"tail": "many"})
+        self.assertTrue(is_error)
+        self.assertIn("tail", text)
+        text, is_error = mcp_server.device_console_tool({"date": "2026-09-11"})
+        self.assertTrue(is_error)
+        self.assertIn("YYYYMMDD", text)
+
+    def test_device_info_tool_accepts_multiple_devices(self):
+        captured = self._capture_run()
+        _text, is_error = mcp_server.device_info_tool({"devices": ["D1", "D2"]})
+        self.assertFalse(is_error)
+        self.assertEqual(captured["command"], "gms-rt-devices-info")
+        self.assertEqual(captured["args"], ["D1", "D2"])
+
+    def test_device_wait_tool_builds_bounded_wait(self):
+        captured = self._capture_run()
+        _text, is_error = mcp_server.device_wait_tool(
+            {
+                "devices": "D1",
+                "state": "fastboot",
+                "interval": 5,
+                "max_wait": 600,
+                "timeout": 620,
+            }
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(captured["command"], "gms-rt-devices-wait")
+        self.assertEqual(
+            captured["args"],
+            ["D1", "--state", "fastboot", "--interval", "5", "--max-wait", "600"],
+        )
+
+    def test_jobs_cancel_tool_requires_and_passes_job_id(self):
+        text, is_error = mcp_server.jobs_cancel_tool({})
+        self.assertTrue(is_error)
+        self.assertIn("job_id", text)
+        captured = self._capture_run()
+        _text, is_error = mcp_server.jobs_cancel_tool({"job_id": "J1"})
+        self.assertFalse(is_error)
+        self.assertEqual(captured["command"], "gms-rt-jobs-cancel")
+        self.assertEqual(captured["args"], ["J1"])
+
     def test_reports_list_tool_takes_no_arguments(self):
         captured = self._capture_run()
         mcp_server.reports_tool({"query": "ignored", "limit": 5})
@@ -602,6 +662,72 @@ class JsonRpcLoopTests(unittest.TestCase):
             self.assertIn("name", tool)
             self.assertIn("description", tool)
             self.assertEqual(tool["inputSchema"]["type"], "object")
+
+    def test_typed_core_tools_are_advertised_with_cli_equivalents(self):
+        by_name = {tool["name"]: tool for tool in mcp_server.tools()}
+        expected = {
+            "gms_rt_context": "gms-rt-system-selfcheck",
+            "gms_rt_device_console": "gms-rt-devices-console",
+            "gms_rt_device_info": "gms-rt-devices-info",
+            "gms_rt_device_wait": "gms-rt-devices-wait",
+            "gms_rt_jobs_cancel": "gms-rt-jobs-cancel",
+        }
+        for name, cli_name in expected.items():
+            self.assertIn(name, by_name)
+            self.assertIn(cli_name, by_name[name]["description"])
+            self.assertNotIn("-", name)
+            self.assertIn("annotations", by_name[name])
+
+    def test_toolset_filter_reduces_catalog_and_is_enforced_on_call(self):
+        with patch.dict(os.environ, {"GMS_MCP_TOOLSETS": "core"}):
+            names = {tool["name"] for tool in mcp_server.tools()}
+            self.assertIn("gms_rt_context", names)
+            self.assertIn("gms_rt_devices", names)
+            self.assertNotIn("gms_rt_test_start", names)
+            self.assertNotIn("gms_rt_jobs_cancel", names)
+            replies = []
+            with patch.object(
+                mcp_server,
+                "response",
+                side_effect=lambda *args, **kwargs: replies.append((args, kwargs)),
+            ):
+                mcp_server.handle(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 9,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "gms_rt_jobs_cancel",
+                            "arguments": {"job_id": "J1"},
+                        },
+                    }
+                )
+            self.assertEqual(replies[0][1]["error"]["code"], -32601)
+
+    def test_json_object_result_has_structured_content_and_text_fallback(self):
+        replies = []
+        with (
+            patch.dict(
+                mcp_server._TOOL_HANDLERS,
+                {"gms_rt_context": lambda _args: ('{"ok":true,"data":{}}', False)},
+            ),
+            patch.object(
+                mcp_server,
+                "response",
+                side_effect=lambda *args, **kwargs: replies.append((args, kwargs)),
+            ),
+        ):
+            mcp_server.handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 10,
+                    "method": "tools/call",
+                    "params": {"name": "gms_rt_context", "arguments": {}},
+                }
+            )
+        payload = replies[0][0][1]
+        self.assertEqual(payload["structuredContent"], {"ok": True, "data": {}})
+        self.assertEqual(payload["content"][0]["type"], "text")
 
 
 

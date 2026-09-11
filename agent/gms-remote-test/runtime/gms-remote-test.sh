@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.16.0"
+GMS_RT_VERSION="0.17.1"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -1658,7 +1658,7 @@ gms-rt-desktop-vnc-stop() {
 
 # Lock bootloader
 gms-rt-devices-bootloader-lock() {
-    local devices="$1"
+    local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-lock DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     devices=$(_resolve_devices "$devices")
@@ -1688,7 +1688,7 @@ gms-rt-devices-bootloader-lock() {
 
 # Unlock bootloader
 gms-rt-devices-bootloader-unlock() {
-    local devices="$1"
+    local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-unlock DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     devices=$(_resolve_devices "$devices")
@@ -1733,7 +1733,7 @@ gms-rt-devices-bootloader-unlock() {
 
 # Check bootloader status
 gms-rt-devices-bootloader-status() {
-    local devices="$1"
+    local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-status DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     devices=$(_resolve_devices "$devices")
@@ -1752,7 +1752,7 @@ gms-rt-devices-bootloader-status() {
 
 # Get device details
 gms-rt-devices-info() {
-    local devices="$1"
+    local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-info DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     devices=$(_resolve_devices "$devices")
@@ -2032,7 +2032,7 @@ gms-rt-devices-reboot() {
 
 # Remount multiple devices (parallel)
 gms-rt-devices-remount() {
-    local devices="$1"
+    local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-remount DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     devices=$(_resolve_devices "$devices")
@@ -2215,7 +2215,7 @@ gms-rt-devices-screencap() {
 }
 
 gms-rt-devices-scrcpy() {
-    local devices="$1"
+    local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-scrcpy DEVICE1 [DEVICE2 ...]"; return 1; }
     check_jq
     devices=$(_resolve_devices "$devices")
@@ -2583,9 +2583,9 @@ gms-rt-devices-wifi() {
     local password
     password=$(_secret_value "${3:-${GMS_REMOTE_WIFI_PASSWORD:-}}")
 
-    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
-    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
-    [ -z "$password" ] && { error "密码必填. 用法: gms-rt-devices-wifi DEVICE1 [DEVICE2 ...] <ssid> <password>"; return 1; }
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-wifi <devices> <ssid> [password]"; return 1; }
+    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-wifi <devices> <ssid> [password]"; return 1; }
+    [ -z "$password" ] && { error "密码必填（第三个参数或 GMS_REMOTE_WIFI_PASSWORD）. 用法: gms-rt-devices-wifi <devices> <ssid> [password]"; return 1; }
 
     check_jq
     devices=$(_resolve_devices "$devices")
@@ -5121,37 +5121,59 @@ _gms_rt_command_names() {
 
 _gms_rt_command_usage() {
     case "$1" in
+        gms-rt-adb-forward-status|gms-rt-auth-credential-mode|gms-rt-auth-elevation-reset|gms-rt-auth-logout|gms-rt-auth-status|gms-rt-cluster-workers|gms-rt-config-read|gms-rt-desktop-vnc-status|gms-rt-desktop-vnc-stop|gms-rt-devices-list|gms-rt-devices-user-locked|gms-rt-reports-list|gms-rt-ssh-route|gms-rt-system-capabilities|gms-rt-system-commands|gms-rt-system-docs|gms-rt-system-health|gms-rt-system-help|gms-rt-system-selfcheck|gms-rt-system-version|gms-rt-test-clean|gms-rt-test-logs-stream|gms-rt-test-status|gms-rt-users-current|gms-rt-users-list|gms-rt-vpn-connect|gms-rt-vpn-disconnect|gms-rt-vpn-status)
+            printf '%s' "$1"
+            ;;
+        gms-rt-adb-forward-start) printf '%s' 'gms-rt-adb-forward-start <source_worker_id> <target_worker_id> <serial> [serial...]' ;;
+        gms-rt-adb-forward-stop) printf '%s' 'gms-rt-adb-forward-stop <source_worker_id> <target_worker_id>' ;;
         gms-rt-auth-login) printf '%s' 'gms-rt-auth-login [username] [--password-stdin]' ;;
         gms-rt-auth-elevate) printf '%s' 'gms-rt-auth-elevate [admin_username] [--password-stdin]' ;;
         gms-rt-agent-enroll) printf '%s' 'gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE]' ;;
         gms-rt-agent-tokens) printf '%s' 'gms-rt-agent-tokens' ;;
         gms-rt-agent-enroll-code) printf '%s' 'gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N]' ;;
         gms-rt-agent-token-revoke) printf '%s' 'gms-rt-agent-token-revoke <TOKEN_ID>' ;;
-        gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <gms_rt_tool> --device <serial> --command <command>' ;;
-        gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
+        gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <gms_rt_tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]' ;;
+        gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-gsi) printf '%s' 'gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-serial) printf '%s' 'gms-rt-burn-serial <device_id> <serial>' ;;
+        gms-rt-cluster-devices) printf '%s' 'gms-rt-cluster-devices [--worker WORKER_ID] [--query REGEX]' ;;
+        gms-rt-cluster-resolve) printf '%s' 'gms-rt-cluster-resolve --device <serial> [--worker <worker_id>]' ;;
+        gms-rt-config-update) printf '%s' 'gms-rt-config-update <key> <value>' ;;
+        gms-rt-desktop-validate) printf '%s' 'gms-rt-desktop-validate <user@ip>' ;;
+        gms-rt-desktop-vnc-start) printf '%s' 'gms-rt-desktop-vnc-start [host] [password] [vnc_password]' ;;
         gms-rt-system-command-describe) printf '%s' 'gms-rt-system-command-describe <gms-rt-command>' ;;
         gms-rt-devices-info|gms-rt-devices-reboot|gms-rt-devices-remount|gms-rt-devices-bootloader-lock|gms-rt-devices-bootloader-unlock|gms-rt-devices-bootloader-status)
             printf '%s' "$1 <devices>"
             ;;
         gms-rt-devices-wait) printf '%s' 'gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]' ;;
         gms-rt-devices-console) printf '%s' 'gms-rt-devices-console [port_key] [--tail N] [--date YYYYMMDD]' ;;
-        gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [command]' ;;
+        gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [--approval-token TOKEN] [command]' ;;
+        gms-rt-devices-scrcpy) printf '%s' 'gms-rt-devices-scrcpy DEVICE1 [DEVICE2 ...]' ;;
         gms-rt-devices-screencap) printf '%s' 'gms-rt-devices-screencap <device_id>' ;;
         gms-rt-devices-ui-dump) printf '%s' 'gms-rt-devices-ui-dump <device_id>' ;;
         gms-rt-devices-snapshot) printf '%s' 'gms-rt-devices-snapshot <device_id>' ;;
+        gms-rt-devices-wifi) printf '%s' 'gms-rt-devices-wifi <devices> <ssid> [password]' ;;
+        gms-rt-files-progress) printf '%s' 'gms-rt-files-progress [upload_id]' ;;
+        gms-rt-opengrok-search) printf '%s' 'gms-rt-opengrok-search <query> [true|false]' ;;
         gms-rt-jobs-follow) printf '%s' 'gms-rt-jobs-follow <job_id> [--after SEQUENCE] [--limit N]' ;;
         gms-rt-devices-logcat) printf '%s' 'gms-rt-devices-logcat <device_id> [-c] [logcat args]' ;;
         gms-rt-devices-push) printf '%s' 'gms-rt-devices-push <device_id> <local_file> <remote_path>' ;;
-        gms-rt-jobs-list) printf '%s' 'gms-rt-jobs-list [limit]' ;;
+        gms-rt-jobs-list) printf '%s' 'gms-rt-jobs-list [limit:1..500]' ;;
         gms-rt-jobs-status) printf '%s' 'gms-rt-jobs-status <job_id>' ;;
         gms-rt-jobs-events) printf '%s' 'gms-rt-jobs-events <job_id> [after_sequence] [limit]' ;;
         gms-rt-jobs-wait) printf '%s' 'gms-rt-jobs-wait <job_id> [--interval SECONDS] [--max-wait SECONDS]' ;;
         gms-rt-jobs-cancel) printf '%s' 'gms-rt-jobs-cancel <job_id>' ;;
         gms-rt-system-doctor) printf '%s' 'gms-rt-system-doctor [read|device|firmware|gsi|test]' ;;
         gms-rt-system-update) printf '%s' 'gms-rt-system-update' ;;
-        gms-rt-test-start) printf '%s' 'gms-rt-test-start <device> [type] [module] [case] [suite] | --retry <timestamp> [device] [type] [suite] [--wait] [--max-wait SECONDS]' ;;
+        gms-rt-reports-analyze) printf '%s' 'gms-rt-reports-analyze <local_report.zip|test_result.xml|report_timestamp|keyword>' ;;
+        gms-rt-reports-delete) printf '%s' 'gms-rt-reports-delete <report_timestamp>' ;;
+        gms-rt-reports-download) printf '%s' 'gms-rt-reports-download <report_timestamp> [output_dir]' ;;
+        gms-rt-ssh-ping) printf '%s' 'gms-rt-ssh-ping <test_host_ip> <client_ip>' ;;
+        gms-rt-ssh-sshd) printf '%s' 'gms-rt-ssh-sshd [user@ip]' ;;
+        gms-rt-system-skills) printf '%s' 'gms-rt-system-skills [skill_name]' ;;
+        gms-rt-terminal-open) printf '%s' 'gms-rt-terminal-open [host] [user] [port]' ;;
+        gms-rt-terminal-push) printf '%s' 'gms-rt-terminal-push <file_path> [target_path]' ;;
+        gms-rt-test-start) printf '%s' 'gms-rt-test-start <device> [type] [module] [case] [suite] [--worker ID] [--wait[=SECONDS]] [--max-wait SECONDS] | --retry <timestamp> [device] [type] [suite] [options]' ;;
         gms-rt-test-stop) printf '%s' 'gms-rt-test-stop [job_id]' ;;
         gms-rt-test-suites) printf '%s' 'gms-rt-test-suites [base_path]' ;;
         gms-rt-test-suites-result) printf '%s' 'gms-rt-test-suites-result <tools_path|suite_name> [--force-refresh]' ;;
@@ -5166,6 +5188,12 @@ _gms_rt_command_usage() {
         gms-rt-apk-search) printf '%s' 'gms-rt-apk-search <task_id> <query> [--limit N]' ;;
         gms-rt-apk-definition) printf '%s' 'gms-rt-apk-definition <task_id> <symbol> [--path P] [--line N]' ;;
         gms-rt-apk-download) printf '%s' 'gms-rt-apk-download <task_id> [output.zip]' ;;
+        gms-rt-usbip-install) printf '%s' 'gms-rt-usbip-install <user@ip>' ;;
+        gms-rt-usbip-connect) printf '%s' 'gms-rt-usbip-connect <user@ip> [password]' ;;
+        gms-rt-usbip-disconnect) printf '%s' 'gms-rt-usbip-disconnect <user@ip>' ;;
+        gms-rt-usbip-status) printf '%s' 'gms-rt-usbip-status <user@ip>' ;;
+        gms-rt-users-detect) printf '%s' 'gms-rt-users-detect <ip> [username] [password]' ;;
+        gms-rt-users-set-username) printf '%s' 'gms-rt-users-set-username [username]' ;;
         gms-rt-redmine-issue-fetch) printf '%s' 'gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none|analyzable|all] [--refresh|--no-refresh] [--wait] [--max-wait SECONDS]' ;;
         gms-rt-redmine-issue-show) printf '%s' 'gms-rt-redmine-issue-show <snapshot_id>' ;;
         gms-rt-redmine-journals) printf '%s' 'gms-rt-redmine-journals <snapshot_id> [--limit N] [--cursor C]' ;;
@@ -5186,11 +5214,32 @@ _gms_rt_command_usage() {
 
 _gms_rt_command_summary() {
     case "$1" in
+        gms-rt-adb-forward-status) printf '%s' 'List ADB proxy Workers and active source-to-target assignments' ;;
+        gms-rt-adb-forward-start) printf '%s' 'Forward selected device serials from one Worker to another through adbproxy-rs' ;;
+        gms-rt-adb-forward-stop) printf '%s' 'Stop one ADB proxy source-to-target Worker assignment' ;;
+        gms-rt-auth-status) printf '%s' 'Show whether authentication is required and describe the current principal/session' ;;
+        gms-rt-auth-login) printf '%s' 'Create and save a human API session (password prompt or --password-stdin)' ;;
+        gms-rt-auth-logout) printf '%s' 'Revoke the current human API session and remove its local cookie jar' ;;
+        gms-rt-auth-elevate) printf '%s' 'Activate administrator elevation for the current human session' ;;
+        gms-rt-auth-elevation-reset) printf '%s' 'Clear administrator elevation from the current human session' ;;
+        gms-rt-auth-credential-mode) printf '%s' 'Show whether this CLI invocation uses an Agent Token file or a session cookie' ;;
         gms-rt-agent-enroll) printf '%s' 'Exchange a one-shot enrollment code for an Agent Service Token stored as a 0600 file' ;;
         gms-rt-agent-tokens) printf '%s' 'List Agent Service Tokens (admin; metadata only, raw tokens are never stored)' ;;
         gms-rt-agent-enroll-code) printf '%s' 'Mint a one-shot enrollment code for a build server agent (admin + elevation)' ;;
         gms-rt-agent-token-revoke) printf '%s' 'Revoke an Agent Service Token by id (admin + elevation)' ;;
         gms-rt-approval-create) printf '%s' 'Create a one-shot approval token for a destructive agent action (human session only)' ;;
+        gms-rt-cluster-workers) printf '%s' 'List registered Cluster Workers and their current availability' ;;
+        gms-rt-cluster-devices) printf '%s' 'List the authoritative cross-Worker device inventory, optionally filtered by Worker or serial' ;;
+        gms-rt-cluster-resolve) printf '%s' 'Resolve an exact device serial to its owning Worker without guessing ambiguous matches' ;;
+        gms-rt-config-read) printf '%s' 'Read the Controller configuration visible to the current principal' ;;
+        gms-rt-config-update) printf '%s' 'Update one Controller configuration key' ;;
+        gms-rt-desktop-validate) printf '%s' 'Validate SSH access to a desktop host' ;;
+        gms-rt-desktop-vnc-start) printf '%s' 'Start the configured VNC service on a desktop host' ;;
+        gms-rt-desktop-vnc-status) printf '%s' 'Read the configured desktop VNC service status' ;;
+        gms-rt-desktop-vnc-stop) printf '%s' 'Stop the configured desktop VNC service' ;;
+        gms-rt-burn-firmware) printf '%s' 'Transfer and burn a firmware image, with optional approved Agent execution and online wait' ;;
+        gms-rt-burn-gsi) printf '%s' 'Transfer and burn a GSI image, with optional online wait' ;;
+        gms-rt-burn-serial) printf '%s' 'Program a serial number on one device' ;;
         gms-rt-system-capabilities) printf '%s' 'Print the CLI contract, global options, and exit codes' ;;
         gms-rt-system-command-describe) printf '%s' 'Describe one CLI command for machine execution' ;;
         gms-rt-system-commands) printf '%s' 'Print the machine-readable command inventory' ;;
@@ -5199,9 +5248,38 @@ _gms_rt_command_summary() {
         gms-rt-system-help) printf '%s' 'Show the human-readable CLI command list' ;;
         gms-rt-system-update) printf '%s' 'Reinstall the latest Skill and CLI command links' ;;
         gms-rt-system-version) printf '%s' 'Print the local CLI version' ;;
+        gms-rt-system-docs) printf '%s' 'Read the Controller API documentation catalog' ;;
+        gms-rt-system-health) printf '%s' 'Check Controller service liveness and version' ;;
+        gms-rt-system-skills) printf '%s' 'Download a Controller-hosted Skill archive to the current directory' ;;
+        gms-rt-devices-list) printf '%s' 'List devices visible through the Controller device inventory' ;;
+        gms-rt-devices-info) printf '%s' 'Read detailed properties for one or more devices' ;;
         gms-rt-devices-wait) printf '%s' 'Wait for selected devices to become visible in the requested state' ;;
         gms-rt-devices-logcat) printf '%s' 'Capture device logcat via adb shell logcat -v time (-c clears the buffer first; dump mode in non-interactive sessions)' ;;
         gms-rt-devices-console) printf '%s' 'List Controller serial ports or read one port retained console log' ;;
+        gms-rt-devices-bootloader-lock) printf '%s' 'Lock the bootloader on one or more devices' ;;
+        gms-rt-devices-bootloader-unlock) printf '%s' 'Unlock the bootloader on one or more devices' ;;
+        gms-rt-devices-bootloader-status) printf '%s' 'Read bootloader lock status for one or more devices' ;;
+        gms-rt-devices-reboot) printf '%s' 'Reboot one or more devices and report partial failures' ;;
+        gms-rt-devices-remount) printf '%s' 'Remount one or more devices read-write and optionally reboot when required' ;;
+        gms-rt-devices-shell) printf '%s' 'Open a human ADB shell or run one approved device command' ;;
+        gms-rt-devices-push) printf '%s' 'Push one local file to a device through ADB' ;;
+        gms-rt-devices-wifi) printf '%s' 'Connect one or more devices to a Wi-Fi network' ;;
+        gms-rt-devices-scrcpy) printf '%s' 'Start human interactive screen mirroring for one or more devices' ;;
+        gms-rt-devices-user-locked) printf '%s' 'List devices currently locked by a platform user' ;;
+        gms-rt-devices-screencap) printf '%s' 'Capture one device screenshot as a base64 PNG payload' ;;
+        gms-rt-devices-ui-dump) printf '%s' 'Read one device UI hierarchy as structured elements' ;;
+        gms-rt-devices-snapshot) printf '%s' 'Collect a fixed read-only device diagnostic snapshot (build, activity, lock and owners)' ;;
+        gms-rt-files-progress) printf '%s' 'Read upload progress, optionally for one upload id' ;;
+        gms-rt-opengrok-search) printf '%s' 'Search the configured OpenGrok index' ;;
+        gms-rt-reports-list) printf '%s' 'List test reports visible to the current principal' ;;
+        gms-rt-reports-analyze) printf '%s' 'Analyze a local report file or a uniquely resolved saved report' ;;
+        gms-rt-reports-download) printf '%s' 'Download a saved report tree into a local output directory' ;;
+        gms-rt-reports-delete) printf '%s' 'Delete one saved report by timestamp' ;;
+        gms-rt-ssh-ping) printf '%s' 'Test network reachability between a test host and client address' ;;
+        gms-rt-ssh-route) printf '%s' 'Read the configured SSH route information' ;;
+        gms-rt-ssh-sshd) printf '%s' 'Inspect SSHD status locally or on a user@host target and show setup guidance' ;;
+        gms-rt-terminal-open) printf '%s' 'Open a human interactive SSH terminal on the test host' ;;
+        gms-rt-terminal-push) printf '%s' 'Upload a local file into a test-host directory' ;;
         gms-rt-test-suites-result) printf '%s' 'List tradefed results for a suite path or short suite name' ;;
         gms-rt-test-modules) printf '%s' 'List available tradefed modules for a suite (testcases/ directory)' ;;
         gms-rt-apk-resolve) printf '%s' 'Resolve a test module keyword to its APK/JAR artifact in the latest suites' ;;
@@ -5229,11 +5307,28 @@ _gms_rt_command_summary() {
         gms-rt-sdk-search) printf '%s' 'Search an SDK source at a pinned revision; matches carry commit-bound result ids' ;;
         gms-rt-sdk-read) printf '%s' 'Read a commit-pinned SDK source window by signed result id (returns commit and blob sha256)' ;;
         gms-rt-test-start) printf '%s' 'Start a test with smart args, suite short names, device prefixes, and optional --wait' ;;
+        gms-rt-test-stop) printf '%s' 'Compatibility stop entry: cancel an explicit job, or the only active owned test job' ;;
+        gms-rt-test-status) printf '%s' 'Read the legacy aggregate test execution status' ;;
+        gms-rt-test-clean) printf '%s' 'Clean the test execution environment' ;;
+        gms-rt-test-logs-stream) printf '%s' 'Stream live test logs until interrupted' ;;
+        gms-rt-test-suites) printf '%s' 'List available test suite installations and tools paths' ;;
         gms-rt-jobs-list) printf '%s' 'List durable test jobs visible to the current session' ;;
         gms-rt-jobs-status) printf '%s' 'Get authoritative durable test job state' ;;
         gms-rt-jobs-events) printf '%s' 'Read incremental durable test job events' ;;
         gms-rt-jobs-wait) printf '%s' 'Wait for a durable test job to reach a terminal state' ;;
         gms-rt-jobs-cancel) printf '%s' 'Request cancellation of a durable test job' ;;
+        gms-rt-jobs-follow) printf '%s' 'Return job status, incremental events and a terminal failure summary in one call' ;;
+        gms-rt-usbip-install) printf '%s' 'Install USB/IP prerequisites on a specified device host' ;;
+        gms-rt-usbip-connect) printf '%s' 'Start a USB/IP connection to a specified device host' ;;
+        gms-rt-usbip-disconnect) printf '%s' 'Stop a USB/IP connection to a specified device host' ;;
+        gms-rt-usbip-status) printf '%s' 'Read USB/IP status for a specified device host' ;;
+        gms-rt-users-current) printf '%s' 'Read the current platform user identity' ;;
+        gms-rt-users-detect) printf '%s' 'Detect a platform username from a remote host identity' ;;
+        gms-rt-users-list) printf '%s' 'List platform users' ;;
+        gms-rt-users-set-username) printf '%s' 'Set the current platform username' ;;
+        gms-rt-vpn-connect) printf '%s' 'Connect the configured VPN' ;;
+        gms-rt-vpn-disconnect) printf '%s' 'Disconnect the configured VPN' ;;
+        gms-rt-vpn-status) printf '%s' 'Read configured VPN connection status' ;;
         gms-rt-burn-*) printf '%s' 'Perform an elevated firmware operation' ;;
         gms-rt-devices-*) printf '%s' 'Inspect or operate Android devices' ;;
         gms-rt-test-*) printf '%s' 'Inspect or operate GMS test execution' ;;
@@ -5259,14 +5354,14 @@ gms-rt-system-commands() {
         def category:
             split("-")[2] // "other";
         def mode:
-            if test("terminal-open|devices-shell|devices-scrcpy|test-logs-stream")
+            if test("terminal-open|devices-shell|devices-scrcpy|devices-logcat|test-logs-stream|auth-(login|elevate)")
             then "interactive"
             elif test(
                 "burn-|config-update|bootloader-(lock|unlock)|devices-(reboot|remount|push|wifi)"
                 + "|reports-delete|apk-analyze|terminal-push|test-(start|stop|clean)|usbip-(install|connect|disconnect)"
                 + "|vpn-(connect|disconnect)|adb-forward-(start|stop)|desktop-vnc-(start|stop)|users-set-username"
                 + "|jobs-cancel|system-update"
-                + "|agent-enroll-code|agent-token-revoke"
+                + "|agent-(enroll|enroll-code|token-revoke)|approval-create|auth-(logout|elevation-reset)"
             )
             then "mutating"
             else "read_only"
@@ -5284,8 +5379,26 @@ gms-rt-system-commands() {
             then {external_side_effects: false, resource_intensive: false, required_scope: "redmine.read"}
             elif test("sdk-")
             then {external_side_effects: false, resource_intensive: false, required_scope: "sdk.read"}
-            elif test("devices-console")
+            elif test("^(gms-rt-cluster-devices|gms-rt-devices-(list|console))$")
             then {external_side_effects: false, resource_intensive: false, required_scope: "devices.read"}
+            elif test("^gms-rt-jobs-(list|status|events|follow|wait)$")
+            then {external_side_effects: false, resource_intensive: false, required_scope: "jobs.read"}
+            elif test("^(gms-rt-jobs-cancel|gms-rt-test-stop)$")
+            then {external_side_effects: true, resource_intensive: false, required_scope: "tests.cancel"}
+            elif test("^gms-rt-test-start$")
+            then {external_side_effects: true, resource_intensive: true, required_scope: "tests.execute"}
+            elif test("^gms-rt-reports-(list|analyze|download)$")
+            then {
+                external_side_effects: test("(analyze|download)$"),
+                resource_intensive: test("analyze$"),
+                required_scope: "reports.read"
+            }
+            elif test("^gms-rt-(adb-forward-|usbip-)")
+            then {external_side_effects: true, resource_intensive: false, required_scope: "devices.lease"}
+            elif test("^(gms-rt-agent-enroll|gms-rt-system-skills|gms-rt-apk-download|gms-rt-terminal-push)$")
+            then {external_side_effects: true, resource_intensive: false, required_scope: ""}
+            elif mode != "read_only"
+            then {external_side_effects: true, resource_intensive: false, required_scope: ""}
             else {external_side_effects: false, resource_intensive: false, required_scope: ""}
             end;
         [inputs | split("\t") as $fields | $fields[0] as $name | {
@@ -5294,7 +5407,7 @@ gms-rt-system-commands() {
             summary: ($fields[2] // ""),
             usage: ($fields[1] // ($name + " [arguments]")),
             mode: ($name | mode),
-            requires_auth: ($name | test("auth-(status|login)|system-(capabilities|command-describe|commands|health|help|update|version)") | not),
+            requires_auth: ($name | test("^(gms-rt-agent-enroll|gms-rt-auth-(credential-mode|login|status)|gms-rt-system-(capabilities|command-describe|commands|health|help|selfcheck|update|version)|gms-rt-test-modules)$") | not),
             requires_elevation: ($name | test(
                 "burn-|config-update|devices-bootloader-(lock|unlock)|adb-forward-"
                 + "|desktop-|terminal-(open|push)|usbip-(install|connect|disconnect)"
@@ -5305,7 +5418,7 @@ gms-rt-system-commands() {
             supports_json: true,
             agent_safe_unattended: (
                 ($name | mode) == "read_only"
-                and ($name | test("auth-(login|logout|elevate|elevation-reset)|terminal-open|devices-(shell|scrcpy)|test-logs-stream") | not)
+                and ($name | test("auth-(login|logout|elevate|elevation-reset)|approval-create|terminal-open|devices-(shell|scrcpy|logcat)|test-logs-stream") | not)
             )
         } + ($name | risk)] |
         {
@@ -5421,8 +5534,8 @@ gms-rt-system-selfcheck() {
     credential_mode=$(gms-rt-auth-credential-mode 2>/dev/null) || credential_mode='{"mode":"unknown"}'
     _gms_rt_selfcheck_is_json "$credential_mode" || credential_mode='{"mode":"unknown"}'
     if [ "$auth_ok" != true ]; then
-        case "$(echo "$credential_mode" | jq -r '.mode // empty')" in
-            agent_token)
+        case "${GMS_AGENT_PROCESS:-0}:$(echo "$credential_mode" | jq -r '.mode // empty')" in
+            1:*|*:agent_token)
                 hints+=("agent token check failed: re-enroll with 'gms-rt-agent-enroll <CODE>' (mint the code in the web UI, 5-minute TTL)")
                 ;;
             *)
@@ -5463,6 +5576,10 @@ gms-rt-system-selfcheck() {
     jq -n \
         --arg server "$SERVER_URL" \
         --arg version "$GMS_RT_VERSION" \
+        --arg profile "${GMS_RT_PROFILE:-${GMS_AGENT_PROFILE:-}}" \
+        --arg agent_client "${GMS_AGENT_CLIENT:-}" \
+        --argjson agent_process "$([ "${GMS_AGENT_PROCESS:-0}" = "1" ] && echo true || echo false)" \
+        --argjson ca_configured "$([ -n "${GMS_CURL_CA_CERT:-}" ] && echo true || echo false)" \
         --argjson credential "$credential_mode" \
         --argjson auth "$auth_json" \
         --argjson health "$health_json" \
@@ -5476,6 +5593,10 @@ gms-rt-system-selfcheck() {
             schema_version: 1,
             cli_version: $version,
             server: $server,
+            profile: (if $profile == "" then null else $profile end),
+            agent_client: (if $agent_client == "" then null else $agent_client end),
+            agent_process: $agent_process,
+            ca_configured: $ca_configured,
             credential: $credential,
             auth: {ok: $auth_ok, status: (if $auth_ok then $auth else null end)},
             server_health: {ok: $health_ok, status: (if $health_ok then $health else null end)},
@@ -5500,9 +5621,22 @@ ${YELLOW}ADB Proxy:${NC}
 ${YELLOW}Authentication:${NC}
   gms-rt-auth-login [username]   - Log in and save an API session
   gms-rt-auth-status             - Show the current authentication status
+  gms-rt-auth-credential-mode    - Show whether the CLI uses an Agent Token or session cookie
   gms-rt-auth-logout             - Revoke and remove the saved session
   gms-rt-auth-elevate [username] - Verify an admin for sensitive operations
   gms-rt-auth-elevation-reset    - Clear administrator elevation
+
+${YELLOW}Agent Credentials and Approval:${NC}
+  gms-rt-agent-enroll            - Exchange a one-shot code for a local 0600 Agent Token
+  gms-rt-agent-tokens            - List Agent Token metadata (admin)
+  gms-rt-agent-enroll-code       - Mint a one-shot Agent enrollment code (admin + elevation)
+  gms-rt-agent-token-revoke      - Revoke an Agent Token (admin + elevation)
+  gms-rt-approval-create         - Mint a human-approved one-shot destructive-action token
+
+${YELLOW}Cluster Inventory:${NC}
+  gms-rt-cluster-workers         - List registered Workers
+  gms-rt-cluster-devices         - List the authoritative cross-Worker device inventory
+  gms-rt-cluster-resolve         - Resolve a device serial to its owning Worker
 
 ${YELLOW}Firmware Burning:${NC}
   gms-rt-burn-firmware           - Burn firmware image (optional --wait-online[=SECONDS])
@@ -5537,6 +5671,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-screencap          - Capture device screenshot as base64 PNG
   gms-rt-devices-ui-dump            - Dump UI layout tree as JSON elements
   gms-rt-devices-snapshot           - One-shot device state snapshot (fp/activity/lock/owners)
+  gms-rt-devices-scrcpy             - Start interactive screen mirroring
 
 ${YELLOW}File Management:${NC}
   gms-rt-files-progress          - Get upload progress
@@ -5568,12 +5703,25 @@ ${YELLOW}System:${NC}
 ${YELLOW}Code search:${NC}
   gms-rt-opengrok-search         - Search the configured OpenGrok service
 
+${YELLOW}APK Analysis:${NC}
+  gms-rt-apk-resolve             - Resolve a suite module to its APK/JAR artifact
+  gms-rt-apk-analyze             - Start JADX analysis for a resolved suite module
+  gms-rt-apk-status              - Read one APK analysis task status
+  gms-rt-apk-tasks               - List visible APK analysis tasks
+  gms-rt-apk-manifest            - Read a decompiled AndroidManifest.xml
+  gms-rt-apk-permissions         - List permissions declared by a decompiled artifact
+  gms-rt-apk-source              - Browse the decompiled source tree or read one file
+  gms-rt-apk-search              - Search decompiled source filenames
+  gms-rt-apk-definition          - Locate a best-effort Java symbol definition
+  gms-rt-apk-download            - Download the decompiled source ZIP
+
 ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-redmine-issue-fetch     - Create/refresh a full evidence snapshot (journals untruncated, attachments hashed)
   gms-rt-redmine-issue-show      - Show snapshot completeness and issue fields
   gms-rt-redmine-journals        - Read full journals with cursor pagination
   gms-rt-redmine-attachments     - List artifacts (kind, size, sha256, status)
   gms-rt-redmine-attachment-download - Save one artifact original locally
+  gms-rt-redmine-artifact-image  - Return an image artifact as base64 plus metadata
   gms-rt-artifact-read           - Read artifact derived text by char window
   gms-rt-artifact-search         - Search description/journals/artifact text
   gms-rt-apk-analyze-attachment  - Import a Redmine .apk artifact into JADX
@@ -5594,6 +5742,7 @@ ${YELLOW}Test Management:${NC}
   gms-rt-test-status             - Check test status
   gms-rt-test-stop               - Stop currently running test
   gms-rt-test-suites             - List available test suites
+  gms-rt-test-modules            - List tradefed modules for a suite
   gms-rt-test-suites-result      - List test results (tools path or short suite name)
 
 ${YELLOW}Durable Test Jobs:${NC}
