@@ -13,6 +13,14 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _expand_project_root(value: str, base_root: Path) -> str:
+    """Expand ``${PROJECT_ROOT}`` to the root of the tree holding the file."""
+
+    if "${PROJECT_ROOT}" in value:
+        return value.replace("${PROJECT_ROOT}", str(base_root))
+    return value
+
+
 def _candidate_paths() -> list[Path]:
     root = _project_root()
     env_root = os.getenv("GMS_DATA_ROOT")
@@ -48,11 +56,15 @@ def load_runtime_env() -> dict[str, str]:
             continue
         if not isinstance(payload, dict):
             continue
+        # ${PROJECT_ROOT} 展开为包含该 runtime.json 的部署树根目录
+        # （configs/ 的上一级），兼容仓库树与 GMS_DATA_ROOT 发布树。
+        base_root = path.parent.parent
         for key, value in payload.items():
             if key.startswith("_") or not isinstance(value, str):
                 continue
+            expanded = _expand_project_root(value, base_root)
             if key not in os.environ:
-                os.environ[key] = value
-                applied[key] = value
+                os.environ[key] = expanded
+                applied[key] = expanded
         break
     return applied

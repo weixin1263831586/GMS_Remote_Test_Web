@@ -1,6 +1,6 @@
-# GMS Remote Test plugin (kkagent)
+# GMS Remote Test agent plugin
 
-Drive the GMS Remote Test Controller from kkagent as an MCP plugin: device
+Drive the GMS Remote Test Controller from Codex, Kimi, or kkagent as an MCP plugin: device
 inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware
 burn, USB/IP, and VPN — all through the bundled, versioned `gms-rt` CLI.
 
@@ -10,13 +10,34 @@ copy of the repository CLI (`agent/gms-remote-test/runtime/gms-remote-test.sh`
 so installing the plugin directory is enough; no clone of this repository is
 needed on the consumer machine.
 
-## Install
+## Install from this checkout
 
-Copy or upload this directory (`plugins/gms-remote-test/`) to the internal
-kk plugin forge (`bjc/kk-plugins`) and install it from the marketplace, or
-install it locally from disk in kkagent.
+The package lifecycle installer is the portable path for all three clients:
 
-One-line local install ("翻版") on any machine with this repo checkout:
+```bash
+python tools/gms_agent_dev.py install \
+  --client codex --server https://CONTROLLER:5001 \
+  --ca-cert /etc/gms/controller-ca.pem
+python tools/gms_agent_dev.py doctor --client codex --json
+```
+
+It installs the runtime, Skill, exact Controller profile, command links, and
+MCP registration together. Enroll a service token separately with a one-shot
+code so it never appears in process arguments retained by a developer wrapper:
+
+```bash
+gms-agent enroll CODE
+```
+
+To refresh only the checkout's runtime and `gms-rt-*` command links without
+creating or changing any Controller profile:
+
+```bash
+python tools/gms_agent_dev.py install --client none
+```
+
+For kkagent-only local plugin development, the generated payload retains its
+one-line compatibility installer:
 
 ```bash
 plugins/gms-remote-test/scripts/install_local.sh           # ~/.kkagent/plugins/local/gms-remote-test
@@ -46,10 +67,14 @@ Password login (`gms-rt-auth-login`) and admin elevation
 
 | Tool | Purpose |
 | --- | --- |
+| `gms_rt_context` | Run the secret-free environment and credential self-check; call first. |
 | `gms_rt_run` | Run any agent-safe (read-only) `gms-rt-*` command with args; the general escape hatch. Mutating/interactive commands are denied. |
 | `gms_rt_commands` | Compact command inventory (one line per command), optional `group` filter. Fallback `<name> [arguments]` usage strings are omitted. |
 | `gms_rt_describe` | Describe one command: usage, risk mode, auth/elevation requirements, agent-safety; served from cache with close-match suggestions. |
-| `gms_rt_devices` | List devices with state, serials, transport. |
+| `gms_rt_devices` | List devices with state, serials, transport (`gms-rt-devices-list`). |
+| `gms_rt_device_console` | List serial ports or read one retained console log (`gms-rt-devices-console`). |
+| `gms_rt_device_info` | Read detailed information for one or more devices. |
+| `gms_rt_device_wait` | Wait boundedly for devices to reach online/fastboot/any state. |
 | `gms_rt_auth_status` | Inspect the CLI session's authentication state. |
 | `gms_rt_auth_login` | Establish the CLI session (username + `password_stdin`). Human context only — agents use the Agent Service Token; hidden entirely when the server runs in service-token mode. |
 | `gms_rt_auth_elevate` | Admin step-up re-auth for the current session (admin credentials via `password_stdin`); unlocks elevated operations. Human context only — hidden in service-token mode. |
@@ -59,6 +84,7 @@ Password login (`gms-rt-auth-login`) and admin elevation
 | `gms_rt_jobs_status` | Authoritative state of one durable job (cheap polling); trimmed to key fields. |
 | `gms_rt_jobs_wait` | Wait for a durable job to reach a terminal state; trimmed like `jobs_status`. |
 | `gms_rt_jobs_events` | Read incremental job events (`after` sequence + `limit`). |
+| `gms_rt_jobs_cancel` | Cancel one exact durable job id after explicit user intent. |
 | `gms_rt_reports_list` | List finished test reports. |
 | `gms_rt_redmine_issue_fetch` | Create/refresh a full Redmine evidence snapshot (raw JSON, untruncated journals, hashed attachments); start/status pattern with optional bounded `wait`. |
 | `gms_rt_redmine_issue` | Snapshot status + completeness + description head. |
@@ -96,7 +122,8 @@ Password login (`gms-rt-auth-login`) and admin elevation
    finished | error`), and `gms_rt_jobs_status` / `gms_rt_jobs_wait` trim
    the single-job payload to key fields — ~60-80% fewer tokens on real
    payloads. Error envelopes are never re-rendered.
-6. **Typed tools for hot paths** (`devices`, `auth_status`, `test_start`
+6. **Typed tools for hot paths** (`context`, `devices`, `device_console`,
+   `device_info`, `device_wait`, `auth_status`, `test_start`
    including retry mode, `jobs_list`, `jobs_*`, `reports_list`, `shell`,
    `auth_elevate`, `burn_firmware`) so agents don't pay schema-guessing
    round trips.
@@ -104,7 +131,7 @@ Password login (`gms-rt-auth-login`) and admin elevation
 ## Recommended agent workflow
 
 ```text
-gms_rt_auth_status                          # check the session
+gms_rt_context                              # environment/profile/auth first
 # Agents authenticate via GMS_AUTH_TOKEN_FILE (service token) — no login
 # call and no password. gms_rt_auth_login is for a human session only.
 gms_rt_commands                             # discover commands (compact)
@@ -143,7 +170,7 @@ USB/IP connect/disconnect, config changes, ...) and interactive sessions
 (`terminal-open`, `devices-scrcpy`, ...) are denied; they require the
 dedicated typed MCP tools with explicit confirmation, or a human-run CLI.
 Firmware burn is reachable only through `gms_rt_burn_firmware` (typed) after
-`gms_rt_auth_elevate` with admin credentials the user explicitly provided.
+the human user mints a server-side, short-lived, single-use approval token.
 Arbitrary device shell commands are reachable only through
 `gms_rt_shell_exec`, which requires a server-issued one-shot
 `approval_token` (minted by the user via `gms_rt_approval_create` in their
@@ -159,6 +186,13 @@ authentication for agents; the password-based `gms_rt_auth_login` /
 `gms_rt_auth_elevate` tools are for a human session only and are not even
 registered when the MCP server runs in service-token mode
 (`GMS_AGENT_AUTH_MODE=service-token`, set by the installer).
+
+MCP tool identifiers intentionally use underscores (`gms_rt_devices`), while
+Shell CLI commands use hyphens and an explicit action
+(`gms-rt-devices-list`). A bare `gms-rt-devices` command is therefore not
+part of the CLI contract. Optional `GMS_MCP_TOOLSETS=core,test,evidence,admin`
+filtering can reduce the advertised schema set; filtered tools are also
+rejected at call time.
 
 ## Maintaining the bundled payload
 

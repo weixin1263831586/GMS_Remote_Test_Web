@@ -13,13 +13,13 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import shutil
 import socket
 import stat
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
@@ -566,6 +566,14 @@ def profile_name(client: str) -> str:
     return f"{client}-{host}-{os.getuid()}"
 
 
+def profile_candidates(client: str) -> list[Path]:
+    """List profiles for a client without guessing which one is active."""
+
+    if not PROFILE_ROOT.is_dir():
+        return []
+    return sorted(PROFILE_ROOT.glob(f"{client}-*.toml"))
+
+
 # ---------------------------------------------------------------------------
 # TOML profiles (10.txt §十八: 取代 export env + source 方案)
 # ---------------------------------------------------------------------------
@@ -711,6 +719,200 @@ def configured_clients() -> list[str]:
         if has_toml:
             found.append(client)
     return found
+
+
+def _controller_url_valid(value: str) -> bool:
+    """Validate a Controller base URL without making a network request."""
+
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        _ = parsed.port
+    except ValueError:
+        return False
+    hostname = parsed.hostname or ""
+    return bool(
+        parsed.scheme in {"http", "https"}
+        and hostname
+        and not parsed.username
+        and not parsed.password
+        and not parsed.query
+        and not parsed.fragment
+        and parsed.path in {"", "/"}
+        and re.fullmatch(r"[A-Za-z0-9.:-]+", hostname)
+    )
+
+
+def _token_file_status(value: str) -> dict[str, object]:
+    """Return token-file metadata without reading or exposing the token."""
+
+    path = Path(value).expanduser() if value else None
+    present = bool(path and path.is_file())
+    mode = stat.S_IMODE(path.stat().st_mode) if present and path else None
+    owner_ok = bool(present and path and path.stat().st_uid == os.geteuid())
+    return {
+        "configured": bool(value),
+        "present": present,
+        "mode_ok": mode == 0o600,
+        "owner_ok": owner_ok,
+        "path": str(path) if path else "",
+    }
+
+
+def _mcp_registration_status(client: str) -> dict[str, object]:
+    """Inspect only the client's GMS MCP registration marker."""
+
+    if client == "kimi":
+        path = client_skill_root(client).parent / "mcp.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            block = (payload.get("mcpServers") or {}).get("gms") or {}
+            args = block.get("args") or []
+            registered = any("mcp_launcher.py" in str(item) for item in args)
+        except (OSError, ValueError, AttributeError):
+            registered = False
+    else:
+        path = client_skill_root(client).parent / "config.toml"
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        marker = (
+            "[mcp_servers.gms]" if client == "kkagent"
+            else "[mcp_servers.gms_remote_test]"
+        )
+        registered = marker in text and "mcp_launcher.py" in text
+        if client == "codex" and not registered:
+            # Codex native plugins own their MCP registration through the
+            # plugin manifest, so no standalone [mcp_servers.*] block is
+            # expected. Recognize an enabled personal/team marketplace entry.
+            plugin_block = re.search(
+                r'(?ms)^\[plugins\."gms-remote-test@[^"\n]+"\]\s*'
+                r'(?P<body>.*?)(?=^\[|\Z)',
+                text,
+            )
+            registered = bool(
+                plugin_block
+                and re.search(
+                    r"(?m)^enabled\s*=\s*true\s*$", plugin_block.group("body")
+                )
+            )
+    return {"registered": registered, "config_path": str(path)}
+
+
+def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
+    """Build a secret-free local installation/profile consistency report."""
+
+    if profile and re.fullmatch(r"[A-Za-z0-9_.-]+", profile):
+        declared = load_profile(profile).get("client", "")
+    else:
+        declared = ""
+    clients = (
+        [declared]
+        if client == "auto" and declared in CLIENTS
+        else (
+            sorted(set(configured_clients()) | set(detect_clients()))
+            if client == "auto"
+            else [client]
+        )
+    )
+    installed = installed_version() or ""
+    running = runtime_version()
+    current_cli = cli_version_in(CURRENT_LINK) or ""
+    report_clients: list[dict[str, object]] = []
+    actions: list[str] = []
+
+    for client_name in clients:
+        candidates = profile_candidates(client_name)
+        selected = None
+        if profile:
+            candidate = PROFILE_ROOT / f"{profile}.toml"
+            if candidate in candidates:
+                selected = candidate
+        elif len(candidates) == 1:
+            selected = candidates[0]
+
+        profile_state: dict[str, object] = {
+            "count": len(candidates),
+            "names": [path.stem for path in candidates],
+            "selected": selected.stem if selected else "",
+            "valid": False,
+        }
+        token_state = _token_file_status("")
+        if selected:
+            flat = load_profile(selected.stem)
+            server = flat.get("url", "")
+            ca_cert = flat.get("ca_cert", "")
+            token_state = _token_file_status(flat.get("token_file", ""))
+            controller_valid = _controller_url_valid(server)
+            profile_state.update(
+                {
+                    "controller": server,
+                    "controller_url_valid": controller_valid,
+                    "ca_configured": bool(ca_cert),
+                    "ca_present": bool(ca_cert and Path(ca_cert).is_file()),
+                    "valid": bool(controller_valid),
+                }
+            )
+            if not controller_valid:
+                actions.append(
+                    f"replace the invalid Controller URL in profile {selected.stem}"
+                )
+            if ca_cert and not Path(ca_cert).is_file():
+                actions.append(f"restore the Controller CA file for {client_name}")
+        elif len(candidates) > 1:
+            actions.append(
+                f"select one {client_name} profile explicitly with GMS_RT_PROFILE"
+            )
+        else:
+            actions.append(f"install/configure the {client_name} profile")
+
+        if not token_state["present"]:
+            actions.append(f"enroll an Agent Service Token for {client_name}")
+        elif not token_state["mode_ok"] or not token_state["owner_ok"]:
+            actions.append(f"fix Agent Service Token ownership/mode for {client_name}")
+
+        mcp_state = _mcp_registration_status(client_name)
+        if not mcp_state["registered"]:
+            actions.append(f"reconcile the {client_name} MCP registration")
+        skill_path = client_skill_root(client_name) / "gms-remote-test"
+        if not (skill_path / "SKILL.md").is_file():
+            actions.append(f"install the {client_name} Skill payload")
+        report_clients.append(
+            {
+                "client": client_name,
+                "skill_present": (skill_path / "SKILL.md").is_file(),
+                "skill_path": str(skill_path),
+                "profile": profile_state,
+                "token": token_state,
+                "mcp": mcp_state,
+            }
+        )
+
+    versions_consistent = bool(installed and installed == current_cli == running)
+    if not versions_consistent:
+        actions.append("install/activate one complete package version")
+    unique_actions = list(dict.fromkeys(actions))
+    ok = versions_consistent and all(
+        bool(item["skill_present"])
+        and bool(item["profile"]["valid"])
+        and bool(item["token"]["present"])
+        and bool(item["token"]["mode_ok"])
+        and bool(item["token"]["owner_ok"])
+        and bool(item["mcp"]["registered"])
+        for item in report_clients
+    )
+    return {
+        "ok": ok,
+        "versions": {
+            "running": running,
+            "installed": installed or None,
+            "current_cli": current_cli or None,
+            "consistent": versions_consistent,
+        },
+        "runtime_root": str(RUNTIME_ROOT),
+        "clients": report_clients,
+        "actions": unique_actions,
+    }
 
 
 def install_skill(client: str, runtime_dir: Path) -> Path:
@@ -887,6 +1089,14 @@ def install_cli_dispatcher() -> list[Path]:
         # resolves its command from $1, never from argv0.
         for match in re.finditer(r"^(gms-rt-[a-z0-9-]+)\(\)", cli.read_text(encoding="utf-8"), re.M):
             links.setdefault(match.group(1), dispatcher)
+    # Update/rollback can change the public command inventory. Remove only
+    # stale links that this installer owns; never touch a user-managed file
+    # or a symlink with a different target.
+    for candidate in bin_dir.glob("gms-rt-*"):
+        if candidate.name in links or not candidate.is_symlink():
+            continue
+        if Path(os.readlink(candidate)) == dispatcher:
+            candidate.unlink()
     for link_name in sorted(links):
         link = bin_dir / link_name
         # 4.txt 审核 P0-1: the gms-agent lifecycle CLI is a real argparse
@@ -1048,14 +1258,29 @@ def cmd_install(args: argparse.Namespace) -> int:
 
 
 def _cmd_install_locked(args: argparse.Namespace) -> int:
-    server = args.server or server_url_from_env()
     ca_cert = os.environ.get("GMS_INSTALL_CA_CERT", "")
-
-    clients = detect_clients() if args.client == "auto" else [args.client]
-    if not clients:
-        print("未检测到 codex/kimi/kkagent；将仅安装运行时与 CLI。")
-
     source_root = local_package_root(args.package, script_dir=SCRIPT_DIR)
+    clients = (
+        []
+        if args.client == "none"
+        else (detect_clients() if args.client == "auto" else [args.client])
+    )
+    if not clients:
+        if args.client == "none":
+            print("已选择 --client none；将仅安装运行时与 CLI。")
+        else:
+            print("未检测到 codex/kimi/kkagent；将仅安装运行时与 CLI。")
+    server = args.server or ""
+    if source_root is None or clients:
+        server = server or server_url_from_env()
+        if not _controller_url_valid(server):
+            print(
+                "Error: Controller URL 无效；要求 http(s)://host[:port]，"
+                "且不能包含凭据、路径、查询或 shell 表达式",
+                file=sys.stderr,
+            )
+            return 2
+
     staging_to_cleanup: Path | None = None
     try:
         if source_root is not None:
@@ -1090,6 +1315,10 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
         activate_clients(clients, server, ca_cert)
 
     print("\nDetected & configured:", ", ".join(clients) if clients else "(none)")
+
+    if not clients:
+        print("Runtime/CLI installation complete; no client profile was changed.")
+        return 0
 
     enroll_code = (getattr(args, "enroll_code", "") or "").strip()
     if not enroll_code:
@@ -1172,6 +1401,8 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     print(f"Installed: {CURRENT_LINK} -> {installed_dir}")
+    cli_links = install_cli_dispatcher()
+    print(f"CLI refreshed: {len(cli_links) - 1} gms-rt-*/gms-agent command links")
 
     # Whole-package activation: refresh skill / kkagent plugin / MCP config
     # from the NEW version for every previously configured client.
@@ -1217,6 +1448,8 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     rollback_from = installed_version()
     flip_current(target)
     print(f"Rolled back: {CURRENT_LINK} -> {target}")
+    cli_links = install_cli_dispatcher()
+    print(f"CLI refreshed: {len(cli_links) - 1} gms-rt-*/gms-agent command links")
     # Rollback is whole-package too: skill/plugin/MCP must follow the
     # symlink back to <version> (10.txt §十). 15.txt 审核 P1-2: per-client
     # profile values are resolved ONCE inside reactivate_clients(), so
@@ -1336,7 +1569,135 @@ def cmd_enroll(args: argparse.Namespace) -> int:
 # status
 # ---------------------------------------------------------------------------
 
-def cmd_status(_args: argparse.Namespace) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Validate package/profile/MCP state without exposing credentials."""
+
+    report = doctor_report(
+        getattr(args, "client", "auto"), getattr(args, "profile", "")
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        versions = report["versions"]
+        print(
+            "Versions: "
+            f"running={versions['running']} installed={versions['installed']} "
+            f"current={versions['current_cli']} "
+            f"consistent={str(versions['consistent']).lower()}"
+        )
+        for item in report["clients"]:
+            selected = item["profile"]["selected"] or "(none/ambiguous)"
+            print(
+                f"  {item['client']}: profile={selected} "
+                f"token={'ok' if item['token']['present'] and item['token']['mode_ok'] and item['token']['owner_ok'] else 'missing/invalid'} "
+                f"mcp={'ok' if item['mcp']['registered'] else 'missing'} "
+                f"skill={'ok' if item['skill_present'] else 'missing'}"
+            )
+        for action in report["actions"]:
+            print(f"Action: {action}")
+    return 0 if report["ok"] else 1
+
+
+def cmd_profile(args: argparse.Namespace) -> int:
+    """List, inspect, or activate an exact client profile."""
+
+    action = getattr(args, "profile_action", "list")
+    requested_client = getattr(args, "client", "")
+    requested_name = getattr(args, "name", "")
+    candidates = sorted(PROFILE_ROOT.glob("*.toml")) if PROFILE_ROOT.is_dir() else []
+    if requested_client:
+        candidates = [
+            path
+            for path in candidates
+            if load_profile(path.stem).get("client", "") == requested_client
+        ]
+
+    if action == "list":
+        result = []
+        for path in candidates:
+            flat = load_profile(path.stem)
+            result.append(
+                {
+                    "name": path.stem,
+                    "client": flat.get("client", ""),
+                    "controller": flat.get("url", ""),
+                    "controller_url_valid": _controller_url_valid(flat.get("url", "")),
+                    "token": _token_file_status(flat.get("token_file", "")),
+                }
+            )
+        if getattr(args, "json", False):
+            print(json.dumps({"profiles": result}, ensure_ascii=False, indent=2))
+        else:
+            for item in result:
+                print(
+                    f"{item['name']} | {item['client']} | {item['controller']} | "
+                    f"token={'present' if item['token']['present'] else 'missing'}"
+                )
+        return 0
+
+    if not requested_name or not re.fullmatch(r"[A-Za-z0-9_.-]+", requested_name):
+        print("Error: a valid profile name is required", file=sys.stderr)
+        return 2
+    path = PROFILE_ROOT / f"{requested_name}.toml"
+    if not path.is_file():
+        print(f"Error: profile not found: {requested_name}", file=sys.stderr)
+        return 2
+    flat = load_profile(requested_name)
+    profile_client = flat.get("client", "")
+    if profile_client not in CLIENTS:
+        print(f"Error: invalid profile client: {profile_client or '(missing)'}", file=sys.stderr)
+        return 2
+    if requested_client and requested_client != profile_client:
+        print(
+            f"Error: profile {requested_name} belongs to {profile_client}, "
+            f"not {requested_client}",
+            file=sys.stderr,
+        )
+        return 2
+    result = {
+        "name": requested_name,
+        "client": profile_client,
+        "controller": flat.get("url", ""),
+        "controller_url_valid": _controller_url_valid(flat.get("url", "")),
+        "ca_cert": flat.get("ca_cert", ""),
+        "token": _token_file_status(flat.get("token_file", "")),
+    }
+    if action == "show":
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(
+                f"{requested_name} | {profile_client} | {result['controller']} | "
+                f"token={'present' if result['token']['present'] else 'missing'}"
+            )
+        return 0
+    if action != "use":
+        print(f"Error: unsupported profile action: {action}", file=sys.stderr)
+        return 2
+    if not result["controller_url_valid"]:
+        print("Error: profile Controller URL is invalid", file=sys.stderr)
+        return 2
+    if not CURRENT_LINK.exists():
+        print("Error: no installed runtime; run gms-agent install first", file=sys.stderr)
+        return 2
+    install_skill(profile_client, CURRENT_LINK)
+    if profile_client == "kkagent":
+        install_plugin_for_kkagent(CURRENT_LINK)
+    else:
+        reconcile_mcp(
+            profile_client,
+            str(result["controller"]),
+            requested_name,
+            str(result["ca_cert"]),
+        )
+    print(f"Activated profile {requested_name} for {profile_client}")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    if getattr(args, "json", False):
+        print(json.dumps(doctor_report(), ensure_ascii=False, indent=2))
+        return 0
     print(f"Runtime:      {runtime_version()} (installed: {installed_version() or 'none'})")
     print(f"Runtime root: {RUNTIME_ROOT}")
     print(f"Detected:     {', '.join(detect_clients()) or '(none)'}")
@@ -1352,5 +1713,3 @@ def cmd_status(_args: argparse.Namespace) -> int:
             break
         print(f"  {client}: {state}{token_ref}")
     return 0
-
-

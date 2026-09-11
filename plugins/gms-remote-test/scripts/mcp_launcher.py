@@ -29,6 +29,7 @@ refuses to register password tools without it.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -37,6 +38,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 CLIENTS = ("kimi", "codex", "kkagent")
+PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 PROFILE_ROOT = Path(
     os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
 ) / "gms-agent" / "profiles"
@@ -83,29 +85,63 @@ def _read_toml_flat(path: Path) -> dict[str, str]:
     return {k: v for k, v in mapping.items() if v}
 
 
-def load_profile(client: str) -> bool:
-    """Populate the environment for a client; returns True when found."""
-    if not PROFILE_ROOT.is_dir():
+def load_named_profile(profile: str, expected_client: str = "") -> bool:
+    """Load exactly one named profile, optionally checking its client."""
+
+    if not PROFILE_NAME_RE.fullmatch(profile):
+        print(f"mcp_launcher: invalid profile name: {profile!r}", file=sys.stderr)
         return False
-    for candidate in sorted(PROFILE_ROOT.glob(f"{client}-*.toml")):
-        try:
-            values = _read_toml_flat(candidate)
-        except OSError as exc:
-            # Unreadable/corrupt profile must not crash the launcher — skip
-            # and let the next candidate (or the unconfigured server) win.
+    candidate = PROFILE_ROOT / f"{profile}.toml"
+    if not candidate.is_file():
+        print(f"mcp_launcher: profile not found: {candidate}", file=sys.stderr)
+        return False
+    try:
+        values = _read_toml_flat(candidate)
+    except OSError as exc:
+        print(f"mcp_launcher: cannot read profile {candidate}: {exc}", file=sys.stderr)
+        return False
+    declared_client = values.get("GMS_AGENT_CLIENT", "")
+    if expected_client and declared_client != expected_client:
+        print(
+            f"mcp_launcher: profile {profile!r} belongs to "
+            f"{declared_client or 'an unknown client'}, not {expected_client}",
+            file=sys.stderr,
+        )
+        return False
+    _apply_env(values)
+    return True
+
+
+def profile_candidates(client: str) -> list[Path]:
+    """Return deterministic profile candidates for one client."""
+
+    if not PROFILE_ROOT.is_dir():
+        return []
+    return sorted(PROFILE_ROOT.glob(f"{client}-*.toml"))
+
+
+def load_profile(client: str) -> bool:
+    """Load the sole profile for a client; fail closed when ambiguous."""
+
+    candidates = profile_candidates(client)
+    if len(candidates) != 1:
+        if candidates:
+            names = ", ".join(path.stem for path in candidates)
             print(
-                f"mcp_launcher: skipping unreadable profile {candidate.name}: {exc}",
+                f"mcp_launcher: multiple {client} profiles found ({names}); "
+                "set GMS_RT_PROFILE or GMS_AGENT_PROFILE explicitly",
                 file=sys.stderr,
             )
-            continue
-        if values:
-            _apply_env(values)
-            return True
-    return False
+        else:
+            print(f"mcp_launcher: no profile found for client {client}", file=sys.stderr)
+        return False
+    return load_named_profile(candidates[0].stem, client)
 
 
 def _client_from_profile(profile: str) -> str:
     """Read the ``client =`` field out of <profile>.toml (fail closed)."""
+    if not PROFILE_NAME_RE.fullmatch(profile):
+        return ""
     profile_path = PROFILE_ROOT / f"{profile}.toml"
     if not profile_path.is_file():
         return ""
@@ -118,22 +154,19 @@ def _client_from_profile(profile: str) -> str:
 
 def main() -> int:
     client = os.environ.get("GMS_AGENT_CLIENT", "")
-    profile = os.environ.get("GMS_RT_PROFILE", "")
-    # 4.txt 审核 P1-5: with multiple clients configured, honoring the pinned
-    # profile's own `client =` field avoids loading another client's
-    # Controller URL and identity.
-    if not client and profile:
-        client = _client_from_profile(profile)
-    # 12.txt P1: GMS_AGENT_PROFILE=<name> pins the profile file directly;
-    # the historical first-match probe over kimi/codex/kkagent was removed.
-    if not client and not profile:
-        named_profile = os.environ.get("GMS_AGENT_PROFILE", "")
-        if named_profile:
-            values = _read_toml_flat(PROFILE_ROOT / f"{named_profile}.toml") \
-                if (PROFILE_ROOT / f"{named_profile}.toml").is_file() else {}
-            _apply_env(values)
-            profile = os.environ.get("GMS_RT_PROFILE", "")
-            client = os.environ.get("GMS_AGENT_CLIENT", "") or _client_from_profile(profile)
+    profile = os.environ.get("GMS_RT_PROFILE", "") or os.environ.get(
+        "GMS_AGENT_PROFILE", ""
+    )
+    # A named profile is authoritative. Previously an explicit profile was
+    # ignored whenever GMS_AGENT_CLIENT was also present (the normal
+    # installer registration), and load_profile(client) silently selected
+    # the first sorted profile. That could route an agent to another
+    # Controller on multi-profile hosts.
+    if profile:
+        if not client:
+            client = _client_from_profile(profile)
+        if not client or not load_named_profile(profile, client):
+            return 2
     if not client:
         print(
             "mcp_launcher: no agent client/profile declared. Set "
@@ -142,10 +175,16 @@ def main() -> int:
             "first-match filesystem probe was removed (12.txt P1).",
             file=sys.stderr,
         )
-        # Still exec the server: it starts unconfigured and reports auth
-        # errors per-call instead of hiding the misconfiguration here.
-    elif client:
-        load_profile(client)
+        return 2
+    elif not profile and not load_profile(client):
+        # Explicit environment-only registrations remain supported. Without
+        # both values, starting an unconfigured MCP server only defers the
+        # same failure to every tool call and obscures the actual fix.
+        if not (
+            os.environ.get("GMS_REMOTE_TEST_SERVER")
+            and os.environ.get("GMS_AUTH_TOKEN_FILE")
+        ):
+            return 2
 
     # 15.txt 审核 P1-1: FORCE service-token — setdefault() let an ambient
     # GMS_AGENT_AUTH_MODE=human/password from the parent shell leak through

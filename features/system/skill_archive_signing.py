@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from pathlib import Path
 
@@ -12,12 +13,46 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 SIGNING_KEY_ENV = "GMS_SKILL_SIGNING_KEY_FILE"
 
+logger = logging.getLogger(__name__)
+
+
+def _generate_signing_key(path: Path) -> Ed25519PrivateKey:
+    """Bootstrap a fresh signing key when the configured file is missing.
+
+    部署数据目录（data/）被重置后，配置仍指向旧路径时自举新密钥而非
+    启动崩溃；生产模式下由调用方日志告警。文件存在但内容损坏仍按配置
+    错误硬失败。
+    """
+
+    private_key = Ed25519PrivateKey.generate()
+    pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(descriptor, pem)
+    finally:
+        os.close(descriptor)
+    logger.warning(
+        "%s pointed at a missing file (%s); generated a new Ed25519 "
+        "signing key. Agent packages signed with the previous key must be "
+        "re-signed.",
+        SIGNING_KEY_ENV,
+        path,
+    )
+    return private_key
+
 
 def _signing_key() -> Ed25519PrivateKey | None:
     configured = os.getenv(SIGNING_KEY_ENV, "").strip()
     if not configured:
         return None
     path = Path(configured).expanduser()
+    if not path.exists():
+        return _generate_signing_key(path)
     try:
         private_key = serialization.load_pem_private_key(
             path.read_bytes(),

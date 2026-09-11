@@ -1,5 +1,5 @@
 {
-    "_comment": "Copy to configs/runtime.json, keep mode 0600, and fill secrets locally. This file is only a schema example.",
+    "_comment": "Copy to configs/runtime.json, keep mode 0600, and fill secrets locally. This file is only a schema example. Paths may reference ${PROJECT_ROOT}, which expands to the deployment tree root at load time. Secret FILES that go missing (e.g. after wiping data/) are regenerated at startup; production logs a warning — secrets or signatures created under the previous key will not verify.",
     "GMS_ENV": "production",
     "GMS_AUTH_REQUIRED": "true",
     "GMS_SECURE_COOKIES": "true",
@@ -18,6 +18,6 @@
     "GMS_AUDIT_HMAC_KEY_FILE": "",
     "GMS_METRICS_TOKEN": "",
     "GMS_AUTOMATION_WEBHOOK_TOKEN": "",
-    "GMS_SKILL_SIGNING_KEY_FILE": "",
+    "GMS_SKILL_SIGNING_KEY_FILE": "${PROJECT_ROOT}/data/secrets/skill-signing-ed25519.pem",
     "GMS_BOOTSTRAP_TOKEN": ""
 }

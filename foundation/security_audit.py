@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import stat
@@ -111,9 +112,15 @@ class SecurityAuditLogger:
                     raise RuntimeError(f'audit HMAC key permissions must be 0600: {path}')
                 key = path.read_bytes().strip()
             else:
-                production = is_production_environment()
-                if production:
-                    raise RuntimeError('GMS_AUDIT_HMAC_KEY or a mode-0600 key file is required')
+                # data/ 被重置时自举新审计密钥（生产模式告警：旧审计链
+                # 无法用新密钥校验）；文件存在但权限错误仍硬失败。
+                if is_production_environment():
+                    logging.getLogger(__name__).warning(
+                        'audit HMAC key file missing (%s); generated a new '
+                        'deployment-local key; previous audit chains cannot '
+                        'be verified against it',
+                        path,
+                    )
                 path.parent.mkdir(parents=True, exist_ok=True)
                 key = os.urandom(32).hex().encode('ascii')
                 descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

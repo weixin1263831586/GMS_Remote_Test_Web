@@ -7,16 +7,16 @@ annotate the context when adding new ones.
 
 Two integration surfaces exist:
 
-- **kkagent MCP plugin** (`gms_rt_*` tools) — preferred inside kkagent;
-  token-optimized envelopes, typed tools, safety gate. See the mapping table
-  in `agent-integration.md`.
+- **Typed MCP plugin** (`gms_rt_*` tools) — preferred inside Codex, Kimi,
+  or kkagent; token-optimized envelopes, typed tools, safety gate. See the
+  mapping table in `agent-integration.md`.
 - **Standalone CLI** (`gms-rt-*` with `--json --non-interactive`) — for any
   other agent or shell.
 
 ## 1. Health-check bootstrap (no side effects)
 
 ```
-gms_rt_run(system-health)            # controller alive?
+gms_rt_context()                     # profile + controller + auth + devices
 gms_rt_run(system-doctor, ["test"])  # binaries + auth + devices + suites
 gms_rt_auth_status                   # session + elevation window
 ```
@@ -92,9 +92,11 @@ The elevation window is visible via `gms_rt_auth_status`
 
 ```
 gms_rt_devices()                                  # inventory
-gms_rt_run(devices-info, ["<serial>"])            # per-device detail
+gms_rt_device_console()                           # list retained serial ports
+gms_rt_device_console(port_key="<port>", tail=500)
+gms_rt_device_info(devices=["<serial>"])          # per-device detail
 gms_rt_run(devices-bootloader-status, ["<serial>"])
-gms_rt_run(devices-wait, ["<prefix>", "--state", "online", "--max-wait", "300"])
+gms_rt_device_wait(devices="<prefix>", state="online", max_wait=300)
 ```
 
 Device list entries use `status` + `protocol` (`adb`/`fastboot`);
@@ -222,15 +224,20 @@ test-start via `gms_rt_run`, reports-delete, users-set-username,
 system-update, adb-forward start/stop, terminal-push, test-clean/stop,
 jobs-cancel) and interactive (terminal-open/push, devices-shell raw /
 scrcpy, test-logs-stream). Route these through typed tools where they exist
-(`gms_rt_test_start`, and the read-only allowlist wrapper `gms_rt_shell`)
+(`gms_rt_test_start`, exact-id `gms_rt_jobs_cancel`, and the read-only
+allowlist wrapper `gms_rt_shell`)
 or a human-run CLI. The generic gate was verified as 35/35 denied with
 elevation active.
 
-## 9. Install / upgrade ("翻版")
+## 9. Install / upgrade
 
 ```bash
-plugins/gms-remote-test/scripts/install_local.sh          # local kkagent
-plugins/gms-remote-test/scripts/install_local.sh /target  # any directory
+python tools/gms_agent_dev.py install --client codex \
+  --server https://CONTROLLER:5001 --ca-cert /etc/gms/controller-ca.pem
+python tools/gms_agent_dev.py doctor --client codex --json
+gms-agent profile list --client codex
 ```
 
-Restart kkagent after installing; the registry version updates automatically.
+Use `plugins/gms-remote-test/scripts/install_local.sh` only for the legacy
+kkagent-local development flow. Restart the selected agent client or open a
+new session after registration changes.

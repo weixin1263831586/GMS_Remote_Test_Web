@@ -42,7 +42,7 @@
   "script_path": "/home/operator/GMS-Suite/run_GMS_Test_Auto.sh",
   "gsi_scripts": "/home/operator/GMS-Suite/run_GSI_Burn.sh",
   "scrcpy_path": "/home/operator/Software/scrcpy-linux-x86_64-v3.3.4/scrcpy",
-  "jadx_path": "${GMS_JADX_PATH:tools/jadx/bin/jadx}",
+  "jadx_path": "${PROJECT_ROOT}/tools/jadx/bin/jadx",
   "jadx_java_home": "${GMS_JADX_JAVA_HOME:}",
   "sdk_sources": {
     "providers": [

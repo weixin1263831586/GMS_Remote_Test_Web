@@ -6,7 +6,7 @@ server. Users should never need to know about ~/.codex/config.toml,
 ~/.kimi-code/mcp.json, ~/.kkagent/plugins, GMS_AUTH_TOKEN_FILE or
 GMS_RT_PROFILE — those become implementation details:
 
-    gms-agent install [--client auto|codex|kimi|kkagent] [--server URL]
+    gms-agent install [--client auto|codex|kimi|kkagent|none] [--server URL]
         [--enroll-code CODE] [--yes]
         Detect installed agent clients and activate the whole package
         (runtime + skill + client registration) from either a local
@@ -32,6 +32,14 @@ GMS_RT_PROFILE — those become implementation details:
 
     gms-agent status
         Show installed version, detected clients, profile and auth state.
+
+    gms-agent doctor [--client CLIENT] [--profile NAME] [--json]
+        Validate the runtime, exact profile, token-file permissions, Skill
+        payload and MCP registration without printing credential contents.
+
+    gms-agent profile list|show|use
+        List profiles, inspect one safely, or bind one exact profile to its
+        agent client. Multi-Controller hosts never use first-match routing.
 
 Package layout contract (single root, produced by
 features/system/agent_package_builder.py and tools/build_agent_package.py):
@@ -321,7 +329,9 @@ from gms_agent.package_manager import (  # noqa: E402
     artifact_url_ok,
     client_skill_root,
     cmd_enroll,
+    cmd_doctor,
     cmd_install,
+    cmd_profile,
     cmd_rollback,
     cmd_status,
     cmd_update,
@@ -360,7 +370,12 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_install = sub.add_parser("install", help="install runtime + skill + MCP for detected clients")
-    p_install.add_argument("--client", default="auto", choices=["auto", "codex", "kimi", "kkagent"])
+    p_install.add_argument(
+        "--client",
+        default="auto",
+        choices=["auto", "codex", "kimi", "kkagent", "none"],
+        help="target agent client; none installs only the local runtime/CLI",
+    )
     p_install.add_argument("--server", default="", help="Controller base URL (default $GMS_REMOTE_TEST_SERVER)")
     p_install.add_argument("--package", default="", help="package root to install (default: this archive; standalone script bootstraps from the registry)")
     p_install.add_argument("--enroll-code", default="", dest="enroll_code",
@@ -382,7 +397,35 @@ def main() -> int:
     p_enroll.set_defaults(func=cmd_enroll)
 
     p_status = sub.add_parser("status", help="show installation state")
+    p_status.add_argument("--json", action="store_true")
     p_status.set_defaults(func=cmd_status)
+
+    p_doctor = sub.add_parser(
+        "doctor", help="validate runtime, profile, token, Skill and MCP registration"
+    )
+    p_doctor.add_argument(
+        "--client", default="auto", choices=["auto", "codex", "kimi", "kkagent"]
+    )
+    p_doctor.add_argument("--profile", default="")
+    p_doctor.add_argument("--json", action="store_true")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    p_profile = sub.add_parser(
+        "profile", help="list, inspect or activate an exact client profile"
+    )
+    profile_sub = p_profile.add_subparsers(dest="profile_action", required=True)
+    p_profile_list = profile_sub.add_parser("list")
+    p_profile_list.add_argument("--client", choices=["codex", "kimi", "kkagent"])
+    p_profile_list.add_argument("--json", action="store_true")
+    p_profile_list.set_defaults(func=cmd_profile)
+    p_profile_show = profile_sub.add_parser("show")
+    p_profile_show.add_argument("name")
+    p_profile_show.add_argument("--json", action="store_true")
+    p_profile_show.set_defaults(func=cmd_profile, client="")
+    p_profile_use = profile_sub.add_parser("use")
+    p_profile_use.add_argument("name")
+    p_profile_use.add_argument("--client", choices=["codex", "kimi", "kkagent"])
+    p_profile_use.set_defaults(func=cmd_profile)
 
     args = parser.parse_args()
     return args.func(args)
