@@ -23,6 +23,7 @@ from features.devices.reconnect import (
     schedule_usbip_reconnect_for_removed_devices,
     stop_usbip_reconnect_tasks,
 )
+from features.devices.serial_console import serial_console_service
 from features.redmine.scheduler import (
     start_redmine_agent_scheduler,
     stop_redmine_agent_scheduler,
@@ -45,7 +46,7 @@ def initialize_runtime_data(services: AppServices) -> None:
     for sub in (
         'apk_uploads', 'automation', 'build', 'cluster', 'cluster/artifacts',
         'cluster/artifact-uploads', 'cluster/transfers',
-        'config_explorer_cache', 'gerrit', 'gerrit/by_user', 'knowledge',
+        'config_explorer_cache', 'devices_console', 'gerrit', 'gerrit/by_user', 'knowledge',
         'knowledge/attachments', 'notes', 'notes/uploads', 'notifications',
         'redmine', 'redmine/attachments', 'redmine/by_user', 'redmine/docs',
         'reports', 'secrets', 'test_execution', 'uploads', 'uploads/gms_uploads',
@@ -225,6 +226,7 @@ def create_lifespan(services: AppServices):
         with controller_process_lock(services.settings.data_root):
             app.state.services = services
             initialize_runtime_data(services)
+            serial_console_service.configure_data_root(services.settings.data_root)
             cluster = get_cluster_service()
             start_local_bridge(cluster.repository, cluster.config)
             event_loop = bind_event_bus_loop()
@@ -256,6 +258,10 @@ def create_lifespan(services: AppServices):
                 logger.exception('Failed to start USB monitor')
                 usb_dispatch_task = None
             app.state.usb_dispatch_task = usb_dispatch_task
+            try:
+                serial_console_service.start()
+            except Exception:
+                logger.exception('Failed to start serial console service')
             automation_task = None
             try:
                 from features.automation.worker import start_automation_worker
@@ -297,6 +303,7 @@ def create_lifespan(services: AppServices):
                         await stop_automation_worker()
                 if redmine_task:
                     await stop_redmine_agent_scheduler()
+                serial_console_service.stop()
                 try:
                     stop_local_bridge()
                 except Exception:

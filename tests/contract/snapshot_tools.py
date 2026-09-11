@@ -80,6 +80,7 @@ def config_shape(value: Any, path: tuple[str, ...] = ()) -> Any:
 
 def ui_source_groups() -> dict[str, list[Path]]:
     automation_ui = ROOT / 'features/automation/ui'
+    devices_console_ui = ROOT / 'features/devices/ui'
     redmine_ui = ROOT / 'features/redmine/ui'
     return {
         'shell': [
@@ -95,6 +96,11 @@ def ui_source_groups() -> dict[str, list[Path]]:
         'automation': (
             sorted(automation_ui.glob('*.*'))
             if automation_ui.exists()
+            else []
+        ),
+        'devices-console': (
+            sorted(devices_console_ui.glob('*.*'))
+            if devices_console_ui.exists()
             else []
         ),
     }

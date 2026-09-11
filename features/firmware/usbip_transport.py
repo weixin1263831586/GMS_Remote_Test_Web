@@ -88,6 +88,17 @@ async def wait_for_adb_devices(
 async def prepare_usbip_firmware_routes(
     devices: list[str],
 ) -> tuple[list[dict], str]:
+    """Resolve immutable physical routes for a complete firmware burn.
+
+    每条 route 显式携带 ``source_os``（windows|linux|""，探测失败时为
+    空字符串）。烧写 backend 必须按 source_os 分流，禁止默默把 Linux
+    source 送进 Windows-only backend。
+    """
+    from features.devices import (
+        lookup_usbip_source_os,
+        record_usbip_source_os,
+    )
+
     usbip_devices = [
         device for device in devices
         if usbip_reconnect.usbip_source_host_for_device(device)
@@ -106,14 +117,103 @@ async def prepare_usbip_firmware_routes(
             + ", ".join(unresolved)
             + "。请断开后从设备管理页重新选择该USB设备并连接。"
         )
+
+    def _route_source_os(device_host: str) -> str:
+        # 缓存优先（TTL 内可信）；未命中时以 AutoBind 流程的探测结果
+        # 为准回填，避免每次烧写都加一次 SSH 探测往返。
+        cached = lookup_usbip_source_os(device_host)
+        return {"linux": "linux", "windows": "windows"}.get(cached, "")
+
     for route in routes:
+        device_host = str(route.get("device_host") or "").strip()
         result = await asyncio.to_thread(
             ensure_usbip_auto_bind_policies,
-            route["device_host"], route["busids"],
+            device_host, route["busids"],
         )
         if not result.get("success"):
             return [], str(result.get("error") or "USB/IP AutoBind策略配置失败")
+        probed = str(result.get("source_os") or "").strip()
+        if not probed:
+            probed = _route_source_os(device_host)
+        if probed == "ubuntu":
+            probed = "linux"
+        if probed:
+            route["source_os"] = probed
+            with contextlib.suppress(Exception):
+                record_usbip_source_os(device_host, probed)
+        else:
+            route["source_os"] = ""
     return routes, ""
+
+
+async def release_usbip_devices_to_source(
+    ssh, routes: list[dict],
+) -> tuple[bool, str]:
+    """Ownership handoff: target worker releases the USB/IP device so the
+    physical source host owns it again before a source-side flash.
+
+    状态机 PREPARE 段（见 ADR-0005）：
+    1. suspend reconnect watchdog（固件 claim 期间禁止通用重连）；
+    2. target 侧 vhci detach（worker 不再持有设备）；
+    3. 确认 target 侧端口已消失（fail closed：查询失败视为未释放）。
+    返回 (released, error)。调用方在 SOURCE_OWNED 状态后才允许下发烧写。
+    """
+    from features.devices import parse_usbip_port_entries, USBIP_PORT_COMMAND
+
+    if not routes:
+        return True, ""
+    all_busids: list[str] = []
+    for route in routes:
+        all_busids.extend(str(b) for b in route.get("busids") or [])
+        device_host = str(route.get("device_host") or "").strip()
+        if device_host:
+            usbip_reconnect.pause_usbip_reconnect(
+                device_host=device_host,
+                device_ids=[str(d) for d in route.get("device_ids") or []],
+            )
+    if not all_busids:
+        return True, ""
+
+    # 1) target 侧 detach：按 host/busid 结构化匹配，只拆本次路由的端口。
+    port_result = await asyncio.to_thread(
+        runtime.ssh_manager.execute_command, ssh, USBIP_PORT_COMMAND, timeout=10,
+    )
+    if not port_result.ok:
+        return False, (
+            "无法确认目标主机 USB/IP 端口状态，拒绝进入源端烧写: "
+            + (port_result.stderr or port_result.stdout or "").strip()
+        )
+    target_busids = set(all_busids)
+    ports_to_detach = [
+        entry for entry in parse_usbip_port_entries(port_result.stdout or "")
+        if entry["busid"] in target_busids
+    ]
+    for entry in ports_to_detach:
+        await asyncio.to_thread(
+            runtime.ssh_manager.execute_command,
+            ssh, f"sudo -n usbip detach -p {entry['port']}", timeout=15,
+        )
+
+    # 2) fail-closed 复核：目标端口必须已消失；列表不可解析时按未释放
+    # 处理（R07 假 detach 教训），由调用方中止烧写。
+    verify = await asyncio.to_thread(
+        runtime.ssh_manager.execute_command, ssh, USBIP_PORT_COMMAND, timeout=10,
+    )
+    if not verify.ok:
+        return False, "USB/IP 释放后无法复核目标主机端口状态，拒绝继续烧写"
+    remaining = [
+        entry["port"] for entry in parse_usbip_port_entries(verify.stdout or "")
+        if entry["busid"] in target_busids
+    ]
+    if remaining:
+        return False, (
+            "目标主机仍持有 USB/IP 端口: " + ", ".join(remaining)
+            + "；设备所有权未交还源主机，已中止烧写"
+        )
+    if ports_to_detach:
+        # 等待源主机侧 PnP 重新认领设备（Windows 重新枚举约 1-2s）。
+        await asyncio.sleep(2)
+    return True, ""
 
 
 def device_flash_protocols(ssh, devices: list[str]) -> dict[str, str]:

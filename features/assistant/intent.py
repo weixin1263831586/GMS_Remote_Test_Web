@@ -76,6 +76,7 @@ _NAV_ALIASES: dict[str, str] = {
     "主机桌面": "desktop", "桌面": "desktop", "vnc": "desktop",
     "终端": "terminal", "主机终端": "terminal",
     "用户": "users", "用户管理": "users",
+    "设备串口": "devices-console", "串口": "devices-console", "serial console": "devices-console",
     "设备": "devices", "设备管理": "devices", "adb": "devices",
     "报告管理": "reports", "报告列表": "reports",
     "报告分析": "report-analysis", "诊断": "report-analysis",

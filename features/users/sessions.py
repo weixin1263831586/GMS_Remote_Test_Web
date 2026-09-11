@@ -53,8 +53,12 @@ class ClientManager:
                 banner_timeout=self.SSH_TIMEOUT,
                 auth_timeout=self.SSH_AUTH_TIMEOUT
             )
-            raw = ssh.exec_command('whoami')[1].read()
-            return raw.decode("utf-8", errors="ignore").strip().split("\\")[-1]
+            # 统一执行层：whoami 探测走 SSHExecutor，禁止裸 exec_command
+            # （stdout/stderr 双流 drain 由执行器保证，不再有窗口互锁风险）。
+            from foundation.ssh_executor import ssh_executor
+
+            raw = ssh_executor.run(ssh, "whoami", timeout=10).stdout
+            return raw.strip().split("\\")[-1]
         finally:
             ssh.close()
 

@@ -114,8 +114,9 @@ SHA-256 + Ed25519 signature; strict-CA environments export
 `--client auto` additionally installs the self-contained Skill+MCP plugin
 for every detected agent (Codex/Kimi/kkagent), reconciles each client's MCP
 registration (update-in-place; corrupt client configs fail with a backup
-rather than being overwritten), and writes per-agent env profiles. The
-profiles are loaded automatically by `scripts/mcp_launcher.sh`, which is
+rather than being overwritten), and writes per-agent TOML profiles under
+`~/.config/gms-agent/profiles/`. The profiles are loaded automatically by
+`scripts/mcp_launcher.py`, which is
 what the plugin manifests use to start the MCP server — nothing to `source`.
 Agents authenticate with an Agent Service
 Token instead of a password: mint a one-shot enrollment code in the web UI

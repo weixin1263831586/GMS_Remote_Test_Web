@@ -69,9 +69,8 @@ async def check_ssh_sshd(request: Request, device_host: str | None = Query(None,
     注意：device_host 必须是 user@ip 格式，例如 user@192.168.1.100
     """
     def exec_ssh_cmd(ssh, cmd):
-        """执行SSH命令并返回输出"""
-        _, stdout, _ = ssh.exec_command(cmd, timeout=10)
-        return stdout.read().decode('utf-8', errors='ignore').strip()
+        # 统一走 SSHExecutor 执行层（并发 drain，防双流互锁）
+        return ssh_manager.execute_command(ssh, cmd, timeout=10).stdout.strip()
 
     config = config_manager.load_config()
     # 优先使用查询参数中的 device_host，否则尝试 Tailscale/配置/当前客户端 IP。
@@ -306,17 +305,17 @@ async def ping_route_test(request: Request):
                 config = config_manager.load_config()
                 async with ssh_manager.async_optional_connection(config) as ssh:
                     if ssh:
-                        # 从测试主机ping客户端IP
-                        ping_cmd = f"ping -c 3 -W 2 {client_ip}"
-                        _, stdout, stderr = ssh.exec_command(ping_cmd, timeout=10)
+                        # 从测试主机ping客户端IP（统一 SSHExecutor 执行层）
+                        from foundation.ssh_executor import ssh_executor
 
-                        # 读取ping输出（限制大小防止内存溢出）
-                        ping_output = stdout.read(8192).decode('utf-8', errors='ignore')   # 8KB sufficient for ping
-                        stderr.read(2048).decode('utf-8', errors='ignore')   # 2KB sufficient for errors
-                        exit_status = stdout.channel.recv_exit_status()
+                        ping_result = await ssh_executor.run_async(
+                            ssh, f"ping -c 3 -W 2 {client_ip}", timeout=10,
+                        )
 
                         # 解析ping结果
-                        reachable, latency = _parse_ping_output(ping_output, exit_status)
+                        reachable, latency = _parse_ping_output(
+                            ping_result.stdout[:8192], ping_result.code,
+                        )
 
                         logger.info(f"Ping test from {test_host_ip} to {client_ip}: reachable={reachable}, latency={latency}")
 

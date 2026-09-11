@@ -51,10 +51,16 @@ def windows_queue_dir(device_host: str) -> str:
 
     Agent 用 Path.home()/gms-flash-queue（%USERPROFILE%），SSH 登录用户
     与运行 Agent 的桌面账户一致时，等价于 C:\\Users\\<user>\\gms-flash-queue。
+    Fail closed：SSH 地址必须携带显式用户名（user@host），否则拒绝猜测——
+    硬编码个人账户目录会让烧写任务投递到错误的主目录。
     """
     username = str(device_host or "").split("@", 1)[0].strip()
-    if not username:
-        return r"C:\Users\hcq\gms-flash-queue"
+    if not username or "@" not in str(device_host or ""):
+        raise SourceFlashError(
+            "Windows 源主机地址必须为 user@host 格式以定位烧写队列目录"
+            f"（当前: {device_host!r}）",
+            status_code=409, stage="SSH",
+        )
     return rf"C:\Users\{username}\gms-flash-queue"
 
 
@@ -112,11 +118,17 @@ def open_windows_ssh(device_host: str):
 
 
 def windows_exec(ssh, command: str, timeout: int = 30) -> tuple[str, int]:
-    _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
-    out = stdout.read().decode("utf-8", errors="replace")
-    err = stderr.read().decode("utf-8", errors="replace")
-    code = stdout.channel.recv_exit_status()
-    return (out + ("\n" + err if err else "")).strip(), code
+    """Execute a Windows source-host command through the unified executor.
+
+    统一收口到 :mod:`foundation.ssh_executor`：stdout/stderr 并发 drain，
+    杜绝历史裸 ``exec_command`` 先读 stdout 再读 stderr 在大输出时的
+    channel 窗口互锁死锁。
+    """
+    from foundation.ssh_executor import ssh_executor
+
+    result = ssh_executor.run(ssh, command, timeout=timeout)
+    output = (result.stdout + ("\n" + result.stderr if result.stderr else "")).strip()
+    return output, result.code
 
 
 def sftp_mkdir_chain(sftp, remote_dir: str) -> None:
@@ -252,7 +264,8 @@ async def run_source_flash(
 ) -> SourceFlashReport:
     """Dispatch a complete-firmware flash to the Windows source agent.
 
-    ``device_host`` is the Windows source host (e.g. hcq@172.16.14.66).
+    ``device_host`` is the Windows source host in ``user@host`` form
+    (e.g. ``gms@192.0.2.10``).
     ``firmware_path`` is the firmware already present on the Controller
     (Linux) filesystem; it is SFTP-uploaded to the source host first.
     ``keepalive`` is an optional no-argument callback invoked during the

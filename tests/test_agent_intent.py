@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -8,6 +9,7 @@ EXPECTED_SIDEBAR_PAGES = {
     "terminal": "主机终端",
     "users": "用户管理",
     "devices": "设备管理",
+    "devices-console": "设备串口",
     "reports": "报告管理",
     "report-analysis": "报告分析",
     "apk-analysis": "APK分析",
@@ -28,6 +30,15 @@ EXPECTED_SIDEBAR_PAGES = {
 
 
 class AgentIntentTests(unittest.TestCase):
+    def test_devices_console_follows_device_management_in_default_navigation(self):
+        template = Path("web/shell/shell.html").read_text(encoding="utf-8")
+        pages = re.findall(r'class="sidebar-item" data-page="([^"]+)"', template)
+        devices_index = pages.index("devices")
+        self.assertEqual(pages[devices_index + 1], "devices-console")
+        guide_entries = re.findall(r"<th>([^<]*)</th>", template)
+        guide_devices_index = guide_entries.index("设备管理")
+        self.assertEqual(guide_entries[guide_devices_index + 1], "设备串口")
+
     def test_agent_can_navigate_to_automation_page(self):
         from features.assistant.intent import resolve
 

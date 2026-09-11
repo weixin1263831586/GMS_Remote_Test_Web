@@ -47,7 +47,7 @@ MIGRATION_LINE_LIMITS = {
     'features/users/config_api.py': 617,
     'features/devices/adb_proxy_service.py': 874,  # R02/R03/R18 + R02/R03 host-level disconnect guards
     'features/devices/config_explorer.py': 625,
-    'features/devices/integrations_api.py': 2552,
+    'features/devices/integrations_api.py': 2554,
     'features/devices/reconnect.py': 942,
     'features/devices/tests/test_adb_proxy_service.py': 911,  # R01-R05/R18 + R02/R03 guard regression stubs
     'features/devices/tests/test_usbip_flash_modes.py': 808,

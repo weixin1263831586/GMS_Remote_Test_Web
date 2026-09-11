@@ -168,7 +168,7 @@ class RuntimeUiHarness(unittest.TestCase):
             """
             try {
                 localStorage.setItem('gms_sidebar_visible_pages', JSON.stringify([
-                    'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
+                    'test', 'desktop', 'terminal', 'users', 'devices', 'devices-console', 'reports',
                     'report-analysis', 'test-suites', 'apk-analysis', 'security-audit',
                     'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant',
                     'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent', 'notes'
@@ -194,7 +194,7 @@ class RuntimeUiHarness(unittest.TestCase):
             """
             if (typeof applySidebarVisibility === 'function') {
                 applySidebarVisibility([
-                    'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
+                    'test', 'desktop', 'terminal', 'users', 'devices', 'devices-console', 'reports',
                     'report-analysis', 'test-suites', 'apk-analysis', 'security-audit',
                     'api-docs', 'architecture', 'websites', 'tools', 'gms-assistant',
                     'automation', 'cluster', 'redmine-agent', 'gerrit-dashboard', 'agent', 'notes'
@@ -712,7 +712,6 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(
                 sorted(scopes),
                 sorted([
-                    "system.read",
                     "devices.read",
                     "devices.lease",
                     "devices.use_leased",
@@ -721,8 +720,6 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "tests.cancel",
                     "jobs.read",
                     "reports.read",
-                    "resources.read_own",
-                    "resources.write_own",
                     "redmine.read",
                     "artifacts.read_own",
                     "apk.analyze_own",
@@ -5319,6 +5316,117 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             first_description = descriptions.first.bounding_box()
             self.assertAlmostEqual(first_icon["y"], first_title["y"], delta=4)
             self.assertAlmostEqual(first_title["y"], first_description["y"], delta=5)
+        finally:
+            page.close()
+
+    def test_serial_console_tabs_and_bottom_input_layout(self):
+        page = self.new_page()
+        legacy_order = [
+            'test', 'desktop', 'terminal', 'users', 'devices', 'reports',
+            'report-analysis', 'apk-analysis', 'test-suites', 'api-docs',
+            'architecture', 'websites', 'tools', 'security-audit', 'gms-assistant',
+            'automation', 'cluster', 'devices-console', 'redmine-agent',
+            'gerrit-dashboard', 'notes', 'agent',
+        ]
+        page.route(
+            "**/api/sidebar-order",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "data": {"order": legacy_order, "visible_pages": legacy_order},
+                }),
+            ),
+        )
+        port = {
+            "port_key": "usb-FTDI_TEST-if00-port0",
+            "devname": "/dev/ttyUSB0",
+            "by_id": "/dev/serial/by-id/usb-FTDI_TEST-if00-port0",
+            "vendor_product": "0403:6001",
+            "driver": "ftdi_sio",
+            "online": True,
+            "capture_enabled": False,
+            "capture_active": False,
+            "last_output_at": "",
+            "error": "",
+            "binding": {
+                "label": "RK3562GMS3",
+                "baudrate": 1500000,
+                "capture_enabled": False,
+                "newline": "cr",
+                "note": "",
+            },
+        }
+        page.route(
+            "**/api/devices/console/ports",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": {"ports": [port]}}),
+            ),
+        )
+        page.route(
+            "**/api/devices/management",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "devices": [{"device_id": "RK3562GMS3", "model": "rk3562"}],
+                }),
+            ),
+        )
+        page.route(
+            "**/api/devices/console/ports/*/logs?*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "data": {"date": "20260910", "content": "", "available_dates": []},
+                }),
+            ),
+        )
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('devices-console', null)")
+            frame = self.frame_for(page, "#devices-console-frame")
+            expect(frame.locator("#ports-tab")).to_have_class(re.compile(r"active"))
+            expect(frame.locator("#ports-section")).to_be_visible()
+            toast_style = frame.locator("#page-notice").evaluate(
+                """element => {
+                    const style = getComputedStyle(element);
+                    return {position: style.position, top: style.top, left: style.left};
+                }"""
+            )
+            self.assertEqual(toast_style["position"], "fixed")
+            self.assertEqual(toast_style["top"], "50%")
+            self.assertEqual(toast_style["left"], "50%")
+            frame.get_by_role("button", name="编辑绑定").click()
+            expect(frame.locator("#binding-label")).to_have_value("RK3562GMS3")
+            self.assertEqual(frame.locator("#binding-label").evaluate("node => node.tagName"), "SELECT")
+            frame.locator("#cancel-binding").click()
+            frame.get_by_role("button", name="打开控制台").click()
+            expect(frame.locator("#console-section")).to_be_visible()
+            expect(frame.locator("#console-tab")).to_have_class(re.compile(r"active"))
+            self.assertTrue(frame.locator(".terminal-column").evaluate(
+                """column => {
+                    const dock = column.querySelector('.input-dock');
+                    const columnBox = column.getBoundingClientRect();
+                    const dockBox = dock.getBoundingClientRect();
+                    return Math.abs(columnBox.bottom - dockBox.bottom) <= 2;
+                }"""
+            ))
+            frame.locator("#ports-tab").click()
+            expect(frame.locator("#ports-section")).to_be_visible()
+            expect(frame.locator("#console-section")).to_be_hidden()
+
+            page.locator(".sidebar-brand").click()
+            values = page.locator(
+                "#sidebar-visibility-list input[type=checkbox]"
+            ).evaluate_all("nodes => nodes.map(node => node.value)")
+            self.assertEqual(values[values.index("devices") + 1], "devices-console")
         finally:
             page.close()
 

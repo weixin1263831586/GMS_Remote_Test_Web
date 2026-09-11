@@ -8,12 +8,11 @@ let agentAccessTokensCache = [];
 let agentAccessLoadSequence = 0;
 
 const AGENT_ACCESS_DEFAULT_SCOPES = [
-    'system.read', 'devices.read', 'devices.lease', 'devices.use_leased',
+    'devices.read', 'devices.lease', 'devices.use_leased',
     'tests.execute', 'tests.cancel', 'jobs.read', 'reports.read',
 ];
 
 const AGENT_ACCESS_SCOPE_LABELS = {
-    'system.read': '读取系统与健康状态',
     'devices.read': '读取设备清单',
     'devices.lease': '租用与认领设备',
     'devices.use_leased': '操作已租用设备',
@@ -22,8 +21,6 @@ const AGENT_ACCESS_SCOPE_LABELS = {
     'tests.cancel': '取消自己的测试任务',
     'jobs.read': '读取任务状态与事件',
     'reports.read': '读取测试报告',
-    'resources.read_own': '读取自己的资源',
-    'resources.write_own': '写入自己的资源',
     'redmine.read': '读取授权范围内的 Redmine 数据',
     'artifacts.read_own': '读取自己的证据与制品',
     'apk.analyze_own': '分析自己的 APK 制品',
@@ -32,7 +29,12 @@ const AGENT_ACCESS_SCOPE_LABELS = {
 
 function agentAccessPanelIsOpen() {
     const panel = document.getElementById('agent-access-panel');
-    return Boolean(panel && panel.style.display !== 'none');
+    if (!panel) return false;
+    // 12.txt §八：状态判定不依赖 inline style（初始态来自 HTML 的
+    // style="display:none"，toggle 后由 JS 改写）。computed style 同时
+    // 覆盖"尚未触碰 inline style"与"已被 toggle"两种来源。
+    if (panel.style.display === 'flex') return true;
+    return getComputedStyle(panel).display !== 'none';
 }
 
 function agentAccessToggle(show) {

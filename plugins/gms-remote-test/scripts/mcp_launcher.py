@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""GMS Agent Runtime MCP launcher — Python edition (10.txt §十九/§十八).
+"""GMS Agent Runtime MCP launcher — Python edition.
 
 Agent manifests launch the MCP server through this launcher instead of
 python3 mcp_server.py directly. It loads the per-client profile WITHOUT any
-shell involvement:
+shell involvement from the single authoritative source:
 
     ~/.config/gms-agent/profiles/<profile>.toml   (authoritative, 0600)
-    ${XDG_DATA_HOME:-~/.local/share}/gms-remote-test/mcp/<client>.env  (legacy)
 
-Selection order for the client name (first wins):
+12.txt P1 (profile single source of truth): the legacy
+``~/.local/share/gms-remote-test/mcp/<client>.env`` fallback and the
+"first existing profile/env among kimi, codex, kkagent" probe were removed.
+With codex-A → Controller A / codex-B → Controller B, a filesystem-glob
+first-match is not an Agent routing policy — it silently picked the wrong
+Controller. The client/profile must now be declared by the caller (MCP
+registration env block or GMS_AGENT_PROFILE); an undeclared launch fails
+with actionable guidance instead of guessing.
+
+Selection order:
   1. $GMS_AGENT_CLIENT (set by the plugin manifest env block)
-  2. first existing profile/env among kimi, codex, kkagent
+  2. $GMS_RT_PROFILE's own ``client =`` field
+  3. $GMS_AGENT_PROFILE → <name>.toml
 
 Security: agents never hold platform passwords — the profile carries only
 the Controller URL, CA path, token file path and the service-token auth
@@ -28,13 +37,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 CLIENTS = ("kimi", "codex", "kkagent")
-MCP_ENV_DIR = Path(
-    os.environ.get(
-        "GMS_MCP_ENV_DIR",
-        Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
-        / "gms-remote-test" / "mcp",
-    )
-)
 PROFILE_ROOT = Path(
     os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
 ) / "gms-agent" / "profiles"
@@ -44,40 +46,6 @@ def _apply_env(values: dict[str, str]) -> None:
     for key, value in values.items():
         if value:
             os.environ[key] = value
-
-
-def _load_env_file(env_file: Path) -> None:
-    """Legacy .env loader (safe: only exports, shlex-parsed values)."""
-    import shlex
-
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line.startswith("export "):
-            continue
-        key, _, value = line[len("export "):].partition("=")
-        parts = shlex.split(value.strip())
-        if parts:
-            os.environ[key.strip()] = parts[0]
-
-
-def load_profile(client: str) -> bool:
-    """Populate the environment for a client; returns True when found."""
-    # 1. TOML profile (authoritative): profile files are named
-    #    <client>-<host>-<uid>.toml.
-    if PROFILE_ROOT.is_dir():
-        import shlex  # noqa: F401  (keep parity with legacy loader context)
-
-        for candidate in sorted(PROFILE_ROOT.glob(f"{client}-*.toml")):
-            values = _read_toml_flat(candidate)
-            if values:
-                _apply_env(values)
-                return True
-    # 2. Legacy .env fallback.
-    env_file = MCP_ENV_DIR / f"{client}.env"
-    if env_file.is_file():
-        _load_env_file(env_file)
-        return True
-    return False
 
 
 def _read_toml_flat(path: Path) -> dict[str, str]:
@@ -115,19 +83,68 @@ def _read_toml_flat(path: Path) -> dict[str, str]:
     return {k: v for k, v in mapping.items() if v}
 
 
+def load_profile(client: str) -> bool:
+    """Populate the environment for a client; returns True when found."""
+    if not PROFILE_ROOT.is_dir():
+        return False
+    for candidate in sorted(PROFILE_ROOT.glob(f"{client}-*.toml")):
+        try:
+            values = _read_toml_flat(candidate)
+        except OSError as exc:
+            # Unreadable/corrupt profile must not crash the launcher — skip
+            # and let the next candidate (or the unconfigured server) win.
+            print(
+                f"mcp_launcher: skipping unreadable profile {candidate.name}: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        if values:
+            _apply_env(values)
+            return True
+    return False
+
+
+def _client_from_profile(profile: str) -> str:
+    """Read the ``client =`` field out of <profile>.toml (fail closed)."""
+    profile_path = PROFILE_ROOT / f"{profile}.toml"
+    if not profile_path.is_file():
+        return ""
+    try:
+        declared = _read_toml_flat(profile_path).get("GMS_AGENT_CLIENT", "")
+        return declared if declared in CLIENTS else ""
+    except OSError:
+        return ""
+
+
 def main() -> int:
     client = os.environ.get("GMS_AGENT_CLIENT", "")
+    profile = os.environ.get("GMS_RT_PROFILE", "")
+    # 4.txt 审核 P1-5: with multiple clients configured, honoring the pinned
+    # profile's own `client =` field avoids loading another client's
+    # Controller URL and identity.
+    if not client and profile:
+        client = _client_from_profile(profile)
+    # 12.txt P1: GMS_AGENT_PROFILE=<name> pins the profile file directly;
+    # the historical first-match probe over kimi/codex/kkagent was removed.
+    if not client and not profile:
+        named_profile = os.environ.get("GMS_AGENT_PROFILE", "")
+        if named_profile:
+            values = _read_toml_flat(PROFILE_ROOT / f"{named_profile}.toml") \
+                if (PROFILE_ROOT / f"{named_profile}.toml").is_file() else {}
+            _apply_env(values)
+            profile = os.environ.get("GMS_RT_PROFILE", "")
+            client = os.environ.get("GMS_AGENT_CLIENT", "") or _client_from_profile(profile)
     if not client:
-        for candidate in CLIENTS:
-            has_env = (MCP_ENV_DIR / f"{candidate}.env").is_file()
-            has_toml = (
-                bool(list(PROFILE_ROOT.glob(f"{candidate}-*.toml")))
-                if PROFILE_ROOT.is_dir() else False
-            )
-            if has_env or has_toml:
-                client = candidate
-                break
-    if client:
+        print(
+            "mcp_launcher: no agent client/profile declared. Set "
+            "GMS_AGENT_CLIENT (kimi/codex/kkagent) or GMS_RT_PROFILE / "
+            "GMS_AGENT_PROFILE in the MCP registration env block; the "
+            "first-match filesystem probe was removed (12.txt P1).",
+            file=sys.stderr,
+        )
+        # Still exec the server: it starts unconfigured and reports auth
+        # errors per-call instead of hiding the misconfiguration here.
+    elif client:
         load_profile(client)
 
     # 15.txt 审核 P1-1: FORCE service-token — setdefault() let an ambient

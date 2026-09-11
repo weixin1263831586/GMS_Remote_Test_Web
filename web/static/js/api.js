@@ -275,7 +275,7 @@ function showAuthGate(setupRequired = false) {
     if (usernameHelp) {
         usernameHelp.textContent = setupRequired
             ? '创建平台管理员账号；此处不使用客户端 SSH 账号。'
-            : '可使用平台管理员账号，或 SSH用户名@客户端IP，例如 hcq@172.16.14.66。';
+            : '可使用平台管理员账号，或 SSH用户名@客户端IP，例如 gms@192.0.2.10。';
     }
     if (passwordHelp) {
         passwordHelp.textContent = setupRequired
@@ -311,7 +311,7 @@ function showAuthGate(setupRequired = false) {
 async function prefillAuthUsernameFromClient() {
     const usernameInput = document.getElementById('auth-username');
     const usernameHelp = document.getElementById('auth-username-help');
-    const defaultPlaceholder = '用户名@客户端IP，例如 hcq@172.16.14.66';
+    const defaultPlaceholder = '用户名@客户端IP，例如 gms@192.0.2.10';
     if (!usernameInput) return;
     if (usernameInput.value.trim()) {
         usernameInput.placeholder = defaultPlaceholder;
@@ -331,9 +331,9 @@ async function prefillAuthUsernameFromClient() {
             usernameInput.value = identity;
             usernameInput.dataset.autoFilled = 'true';
         } else if (clientIp && clientIp !== 'unknown') {
-            usernameInput.placeholder = `用户名@${clientIp}，例如 hcq@${clientIp}`;
+            usernameInput.placeholder = `用户名@${clientIp}，例如 gms@${clientIp}`;
             if (usernameHelp) {
-                usernameHelp.textContent = `检测到客户端 IP ${clientIp}，但尚不知道 SSH 用户名；请填写完整账号，例如 hcq@${clientIp}。`;
+                usernameHelp.textContent = `检测到客户端 IP ${clientIp}，但尚不知道 SSH 用户名；请填写完整账号，例如 gms@${clientIp}。`;
             }
         }
     } catch (error) {

@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock
 from unittest.mock import Mock
 
 from features.devices.utils import DeviceUtils
@@ -36,19 +37,33 @@ class DeviceUtilsTests(unittest.TestCase):
 
         self.assertTrue(DeviceUtils.kill_process(ssh, "scrcpy.*-s ABC-123"))
 
-        ssh.exec_command.assert_called_once_with("pkill -f -- 'scrcpy.*-s ABC-123'")
+        # 统一执行层：走 foundation.ssh_executor（并发 drain），命令本身
+        # 仍是 pkill -f -- + shlex.quote 的安全模式。
+        from foundation.ssh_executor import ssh_executor
+
+        with unittest.mock.patch.object(ssh_executor, "run") as run_mock:
+            self.assertTrue(DeviceUtils.kill_process(ssh, "scrcpy.*-s ABC-123"))
+            run_mock.assert_called_once_with(
+                ssh, "pkill -f -- 'scrcpy.*-s ABC-123'", timeout=10,
+            )
 
     def test_check_scrcpy_healthy_uses_quoted_pattern_and_log_path(self):
-        stdout = Mock()
-        stdout.read.return_value = b"1234\n"
-        ssh = Mock()
-        ssh.exec_command.return_value = (stdout, None, None)
+        from foundation.command_result import CommandResult
+        from foundation.ssh_executor import ssh_executor
 
-        healthy, pid = DeviceUtils.check_scrcpy_healthy(ssh, "ABC-123")
+        ssh = Mock()
+        command_used = {}
+
+        def fake_run(_ssh, cmd, timeout=0, **_kw):
+            command_used["cmd"] = cmd
+            return CommandResult(stdout="1234\n", stderr="", code=0)
+
+        with unittest.mock.patch.object(ssh_executor, "run", side_effect=fake_run):
+            healthy, pid = DeviceUtils.check_scrcpy_healthy(ssh, "ABC-123")
 
         self.assertTrue(healthy)
         self.assertEqual(pid, "1234")
-        command = ssh.exec_command.call_args.args[0]
+        command = command_used["cmd"]
         self.assertIn("pgrep -f -- 'scrcpy.*-s ABC-123'", command)
         self.assertIn("tail -c 2048 /tmp/scrcpy_ABC-123.log", command)
 

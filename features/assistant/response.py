@@ -18,6 +18,7 @@ PAGE_DISPLAY_NAMES: dict[str, str] = {
     "terminal": "主机终端",
     "users": "用户管理",
     "devices": "设备管理",
+    "devices-console": "设备串口",
     "reports": "报告管理",
     "report-analysis": "报告分析",
     "apk-analysis": "APK分析",
@@ -104,7 +105,7 @@ def generate_capability_overview() -> str:
         "- 查询状态：设备/型号、空闲占用、测试状态、测试套件、报告、ATS 流水线、Cluster Worker/任务、构建任务、知识库、在线用户、系统健康、VPN、USB/IP、配置摘要。\n"
         "- 执行操作：启动/停止测试、失败 retry、取消/重试 ATS 或集群任务、连接 WiFi、重启/remount/投屏设备、VPN/USB-IP 操作、知识文档创建、报告下载/删除等；有风险或会改状态的操作会先让你确认。\n"
         "- 分析问题：报告分析、失败用例诊断、APK/JAR 反编译、套件 APK 源码分析、OpenGrok 代码搜索。\n"
-        "- 页面导航：打开测试界面、设备管理、报告管理、报告分析、APK分析、测试套件、GMS ATS、主机集群、Redmine看板、Gerrit看板、个人知识库、终端、桌面、常用网址、常用工具、安全审计。\n\n"
+        "- 页面导航：打开测试界面、设备管理、设备串口、报告管理、报告分析、APK分析、测试套件、GMS ATS、主机集群、Redmine看板、Gerrit看板、个人知识库、终端、桌面、常用网址、常用工具、安全审计。\n\n"
         "你可以直接这样说：\n"
         "- 「rk3572设备」或「空闲设备」\n"
         "- 「最近报告」或「分析最新失败报告」\n"
@@ -122,6 +123,7 @@ def generate_page_overview() -> str:
         "- 主机终端：打开服务器 SSH 终端，执行命令、上传文件、辅助定位环境问题。\n"
         "- 用户管理：查看在线用户、客户端 IP、用户名、测试运行状态和设备占用情况。\n"
         "- 设备管理：查看 ADB 设备、型号、Android 版本、电量、来源、锁定状态；支持重启、remount、WiFi、投屏、bootloader 操作。\n"
+        "- 设备串口：查看 Controller 本机 USB 转串口，使用实时控制台并管理开机早期日志。\n"
         "- 报告管理：列出历史测试报告，按用户/时间查看，下载、删除、进入分析。\n"
         "- 报告分析：上传报告或打开已有报告，解析失败项，做失败诊断、AI 分析和根因线索整理。\n"
         "- APK分析：上传 APK/JAR，反编译源码，查看 Manifest、权限、源码树和文件内容。\n"

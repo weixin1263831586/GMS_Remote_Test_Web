@@ -406,10 +406,12 @@ class TypedToolTests(unittest.TestCase):
     def _capture_run(self):
         captured = {}
 
-        def fake_run(command, args=None, stdin_text=None, timeout=None):
+        def fake_run(command, args=None, stdin_text=None, timeout=None,
+                     env_extra=None):
             captured["command"] = command
             captured["args"] = args
             captured["stdin_text"] = stdin_text
+            captured["env_extra"] = env_extra
             return '{"ok":true,"exit_code":0,"data":{}}', False
 
         original = mcp_server.run_cli
@@ -729,7 +731,8 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
     def _capture_run(self):
         captured = {}
 
-        def fake_run(command, args=None, stdin_text=None, timeout=None):
+        def fake_run(command, args=None, stdin_text=None, timeout=None,
+                     env_extra=None):
             captured["command"] = command
             captured["args"] = args
             captured["stdin_text"] = stdin_text
@@ -1018,7 +1021,8 @@ class LogcatToolTests(unittest.TestCase):
     def _capture_run(self):
         captured = {}
 
-        def fake_run(command, args=None, stdin_text=None, timeout=None):
+        def fake_run(command, args=None, stdin_text=None, timeout=None,
+                     env_extra=None):
             captured["command"] = command
             captured["args"] = args
             captured["stdin_text"] = stdin_text
@@ -1137,7 +1141,8 @@ class ShellExecToolTests(unittest.TestCase):
     def _capture_run(self):
         captured = {}
 
-        def fake_run(command, args=None, stdin_text=None, timeout=None):
+        def fake_run(command, args=None, stdin_text=None, timeout=None,
+                     env_extra=None):
             captured["command"] = command
             captured["args"] = args
             captured["timeout"] = timeout
@@ -1223,7 +1228,8 @@ class ApkToolTests(unittest.TestCase):
     def _capture_run(self):
         captured = {}
 
-        def fake_run(command, args=None, stdin_text=None, timeout=None):
+        def fake_run(command, args=None, stdin_text=None, timeout=None,
+                     env_extra=None):
             captured["command"] = command
             captured["args"] = args
             return '{"ok":true,"exit_code":0,"data":{}}', False

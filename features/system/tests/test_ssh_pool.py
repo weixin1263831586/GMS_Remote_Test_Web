@@ -119,7 +119,7 @@ def test_stream_reading_uses_stderr_api_for_stderr():
     """
     import paramiko
 
-    from features.system.ssh_executor import ssh_executor
+    from foundation.ssh_executor import ssh_executor
 
     channel = MagicMock(spec=paramiko.Channel)
     # ready 直到数据被消费；进程已退出（exit ready 恒真）。
@@ -163,7 +163,7 @@ def test_stream_reading_uses_stderr_api_for_stderr():
 def test_stream_reading_uses_stdout_api_for_stdout():
     import paramiko
 
-    from features.system.ssh_executor import ssh_executor
+    from foundation.ssh_executor import ssh_executor
 
     channel = MagicMock(spec=paramiko.Channel)
     channel.exit_status_ready.return_value = True

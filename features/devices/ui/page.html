@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设备串口</title>
+    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
+    <style>{{CONSOLE_CSS}}</style>
+</head>
+<body>
+<main class="page-shell">
+    <header class="toolbar">
+        <div class="view-tabs" role="tablist" aria-label="设备串口视图">
+            <button id="ports-tab" class="view-tab active" type="button" role="tab" aria-selected="true">本机串口 <span id="ports-count" class="count-badge">0</span></button>
+            <button id="console-tab" class="view-tab" type="button" role="tab" aria-selected="false" disabled>控制台</button>
+        </div>
+        <div class="toolbar-actions">
+            <span id="refresh-status" class="muted">准备中</span>
+            <button id="refresh-ports" type="button">刷新端口</button>
+        </div>
+    </header>
+
+    <div id="page-notice" class="notice" hidden></div>
+    <section id="ports-section" class="view-panel">
+        <div class="section-heading">
+            <div><h2>本机串口</h2><p>支持 /dev/ttyUSB*、/dev/ttyACM*，优先使用 by-id 稳定标识。</p></div>
+        </div>
+        <div id="ports-list" class="ports-grid"><div class="empty">正在扫描串口…</div></div>
+    </section>
+
+    <section id="console-section" class="view-panel console-panel" hidden>
+        <div class="section-heading console-heading">
+            <div>
+                <h2 id="console-title">串口控制台</h2>
+                <p id="console-subtitle"></p>
+            </div>
+            <div class="console-actions">
+                <span id="socket-status" class="status-pill offline">未连接</span>
+                <button id="pause-output" type="button">暂停</button>
+                <button id="clear-screen" type="button">清屏</button>
+                <button id="copy-output" type="button">复制</button>
+                <button id="close-console" type="button">关闭</button>
+            </div>
+        </div>
+        <div class="console-layout">
+            <div class="terminal-column">
+                <div id="terminal-output" class="terminal" tabindex="0" aria-label="串口输出"></div>
+                <div class="input-dock">
+                    <div class="input-row">
+                        <input id="terminal-input" type="text" autocomplete="off" placeholder="输入命令，按 Enter 发送">
+                        <button id="send-input" class="primary" type="button">发送</button>
+                        <button id="send-ctrl-c" type="button" title="发送 0x03">Ctrl+C</button>
+                    </div>
+                </div>
+            </div>
+            <aside class="history-column">
+                <div class="history-head">
+                    <h3>历史日志</h3>
+                    <button id="reload-log" type="button">刷新</button>
+                </div>
+                <label>日期<select id="log-date"><option value="">最新</option></select></label>
+                <label>尾部行数<select id="log-tail"><option>200</option><option selected>500</option><option>2000</option><option>10000</option></select></label>
+                <pre id="history-output" class="history-output">暂无日志</pre>
+                <div class="history-actions">
+                    <button id="download-log" type="button">下载</button>
+                    <button id="clear-logs" class="danger" type="button">清空日志</button>
+                </div>
+            </aside>
+        </div>
+    </section>
+</main>
+
+<div id="binding-modal" class="modal-backdrop" hidden>
+    <form id="binding-form" class="modal" autocomplete="off">
+        <div class="modal-head"><h2>串口绑定</h2><button id="close-binding" type="button" aria-label="关闭">×</button></div>
+        <p id="binding-port" class="mono"></p>
+        <label>设备名称<select id="binding-label"><option value="">正在加载设备…</option></select></label>
+        <label>备注<textarea id="binding-note" maxlength="500" rows="3" placeholder="串口线连接位置、板卡或故障说明"></textarea></label>
+        <label>波特率<input id="binding-baudrate" type="number" min="300" max="4000000" list="baudrate-options" required value="1500000"></label>
+        <datalist id="baudrate-options"><option value="115200"></option><option value="921600"></option><option value="1500000"></option></datalist>
+        <label>回车发送<select id="binding-newline"><option value="cr">CR (\r)</option><option value="lf">LF (\n)</option><option value="crlf">CRLF</option><option value="none">不追加</option></select></label>
+        <label class="switch-row"><input id="binding-capture" type="checkbox"><span>开启常驻日志采集</span></label>
+        <div class="modal-actions">
+            <button id="delete-binding" class="danger" type="button">删除绑定</button>
+            <span class="spacer"></span>
+            <button id="cancel-binding" type="button">取消</button>
+            <button class="primary" type="submit">保存</button>
+        </div>
+    </form>
+</div>
+
+<script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script>
+<script src="/static/vendor/xterm/xterm.min.js"></script>
+<script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
+<script>{{CONSOLE_JS}}</script>
+</body>
+</html>

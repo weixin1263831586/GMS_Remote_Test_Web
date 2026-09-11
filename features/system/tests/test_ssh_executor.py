@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 
-from features.system.ssh_executor import SSHExecutor
+from foundation.ssh_executor import SSHExecutor
 
 
 class _FakeStream:

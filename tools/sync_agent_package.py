@@ -63,10 +63,23 @@ def read_version(path: Path, pattern: str) -> str:
 
 
 def sync_one(source: Path, target: Path) -> bool:
-    """Copy when changed; returns True when a copy happened."""
+    """Copy when changed; returns True when a copy happened.
+
+    4.txt 审核其他项: an early return on identical content used to leave a
+    WRONG executable bit unfixed forever (e.g. the manifests exec
+    ./scripts/mcp_launcher.py directly, but a chmod had been lost on the
+    generated side). Even when content matches, mirror the executable bit
+    the source demands.
+    """
     if not source.is_file():
         fail(f"source missing: {source}")
     if target.is_file() and target.read_bytes() == source.read_bytes():
+        want_exec = _is_executable_source(source)
+        is_exec = bool(target.stat().st_mode & 0o111)
+        if want_exec and not is_exec:
+            target.chmod(0o755)
+            print(f"Fixed exec bit: {target.name}")
+            return True
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(source.read_bytes())

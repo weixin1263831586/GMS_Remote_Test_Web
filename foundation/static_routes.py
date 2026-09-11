@@ -5,8 +5,8 @@
     "static_routes": {
         "enabled": true,
         "routes": [
-            {"destination": "10.10.10.0/24", "gateway": "172.16.14.1"},
-            {"destination": "10.10.10.29/32", "gateway": "172.16.14.1"}
+            {"destination": "10.10.10.0/24", "gateway": "192.0.2.1"},
+            {"destination": "10.10.10.29/32", "gateway": "192.0.2.1"}
         ]
     }
 
@@ -56,8 +56,8 @@ def _parse_route(entry: dict) -> tuple[ipaddress._BaseNetwork, ipaddress._BaseAd
 def _route_matches(destination: str, gateway: str) -> bool:
     """已存在的该目标路由是否与配置的网关一致。
 
-    逐 token 精确匹配 ``via <gateway>``：``'via 172.16.14.1' in stdout``
-    式的子串判断会把 ``via 172.16.14.10`` 误判为已匹配，导致配置的
+    逐 token 精确匹配 ``via <gateway>``：``'via 192.0.2.1' in stdout``
+    式的子串判断会把 ``via 192.0.2.10`` 误判为已匹配，导致配置的
     网关修正（ip route replace）被跳过。
     """
     try:

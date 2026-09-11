@@ -6,12 +6,12 @@ import logging
 import os
 import queue
 import time
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress as contextlib_suppress
 from typing import Any
 
 import paramiko
 
-from features.system.ssh_executor import ssh_executor
+from foundation.ssh_executor import ssh_executor
 from foundation.command_result import CommandResult
 from foundation.config import get_ubuntu_user
 from foundation.networking import split_host_port
@@ -151,11 +151,12 @@ class SSHManager:
                     except Exception:
                         pass
                     continue
-                # 测试连接是否仍然有效（轻量级检查）。
-                # 注意：paramiko 的 recv_exit_status() 内部是不带超时的
+                # 测试连接是否仍然有效（轻量级检查，登记的 connection-health
+                # 原语：手工管理 channel 超时，不走 SSHExecutor，因为
+                # paramiko 的 recv_exit_status() 是不带超时的
                 # status_event.wait()，channel settimeout 约束不到它——
-                # 远端不回传 exit status 时这里会无限阻塞整个事件循环
-                # （R28）。改为按 deadline 轮询 exit_status_ready，超时
+                # 远端不回传 exit status 时会无限阻塞整个事件循环
+                # （R28）。按 deadline 轮询 exit_status_ready，超时
                 # 主动关闭 channel 并判定连接已死。
                 try:
                     _stdin, stdout, _stderr = ssh.exec_command('true', timeout=2)
@@ -174,6 +175,8 @@ class SSHManager:
                     logger.debug(
                         f"[SSH] Pool health check exit_code={channel.recv_exit_status()}"
                     )
+                    with contextlib_suppress(Exception):
+                        channel.close()
                 except Exception as e:
                     logger.debug(f"[SSH] Connection {attempt+1}/{max_attempts} is dead: {e}")
                     try:
@@ -204,7 +207,7 @@ class SSHManager:
         """执行 SSH 命令，统一返回 :class:`CommandResult`。
 
         同步/异步执行统一委托给
-        :class:`~features.system.ssh_executor.SSHExecutor` 唯一实现，
+        :class:`~foundation.ssh_executor.SSHExecutor` 唯一实现，
         彻底废除 ``(stdout, stderr, exit_code)`` 裸 tuple（位置错用曾造成
         真实功能 bug）。
         """

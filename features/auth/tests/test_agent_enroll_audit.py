@@ -138,7 +138,7 @@ class AgentEnrollmentPublicAccessTests(unittest.TestCase):
             "/api/auth/agent-enrollment-codes",
             json={
                 "name": name,
-                "scopes": ["system.read", "tests.execute"],
+                "scopes": ["devices.read", "tests.execute"],
                 "allowed_workers": "*",
             },
         )
@@ -315,7 +315,7 @@ class EnrollmentRateLimitAndEntropyTests(AgentEnrollmentPublicAccessTests):
         record = auth_service.create_agent_enrollment(
             name="entropy-check",
             creator=self._admin_user(),
-            scopes=["system.read"],
+            scopes=["devices.read"],
         )
         code = record["code"]
         # token_hex(3)×3 → 6 hex chars per group (48 bit each, 144 total).

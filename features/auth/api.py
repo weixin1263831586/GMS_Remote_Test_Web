@@ -307,7 +307,7 @@ async def auth_login(request: Request, req: dict):
             if retry_after:
                 return _rate_limit_response(retry_after)
             return error_response(
-                "客户端账号格式错误，请使用 SSH用户名@客户端IP，例如 hcq@172.16.14.66",
+                "客户端账号格式错误，请使用 SSH用户名@客户端IP，例如 gms@192.0.2.10",
                 status_code=401,
             )
         from fastapi.concurrency import run_in_threadpool

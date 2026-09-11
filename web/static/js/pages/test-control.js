@@ -382,7 +382,7 @@ async function showConfig() {
             </table>
             <div class="modal-form-row" style="margin-top:8px;gap:6px;">
                 <input type="text" id="static-route-destination" placeholder="目标网段，例如 10.10.10.0/24 或 10.10.10.29/32" autocomplete="off" style="flex:2;" />
-                <input type="text" id="static-route-gateway" placeholder="网关，例如 172.16.14.1" autocomplete="off" style="flex:1.5;" />
+                <input type="text" id="static-route-gateway" placeholder="网关，例如 192.0.2.1" autocomplete="off" style="flex:1.5;" />
                 <button class="btn-xxs btn-primary" onclick="addStaticRouteRow()">添加</button>
             </div>
             <small style="color:var(--text-secondary);margin-top:4px;">程序启动和每次保存时自动应用（幂等）。修改路由表需要 root；普通用户运行时需配置 sudoers 免密 ip route。</small>
@@ -597,7 +597,7 @@ function addStaticRouteRow() {
         return;
     }
     if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(gateway)) {
-        showToast('网关格式应为 IP 地址，例如 172.16.14.1', 'warning');
+        showToast('网关格式应为 IP 地址，例如 192.0.2.1', 'warning');
         return;
     }
 

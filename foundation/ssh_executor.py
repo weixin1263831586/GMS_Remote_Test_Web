@@ -11,11 +11,18 @@
 
 本模块位于 foundation 层，是 Build / System / Cluster 共用的 SSH 执行
 原语（feature 之间禁止互相 import 内部模块，共享实现必须下沉到这里）。
-``features/system/ssh_executor.py`` 仅再导出，历史 import 路径不变。
+历史的 ``features/system/ssh_executor.py`` 薄再导出已删除，所有调用方
+直接 import 本模块。
 
 ``SSHManager.execute_command`` / ``SSHAsyncManager`` 只做连接管理与薄委托，
 不存在第二份执行语义；所有结果统一为 :class:`CommandResult`，不再有
 ``(stdout, stderr, exit_code)`` 裸 tuple。
+
+架构硬规则（由 ``tests/architecture/test_ssh_command_execution.py`` 强制）：
+业务模块禁止直接调用 ``ssh.exec_command()``——命令执行必须经过本模块
+（``SSHExecutor``/``SSHManager.execute_command``），例外仅限本文件与
+已登记的 connection-health 原语。直接调用会重新引入 stdout/stderr
+channel 窗口互锁死锁与双实现漂移。
 """
 
 from __future__ import annotations
@@ -83,13 +90,27 @@ class SSHExecutor:
         timeout: int = 30,
         get_pty: bool = False,
         should_cancel: Callable[[], bool] | None = None,
+        input_text: str | None = None,
     ) -> CommandResult:
-        """Blocking execution on an established SSH client."""
+        """Blocking execution on an established SSH client.
+
+        ``input_text``：命令启动后写入 stdin 的数据（如 ``sudo -S`` 的密
+        码行）。写入后立即关闭 stdin 送 EOF，避免远端继续等待输入。
+        """
         channel = None
         try:
             _stdin, stdout, _stderr = ssh.exec_command(
                 command, timeout=timeout, get_pty=get_pty,
             )
+            if input_text is not None:
+                # sudo -S 等交互输入：写完立即 EOF，不阻塞 drain 循环。
+                try:
+                    _stdin.write(input_text)
+                    _stdin.flush()
+                except Exception as exc:
+                    logger.warning("[SSH] stdin write failed: %s", exc)
+                with suppress(Exception):
+                    _stdin.channel.shutdown_write()
             channel = stdout.channel
             # 缓冲原始字节、结束后整体解码：decode_ssh_output 的
             # utf-8→gbk 兜底链必须作用于完整流，逐 chunk 解码会把跨
@@ -207,9 +228,12 @@ class SSHExecutor:
         command: str,
         timeout: int = 30,
         get_pty: bool = False,
+        input_text: str | None = None,
     ) -> CommandResult:
         """Non-blocking execution for async routes (thread offload)."""
-        return await asyncio.to_thread(self.run, ssh, command, timeout, get_pty)
+        return await asyncio.to_thread(
+            self.run, ssh, command, timeout, get_pty, None, input_text,
+        )
 
     async def run_stream(
         self,

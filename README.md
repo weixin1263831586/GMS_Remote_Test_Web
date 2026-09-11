@@ -293,73 +293,44 @@ Loader 枚举为 `2207:351a / Rockusb Device`。部署可在 `configs/config.jso
 降低新增 SoC/PID 导致重连失败的风险。RockUSB 模式和不同 SoC 使用不同 PID
 的说明见 [Rockchip Rockusb 文档](https://opensource.rock-chips.com/wiki_Rockusb)。
 
-固件烧写还包含 Loader → MaskROM 的二次枚举。普通 `usbipd bind` 绑定的是
-Windows 设备实例；如果新实例显示为 `Not shared`，`upgrade_tool` 会停在
-`Wait For Maskrom Start`。实测该二次枚举在 usbipd-win 来源端口上会间歇性
-失败为 `0000:0002 Device Descriptor Request Failed`（Windows Problem
-Code 43），且故障发生在 Windows USB 枚举层、先于任何 USB/IP 导出动作，
-客户端侧重试无法修复。因此 USB/IP 设备的固件烧写按 `burn_mode` 分流：
-`auto`（默认）与 `fastboot` 走 **GPT + 两阶段 Fastboot 完整烧写**：平台以
-固件大小和 SHA-256 校验解包缓存，执行 `SFI`/`EXF` 后解析 `parameter.txt`。
-其中 Linux `upgrade_tool EXF` 直接生成 Windows RKDevTool 先执行
-`RKImageMaker -unpack`、再执行 `AFPTool -unpack` 后的最终 Android 文件集合，
-服务端不依赖 Wine 或未跟踪的 Windows 可执行文件。平台随后
-读取目标 UFS/eMMC 的真实扇区数，用 `upgrade_tool GPT` 生成并修正主 GPT、
-grow 分区、PMBR 与 CRC。随后先在 Bootloader Fastboot 写入 GPT 和固件包内
-所有物理分区镜像（包括 uboot、misc、resource、vendor_boot、init_boot、
-dtbo、vbmeta、boot、baseparameter），再进入 Fastbootd。写入 sparse
-`super.img` 前先擦除旧 super，并生成一个很小的 sparse 零写入补丁：原镜像
-所有 `DONT_CARE` 空洞在补丁中转换为零值 `FILL`，其余数据段保持跳过；先写
-补丁、再写原镜像，避免不同固件间遗留块触发 AVB/dm-verity。任一固件镜像
-无法映射、分区未暴露或容量不符都会报错，不再静默保留
-旧版 dtbo/vbmeta。即使 `pvmfw_a/b` 等新分区没有独立 payload，也会由新 GPT
-正确创建，从而支持分区布局发生变化的跨版本固件。为避免旧文件系统在 GPT
-偏移变化后落入错误分区，写完动态分区会执行 Fastbootd `-w` 重建
-metadata/cache/userdata，**该模式会清除用户数据**。重启后必须等待 ADB 且
-`sys.boot_completed=1` 才返回成功；如果新固件改变 USB/ADB 序列号，平台仅
-通过烧写前锁定的来源主机和物理 BUSID 接受新身份，并原子迁移持久分配，
-不会把同一测试主机上的其他 ADB 设备误认成目标。由于 MiniLoader/IDBlock 只能经 RockUSB
-Loader/MaskROM 机制生成和写入，该路径保留设备现有 MiniLoader；同一 SoC 的
-Android 整包跨版本更新不再依赖不稳定的 Windows 二次枚举。`partition` 走
-**同会话 DI 分区烧写**：进入
-ADB→Loader 后依次执行 `SFI`（解析镜像头）、`EXF`（解包，按镜像名缓存）、
-`RID`（探测当前会话的存储访问能力；成功即跳过 DB）。RID 失败时普通
-USB/IP 会话在 DB 前安全停止（DB 重枚举即上述 Code 43 窗口）；只有管理员
-`transport-probe-force` 在目标 PnP 实例预绑定为 Shared (forced) 后才执行
-DB 验证。随后执行 `RL`（读回设备 GPT 并与 parameter.txt
-比对，布局不一致即拒绝写入）、`UL -noreset`（重写 Loader，不触发设备
-复位）、逐分区 `DI -分区名 镜像`（双槽 `_a/_b` 一并覆盖；DI 原生解析
-Android sparse 并校验展开容量，平台在任何写入前还会按 sparse 头预检
-展开尺寸与分区容量）、最后 `RD` 复位重启
-交由既有 ADB 重连机制恢复。已具备存储访问能力的 Loader 路径除进场和收尾外
-不再发生 USB 身份切换。`burn_mode=uf` 显式要求 Ubuntu 本地
-`upgrade_tool uf` 整包路径；USB/IP 设备选择 `uf` 会被拒绝（直连/本地
-设备始终使用 `uf`），混合选择 Windows USB/IP 与本地设备同样被拒绝。
-回退路径（`uf`）的防护逻辑仍完整保留：平台在烧写预检时会针对已分配的
-物理 BUSID 创建 usbipd-win 4.2+ `AutoBind` 策略；烧写前记录 Loader 的
-PnP InstanceId 和 VID:PID；Loader 就绪后暂停目标设备的通用后台重连并等待
-已有重连线程退出，保证同一物理 BUSID 只由固件状态机操作。进场 ADB→Loader
-转换接受"BUSID 完整消失"或"PnP 实例/VID:PID 相对基线变化且已稳定"任一
-证据（`2207:0006→2207:351a` 的行替换可能发生在两次轮询之间，缺席采样
-不到）；uf/DB 路径则由 `Download Boot Success` 解锁，不再把“必须采到
-BUSID 消失”作为硬条件。状态机以 `usbipd state` JSON 为主状态源，同一
-BUSID 的合法 `2207:*` 非 Attached 状态连续稳定两个独立样本、且身份稳定
-满最小落定时间（`ROCKUSB_ATTACH_SETTLE_SECONDS`）后才重新 attach；结构化
-状态下目标行缺失同样按物理缺席处理，绝不对已消失的 BUSID 发起 attach。
-被 Windows 拒绝的 attach（`Device not found`/`Device in error state` 等）
-会重置稳定跟踪并重新等待落定，避免秒级间隔连发 claim。实机验证
-（usbipd-win 5.3.0-54 + Rockchip `351a`）：结构化状态行出现远早于 PnP
-节点可 claim，转换窗口内的 VBoxUsb claim 会崩溃并把端口锁死为
-`0000:0002`（Code 43）；只要让新实例落定后再 attach，DB 复位本身可以
-干净存活（新 DRAM Loader 实例约 2 秒内出现，空闲窗口约 45 秒）。恢复
-结果以 `upgrade_tool ld` 决定 uf 是否自动重试。这避免后台 30 次
-重连循环或过早的 Windows
-USB 端口 cycle 导致 `0000:0002 Device Descriptor Request Failed`。若已经发生
-描述符失败，通用重连会冷却 5 分钟，避免请求结束后继续复位端口；手动连接及
-冷却到期后可再次恢复。平台不会在转换窗口内自动执行 `usbipd detach` 或撤销
-`Shared (forced)` 绑定。
-Windows SSH 账号必须具有执行策略命令的管理员权限。需要手工排查时，可在
-管理员 PowerShell 中执行：
+### 固件烧写（Rockchip update.img）
+
+平台的完整固件烧写只使用 Rockchip `upgrade_tool uf` 整包路径。当前 API 的
+`burn_mode` 仅接受 `auto` 与 `uf`；历史上的 USB/IP Fastboot 分区烧写、
+`partition`（同会话 DI）、`transport-probe-force` 等实验性 backend 已删除，
+不再属于当前架构。
+
+**Local USB devices**（直连 Ubuntu 测试主机）：平台确认设备处于 ADB、
+Fastboot 或 Rockusb Loader 可识别状态后，由测试主机执行
+`upgrade_tool uf` 完成 update.img 烧写。Fastboot 状态的设备先回到
+Android/ADB 再进入 Loader；已处于 Rockusb Loader 的设备直接进入烧写。
+
+**USB/IP devices**：完整固件烧写必须在设备的物理 Source Host 上执行，
+不跨 USB/IP 链路维持 ADB → Loader → MaskROM 多次 USB 重枚举。流程：
+
+1. 平台解析设备到 (Source Host, BUSID) 的持久物理路由，并确认
+   usbipd-win AutoBind 策略（Windows 来源，4.2+）或用户态 usbipd 导出
+   进程（Ubuntu 来源）。
+2. 烧写前显式完成所有权交还：暂停目标设备的通用重连 watchdog，目标
+   Worker 侧 vhci detach，并 fail-closed 复核端口已释放——只有确认
+   Source Host 物理持有设备后才开始烧写。
+3. **Windows Source**：由运行在交互桌面会话中的 Windows Source Agent 调度
+   RKDevTool 完成（Controller SFTP 上传固件与任务文件，轮询结果）。
+4. **Ubuntu/Linux Source**：支持设备共享、分配与重连；在 Linux Source
+   完整烧写 backend 实现之前，API 拒绝（HTTP 409）对 Linux 来源 USB/IP
+   设备的完整固件烧写，不会误送入 Windows backend。
+5. 烧写完成或失败后，平台按原物理路由恢复 USB/IP 导出与 Worker attach。
+
+Loader、MaskROM 等 USB 重枚举属于 Source 端烧写 backend 的内部细节，
+不需要（也无法）由用户手工选择传输 backend。
+
+**Safety**：固件烧写属于破坏性操作。Agent 调用必须使用 Agent Service
+Token，并提供与目标设备集合、固件 SHA-256、`wipe_data`、`burn_mode`
+精确绑定的一次性 approval token；令牌只能消费一次，不能跨固件、设备或
+参数复用。
+
+Windows 来源主机需要 usbipd-win 4.2+，SSH 账号必须具有执行策略命令的
+管理员权限。需要手工排查时，可在管理员 PowerShell 中执行：
 
 ```powershell
 usbipd --version
@@ -1113,7 +1084,8 @@ Controller 与 Worker 不直接信任任意客户端拼出的 Shell `argv`；执
 - 固件资源管理
 - Firmware Share
 - Worker 固件传输
-- 烧录任务
+- 烧录任务（Rockchip update.img，`burn_mode=auto|uf`，详见
+  [Android 设备远程接入方案对比](#android-设备远程接入方案对比) 的固件烧写一节）
 - GSI 烧录
 - 烧录后等待设备重新上线
 - Fastboot / ADB 状态恢复检查
@@ -1127,7 +1099,9 @@ Worker 状态
 操作审计
 ```
 
-使用，避免多个用户同时操作同一物理设备。
+使用，避免多个用户同时操作同一物理设备。Agent 发起的烧写还必须携带与
+固件 SHA-256 和设备集合绑定的一次性 approval token（见安全模型的
+Agent Service Token 一节）。
 
 ---
 
@@ -1680,6 +1654,21 @@ gms-rt-system-selfcheck --json
 ```
 
 不要通过长期设置 insecure TLS 来掩盖 CA、证书 SAN 或网络配置问题。
+
+### 10. 设备串口显示权限不足或无法打开
+
+设备串口功能只访问 Controller 本机的 `/dev/ttyUSB*` 和 `/dev/ttyACM*`。
+确认运行 Web 服务的账号属于 `dialout` 组：
+
+```bash
+id
+ls -l /dev/ttyUSB0
+sudo usermod -aG dialout SERVICE_USER
+```
+
+加入组后需要重新登录或重启 Web 服务。若页面提示串口被占用，请先退出
+`picocom`、`minicom` 等独占该端口的程序。Rockchip 调试串口常用
+1500000 波特率，可在绑定窗口中修改。
 
 ---
 

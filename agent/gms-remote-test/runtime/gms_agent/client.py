@@ -66,11 +66,21 @@ def _load_token(token_path: Path) -> str:
     """
     try:
         path = token_path.expanduser()
-        mode = path.stat().st_mode & 0o777
-        if mode & 0o077:
+        stat = path.stat()
+        mode = stat.st_mode & 0o777
+        # 4.txt 审核其他项: parity with the CLI — permissions alone don't
+        # prove ownership; a group/world-readable 0600 file owned by
+        # another user (or a file planted in a shared directory) must be
+        # rejected exactly like the CLI rejects it.
+        if mode & 0o077 or (hasattr(os, "geteuid") and stat.st_uid != os.geteuid()):
             print(
-                f"Error: token file {path} 权限为 {oct(mode)}，要求 0600；"
-                "已拒绝读取（chmod 600 后重试）",
+                f"Error: token file {path} 权限为 {oct(mode)}"
+                + (
+                    f"，owner uid={stat.st_uid} 而非当前 uid={os.geteuid()}"
+                    if hasattr(os, "geteuid") and stat.st_uid != os.geteuid()
+                    else ""
+                )
+                + "；要求 0600 且属主为当前用户，已拒绝读取",
                 file=sys.stderr,
             )
             return ""

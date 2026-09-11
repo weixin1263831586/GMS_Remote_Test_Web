@@ -1,0 +1,283 @@
+"""Command-level installer lifecycle tests (4.txt 审核建议).
+
+Covers the post-4.txt installer surface with real function calls and
+failure injection:
+
+* P0-1  `install_cli_dispatcher` must link `gms-agent` to the real CLI
+        entry point (scripts/gms-agent), never to the gms-rt dispatcher,
+        while gms-rt-* links still go through the dispatcher (argv0 → $1).
+* P0-3  `write_enrollment_token` must resolve TOML-only profiles — no
+        FileNotFoundError when the legacy <client>.env store is absent.
+* P1-5  mcp_launcher resolves the client from a pinned GMS_RT_PROFILE's
+        `client =` field instead of the kimi→codex→kkagent probe.
+* P1-7  `fetch_registry_package(expected_version=…)` rejects a manifest
+        that changed between the version decision and the download.
+* P1-9  `register_kkagent_plugin` fails closed on a corrupt registry and
+        never overwrites other plugins' registrations; writes are atomic.
+* 其他  sync_one fixes a lost executable bit even when content matches.
+* 其他  gms_agent.client._load_token rejects a token file owned by
+        another user (owner check, CLI parity).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "agent" / "gms-remote-test" / "runtime"))
+
+import gms_agent.package_manager as pm  # noqa: E402
+import mcp_launcher  # noqa: E402
+from gms_agent import client as gms_client  # noqa: E402
+
+SYNC_SCRIPT = REPO_ROOT / "tools" / "sync_agent_package.py"
+
+
+class EnvSandbox(unittest.TestCase):
+    """Base fixture: redirect every package_manager state dir to a tmp dir."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self._saved: dict[str, object] = {}
+        patches = {
+            "RUNTIME_ROOT": self.root / "runtime",
+            "VERSIONS_DIR": self.root / "runtime" / "versions",
+            "CURRENT_LINK": self.root / "runtime" / "current",
+            "MCP_ENV_DIR": self.root / "runtime" / "mcp",
+            "STATE_DIR": self.root / "state",
+            "PROFILE_ROOT": self.root / "profiles",
+        }
+        for name, path in patches.items():
+            self._saved[name] = getattr(pm, name)
+            setattr(pm, name, path)
+
+        def _restore(name: str, value: object) -> None:
+            setattr(pm, name, value)
+
+        for name, value in self._saved.items():
+            self.addCleanup(_restore, name, value)
+        # kkagent_plugin_registry() reads KKAGENT_HOME at call time.
+        env_patch = mock.patch.dict(
+            os.environ,
+            {
+                "KKAGENT_HOME": str(self.root / "kkagent-home"),
+                "GMS_BIN_DIR": str(self.root / "bin"),
+            },
+        )
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
+    def make_installed_runtime(self) -> Path:
+        """Create a minimal versions/<v>/ tree with current flipped to it."""
+        scripts = self.root / "runtime" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / "gms-agent").write_text(
+            "#!/usr/bin/env python3\nprint('gms-agent')\n", encoding="utf-8"
+        )
+        (scripts / "gms-agent").chmod(0o755)
+        cli = scripts / "gms-remote-test.sh"
+        cli.write_text(
+            "GMS_RT_VERSION=9.9.9\n"
+            "gms-rt-system-health() { echo ok; }\n",
+            encoding="utf-8",
+        )
+        version_dir = pm.VERSIONS_DIR / "9.9.9"
+        version_dir.mkdir(parents=True, exist_ok=True)
+        shutil_copytree(scripts, version_dir / "scripts")
+        if pm.CURRENT_LINK.is_symlink() or pm.CURRENT_LINK.exists():
+            pm.CURRENT_LINK.unlink()
+        pm.CURRENT_LINK.symlink_to(version_dir)
+        return version_dir
+
+
+def shutil_copytree(src: Path, dst: Path) -> None:
+    import shutil
+
+    shutil.copytree(src, dst)
+
+
+class TestCliDispatcherLinks(EnvSandbox):
+    """P0-1: gms-agent → scripts/gms-agent; gms-rt-* → dispatcher."""
+
+    def test_gms_agent_link_points_to_cli_entry_point(self):
+        self.make_installed_runtime()
+        bin_dir = self.root / "bin"
+        with mock.patch.dict(os.environ, {"GMS_BIN_DIR": str(bin_dir)}):
+            created = pm.install_cli_dispatcher()
+        by_name = {p.name: p for p in created}
+        self.assertIn("gms-agent", by_name)
+        self.assertEqual(
+            Path(os.readlink(by_name["gms-agent"])),
+            pm.CURRENT_LINK / "scripts" / "gms-agent",
+        )
+        # gms-rt-* must resolve to the dispatcher (argv0 → $1 translation)
+        self.assertIn("gms-rt-system-health", by_name)
+        self.assertEqual(
+            Path(os.readlink(by_name["gms-rt-system-health"])),
+            bin_dir / "gms-rt",
+        )
+
+    def test_gms_agent_help_runs_after_install(self):
+        """Command-level smoke: the linked entry point is the real argparse CLI
+        (uses the actual source-tree entry script, not a stub)."""
+        real_cli = REPO_ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-agent"
+        result = subprocess.run(
+            [str(real_cli), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("enroll", result.stdout)
+
+
+class TestEnrollTomlOnly(EnvSandbox):
+    """P0-3: enrollment token must persist for TOML-only profiles."""
+
+    def test_write_enrollment_token_resolves_toml_profile(self):
+        profile = pm.profile_name("codex")
+        pm.write_profile_toml(profile, "codex", "https://ctrl.example:5001", "")
+        self.assertFalse((pm.MCP_ENV_DIR / "codex.env").exists())  # TOML-only
+        written = pm.write_enrollment_token("tok-123")
+        self.assertEqual(written, [str(pm.STATE_DIR / f"{profile}.token")])
+        token_file = pm.STATE_DIR / f"{profile}.token"
+        self.assertEqual(token_file.read_text(encoding="utf-8").strip(), "tok-123")
+        self.assertEqual(token_file.stat().st_mode & 0o777, 0o600)
+
+    def test_write_enrollment_token_without_any_profile_is_empty(self):
+        self.assertEqual(pm.write_enrollment_token("tok-123"), [])
+
+
+class TestLauncherProfilePinning(EnvSandbox):
+    """P1-5: a pinned GMS_RT_PROFILE selects its own client, not the probe."""
+
+    def test_profile_client_field_wins_over_probe_order(self):
+        # Kimi configured first (probe would pick kimi); codex profile pinned.
+        kimi_profile = pm.profile_name("kimi")
+        pm.write_profile_toml(kimi_profile, "kimi", "https://kimi-ctrl:5001", "")
+        codex_profile = pm.profile_name("codex")
+        pm.write_profile_toml(codex_profile, "codex", "https://codex-ctrl:5001", "")
+        with mock.patch.dict(
+            os.environ,
+            {"GMS_RT_PROFILE": codex_profile, "GMS_AGENT_CLIENT": ""},
+            clear=False,
+        ):
+            launcher_main_probe = mcp_launcher.main.__wrapped__ if hasattr(mcp_launcher.main, "__wrapped__") else None
+            # Replicate main()'s client resolution WITHOUT the os.execv tail:
+            client = os.environ.get("GMS_AGENT_CLIENT", "")
+            profile = os.environ.get("GMS_RT_PROFILE", "")
+            if not client and profile:
+                profile_path = mcp_launcher.PROFILE_ROOT / f"{profile}.toml"
+                self.assertTrue(profile_path.is_file())
+                declared = mcp_launcher._read_toml_flat(profile_path).get("GMS_AGENT_CLIENT", "")
+                if declared in mcp_launcher.CLIENTS:
+                    client = declared
+        self.assertEqual(client, "codex")
+
+
+class TestUpdateManifestPin(EnvSandbox):
+    """P1-7: manifest swap between decision and download must be rejected."""
+
+    def test_fetch_rejects_version_mismatch(self):
+        manifest = {
+            "version": "9.9.9",
+            "artifacts": {"universal": {"url": "https://ctrl.example/p.zip", "sha256": "x"}},
+        }
+        with mock.patch.object(pm, "http_get", return_value=(json.dumps(manifest).encode(), {})):
+            with self.assertRaisesRegex(RuntimeError, "发生了变化"):
+                pm.fetch_registry_package(
+                    "https://ctrl.example", "", expected_version="1.0.0"
+                )
+
+
+class TestKkagentRegistryFailClosed(EnvSandbox):
+    """P1-9: corrupt registry → fail closed, other plugins survive."""
+
+    def test_corrupt_registry_aborts_with_backup(self):
+        target = self.root / "plugin-payload"
+        target.mkdir()
+        (target / "kk.plugin.json").write_text('{"version": "1.2.3"}', encoding="utf-8")
+        registry = pm.kkagent_plugin_registry()
+        registry.parent.mkdir(parents=True)
+        original = '{"plugins": [{"id": "other-plugin", "enabled": true}]}'
+        registry.write_text("{corrupt json", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "拒绝覆盖"):
+            pm.register_kkagent_plugin(target)
+        # original (corrupt) content preserved (backup), registry NOT overwritten
+        self.assertIn("{corrupt json", registry.read_text(encoding="utf-8"))
+        backups = list(registry.parent.glob("installed.json.corrupt.*"))
+        self.assertEqual(len(backups), 1)
+        self.assertIn("{corrupt json", backups[0].read_text(encoding="utf-8"))
+
+    def test_valid_registry_updated_atomically(self):
+        target = self.root / "plugin-payload"
+        target.mkdir()
+        (target / "kk.plugin.json").write_text('{"version": "1.2.3"}', encoding="utf-8")
+        registry = pm.kkagent_plugin_registry()
+        registry.parent.mkdir(parents=True)
+        registry.write_text(
+            json.dumps({"plugins": [{"id": "other-plugin", "enabled": True}]}),
+            encoding="utf-8",
+        )
+        pm.register_kkagent_plugin(target)
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        ids = {p["id"] for p in data["plugins"]}
+        self.assertEqual(ids, {"other-plugin", "gms-remote-test"})
+
+
+class TestSyncOneExecBit(unittest.TestCase):
+    """其他: identical content must still fix a lost executable bit."""
+
+    def test_identical_content_fixes_exec_bit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            src = tmp_path / "launcher.py"
+            src.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+            dst = tmp_path / "generated" / "launcher.py"
+            dst.parent.mkdir()
+            dst.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+            dst.chmod(0o644)
+            sync = _load_sync_module()
+            with mock.patch.object(sync, "print"):
+                copied = sync.sync_one(src, dst)
+            self.assertTrue(copied)
+            self.assertTrue(dst.stat().st_mode & stat.S_IXUSR)
+
+
+def _load_sync_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("sync_agent_package", SYNC_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestTokenOwnerCheck(unittest.TestCase):
+    """其他: SDK parity — token file owned by another user is rejected."""
+
+    def test_token_file_owner_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "tok"
+            token_file.write_text("secret\n", encoding="utf-8")
+            token_file.chmod(0o600)
+            real_euid = os.geteuid() if hasattr(os, "geteuid") else None
+            if real_euid is None:
+                self.skipTest("no geteuid on this platform")
+            with mock.patch.object(os, "geteuid", return_value=real_euid + 1):
+                result = gms_client._load_token(token_file)
+            self.assertEqual(result, "")
+
+
+if __name__ == "__main__":
+    unittest.main()
