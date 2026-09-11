@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to configs/build_servers.json for local deployment. Hosts, users and workspaces below are placeholders; passwords come from environment variables.",
+  "_comment": "Copy to configs/local/build_servers.json for local deployment. Hosts, users and workspaces below are placeholders; passwords come from environment variables.",
   "servers": [
     {
       "id": "example-build-server",

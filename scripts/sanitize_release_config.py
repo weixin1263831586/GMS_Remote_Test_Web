@@ -121,7 +121,7 @@ def sanitize_cluster_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def sanitize_named_config(path: Path, raw: Any) -> Any:
-    if path.name == "config.json" and path.parent.name == "configs":
+    if path.name == "config.json" and path.parent.name in {"configs", "local"}:
         return sanitize_product_config(raw if isinstance(raw, dict) else {})
     if path.name == "automation_profiles.json":
         return {"profiles": []}
@@ -133,14 +133,20 @@ def sanitize_named_config(path: Path, raw: Any) -> Any:
 
 
 def _example_for(path: Path) -> Path | None:
-    """Tracked example twin for a deployment-local config (2026-08-27 audit)."""
+    """Find a grouped template, retaining compatibility with older release trees."""
     examples = {
         "config.json": "config.example.json",
         "automation_profiles.json": "automation_profiles.example.json",
         "build_servers.json": "build_servers.example.json",
+        "cluster.json": "cluster.example.json",
     }
     example = examples.get(path.name)
-    return path.with_name(example) if example else None
+    if not example:
+        return None
+    root = path.parent.parent if path.parent.name == "local" else path.parent
+    canonical = root / "examples" / example
+    legacy = root / example
+    return legacy if not canonical.is_file() and legacy.is_file() else canonical
 
 
 def sanitize_file(path: Path) -> None:
@@ -149,6 +155,7 @@ def sanitize_file(path: Path) -> None:
         # 让发布包仍带完整脱敏默认值。
         example = _example_for(path)
         if example and example.is_file():
+            path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(example, path)
             sanitize_file(path)
             return
@@ -169,7 +176,7 @@ def main(argv: list[str]) -> int:
         return 2
     for value in argv[1:]:
         path = Path(value)
-        if path.is_file():
+        if path.is_file() or _example_for(path) is not None:
             sanitize_file(path)
     return 0
 

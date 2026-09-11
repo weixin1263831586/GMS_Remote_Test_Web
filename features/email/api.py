@@ -25,8 +25,9 @@ router = APIRouter()
 
 # SMTP 凭证存放在 redmine 配置树；组合根在启动时注入按请求解析 manager 的 provider。
 _manager_provider = None
-# R04/R13：报告附件解析能力由组合根注入（features/reports 提供），email
+# 报告附件解析能力由组合根注入（features/reports 提供），email
 # 不反向 import reports——否则闭合 email→reports→redmine→email 依赖环。
+# See docs/architecture/adr/0002-feature-foundation-boundary.md.
 _attachment_resolver = None
 
 
@@ -67,7 +68,7 @@ async def send_email_endpoint(request: Request):
     if content is None:
         return error_response("body is required", status_code=400)
 
-    # R04: 客户端路径型附件（attachment_paths）已下线——路径不能证明所有权。
+    # 客户端路径型附件（attachment_paths）已下线——路径不能证明所有权。
     if body.get("attachment_paths"):
         return error_response(
             "attachment_paths is no longer accepted; pass attachment_report_ids",

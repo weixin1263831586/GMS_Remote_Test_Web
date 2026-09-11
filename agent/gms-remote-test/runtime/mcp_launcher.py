@@ -7,7 +7,7 @@ shell involvement from the single authoritative source:
 
     ~/.config/gms-agent/profiles/<profile>.toml   (authoritative, 0600)
 
-12.txt P1 (profile single source of truth): the legacy
+Profile single source of truth: the legacy
 ``~/.local/share/gms-remote-test/mcp/<client>.env`` fallback and the
 "first existing profile/env among kimi, codex, kkagent" probe were removed.
 With codex-A → Controller A / codex-B → Controller B, a filesystem-glob
@@ -15,6 +15,11 @@ first-match is not an Agent routing policy — it silently picked the wrong
 Controller. The client/profile must now be declared by the caller (MCP
 registration env block or GMS_AGENT_PROFILE); an undeclared launch fails
 with actionable guidance instead of guessing.
+See docs/architecture/adr/0003-agent-profile-store.md.
+
+Profile storage/parsing/selection live in
+``gms_agent/profile_store.py`` — the one implementation shared with the
+package lifecycle; this launcher keeps only the MCP env mapping.
 
 Selection order:
   1. $GMS_AGENT_CLIENT (set by the plugin manifest env block)
@@ -29,7 +34,6 @@ refuses to register password tools without it.
 from __future__ import annotations
 
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -37,11 +41,13 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-CLIENTS = ("kimi", "codex", "kkagent")
-PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
-PROFILE_ROOT = Path(
-    os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
-) / "gms-agent" / "profiles"
+from gms_agent import profile_store  # noqa: E402
+
+
+CLIENTS = profile_store.CLIENTS
+# Diagnostics/tests re-export; the live lookup always goes through
+# profile_store (patch gms_agent.profile_store.PROFILE_ROOT in sandboxes).
+PROFILE_ROOT = profile_store.PROFILE_ROOT
 
 
 def _apply_env(values: dict[str, str]) -> None:
@@ -50,37 +56,16 @@ def _apply_env(values: dict[str, str]) -> None:
             os.environ[key] = value
 
 
-def _read_toml_flat(path: Path) -> dict[str, str]:
-    """Minimal TOML reader → flat {ENV_NAME: value} mapping."""
-    section = ""
-    data: dict[str, dict[str, str]] = {"": {}}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            section = line[1:-1].strip()
-            data.setdefault(section, {})
-            continue
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-            value = value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
-        data[section][key] = value
-    top = data.get("", {})
-    controller = data.get("controller", {})
-    auth = data.get("auth", {})
+def _env_mapping(flat: dict[str, str]) -> dict[str, str]:
+    """Profile TOML flat view → MCP runtime environment variables."""
     mapping: dict[str, str] = {
-        "GMS_RT_PROFILE": top.get("profile", ""),
-        "GMS_AGENT_CLIENT": top.get("client", ""),
-        "GMS_REMOTE_TEST_SERVER": controller.get("url", ""),
-        "GMS_CURL_CA_CERT": controller.get("ca_cert", ""),
-        "GMS_AUTH_TOKEN_FILE": auth.get("token_file", ""),
+        "GMS_RT_PROFILE": flat.get("profile", ""),
+        "GMS_AGENT_CLIENT": flat.get("client", ""),
+        "GMS_REMOTE_TEST_SERVER": flat.get("url", ""),
+        "GMS_CURL_CA_CERT": flat.get("ca_cert", ""),
+        "GMS_AUTH_TOKEN_FILE": flat.get("token_file", ""),
     }
-    if controller.get("insecure", "").lower() == "true":
+    if flat.get("insecure", "").lower() == "true":
         mapping["GMS_CURL_INSECURE"] = "1"
     return {k: v for k, v in mapping.items() if v}
 
@@ -88,19 +73,19 @@ def _read_toml_flat(path: Path) -> dict[str, str]:
 def load_named_profile(profile: str, expected_client: str = "") -> bool:
     """Load exactly one named profile, optionally checking its client."""
 
-    if not PROFILE_NAME_RE.fullmatch(profile):
+    if not profile_store.validate_profile_name(profile):
         print(f"mcp_launcher: invalid profile name: {profile!r}", file=sys.stderr)
         return False
-    candidate = PROFILE_ROOT / f"{profile}.toml"
+    candidate = profile_store.profile_path(profile)
     if not candidate.is_file():
         print(f"mcp_launcher: profile not found: {candidate}", file=sys.stderr)
         return False
     try:
-        values = _read_toml_flat(candidate)
+        flat = profile_store.load_profile(profile)
     except OSError as exc:
         print(f"mcp_launcher: cannot read profile {candidate}: {exc}", file=sys.stderr)
         return False
-    declared_client = values.get("GMS_AGENT_CLIENT", "")
+    declared_client = flat.get("client", "")
     if expected_client and declared_client != expected_client:
         print(
             f"mcp_launcher: profile {profile!r} belongs to "
@@ -108,23 +93,22 @@ def load_named_profile(profile: str, expected_client: str = "") -> bool:
             file=sys.stderr,
         )
         return False
-    _apply_env(values)
+    _apply_env(_env_mapping(flat))
     return True
 
 
 def profile_candidates(client: str) -> list[Path]:
     """Return deterministic profile candidates for one client."""
 
-    if not PROFILE_ROOT.is_dir():
-        return []
-    return sorted(PROFILE_ROOT.glob(f"{client}-*.toml"))
+    return profile_store.profile_candidates(client)
 
 
 def load_profile(client: str) -> bool:
     """Load the sole profile for a client; fail closed when ambiguous."""
 
     candidates = profile_candidates(client)
-    if len(candidates) != 1:
+    selected = profile_store.resolve_profile(client)
+    if selected is None:
         if candidates:
             names = ", ".join(path.stem for path in candidates)
             print(
@@ -135,21 +119,19 @@ def load_profile(client: str) -> bool:
         else:
             print(f"mcp_launcher: no profile found for client {client}", file=sys.stderr)
         return False
-    return load_named_profile(candidates[0].stem, client)
+    return load_named_profile(selected.stem, client)
 
 
 def _client_from_profile(profile: str) -> str:
     """Read the ``client =`` field out of <profile>.toml (fail closed)."""
-    if not PROFILE_NAME_RE.fullmatch(profile):
-        return ""
-    profile_path = PROFILE_ROOT / f"{profile}.toml"
-    if not profile_path.is_file():
+
+    if not profile_store.validate_profile_name(profile):
         return ""
     try:
-        declared = _read_toml_flat(profile_path).get("GMS_AGENT_CLIENT", "")
-        return declared if declared in CLIENTS else ""
+        declared = profile_store.load_profile(profile).get("client", "")
     except OSError:
         return ""
+    return declared if declared in CLIENTS else ""
 
 
 def main() -> int:
@@ -172,7 +154,7 @@ def main() -> int:
             "mcp_launcher: no agent client/profile declared. Set "
             "GMS_AGENT_CLIENT (kimi/codex/kkagent) or GMS_RT_PROFILE / "
             "GMS_AGENT_PROFILE in the MCP registration env block; the "
-            "first-match filesystem probe was removed (12.txt P1).",
+            "first-match filesystem probe was removed.",
             file=sys.stderr,
         )
         return 2
@@ -186,7 +168,7 @@ def main() -> int:
         ):
             return 2
 
-    # 15.txt 审核 P1-1: FORCE service-token — setdefault() let an ambient
+    # FORCE service-token: setdefault() let an ambient
     # GMS_AGENT_AUTH_MODE=human/password from the parent shell leak through
     # and re-enable the password/elevation tools. Agents must never run in
     # password mode even if the profile is missing. GMS_AGENT_PROCESS=1 is

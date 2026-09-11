@@ -1,6 +1,6 @@
 """第二轮评审回归测试：device identity / uploader ordering / claim borrow。
 
-覆盖 4.txt 第二轮评审要求的核心边界用例：
+第二轮评审沉淀的核心边界用例：
 
 - 含 ":" 的 serial（ADB TCP / ADB Proxy / 跨 Worker 前缀）在
   startTest 校验与 workspace normalize 中不被误判为 Worker 前缀；

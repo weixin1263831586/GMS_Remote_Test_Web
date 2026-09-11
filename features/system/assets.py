@@ -12,6 +12,7 @@ import shlex
 import stat
 import urllib.parse
 from datetime import datetime
+from pathlib import Path
 
 import aiohttp
 from fastapi import APIRouter, Depends, Query, Request
@@ -23,6 +24,7 @@ from features.system.ssh import ssh_manager
 from features.users import get_client_display_id_from_request, get_client_id_from_request
 from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, TOOLS_DATA_FILE, config_manager
 from foundation.errors import handle_api_errors
+from foundation.private_config import write_private_json
 from foundation.responses import error_response, success_response
 
 from .utility_tools_api import (
@@ -250,7 +252,7 @@ async def search_opengrok(
     base_url = str(opengrok_config.get('base_url') or '').strip()
     project = str(opengrok_config.get('default_project') or '').strip()
     if not base_url or not project:
-        return error_response('OpenGrok未配置，请在configs/config.json中配置opengrok段', status_code=404)
+        return error_response('OpenGrok未配置，请在configs/local/config.json中配置opengrok段', status_code=404)
 
     search_url = _build_opengrok_search_url(base_url, project, query, full)
     results = []
@@ -392,9 +394,7 @@ def load_tools_data():
 
 def save_tools_data(tools_data):
     try:
-        os.makedirs(os.path.dirname(TOOLS_DATA_FILE), exist_ok=True)
-        with open(TOOLS_DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(tools_data, f, indent=4, ensure_ascii=False)
+        write_private_json(Path(TOOLS_DATA_FILE), tools_data)
         return True
     except Exception as e:
         logger.error(f"[ToolsData] Error saving tools data: {e}")

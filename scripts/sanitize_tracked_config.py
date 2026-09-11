@@ -6,14 +6,21 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from foundation.config_paths import secret_environment_path, static_config_path
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / 'configs/config.json'
-DEFAULT_RUNTIME_PATH = PROJECT_ROOT / 'configs/runtime.json'
+DEFAULT_CONFIG_PATH = static_config_path(PROJECT_ROOT)
+DEFAULT_RUNTIME_PATH = secret_environment_path(PROJECT_ROOT)
 PLACEHOLDER_RE = re.compile(r'^\$\{[A-Za-z_][A-Za-z0-9_]*(?::[^}]*)?\}$')
 
 KNOWN_SECRET_ENV = {
@@ -123,6 +130,10 @@ def sanitize_config(
         if current is None:
             continue
         if _is_literal(current):
+            if runtime.get(env_name) not in (None, '', str(current)):
+                env_name = f'{env_name}_STATIC_CONFIG'
+                if runtime.get(env_name) not in (None, '', str(current)):
+                    raise ValueError(f'Conflicting secret reference: {env_name}')
             if not str(runtime.get(env_name) or '').strip():
                 runtime[env_name] = str(current)
                 migrated += 1
@@ -132,7 +143,7 @@ def sanitize_config(
             sanitized += 1
 
     _atomic_write_json(runtime_path, runtime, 0o600)
-    _atomic_write_json(config_path, config, 0o644)
+    _atomic_write_json(config_path, config, 0o600)
     return migrated, sanitized
 
 
@@ -140,9 +151,9 @@ def main() -> int:
     migrated, sanitized = sanitize_config()
     print(
         f'Sanitized {sanitized} tracked secret field(s); '
-        f'migrated {migrated} literal value(s) to configs/runtime.json.'
+        f'migrated {migrated} literal value(s) to configs/secrets/environment.json.'
     )
-    print('No secret values were printed. configs/runtime.json is mode 0600.')
+    print('No secret values were printed. Both configuration files are mode 0600.')
     return 0
 
 

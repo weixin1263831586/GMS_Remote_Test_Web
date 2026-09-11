@@ -301,8 +301,24 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
             )
             visible_modals = document.locator('.modal.show').count()
             if visible_modals:
+                # Leak diagnosis: identify exactly which dialog(s) survived
+                # the Escape + closeTopmost cleanup, with computed display
+                # state so a stale class vs. real visibility is obvious.
+                leak_details = document.evaluate(
+                    """
+                    () => [...document.querySelectorAll('.modal.show')].map(
+                        x => ({
+                            id: x.id || '(no id)',
+                            className: x.className,
+                            display: getComputedStyle(x).display,
+                            ariaHidden: x.getAttribute('aria-hidden'),
+                        })
+                    )
+                    """
+                )
                 raise AssertionError(
-                    f"{inventory['page']} button left {visible_modals} modal(s) open: {button}"
+                    f"{inventory['page']} button left {visible_modals} "
+                    f"modal(s) open: {button}; leaking modals: {leak_details}"
                 )
             results.append({**button, 'status': 'clicked' if clicked.get('clicked') else clicked.get('reason', 'not_clicked')})
         return results

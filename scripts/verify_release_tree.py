@@ -115,6 +115,12 @@ def verify_release_tree(root: Path) -> list[str]:
     for path in root.rglob("*"):
         relative = path.relative_to(root)
         relative_text = relative.as_posix()
+        if relative_text == "configs/secrets" or relative_text.startswith("configs/secrets/"):
+            findings.append(f"private configuration: {relative}")
+            continue
+        if relative_text in {"configs/local/environment.json", "configs/local/deployment.json", "configs/local/layout.json"}:
+            findings.append(f"deployment configuration: {relative}")
+            continue
         if any(part in DENIED_COMPONENTS for part in relative.parts):
             findings.append(f"denied path: {relative}")
             continue

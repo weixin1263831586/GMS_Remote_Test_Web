@@ -114,7 +114,7 @@ async def get_status(
                             with contextlib.suppress(Exception):
                                 await ws.send_json(usb_event)
 
-                        # R26: values are sets of sockets since the multi-tab
+                        # Values are sets of sockets since the multi-tab
                         # migration; iterate flattened (client, socket) pairs.
                         await asyncio.gather(*[_send_usb_event(cid, ws) for cid, ws in iter_websocket_targets()])
                 except _queue.Empty:
@@ -191,7 +191,7 @@ _ACTIVE_JOB_STATUSES = {
 
 
 def _active_durable_job_for_owner(client_id: str):
-    """Return the owner's active durable job (R33), or None.
+    """Return the owner's active durable job, or None.
 
     The legacy log stream used to read only the in-process ``user_state``;
     durable Worker jobs never write there, so this legacy endpoint streamed
@@ -217,7 +217,7 @@ def _active_durable_job_for_owner(client_id: str):
 
 
 def _resolve_stream_job(request: Request, client_id: str):
-    """R33: resolve the durable job this legacy stream should bridge to.
+    """Resolve the durable job this legacy stream should bridge to.
 
     Precedence: explicit ``job_id`` query parameter, then the owner's most
     recent active job. A recently finished explicit job is still streamed
@@ -250,7 +250,7 @@ async def stream_test_logs(request: Request):
     async def log_stream():
         try:
             last_log_count = 0
-            # R33: bridge to the durable job event source when a job is
+            # Bridge to the durable job event source when a job is
             # resolved (explicit job_id or the owner's active job); fall
             # back to the legacy in-process user_state stream for
             # process-local runs that predate durable jobs.
@@ -271,7 +271,7 @@ async def stream_test_logs(request: Request):
                     }
                     # Drain ALL pages before exiting on a terminal status:
                     # list_events is paginated (default 1000); stopping at
-                    # the first page truncated the log tail (R33).
+                    # the first page truncated the log tail.
                     while True:
                         events = repository.list_events(
                             job_id, after=event_sequence, limit=1000,
@@ -317,7 +317,7 @@ async def stream_test_logs(request: Request):
                     yield "=== Test complete ===\n"
                     break
 
-                # R33: the legacy fallback used to spin forever when a
+                # The legacy fallback used to spin forever when a
                 # finished local run never produced logs; idle_timeout
                 # bounds the wait so consumers are not left hanging.
                 if not running:

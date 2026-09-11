@@ -15,9 +15,10 @@ from .locks import device_lock_manager
 def _owned_local_device_keys(owner_id: str, device_keys: list[str]) -> dict[str, dict]:
     """Return the caller's active claims for the requested devices.
 
-    Used for the devices.use_leased semantics (R10): a plain user without
+    Used for the devices.use_leased semantics: a plain user without
     devices.lease may only act on devices they already hold via a claim,
     reservation or running job — matching the cluster device-actions API.
+    See docs/architecture/adr/0001-controller-worker-boundary.md.
     """
     owned: dict[str, dict] = {}
     try:
@@ -32,11 +33,11 @@ def _owned_local_device_keys(owner_id: str, device_keys: list[str]) -> dict[str,
     return owned
 
 
-# R10: claims a concurrent operation may BORROW instead of acquiring a new
-# one. Only long-lived holder states qualify — borrowing another in-flight
-# operation's claim let two parallel mutations share one lifecycle: when
-# the first finished it released the claim while the second was still
-# executing, and neither had an independent source_id.
+# Source types whose claims a concurrent operation may BORROW instead of
+# acquiring a new one. Only long-lived holder states qualify — borrowing
+# another in-flight operation's claim let two parallel mutations share one
+# lifecycle: when the first finished it released the claim while the second
+# was still executing, and neither had an independent source_id.
 _BORROWABLE_SOURCE_TYPES = {"cluster-reservation", "cluster-job"}
 
 
@@ -80,7 +81,7 @@ def acquire_device_operation_claim(
     if not devices:
         return "", [], None
     device_keys = [device_lock_manager._device(item)["device_key"] for item in devices]
-    # R10 devices.use_leased semantics — same contract as the cluster
+    # devices.use_leased semantics — same contract as the cluster
     # device-actions API: a plain user (no devices.lease permission) may
     # only act on devices they ALREADY hold through a claim, reservation
     # or running job; free devices require a device operator. Previously
@@ -106,7 +107,7 @@ def acquire_device_operation_claim(
                 },
                 status_code=403,
             )
-    # R10 borrow semantics: a device held by THIS owner through a
+    # Borrow semantics: a device held by THIS owner through a
     # reservation or running job is reused (its fencing token carries the
     # holder's generation); a device held by another in-flight OPERATION
     # is NOT borrowed — concurrent operations get independent claims and

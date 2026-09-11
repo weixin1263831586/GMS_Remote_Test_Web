@@ -386,7 +386,7 @@ async function uploadFileRegular(file, url, options = {}) {
 }
 
 /**
- * 带管理员提权恢复的分片上传（15.txt 审核 P2：从 firmware-burn.js 抽出，
+ * 带管理员提权恢复的分片上传（从 firmware-burn.js 抽出为独立模块，
  * 该页因此超出了前端尺寸预算）。大文件分片上传可能超过 30 分钟的管理员
  * 提权 TTL：过期后分片请求返回 403 elevation_required，此处弹框（由调用
  * 方通过 onReElevate 提供）重新提权后按断点续传重试一次，已上传分片不

@@ -20,13 +20,15 @@ class ClusterClaimRepositoryMixin:
         return None
 
     def _physical_alias_keys(self, device_key: str) -> list[str]:
-        """R01: every claim key that routes to the same physical device.
+        """Every claim key that routes to the same physical device.
 
         An ADB-Proxy alias row carries adb_proxy_source_worker_id /
         adb_proxy_source_serial pointing at the source worker's local-USB
         row; claiming through either route must contend for the same
         physical hardware. Returns the requested key itself plus every
         alias key found in the current inventory.
+
+        See docs/architecture/adr/0001-controller-worker-boundary.md.
         """
         alias_keys = [device_key]
         with self.connect() as conn:
@@ -79,7 +81,7 @@ class ClusterClaimRepositoryMixin:
                     value if value.startswith(f"{worker_id}:")
                     else f"{worker_id}:{value}"
                 )
-                # R01: claim the requested alias AND its physical sibling
+                # Claim the requested alias AND its physical sibling
                 # keys in the same atomic acquire, so an operation claim on
                 # the source device conflicts with a job on the proxy alias
                 # (and vice versa) instead of letting both run at once.
@@ -132,7 +134,7 @@ class ClusterClaimRepositoryMixin:
         if not expected:
             return False
         source_id = f"job:{job_id}"
-        # R03: 任务占用的物理 claim 集合包含 ADB Proxy alias 的源设备 key
+        # 任务占用的物理 claim 集合包含 ADB Proxy alias 的源设备 key
         # （_claim_devices 建任务时同时占用了 proxy 和源端两个 key）。
         # 续租必须覆盖全集：只按 device_leases 里的目标 key 续租会让源端
         # claim 在一个 TTL 后过期，另一用户即可通过本地固件锁入口抢到

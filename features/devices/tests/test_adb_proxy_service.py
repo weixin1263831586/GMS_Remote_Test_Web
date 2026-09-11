@@ -463,7 +463,7 @@ async def test_connect_adds_remaining_device_to_existing_assignment():
 
 @pytest.mark.asyncio
 async def test_connect_restore_replays_new_generation_instead_of_stale_one():
-    """R04: when target_connect fails with a previous assignment present,
+    """When target_connect fails with a previous assignment present,
     the restore commands must carry the NEW generation — replaying the
     stale one is always rejected by the worker's staleness check."""
     repository = _Repository()
@@ -842,7 +842,7 @@ async def test_connect_rejects_worker_with_legacy_default_allow_proxy():
 
 
 def test_guards_block_operation_claimed_devices_with_available_state():
-    """R03: an operation claim can coexist with state='available'.  Both
+    """An operation claim can coexist with state='available'.  Both
     proxy guards must treat any active claim as busy, not just the
     protocol-state fields."""
     from fastapi import HTTPException as _HTTPException
@@ -870,7 +870,7 @@ def test_guards_block_operation_claimed_devices_with_available_state():
 
 @pytest.mark.asyncio
 async def test_disconnect_blocks_when_other_assignment_devices_claimed():
-    """R02: target_disconnect restarts the shared Hub, so disconnecting one
+    """target_disconnect restarts the shared Hub, so disconnecting one
     source must also verify the OTHER assignments' devices on the same
     target are claim-free."""
     run = AsyncMock(side_effect=[

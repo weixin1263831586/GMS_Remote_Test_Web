@@ -13,7 +13,7 @@ class ReleasePackagingTests(unittest.TestCase):
     def test_tracked_product_config_uses_runtime_secret_placeholders(self):
         # 真实 config.json 不入库；example 是随源码携带的静态默认值。
         config = json.loads(
-            Path("configs/config.example.json").read_text(encoding="utf-8")
+            Path("configs/examples/config.example.json").read_text(encoding="utf-8")
         )
 
         self.assertEqual(config["ubuntu_pswd"], "${GMS_UBUNTU_PASSWORD:}")
@@ -23,15 +23,26 @@ class ReleasePackagingTests(unittest.TestCase):
             config["ai_models"]["providers"]["glm_local"]["api_key"],
             "${GMS_LOCAL_AI_API_KEY:}",
         )
-        # 11.txt P1-2: zhipu provider 已下线（config.example.json 只保留
+        # zhipu provider 已下线（config.example.json 只保留
         # glm_local），测试断言与配置契约同步，而不是反向恢复键。
 
         runtime_example = json.loads(
-            Path("configs/runtime.example.json").read_text(encoding="utf-8")
+            Path("configs/examples/runtime.example.json").read_text(encoding="utf-8")
         )
         for key, value in runtime_example.items():
-            if any(marker in key for marker in ("PASSWORD", "KEY", "TOKEN")):
+            # Secret VALUE keys must be empty in the tracked
+            # example, but *_FILE keys are file PATHS (e.g. the Ed25519
+            # signing key location), not secret material — they may carry a
+            # ${PROJECT_ROOT} placeholder instead of being blank.
+            if not key.endswith("_FILE") and any(
+                marker in key for marker in ("PASSWORD", "KEY", "TOKEN", "SECRET")
+            ):
                 self.assertEqual(value, "", key)
+            elif key.endswith("_FILE"):
+                # A *_FILE value is a path (possibly a ${PROJECT_ROOT}
+                # placeholder) — it must never inline secret material.
+                self.assertNotIn("-----BEGIN", value, key)
+                self.assertNotIn("\n", value, key)
 
     def test_install_script_declares_product_runtime_and_sensitive_exclusions(self):
         source = Path("install.sh").read_text(encoding="utf-8")
@@ -126,6 +137,30 @@ class ReleasePackagingTests(unittest.TestCase):
                 (destination / "tools/gms-worker-native/dist/x86_64/gms-process-inventory").is_file()
             )
             self.assertFalse((destination / "tools/gms-worker-native/target").exists())
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync is required")
+    def test_config_copy_whitelist_excludes_unknown_secrets_and_preserves_destination(self):
+        installer = Path("install.sh").read_text(encoding="utf-8").rsplit('main "$@"', 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target = root / "source", root / "target"
+            for relative in (
+                "configs/examples/config.example.json", "configs/examples/private.example.json",
+                "configs/config.json.bak", "configs/secrets/environment.json", "configs/local/config.json",
+            ):
+                path = source / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}", encoding="utf-8")
+            local = target / "configs/local/config.json"
+            local.parent.mkdir(parents=True)
+            local.write_text('{"preserve": true}', encoding="utf-8")
+            command = installer + '\nrsync -a --delete "${CONFIG_RSYNC_FILTERS[@]}" "$1/" "$2/"\n'
+            subprocess.run(["bash", "-c", command, "config-copy-test", str(source), str(target)], check=True, capture_output=True)
+            self.assertEqual(json.loads(local.read_text()), {"preserve": True})
+            self.assertTrue((target / "configs/examples/config.example.json").is_file())
+            self.assertFalse((target / "configs/examples/private.example.json").exists())
+            self.assertFalse((target / "configs/config.json.bak").exists())
+            self.assertFalse((target / "configs/secrets/environment.json").exists())
 
     def test_installer_adds_limited_networkmanager_policy_for_service_user(self):
         installer = Path("install.sh").read_text(encoding="utf-8")

@@ -29,7 +29,7 @@ from .schema import initialize_auth_schema
 AUTH_COOKIE_NAME = "gms_session"
 PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
-# 11.txt P3-1: fixed dummy hash for the unknown-username login branch —
+# Fixed dummy hash for the unknown-username login branch —
 # precomputed once at import (format matches _verify_password's parser) so
 # that branch runs exactly one PBKDF2 like the known-user branch.
 _UNKNOWN_USER_DUMMY_HASH = "$".join((
@@ -251,7 +251,7 @@ class AuthService(
                 ((username or "").strip(),),
             ).fetchone()
         if not row:
-            # 11.txt P3-1: run ONE fixed-salt dummy PBKDF2 verify for unknown
+            # Run ONE fixed-salt dummy PBKDF2 verify for unknown
             # users so the response time matches the known-user path and the
             # endpoint stops leaking username existence through timing. The
             # hash is precomputed at import: verifying (1 PBKDF2) mirrors the

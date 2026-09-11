@@ -71,7 +71,7 @@ def upload_temp_root(namespace: str = "gms_uploads") -> str:
 def safe_upload_token(value: str) -> str:
     """Sanitize an untrusted upload/session id into a path-safe token.
 
-    11.txt P2-1: upload ids flow from multipart form data straight into
+    Upload ids flow from multipart form data straight into
     os.path.join() staging paths; without this whitelist an id like
     ``../../x`` escapes the upload root. Untrusted shapes are rewritten to a
     deterministic safe token (both firmware and terminal chunk pipelines

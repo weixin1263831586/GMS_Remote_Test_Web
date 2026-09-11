@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to configs/config.json for local deployment and fill secrets via configs/runtime.json env entries or a real environment. Never commit the real copy.",
+  "_comment": "Copy to configs/local/config.json for local deployment and fill secrets via configs/secrets/environment.json env entries or a real environment. Never commit the real copy.",
   "ubuntu_user": "${UBUNTU_USER:operator}",
   "ubuntu_host": "${UBUNTU_HOST:192.0.2.10}",
   "ubuntu_pswd": "${GMS_UBUNTU_PASSWORD:}",

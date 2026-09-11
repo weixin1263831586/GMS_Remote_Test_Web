@@ -391,7 +391,7 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     config_path = root / "hub.toml"
     # Validate the requested generation BEFORE mutating any state file:
     # rejecting a stale request after rewriting hub.toml left the config
-    # polluted with a backend for a stale source (R05).
+    # polluted with a backend for a stale source.
     state = _read_json(root / "target.json")
     requested_generation = int(payload.get("generation") or 0)
     current_import = next((
@@ -765,7 +765,7 @@ def _force_kill_adb_port(port: int) -> None:
     (the exact scenario that triggers the protocol fault). Use ``fuser`` to
     forcefully clear the port so adb-hub can bind cleanly.
 
-    R02: the previous ``fuser -k PORT/tcp`` killed EVERY process with a
+    The previous ``fuser -k PORT/tcp`` killed EVERY process with a
     socket on the port — including outbound client connections from
     unrelated tooling. Restrict the kill to processes that OWN a listening
     socket bound to the loopback address the managed hub uses, so foreign

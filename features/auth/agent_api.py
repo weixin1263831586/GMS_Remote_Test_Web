@@ -32,7 +32,7 @@ async def auth_agent_scopes(
     request: Request,
     user: CurrentUser = Depends(require_authenticated_user_when_auth_required),
 ):
-    """Scope 目录（11.txt 中优先级 §4）。
+    """Scope 目录。
 
     scope 名单本身不敏感（静态字典），对任何已认证 principal 开放只读，
     让 agent 遇到 403 时能自查缺哪个 scope；管理操作（创建/吊销 token）
@@ -41,7 +41,7 @@ async def auth_agent_scopes(
     scopes = dict(AGENT_SCOPES)
     # granted 必须来自 request.state（get_authenticated_user 把 token 记录
     # 写在那里），CurrentUser dataclass 上没有该属性——从 user 对象取永远
-    # 为空，agent 无法自查实际拥有的 scope（11.txt 中优先级 §4）。
+    # 为空，agent 无法自查实际拥有的 scope。
     record = getattr(request.state, "agent_token_record", None) if user is not None else None
     granted = [
         name for name in str((record or {}).get("scopes") or "").split(",") if name
@@ -125,7 +125,7 @@ async def auth_agent_enroll(request: Request, req: dict):
     the same persistent limiter the login endpoint uses (code review
     2026-08: the endpoint must not rely on TTL/one-shot alone).
     """
-    # 11.txt P2: use the trusted-proxy-aware resolver — behind nginx/Traefik
+    # Use the trusted-proxy-aware resolver — behind nginx/Traefik
     # every enrollment would otherwise share the proxy's IP and one build
     # server's failures rate-limit all the others.
     from foundation.networking import get_client_ip
@@ -186,13 +186,13 @@ async def auth_create_approval_token(request: Request, req: dict):
         )
     required, _description = _APPROVAL_TOOLS[tool]
     if required == "elevated_admin":
-        # 4.txt P1d：烧录审批必须二次认证（step-up）。admin 角色本身不能
+        # 烧录审批必须二次认证（step-up）。admin 角色本身不能
         # 绕过提权——必须存在活的提权会话才能签发烧录审批。
         if not is_elevated(request):
             return error_response("烧录审批需要管理员提权会话", status_code=403)
     try:
         if tool == auth_service.BURN_TOOL:
-            # 4.txt P1 精确绑定：烧录审批绑定 固件SHA256 + wipe_data +
+            # 精确绑定：烧录审批绑定 固件SHA256 + wipe_data +
             # burn_mode + 规范化设备列表，命令串由服务端派生，客户端传入
             # 的 command 字段被忽略。
             record = auth_service.create_approval_token(
@@ -234,7 +234,7 @@ async def auth_consume_approval_token(request: Request, req: dict):
     if tool not in _APPROVAL_TOOLS:
         return error_response(f"未知工具: {tool}", status_code=400)
     if tool == auth_service.BURN_TOOL:
-        # 4.txt P1 精确绑定：burn 消费时命令串同样由服务端从
+        # 精确绑定：burn 消费时命令串同样由服务端从
         # 固件SHA256+wipe_data+burn_mode+设备列表派生；客户端传来的
         # command 字段不参与匹配，伪造的 command 无法通过校验。
         try:

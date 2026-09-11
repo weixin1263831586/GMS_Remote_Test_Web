@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-# In the source tree (11.txt) this test lives under agent/gms-remote-test/
+# In the source tree this test lives under agent/gms-remote-test/
 # tests/ and imports the runtime from agent/gms-remote-test/runtime; the
 # synced copy under plugins/gms-remote-test/tests/ uses scripts/.
 _TEST_DIR = Path(__file__).resolve().parent
@@ -204,7 +204,7 @@ class RunCliTests(unittest.TestCase):
         self.assertEqual(payload["ok"], False)
 
     def test_run_cli_oversized_envelope_stays_valid_json(self):
-        """R17: an envelope larger than MAX_OUTPUT_BYTES must still parse as
+        """An envelope larger than MAX_OUTPUT_BYTES must still parse as
         JSON after adapter trimming — the old head/tail text cut produced
         invalid JSON with is_error=False (silently corrupted data)."""
         import subprocess as _subprocess
@@ -950,7 +950,7 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
 
 
 class AsyncBurnOperationTests(unittest.TestCase):
-    """wait=false 后台烧录（15.txt §十一）：start → operation_id → status。"""
+    """wait=false 后台烧录：start → operation_id → status。"""
 
     def setUp(self):
         _reset_catalog_cache()
@@ -1068,7 +1068,7 @@ class ShellToolGateTests(unittest.TestCase):
             "settings get secure user_setup_complete",
             "ls /system/etc",
             "pidof com.google.android.setupwizard",
-            # 11.txt §3: ONE restricted pipe — readonly head, filter tail.
+            # ONE restricted pipe — readonly head, filter tail.
             "dumpsys window | grep focus",
             "getprop | grep build",
             "ps -A | wc -l",
@@ -1078,7 +1078,7 @@ class ShellToolGateTests(unittest.TestCase):
             self.assertTrue(allowed, f"{cmd!r} should be allowed: {reason}")
 
     def test_gate_pipe_restrictions(self):
-        """11.txt §3: pipe is single, tail-filtered, and fully validated."""
+        """Pipe is single, tail-filtered, and fully validated."""
         for cmd in (
             "getprop | grep x | wc -l",      # more than one pipe
             "getprop | sh",                  # tail not a filter binary
@@ -1115,7 +1115,7 @@ class ShellToolGateTests(unittest.TestCase):
         self.assertIn("command", out)
 
     def test_gate_denies_mutating_variants_found_by_audit(self):
-        """R12: token-exact flag matching and the narrow dumpsys blacklist
+        """Token-exact flag matching and the narrow dumpsys blacklist
         let real mutating commands through the read-only gate."""
         for cmd in (
             "dumpsys battery set level 1",           # 'set' not in old blacklist
@@ -1204,7 +1204,7 @@ class LogcatToolTests(unittest.TestCase):
             self.assertIn("denied", out)
 
     def test_logcat_clear_true_is_denied(self):
-        # 10.txt §六: clearing the log buffer destroys CTS/GTS diagnostic
+        # Clearing the log buffer destroys CTS/GTS diagnostic
         # evidence, so the MCP tool refuses clear=true in every spelling;
         # clearing is a human CLI step (logcat -c).
         for value in (True, "true"):
@@ -1410,15 +1410,42 @@ class ApkToolTests(unittest.TestCase):
         captured = self._capture_run()
         mcp_server.apk_search_tool({"task_id": "T1", "query": "Permission", "limit": 999})
         self.assertEqual(captured["args"], ["T1", "Permission", "--limit", "50"])
+        mcp_server.apk_search_tool({
+            "task_id": "T1", "query": "onCreate", "mode": "symbol",
+            "path": "com/example", "line": 42,
+        })
+        self.assertEqual(
+            captured["args"],
+            ["T1", "onCreate", "--mode", "symbol", "--path", "com/example", "--line", "42"],
+        )
 
-    def test_source_view_flag(self):
+    def test_search_rejects_unknown_mode(self):
+        text, is_error = mcp_server.apk_search_tool({
+            "task_id": "T1", "query": "x", "mode": "bogus",
+        })
+        self.assertTrue(is_error)
+        self.assertIn("mode", text)
+
+    def test_manifest_permissions_flag(self):
+        captured = self._capture_run()
+        mcp_server.apk_manifest_tool({"task_id": "T1"})
+        self.assertEqual(captured["args"], ["T1"])
+        mcp_server.apk_manifest_tool({"task_id": "T1", "permissions": True})
+        self.assertEqual(captured["args"], ["T1", "--permissions"])
+
+    def test_source_view_routes_to_source_read(self):
         captured = self._capture_run()
         mcp_server.apk_source_tool({
             "task_id": "T1", "path": "com/example/A.java", "view": True,
         })
-        self.assertEqual(
-            captured["args"], ["T1", "com/example/A.java", "--view"],
-        )
+        self.assertEqual(captured["command"], "gms-rt-apk-source-read")
+        self.assertEqual(captured["args"], ["T1", "com/example/A.java"])
+        text, is_error = mcp_server.apk_source_tool({"task_id": "T1", "view": True})
+        self.assertTrue(is_error)
+        self.assertIn("path", text)
+        mcp_server.apk_source_tool({"task_id": "T1", "path": "com/example"})
+        self.assertEqual(captured["command"], "gms-rt-apk-source")
+        self.assertEqual(captured["args"], ["T1", "com/example"])
 
     def test_registered_in_tools_and_handlers(self):
         names = {tool["name"] for tool in mcp_server.tools()}
@@ -1573,7 +1600,7 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         })
         self.assertEqual(
             captured["args"],
-            ["T1", "AssertionError", "--path", "com/example"],
+            ["T1", "AssertionError", "--mode", "content", "--path", "com/example"],
         )
         mcp_server.apk_source_read_tool({
             "task_id": "T1", "path": "a.java", "offset": 5, "limit": 50,
@@ -1608,7 +1635,7 @@ class RedmineEvidenceToolTests(unittest.TestCase):
 
 
 class ServiceTokenBoundaryTests(unittest.TestCase):
-    """15.txt 审核 P1-1: the tool-catalog boundary is service-token mode.
+    """The tool-catalog boundary is service-token mode.
 
     mcp_launcher.py must FORCE GMS_AGENT_AUTH_MODE (a plain setdefault let
     an ambient auth-mode variable from the parent shell re-enable the

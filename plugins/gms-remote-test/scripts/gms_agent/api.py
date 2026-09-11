@@ -1,4 +1,4 @@
-"""Namespace modules for the gms_agent SDK (10.txt §五, Phase 2).
+"""Namespace modules for the gms_agent SDK.
 
 Each module is a thin, typed façade over one Controller domain. They return
 the raw API payload (the ``data`` field of the CLI envelope) and raise

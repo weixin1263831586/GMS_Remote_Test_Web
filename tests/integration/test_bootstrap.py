@@ -52,7 +52,7 @@ class BootstrapTests(unittest.TestCase):
             create_app()
 
     def test_production_requires_agent_package_signing_key(self):
-        """15.txt 审核 P2: production must fail closed without an Ed25519
+        """Production must fail closed without an Ed25519
         agent-package signing key — SHA-only serving is dev-only fallback."""
         import tempfile
 

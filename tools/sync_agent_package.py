@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""sync_agent_package.py — generate plugins/gms-remote-test from agent/ (11.txt §二).
+"""sync_agent_package.py — generate plugins/gms-remote-test from agent/.
 
-The single generation rule of the agent package system (11.txt):
+The single generation rule of the agent package system:
 
     agent/gms-remote-test/   Source      — the ONLY hand-edited tree
     plugins/gms-remote-test/ Generated   — produced by this tool, never edited
@@ -24,7 +24,8 @@ preserved by the prune step.
 
 The tool also enforces:
   * six-way version contract (package.yaml / CLI / MCP / three manifests)
-  * R16 same-version content guard (a version never silently changes content)
+  * same-version content guard (a version never silently changes content);
+    See docs/architecture/adr/0003-agent-profile-store.md.
 
 Usage:
     python tools/sync_agent_package.py [repo_root]
@@ -65,7 +66,7 @@ def read_version(path: Path, pattern: str) -> str:
 def sync_one(source: Path, target: Path) -> bool:
     """Copy when changed; returns True when a copy happened.
 
-    4.txt 审核其他项: an early return on identical content used to leave a
+    Historically, an early return on identical content used to leave a
     WRONG executable bit unfixed forever (e.g. the manifests exec
     ./scripts/mcp_launcher.py directly, but a chmod had been lost on the
     generated side). Even when content matches, mirror the executable bit
@@ -90,7 +91,7 @@ def sync_one(source: Path, target: Path) -> bool:
 
 
 def _is_executable_source(source: Path) -> bool:
-    """11.txt 审核 P0-4: the manifests exec ./scripts/mcp_launcher.py
+    """The manifests exec ./scripts/mcp_launcher.py
     directly, so shebang-carrying .py launchers must keep the executable
     bit in the generated tree (not just .sh / extension-less files)."""
     if source.suffix == ".sh" or not source.suffix:
@@ -130,7 +131,7 @@ def prune_stale(plugin_dir: Path, expected: set[str]) -> list[str]:
 
 
 def r16_guard(root: Path, source: Path, version: str, pattern: str, label: str) -> None:
-    """A version must never silently change content (10.txt §二十一)."""
+    """A version must never silently change content."""
     try:
         result = subprocess.run(
             ["git", "-C", str(root), "show", f"HEAD:{source.relative_to(root).as_posix()}"],
@@ -154,7 +155,7 @@ def r16_guard(root: Path, source: Path, version: str, pattern: str, label: str) 
 
 
 def r16_tree_guard(root: Path, source_dir: Path, version: str, label: str) -> None:
-    """Whole-tree same-version content guard (11.txt 审核 P1).
+    """Whole-tree same-version content guard.
 
     ``r16_guard`` above only compares two anchor files; a same-version
     change to ANY other payload file (package_manager.py, mcp_launcher.py,
@@ -272,7 +273,9 @@ def main() -> int:
             print(f"  {name}: {value}{marker}", file=sys.stderr)
         fail(f"version drift against package.yaml {package_version}; fix with tools/release_agent.py")
 
-    # --- R16 same-version content guard ---------------------------------
+    # --- same-version content guard --------------------------------------
+    # A version must never silently change payload content.
+    # See docs/architecture/adr/0003-agent-profile-store.md.
     in_git = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
         capture_output=True, text=True,
@@ -282,7 +285,7 @@ def main() -> int:
                   r'^GMS_RT_VERSION="([^"]+)"$', "gms-remote-test.sh")
         r16_guard(root, runtime / "mcp_server.py", mcp_version,
                   r'^SERVER_VERSION = "([^"]+)"$', "mcp_server.py")
-        # 11.txt 审核 P1: the anchor checks above only cover two files; this
+        # The anchor checks above only cover two files; this
         # whole-tree guard closes the same-version drift hole for every
         # other payload file (package_manager.py, mcp_launcher.py, skill,
         # manifests, docs …).
@@ -318,7 +321,7 @@ def main() -> int:
     # docs → plugin root
     sync_one(docs / "README.md", plugin_dir / rel_plugin("README.md"))
     sync_one(docs / "AGENTS.md", plugin_dir / rel_plugin("AGENTS.md"))
-    # 11.txt P0-2: the agent playbook is part of the published payload —
+    # The agent playbook is part of the published payload —
     # without this line the playbook only ever exists in the source tree
     # and agents downloading from the registry never see it.
     sync_one(docs / "AGENT_PLAYBOOK.md", plugin_dir / rel_plugin("docs", "AGENT_PLAYBOOK.md"))

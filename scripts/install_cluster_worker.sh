@@ -10,7 +10,7 @@ WORKER_ID="$1"
 CONTROLLER_URL="$2"
 TOKEN_ARG="$3"
 CONTROLLER_CERT="$4"
-# 11.txt P3-3: TOKEN_ARG may be the literal token (legacy) or the path of a
+# TOKEN_ARG may be the literal token (legacy) or the path of a
 # 0600 file uploaded next to the archive (preferred — keeps the secret out
 # of the remote process argv, where same-host users could read it via ps).
 if [[ -r "${TOKEN_ARG}" && -f "${TOKEN_ARG}" && $(stat -c '%s' "${TOKEN_ARG}") -lt 4096 ]]; then
@@ -98,12 +98,21 @@ mkdir -p "${INSTALL_ROOT}" "${CONFIG_ROOT}" "${UNIT_ROOT}" \
     "${HOME}/.cache/gms-worker/pycache" "${HOME}/gms-worker-data" \
     "${SOFTWARE_ROOT}/GMS-Host-Tools"
 
-if [[ ! -d "${HOST_TOOLS_SOURCE}/jdk-11" ]]; then
-    echo "Missing bundled host tools directory: jdk-11" >&2
+# JDK 11 与 platform-tools 不再进 Git（ADR 仓库卫生策略）：缺失时经
+# scripts/prepare_gms_host_tools.sh 从配置的制品 URL 下载并强校验 SHA-256
+# （GMS_HOST_TOOLS_JDK_URL / GMS_HOST_TOOLS_JDK_SHA256，见
+# tools/GMS-Host-Tools/manifest.json）。
+if [[ ! -x "${HOST_TOOLS_SOURCE}/jdk-11/bin/java" ]] || \
+        [[ ! -f "${HOST_TOOLS_SOURCE}/platform-tools-gms-linux.zip" ]]; then
+    echo "Provisioning host tools (jdk-11 / platform-tools) from artifact URLs..." >&2
+    "${PROJECT_ROOT}/scripts/prepare_gms_host_tools.sh" "${PROJECT_ROOT}"
+fi
+if [[ ! -x "${HOST_TOOLS_SOURCE}/jdk-11/bin/java" ]]; then
+    echo "jdk-11 provisioning failed; set GMS_HOST_TOOLS_JDK_URL and GMS_HOST_TOOLS_JDK_SHA256" >&2
     exit 1
 fi
 if [[ ! -f "${HOST_TOOLS_SOURCE}/platform-tools-gms-linux.zip" ]]; then
-    echo "Missing bundled host tools archive: platform-tools-gms-linux.zip" >&2
+    echo "platform-tools provisioning failed; check GMS_HOST_TOOLS_PLATFORM_URL" >&2
     exit 1
 fi
 
@@ -111,20 +120,22 @@ fi
 rm -rf "${SOFTWARE_ROOT}/jdk-11" "${SOFTWARE_ROOT}/platform-tools"
 rsync -a "${HOST_TOOLS_SOURCE}/jdk-11/" "${SOFTWARE_ROOT}/jdk-11/"
 
-# 合并仓库中的 JDK 模块分片。
+# 兼容两种形态：仓库分片 modules.part.*（历史部署）或完整 modules 文件
+# （prepare_gms_host_tools.sh 下载形态）。
 python3 - "${SOFTWARE_ROOT}/jdk-11/lib" <<'PY'
 import sys
 from pathlib import Path
 
 lib_dir = Path(sys.argv[1])
 parts = sorted(lib_dir.glob("modules.part.*"))
-if not parts:
-    raise SystemExit("Missing JDK module chunks: modules.part.*")
-with (lib_dir / "modules").open("wb") as output:
+if parts:
+    with (lib_dir / "modules").open("wb") as output:
+        for part in parts:
+            output.write(part.read_bytes())
     for part in parts:
-        output.write(part.read_bytes())
-for part in parts:
-    part.unlink()
+        part.unlink()
+elif not (lib_dir / "modules").is_file():
+    raise SystemExit("Missing JDK modules and modules.part.*")
 PY
 python3 "${PROJECT_ROOT}/scripts/extract_zip_preserve_mode.py" \
     "${HOST_TOOLS_SOURCE}/platform-tools-gms-linux.zip" "${SOFTWARE_ROOT}"
@@ -134,10 +145,11 @@ install -m 755 "${HOST_TOOLS_SOURCE}/verify.sh" \
     "${SOFTWARE_ROOT}/GMS-Host-Tools/verify.sh"
 install -m 644 "${HOST_TOOLS_SOURCE}/README.md" \
     "${SOFTWARE_ROOT}/GMS-Host-Tools/README.md"
-# 同步 scrcpy 到 Controller 配置使用的路径。
-rsync -a --delete \
-    "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4/" \
-    "${SOFTWARE_ROOT}/scrcpy-linux-x86_64-v3.3.4/"
+# scrcpy 以 tarball 分发（e48: 解压二进制已移出 Git），安装时解包，
+# 保持与 Controller 配置一致的路径。
+rm -rf "${SOFTWARE_ROOT}/scrcpy-linux-x86_64-v3.3.4"
+tar -xzf "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4.tar.gz" \
+    -C "${SOFTWARE_ROOT}"
 install -m 600 "${GTS_CREDENTIAL_FILE}" \
     "${SOFTWARE_ROOT}/gts-rockchip.json"
 
@@ -179,8 +191,9 @@ install -m 755 "${PROJECT_ROOT}/tools/upgrade_tool" \
     "${INSTALL_ROOT}/tools/upgrade_tool"
 install -m 644 "${PROJECT_ROOT}/tools/misc.img" \
     "${INSTALL_ROOT}/tools/misc.img"
-rsync -a --delete "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4/" \
-    "${INSTALL_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4/"
+rm -rf "${INSTALL_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4"
+tar -xzf "${PROJECT_ROOT}/tools/scrcpy-linux-x86_64-v3.3.4.tar.gz" \
+    -C "${INSTALL_ROOT}/tools"
 for platform_tool in adb fastboot; do
     install -m 755 "${SOFTWARE_ROOT}/platform-tools/${platform_tool}" \
         "${INSTALL_ROOT}/tools/${platform_tool}"

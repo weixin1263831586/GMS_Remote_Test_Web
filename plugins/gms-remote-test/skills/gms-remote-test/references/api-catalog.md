@@ -51,7 +51,7 @@ human user in their own shell.
 | Devices | `gms-rt-devices-list`, `gms-rt-devices-info`, `gms-rt-devices-console`, `gms-rt-devices-wait`, `gms-rt-devices-reboot`, `gms-rt-devices-remount`, `gms-rt-devices-shell`, `gms-rt-devices-logcat`, `gms-rt-devices-push`, `gms-rt-devices-wifi`, `gms-rt-devices-scrcpy`, `gms-rt-devices-screencap`, `gms-rt-devices-ui-dump`, `gms-rt-devices-snapshot`, `gms-rt-devices-user-locked` |
 | Bootloader | `gms-rt-devices-bootloader-lock`, `gms-rt-devices-bootloader-unlock`, `gms-rt-devices-bootloader-status` |
 | Reports | `gms-rt-reports-list`, `gms-rt-reports-analyze`, `gms-rt-reports-download`, `gms-rt-reports-delete` |
-| APK analysis | `gms-rt-apk-resolve`, `gms-rt-apk-analyze`, `gms-rt-apk-status`, `gms-rt-apk-tasks`, `gms-rt-apk-manifest`, `gms-rt-apk-permissions`, `gms-rt-apk-source`, `gms-rt-apk-search`, `gms-rt-apk-definition`, `gms-rt-apk-download`, `gms-rt-apk-analyze-attachment`, `gms-rt-apk-source-search`, `gms-rt-apk-source-read` |
+| APK analysis | `gms-rt-apk-resolve`, `gms-rt-apk-analyze`, `gms-rt-apk-status`, `gms-rt-apk-manifest`, `gms-rt-apk-source`, `gms-rt-apk-search`, `gms-rt-apk-download`, `gms-rt-apk-analyze-attachment`, `gms-rt-apk-source-read` |
 | Desktop and terminal | `gms-rt-desktop-validate`, `gms-rt-desktop-vnc-start`, `gms-rt-desktop-vnc-status`, `gms-rt-desktop-vnc-stop`, `gms-rt-terminal-open`, `gms-rt-terminal-push` |
 | Firmware | `gms-rt-burn-firmware`, `gms-rt-burn-gsi`, `gms-rt-burn-serial` |
 | Connectivity | `gms-rt-ssh-ping`, `gms-rt-ssh-route`, `gms-rt-ssh-sshd`, `gms-rt-vpn-connect`, `gms-rt-vpn-disconnect`, `gms-rt-vpn-status`, `gms-rt-usbip-install`, `gms-rt-usbip-connect`, `gms-rt-usbip-disconnect`, `gms-rt-usbip-status`, `gms-rt-adb-forward-status`, `gms-rt-adb-forward-start`, `gms-rt-adb-forward-stop` |
@@ -77,8 +77,11 @@ Related commands intentionally have different contracts:
 - `gms-rt-jobs-events` returns raw incremental events,
   `gms-rt-jobs-follow` combines status/events/failure summary, and
   `gms-rt-jobs-wait` blocks until a terminal state.
-- `gms-rt-apk-search` searches filenames; `gms-rt-apk-source-search` searches
-  decompiled file contents.
+- `gms-rt-apk-search` is the single lookup surface: `--mode name` searches
+  filenames, `--mode content` searches decompiled file contents, and
+  `--mode symbol` locates a Java symbol definition.
+- `gms-rt-apk-status` without a task id lists all analysis tasks;
+  `gms-rt-apk-manifest --permissions` returns only declared permissions.
 
 ## Redmine evidence workflow (read-only, 2026-09-08 plan)
 
@@ -109,7 +112,7 @@ gms-rt-artifact-read ART --offset 0 --limit 65536 --json --non-interactive
 # 7. Optional: import an .apk artifact into JADX, then search its source
 gms-rt-apk-analyze-attachment SNAP ART --json --non-interactive
 gms-rt-apk-status TASK --json --non-interactive
-gms-rt-apk-source-search TASK --query 'testMethod' --json --non-interactive
+gms-rt-apk-search TASK 'testMethod' --mode content --json --non-interactive
 gms-rt-apk-source-read TASK com/example/Test.java --offset 0 --limit 400 --json --non-interactive
 
 # 8. Bind SDK conclusions to an exact commit (admin-configured sources)

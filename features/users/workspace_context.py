@@ -35,7 +35,7 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@/+-]*$")
 
 
 def _is_tcp_serial(value: str) -> bool:
-    """R18: structural adb TCP-serial detection, not prefix guessing.
+    """Structural adb TCP-serial detection, not prefix guessing.
 
     A TCP serial is exactly ``host:port`` where host is an IPv4 literal, an
     IPv6 literal (possibly bracketed), or a hostname without colons, and
@@ -178,7 +178,7 @@ def save_workspace_context(owner_id: str, patch: WorkspaceContextPatch) -> dict:
             current["worker_id"] = local_worker_id
             current["device_ids"] = [
                 value for value in current.get("device_ids", [])
-                # R18: a colon means either a worker namespace prefix
+                # a colon means either a worker namespace prefix
                 # ("worker:serial") or a TCP serial ("10.0.0.5:5555").
                 # Strip only foreign worker prefixes; TCP serials without
                 # the local worker prefix must survive the single-mode save.

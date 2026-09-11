@@ -480,9 +480,10 @@ class WorkerRuntime:
         work_dir = self.config.data_root / "jobs" / (command.get("job_id") or command["id"]) / (command.get("attempt_id") or "1")
         work_dir.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
-        # R01: 与 Controller 共用白名单再过滤一次。正常流量已在入队前
+        # 与 Controller 共用白名单再过滤一次。正常流量已在入队前
         # 校验，这里防御伪造/回放的 command payload——BASH_ENV 等键一旦
         # 进入 Bash 包装即等同于任意代码执行。
+        # 参见 docs/architecture/adr/0001-controller-worker-boundary.md。
         payload_env, dropped_env_keys = _filter_job_env(payload.get("env"))
         if dropped_env_keys:
             logger.warning(

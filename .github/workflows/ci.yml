@@ -1,8 +1,6 @@
 name: CI
 
-# 门禁流程（对应 2026-08 代码审核第五节的最低门禁建议 + 2026-08-27 凭据泄漏评审
-# + 10.txt §二十八：门禁拆分为并行 job，Agent Package gate 不再被无关
-# UI/单测失败连坐跳过）：
+# 门禁流程（并行 job 拆分：Agent Package gate 不再被无关 UI/单测失败连坐跳过）：
 #   secret-scan ─┐
 #   lint ────────┤
 #   unit ────────┤
@@ -125,13 +123,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-      - name: Agent plugin gate (2026-09-08 audit §一 + 11.txt)
+      - name: Agent plugin gate
         # plugins/gms-remote-test is a generated release payload synced from
-        # agent/gms-remote-test (single source of truth, 11.txt) with a
+        # agent/gms-remote-test (single source of truth) with a
         # six-way version contract (package.yaml / three manifests / CLI /
         # MCP). The git diff covers the WHOLE plugin directory, so a stale
-        # MCP or skill copy can no longer sneak into main (10.txt §十六).
-        # 11.txt 审核 P1-9：生成树的测试也必须运行——其 scripts/ 布局、
+        # MCP or skill copy can no longer sneak into main.
+        # 生成树的测试也必须运行——其 scripts/ 布局、
         # launcher 可执行位与自包含性只有在这套测试里才被覆盖。两个测试树
         # 的文件同名，必须分开两次 pytest 调用收集。
         run: |
@@ -139,7 +137,7 @@ jobs:
           git diff --exit-code -- plugins/gms-remote-test/
           python -m pytest agent/gms-remote-test/tests -q
           python -m pytest plugins/gms-remote-test/tests -q
-      - name: Agent package lifecycle + registry contract (10.txt §三十六)
+      - name: Agent package lifecycle + registry contract
         # install/update/rollback/bootstrap lifecycle, single-root ZIP
         # contract between the registry and the release builder.
         run: |
@@ -184,11 +182,11 @@ jobs:
           RESULTS: ${{ toJSON(needs.*.result) }}
         run: |
           echo "Gate results: ${RESULTS}"
-          # 11.txt 审核 P1-8：旧的 `grep -Ev '"(success|skipped)"'` 对单行
+          # 旧的 `grep -Ev '"(success|skipped)"'` 对单行
           # JSON 无效——只要整行含 "success" 就会被整体过滤，掩盖真实失败
           # （["success","failure"] 被判通过）。改为逐元素精确判定。
           fail=0
-          # 4.txt 审核其他项: "every gate green" means success — a skipped
+          # "every gate green" means success — a skipped
           # gate (e.g. its `if:` skipped the job after an earlier failure)
           # used to count as green and masked the failure. Only `success`
           # is acceptable; anything else (including skipped/cancelled) fails.

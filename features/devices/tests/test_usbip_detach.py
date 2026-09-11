@@ -190,7 +190,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
         self.assertEqual(detached, ["00"])
 
     def test_failed_detach_with_failed_confirmation_is_not_detached(self):
-        """R07: when both the detach and the follow-up port listing fail,
+        """When both the detach and the follow-up port listing fail,
         the port state is unknown — it must NOT be reported as detached."""
         manager = _fake_ssh_manager({
             "sudo -n /usr/bin/usbip port": (PORT_LISTING, "", 0),
@@ -217,7 +217,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
         self.assertEqual(detached, [])
 
     def test_usbip_attached_ports_returns_none_on_query_failure(self):
-        """R07: a failed listing is 'unknown', not 'no ports attached'."""
+        """A failed listing is 'unknown', not 'no ports attached'."""
         from features.devices.usbip_transaction import usbip_attached_ports
 
         ssh_manager = MagicMock()

@@ -228,7 +228,7 @@ notification_store = NotificationStore(
 async def safe_websocket_send(client_id: str, message: dict):
     """线程安全地发送WebSocket消息（带背压检查）。
 
-    R26: a client may have several live sockets; deliver to every one so a
+    A client may have several live sockets; deliver to every one so a
     second tab on the same account stops losing push notifications.
     """
     with global_state.websocket_connections_lock:

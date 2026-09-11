@@ -1,4 +1,4 @@
-"""Agent Service Token burn authorization tests (15.txt 缺陷1 regression).
+"""Agent Service Token burn authorization tests (regression).
 
 `/api/burn/firmware` used to depend on require_elevated_admin_when_auth_required,
 which reads the *cookie* session elevation table. An Agent Service Token
@@ -67,7 +67,7 @@ class FakeSshManager:
                 stdout="__GMS_REMOTE_FILE_MISSING__\n", stderr="", code=0,
             )
         if "sha256sum" in cmd:
-            # R06: agent burn digest is computed on the test host against
+            # agent burn digest is computed on the test host against
             # the exact remote_firmware bytes (not the Controller FS).
             import hashlib as _h
 
@@ -190,13 +190,13 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
             response.json(),
             {"success": False, "error": "Firmware not found: /tmp/not-found.img"},
         )
-        # 审批令牌按 tool+规范化设备列表 被服务端一次性消费（4.txt P0-3），
-        # 绑定串包含固件 SHA256（4.txt P1 精确绑定；此处路径不存在，
+        # 审批令牌按 tool+规范化设备列表 被服务端一次性消费，
+        # 绑定串包含固件 SHA256（精确绑定；此处路径不存在，
         # consume 在固件解析之后，所以这里根本不会到达 consume）。
         consume.assert_not_called()
 
     def test_agent_multi_device_burn_consumes_one_operation_approval(self):
-        """4.txt P0-3 回归：多设备烧录只消费一次 operation 级审批。
+        """回归：多设备烧录只消费一次 operation 级审批。
 
         旧实现按设备循环 consume，第二个设备必失败（single use）。新实现
         对规范化（排序去重后逗号连接）设备列表做一次性绑定+消费。
@@ -222,7 +222,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
         consume.assert_not_called()
 
     def test_agent_burn_approval_binds_firmware_digest_and_params(self):
-        """4.txt P1 精确绑定回归：approval 绑定 固件SHA256+wipe+mode。
+        """精确绑定回归：approval 绑定 固件SHA256+wipe+mode。
 
         固件文件存在（临时文件），服务端必须对它的实际字节计算 SHA256 并
         用服务端派生的 operation 串消费审批，而不是客户端传入的任何串。

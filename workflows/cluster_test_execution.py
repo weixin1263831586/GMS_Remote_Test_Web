@@ -71,7 +71,7 @@ def _resolve_test_module(tools_path: str, module: str, worker_id: str = "") -> s
 
     Returns an error message ("" when the module is acceptable).  Only runs
     for the LOCAL Worker and only when the testcases directory exists on the
-    local filesystem.  R19: a remote Worker may have a suite at the same
+    local filesystem.  A remote Worker may have a suite at the same
     path with different modules — validating it against the Controller's
     local files rejected valid remote modules (HTTP 400).  Remote Worker
     suites are passed through unchanged; the Worker executes what its own
@@ -166,7 +166,7 @@ def start_cluster_test(request: Any, client_id: str):
     except Exception as exc:  # HTTPException from the shared builder
         detail = getattr(exc, "detail", None) or str(exc)
         return error_response(str(detail), 400)
-    # Transport compatibility applies to EVERY job entry point (R08):
+    # Transport compatibility applies to EVERY job entry point:
     # /api/cluster/jobs runs this check via jobs_api, but /api/test/start
     # previously skipped it, letting ADB Proxy devices receive tests that
     # require a physical USB/Fastboot channel.
@@ -223,7 +223,7 @@ def start_cluster_test(request: Any, client_id: str):
     except ValueError as exc:
         return error_response(str(exc), 409)
     try:
-        # R09: shared dispatch helper (idempotent per attempt) with the
+        # Shared dispatch helper (idempotent per attempt) with the
         # same compensation contract as /api/cluster/jobs.
         command = repository.dispatch_job_start_command(
             job,
@@ -238,11 +238,12 @@ def start_cluster_test(request: Any, client_id: str):
                                  "worker_id": request.worker_id},
                                 message="Distributed test queued")
     except Exception as exc:
-        # R09: job and dispatch command are committed separately.  Without
+        # Job and dispatch command are committed separately.  Without
         # compensation, a command-write failure left an `assigned` job with
         # zero dispatchable commands and active claims; no watchdog covered
         # that state.  Fail the job and release its claims so callers can
         # retry cleanly.
+        # See docs/architecture/adr/0001-controller-worker-boundary.md.
         logger.exception(
             "Dispatch command commit failed for job %s; compensating", job["id"]
         )

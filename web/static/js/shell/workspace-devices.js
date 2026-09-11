@@ -220,7 +220,7 @@ function applyClusterMode(enabled) {
     updateClusterToggleUI(enabled);
 }
 
-// R20: single cleanup used by BOTH switchTestWorker and toggleClusterMode.
+// Single cleanup used by BOTH switchTestWorker and toggleClusterMode.
 // The mode toggle previously skipped job/attempt/testStopping/sessionStorage
 // cleanup, so switching modes left the previous host's active-job state
 // attached to the new context.
@@ -253,7 +253,17 @@ async function toggleClusterMode() {
         applyClusterMode(enabled);
         clearActiveTestContext();
         if (enabled) {
-            await loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
+            const directoryRefreshes = [
+                loadClusterWorkers(true).catch(error =>
+                    debugLog('[Cluster] Worker list unavailable:', error)),
+            ];
+            if (typeof window.refreshClusterHostDirectory === 'function') {
+                directoryRefreshes.push(
+                    window.refreshClusterHostDirectory(true).catch(error =>
+                        debugLog('[Cluster] Host directory unavailable:', error))
+                );
+            }
+            await Promise.all(directoryRefreshes);
             showToast('已切换到集群模式', 'success');
         } else {
             showToast('已切换到单机模式', 'success');
@@ -832,7 +842,7 @@ async function refreshTestSuites() {
 function renderTestSuitesDropdown() {
     const selectElement = document.getElementById('test-suite');
 
-    // R22: capture the user's current selection BEFORE clearing the DOM.
+    // Capture the user's current selection BEFORE clearing the DOM.
     // The old order (innerHTML='' → autoSelectTestSuite) left the select
     // empty when the guard ran, so currentTestSuiteStillValid('') was
     // always false and every refresh re-selected the newest version
@@ -893,5 +903,4 @@ function renderTestSuitesDropdown() {
         autoSelectTestSuite(currentTestType);
     }
 }
-
 

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import threading
+from contextlib import nullcontext
+from pathlib import Path
 from typing import Any
+
+from foundation.private_config import write_private_json
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +38,7 @@ class ConfigPersistenceMixin:
     ) -> bool:
         """Atomically merge selected top-level runtime keys."""
         try:
-            with self._runtime_write_lock:
+            with self._runtime_write_lock, self._runtime_transaction():
                 runtime = self._load_runtime_config() or {}
                 runtime.update(dict(updates or {}))
                 for key in remove_keys or set():
@@ -55,11 +57,19 @@ class ConfigPersistenceMixin:
         preserve_redmine_auth: bool = True,
     ) -> bool:
         payload = dict(runtime_config or {})
-        with self._runtime_write_lock:
+        with self._runtime_write_lock, self._runtime_transaction():
             if preserve_redmine_auth and 'redmine_auth' not in payload:
                 existing = self._load_runtime_config()
                 if existing and 'redmine_auth' in existing:
                     payload['redmine_auth'] = existing['redmine_auth']
+            if self._uses_runtime_store():
+                try:
+                    self._runtime_store.write(payload)
+                    self.invalidate_cache()
+                    return True
+                except Exception as exc:
+                    logger.error('Error writing partitioned runtime config: %s', type(exc).__name__)
+                    return False
             return self._write_config_json(
                 self.runtime_config_path,
                 payload,
@@ -72,23 +82,15 @@ class ConfigPersistenceMixin:
         payload: dict[str, Any],
         label: str,
     ) -> bool:
-        temporary = f'{path}.{os.getpid()}.{threading.get_ident()}.tmp'
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
             with self._runtime_write_lock:
-                with open(temporary, 'w', encoding='utf-8') as handle:
-                    json.dump(payload, handle, indent=4, ensure_ascii=False)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, path)
+                write_private_json(Path(path), payload)
             logger.info('Saved %s to %s', label, path)
             self.invalidate_cache()
             return True
         except Exception as exc:
             logger.error('Error writing %s: %s', label, exc)
             return False
-        finally:
-            try:
-                os.remove(temporary)
-            except OSError:
-                pass
+
+    def _runtime_transaction(self):
+        return self._runtime_store.locked() if self._uses_runtime_store() else nullcontext()

@@ -2,7 +2,7 @@
 
 Both consumers MUST build the distribution archive through this module so
 the served bytes and the released artifact can never drift apart
-(10.txt §七/§八: "ZIP 构建只能有一个实现"):
+("ZIP 构建只能有一个实现"):
 
   * features/system/agent_package_registry.py (Controller registry)
   * tools/build_agent_package.py (release builder)
@@ -67,8 +67,8 @@ def payload_files(plugin_dir: Path, client: str = "universal") -> list[tuple[Pat
 def _archive_mode(path: Path) -> int:
     # Executable bit: shell scripts, extension-less executables (gms-agent)
     # and any file carrying a POSIX shebang (mcp_launcher.py is executed
-    # DIRECTLY as "./scripts/mcp_launcher.py" by the plugin manifests —
-    # 11.txt 审核 P0-4). Everything else 0644.
+    # DIRECTLY as "./scripts/mcp_launcher.py" by the plugin manifests).
+    # Everything else 0644.
     if path.suffix == ".sh" or not path.suffix:
         return 0o755 << 16
     try:

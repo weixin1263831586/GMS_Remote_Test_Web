@@ -6,7 +6,8 @@ import json
 import os
 from pathlib import Path
 
-from foundation.config_paths import runtime_environment_path
+from foundation.config_paths import runtime_environment_path, secret_environment_path
+from foundation.private_config import read_json_object
 
 
 def _project_root() -> Path:
@@ -48,17 +49,22 @@ def load_runtime_env() -> dict[str, str]:
     if os.getenv("GMS_SKIP_RUNTIME_ENV"):
         return applied
     for path in _candidate_paths():
-        if not path.is_file():
+        base_root = path.parent.parent.parent if path.parent.name == "local" else path.parent.parent
+        secret_path = secret_environment_path(base_root)
+        if not path.is_file() and not secret_path.is_file():
             continue
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(payload, dict):
             continue
         # ${PROJECT_ROOT} 展开为包含该 runtime.json 的部署树根目录
         # （configs/ 的上一级），兼容仓库树与 GMS_DATA_ROOT 发布树。
-        base_root = path.parent.parent
+        if secret_path.exists():
+            # Secret environment entries override file defaults; explicit process
+            # environment still wins below. Do not silently ignore corrupt secrets.
+            payload.update(read_json_object(secret_path))
         for key, value in payload.items():
             if key.startswith("_") or not isinstance(value, str):
                 continue

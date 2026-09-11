@@ -74,7 +74,7 @@ async def start_test(
 
     local_worker_id = cluster.config.local_worker_id
     requested_worker_id = req.worker_id or local_worker_id
-    # R02: 默认 Worker（请求未显式给出 worker_id）同样必须通过 Agent ACL；
+    # 默认 Worker（请求未显式给出 worker_id）同样必须通过 Agent ACL；
     # 只在显式 worker_id 上检查会让 Agent 以空 worker_id 越权命中默认 Worker。
     if principal is not None and requested_worker_id != req.worker_id:
         ensure_agent_worker_allowed(request, requested_worker_id)
@@ -173,7 +173,7 @@ async def stop_test(
     if response:
         return response
 
-    # 11.txt P1: tests.cancel was defined but never enforced server-side.
+    # tests.cancel was defined but never enforced server-side.
     # Mirror the start_test pattern: agent principals must hold the scope;
     # human roles carry tests.cancel via ROLE_PERMISSIONS (dev-mode anonymous
     # callers keep working because the principal is None there).

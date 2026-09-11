@@ -1,8 +1,8 @@
 """One-shot approval token storage (2026-09-08 audit §五).
 
-Split out of agent_tokens.py (4.txt round: the burn approval gained
+Split out of agent_tokens.py after the burn approval gained
 server-side operation derivation, pushing the module past its reviewable
-line limit). ApprovalTokenServiceMixin is mixed into AuthService and reuses
+line limit. ApprovalTokenServiceMixin is mixed into AuthService and reuses
 its _connect/_lock/hash_token helpers.
 """
 
@@ -43,7 +43,7 @@ class ApprovalTokenServiceMixin:
     def command_hash(command: str) -> str:
         return hashlib.sha256(str(command or "").encode("utf-8")).hexdigest()
 
-    # 4.txt P1（精确绑定）：烧录审批不再绑定 "burn_firmware:<devices>" 这种
+    # 精确绑定：烧录审批不再绑定 "burn_firmware:<devices>" 这种
     # 宽泛串，而是绑定完整的 operation：规范化设备列表 + 固件 SHA256 +
     # wipe_data + burn_mode。命令串只由服务端从这些字段派生，审批创建与
     # 消费两端使用同一函数，调用方无法用为 A 固件签发的令牌烧 B 固件。
@@ -91,7 +91,7 @@ class ApprovalTokenServiceMixin:
         For the burn tool the command string is DERIVED server-side from the
         full operation (devices + firmware SHA256 + wipe_data + burn_mode);
         any client-supplied command is ignored so an approval minted for one
-        firmware can never be consumed for another (4.txt P1 精确绑定).
+        firmware can never be consumed for another (精确绑定).
         """
         tool_name = str(tool or "").strip()
         device_name = str(device or "").strip()

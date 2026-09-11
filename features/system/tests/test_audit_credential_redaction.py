@@ -1,4 +1,4 @@
-"""R09 unit tests: credential-body audit redaction path matching.
+"""Unit tests: credential-body audit redaction path matching.
 
 These assertions live next to the implementation (features/system) so the
 auth acceptance tests don't need to import system feature internals

@@ -1,5 +1,5 @@
 {
-    "_comment": "Copy to configs/runtime.json, keep mode 0600, and fill secrets locally. This file is only a schema example. Paths may reference ${PROJECT_ROOT}, which expands to the deployment tree root at load time. Secret FILES that go missing (e.g. after wiping data/) are regenerated at startup; production logs a warning — secrets or signatures created under the previous key will not verify.",
+    "_comment": "Production schema example. Store ordinary variables in configs/local/environment.json and password/token values in configs/secrets/environment.json, both mode 0600. Paths may reference ${PROJECT_ROOT}. Preserve existing master/signing keys when migrating; deleting them breaks existing encrypted data and signatures.",
     "GMS_ENV": "production",
     "GMS_AUTH_REQUIRED": "true",
     "GMS_SECURE_COOKIES": "true",
@@ -7,7 +7,6 @@
     "GMS_VNC_PASSWORD": "",
     "GMS_WIFI_PASSWORD": "",
     "GMS_LOCAL_AI_API_KEY": "",
-    "GMS_ZHIPU_API_KEY": "",
     "GMS_ASSISTANT_API_KEY": "",
     "GMS_HOST_TOOLS_JDK_URL": "",
     "GMS_HOST_TOOLS_JDK_SHA256": "",

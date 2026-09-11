@@ -257,14 +257,14 @@ async function loadSuiteWorkerSelector() {
     }
 }
 
-// R21: the Suite Browser keeps its OWN cache.  It previously wrote the
+// Suite Browser keeps its OWN cache.  It previously wrote the
 // execution page's shared test-suites cache, so browsing
 // Worker B's suites replaced the execution page's cached list (and the
 // reverse).  A per-browser cache keyed by worker keeps both views intact.
 let _browserSuitesCache = [];
 let _browserSuitesWorkerId = '';
 
-// R21: request generation guard for remote suite listing. A slow response
+// Request generation guard for remote suite listing. A slow response
 // for worker A must not overwrite the browser cache after the user has
 // already switched to worker B.
 let _browserSuitesRequestGeneration = 0;
@@ -278,7 +278,7 @@ async function loadSuitesForBrowserWorker(force = false) {
     if (!force && _browserSuitesWorkerId === workerId && _browserSuitesCache.length > 0) {
         return _browserSuitesCache;
     }
-    // R21: the LOCAL branch used to call loadTestSuites(), which loads by
+    // The LOCAL branch used to call loadTestSuites(), which loads by
     // the GLOBAL EXECUTION worker — browsing "local" while the execution
     // target was B cached B's suites under the local label.  Fetch the
     // local suite list directly instead, independent of execution state.
@@ -710,7 +710,6 @@ window.showExtractSuiteModal = async function showExtractSuiteModal() {
     const folderInput = $('extract-suite-folder-name');
     if (!modal || !select || !pathInput || !folderInput) return;
 
-    modal.style.display = '';
     ModalManager.open('extract-suite-modal');
     select.innerHTML = '<option value="">正在加载压缩包...</option>';
 
@@ -750,8 +749,6 @@ window.showExtractSuiteModal = async function showExtractSuiteModal() {
 
 window.closeExtractSuiteModal = function closeExtractSuiteModal() {
     ModalManager.close('extract-suite-modal');
-    const modal = $('extract-suite-modal');
-    if (modal) modal.style.display = 'none';
 };
 
 window.handleExtractSuiteKeydown = function handleExtractSuiteKeydown(event) {
@@ -990,7 +987,7 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
 
     state.suiteBrowser.selectedSuitePath = suite.tools_path;
     state.suiteBrowser.currentPath = path || '';
-    // R14: Suite Browser is a browsing context — selecting a suite here
+    // Suite Browser is a browsing context — selecting a suite here
     // must NOT touch the global test-execution context at all.  Writing
     // suite_key/suite_path (and the test page's select) made the
     // execution page show Worker A with Worker B's suite path after a
@@ -1109,7 +1106,7 @@ async function searchSuiteFiles() {
         return;
     }
     if (!_browserSuitesCache.length) {
-        // R21: 浏览页空缓存时走自己的加载器，避免把执行页的缓存
+        // 浏览页空缓存时走自己的加载器，避免把执行页的缓存
         // 隐式拉进浏览上下文。
         await loadSuitesForBrowserWorker(false);
     }

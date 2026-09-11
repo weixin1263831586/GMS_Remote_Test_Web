@@ -18,7 +18,7 @@ _ED25519_TEST_KEY_PEM: bytes | None = None
 
 
 def _test_ed25519_key_pem() -> bytes:
-    """15.txt 审核 P2: production fixtures must supply an agent-package
+    """Production fixtures must supply an agent-package
     signing key now that production validation requires one."""
     global _ED25519_TEST_KEY_PEM
     if _ED25519_TEST_KEY_PEM is None:
@@ -38,7 +38,7 @@ def _test_ed25519_key_pem() -> bytes:
 class SecurityBoundaryFixtureTests(unittest.TestCase):
     """Production-mode bootstrap fixture shared by boundary test modules.
 
-    11.txt P1-3: split from the former monolithic SecurityBoundaryTests —
+    Split from the former monolithic SecurityBoundaryTests —
     test_security_boundary.py keeps the browser/session boundary tests while
     service-token tests live in test_service_token_boundary.py.
     """

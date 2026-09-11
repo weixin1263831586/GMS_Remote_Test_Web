@@ -1,4 +1,4 @@
-"""Admin CLI commands for Agent Service Token management (15.txt §三).
+"""Admin CLI commands for Agent Service Token management.
 
 `gms-rt-agent-tokens` / `gms-rt-agent-enroll-code` / `gms-rt-agent-token-revoke`
 close the tooling gap: an admin can fully drive the Agent enrollment

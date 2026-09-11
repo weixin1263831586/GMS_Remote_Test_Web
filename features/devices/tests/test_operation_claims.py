@@ -107,7 +107,7 @@ def test_lock_status_resolves_internal_owner_to_user_management_identity():
 
 
 def test_operation_claim_borrows_existing_claim_for_same_owner():
-    """R10: a device already claimed by the same owner (reservation/job/
+    """A device already claimed by the same owner (reservation/job/
     earlier operation) must be reused, not rejected with a spurious 409."""
     with tempfile.TemporaryDirectory() as directory:
         manager = DeviceLockManager(

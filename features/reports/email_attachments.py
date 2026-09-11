@@ -1,11 +1,12 @@
-"""Email attachment bundles built from report resources (R04).
+"""Email attachment bundles built from report resources.
 
 Lives in ``features.reports`` so the report-attachment capability is owned
 by the reports feature; the email feature receives it via a provider
 injected by the composition root (bootstrap/dependencies.py). This keeps
 the feature dependency graph acyclic — email must not import reports
-(2026-09-08 R13 architecture gate; the previous direct import closed the
+(architecture gate: the previous direct import closed the
 email → reports → redmine → email cycle).
+See docs/architecture/adr/0002-feature-foundation-boundary.md.
 """
 
 from __future__ import annotations

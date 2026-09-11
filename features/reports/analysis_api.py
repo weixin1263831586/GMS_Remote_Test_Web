@@ -49,7 +49,7 @@ from .uploads import ReportUploadTooLargeError, stage_report_uploads
 
 
 def _principal_has_reports_read(principal: object) -> bool:
-    """11.txt P1: reports.read gate shared by list/analyze/diagnose.
+    """reports.read gate shared by list/analyze/diagnose.
 
     Agent principals must carry the reports.read scope; human roles get it
     from ROLE_PERMISSIONS and admin via '*'. The getattr fallback keeps unit
@@ -150,7 +150,7 @@ async def analyze_reports(
 ):
     """Unified report analysis API."""
     principal = require_authenticated_user(request)
-    # 11.txt P1: reading reports (incl. analysis) requires reports.read for
+    # Reading reports (incl. analysis) requires reports.read for
     # agent principals; human roles carry it via ROLE_PERMISSIONS.
     if not _principal_has_reports_read(principal):
         return error_response(
@@ -478,7 +478,7 @@ async def analyze_suite_log_dir(
 async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request: Request):
     """Diagnose one report failure and locate matching suite APK/JAR source."""
     principal = require_authenticated_user(http_request)
-    # 11.txt P1: same reports.read gate as list/analyze (agent principals).
+    # Same reports.read gate as list/analyze (agent principals).
     if not _principal_has_reports_read(principal):
         return error_response(
             {
@@ -684,7 +684,7 @@ async def delete_report(
 ):
     """Delete test report (owner or admin only)."""
     principal = require_authenticated_user(request)
-    # 11.txt P1: report deletion is a human-operator write action — agent
+    # Report deletion is a human-operator write action — agent
     # tokens are refused outright (no agent scope covers destructive report
     # operations; MCP exposes no delete tool either).
     if getattr(request.state, "auth_method", None) == "agent_token":

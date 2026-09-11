@@ -17,10 +17,21 @@ ACTION="install"
 
 INSTALL_DIR="${GMS_INSTALL_DIR:-/opt/gms-remote-test/web_app}"
 SERVICE_NAME="${GMS_SERVICE_NAME:-gms-web-app}"
+CONFIG_RSYNC_FILTERS=(
+    --include '/configs/'
+    --include '/configs/examples/'
+    --include '/configs/examples/config.example.json'
+    --include '/configs/examples/runtime.example.json'
+    --include '/configs/examples/cluster.example.json'
+    --include '/configs/examples/build_servers.example.json'
+    --include '/configs/examples/automation_profiles.example.json'
+    --include '/configs/README.md'
+    --exclude '/configs/***'
+)
 PORT="${GMS_PORT:-5001}"
 RUN_USER="${GMS_RUN_USER:-${SUDO_USER:-$(id -un)}}"
 HOST_IP="${GMS_HOST_IP:-}"
-CERT_DIR="${GMS_CERT_DIR:-${INSTALL_DIR}/configs/certs}"
+CERT_DIR="${GMS_CERT_DIR:-${INSTALL_DIR}/configs/secrets/certs}"
 CERT_KEY="${GMS_CERT_KEY:-${CERT_DIR}/gms-local.key}"
 CERT_CRT="${GMS_CERT_CRT:-${CERT_DIR}/gms-local.crt}"
 
@@ -168,7 +179,7 @@ package_web_app() {
         trap 'rm -rf "${stage}"' EXIT
         package_root="${stage}/${root_name}"
         mkdir -p "${package_root}"
-        rsync -a \
+        rsync -a "${CONFIG_RSYNC_FILTERS[@]}" \
             --exclude '.git/' \
             --exclude '.agents/' \
             --exclude '.codex/' \
@@ -177,6 +188,12 @@ package_web_app() {
             --exclude '.certs/' \
             --exclude '.env.production' \
             --exclude 'configs/env.production' \
+            --exclude 'configs/local/' \
+            --exclude 'configs/secrets/' \
+            --exclude 'configs/config.json' \
+            --exclude 'configs/cluster.json' \
+            --exclude 'configs/build_servers.json' \
+            --exclude 'configs/automation_profiles.json' \
             --exclude 'configs/certs/' \
             --exclude 'configs/runtime.json' \
             --exclude 'configs/worker_tokens.json' \
@@ -228,10 +245,10 @@ package_web_app() {
             "${PROJECT_DIR}/" "${package_root}/"
         mkdir -p "${package_root}/data"
         python3 "${PROJECT_DIR}/scripts/sanitize_release_config.py" \
-            "${package_root}/configs/config.json" \
-            "${package_root}/configs/automation_profiles.json" \
-            "${package_root}/configs/build_servers.json" \
-            "${package_root}/configs/cluster.json" \
+            "${package_root}/configs/local/config.json" \
+            "${package_root}/configs/local/automation_profiles.json" \
+            "${package_root}/configs/local/build_servers.json" \
+            "${package_root}/configs/local/cluster.json" \
             "${package_root}/plugins/codesearch/config/config.json"
         python3 "${PROJECT_DIR}/scripts/verify_release_tree.py" "${package_root}"
         tar -czf "${archive}" -C "${stage}" "${root_name}"
@@ -291,7 +308,7 @@ install_system_packages() {
 copy_project() {
     sudo mkdir -p "${INSTALL_DIR}"
     if [[ "$(readlink -f "${PROJECT_DIR}")" != "$(readlink -f "${INSTALL_DIR}")" ]]; then
-        sudo rsync -a --delete \
+        sudo rsync -a --delete "${CONFIG_RSYNC_FILTERS[@]}" \
             --exclude '.git/' \
             --exclude '.agents/' \
             --exclude '.codex/' \
@@ -300,6 +317,12 @@ copy_project() {
             --exclude '.certs/' \
             --exclude '.env.production' \
             --exclude 'configs/env.production' \
+            --exclude 'configs/local/' \
+            --exclude 'configs/secrets/' \
+            --exclude 'configs/config.json' \
+            --exclude 'configs/cluster.json' \
+            --exclude 'configs/build_servers.json' \
+            --exclude 'configs/automation_profiles.json' \
             --exclude 'configs/certs/' \
             --exclude 'configs/runtime.json' \
             --exclude 'configs/worker_tokens.json' \
@@ -369,15 +392,15 @@ setup_runtime_secrets() {
     secret_root="${INSTALL_DIR}/data/secrets"
     secret_key="${secret_root}/master.key"
     worker_token="${secret_root}/local-worker.token"
-    env_file="${INSTALL_DIR}/configs/runtime.json"
+    env_file="${INSTALL_DIR}/configs/local/environment.json"
     worker_config="${INSTALL_DIR}/data/local-worker/config.json"
-    worker_tokens_file="${INSTALL_DIR}/configs/worker_tokens.json"
+    worker_tokens_file="${INSTALL_DIR}/configs/secrets/worker_tokens.json"
 
     sudo -H -u "${RUN_USER}" mkdir -p "${secret_root}" "$(dirname "${worker_config}")"
     sudo -H -u "${RUN_USER}" chmod 700 "${secret_root}"
     sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - \
         "${secret_key}" "${worker_token}" "${env_file}" "${worker_config}" \
-        "${INSTALL_DIR}/configs/cluster.json" "${worker_tokens_file}" \
+        "${INSTALL_DIR}/configs/local/cluster.json" "${worker_tokens_file}" \
         "${CERT_CRT}" "${RUN_HOME}" \
         "${RUN_USER}" "${HOST_IP}" "${PORT}" <<'PY'
 import json
@@ -410,6 +433,10 @@ env_path = Path(env_path_raw)
 worker_config = Path(worker_config_raw)
 cluster_config_path = Path(cluster_config_raw)
 worker_tokens_path = Path(worker_tokens_raw)
+sys.path.insert(0, str(env_path.parents[2]))
+from foundation.private_config import read_json_object, write_private_json
+from foundation.runtime_config_store import is_secret_field
+secret_env_path = env_path.parents[1] / "secrets/environment.json"
 
 def create_private(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -465,6 +492,7 @@ if env_path.exists():
             values = {str(k): str(v) for k, v in loaded.items() if isinstance(v, str)}
     except (OSError, json.JSONDecodeError):
         pass
+values.update(read_json_object(secret_env_path))
 for host_tools_name in (
     "GMS_HOST_TOOLS_JDK_URL",
     "GMS_HOST_TOOLS_JDK_SHA256",
@@ -493,15 +521,7 @@ tokens = {}
 if isinstance(existing_tokens, dict):
     tokens.update({str(k): str(v) for k, v in existing_tokens.items() if v})
 tokens[worker_id] = token
-worker_tokens_path.write_text(
-    json.dumps(
-        {"worker_tokens": dict(sorted(tokens.items()))},
-        indent=2,
-        ensure_ascii=False,
-    ) + "\n",
-    encoding="utf-8",
-)
-os.chmod(worker_tokens_path, 0o600)
+write_private_json(worker_tokens_path, {"worker_tokens": dict(sorted(tokens.items()))})
 values.update({
     "GMS_SECRET_KEY_FILE": str(key_path),
     "GMS_AUDIT_HMAC_KEY_FILE": str(audit_key_path),
@@ -517,11 +537,8 @@ values.update({
     "TRUSTED_HOSTS": f"{host_ip},localhost,127.0.0.1",
     "GMS_SSH_KNOWN_HOSTS": str(Path(run_home) / ".ssh/known_hosts"),
 })
-env_path.write_text(
-    json.dumps(values, indent=2, ensure_ascii=False) + "\n",
-    encoding="utf-8",
-)
-os.chmod(env_path, 0o600)
+write_private_json(secret_env_path, {key: value for key, value in values.items() if is_secret_field(key)})
+write_private_json(env_path, {key: value for key, value in values.items() if not is_secret_field(key)})
 
 worker_payload = {
     "worker_id": worker_id,
@@ -624,19 +641,21 @@ setup_local_ssh_key() {
 }
 
 write_runtime_config() {
-    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${INSTALL_DIR}/configs/config.json" "${INSTALL_DIR}/configs/cluster.json" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
+    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}" "${RUN_USER}" "${HOST_IP}" "${RUN_HOME}" "${SSH_KEY_PATH}" "${PORT}" <<'PY'
 import json
 import os
 import sys
 
-runtime_path, static_path, cluster_path, user, host_ip, home, key_path, port = sys.argv[1:9]
-os.makedirs(os.path.dirname(runtime_path), exist_ok=True)
+from pathlib import Path
 
-try:
-    with open(runtime_path, 'r', encoding='utf-8') as f:
-        runtime_config = json.load(f)
-except Exception:
-    runtime_config = {}
+root_raw, user, host_ip, home, key_path, port = sys.argv[1:7]
+root = Path(root_raw)
+sys.path.insert(0, str(root))
+from foundation.private_config import read_json_object, write_private_json
+from foundation.runtime_config_store import RuntimeConfigStore
+
+store = RuntimeConfigStore(root)
+runtime_config = store.read()
 
 gms_suite = os.path.join(home, 'GMS-Suite')
 deployment_config = {
@@ -660,45 +679,35 @@ client_hosts = runtime_config.setdefault('client_hosts', {})
 if isinstance(client_hosts, dict):
     client_hosts.setdefault(host_ip, user)
 
-with open(runtime_path, 'w', encoding='utf-8') as f:
-    json.dump(runtime_config, f, ensure_ascii=False, indent=4)
-    f.write('\n')
+store.write(runtime_config)
 
 # The packaged config.json may contain the source machine identity. Keep the
 # installed static defaults aligned with the deployment host so templates and
 # fallback paths never expose the package builder's user/host.
-try:
-    with open(static_path, 'r', encoding='utf-8') as f:
-        static_config = json.load(f)
-except Exception:
-    static_config = {}
+static_path = root / 'configs/local/config.json'
+static_config = read_json_object(static_path)
+for key in deployment_config:
+    static_config.pop(key, None)
+write_private_json(static_path, static_config)
 
-static_config.update(deployment_config)
-
-with open(static_path, 'w', encoding='utf-8') as f:
-    json.dump(static_config, f, ensure_ascii=False, indent=4)
-    f.write('\n')
-
-try:
-    with open(cluster_path, 'r', encoding='utf-8') as f:
-        cluster_config = json.load(f)
-except Exception:
-    cluster_config = {}
+cluster_path = root / 'configs/local/cluster.json'
+cluster_config = read_json_object(cluster_path)
 cluster_config['controller_url'] = f'https://{host_ip}:{port}'
-with open(cluster_path, 'w', encoding='utf-8') as f:
-    json.dump(cluster_config, f, ensure_ascii=False, indent=4)
-    f.write('\n')
+write_private_json(cluster_path, cluster_config)
 PY
 }
 
 verify_runtime_config() {
-    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}/configs/config_runtime.json" "${RUN_USER}" "${HOST_IP}" <<'PY'
+    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}" "${RUN_USER}" "${HOST_IP}" <<'PY'
 import json
 import sys
 
-path, expected_user, expected_host = sys.argv[1:4]
-with open(path, 'r', encoding='utf-8') as f:
-    config = json.load(f)
+from pathlib import Path
+
+root, expected_user, expected_host = sys.argv[1:4]
+sys.path.insert(0, root)
+from foundation.runtime_config_store import RuntimeConfigStore
+config = RuntimeConfigStore(Path(root)).read()
 
 actual_user = config.get('ubuntu_user')
 actual_host = config.get('ubuntu_host')
@@ -987,6 +996,7 @@ install_web_app() {
     install_system_packages
     copy_project
     setup_python_env
+    initialize_configuration
     setup_https_cert
     setup_runtime_secrets
     setup_local_ssh_key
@@ -1003,9 +1013,38 @@ install_web_app() {
     ok "安装完成"
     echo "访问地址: https://${HOST_IP}:${PORT}"
     echo "本机访问: https://localhost:${PORT}"
+    echo "首次访问: 创建平台管理员账号，并填写初始化令牌。"
+    echo "令牌位置: ${INSTALL_DIR}/configs/secrets/environment.json 中的 GMS_BOOTSTRAP_TOKEN"
+    echo "在 Controller 终端执行以下命令读取令牌，然后粘贴到初始化页面:"
+    printf '  sudo -u %q python3 -c %q %q\n' \
+        "${RUN_USER}" \
+        'import json, sys; print(json.load(open(sys.argv[1]))["GMS_BOOTSTRAP_TOKEN"])' \
+        "${INSTALL_DIR}/configs/secrets/environment.json"
     echo "查看日志: sudo journalctl -u ${SERVICE_NAME} -f"
     echo "立即备份: sudo systemctl start ${SERVICE_NAME}-backup.service"
     echo "备份目录: ${BACKUP_DIR}（密钥为 root-only，请另行托管副本）"
+}
+
+initialize_configuration() {
+    sudo -H -u "${RUN_USER}" "${INSTALL_DIR}/.venv/bin/python" - "${INSTALL_DIR}" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+from scripts.migrate_config_layout import migrate
+from scripts.sanitize_release_config import sanitize_file
+
+if any((root / 'configs' / name).exists() for name in (
+    'config.json', 'runtime.json', 'config_runtime.json', 'cluster.json',
+    'worker_tokens.json', 'build_servers.json', 'automation_profiles.json',
+)):
+    migrate(root, apply=True)
+for name in ('config.json', 'cluster.json', 'build_servers.json', 'automation_profiles.json'):
+    target = root / 'configs/local' / name
+    if not target.exists():
+        sanitize_file(target)
+PY
 }
 
 main() {

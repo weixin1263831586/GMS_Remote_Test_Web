@@ -62,7 +62,7 @@ def render_metrics() -> str:
     from features.system.state import global_state
 
     with global_state.websocket_connections_lock:
-        # R26: values are now sets of sockets; count each live socket, not
+        # Values are sets of sockets; count each live socket, not
         # just one per client.
         websocket_count = sum(
             len(v) if isinstance(v, set) else 1

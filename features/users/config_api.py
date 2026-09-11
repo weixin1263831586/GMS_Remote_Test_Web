@@ -273,7 +273,7 @@ async def get_opengrok_config(request: Request):
     opengrok_config = config.get('opengrok', {})
 
     if not opengrok_config or 'base_url' not in opengrok_config:
-        return error_response('OpenGrok未配置，请在configs/config.json中配置opengrok段', status_code=404)
+        return error_response('OpenGrok未配置，请在configs/local/config.json中配置opengrok段', status_code=404)
 
     return success_response(opengrok_config)
 

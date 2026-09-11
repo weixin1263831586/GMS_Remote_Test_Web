@@ -342,7 +342,7 @@
         body.workspace-scope-cluster #page-terminal .host-workspace-pane-header .btn-xs {
             height: 24px;
             min-height: 24px;
-            /* R24: single-glyph buttons (⛶ ▦ ×) measured 19.8–21.5px wide
+            /* Single-glyph buttons (⛶ ▦ ×) measured 19.8–21.5px wide
                with the old 1px 6px padding; enforce the 24×24 pointer-target
                minimum the geometry tests require. */
             min-width: 24px;
@@ -553,7 +553,15 @@
             <div class="auth-row" id="auth-bootstrap-token-row" style="display: none;">
                 <label for="auth-bootstrap-token">初始化令牌</label>
                 <input id="auth-bootstrap-token" name="bootstrap_token" type="password" autocomplete="off" aria-describedby="auth-bootstrap-token-help">
-                <div class="auth-help" id="auth-bootstrap-token-help">请输入 Controller 的 configs/runtime.json 中 GMS_BOOTSTRAP_TOKEN 的值；令牌只用于创建首个管理员。</div>
+                <div class="auth-help" id="auth-bootstrap-token-help">
+                    一键安装会自动生成令牌，保存在 Controller 安装目录的 <code>configs/secrets/environment.json</code> 中，字段名为 <code>GMS_BOOTSTRAP_TOKEN</code>；仅用于创建首个管理员。
+                    <details>
+                        <summary>如何获取初始化令牌</summary>
+                        在 Controller 服务器上，以服务运行用户或管理员身份进入实际安装目录，执行：
+                        <code style="display: block; overflow-wrap: anywhere; margin: 6px 0;">python3 -c 'import json; print(json.load(open("configs/secrets/environment.json"))["GMS_BOOTSTRAP_TOKEN"])'</code>
+                        将输出粘贴到上方。默认安装目录为 <code>/opt/gms-remote-test/web_app</code>。手动部署请使用为 Controller 配置的同名环境变量；旧部署也可能保存在 <code>configs/runtime.json</code> 中。
+                    </details>
+                </div>
             </div>
             <div class="auth-message" id="auth-message"></div>
             <!-- 登录层打开时主动探测本机 SSH 端口；未装 SSHD 时提前提示安装 -->
@@ -3480,7 +3488,21 @@
             const fresh = clusterHostDirectory.loadedAt
                 && Date.now() - clusterHostDirectory.loadedAt < CLUSTER_HOST_DIRECTORY_TTL_MS;
             if (!force && fresh) return clusterHostDirectory.hosts;
-            if (clusterHostDirectory.promise) return clusterHostDirectory.promise;
+            if (clusterHostDirectory.promise) {
+                const pending = clusterHostDirectory.promise;
+                if (!force) return pending;
+                // A forced refresh must observe registrations that happened
+                // after an older request started. Wait for that request, then
+                // issue a new one instead of inheriting its stale result.
+                try {
+                    await pending;
+                } catch (_) {
+                    // The forced request below is the recovery attempt.
+                }
+                if (clusterHostDirectory.promise && clusterHostDirectory.promise !== pending) {
+                    return clusterHostDirectory.promise;
+                }
+            }
             clusterHostDirectory.promise = (async () => {
                 const response = await fetch('/api/cluster/hosts', {cache: 'no-store'});
                 const payload = await response.json();
@@ -3616,9 +3638,9 @@
             }
         }
 
-        async function mergeClusterDesktopHosts() {
+        async function mergeClusterDesktopHosts(force = false) {
             try {
-                const hosts = await loadClusterHostDirectory();
+                const hosts = await loadClusterHostDirectory(force);
                 const selectedId = currentHost && currentHost.id;
                 const clusterHosts = hosts
                     .filter(host => host.address && host.ssh_user)
@@ -3658,10 +3680,33 @@
                 }
                 if (window.hostWorkspaceInitialized && currentPage === 'desktop') renderHostWorkspace();
                 if (window.terminalWorkspaceInitialized && currentPage === 'terminal') renderTerminalWorkspace();
+                if (window.hostWorkspaceInitialized) refreshHostWorkspaceHostSelectors();
+                if (window.terminalWorkspaceInitialized) refreshTerminalWorkspaceHostSelectors();
             } catch (error) {
                 console.debug('Cluster desktop hosts unavailable; preserving local host list', error);
             }
         }
+
+        async function refreshClusterHostDirectory(force = true) {
+            await mergeClusterDesktopHosts(force);
+            return desktopHosts;
+        }
+
+        function refreshClusterHostDirectoryForWorker(workerId, status = '') {
+            const normalizedWorkerId = String(workerId || '');
+            if (!normalizedWorkerId) return Promise.resolve(desktopHosts);
+            const cached = clusterHostDirectory.hosts.find(
+                host => host.worker_id === normalizedWorkerId
+            );
+            if (cached && (!status || cached.status === status)) {
+                return Promise.resolve(desktopHosts);
+            }
+            return refreshClusterHostDirectory(true);
+        }
+        Object.assign(window, {
+            refreshClusterHostDirectory,
+            refreshClusterHostDirectoryForWorker,
+        });
 
         // 首次初始化或确保 VNC 已加载（桌面页面切换时调用）
         async function ensureDesktopInitialized() {
@@ -3822,6 +3867,21 @@
                 const selected = host.id === selectedId ? ' selected' : '';
                 return `<option value="${escapeHtml(host.id)}"${selected}${disabled}>${escapeHtml(host.name)}</option>`;
             }).join('');
+        }
+
+        function refreshHostWorkspaceHostSelectors() {
+            hostWorkspace.panes.forEach((pane, index) => {
+                const select = document.querySelector(
+                    `[data-workspace-pane="${index}"] select[aria-label="主机"]`
+                );
+                if (!select) return;
+                select.innerHTML = hostWorkspaceHostOptions(
+                    pane.hostId,
+                    hostWorkspace.panes,
+                    index
+                );
+                select.disabled = pane.type === 'empty';
+            });
         }
 
         function hostWorkspaceRenderSignature() {
@@ -4196,6 +4256,20 @@
 
         // ==================== 多主机终端工作区 ====================
         const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), mountingPanes:new Map(), paneGenerations:new Map(), maximized:null, generation:0, clusterState:null};
+
+        function refreshTerminalWorkspaceHostSelectors() {
+            terminalWorkspace.panes.forEach((pane, index) => {
+                const select = document.querySelector(
+                    `[data-terminal-pane="${index}"] select[aria-label="主机"]`
+                );
+                if (!select) return;
+                select.innerHTML = hostWorkspaceHostOptions(
+                    pane.hostId,
+                    terminalWorkspace.panes,
+                    index
+                );
+            });
+        }
         function snapshotTerminalClusterState() {
             return {
                 layout: terminalWorkspace.layout,
@@ -7257,13 +7331,7 @@
             title.textContent = trigger.dataset.guideTitle || sourceImage.alt || '图片操作实例';
             caption.textContent = trigger.dataset.guideCaption || '';
             setGuideImageZoom(false);
-            if (typeof ModalManager !== 'undefined') {
-                ModalManager.open('guide-image-modal');
-            } else {
-                const modal = document.getElementById('guide-image-modal');
-                modal.style.display = 'flex';
-                modal.classList.add('show');
-            }
+            ModalManager.open('guide-image-modal');
         }
 
         function toggleGuideImageZoom() {
@@ -7273,13 +7341,7 @@
         }
 
         function closeGuideImageLightbox() {
-            if (typeof ModalManager !== 'undefined') {
-                ModalManager.close('guide-image-modal');
-            } else {
-                const modal = document.getElementById('guide-image-modal');
-                modal.classList.remove('show');
-                modal.style.display = 'none';
-            }
+            ModalManager.close('guide-image-modal');
         }
 
         function closeGuideImageLightboxFromBackdrop(event) {
@@ -7314,23 +7376,11 @@
 
             switchSidebarSettingsTab('visibility');
 
-            if (typeof ModalManager !== 'undefined') {
-                ModalManager.open('sidebar-visibility-modal');
-            } else {
-                modal.style.display = 'flex';
-                modal.classList.add('show');
-            }
+            ModalManager.open('sidebar-visibility-modal');
         }
 
         function closeSidebarVisibilityModal() {
-            const modal = document.getElementById('sidebar-visibility-modal');
-            if (!modal) return;
-            if (typeof ModalManager !== 'undefined') {
-                ModalManager.close('sidebar-visibility-modal');
-            } else {
-                modal.classList.remove('show');
-                modal.style.display = 'none';
-            }
+            ModalManager.close('sidebar-visibility-modal');
         }
 
         function selectAllSidebarVisibility() {
@@ -8569,15 +8619,7 @@
     // OpenGrok 源码分析弹框。
 
     function closeSourceAnalysisModal() {
-        if (window.ModalManager) {
-            ModalManager.close('source-analysis-modal');
-            return;
-        }
-        const modal = document.getElementById('source-analysis-modal');
-        if (modal) {
-            modal.classList.remove('show');
-            modal.style.display = 'none';
-        }
+        ModalManager.close('source-analysis-modal');
     }
 
     function searchSourceCode() {

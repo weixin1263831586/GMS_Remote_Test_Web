@@ -1,4 +1,4 @@
-"""GMS Agent package lifecycle integration tests (10.txt §三十六 1-10).
+"""GMS Agent package lifecycle integration tests.
 
 Covers the exact gaps the static packaging tests missed (code review
 2026-08): fresh-HOME install, update into the correct versions/<ver>/
@@ -79,22 +79,28 @@ class LifecycleTests(unittest.TestCase):
         self.runtime_root = self.home / ".local" / "share" / "gms-remote-test"
         self.addCleanup(self._tmp.cleanup)
         self.agent = load_gms_agent_module()
-        # 10.txt §三十四 拆分后,生命周期函数住在 gms_agent.package_manager;
+        # 拆分后,生命周期函数住在 gms_agent.package_manager;
         # 沙箱化 = 同时替换薄壳与真模块的全局(函数体读的是后者)。
+        # profile 存储收口在 gms_agent.profile_store（ADR 0003）——
+        # PROFILE_ROOT
+        # 只能 patch 那里（package_manager 与 mcp_launcher 都经它读取）；
+        # MCP_ENV_DIR / legacy .env 契约已删除。
         sandbox = {
             "RUNTIME_ROOT": self.runtime_root,
             "VERSIONS_DIR": self.runtime_root / "versions",
             "CURRENT_LINK": self.runtime_root / "current",
-            "MCP_ENV_DIR": self.runtime_root / "mcp",
-            "STATE_DIR": self.home / ".local" / "state" / "gms-remote-test",
-            # 11.txt: configured_clients() now also scans TOML profiles, so
-            # the sandbox must cover the profile store too — otherwise the
-            # test reads the real host's ~/.config/gms-agent/profiles.
-            "PROFILE_ROOT": self.home / ".config" / "gms-agent" / "profiles",
         }
         for target in (self.agent, self.agent.pm):
             for key, value in sandbox.items():
                 setattr(target, key, value)
+        from gms_agent import profile_store
+
+        original_profile_root = profile_store.PROFILE_ROOT
+        profile_store.PROFILE_ROOT = self.home / ".config" / "gms-agent" / "profiles"
+        self.addCleanup(
+            setattr, profile_store, "PROFILE_ROOT", original_profile_root
+        )
+        self.profile_store = profile_store
 
     # --- 1. version comes from the PACKAGE, not the running script ------
     def test_install_uses_package_version_not_running_version(self):
@@ -147,23 +153,25 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(captured["source"], runtime)
         self.assertEqual(captured["target"].name, "gms-remote-test")
 
-    # --- 4. profile env uses shell-safe quoting -------------------------
-    def test_write_profile_shell_quotes_server_url(self):
-        self.agent.write_profile(
-            "codex", "https://$(dangerous)/host", ""
-        )
-        env_file = self.agent.MCP_ENV_DIR / "codex.env"
-        content = env_file.read_text(encoding="utf-8")
-        # json.dumps would leave $( ) live inside double quotes; shlex.quote
-        # must neutralize it for `source`.
-        self.assertNotIn('"https://$(dangerous)/host"', content)
-        # And sourcing the file must not execute the substitution.
+    # --- 4. profile is data-only TOML with an escaped server URL --------
+    def test_write_profile_toml_escapes_server_url(self):
+        dangerous_url = 'https://"quoted"/host'
+        name = self.agent.write_profile("codex", dangerous_url, "")
+        flat = self.agent.pm.load_profile(name)
+        # The raw URL round-trips through the TOML reader (data-only store).
+        self.assertEqual(flat["url"], dangerous_url)
+        self.assertEqual(flat["mode"], "service-token")
+        # TOML-only contract: write_profile must not create any
+        # legacy <client>.env anywhere in the sandbox home.
+        self.assertEqual([], list(self.home.rglob("*.env")))
+        # And sourcing the profile in bash executes nothing.
+        profile_path = self.profile_store.profile_path(name)
         result = subprocess.run(
-            ["bash", "-c", f"source {env_file} && printf %s \"$GMS_REMOTE_TEST_SERVER\""],
+            ["bash", "-c", f"source {profile_path} 2>/dev/null; printf %s \"$url\""],
             capture_output=True,
             text=True,
         )
-        self.assertEqual(result.stdout, "https://$(dangerous)/host")
+        self.assertEqual(result.stdout, "")  # TOML has no $url shell variable
 
     # --- 5. configured_clients / profile_server round trip --------------
     def test_configured_clients_round_trip(self):
@@ -266,7 +274,7 @@ class LifecycleTests(unittest.TestCase):
             self.agent.cmd_rollback(type("Args", (), {"version": "1.0.0"})())
         self.assertIn("marker A", marker_file.read_text(encoding="utf-8"))
 
-    # --- 10. 11.txt P1-10: update refuses to downgrade -------------------
+    # --- 10. update refuses to downgrade -------------------
     def test_update_rejects_downgrade(self):
         self.agent.install_runtime(
             build_registry_tree("9.9.9", self.home / "cur"), "9.9.9", "3" * 64
@@ -285,7 +293,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(code, 5)
         self.assertEqual(self.agent.installed_version(), "9.9.9")
 
-    # --- 11. 11.txt P1-10: artifact URL must match scheme as well -------
+    # --- 11. artifact URL must match scheme as well -------
     def test_artifact_url_scheme_must_match_controller(self):
         self.assertFalse(
             self.agent.artifact_url_ok("http://ctrl:5001/api/x", "https://ctrl:5001")
@@ -294,7 +302,7 @@ class LifecycleTests(unittest.TestCase):
             self.agent.artifact_url_ok("https://ctrl:5001/api/x", "https://ctrl:5001")
         )
 
-    # --- 12. 11.txt P0-5: dispatcher install links every CLI command ----
+    # --- 12. dispatcher install links every CLI command ----
     def test_install_cli_dispatcher_creates_all_command_links(self):
         cli_dir = self.agent.CURRENT_LINK / "scripts"
         cli_dir.mkdir(parents=True, exist_ok=True)
@@ -326,7 +334,7 @@ class LifecycleTests(unittest.TestCase):
             (os.stat(bin_dir / "gms-rt").st_mode & 0o777), 0o755
         )
 
-    # --- 13. 11.txt P1-6: kkagent install registers the local plugin ----
+    # --- 13. kkagent install registers the local plugin ----
     def test_kkagent_plugin_registered_in_installed_json(self):
         kkagent_home = self.home / "kkagent-home"
         runtime = self.home / "runtime"
@@ -350,7 +358,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(entry["version"], "9.9.9")
         self.assertTrue(entry["enabled"])
 
-    # --- 14. 15.txt P1-2: reconcile_mcp gets the RESOLVED server --------
+    # --- 14. reconcile_mcp gets the RESOLVED server --------
     def test_reactivate_clients_resolves_profile_server_for_mcp(self):
         # The rollback bug: write_profile received server_i or env-fallback
         # but reconcile_mcp received the raw (possibly empty) profile value.
@@ -375,7 +383,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(reactivated, ["kimi"])
         self.assertEqual(captured["server"], "https://ctrl-from-profile:5001")
 
-    # --- 15. 15.txt P1-3: activation failure triggers compensation ------
+    # --- 15. activation failure triggers compensation ------
     def test_reactivate_clients_compensates_back_to_previous_version(self):
         old = build_registry_tree("1.0.0", self.home / "p1", mutate_marker="A")
         self.agent.install_runtime(old, "1.0.0", "1" * 64)

@@ -643,11 +643,9 @@ function closeModal(modalId) {
     if (modal) {
         // 对于动态创建的模态框（直接移除）
         if (id.startsWith('source-analysis-modal-') || id.startsWith('ai-analysis-modal-')) {
-            // 先从 ModalManager 移除（清理 Esc 监听器）
+            // ModalManager.close 同时负责隐藏（display/show/aria）与清理
+            // Esc 监听器；这里只补一个延迟 DOM 移除以等动画完成。
             ModalManager.close(id);
-
-            modal.style.display = 'none';
-            // 延迟删除，确保动画完成
             setTimeout(() => {
                 if (modal && modal.parentNode) {
                     modal.parentNode.removeChild(modal);

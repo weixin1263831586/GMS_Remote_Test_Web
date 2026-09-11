@@ -1,7 +1,9 @@
 """start_usbip 事务回滚测试。
 
 attach 在 Ubuntu 侧失败时，本次事务在 Windows 上新 bind 的设备必须被
-unbind 回滚（P1-4 幽灵 bind），且不能把之前已 Shared 的设备一并回滚。
+unbind 回滚（不留幽灵 bind），且不能把之前已 Shared 的设备一并回滚。
+
+See docs/architecture/adr/0005-usbip-firmware-ownership.md.
 """
 
 from __future__ import annotations

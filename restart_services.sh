@@ -16,30 +16,24 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 cd "$PROJECT_DIR"
 
-ENV_FILE="${PROJECT_DIR}/configs/runtime.json"
-# 加载生产环境变量（含 worker token 等配置），保证手动启动与 systemd 行为一致。
-# runtime.json 是 JSON 格式，由 app.py 启动时通过 bootstrap.env_loader 加载；
-# 将 JSON 环境配置导出为 Shell 变量供后台进程继承。
-if [[ -f "${ENV_FILE}" ]]; then
-    while IFS='=' read -r key value; do
-        [[ -n "$key" ]] && export "$key=$value"
-    done < <("${PYTHON_BIN}" -c '
-import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-for key, value in data.items():
-    if isinstance(value, str) and not key.startswith("_"):
-        print(f"{key}={value}")
-' "$ENV_FILE")
-fi
+# Use the same environment precedence and placeholder expansion as app.py.
+while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    export "$key=$value"
+done < <("${PYTHON_BIN}" -c '
+import sys
+from bootstrap.env_loader import load_runtime_env
+for key, value in load_runtime_env().items():
+    sys.stdout.write(key + "\0" + value + "\0")
+')
 
-CERT_DIR="${PROJECT_DIR}/configs/certs"
+CERT_DIR="$("${PYTHON_BIN}" -c 'from foundation.config_paths import certificates_path; print(certificates_path("."))')"
 CERT_KEY="${CERT_DIR}/gms-local.key"
 CERT_CRT="${CERT_DIR}/gms-local.crt"
 PORT="${GMS_PORT:-5001}"
 CONFIGURED_SERVER_HOSTNAME="$(
     "${PYTHON_BIN}" -c \
-        'import json, sys; print(str(json.load(open(sys.argv[1], encoding="utf-8")).get("ubuntu_host") or ""))' \
-        "${PROJECT_DIR}/configs/config.json" 2>/dev/null || true
+        'from foundation.config import config_manager; print(config_manager.load_config().get("ubuntu_host") or "")' \
+        2>/dev/null || true
 )"
 SERVER_HOSTNAME="${GMS_SERVER_HOSTNAME:-${CONFIGURED_SERVER_HOSTNAME:-127.0.0.1}}"
 
@@ -121,12 +115,8 @@ echo ""
 # 3. 停止旧服务
 echo -e "${YELLOW}[3/4] 停止旧服务...${NC}"
 
-# 确认环境变量已加载（含 worker token，防 503）
-if [[ -f "${ENV_FILE}" ]]; then
-    echo -e "${GREEN}  ✓ 已加载 ${ENV_FILE}${NC}"
-else
-    echo -e "${YELLOW}  ⚠ 未找到 ${ENV_FILE}，worker token 可能缺失${NC}"
-fi
+# Environment loading is handled above; there is no single ENV_FILE anymore.
+echo -e "${BLUE}  ℹ 环境配置由统一配置加载器处理${NC}"
 if [[ -f "${SYSTEMD_UNIT_FILE}" ]]; then
     sudo systemctl stop "${SYSTEMD_SERVICE}" 2>/dev/null || systemctl stop "${SYSTEMD_SERVICE}" 2>/dev/null || true
     echo -e "${GREEN}  ✓ systemd ${SYSTEMD_SERVICE} 已停止${NC}"
@@ -149,7 +139,7 @@ echo -e "${YELLOW}[4/4] 启动新服务...${NC}"
 
 ensure_https_cert
 
-# 优先通过 systemd 启动（自带 configs/env.production 和自动重启）
+# 优先通过 systemd 启动（应用加载配置，systemd 管理自动重启）
 # 直接检测 unit 文件是否存在，避免非交互式 shell 中 systemctl 连不上 D-Bus
 USE_SYSTEMD=false
 if [[ -f "${SYSTEMD_UNIT_FILE}" ]]; then
@@ -169,8 +159,8 @@ if [[ "${USE_SYSTEMD}" == "true" ]]; then
 else
     echo -e "${YELLOW}  systemd 服务未安装，使用 nohup 方式启动...${NC}"
 
-    # 无远程 Worker 时 token 可以为空；首次部署 Worker 后会自动写入 cluster.json。
-    if ! "${PYTHON_BIN}" -c "import json,sys; d=json.load(open('${PROJECT_DIR}/configs/cluster.json')); sys.exit(0 if d.get('worker_tokens') else 1)" 2>/dev/null; then
+    # Worker tokens are separate from cluster configuration.
+    if ! "${PYTHON_BIN}" -c 'import sys; from features.cluster.worker_auth import worker_tokens; sys.exit(0 if worker_tokens() else 1)' 2>/dev/null; then
         echo -e "${YELLOW}  ⚠ 尚未配置远程 Worker token，远程 Worker 接口暂不可用${NC}"
     fi
 

@@ -6,16 +6,17 @@ import logging
 import os
 import queue
 import time
-from contextlib import asynccontextmanager, contextmanager, suppress as contextlib_suppress
+from contextlib import asynccontextmanager, contextmanager
+from contextlib import suppress as contextlib_suppress
 from typing import Any
 
 import paramiko
 
-from foundation.ssh_executor import ssh_executor
 from foundation.command_result import CommandResult
 from foundation.config import get_ubuntu_user
 from foundation.networking import split_host_port
 from foundation.ssh import SSHD_INSTALL_GUIDE
+from foundation.ssh_executor import ssh_executor
 from foundation.ssh_security import configure_strict_host_keys
 
 
@@ -155,9 +156,10 @@ class SSHManager:
                 # 原语：手工管理 channel 超时，不走 SSHExecutor，因为
                 # paramiko 的 recv_exit_status() 是不带超时的
                 # status_event.wait()，channel settimeout 约束不到它——
-                # 远端不回传 exit status 时会无限阻塞整个事件循环
-                # （R28）。按 deadline 轮询 exit_status_ready，超时
+                # 远端不回传 exit status 时会无限阻塞整个事件循环。
+                # 按 deadline 轮询 exit_status_ready，超时
                 # 主动关闭 channel 并判定连接已死。
+                # See docs/architecture/adr/0004-ssh-execution-boundary.md.
                 try:
                     _stdin, stdout, _stderr = ssh.exec_command('true', timeout=2)
                     channel = stdout.channel

@@ -57,7 +57,7 @@ def test_pair_grant_is_target_bound_and_rejects_tampering():
 
 
 def test_local_proxy_secret_reads_32_byte_binary_key_verbatim(tmp_path, monkeypatch):
-    """R06: a binary key whose first/last byte is whitespace must not be
+    """A binary key whose first/last byte is whitespace must not be
     corrupted by stripping; the file stays readable on every call."""
     secret_path = _write_secret(tmp_path, b"\n" + b"A" * 31)
     monkeypatch.setenv("GMS_ADB_PROXY_SECRET_FILE", str(secret_path))

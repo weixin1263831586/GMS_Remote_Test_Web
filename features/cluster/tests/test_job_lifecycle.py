@@ -247,7 +247,7 @@ if __name__ == "__main__":
 
 
 class PhysicalDeviceAliasLeaseTests(unittest.TestCase):
-    """R01: the same physical device reachable via ADB Proxy aliases must
+    """The same physical device reachable via ADB Proxy aliases must
     not be leased concurrently through different worker routes."""
 
     def setUp(self):
@@ -288,7 +288,7 @@ class PhysicalDeviceAliasLeaseTests(unittest.TestCase):
             "devices": ["source:SERIAL"], "suite_key": "CTS:17_r1",
         })
         self.assertEqual(job["status"], "assigned")
-        # R01: the claim layer now acquires the alias AND its source key in
+        # The claim layer now acquires the alias AND its source key in
         # one atomic acquire, so the conflict surfaces as "already claimed
         # by <owner>" before the lease metadata guard runs.
         with self.assertRaisesRegex(ValueError, "already claimed"):
@@ -303,7 +303,7 @@ class PhysicalDeviceAliasLeaseTests(unittest.TestCase):
             "devices": ["target:localhost:5038"], "suite_key": "CTS:17_r1",
         })
         self.assertEqual(job["status"], "assigned")
-        # R01: the claim layer now acquires the alias AND its source key in
+        # The claim layer now acquires the alias AND its source key in
         # one atomic acquire, so the conflict surfaces as "already claimed
         # by <owner>" before the lease metadata guard runs.
         with self.assertRaisesRegex(ValueError, "already claimed"):

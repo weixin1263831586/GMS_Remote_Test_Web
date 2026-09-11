@@ -36,11 +36,11 @@ def validate_production_security_configuration() -> None:
 
     validate_secret_configuration()
     security_audit_logger.validate_configuration()
-    # 15.txt 审核 P2: the agent package trust chain must not silently
+    # the agent package trust chain must not silently
     # degrade to SHA-only in production — manifest SHA and artifact come
     # from the same Controller, so only the Ed25519 signature forms a real
     # release trust chain. configs/runtime.json supplies the key via
-    # GMS_SKILL_SIGNING_KEY_FILE (see configs/runtime.example.json).
+    # GMS_SKILL_SIGNING_KEY_FILE (see configs/examples/runtime.example.json).
     if not skill_verify_key_b64().strip():
         raise RuntimeError(
             "GMS_SKILL_SIGNING_KEY_FILE must contain an Ed25519 signing key "

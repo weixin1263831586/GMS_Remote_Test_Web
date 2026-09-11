@@ -381,7 +381,7 @@ function formatBytes(v){const n=Number(v)||0;if(n>=1073741824)return `${(n/10737
 function archiveFolder(name){return String(name).replace(/\.(tar\.gz|tar\.bz2|zip|tgz|tar)$/i,'').replace(/[^A-Za-z0-9._+-]+/g,'_')}
 function renderLibrary(){
  const body=document.querySelector('#library');if(!body)return;
- // R23: 保存当前草稿（目标 Worker、目录名、打开的菜单与焦点），
+ // 保存当前草稿（目标 Worker、目录名、打开的菜单与焦点），
  // 后台每 10 秒的 refresh 会触发整体重绘——不保留时未提交的下发
  // 草稿被重置为默认目录、目标回到第一台 Worker。
  // 草稿按压缩包稳定标识（name|size）而非数组下标保存：清单前插入
@@ -443,7 +443,7 @@ function cssEscape(value){return window.CSS&&CSS.escape?CSS.escape(String(value)
 async function loadLibrary(){const button=document.querySelector('#reload-library'),original=button?.textContent||'↻ 刷新测试套件';if(button){button.disabled=true;button.textContent='刷新中…';button.setAttribute('aria-busy','true')}try{const d=await api('/api/cluster/suite-library');state.library=d.archives||[];renderLibrary();toast('测试套件已更新')}catch(e){toast(e.message)}finally{if(button){button.disabled=false;button.textContent=original;button.removeAttribute('aria-busy')}}}
 async function waitCommand(id,progress,onProgress){for(let i=0;i<7200;i++){const d=await api(`/api/cluster/commands/${encodeURIComponent(id)}`),c=d.command;if(c.status==='completed')return c.result||{};if(['failed','cancelled'].includes(c.status))throw new Error(c.error||`${c.command_type}失败`);if(onProgress&&c.result?.downloaded_bytes)onProgress(c.result);else if(i%10===0)progress.textContent=`处理中 ${Math.floor(i/10)}s`;await new Promise(r=>setTimeout(r,1000))}throw new Error('操作超时')}
 async function deployArchive(key){
- // R23: 定位下发条目用稳定 archive key，不再用数组下标（清单刷新
+ // 定位下发条目用稳定 archive key，不再用数组下标（清单刷新
  // 重排后下标会指向另一份压缩包）。
  const archive=state.library.find(a=>archiveKey(a)===key);
  if(!archive)return;

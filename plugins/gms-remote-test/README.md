@@ -6,7 +6,7 @@ burn, USB/IP, and VPN — all through the bundled, versioned `gms-rt` CLI.
 
 The plugin is **self-contained**: `scripts/gms-remote-test.sh` is a generated
 copy of the repository CLI (`agent/gms-remote-test/runtime/gms-remote-test.sh`
-— 11.txt: `agent/gms-remote-test/` is the single hand-maintained source root),
+— `agent/gms-remote-test/` is the single hand-maintained source root),
 so installing the plugin directory is enough; no clone of this repository is
 needed on the consumer machine.
 
@@ -94,7 +94,7 @@ Password login (`gms-rt-auth-login`) and admin elevation
 | `gms_rt_redmine_artifact_read` | Read artifact text by character window. |
 | `gms_rt_redmine_image` | Return an image artifact as MCP image content (base64) + metadata; oversized originals error with a download hint. |
 | `gms_rt_apk_analyze_attachment` | Import a Redmine `.apk` artifact into the JADX pipeline (owner-scoped, resource-intensive). |
-| `gms_rt_apk_source_search` | Search decompiled source content (path:line:column + snippet). |
+| `gms_rt_apk_source_search` | Search decompiled source content (path:line:column + snippet); maps to `gms-rt-apk-search --mode content`. |
 | `gms_rt_apk_source_read` | Read a line window of one decompiled file. |
 | `gms_rt_sdk_sources` | List admin-configured SDK source providers. |
 | `gms_rt_sdk_search` | Search an SDK source pinned to a revision; matches carry resolved commit + signed result id. |
@@ -197,7 +197,7 @@ rejected at call time.
 ## Maintaining the bundled payload
 
 Everything in this plugin except the manifests and docs is a GENERATED
-release copy of `agent/gms-remote-test/` (11.txt: never edit this directory
+release copy of `agent/gms-remote-test/` (never edit this directory
 directly), kept in sync by:
 
 ```bash

@@ -1,4 +1,4 @@
-"""Reconciler tests for agent_mcp_config.py (10.txt §十四/§十五)."""
+"""Reconciler tests for agent_mcp_config.py."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def test_kimi_fresh_registration(tmp_path):
 
 
 def test_desired_env_forces_service_token_mode(tmp_path):
-    # 11.txt P0-3: the reconciled MCP env must pin GMS_AGENT_AUTH_MODE —
+    # The reconciled MCP env must pin GMS_AGENT_AUTH_MODE —
     # mcp_server.py refuses to register password/elevation/approval-mint
     # tools only when this variable is set to "service-token".
     env = desired_env(CA)
@@ -83,7 +83,7 @@ def test_kimi_unchanged_is_idempotent(tmp_path):
 
 
 def test_kimi_invalid_json_fails_and_never_overwrites(tmp_path):
-    # 10.txt §十四: a single comma error must FAIL the install, never
+    # A single comma error must FAIL the install, never
     # rewrite the user's config down to only-GMS.
     config = tmp_path / "mcp.json"
     config.write_text('{"mcpServers": {"user": {"command": "x",},}}')  # trailing commas

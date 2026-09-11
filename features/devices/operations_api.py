@@ -197,9 +197,10 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
     if conflict:
         return conflict
 
-    # R28: AsyncSSHConnection keeps the pool acquire/release (SSH health
+    # AsyncSSHConnection keeps the pool acquire/release (SSH health
     # probes and cold connect) off the event loop; a stalled host used to
     # freeze every concurrent request during `with SSHConnection()`.
+    # See docs/architecture/adr/0004-ssh-execution-boundary.md.
     async with AsyncSSHConnection() as ssh:
         async def remount_single_device(device_id: str) -> dict:
             await runtime.safe_websocket_send(

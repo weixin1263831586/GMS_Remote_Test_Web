@@ -16,7 +16,7 @@ _DEFAULT_TRUSTED_PROXIES = ('127.0.0.0/8', '::1/128')
 def _trusted_proxy_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
     """Trusted reverse-proxy networks (config key ``trusted_proxies``).
 
-    11.txt P2: shared here so features/auth, features/users and the agent
+    Shared here so features/auth, features/users and the agent
     enrollment rate limiter resolve client IPs identically — only proxies on
     this list may contribute X-Forwarded-For hops.
 

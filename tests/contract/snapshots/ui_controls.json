@@ -180,6 +180,7 @@
       "hideTrendStartModal()",
       "loadChanges()",
       "loadDepartment(true)",
+      "onPersonalOwnerInput()",
       "onPersonalProfileChange()",
       "refreshCurrentTab()",
       "removeDepartmentOwner(&quot;",

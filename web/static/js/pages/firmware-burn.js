@@ -189,7 +189,7 @@ async function firmwareShareApi(path, options = {}, elevationRetried = false) {
     return data;
 }
 
-// ---- 远端固件主机密码：仅内存缓存（11.txt P2: 不进 sessionStorage，
+// ---- 远端固件主机密码：仅内存缓存（不进 sessionStorage，
 // 避免 DOM XSS 读取明文密码）；刷新后需重新输入。----
 const _firmwareSharePasswords = {};
 function getShareFirmwarePassword(host) {

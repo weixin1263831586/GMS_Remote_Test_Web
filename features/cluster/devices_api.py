@@ -85,7 +85,7 @@ def list_devices(
 ):
     svc = service()
     user = _user
-    # R02: Agent Token 读取设备清单受 devices.read scope 和 Worker/设备
+    # Agent Token 读取设备清单受 devices.read scope 和 Worker/设备
     # ACL 双重约束；人类会话保持原有行为不变。
     if (
         user is not None

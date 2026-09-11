@@ -1,6 +1,6 @@
-"""Command-level installer lifecycle tests (4.txt 审核建议).
+"""Command-level installer lifecycle tests.
 
-Covers the post-4.txt installer surface with real function calls and
+Covers the post-refactor installer surface with real function calls and
 failure injection:
 
 * P0-1  `install_cli_dispatcher` must link `gms-agent` to the real CLI
@@ -56,9 +56,6 @@ class EnvSandbox(unittest.TestCase):
             "RUNTIME_ROOT": self.root / "runtime",
             "VERSIONS_DIR": self.root / "runtime" / "versions",
             "CURRENT_LINK": self.root / "runtime" / "current",
-            "MCP_ENV_DIR": self.root / "runtime" / "mcp",
-            "STATE_DIR": self.root / "state",
-            "PROFILE_ROOT": self.root / "profiles",
         }
         for name, path in patches.items():
             self._saved[name] = getattr(pm, name)
@@ -69,10 +66,18 @@ class EnvSandbox(unittest.TestCase):
 
         for name, value in self._saved.items():
             self.addCleanup(_restore, name, value)
-        self._launcher_profile_root = mcp_launcher.PROFILE_ROOT
-        mcp_launcher.PROFILE_ROOT = self.root / "profiles"
+        # profile/token 存储唯一实现在 gms_agent.profile_store（ADR 0003）——
+        # patch 一处即同时作用于 package_manager 与 mcp_launcher（二者都经
+        # profile_store 读写）。legacy .env / MCP_ENV_DIR 已删除。
+        self._store_profile_root = pm.profile_store.PROFILE_ROOT
+        self._store_state_dir = pm.profile_store.STATE_DIR
+        pm.profile_store.PROFILE_ROOT = self.root / "profiles"
+        pm.profile_store.STATE_DIR = self.root / "state"
         self.addCleanup(
-            setattr, mcp_launcher, "PROFILE_ROOT", self._launcher_profile_root
+            setattr, pm.profile_store, "PROFILE_ROOT", self._store_profile_root
+        )
+        self.addCleanup(
+            setattr, pm.profile_store, "STATE_DIR", self._store_state_dir
         )
         # kkagent_plugin_registry() reads KKAGENT_HOME at call time.
         env_patch = mock.patch.dict(
@@ -180,10 +185,14 @@ class TestEnrollTomlOnly(EnvSandbox):
     def test_write_enrollment_token_resolves_toml_profile(self):
         profile = pm.profile_name("codex")
         pm.write_profile_toml(profile, "codex", "https://ctrl.example:5001", "")
-        self.assertFalse((pm.MCP_ENV_DIR / "codex.env").exists())  # TOML-only
+        # TOML-only contract: no legacy <client>.env may appear
+        # anywhere in the sandbox.
+        self.assertEqual([], list(self.root.rglob("*.env")))
         written = pm.write_enrollment_token("tok-123")
-        self.assertEqual(written, [str(pm.STATE_DIR / f"{profile}.token")])
-        token_file = pm.STATE_DIR / f"{profile}.token"
+        self.assertEqual(
+            written, [str(pm.profile_store.token_file(profile))]
+        )
+        token_file = pm.profile_store.token_file(profile)
         self.assertEqual(token_file.read_text(encoding="utf-8").strip(), "tok-123")
         self.assertEqual(token_file.stat().st_mode & 0o777, 0o600)
 
@@ -242,7 +251,7 @@ class TestDoctorAndProfiles(EnvSandbox):
     def test_doctor_reports_token_metadata_without_token_contents(self):
         profile = pm.profile_name("codex")
         pm.write_profile_toml(profile, "codex", "https://ctrl.example:5001", "")
-        token = pm.STATE_DIR / f"{profile}.token"
+        token = pm.profile_store.token_file(profile)
         token.parent.mkdir(parents=True, exist_ok=True)
         token.write_text("top-secret-token\n", encoding="utf-8")
         token.chmod(0o600)
@@ -322,7 +331,7 @@ class TestLocalRuntimeOnlyInstall(EnvSandbox):
     def test_client_none_installs_console_link_without_profile(self):
         self.assertEqual(pm._cmd_install_locked(self._args("none")), 0)
         self.assertTrue((self.root / "bin" / "gms-rt-devices-console").is_symlink())
-        self.assertFalse(pm.PROFILE_ROOT.exists())
+        self.assertFalse(pm.profile_store.PROFILE_ROOT.exists())
 
     def test_client_install_rejects_invalid_controller_before_changes(self):
         self.assertEqual(

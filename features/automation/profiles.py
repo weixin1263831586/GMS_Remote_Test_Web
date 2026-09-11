@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from foundation.private_config import write_private_json
+
 
 def normalize_profile(raw: dict[str, Any]) -> dict[str, Any]:
     profile_id = str(raw.get("id") or "").strip()
@@ -59,7 +61,7 @@ def save_profiles(path: str | Path, profiles: list[dict[str, Any]]) -> dict[str,
         seen.add(profile["id"])
         normalized.append(profile)
     data = {"profiles": normalized}
-    profile_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_private_json(profile_path, data)
     return data
 
 

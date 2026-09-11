@@ -31,7 +31,7 @@ async def get_ai_config(
     ai_config = config_manager.get_ai_config()
 
     if not ai_config:
-        return error_response('AI 未配置或未启用，请在 configs/config.json 中配置 ai_models 段并设置 enabled: true', status_code=404)
+        return error_response('AI 未配置或未启用，请在 configs/local/config.json 中配置 ai_models 段并设置 enabled: true', status_code=404)
 
     analyzer = UniversalAIAnalyzer(ai_config)
     statuses = analyzer.get_provider_statuses()

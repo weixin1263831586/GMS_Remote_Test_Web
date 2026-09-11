@@ -2386,7 +2386,7 @@ body.modal-open {
     flex-shrink: 0;
 }
 
-/* 12.txt P1（responsive）：窄 viewport 下 nowrap + overflow:hidden 会把
+/* 响应式：窄 viewport 下 nowrap + overflow:hidden 会把
  * 240px/200px min-width 的输入框直接裁掉。允许换行并解除 min-width。 */
 @media (max-width: 700px) {
     #device-config-modal .dcfg-toolbar {

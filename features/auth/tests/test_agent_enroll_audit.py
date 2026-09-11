@@ -1,11 +1,11 @@
-"""R05 / R09 acceptance tests (2026-09-08 audit round 2).
+"""Agent enrollment and audit redaction acceptance tests.
 
-R05 — Agent 配对码兑换必须在开启全局鉴权的完整应用上匿名可用：
+Agent 配对码兑换必须在开启全局鉴权的完整应用上匿名可用：
 以前的测试继承根 conftest 的 GMS_AUTH_REQUIRED=false，隔离 router 通过
 但部署入口（audit middleware 401）必然失败。这里用与部署一致的
 production 环境（鉴权开启）走 create_app() 完整入口。
 
-R09 — 配对码 / Agent Service Token 不得进入安全审计明文：
+配对码 / Agent Service Token 不得进入安全审计明文：
 认证入口的请求与响应正文必须被专用 schema 替换为占位标记，其他业务
 接口（对照组）不受影响。
 """
@@ -29,7 +29,7 @@ _ED25519_TEST_KEY_PEM: bytes | None = None
 
 
 def _test_ed25519_key_pem() -> bytes:
-    """15.txt 审核 P2: production fixtures must supply an agent-package
+    """Production fixtures must supply an agent-package
     signing key now that production validation requires one."""
     global _ED25519_TEST_KEY_PEM
     if _ED25519_TEST_KEY_PEM is None:
@@ -47,7 +47,7 @@ def _test_ed25519_key_pem() -> bytes:
 
 
 class AgentEnrollmentPublicAccessTests(unittest.TestCase):
-    """R05: full-app entry point with GMS_AUTH_REQUIRED=true."""
+    """Full-app entry point with GMS_AUTH_REQUIRED=true."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -195,7 +195,7 @@ class AgentEnrollmentPublicAccessTests(unittest.TestCase):
 
 
 class EnrollmentAuditRedactionTests(AgentEnrollmentPublicAccessTests):
-    """R09: 配对码/Token 不进入审计明文（完整应用 + 真实审计链）。"""
+    """配对码/Token 不进入审计明文（完整应用 + 真实审计链）。"""
 
     def _read_audit_text(self) -> str:
         try:
@@ -227,7 +227,7 @@ class EnrollmentAuditRedactionTests(AgentEnrollmentPublicAccessTests):
         self.assertNotIn(code, audit_text)
 
     def test_business_code_fields_are_not_blanket_redacted(self):
-        # 对照组：R09 的路径级脱敏只精确匹配认证入口——登录接口的正文
+        # 对照组：路径级脱敏只精确匹配认证入口——登录接口的正文
         # 仍照常摘要。模块级单元断言在
         # features/system/tests/test_audit_credential_redaction.py
         # （本测试不跨 feature 依赖 system 内部子模块，架构门禁约束）。
@@ -256,7 +256,7 @@ class _FixedIPASGIWrapper:
 
 
 class EnrollmentRateLimitAndEntropyTests(AgentEnrollmentPublicAccessTests):
-    """配对码暴力枚举防护（10.txt 2026-08 评审）：
+    """配对码暴力枚举防护：
 
     - 兑换端点按来源 IP 持久限速（复用登录限速基础设施）
     - 配对码熵提升到 token_hex(3)×3（144 bit），拒绝 24-bit 旧格式

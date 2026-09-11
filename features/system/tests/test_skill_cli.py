@@ -538,7 +538,7 @@ class SkillCliTests(unittest.TestCase):
 class SkillUpdateEnvTests(unittest.TestCase):
     """gms-rt-system-update 必须走 gms-agent update 并传导当前 TLS 配置。
 
-    11.txt 收口：install.sh 已随包结构迁移删除，更新生命周期改为
+    install.sh 已随包结构迁移删除，更新生命周期改为
     `gms-agent update`（registry → 校验 → versions/<v>/ → 整包重激活）。
     命令现在优先取本脚本旁边的 gms-agent，并把会话的
     GMS_INSTALL_CA_CERT / GMS_INSTALL_INSECURE 传导给 gms-agent 的下载层。

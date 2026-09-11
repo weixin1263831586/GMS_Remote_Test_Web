@@ -85,7 +85,7 @@ class ClusterCommandRepositoryMixin:
         env: dict[str, Any],
         devices: list[str],
     ) -> dict[str, Any]:
-        """R09: queue the start_test command for a freshly leased job.
+        """Queue the start_test command for a freshly leased job.
 
         Both submission entrances (``/api/cluster/jobs`` and
         ``/api/test/start``) used to commit the job first and the dispatch
@@ -124,7 +124,7 @@ class ClusterCommandRepositoryMixin:
         return command
 
     def compensate_failed_dispatch(self, job_id: str, exc: Exception) -> None:
-        """R09: roll back a job whose dispatch command could not be queued.
+        """Roll back a job whose dispatch command could not be queued.
 
         Fail the job and release its device claims so the devices do not
         stay occupied by a job that can never execute. Both release steps

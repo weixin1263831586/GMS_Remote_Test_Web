@@ -1,6 +1,6 @@
 # gms-remote-test plugin — agent maintenance contract
 
-This directory is a GENERATED release payload (11.txt): everything except
+This directory is a GENERATED release payload: everything except
 `scripts/install_local.sh` is produced from the single source root
 `agent/gms-remote-test/`. Read this file before changing anything —
 especially before editing a generated file by hand.
@@ -20,7 +20,7 @@ especially before editing a generated file by hand.
 | `GENERATED.md` | Marks this tree as generated. |
 | `tests/` | Copies of `agent/gms-remote-test/tests/` (work in both layouts). |
 
-## Change flow (mandatory order, 11.txt)
+## Change flow (mandatory order)
 
 1. Edit the CLI / MCP adapter / SKILL / manifests under
    `agent/gms-remote-test/` — never in this generated copy.
@@ -57,7 +57,8 @@ especially before editing a generated file by hand.
   dump-mode and rejects `-c/-f` and shell metacharacters. Clearing the log
   buffer (`logcat -c`) destroys diagnostic evidence and stays human-only
   via the CLI; the tool denies `clear=true` and raw `-c` in args alike
-  (R17, 10.txt §六). The CLI catalog marks the raw command manual, so
+  (see docs/architecture/adr/0004-ssh-execution-boundary.md for the
+  execution-boundary policy). The CLI catalog marks the raw command manual, so
   `gms_rt_run` cannot reach it.
 - `gms_rt_shell_exec` (added v0.8.0) is the only agent path to
   `gms-rt-devices-shell`: it requires a server-issued one-shot

@@ -36,7 +36,7 @@ function startStatusPolling() {
         try {
             if (state.clusterJobId) {
                 const jobId = encodeURIComponent(state.clusterJobId);
-                // R13: snapshot the polled job id; responses that arrive after
+                // Snapshot the polled job id; responses that arrive after
                 // the user switched to another job/worker must not write the
                 // stale context back.
                 const polledJobId = String(state.clusterJobId);

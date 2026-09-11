@@ -70,7 +70,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 下载/解压是日常操作，只需登录；添加本地路径修改主机配置，需要管理员提权。
-# 11.txt P1: 套件下载/解压会占用磁盘/CPU/带宽且可写主机路径——Agent Token
+# 套件下载/解压会占用磁盘/CPU/带宽且可写主机路径——Agent Token
 # 一律拒绝（human-only）；agent 需要套件信息时走只读的 suites 列表接口。
 _WRITE_AUTH = [Depends(require_human_principal_when_auth_required)]
 _ADD_LOCAL_ELEVATION = [Depends(require_elevated_admin_when_auth_required)]

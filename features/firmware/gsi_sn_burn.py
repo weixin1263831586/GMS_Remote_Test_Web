@@ -1,6 +1,6 @@
 """GSI and serial-number burn endpoints.
 
-Split out of firmware_api.py (4.txt round) so the main firmware API stays
+Split out of firmware_api.py so the main firmware API stays
 under the reviewable-size limit. Both endpoints reuse the firmware runtime
 bindings; the /api/burn/gsi script flow and the SN stub previously lived
 inline at the tail of firmware_api.py.
@@ -64,7 +64,7 @@ async def _lock_devices(
 ):
     """Lock devices for a burn operation (moved from firmware_api.py).
 
-    R07: the split-out copy passed four positional arguments while the real
+    The split-out copy passed four positional arguments while the real
     runtime binding (workflows/firmware_device.lock_firmware_devices) only
     accepts keyword parameters — any legitimate request failed with
     ``TypeError`` at the lock stage, before flashing. Mirror the original

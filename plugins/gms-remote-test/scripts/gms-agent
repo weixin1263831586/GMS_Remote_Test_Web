@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gms-agent — one installer, one updater, one enrollment (10.txt §十三~§十六).
+"""gms-agent — one installer, one updater, one enrollment.
 
 The single user-facing entry point of the GMS Agent Runtime on a build
 server. Users should never need to know about ~/.codex/config.toml,
@@ -55,7 +55,7 @@ separates the client via GMS_AGENT_CLIENT metadata); per-client tokens can
 be introduced later by enrolling with dedicated profiles.
 """
 
-# Thin argparse shell (10.txt §三十四: the lifecycle logic lives in
+# Thin argparse shell: the lifecycle logic lives in
 # gms_agent.package_manager; this file stays the stable entry point so
 # bootstrap downloads and existing muscle memory keep working).
 #
@@ -63,7 +63,7 @@ be introduced later by enrolling with dedicated profiles.
 # ships alone, without the gms_agent package next to it. In that mode the
 # shell delegates the ENTIRE run to the full gms-agent inside the registry
 # package (download → verify → exec), instead of importing a module it does
-# not carry. Two-layer lifecycle, exactly 10.txt §四.
+# not carry (two-layer lifecycle: bootstrap fetch, package entry runs).
 import os
 import runpy
 import sys
@@ -78,7 +78,7 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
     # ---- standalone bootstrap: minimal, dependency-free fetch-and-exec ----
     # The embedded Controller URL replaces __GMS_AGENT_DEFAULT_SERVER__ at
     # download time; GMS_AGENT_VERIFY_KEY_B64 replaces
-    # __GMS_AGENT_VERIFY_KEY_B64__ (release public-key pin, 10.txt §二十).
+    # __GMS_AGENT_VERIFY_KEY_B64__ (release public-key pin).
 
     def _bootstrap_server() -> str:
         # --server wins over the embedded default (same precedence the full
@@ -104,11 +104,11 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
 
     def _standalone_main() -> int:
         # Fetch the FULL registry package and verify the ENTIRE trust chain
-        # BEFORE anything extracted is executed (11.txt 审核 P0-2):
+        # BEFORE anything extracted is executed:
         #   1. same-origin artifact URL (scheme+netloc, redirects rejected),
         #   2. SHA-256 of the downloaded bytes against the manifest,
         #   3. Ed25519 manifest signature against the release public key
-        #      pinned into this bootstrap at download time (10.txt §二十) —
+        #      pinned into this bootstrap at download time —
         #      when a key is pinned, an absent/invalid signature is fatal,
         #   4. only then a guarded extract (no traversal / symlink / bomb),
         #   5. and only then exec the package's gms-agent with all original
@@ -231,7 +231,7 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
             archive_path = extract_dir / "package.zip"
             archive_path.write_bytes(data)
             # Guarded extraction — same contract as
-            # gms_agent.package_manager.safe_extract (10.txt §十九): never
+            # gms_agent.package_manager.safe_extract: never
             # trust the archive's own paths.
             try:
                 with zipfile.ZipFile(archive_path) as archive:

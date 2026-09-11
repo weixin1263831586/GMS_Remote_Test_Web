@@ -85,7 +85,7 @@ def _extract_json_object(text: str):
             break
     if start < 0:
         return None
-    # R25: 从首个 { 或 [ 起用 raw_decode 解析，而不是按最后一个 ]/} 裁剪——
+    # 从首个 { 或 [ 起用 raw_decode 解析，而不是按最后一个 ]/} 裁剪——
     # 裁剪点在嵌套结构中会错位（连合法的 {"elements":[...]} 都解析失败），
     # 且对象后跟数组/日志的混合输出同样出错。raw_decode 一次解析出
     # 最外层完整 JSON 值，天然忽略其后的日志尾随。
@@ -225,7 +225,7 @@ async def ui_screenshot(req: UiControlRequest, request: Request):
     )
     if conflict:
         return conflict
-    # 11.txt P1 补口：screencap MCP 工具直连此端点，agent principal 必须受
+    # 补口：screencap MCP 工具直连此端点，agent principal 必须受
     # allowed_devices ACL 约束（与其他设备操作端点一致，无 ACL 的 agent
     # 不能绕过租约边界读任意设备画面）。
     ensure_agent_device_allowed(request, serial)
@@ -276,7 +276,7 @@ async def ui_layout(req: UiControlRequest, request: Request):
     if conflict:
         return conflict
     # 与 screenshot 一致：layout 同样泄漏设备画面内容，agent principal
-    # 必须通过 allowed_devices ACL（11.txt P1 补口）。
+    # 必须通过 allowed_devices ACL。
     ensure_agent_device_allowed(request, serial)
 
     config = runtime.config_manager.load_config()

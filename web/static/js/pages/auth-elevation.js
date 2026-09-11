@@ -105,8 +105,12 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限', opti
             return false;
         }
     }
-    if (!state.currentUser && state.authSetupRequired) {
-        showAuthGate(true);
+    if (state.authRequired && !state.currentUser) {
+        // 未认证时只显示登录层，不打开提权弹框：两层叠加会让 Escape 被
+        // auth-gate 的捕获阶段处理器吞掉（api.js），底层弹框永远关不掉
+        // （E2E 复现的 .modal.show 残留）。登录完成后页面重新加载用户
+        // 列表，提权流程自然重走。
+        showAuthGate(state.authSetupRequired);
         return false;
     }
     if (_elevationRequestPromise) {

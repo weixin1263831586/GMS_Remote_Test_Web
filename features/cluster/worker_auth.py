@@ -14,6 +14,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from foundation.config_paths import worker_tokens_path
+
 
 _token_lock = threading.RLock()
 
@@ -22,7 +24,7 @@ def _worker_tokens_path() -> Path:
     configured = os.getenv("GMS_WORKER_TOKENS_FILE", "").strip()
     if configured:
         return Path(configured)
-    return Path(__file__).resolve().parents[2] / "configs" / "worker_tokens.json"
+    return worker_tokens_path(Path(__file__).resolve().parents[2])
 
 
 def _read_token_raw(path: Path) -> dict:

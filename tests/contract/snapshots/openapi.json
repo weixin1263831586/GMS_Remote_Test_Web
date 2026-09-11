@@ -4041,7 +4041,7 @@
     },
     "/api/auth/agent-scopes": {
       "get": {
-        "description": "Scope 目录（11.txt 中优先级 §4）。\n\nscope 名单本身不敏感（静态字典），对任何已认证 principal 开放只读，\n让 agent 遇到 403 时能自查缺哪个 scope；管理操作（创建/吊销 token）\n仍由下方 admin 端点把关。匿名/开发模式返回全量目录用于 UI 渲染。",
+        "description": "Scope 目录。\n\nscope 名单本身不敏感（静态字典），对任何已认证 principal 开放只读，\n让 agent 遇到 403 时能自查缺哪个 scope；管理操作（创建/吊销 token）\n仍由下方 admin 端点把关。匿名/开发模式返回全量目录用于 UI 渲染。",
         "responses": {
           "200": {
             "content": {
@@ -17425,7 +17425,7 @@
     },
     "/api/reports/failure-summary": {
       "get": {
-        "description": "Structured failure summary for one report (11.txt P1 §4).\n\nParses test_result.xml server-side so agents stop paging through\nhundred-MB raw logs with offset windows: returns the failed-case list\n(module, name, reason, stack-trace head). Same reports.read gate as\nlist/download; ownership is enforced through the same access helpers.",
+        "description": "Structured failure summary for one report.\n\nParses test_result.xml server-side so agents stop paging through\nhundred-MB raw logs with offset windows: returns the failed-case list\n(module, name, reason, stack-trace head). Same reports.read gate as\nlist/download; ownership is enforced through the same access helpers.",
         "parameters": [
           {
             "in": "query",
@@ -18485,7 +18485,7 @@
     },
     "/api/system/skills": {
       "get": {
-        "description": "下载技能 zip（兼容端点，11.txt 目录重构后的包装）\n\n旧结构 zips skills/<name>/；新结构的技能源位于\nagent/gms-remote-test/skill/（内容即旧 skills/gms-remote-test/ 主体）。\n这里将 skill/ 内容以 gms-remote-test/ 根打包，保持下载语义不变。\n唯一合法的 skill_name 是 gms-remote-test。\n\nReturns:\n    ZIP 文件下载",
+        "description": "下载技能 zip（目录重构后的兼容端点包装）\n\n旧结构 zips skills/<name>/；新结构的技能源位于\nagent/gms-remote-test/skill/（内容即旧 skills/gms-remote-test/ 主体）。\n这里将 skill/ 内容以 gms-remote-test/ 根打包，保持下载语义不变。\n唯一合法的 skill_name 是 gms-remote-test。\n\nReturns:\n    ZIP 文件下载",
         "parameters": [
           {
             "description": "技能名称（兼容参数：当前唯一技能源是 agent/gms-remote-test/skill/）",

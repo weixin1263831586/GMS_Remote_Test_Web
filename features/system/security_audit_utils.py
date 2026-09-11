@@ -72,7 +72,7 @@ _FIRMWARE_SHARE_DOWNLOAD_PATH = re.compile(
     r'^(/api/firmware-shares/)[^/]+(/download)$'
 )
 
-# R09（2026-09-08 审核）：这些认证入口的请求/响应正文携带一次性配对码
+# 这些认证入口的请求/响应正文携带一次性配对码
 # 或 Agent Service Token。现有递归脱敏只按"键名"匹配（token/password
 # 等），而配对码放在 `enrollment.code` / 请求体的 `code` 键下，会原样
 # 进入审计。对这些路径记录不解析的占位标记；其他业务接口不受影响，
@@ -193,7 +193,7 @@ async def summarize_audit_response(
 ) -> tuple[Any, dict[str, Any]]:
     """Capture small JSON responses for audit detail and rebuild the response.
 
-    R09（2026-09-08 审核）：认证入口（配对码兑换/签发）的响应正文换成
+    认证入口（配对码兑换/签发）的响应正文换成
     占位标记，原始配对码与 Service Token 不进入审计，但响应本身仍正常
     重建返回给客户端。
     """

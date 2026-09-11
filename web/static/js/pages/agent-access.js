@@ -30,7 +30,7 @@ const AGENT_ACCESS_SCOPE_LABELS = {
 function agentAccessPanelIsOpen() {
     const panel = document.getElementById('agent-access-panel');
     if (!panel) return false;
-    // 12.txt §八：状态判定不依赖 inline style（初始态来自 HTML 的
+    // 状态判定不依赖 inline style（初始态来自 HTML 的
     // style="display:none"，toggle 后由 JS 改写）。computed style 同时
     // 覆盖"尚未触碰 inline style"与"已被 toggle"两种来源。
     if (panel.style.display === 'flex') return true;

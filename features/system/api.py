@@ -8,9 +8,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from urllib.parse import urlparse
 
-import aiohttp
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import (
     FileResponse,
@@ -21,7 +19,7 @@ from fastapi.responses import (
 )
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
-from features.system import agent_package_registry, jq_binary
+from features.system import agent_package_registry, gms_assistant_proxy, jq_binary
 from features.system.api_docs_list import API_DOCS_LIST
 from features.system.skill_archive_signing import (
     sign_skill_archive,
@@ -54,6 +52,10 @@ from foundation.responses import error_response
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# GMS Assistant boot shell + same-origin proxy live in their own module
+# (api.py size budget); their routes are included here.
+router.include_router(gms_assistant_proxy.router)
+
 # Template factory (initialized from app.py)
 _templates = None
 
@@ -81,35 +83,10 @@ SHELL_PAGE_TITLES = {
     "notes": "个人知识库 - GMS 远程测试",
 }
 
-_EXTERNAL_GOOGLE_FONT_LINK_RE = re.compile(
-    r"<link\b(?=[^>]*\bhref\s*=\s*['\"]https://fonts\.(?:googleapis|gstatic)\.com(?:/[^'\"]*)?['\"])[^>]*>\s*",
-    re.IGNORECASE,
-)
-
-
 def init_templates(templates):
     """Initialize Jinja2 templates reference from the main app."""
     global _templates
     _templates = templates
-
-
-def _gms_assistant_upstream() -> str:
-    """Resolve the optional upstream from environment or product config."""
-    env_url = str(os.getenv("GMS_ASSISTANT_URL") or "").strip()
-    if env_url:
-        return env_url.rstrip("/")
-    config = config_manager.load_config()
-    external = config.get("external_services") or {}
-    return str(external.get("gms_assistant_url") or "").strip().rstrip("/")
-
-
-def _gms_assistant_api_key() -> str:
-    """Return the server-side API key used by the Assistant upstream."""
-    env_key = str(os.getenv("GMS_ASSISTANT_API_KEY") or "").strip()
-    if env_key:
-        return env_key
-    external = config_manager.load_config().get("external_services", {})
-    return str(external.get("gms_assistant_api_key") or "").strip()
 
 
 # ==================== Root Page ====================
@@ -151,255 +128,8 @@ async def root(request: Request):
     return response
 
 
-def _rewrite_gms_assistant_content(
-    text: str,
-    request: Request,
-    proxy_base: str = "",
-    upstream: str = "",
-) -> str:
-    """Rewrite upstream absolute URLs to this HTTPS origin."""
-    # The shell deliberately keeps style-src restricted to same-origin CSS.
-    # Remove the assistant's optional Google Fonts link so the iframe uses its
-    # local/system fallback fonts without producing CSP violations.
-    text = _EXTERNAL_GOOGLE_FONT_LINK_RE.sub("", text)
-    upstream = upstream or _gms_assistant_upstream()
-    if not upstream:
-        return text
-    upstream_https = re.sub(r"^http://", "https://", upstream)
-    base = proxy_base.rstrip("/")
-    replacements = {
-        upstream: base,
-        upstream_https: base,
-        upstream.replace("/", "\\/"): base.replace("/", "\\/"),
-        upstream_https.replace("/", "\\/"): base.replace("/", "\\/"),
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    root_prefixes = ("/assets/", "/api/")
-    for prefix in root_prefixes:
-        text = text.replace(f'"{prefix}', f'"{base}{prefix}')
-        text = text.replace(f"'{prefix}", f"'{base}{prefix}")
-        text = text.replace(f"`{prefix}", f"`{base}{prefix}")
-    return text
-
-
-async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str = ""):
-    """Same-origin HTTPS proxy for the external HTTP GMS assistant."""
-    upstream = _gms_assistant_upstream()
-    if not upstream:
-        if path.startswith("public/agents/") and path.endswith("/chat"):
-            return HTMLResponse(
-                """<!doctype html><html lang='zh-CN'><meta charset='utf-8'>
-<title>GMS助手未配置</title><style>
-body{font-family:system-ui,sans-serif;margin:0;padding:32px;color:#243042;background:#f7f8fa}
-main{max-width:640px;margin:8vh auto;padding:28px;background:#fff;border:1px solid #e3e7ed;border-radius:12px}
-code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
-</style><main><h2>GMS助手暂未配置</h2>
-<p>请在服务器配置中设置 <code>external_services.gms_assistant_url</code>，然后刷新此页面。</p>
-</main>""",
-                status_code=200,
-            )
-        return JSONResponse(
-            content={"success": False, "error": "GMS助手未配置，请设置 external_services.gms_assistant_url"},
-            status_code=503,
-        )
-    upstream_url = f"{upstream}/{path}"
-    if request.url.query:
-        upstream_url = f"{upstream_url}?{request.url.query}"
-
-    # 请求头白名单：仅将 Assistant 公共 API 所需的平台会话凭证转发给
-    # 已配置的内部 Assistant 上游；其它代理路径仍不转发认证信息。
-    forwarded_request_headers = {
-        "accept",
-        "accept-language",
-        "content-type",
-        "user-agent",
-        "x-request-id",
-        "x-trace-id",
-    }
-    request_headers = {
-        key: value
-        for key, value in request.headers.items()
-        if key.lower() in forwarded_request_headers
-    }
-    if path.startswith("api/public/agents/"):
-        for credential in ("cookie", "authorization"):
-            value = request.headers.get(credential)
-            if value:
-                request_headers[credential.title()] = value
-        assistant_api_key = _gms_assistant_api_key()
-        if assistant_api_key:
-            request_headers["X-API-Key"] = assistant_api_key
-    request_headers["Host"] = urlparse(upstream).netloc
-
-    # 响应头黑名单：除跳板/缓存类头外，必须剥离会话写入与服务器指纹。
-    excluded_response_headers = {
-        "connection",
-        "content-encoding",
-        "content-length",
-        "content-security-policy",
-        "date",
-        "etag",
-        "expires",
-        "keep-alive",
-        "last-modified",
-        "proxy-authenticate",
-        "server",
-        "set-cookie",
-        "te",
-        "trailer",
-        "transfer-encoding",
-        "upgrade",
-        "www-authenticate",
-        "x-frame-options",
-    }
-
-    try:
-        timeout = aiohttp.ClientTimeout(total=60)
-        async with aiohttp.ClientSession(timeout=timeout) as session, session.request(
-            request.method,
-            upstream_url,
-            headers=request_headers,
-            data=await request.body(),
-            allow_redirects=False,
-        ) as upstream_response:
-            body = await upstream_response.read()
-            content_type = upstream_response.headers.get("content-type", "")
-            response_headers = {
-                key: value
-                for key, value in upstream_response.headers.items()
-                if key.lower() not in excluded_response_headers
-            }
-
-            if upstream_response.status in {301, 302, 303, 307, 308}:
-                location = response_headers.get("Location") or response_headers.get("location")
-                if location:
-                    response_headers["Location"] = location.replace(upstream, "/gms-assistant")
-
-            if any(marker in content_type for marker in ("text/", "javascript", "json")):
-                try:
-                    text = body.decode(upstream_response.charset or "utf-8", errors="replace")
-                    body = _rewrite_gms_assistant_content(
-                        text, request, proxy_base=proxy_base, upstream=upstream
-                    ).encode("utf-8")
-                    response_headers.pop("Content-Length", None)
-                    response_headers.pop("content-length", None)
-                except Exception:
-                    logger.debug("[GMS_ASSISTANT_PROXY] 跳过内容重写: %s", upstream_url, exc_info=True)
-
-            return Response(
-                content=body,
-                status_code=upstream_response.status,
-                media_type=content_type.split(";")[0] if content_type else None,
-                headers=response_headers,
-            )
-    except Exception:
-        # 详细异常只写服务端日志；前端只拿到通用错误与 request_id，
-        # 避免把内部连接细节（地址/超时/证书错误）泄漏给浏览器。
-        logger.exception("[GMS_ASSISTANT_PROXY] 代理失败 %s", upstream_url)
-        return JSONResponse(
-            content={
-                "success": False,
-                "error": "GMS助手服务暂不可用",
-                "request_id": getattr(request.state, "request_id", None),
-            },
-            status_code=502,
-        )
-
-
-@router.api_route(
-    "/gms-assistant/{path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant(path: str, request: Request):
-    return await _proxy_gms_assistant_path(path, request, proxy_base="/gms-assistant")
-
-
-@router.api_route(
-    "/public/{path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_public(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"public/{path}", request)
-
-
-@router.api_route(
-    "/assets/{path:path}",
-    methods=["GET"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_assets(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"assets/{path}", request)
-
-
-@router.api_route(
-    "/@vite/{path:path}",
-    methods=["GET"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_vite(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"@vite/{path}", request)
-
-
-@router.api_route(
-    "/@react-refresh",
-    methods=["GET"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_react_refresh(request: Request):
-    return await _proxy_gms_assistant_path("@react-refresh", request)
-
-
-@router.api_route(
-    "/src/{path:path}",
-    methods=["GET"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_src(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"src/{path}", request)
-
-
-@router.api_route(
-    "/node_modules/{path:path}",
-    methods=["GET"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_node_modules(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"node_modules/{path}", request)
-
-
-@router.api_route(
-    "/@id/{path:path}",
-    methods=["GET"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_vite_id(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"@id/{path}", request)
-
-
-@router.api_route(
-    "/@fs/{path:path}",
-    methods=["GET"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_vite_fs(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"@fs/{path}", request)
-
-
-@router.api_route(
-    "/api/public/{path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    include_in_schema=False,
-)
-async def proxy_gms_assistant_public_api(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"api/public/{path}", request)
-
-
 # ==================== Skills Download ====================
-# 11.txt: agent/gms-remote-test is the single source root. The legacy
+# agent/gms-remote-test is the single source root. The legacy
 # /api/system/skills* endpoints remain as compatibility wrappers over the
 # agent package source (skill content now lives in agent/.../skill/). The
 # modern install path is GET /api/agent/install (bootstrap → gms-agent).
@@ -424,7 +154,7 @@ async def download_skills_zip(
         description="技能名称（兼容参数：当前唯一技能源是 agent/gms-remote-test/skill/）",
     ),
 ):
-    """下载技能 zip（兼容端点，11.txt 目录重构后的包装）
+    """下载技能 zip（目录重构后的兼容端点包装）
 
     旧结构 zips skills/<name>/；新结构的技能源位于
     agent/gms-remote-test/skill/（内容即旧 skills/gms-remote-test/ 主体）。
@@ -454,7 +184,7 @@ async def download_skills_zip(
             )
 
         zip_filename = f"{skill_name}-skills.zip"
-        # 11.txt: skill 源位于 agent/gms-remote-test/skill/，打包时以
+        # skill 源位于 agent/gms-remote-test/skill/，打包时以
         # gms-remote-test/ 为 arcname 根，保持旧下载语义（解压出
         # gms-remote-test/ 目录）不变。
         result = FileUtils.create_zip_from_multiple_directories(
@@ -499,7 +229,7 @@ async def download_skills_zip(
 # itself over the GitHub fallback. Integrity is double-checked: the endpoint
 # only serves the pinned file pinned path, and the installer verifies the
 # SHA-256 it receives in the X-GMS-SHA256 header before installing.
-# R13: implementation lives in features/system/jq_binary.py (size budget).
+# Implementation lives in features/system/jq_binary.py (api.py size budget).
 
 
 @router.get("/api/system/tools/jq")
@@ -508,7 +238,7 @@ async def download_jq_binary(request: Request):
     return await jq_binary.serve(request)
 
 
-# ==================== Agent Package Registry (10.txt §十三, Phase 3) ====================
+# ==================== Agent Package Registry (Phase 3) ====================
 # The Controller is the single production distribution source for the GMS
 # Agent Runtime; implementation lives in agent_package_registry.py (size
 # budget). Endpoints:
@@ -680,7 +410,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             state["client_ip"] = client_ip
             state["display_client_id"] = display_client_id
     with global_state.websocket_connections_lock:
-        # R26: a user may open several tabs; store ALL connections per
+        # A user may open several tabs; store ALL connections per
         # client so the second tab no longer silently steals pushes from
         # the first.  {client_id: set[websocket]}.
         connections = global_state.websocket_connections.get(client_id)
@@ -764,7 +494,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except Exception as e:
         logger.error(f"WebSocket error for {client_id}: {e}")
     finally:
-        # 清理WebSocket连接（R26: 按 set 成员移除，不影响同账号其他标签页）
+        # 清理WebSocket连接（按 set 成员移除，不影响同账号其他标签页）
         with global_state.websocket_connections_lock:
             connections = global_state.websocket_connections.get(client_id)
             if isinstance(connections, set):

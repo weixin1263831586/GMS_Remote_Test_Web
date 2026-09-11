@@ -23,6 +23,8 @@
 （``SSHExecutor``/``SSHManager.execute_command``），例外仅限本文件与
 已登记的 connection-health 原语。直接调用会重新引入 stdout/stderr
 channel 窗口互锁死锁与双实现漂移。
+
+See docs/architecture/adr/0004-ssh-execution-boundary.md.
 """
 
 from __future__ import annotations
@@ -44,10 +46,10 @@ logger = logging.getLogger(__name__)
 _READ_CHUNK = 65536
 _POLL_INTERVAL = 0.01
 _EXIT_DRAIN_GRACE_SECONDS = 0.05
-# R11：退出状态就绪后允许的尾部 drain 上限——远端在 exit 之后仍持续
+# 退出状态就绪后允许的尾部 drain 上限——远端在 exit 之后仍持续
 # 输出（如派生进程继承 channel）不能把执行器拖住。
 _EXIT_TAIL_DRAIN_SECONDS = 10.0
-# R11：单条命令在内存中捕获的每流输出上限；超出部分丢弃并打标记，
+# 单条命令在内存中捕获的每流输出上限；超出部分丢弃并打标记，
 # 防止高输出任务把 Controller/Worker 内存打爆。
 _MAX_CAPTURED_STREAM_BYTES = 8 * 1024 * 1024
 _TRUNCATION_MARKER = "\n...[GMS: output truncated]"
@@ -64,12 +66,12 @@ class SSHExecutor:
        stdout channel，stderr 日志错乱/丢失；
     3. 异常一律折叠为 ``CommandResult(stdout='', stderr=<msg>, code=-1)``，
        调用方统一以 ``code == -1`` 判错（流式路径额外回调一条 error 日志）；
-    4. R11（2026-09-08 审核）：执行结束（成功/超时/取消/异常）都在
+    4. 执行结束（成功/超时/取消/异常）都在
        ``finally`` 中关闭 channel。注意这只释放本地 SSH channel 并向远端
        发送 EOF——脱离会话的远端进程（nohup/setsid）不会因此被终止；
        对需要强终止的长任务，应使用可追踪的远端任务/进程组协议，不能
        把"channel 已关闭"等同于"远端进程已退出"；
-    5. R11：总体 deadline 在持续 drain 期间同样生效，退出后的尾部 drain
+    5. 总体 deadline 在持续 drain 期间同样生效，退出后的尾部 drain
        与内存中的输出捕获均有上限；可选 ``should_cancel`` 回调提供协作
        式取消（检查点返回 True 时停止执行并关闭 channel）。
     """
@@ -126,7 +128,7 @@ class SSHExecutor:
             max_captured = self._max_captured_stream_bytes
 
             def _over_deadline() -> bool:
-                # 总体 deadline 在持续 drain 期间同样生效（R11），不能只
+                # 总体 deadline 在持续 drain 期间同样生效，不能只
                 # 在外层轮询处检查——高输出会一直走 recv 分支绕过它。
                 return (
                     deadline is not None
@@ -216,7 +218,7 @@ class SSHExecutor:
             logger.error(f"[SSH] Command execution error: {e}")
             return CommandResult(stdout="", stderr=str(e), code=-1)
         finally:
-            # R11：无论成功、超时、取消还是异常，都释放本地 channel，
+            # 无论成功、超时、取消还是异常，都释放本地 channel，
             # 不再让调用方认为已结束的命令继续占用 SSH 资源。
             if channel is not None:
                 with suppress(Exception):
@@ -252,7 +254,7 @@ class SSHExecutor:
         - 逐行回调的同时捕获全文，结束后返回带 stdout/stderr/exit code
           的 :class:`CommandResult`；
         - 退出状态就绪后仍继续 drain 缓冲数据，避免尾部输出丢失；
-        - R11：超时/取消/异常路径在 ``finally`` 中关闭 channel；持续高
+        - 超时/取消/异常路径在 ``finally`` 中关闭 channel；持续高
           输出同样受总体 deadline 约束；内存捕获有上限（超出打标记），
           退出后的尾部 drain 有时限。
         """
@@ -282,7 +284,7 @@ class SSHExecutor:
             exit_seen_at: float | None = None
 
             def _over_deadline() -> bool:
-                # 总体 deadline 在持续 drain 期间同样生效（R11）。
+                # 总体 deadline 在持续 drain 期间同样生效。
                 return (
                     deadline is not None
                     and exit_seen_at is None
@@ -309,7 +311,7 @@ class SSHExecutor:
                     raw, pending = pending[:newline], pending[newline + 1:]
                     line = raw.decode("utf-8", errors="replace")
                     if line.strip():
-                        # R11：超过捕获上限后仍逐行回调（实时日志不中断），
+                        # 超过捕获上限后仍逐行回调（实时日志不中断），
                         # 但不再把行留在内存里。
                         if capture:
                             captured.append(line)
@@ -418,7 +420,7 @@ class SSHExecutor:
                 await log_callback(f"SSH 执行错误: {e!s}", "error")
             return CommandResult(stdout="", stderr=str(e), code=-1)
         finally:
-            # R11：无论成功、超时、取消还是异常，都释放本地 channel。
+            # 无论成功、超时、取消还是异常，都释放本地 channel。
             # 注意：这只是关闭 SSH channel（向远端送 EOF），不能保证
             # 脱离会话的远端进程退出；需要强终止的长任务须使用进程组
             # 级别的远端取消协议。

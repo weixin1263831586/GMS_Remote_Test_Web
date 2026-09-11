@@ -74,7 +74,7 @@ class RedmineConfig:
         redmine = dict(config.get("redmine") or {})
         redmine["base_url"] = self.get_redmine_base_url(config)
         if not redmine["base_url"]:
-            raise ValueError("Redmine 未配置，请设置 configs/config.json 的 redmine.base_url")
+            raise ValueError("Redmine 未配置，请设置 configs/local/config.json 的 redmine.base_url")
         redmine.setdefault("domain", urlparse(redmine["base_url"]).netloc)
         return redmine
 

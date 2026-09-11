@@ -42,7 +42,7 @@ from .downloads import (
 
 
 def _principal_has_reports_read(principal: object) -> bool:
-    """11.txt P1: reports.read gate (mirror of analysis_api helper).
+    """reports.read gate (mirror of analysis_api helper).
 
     Agent principals must carry the reports.read scope; human roles get it
     from ROLE_PERMISSIONS and admin via '*'. getattr fallback keeps unit
@@ -164,7 +164,7 @@ async def list_reports(
     """Get test report list from database."""
     import time
     start_time = time.time()
-    # 11.txt P1: agent principals must hold reports.read to read reports
+    # Agent principals must hold reports.read to read reports
     # (human roles carry it via ROLE_PERMISSIONS; dev-mode anonymous passes).
     # Inline has_permission check (not the require_agent_scope dependency) so
     # unit tests can stub the auth seam the same way as everywhere else.
@@ -278,7 +278,7 @@ async def download_report(
 ):
     """Unified report interface: list files, download ZIP, or view file content."""
     principal = require_authenticated_user(request)
-    # 11.txt P1: report file browsing/download needs reports.read for agent
+    # Report file browsing/download needs reports.read for agent
     # principals (human roles carry it via ROLE_PERMISSIONS; admin via '*').
     if not _principal_has_reports_read(principal):
         return error_response(
@@ -441,7 +441,7 @@ async def report_failure_summary(
     max_cases: Annotated[int, Query(ge=1, le=100)] = 20,
     stack_head_lines: Annotated[int, Query(ge=0, le=100)] = 15,
 ):
-    """Structured failure summary for one report (11.txt P1 §4).
+    """Structured failure summary for one report.
 
     Parses test_result.xml server-side so agents stop paging through
     hundred-MB raw logs with offset windows: returns the failed-case list

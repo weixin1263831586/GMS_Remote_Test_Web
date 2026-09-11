@@ -66,7 +66,7 @@ class JqBinaryEndpointTests(unittest.TestCase):
         self.assertFalse(response.json()["success"])
 
     def test_rejects_distro_jq_that_needs_libjq(self):
-        """R12: tiny dynamically-linked wrapper builds are refused (404)."""
+        """Tiny dynamically-linked wrapper builds are refused (404)."""
         with patch.object(
             jq_binary, "JQ_BIN_PATH", "/tmp/does-not-exist-jq"
         ), patch(
@@ -106,7 +106,7 @@ class JqBinaryEndpointTests(unittest.TestCase):
         # Executable bit preserved for direct install.
         self.assertTrue(response.content[:4] == b"\x7fELF")
 
-    # 11.txt: the legacy bash installer (and its jq download priority
+    # The legacy bash installer (and its jq download priority
     # checks) is retired — installs flow through the gms-agent bootstrap,
     # which downloads the pinned jq via the same /api/system/tools/jq
     # endpoint when the CLI needs it. The old installer-text assertions
