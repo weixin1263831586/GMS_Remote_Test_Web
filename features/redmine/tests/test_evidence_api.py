@@ -265,7 +265,7 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertIn("artifact", kinds)
 
     def test_search_cites_zip_member_with_line(self):
-        """2026-09-11 反馈（zip 内容可检索）端点级：archive 派生文本命中给出 zip!/member 行级引用。"""
+        """zip 内容可检索（端点级）：archive 派生文本命中给出 zip!/member 行级引用。"""
         from features.redmine.evidence import zip_member_marker
         from features.redmine.evidence_store import owner_evidence_store
 
@@ -313,7 +313,7 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertEqual(entry["zip_member"], "logs/logcat.txt")
 
     def test_latest_endpoint_resolves_newest_snapshot_for_issue(self):
-        """2026-09-11 反馈：issue-show 双参数——latest 端点按 issue 解析。"""
+        """issue-show 双参数——latest 端点按 issue 解析。"""
         from features.redmine.evidence_store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
@@ -365,7 +365,7 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
     def test_create_preflight_blocks_missing_credentials_without_snapshot(self):
-        """2026-09-11 反馈：凭据缺失时建快照前 4xx 快速失败，不留垃圾快照。"""
+        """凭据缺失时建快照前 4xx 快速失败，不留垃圾快照。"""
         from features.redmine.evidence_store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
@@ -395,7 +395,7 @@ class EvidenceApiTests(unittest.TestCase):
         )
 
     def test_create_preflight_blocks_missing_base_url_without_snapshot(self):
-        """2026-09-11 反馈：base_url 缺失同样在建快照前 4xx 快速失败。"""
+        """base_url 缺失同样在建快照前 4xx 快速失败。"""
         from features.redmine.evidence_store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")

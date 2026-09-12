@@ -60,7 +60,7 @@ export GMS_CURL_INSECURE=1        # 或 GMS_CURL_CA_CERT=/path/to/ca.crt
   避免 serial 歧义(exit 5)。
 - `gms-rt-devices-logcat` 只支持 dump 模式;`logcat -c` 是人工操作(MCP 层拒绝)。
 - 截图:`gms-rt-devices-screencap <serial>` 返回 base64 PNG;MCP 工具 `gms_rt_devices_screencap` 直接返回图片内容,无需 screencap/pull。
-- 固件烧写、shell 变更类操作都要一次性 approval token,见 §2。
+- 固件烧写、shell 变更类操作都要一次性 approval token,见第 2 节。
 
 ## 6. 日志与报告
 

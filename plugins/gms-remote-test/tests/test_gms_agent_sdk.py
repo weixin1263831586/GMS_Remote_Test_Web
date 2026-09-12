@@ -132,7 +132,7 @@ def test_token_file_with_loose_permissions_is_rejected(monkeypatch, tmp_path):
 
 
 def test_request_rereads_rotated_token_file(monkeypatch, tmp_path):
-    """2026-09-11 反馈回归：MCP 的长生命周期 client 不能固化启动时的 token。
+    """MCP 的长生命周期 client 不能固化启动时的 token。
 
     enroll 轮换 token 文件（或换路径）后，下一次 request() 必须拿到
     新凭据，否则 MCP 认证状态与 CLI 分裂（gms_rt_auth_status 报旧值）。

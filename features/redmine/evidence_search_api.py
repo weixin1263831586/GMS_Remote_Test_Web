@@ -3,7 +3,7 @@
 `GET /evidence/{snapshot_id}/search`：manifest（description/journals）+
 artifact 派生文本全文匹配。zip 附件的文本成员在 fetch 阶段已派生成带
 成员标记的文本，这里按成员给出 ``attachment:<file>.zip!/<member>`` 行级
-引用（反馈 2026-09-11 2026-09-11 反馈：logcat 已下载却搜不到）。
+引用（否则 logcat 已下载却搜不到）。
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ async def search_evidence(
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            # zip 派生文本带成员标记（2026-09-11 反馈）：按成员给出
+            # zip 派生文本带成员标记：按成员给出
             # attachment:<file>.zip!/<member>:L<line> 引用，而不是把整个
             # zip 派生文本当作一段无位置信息的大文本。标记只对 archive
             # 派生文本生效，防止普通附件内容伪造成员引用。
@@ -166,7 +166,7 @@ def _collect_zip_member_matches(
     artifact: dict[str, Any],
     limit: int,
 ) -> None:
-    """2026-09-11 反馈：zip 派生文本按成员匹配，引用为
+    """zip 派生文本按成员匹配，引用为
     ``attachment:<file>.zip!/<member>`` 并带 1-based 行号。"""
 
     filename = str(artifact.get("filename") or "")

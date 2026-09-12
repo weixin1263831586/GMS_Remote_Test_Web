@@ -35,7 +35,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # 生产源码树：features/foundation/bootstrap/worker_agent/workflows 的全部
-# .py（含各自 tests/），agent 源树，顶层 .py 与 scripts/tools 的 .py。
+# .py（含各自 tests/），agent 源树，顶层 .py 与 scripts/tools 的 .py，
+# 以及 docs/ 的文档——文档同样不得引用不存在的评审轮次。
 SCAN_ROOTS = [
     ROOT / "features",
     ROOT / "foundation",
@@ -45,9 +46,16 @@ SCAN_ROOTS = [
     ROOT / "agent" / "gms-remote-test",
     ROOT / "scripts",
     ROOT / "tools",
+    ROOT / "docs",
 ]
 TOP_LEVEL_PY = sorted((ROOT / name).name for name in
                       ("app.py", "conftest.py") if (ROOT / name).is_file())
+
+# 除 .py 外同样受门禁约束的文件：agent 源树与 scripts 的 shell、前端
+# JS/HTML、以及全部扫描根内的 Markdown 文档。生成树 plugins/ 不在此列
+# （由 drift gate 保证与源树一致）。
+SCAN_SUFFIXES = {".py", ".sh", ".js", ".html", ".md"}
+
 
 # 允许出现评审标记的文件（相对 ROOT）。必须写明理由，且随清理移除。
 EXCEPTIONS: set[str] = {
@@ -80,7 +88,9 @@ def _candidate_files() -> list[Path]:
     for base in SCAN_ROOTS:
         if not base.is_dir():
             continue
-        for path in base.rglob("*.py"):
+        for path in base.rglob("*"):
+            if path.suffix.lower() not in SCAN_SUFFIXES or not path.is_file():
+                continue
             if any(part in _EXCLUDED_DIR_NAMES for part in path.parts):
                 continue
             if path in seen:

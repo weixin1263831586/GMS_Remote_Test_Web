@@ -9,7 +9,7 @@
 # After installing, restart kkagent (or reconnect plugins) so the new MCP
 # server process picks up the changes.
 #
-# 2026-09-10: also reconciles the kkagent MCP registration so an existing
+# Also reconciles the kkagent MCP registration so an existing
 # hand-written `[mcp_servers.gms]` (direct `python3 mcp_server.py` launch,
 # possibly without GMS_AUTH_TOKEN_FILE in env) is upgraded to the launcher
 # entrypoint — the same reconciliation `gms-agent install` performs for
@@ -71,7 +71,7 @@ print(f"registry updated: {plugin_id} -> {version}")
 PY
 fi
 
-# Reconcile the kkagent MCP registration (2026-09-10). If the user's
+# Reconcile the kkagent MCP registration. If the user's
 # config.toml still points [mcp_servers.gms] directly at mcp_server.py,
 # repoint it at mcp_launcher.py (which loads the per-client profile and
 # forces service-token auth mode) and back the config up first. A launcher

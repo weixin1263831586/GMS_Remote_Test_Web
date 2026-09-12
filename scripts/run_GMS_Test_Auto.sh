@@ -274,7 +274,7 @@ run_tradefed() {
 
     log "⏱️ 结束时间: $(date)"
     log "📊 退出代码: $exit_code"
-    # P2-5：0 模块匹配时结构化透传根因，避免被"未找到 RESULT DIRECTORY"掩盖。
+    # 0 模块匹配时结构化透传根因，避免被"未找到 RESULT DIRECTORY"掩盖。
     if grep -Fq "No matched tradefed modules" "$LOG_FILE"; then
         log "❌ module not found in suite: tradefed matched 0 modules"
         return 2
@@ -446,7 +446,7 @@ copy_to_remote_server() {
 }
 
 ## 主函数
-# P2-5 前置校验：模块名在 testcases/ 下不存在时立即失败（精确/大小写
+# 前置校验：模块名在 testcases/ 下不存在时立即失败（精确/大小写
 # 不敏感），附相近候选；避免走完 tradefed 会话建立→清理流程后才报
 # "未找到 RESULT DIRECTORY"。
 validate_module() {

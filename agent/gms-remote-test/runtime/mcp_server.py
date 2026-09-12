@@ -78,7 +78,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.20.1"
+SERVER_VERSION = "0.21.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -105,7 +105,7 @@ _SERVICE_TOKEN_MODE = (
     == "service-token"
 )
 
-# Token-file freshness (2026-09-11 反馈（MCP/CLI 认证状态不一致）): the launcher freezes
+# Token-file freshness: the launcher freezes
 # GMS_AUTH_TOKEN_FILE at MCP startup from the profile TOML. When enroll (or
 # an operator) rewrites the profile's token_file — e.g. the code was
 # enrolled under a different profile name — this process keeps pointing at
@@ -236,7 +236,7 @@ def _sdk_fast_call(command: str, args: list[str]) -> tuple[str, bool] | None:
             from gms_agent import GmsClient
 
             _sdk_client = GmsClient()
-        # Profile TOML moved the token file (2026-09-11 反馈): follow it, then
+        # Profile TOML moved the token file: follow it, then
         # request() re-reads the file contents itself.
         fresh_token = _fresh_token_file_env().get("GMS_AUTH_TOKEN_FILE")
         if fresh_token and fresh_token != _sdk_client.token_path:
@@ -564,7 +564,7 @@ def run_cli(
     merged_env_extra: dict[str, str] = {}
     if env_extra:
         merged_env_extra.update(env_extra)
-    # Token-file freshness (2026-09-11 反馈): explicit env_extra wins over the profile
+    # Token-file freshness: explicit env_extra wins over the profile
     # re-resolution so typed tools keep their explicit overrides.
     merged_env_extra.update(_fresh_token_file_env())
     if merged_env_extra:
@@ -1448,8 +1448,7 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 _SHELL_READONLY_BINARIES = frozenset({
     "cat", "df", "dumpsys", "getprop", "logcat", "ls", "pidof", "ps",
     "settings", "stat", "uptime", "vmstat", "wm",
-    # Read-only diagnostics added after the CTS profiling investigation
-    # (2026-09-07): process/pattern lookup, log post-processing on files
+    # Read-only diagnostics: process/pattern lookup, log post-processing on files
     # already readable via cat, kernel ring buffer, and device_config reads.
     "pgrep", "grep", "wc", "head", "tail", "dmesg", "id", "printenv",
     "device_config", "cmd", "am",
@@ -1872,7 +1871,7 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
                 True,
             )
 
-    # Native time-window support (2026-09-07): 'since' maps to logcat -t
+    # Native time-window support: 'since' maps to logcat -t
     # <time> (dump entries at/after the timestamp, device-side filtering);
     # 'until' trims the captured output client-side. Validated against the
     # logcat time format so the value is always a safe single argument.
@@ -2079,6 +2078,7 @@ _TOOLSETS = {
             "gms_rt_apk_source",
             "gms_rt_redmine_issue_fetch",
             "gms_rt_redmine_issue",
+            "gms_rt_redmine_triage",
             "gms_rt_redmine_journals",
             "gms_rt_redmine_attachments",
             "gms_rt_redmine_artifact_search",
@@ -3246,6 +3246,35 @@ def _all_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "gms_rt_redmine_triage",
+            "description": (
+                "List TODAY's pending Redmine issues for the owner account: "
+                "waiting_my_reply + no_reply_3_days buckets, deduped with "
+                "priority and fingerprint. Read-only entry point for daily "
+                "brief analysis; source of truth is the personal dashboard "
+                "workload statistics."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stale_days": {
+                        "type": "integer", "minimum": 1, "maximum": 30,
+                        "description": "Days after which an unreplied issue counts as stale (default 3).",
+                    },
+                    "list_limit": {
+                        "type": "integer", "minimum": 1, "maximum": 100,
+                        "description": "Max issues per bucket (default 100).",
+                    },
+                    "refresh": {
+                        "type": "boolean",
+                        "description": "Bypass the workload statistics cache for this call.",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_redmine_journals",
             "description": (
                 "Read COMPLETE journals (no 2,000-char truncation) with "
@@ -3616,7 +3645,7 @@ def redmine_issue_fetch_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if arguments.get("no_refresh"):
         args.append("--no-refresh")
     if arguments.get("dry_run"):
-        # 2026-09-11 反馈：只校验前置条件，不建快照。
+        # 只校验前置条件，不建快照。
         args.append("--dry-run")
     if arguments.get("wait"):
         args.append("--wait")
@@ -3629,6 +3658,18 @@ def redmine_issue_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if not snapshot_id:
         return "snapshot_id is required", True
     return run_cli("gms-rt-redmine-issue-show", [snapshot_id])
+
+
+def redmine_triage_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """List today's pending issues (read-only triage entry point)."""
+    args: list[str] = []
+    if arguments.get("stale_days"):
+        args.extend(["--stale-days", str(_int_arg(arguments, "stale_days", 3, 1, 30))])
+    if arguments.get("list_limit"):
+        args.extend(["--list-limit", str(_int_arg(arguments, "list_limit", 100, 1, 100))])
+    if arguments.get("refresh"):
+        args.append("--refresh")
+    return run_cli("gms-rt-redmine-triage", args)
 
 
 def redmine_journals_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -3855,6 +3896,7 @@ _TOOL_HANDLERS = {
     "gms_rt_apk_source": apk_source_tool,
     "gms_rt_redmine_issue_fetch": redmine_issue_fetch_tool,
     "gms_rt_redmine_issue": redmine_issue_tool,
+    "gms_rt_redmine_triage": redmine_triage_tool,
     "gms_rt_redmine_journals": redmine_journals_tool,
     "gms_rt_redmine_attachments": redmine_attachments_tool,
     "gms_rt_redmine_artifact_search": redmine_artifact_search_tool,

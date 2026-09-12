@@ -148,7 +148,7 @@ async def auth_agent_enroll(request: Request, req: dict):
         record, failure = None, {"reason": "invalid"}
     if record is None:
         auth_service.record_auth_failure("agent-enroll", "code", source_ip)
-        # 三态可区分（2026-09-11 反馈）：已使用 / 已过期 / 不存在，
+        # 三态可区分：已使用 / 已过期 / 不存在，
         # 各附机器可读 reason 与时间戳，CLI 据此给人话提示。
         reason = str(failure.get("reason") or "invalid")
         if reason == "expired":

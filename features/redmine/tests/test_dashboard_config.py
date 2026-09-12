@@ -38,6 +38,29 @@ class SidebarNavigationConfigTests(unittest.TestCase):
             self.assertIn(marker, template)
 
 class RedmineDashboardConfigTests(unittest.TestCase):
+    def test_save_redmine_credentials_keeps_saved_api_key(self):
+        """保存用户名/密码不得清掉已保存的 API Key（两者可共存）。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "core").mkdir()
+            configs = root / "configs"
+            configs.mkdir()
+            (configs / "config_runtime.json").write_text("{}", encoding="utf-8")
+
+            manager = ConfigManager(base_dir=str(root / "core"))
+            self.assertTrue(manager.save_redmine_api_key("api-key-1"))
+            self.assertTrue(manager.save_redmine_credentials("user-1", "pass-1"))
+
+            self.assertEqual(manager.load_redmine_api_key(), "api-key-1")
+            self.assertEqual(manager.load_redmine_credentials(), {
+                "username": "user-1",
+                "password": "pass-1",
+            })
+            # 反向共存同样成立：保存 API Key 不清除用户名/密码。
+            self.assertTrue(manager.save_redmine_api_key("api-key-2"))
+            self.assertEqual(manager.load_redmine_credentials()["password"], "pass-1")
+            self.assertEqual(manager.load_redmine_api_key(), "api-key-2")
+
     def test_save_redmine_stats_config_writes_runtime_override(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

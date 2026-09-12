@@ -119,7 +119,7 @@ class GmsClient:
     # -- low level ---------------------------------------------------------
 
     def refresh_token(self, token_path: str | None = None) -> None:
-        """Re-read the token file before a request (2026-09-11 反馈（MCP/CLI 认证状态不一致）).
+        """Re-read the token file before a request.
 
         A long-lived client (the MCP adapter keeps one singleton) would
         otherwise keep authenticating with the token captured at startup,
@@ -162,7 +162,7 @@ class GmsClient:
 
             query = "?" + urlencode({k: v for k, v in params.items() if v is not None})
         url = f"{self.server_url}/api{endpoint}{query}"
-        # Pick up token rotations/enroll-paths between calls (2026-09-11 反馈).
+        # Pick up token rotations/enroll-paths between calls.
         self.refresh_token()
         data = None
         headers = {"Accept": "application/json"}

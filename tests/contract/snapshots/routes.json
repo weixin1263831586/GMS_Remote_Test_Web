@@ -1824,6 +1824,54 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/config"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/redmine-agent/daily-brief/config"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/latest"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/daily-brief/run"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/triage"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/{brief_date}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/reanalyze"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/daily-brief/{brief_date}/refresh"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/redmine-agent/dashboard/profiles"

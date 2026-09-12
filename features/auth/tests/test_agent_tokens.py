@@ -214,7 +214,7 @@ class EnrollmentServiceTests(unittest.TestCase):
             self.service.agent_acl_allows(agent_record, "workers", "w1")
         )
         # One shot: the same code can never redeem again (distinguishable
-        # reason, 2026-09-11 反馈（注册码三态区分）).
+        # reason).
         record2, failure2 = self.service.redeem_agent_enrollment(code)
         self.assertIsNone(record2)
         self.assertEqual(failure2["reason"], "used")

@@ -1,0 +1,20 @@
+[Unit]
+Description=GMS Redmine AI Daily Brief (morning delta refresh)
+Documentation=file:///opt/gms-remote-test/docs/redmine-daily-brief.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/gms-remote-test
+ExecStart=/opt/gms-remote-test/.venv/bin/python -m features.redmine.daily_brief_cli run-delta
+User=gms
+Group=gms
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/gms-remote-test/data
+TimeoutStartSec=1h
+
+[Install]
+WantedBy=multi-user.target

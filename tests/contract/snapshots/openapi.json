@@ -15109,7 +15109,7 @@
         "summary": "Get Credentials Status"
       },
       "post": {
-        "description": "保存 Redmine 凭据到登录用户的运行时配置（human-only）。\n\n安全边界（反馈 2026-09-11 S-1）：只接受人工会话。Agent Service\nToken 与该账号共享 owner 存储，凭据必须由人掌握——agent 调用直接\n403 并返回修复指引；写入成功记入安全审计链（不含凭据内容）。",
+        "description": "保存 Redmine 凭据到登录用户的运行时配置（human-only）。\n\n安全边界：只接受人工会话。Agent Service\nToken 与该账号共享 owner 存储，凭据必须由人掌握——agent 调用直接\n403 并返回修复指引；写入成功记入安全审计链（不含凭据内容）。",
         "responses": {
           "200": {
             "content": {
@@ -15167,6 +15167,306 @@
           }
         },
         "summary": "Update Stats Config"
+      }
+    },
+    "/api/redmine-agent/daily-brief/config": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Daily Brief Config"
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Daily Brief Config"
+      }
+    },
+    "/api/redmine-agent/daily-brief/latest": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Latest Brief"
+      }
+    },
+    "/api/redmine-agent/daily-brief/run": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "manual",
+              "title": "Mode",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Daily Brief"
+      }
+    },
+    "/api/redmine-agent/daily-brief/triage": {
+      "get": {
+        "description": "当天待处理 issue（waiting_my_reply / no_reply_3_days 去重）。\n\n``refresh=true``（默认）先从 Redmine 同步该 owner 的最新 issue 快照，\n再基于本地库构建 triage；``refresh=false`` 只读本地镜像（可用于离线\n检视，结果可能落后于 Redmine）。",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "stale_days",
+            "required": false,
+            "schema": {
+              "default": 3,
+              "maximum": 30,
+              "minimum": 1,
+              "title": "Stale Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "list_limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "List Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Daily Triage"
+      }
+    },
+    "/api/redmine-agent/daily-brief/{brief_date}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_date",
+            "required": true,
+            "schema": {
+              "title": "Brief Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Brief For Date"
+      }
+    },
+    "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/reanalyze": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_date",
+            "required": true,
+            "schema": {
+              "title": "Brief Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reanalyze Issue"
+      }
+    },
+    "/api/redmine-agent/daily-brief/{brief_date}/refresh": {
+      "post": {
+        "description": "增量刷新：只重分析发生变化的 issue（第二阶段语义，入口先留）。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_date",
+            "required": true,
+            "schema": {
+              "title": "Brief Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Daily Brief"
       }
     },
     "/api/redmine-agent/dashboard/profiles": {
@@ -16082,7 +16382,7 @@
     },
     "/api/redmine-agent/issues/{issue_id}/evidence/latest": {
       "get": {
-        "description": "该 owner 某 issue 的最新快照（2026-09-11 反馈：issue-show 参数语义）。\n\nissue-show 收到 issue_id 时用它解析 snapshot_id；优先返回最近 ready\n快照，若只有 running/partial/failed 则返回最近一条并附带其 status，\n便于 CLI 区分「无快照」与「快照未就绪」。",
+        "description": "该 owner 某 issue 的最新快照（issue-show 参数语义）。\n\nissue-show 收到 issue_id 时用它解析 snapshot_id；优先返回最近 ready\n快照，若只有 running/partial/failed 则返回最近一条并附带其 status，\n便于 CLI 区分「无快照」与「快照未就绪」。",
         "parameters": [
           {
             "in": "path",

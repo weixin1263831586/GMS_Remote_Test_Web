@@ -10,7 +10,7 @@ let agentAccessLoadSequence = 0;
 const AGENT_ACCESS_DEFAULT_SCOPES = [
     'devices.read', 'devices.lease', 'devices.use_leased',
     'tests.execute', 'tests.cancel', 'jobs.read', 'reports.read',
-    // 只读证据/分析链（反馈 2026-09-11 P0-1）：默认勾选让 mint 出的
+    // 只读证据/分析链：默认勾选让 mint 出的
     // enrollment 能直接跑通 SKILL 文档化的 Redmine 工作流；写操作类
     // scope（devices.inventory 等）仍需手动勾选。
     'redmine.read', 'artifacts.read_own', 'apk.analyze_own', 'sdk.read',
