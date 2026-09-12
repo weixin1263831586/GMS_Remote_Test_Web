@@ -25,6 +25,7 @@ class ValidIssueResultTests(unittest.TestCase):
             "customer_request": "客户要求定位失败原因",
             "recommended_actions": [{"step": 1, "action": "复查 logcat"}],
             "suggested_solution": "升级安全补丁后重跑",
+            "detailed_report": "## 一、问题概况\n\n| 项目 | 内容 |\n|---|---|\n| Issue | #1 |",
             "evidence": [{"source": "journal", "reference": "#12", "fact": "…"}],
             "similar_issues": [],
             "history_checked": True,
@@ -41,6 +42,12 @@ class ValidIssueResultTests(unittest.TestCase):
         result.pop("suggested_solution")
         errors = validate_issue_result(result)
         self.assertTrue(any("suggested_solution" in e for e in errors))
+
+    def test_detailed_report_type_is_checked(self):
+        result = self._valid()
+        result["detailed_report"] = {"not": "a string"}
+        errors = validate_issue_result(result)
+        self.assertTrue(any("detailed_report" in e for e in errors))
 
     def test_invalid_confidence_and_enums(self):
         result = self._valid()

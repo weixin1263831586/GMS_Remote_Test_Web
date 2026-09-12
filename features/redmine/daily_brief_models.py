@@ -165,6 +165,7 @@ ISSUE_RESULT_REQUIRED_FIELDS = (
     "customer_request",
     "recommended_actions",
     "suggested_solution",
+    "detailed_report",
     "evidence",
     "similar_issues",
     "history_checked",
@@ -203,6 +204,9 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
         errors.append("evidence must be a list")
     if not isinstance(result.get("recommended_actions") or [], list):
         errors.append("recommended_actions must be a list")
+    detailed = result.get("detailed_report")
+    if detailed not in (None, "") and not isinstance(detailed, str):
+        errors.append("detailed_report must be a string")
     similar = result.get("similar_issues")
     if not isinstance(similar, list):
         errors.append("similar_issues must be a list")

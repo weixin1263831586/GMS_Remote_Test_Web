@@ -22,6 +22,7 @@ VALID = {
     "customer_request": "request",
     "recommended_actions": [],
     "suggested_solution": "solution",
+    "detailed_report": "## 一、问题概况\n\n| 项目 | 内容 |\n|---|---|\n| Issue | #101 |",
     "evidence": [],
     "confidence": 0.9,
     "root_cause_type": "likely",
@@ -217,6 +218,9 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertEqual(by_id[102].error_type, "kkagent_error")
         self.assertEqual(run.report_json["counts"]["completed"], 1)
         self.assertIn("#101", run.report_markdown)
+        # 深度报告（detailed_report）必须原样进入汇总 Markdown。
+        self.assertIn("### 详细分析报告", run.report_markdown)
+        self.assertIn("## 一、问题概况", run.report_markdown)
 
     def test_execute_run_all_failed_marks_failed(self):
         started = self.service.start_run("manual")

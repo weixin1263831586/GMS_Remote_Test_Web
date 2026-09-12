@@ -533,6 +533,12 @@ class DailyBriefService:
             lines.append(f"- 客户诉求：{result.get('customer_request', '')}")
             lines.append(f"- 根因（{result.get('root_cause_type', 'unknown')}）：{result.get('root_cause', '')}")
             lines.append(f"- 建议：{result.get('suggested_solution', '')}")
+            detailed = str(result.get("detailed_report") or "").strip()
+            if detailed:
+                lines.append("")
+                lines.append("### 详细分析报告")
+                lines.append(detailed)
+                lines.append("")
             similar = result.get("similar_issues") or []
             if similar:
                 refs = "；".join(

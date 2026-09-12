@@ -2812,6 +2812,13 @@ function showDailyBriefIssue(issueId) {
       + '<summary>' + title + '</summary>'
       + '<div class="daily-brief-section-body">' + esc(body) + '</div></details>';
   };
+  // 深度报告是 Markdown（表格/标题/代码块），走已有的轻量渲染器。
+  var mdSection = function (title, body, open) {
+    if (!body) return '';
+    return '<details' + (open !== false ? ' open' : '') + ' class="daily-brief-section daily-brief-section-md">'
+      + '<summary>' + title + '</summary>'
+      + '<div class="daily-brief-section-body">' + renderMarkdownDoc(String(body)) + '</div></details>';
+  };
   var ev = (r.evidence || []).map(function (e) { return '· [' + esc(e.source || '') + '] ' + esc(e.reference || '') + '：' + esc(e.fact || ''); }).join('\n');
   var actions = (r.recommended_actions || []).map(function (a) { return (a.step || '·') + '. ' + esc(a.action || '') + (a.reason ? '（' + esc(a.reason) + '）' : ''); }).join('\n');
   var missing = (r.missing_information || []).map(esc).join('、');
@@ -2843,6 +2850,7 @@ function showDailyBriefIssue(issueId) {
         ${issue.status === 'failed' ? `<div style="color:var(--bad,#ef4444)"><b>分析失败${issue.error_type ? '（' + esc(issue.error_type) + '）' : ''}</b><div style="white-space:pre-wrap;margin-top:4px">${esc(issue.error || '未知错误')}</div></div>` : ''}
         ${r.problem_summary ? '<div style="line-height:1.7;margin-bottom:4px">' + esc(r.problem_summary) + '</div>' : ''}
         ${chips}
+        ${mdSection('📋 详细分析报告', r.detailed_report)}
         ${section('🧩 根因分析', r.root_cause)}
         ${section('💬 客户诉求', r.customer_request)}
         ${section('📌 当前状态', r.current_status || r.current_blocker)}

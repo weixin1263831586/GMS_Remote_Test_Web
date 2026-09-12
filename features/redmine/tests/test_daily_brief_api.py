@@ -22,6 +22,7 @@ VALID = {
     "customer_request": "request",
     "recommended_actions": [],
     "suggested_solution": "solution",
+    "detailed_report": "## 一、问题概况\n\n| 项目 | 内容 |\n|---|---|\n| Issue | #101 |",
     "evidence": [],
     "confidence": 0.9,
     "root_cause_type": "likely",

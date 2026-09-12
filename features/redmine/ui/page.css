@@ -311,6 +311,11 @@
     .daily-brief-section summary { padding:10px 12px; cursor:pointer; font-weight:650; color:#dbeafe; background:rgba(30,41,59,.46); user-select:none; }
     .daily-brief-section[open] summary { border-bottom:1px solid rgba(43,51,66,.72); }
     .daily-brief-section-body { padding:10px 14px 13px; white-space:pre-wrap; line-height:1.7; overflow-wrap:anywhere; }
+    /* Markdown 渲染的深度报告：关闭 pre-wrap，交给渲染器的块级元素控制间距。 */
+    .daily-brief-section-md .daily-brief-section-body { white-space:normal; }
+    .daily-brief-section-md .md-table { margin:6px 0 10px; max-width:100%; }
+    .daily-brief-section-md .md-p, .daily-brief-section-md .md-ul, .daily-brief-section-md .md-ol { margin:4px 0 8px; }
+    .daily-brief-section-md h2.md-h { font-size:15px; margin:10px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border); }
     .daily-brief-modal-footer { flex:0 0 auto; width:100%; margin:0; padding:12px 20px; border-top:1px solid var(--border); background:var(--panel); box-shadow:0 -8px 20px rgba(0,0,0,.18); }
     @media (max-width:760px) {
         .setting-inline-grid { grid-template-columns:1fr; }

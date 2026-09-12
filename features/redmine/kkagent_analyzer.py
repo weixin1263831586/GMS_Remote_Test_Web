@@ -25,7 +25,7 @@ from .daily_brief_models import validate_issue_result
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "redmine_daily_triage_v4"
+PROMPT_VERSION = "redmine_daily_triage_v5"
 
 # kkagent 可执行文件名（PATH 查找）；可通过配置覆盖绝对路径。
 KKAGENT_BINARY = "kkagent"
@@ -142,6 +142,7 @@ Return ONLY a JSON object with exactly these fields:
   "missing_information": ["..."],
   "suggested_reply_en": "...",
   "suggested_reply_zh": "...",
+  "detailed_report": "...",
   "risk": "high|medium|low",
   "confidence": 0.0
 }}
@@ -194,6 +195,32 @@ EVIDENCE QUALITY GATE (complete this silently before returning JSON):
 - Re-read the final JSON once: remove unsupported claims, correct imprecise
   terminology, ensure confidence/root_cause_type match the cited evidence, and
   confirm similar_issues entries each have a real reusable_fix or reference_fact.
+
+DETAILED REPORT ("detailed_report", mandatory, Chinese Markdown):
+- This is the in-depth per-issue report shown in the UI. Structure it with
+  EXACTLY these level-2 sections, in order (use "## " headings):
+  1. "## 一、问题概况" — a Markdown table (one row per key: Issue link,
+     报告设备, 测试套件/复现环境, 失败用例, 失败原因, 当前状态) using facts
+     from the issue and journals only. Cell text stays short; long values
+     may wrap inside a cell.
+  2. "## 二、测试原理（源码级）" — when the issue is about a test/feature
+     failure: cite the actual host/device/AOSP source paths and key logic
+     (use the GMS MCP SDK search or the test module knowledge), in a short
+     list. If source-level detail is genuinely unavailable, explain the
+     general mechanism instead of inventing paths.
+  3. "## 三、根因分析（按可能性排序）" — numbered hypotheses, most likely
+     first, each with how to verify it (config/file/log to check). Mark
+     each hypothesis 待验证 unless backed by direct evidence.
+  4. "## 四、本地设备现状" — when device tools returned live data: build
+     fingerprint, relevant flags/compat changes, log traces, with ✅/⚠️.
+     If no device was inspected, write "未检查本地设备。" and skip.
+  5. "## 五、建议下一步" — numbered concrete actions; adb/shell commands
+     may be given in a fenced ``` code block.
+- Rules: every fact must come from journals, attachments, tool output or
+  your own tool calls; do NOT fabricate device names, paths, flag values
+  or log lines. Uncertainty is stated explicitly (待验证 / 未确认). Keep
+  the whole report under 2000 字; prefer tables and lists over prose.
+- Consistency: detailed_report must not contradict the JSON summary fields.
 
 BREVITY (hard limits, Chinese output — write 中文 unless the field name says _en):
 - problem_summary: ONE sentence, <= 60 字, 只说“什么现象/卡在哪”，不铺陈背景。
