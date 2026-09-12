@@ -34,6 +34,11 @@ VALID_RESULT = {
     "missing_information": ["bugreport"],
     "suggested_reply_en": "Could you please provide a bugreport?",
     "suggested_reply_zh": "请提供一份 bugreport 以便定位。",
+    "detailed_report": (
+        "## 一、问题概况\n\n"
+        "| 项目 | 内容 |\n|---|---|\n| Issue | #648526 |\n"
+        "## 五、建议下一步\n\n1. 复跑 CtsMediaTestCases。"
+    ),
     "risk": "medium",
     "confidence": 0.72,
 }
@@ -422,8 +427,19 @@ class KkAgentAnalyzerTests(unittest.TestCase):
         self.assertIn("gms_rt_redmine_history_search", prompt)
         self.assertIn("Never invent an issue id", prompt)
 
+    def test_prompt_requires_detailed_report(self):
+        """深度报告：固定五个小节 + 不得编造事实。"""
+        prompt = KkAgentRedmineAnalyzer().build_prompt(ENTRY)
+        self.assertIn("detailed_report", prompt)
+        self.assertIn("## 一、问题概况", prompt)
+        self.assertIn("## 二、测试原理（源码级）", prompt)
+        self.assertIn("## 三、根因分析（按可能性排序）", prompt)
+        self.assertIn("## 四、本地设备现状", prompt)
+        self.assertIn("## 五、建议下一步", prompt)
+        self.assertIn("do NOT fabricate", prompt)
+
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v4")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v5")
 
 
 if __name__ == "__main__":

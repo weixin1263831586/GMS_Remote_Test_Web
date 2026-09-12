@@ -1922,6 +1922,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/redmine-agent/history/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/redmine-agent/issues"
   },
   {
