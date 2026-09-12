@@ -78,7 +78,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.20.0"
+SERVER_VERSION = "0.20.1"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -150,9 +150,8 @@ def _current_profile_token_file() -> str:
 def _fresh_token_file_env() -> dict[str, str]:
     """Env overrides that keep GMS_AUTH_TOKEN_FILE in sync with the profile."""
 
-    current = str(os.environ.get("GMS_AUTH_TOKEN_FILE", "")).strip()
     resolved = _current_profile_token_file()
-    if resolved and resolved != current:
+    if resolved:
         return {"GMS_AUTH_TOKEN_FILE": resolved}
     return {}
 

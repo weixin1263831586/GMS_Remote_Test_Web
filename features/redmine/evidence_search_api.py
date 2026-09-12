@@ -63,7 +63,19 @@ async def search_evidence(
                 _collect_text_match(matches, "journal_detail", "", blob, needle, journal)
 
     store = owner_evidence_store(owner_id)
-    for artifact in store.list_artifacts(snapshot["snapshot_id"]):
+    artifacts = store.list_artifacts(snapshot["snapshot_id"])
+    index_warnings = [
+        {
+            "artifact_id": artifact.get("artifact_id"),
+            "filename": artifact.get("filename"),
+            "warning": artifact.get("error"),
+        }
+        for artifact in artifacts
+        if str(artifact.get("kind") or "") == "archive"
+        and str(artifact.get("status") or "") == "partial"
+        and artifact.get("error")
+    ]
+    for artifact in artifacts:
         with store._connect() as conn:
             row = conn.execute(
                 "SELECT derived_text_path, stored_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
@@ -111,6 +123,8 @@ async def search_evidence(
             "query": q,
             "total": len(matches),
             "limited": len(matches) >= limit,
+            "index_complete": not index_warnings,
+            "index_warnings": index_warnings,
             "matches": matches,
         },
     }

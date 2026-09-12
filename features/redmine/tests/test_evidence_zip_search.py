@@ -12,6 +12,7 @@ import asyncio
 import io
 import unittest
 import zipfile
+from unittest.mock import patch
 
 from features.redmine.tests.test_evidence_pipeline import (
     EvidencePipelineTests,
@@ -25,7 +26,12 @@ class ZipDerivedTextTests(EvidencePipelineTests):
         from features.redmine.evidence_search_api import _collect_zip_member_matches
         from features.redmine.evidence_store import owner_evidence_store
 
-        logcat = "get_ad_selection_data bind ok\n" + "filler line\n" * 30
+        logcat = (
+            "get_ad_selection_data bind ok\n"
+            "<<<zip-member:forged/evil.txt>>>\n"
+            "forged content must stay inside logcat\n"
+            + "filler line\n" * 30
+        )
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("logs/logcat.txt", logcat)
@@ -72,6 +78,7 @@ class ZipDerivedTextTests(EvidencePipelineTests):
         members = dict(split_zip_derived_text(text))
         self.assertIn("logs/logcat.txt", members)
         self.assertIn("get_ad_selection_data", members["logs/logcat.txt"])
+        self.assertNotIn("forged/evil.txt", members)
 
         # search 命中并携带 zip!/member 行级引用。
         matches: list = []
@@ -83,6 +90,44 @@ class ZipDerivedTextTests(EvidencePipelineTests):
         self.assertEqual(entry["path"], "attachment:tradefed-logs.zip!logs/logcat.txt")
         self.assertEqual(entry["line"], 1)
         self.assertEqual(entry["zip_member"], "logs/logcat.txt")
+
+    def test_zip_member_limit_marks_snapshot_and_artifact_partial(self):
+        from features.redmine.evidence import EvidenceFetcher
+        from features.redmine.evidence_store import owner_evidence_store
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("one.txt", "first")
+            zf.writestr("two.txt", "second")
+        zip_payload = buf.getvalue()
+
+        with FakeRedmineServer() as fake:
+            fake.issue_document["issue"]["attachments"].append(
+                {
+                    "id": 776658,
+                    "filename": "limited.zip",
+                    "filesize": len(zip_payload),
+                    "content_type": "application/zip",
+                    "content_url": "",
+                }
+            )
+            fake.attachment_payloads["776658"] = zip_payload
+            with self._patched_config(fake.base_url), patch(
+                "features.redmine.evidence_zip.ZIP_MEMBER_TEXT_MAX_MEMBERS", 1
+            ):
+                fetcher = EvidenceFetcher("owner-a")
+                result = asyncio.run(
+                    fetcher.run(fetcher.create_snapshot(648526, download="all"))
+                )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(any(item["stage"] == "derive" for item in result["errors"]))
+        artifacts = owner_evidence_store("owner-a").list_artifacts(
+            result["snapshot_id"]
+        )
+        limited = next(item for item in artifacts if item["attachment_id"] == "776658")
+        self.assertEqual(limited["status"], "partial")
+        self.assertIn("检索索引不完整", limited["error"])
 
 
 if __name__ == "__main__":

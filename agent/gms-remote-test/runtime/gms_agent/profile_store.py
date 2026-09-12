@@ -102,7 +102,15 @@ def profile_candidates(client: str) -> list[Path]:
 
     if not PROFILE_ROOT.is_dir():
         return []
-    return sorted(PROFILE_ROOT.glob(f"{client}-*.toml"))
+    candidates = []
+    for path in sorted(PROFILE_ROOT.glob("*.toml")):
+        try:
+            declared_client = load_profile(path.stem).get("client", "")
+        except OSError:
+            continue
+        if declared_client == client:
+            candidates.append(path)
+    return candidates
 
 
 def resolve_profile(client: str) -> Path | None:

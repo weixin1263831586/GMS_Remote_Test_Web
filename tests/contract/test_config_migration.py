@@ -33,6 +33,7 @@ def seed(root):
     environment = {
         "GMS_UBUNTU_PASSWORD": "fixture-ssh", "GMS_LOCAL_AI_API_KEY": "fixture-environment-ai",
         "GMS_ENV": "development", "GMS_TEST_ROOT_PATH": "${PROJECT_ROOT}/data",
+        "GMS_WORKER_TOKENS_FILE": "${PROJECT_ROOT}/configs/worker_tokens.json",
     }
     for name, payload in {
         "config.json": static, "config_runtime.json": runtime, "runtime.json": environment,
@@ -60,6 +61,9 @@ def test_migration_preserves_effective_configuration_and_secret_conflicts(tmp_pa
         after = ConfigManager(project_root=tmp_path).load_config()
         assert os.environ["GMS_LOCAL_AI_API_KEY"] == "fixture-environment-ai"
         assert os.environ["GMS_TEST_ROOT_PATH"] == str(tmp_path / "data")
+        assert os.environ["GMS_WORKER_TOKENS_FILE"] == str(
+            tmp_path / "configs/secrets/worker_tokens.json"
+        )
     assert before == after
     local = read_json_object(tmp_path / "configs/local/config.json")
     assert "ubuntu_user" not in local

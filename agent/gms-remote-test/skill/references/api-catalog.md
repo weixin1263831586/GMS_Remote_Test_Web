@@ -45,7 +45,7 @@ human user in their own shell.
 
 | Group | Commands |
 |---|---|
-| Agent credentials and approval | `gms-rt-agent-tokens`, `gms-rt-agent-enroll-code`, `gms-rt-agent-token-revoke`, `gms-rt-approval-create` |
+| Agent credentials and approval | `gms-rt-agent-tokens`, `gms-rt-agent-enroll-code`, `gms-rt-agent-token-revoke`, `gms-rt-auth-scopes-check`, `gms-rt-approval-create` |
 | Cluster inventory | `gms-rt-cluster-workers`, `gms-rt-cluster-devices`, `gms-rt-cluster-resolve` |
 | Test | `gms-rt-test-start`, `gms-rt-test-stop`, `gms-rt-test-status`, `gms-rt-test-clean`, `gms-rt-test-suites`, `gms-rt-test-modules`, `gms-rt-test-suites-result`, `gms-rt-test-logs-stream` |
 | Devices | `gms-rt-devices-list`, `gms-rt-devices-info`, `gms-rt-devices-console`, `gms-rt-devices-wait`, `gms-rt-devices-reboot`, `gms-rt-devices-remount`, `gms-rt-devices-shell`, `gms-rt-devices-logcat`, `gms-rt-devices-push`, `gms-rt-devices-wifi`, `gms-rt-devices-scrcpy`, `gms-rt-devices-screencap`, `gms-rt-devices-ui-dump`, `gms-rt-devices-snapshot`, `gms-rt-devices-user-locked` |
@@ -60,7 +60,7 @@ human user in their own shell.
 | Config and files | `gms-rt-config-read`, `gms-rt-config-update`, `gms-rt-files-progress` |
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-selfcheck`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
 | Code search | `gms-rt-opengrok-search` |
-| Redmine evidence | `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
+| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
 | SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |
 
 Related commands intentionally have different contracts:

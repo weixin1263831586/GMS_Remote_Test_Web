@@ -228,6 +228,20 @@ class TestMultiControllerFailClosed(EnvSandbox):
             server, _ca = pm.resolve_controller("", "codex-b")
         self.assertEqual(server, "https://ctrl-b:5001")
 
+    def test_explicit_profile_overrides_unrelated_environment_controller(self):
+        pm.write_profile_toml("codex-b", "codex", "https://ctrl-b:5001", "/ca-b.pem")
+        with mock.patch.dict(
+            os.environ, {"GMS_REMOTE_TEST_SERVER": "https://ctrl-a:5001"}
+        ):
+            server, ca = pm.resolve_controller("", "codex-b")
+        self.assertEqual((server, ca), ("https://ctrl-b:5001", "/ca-b.pem"))
+
+    def test_explicit_server_cannot_conflict_with_profile(self):
+        pm.write_profile_toml("codex-b", "codex", "https://ctrl-b:5001", "")
+        with self.assertRaises(SystemExit) as ctx:
+            pm.resolve_controller("https://ctrl-a:5001", "codex-b")
+        self.assertEqual(ctx.exception.code, 2)
+
     def test_resolve_controller_unique_profile_set_is_automatic(self):
         pm.write_profile_toml("codex-x", "codex", "https://only:5001", "")
         pm.write_profile_toml("kimi-y", "kimi", "https://only:5001", "")
@@ -266,6 +280,29 @@ class TestMultiControllerFailClosed(EnvSandbox):
             pm.profile_store.token_file("codex-b").exists(), False
         )
 
+    def test_write_enrollment_token_honors_custom_profile_token_file(self):
+        pm.write_profile_toml("production", "codex", "https://ctrl-a:5001", "")
+        custom = self.root / "custom" / "service.token"
+        path = pm.profile_store.profile_path("production")
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                str(pm.profile_store.token_file("production")), str(custom)
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            pm.write_enrollment_token("tok-custom", profile="production"),
+            [str(custom)],
+        )
+        self.assertEqual(custom.read_text(encoding="utf-8"), "tok-custom\n")
+
+    def test_custom_profile_name_is_discovered_by_declared_client(self):
+        pm.write_profile_toml("production", "codex", "https://ctrl-a:5001", "")
+        self.assertEqual(
+            [item.stem for item in pm.profile_store.profile_candidates("codex")],
+            ["production"],
+        )
+
     def test_write_enrollment_token_unique_controller_covers_all_profiles(self):
         pm.write_profile_toml("hand-named", "codex", "https://only:5001", "")
         pm.write_profile_toml("kimi-default", "kimi", "https://only:5001", "")
@@ -292,6 +329,53 @@ class TestEnrollTomlOnly(EnvSandbox):
 
     def test_write_enrollment_token_without_any_profile_is_empty(self):
         self.assertEqual(pm.write_enrollment_token("tok-123"), [])
+
+    def test_shell_enroll_rejects_environment_profile_controller_mismatch(self):
+        config_root = self.root / "config"
+        profile_root = config_root / "gms-agent" / "profiles"
+        profile_root.mkdir(parents=True)
+        (profile_root / "production.toml").write_text(
+            'profile = "production"\nclient = "codex"\n\n'
+            '[controller]\nurl = "https://ctrl-b:5001"\n\n'
+            '[auth]\ntoken_file = "/tmp/production.token"\n',
+            encoding="utf-8",
+        )
+        script = REPO_ROOT / "agent/gms-remote-test/runtime/gms-remote-test.sh"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; gms-rt-agent-enroll CODE --profile production',
+                "bash",
+                str(script),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "XDG_CONFIG_HOME": str(config_root),
+                "GMS_REMOTE_TEST_SERVER": "https://ctrl-a:5001",
+            },
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("different Controllers", result.stderr)
+
+    def test_shell_enrollment_code_json_success_returns_zero(self):
+        script = REPO_ROOT / "agent/gms-remote-test/runtime/gms-remote-test.sh"
+        command = """
+source "$1"
+curl() {
+  printf '%s\\n' '{"success":true,"enrollment":{"code":"once","expires_at":"","ttl_minutes":5}}' 'HTTP_STATUS:200'
+}
+gms-rt-agent-enroll-code --name fixture
+"""
+        result = subprocess.run(
+            ["bash", "-c", command, "bash", str(script)],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GMS_RT_OUTPUT": "json"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class TestLauncherProfilePinning(EnvSandbox):
@@ -410,7 +494,7 @@ class TestDoctorAndProfiles(EnvSandbox):
 
 class TestLocalRuntimeOnlyInstall(EnvSandbox):
     @staticmethod
-    def _args(client: str, server: str = ""):
+    def _args(client: str, server: str = "", profile: str = ""):
         return type(
             "Args",
             (),
@@ -419,6 +503,7 @@ class TestLocalRuntimeOnlyInstall(EnvSandbox):
                 "server": server,
                 "package": str(REPO_ROOT / "agent" / "gms-remote-test"),
                 "enroll_code": "",
+                "profile": profile,
             },
         )()
 
@@ -434,9 +519,57 @@ class TestLocalRuntimeOnlyInstall(EnvSandbox):
         )
         self.assertFalse(pm.CURRENT_LINK.exists())
 
+    def test_auto_install_rejects_one_profile_for_multiple_clients_before_changes(self):
+        with mock.patch.object(pm, "detect_clients", return_value=["codex", "kimi"]):
+            result = pm._cmd_install_locked(
+                self._args("auto", "https://ctrl.example:5001", "production")
+            )
+        self.assertEqual(result, 2)
+        self.assertFalse(pm.CURRENT_LINK.exists())
+
+    def test_install_rejects_retargeting_profile_with_existing_token(self):
+        pm.write_profile_toml(
+            "production", "codex", "https://ctrl-a.example:5001", ""
+        )
+        self.assertEqual(
+            pm._cmd_install_locked(
+                self._args("codex", "https://ctrl-b.example:5001", "production")
+            ),
+            2,
+        )
+        self.assertFalse(pm.CURRENT_LINK.exists())
+
+
+class TestProfilePreservingReactivation(EnvSandbox):
+    def test_reactivation_keeps_custom_profile_identity(self):
+        self.make_installed_runtime()
+        pm.write_profile_toml(
+            "production", "codex", "https://ctrl.example:5001", "/ca.pem"
+        )
+        with mock.patch.object(pm, "install_skill"), mock.patch.object(
+            pm, "reconcile_mcp"
+        ) as reconcile:
+            self.assertEqual(
+                pm.reactivate_clients("", "", profile="production"), ["codex"]
+            )
+        self.assertEqual(pm.profile_store.list_profiles(), ["production"])
+        self.assertEqual(reconcile.call_args.args[2], "production")
+
 
 class TestUpdateManifestPin(EnvSandbox):
     """A manifest swap between decision and download must be rejected."""
+
+    def test_http_controller_download_does_not_require_tls_module_side_effect(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b"ok"
+        response.headers = {"Content-Type": "application/json"}
+        opener = mock.MagicMock()
+        opener.open.return_value = response
+        with mock.patch.object(pm.urllib.request, "build_opener", return_value=opener):
+            body, headers = pm.http_get("http://ctrl.example/api/health")
+        self.assertEqual(body, b"ok")
+        self.assertEqual(headers["Content-Type"], "application/json")
 
     def test_fetch_rejects_version_mismatch(self):
         manifest = {
