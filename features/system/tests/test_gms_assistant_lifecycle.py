@@ -16,16 +16,39 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 
-# Lock the isolated data root BEFORE any app import: the controller lock
-# handle is process-global and the real deployment Controller on a dev
-# machine may own <repo>/data/controller.lock. TestClient keeps the app in
-# this process, and controller_process_lock() allows same-process reuse.
+# Isolated data root + locked environment for every test in this file.
+# This MUST NOT live at module import time: pytest collects the whole tree
+# into one process, and a module-level os.environ write permanently leaks
+# GMS_DATA_ROOT/GMS_SKIP_RUNTIME_ENV/GMS_AUTH_REQUIRED into every later
+# test — 17 config-contract tests read the polluted root and fail
+# (config_paths/config_migration/config_examples/dashboard_config …).
+# Instead, each test activates the env in setUp and restores the previous
+# values in tearDown.
 _DATA_ROOT = "/tmp/gms-assistant-lifecycle-tests"
-os.environ["GMS_DATA_ROOT"] = _DATA_ROOT
-os.environ["GMS_SKIP_RUNTIME_ENV"] = "1"
-os.environ["GMS_AUTH_REQUIRED"] = "false"
-os.environ.pop("GMS_ASSISTANT_URL", None)
-os.environ.pop("GMS_ASSISTANT_DEV_PROXY", None)
+_ISOLATED_ENV = {
+    "GMS_DATA_ROOT": _DATA_ROOT,
+    "GMS_SKIP_RUNTIME_ENV": "1",
+    "GMS_AUTH_REQUIRED": "false",
+}
+
+
+def _activate_isolated_env() -> None:
+    for key, value in _ISOLATED_ENV.items():
+        os.environ[key] = value
+    os.environ.pop("GMS_ASSISTANT_URL", None)
+    os.environ.pop("GMS_ASSISTANT_DEV_PROXY", None)
+
+
+class _IsolatedEnvTestCase(unittest.TestCase):
+    """Snapshot/restore the process env around each test method."""
+
+    def setUp(self) -> None:
+        self._env_snapshot = dict(os.environ)
+        _activate_isolated_env()
+
+    def tearDown(self) -> None:
+        os.environ.clear()
+        os.environ.update(self._env_snapshot)
 
 
 def _load_app():
@@ -68,13 +91,7 @@ def _stop_upstream_patch(client):
     client._upstream_patch.stop()
 
 
-class GmsAssistantBootShellTests(unittest.TestCase):
-    def setUp(self):
-        os.environ.pop("GMS_ASSISTANT_DEV_PROXY", None)
-
-    def tearDown(self):
-        os.environ.pop("GMS_ASSISTANT_DEV_PROXY", None)
-
+class GmsAssistantBootShellTests(_IsolatedEnvTestCase):
     def test_bare_assistant_page_is_local_shell_without_upstream(self):
         app = _load_app()
         # No `with`: the lifespan startup takes the process-global controller
@@ -182,7 +199,7 @@ class _FakeUpstreamResponse:
         self.content = _FakeUpstreamContent(body)
 
 
-class GmsAssistantProxySecurityTests(unittest.TestCase):
+class GmsAssistantProxySecurityTests(_IsolatedEnvTestCase):
     """Security contract: browser session credentials never reach upstream."""
 
     def _proxy_request(
@@ -271,7 +288,7 @@ class GmsAssistantProxySecurityTests(unittest.TestCase):
         self.assertEqual(sent.get("host"), "assistant.example")
 
     def test_invalid_bearer_on_proxied_path_fails_closed_before_upstream(self):
-        # 2026-09-08 audit §二: invalid Bearer never downgrades to anonymous
+        # Invalid Bearer never downgrades to anonymous
         # — the request must 401 at the Controller and never hit upstream.
         resp, captured = self._proxy_request(
             "https://assistant.example",

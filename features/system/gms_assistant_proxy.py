@@ -39,12 +39,34 @@ _ASSISTANT_UPSTREAM_BOOT_QUERY = "__gms_boot=upstream"
 # into memory, so an unbounded upstream could exhaust Controller memory.
 _GMS_ASSISTANT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
+# Hard cap for proxied request bodies (chat POSTs etc.). Same rationale as
+# the response cap — the body is fully buffered before relay — and it must
+# hold even when the upstream later grows attachment support.
+_GMS_ASSISTANT_MAX_REQUEST_BYTES = 16 * 1024 * 1024
+
 # Plaintext HTTP upstreams are only tolerated on loopback (dev servers).
 _GMS_ASSISTANT_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class _UpstreamResponseTooLargeError(Exception):
     """Upstream body exceeded _GMS_ASSISTANT_MAX_RESPONSE_BYTES."""
+
+
+class _RequestBodyTooLargeError(Exception):
+    """Client request body exceeded _GMS_ASSISTANT_MAX_REQUEST_BYTES."""
+
+
+async def _read_capped_request_body(request: Request) -> bytes:
+    """Read the request body with a hard size cap (awaitable)."""
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > _GMS_ASSISTANT_MAX_REQUEST_BYTES:
+            raise _RequestBodyTooLargeError()
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 _ASSISTANT_BOOT_SHELL = """<!doctype html>
 <html lang="zh-CN">
@@ -289,12 +311,30 @@ code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
     }
 
     try:
+        body = await _read_capped_request_body(request)
+    except _RequestBodyTooLargeError:
+        logger.warning(
+            "[GMS_ASSISTANT_PROXY] 请求体超过 %d 字节上限，已拒绝: %s/%s",
+            _GMS_ASSISTANT_MAX_REQUEST_BYTES,
+            upstream,
+            path,
+        )
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": "请求体超过代理上限",
+                "request_id": getattr(request.state, "request_id", None),
+            },
+            status_code=413,
+        )
+
+    try:
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session, session.request(
             request.method,
             upstream_url,
             headers=request_headers,
-            data=await request.body(),
+            data=body,
             allow_redirects=False,
         ) as upstream_response:
             chunks = []
@@ -389,13 +429,32 @@ async def gms_assistant_root():
     return HTMLResponse(_gms_assistant_boot_shell())
 
 
+# --- root-level compatibility routes (DEPRECATED) --------------------------
+# Content rewriting already points every upstream asset at
+# /gms-assistant/...; these root-level aliases only exist for older
+# bookmarked/registered URLs. They keep working (proxying is unchanged) but
+# advertise their removal via Deprecation/Sunset; drop them once the
+# successor scoped routes are confirmed as the only seen traffic.
+_ASSISTANT_ROOT_SHIM_SUNSET = "Wed, 31 Dec 2025 23:59:59 GMT"
+
+
+def _deprecation_headers() -> dict[str, str]:
+    return {
+        "Deprecation": "true",
+        "Sunset": _ASSISTANT_ROOT_SHIM_SUNSET,
+        'Link': '</gms-assistant>; rel="successor-version"',
+    }
+
+
 @router.api_route(
     "/public/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     include_in_schema=False,
 )
 async def proxy_gms_assistant_public(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"public/{path}", request)
+    response = await _proxy_gms_assistant_path(f"public/{path}", request)
+    response.headers.update(_deprecation_headers())
+    return response
 
 
 @router.api_route(
@@ -404,7 +463,9 @@ async def proxy_gms_assistant_public(path: str, request: Request):
     include_in_schema=False,
 )
 async def proxy_gms_assistant_assets(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"assets/{path}", request)
+    response = await _proxy_gms_assistant_path(f"assets/{path}", request)
+    response.headers.update(_deprecation_headers())
+    return response
 
 
 def _gms_assistant_dev_proxy_enabled() -> bool:
@@ -476,4 +537,6 @@ if _gms_assistant_dev_proxy_enabled():
     include_in_schema=False,
 )
 async def proxy_gms_assistant_public_api(path: str, request: Request):
-    return await _proxy_gms_assistant_path(f"api/public/{path}", request)
+    response = await _proxy_gms_assistant_path(f"api/public/{path}", request)
+    response.headers.update(_deprecation_headers())
+    return response

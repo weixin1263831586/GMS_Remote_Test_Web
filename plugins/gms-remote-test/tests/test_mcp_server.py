@@ -161,6 +161,64 @@ class RunCliTests(unittest.TestCase):
         self.assertTrue(is_error)
         self.assertIn("denied", text)
 
+    def test_run_cli_refreshes_token_file_from_profile_toml(self):
+        """2026-09-11 反馈回归：profile TOML 的 token_file 变化必须反映到子进程 env。
+
+        launcher 在启动时固化 GMS_AUTH_TOKEN_FILE；enroll 换了 profile 的
+        token 落点后，MCP 子进程若还用旧路径就会与 CLI 认证状态分裂。
+        用真实 gms_agent.profile_store + 沙箱 PROFILE_ROOT 验证。
+        """
+        import gms_agent.profile_store as profile_store
+
+        stub_dir = Path(self._tmp.name)
+        profile_root = stub_dir / "profiles"
+        profile_root.mkdir()
+        profile_name = "kkagent-host-1a2b3c4d"
+        toml_path = profile_root / f"{profile_name}.toml"
+        old_token = stub_dir / "old.token"
+        new_token = stub_dir / "new.token"
+        old_token.write_text("old")
+        toml_path.write_text(f'[auth]\ntoken_file = "{old_token}"\n')
+
+        saved_root = profile_store.PROFILE_ROOT
+        profile_store.PROFILE_ROOT = profile_root
+        saved_environ = os.environ.copy()
+        saved_cache = dict(mcp_server._TOKEN_FILE_CACHE)
+        mcp_server._TOKEN_FILE_CACHE.clear()
+        try:
+            os.environ["GMS_RT_PROFILE"] = profile_name
+            os.environ["GMS_AUTH_TOKEN_FILE"] = str(old_token)
+            seen = {}
+
+            def fake_run(argv, **kwargs):
+                seen["env"] = kwargs.get("env")
+                import types
+
+                return types.SimpleNamespace(
+                    stdout='{"ok":true,"data":{}}', stderr="", returncode=0
+                )
+
+            with patch.object(mcp_server.subprocess, "run", fake_run):
+                mcp_server.run_cli("gms-rt-redmine-journals", ["SNAP"])
+            # 同路径：不覆盖（merged env 为空 → env=None，继承即可）
+            self.assertEqual(seen["env"], None)
+
+            # TOML 指向新文件：子进程 env 必须换到新路径。缓存按内容指纹
+            # 失效，因此同一秒写入、等长的 old.token -> new.token 也必须
+            # 被识别（这正是 stat 戳会漏掉的场景）。
+            toml_path.write_text(f'[auth]\ntoken_file = "{new_token}"\n')
+            with patch.object(mcp_server.subprocess, "run", fake_run):
+                mcp_server.run_cli("gms-rt-redmine-journals", ["SNAP"])
+            self.assertEqual(
+                seen["env"].get("GMS_AUTH_TOKEN_FILE"), str(new_token)
+            )
+        finally:
+            profile_store.PROFILE_ROOT = saved_root
+            os.environ.clear()
+            os.environ.update(saved_environ)
+            mcp_server._TOKEN_FILE_CACHE.clear()
+            mcp_server._TOKEN_FILE_CACHE.update(saved_cache)
+
     def test_run_cli_success_compacts_envelope(self):
         self._write_stub(
             'echo \'{"ok":true,"command":"gms-rt-devices-list",'
@@ -1458,7 +1516,7 @@ class ApkToolTests(unittest.TestCase):
 
 
 class RedmineEvidenceToolTests(unittest.TestCase):
-    """2026-09-08 plan §10: redmine/apk/sdk typed tools wiring."""
+    """Redmine/apk/sdk typed tools wiring."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1499,6 +1557,13 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         self.assertEqual(
             captured["args"],
             ["648526", "--download", "all", "--wait", "--max-wait", "60"],
+        )
+
+    def test_fetch_maps_dry_run(self):
+        captured = self._capture_run()
+        mcp_server.redmine_issue_fetch_tool({"issue": "648526", "dry_run": True})
+        self.assertEqual(
+            captured["args"], ["648526", "--dry-run"]
         )
 
     def test_fetch_rejects_bad_download(self):
@@ -1559,7 +1624,7 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         self.assertTrue(result.is_error)
 
     def test_sdk_read_requires_result_id_only(self):
-        # 计划 §12：read 只接受自包含 opaque result_id。
+        # read 只接受自包含 opaque result_id。
         text, is_error = mcp_server.sdk_read_tool({})
         self.assertTrue(is_error)
         self.assertIn("result_id", text)

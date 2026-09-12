@@ -1,6 +1,6 @@
 """Redmine 证据快照抓取服务（只读 evidence pipeline）。
 
-2026-09-08 计划：redmine-cli-agent-implementation-plan.md §7。本模块与看板摘要
+本模块与看板摘要
 通道（analysis_issue.py 的 2,000 字符截断）完全分离：
 
 - 直接请求 Redmine REST ``/issues/{id}.json?include=...``，原样保存返回的
@@ -58,6 +58,41 @@ ANALYZABLE_KINDS = {"text", "log", "image", "pdf", "archive", "apk"}
 
 _TEXT_ENCODINGS = ("utf-8", "gb18030", "utf-16", "latin-1")
 _DERIVED_TEXT_MAX_BYTES = 64 * 1024 * 1024
+# 2026-09-11 反馈（反馈 2026-09-11）：zip 内文本成员的派生文本限制。单成员解压后
+# 超过阈值、成员数超上限或总量超上限都会跳过剩余成员（可审计地记录在
+# artifact error 里），防止 zip 炸弹拖垮 fetch 或搜索。
+ZIP_MEMBER_TEXT_MAX_BYTES = 2 * 1024 * 1024
+ZIP_MEMBER_TEXT_MAX_MEMBERS = 50
+ZIP_MEMBER_DERIVED_TOTAL_MAX_BYTES = 32 * 1024 * 1024
+# 派生文本里的成员分隔标记（行级），search 用它还原
+# ``attachment:<file>.zip!/<member>`` 引用与行号。
+_ZIP_MEMBER_MARKER_RE = re.compile(r"^<<<zip-member:(.*?)>>>$")
+_ZIP_MEMBER_MARKER_PREFIX = "<<<zip-member:"
+_ZIP_MEMBER_MARKER_SUFFIX = ">>>"
+
+
+def zip_member_marker(name: str) -> str:
+    return f"{_ZIP_MEMBER_MARKER_PREFIX}{name}{_ZIP_MEMBER_MARKER_SUFFIX}"
+
+
+def split_zip_derived_text(text: str) -> list[tuple[str, str]]:
+    """按成员标记切派生文本 → [(member_name, member_text), ...]。"""
+
+    members: list[tuple[str, list[str]]] = []
+    current_name = ""
+    current_lines: list[str] = []
+    for line in text.splitlines():
+        marker = _ZIP_MEMBER_MARKER_RE.match(line)
+        if marker:
+            if current_name:
+                members.append((current_name, current_lines))
+            current_name = marker.group(1)
+            current_lines = []
+        elif current_name:
+            current_lines.append(line)
+    if current_name:
+        members.append((current_name, current_lines))
+    return [(name, "\n".join(lines)) for name, lines in members]
 _ISSUE_ID_OR_URL_RE = re.compile(r"^/issues/(\d+)$")
 
 
@@ -147,6 +182,34 @@ def load_owner_credentials(owner_id: str) -> _OwnerCredentials:
 def owner_base_url(owner_id: str) -> str:
     manager = redmine_config_manager.for_owner(owner_id)
     return str(manager.get_redmine_base_url() or "").strip().rstrip("/")
+
+
+def preflight_owner_fetch(owner_id: str) -> str:
+    """抓取前置校验（2026-09-11 反馈：失败快照缺 pre-flight）。
+
+    在建快照之前确认 owner 已配置 base_url 与 Redmine 凭据，缺失时立即
+    抛 ``EvidenceError``（409/401），快速失败且不留 failed 垃圾快照。
+    返回校验通过的 base_url（已 rstrip）。
+
+    错误自带修复路径：agent 与 enroll 账号共享 owner 存储，人在 Web UI
+    配置即可；凭据为 human-only（见 /config/credentials）。
+    """
+
+    base_url = owner_base_url(owner_id)
+    if not base_url:
+        raise EvidenceError(
+            "redmine.base_url 未配置；请在 Web UI『设置』页配置 Redmine 地址后再抓取证据",
+            status_code=409,
+        )
+    credentials = load_owner_credentials(owner_id)
+    if not credentials.headers():
+        raise EvidenceAuthError(
+            "owner 账号未配置 Redmine 凭据；请由 enroll 该 agent 的账号在 Web UI『设置』页"
+            "配置用户名/密码或 API Key（agent 与该账号共享 owner 存储），"
+            "或由该账号调用 POST /api/redmine-agent/config/credentials；"
+            "配置后可用 gms-rt-redmine-credentials-status 验证"
+        )
+    return base_url
 
 
 # ------------------------------------------------------------------- helpers
@@ -260,7 +323,7 @@ def start_evidence_fetch(owner_id: str, snapshot: dict[str, Any]) -> asyncio.Tas
 
 
 def snapshot_completeness(snapshot: dict[str, Any], artifacts: list[dict[str, Any]] | None = None) -> dict[str, bool]:
-    """按计划 §8 计算 completeness，失败绝不能标记 complete。"""
+    """计算 completeness，失败绝不能标记 complete。"""
     status = str(snapshot.get("status") or "")
     errors = snapshot.get("errors") or []
     issue_ok = status in {"ready", "partial"} and bool(snapshot.get("content_sha256"))

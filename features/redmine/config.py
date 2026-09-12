@@ -109,7 +109,7 @@ class RedmineConfig:
         return {}
 
     def load_redmine_api_key(self) -> str:
-        """读取加密保存的 Redmine API Key（计划 §5.3；不进入任何日志/响应）。"""
+        """读取加密保存的 Redmine API Key（不进入任何日志/响应）。"""
         saved = self.manager.get_runtime_config().get("redmine_auth") or {}
         encrypted = saved.get("encrypted_api_key")
         if not encrypted:

@@ -80,7 +80,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
 
     user = require_authenticated_user(request)
     owner_id = user.id
-    # Agent Service Token enforcement (2026-09-08 audit §四): an agent
+    # Agent Service Token enforcement (ADR 0006): an agent
     # principal must hold devices.use_leased for any action and may only
     # touch devices in its allowed_devices ACL, on workers in its
     # allowed_workers ACL. Human sessions are unaffected.

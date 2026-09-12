@@ -1,6 +1,6 @@
 """Evidence snapshot/artifact persistence (per-owner SQLite).
 
-2026-09-08 plan: redmine-cli-agent-implementation-plan.md §6. Evidence data is
+Evidence data is
 kept strictly separate from the dashboard tables (``redmine_agent_issues``):
 the dashboard keeps its summarized/2,000-char-truncated semantics, while this
 store keeps byte-faithful raw evidence for the agent analysis chain.
@@ -183,6 +183,23 @@ class EvidenceStore:
         if row is None:
             return None
         return self._snapshot_from_row(row)
+
+    def list_snapshots_for_issue(
+        self, issue_id: int, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """某 issue 的快照列表，最新在前（latest 端点用）。"""
+
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM redmine_evidence_snapshots
+                WHERE issue_id = ?
+                ORDER BY created_at DESC, snapshot_id DESC
+                LIMIT ?
+                """,
+                (int(issue_id), int(limit)),
+            ).fetchall()
+        return [self._snapshot_from_row(row) for row in rows]
 
     @staticmethod
     def _snapshot_from_row(row: sqlite3.Row) -> dict[str, Any]:

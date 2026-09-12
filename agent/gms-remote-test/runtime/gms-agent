@@ -7,14 +7,18 @@ server. Users should never need to know about ~/.codex/config.toml,
 GMS_RT_PROFILE — those become implementation details:
 
     gms-agent install [--client auto|codex|kimi|kkagent|none] [--server URL]
-        [--enroll-code CODE] [--yes]
+        [--profile NAME] [--enroll-code CODE] [--yes]
         Detect installed agent clients and activate the whole package
         (runtime + skill + client registration) from either a local
         package tree (--package / extracted archive / plugin payload) or,
         when downloaded standalone via GET /api/agent/install, straight
-        from the Controller Agent Package Registry.
+        from the Controller Agent Package Registry. The default profile
+        identity includes the Controller
+        (<client>-<host>-<sha256(server)[:8]>), so Controller A and
+        Controller B for the same client never overwrite each other;
+        --profile picks a readable name.
 
-    gms-agent update
+    gms-agent update [--server URL] [--profile NAME]
         Check the Controller Agent Package Registry for a newer version,
         download + verify (SHA-256 + manifest/package version contract),
         install into versions/<new>/ (immutable per version) and re-activate
@@ -26,9 +30,11 @@ GMS_RT_PROFILE — those become implementation details:
         Flip `current` back to an installed version AND re-activate all
         configured clients from that version.
 
-    gms-agent enroll <CODE>
+    gms-agent enroll <CODE> [--profile NAME]
         Exchange a one-shot enrollment code for an Agent Service Token
-        (0600) and wire it into every configured client profile.
+        (0600). The code is redeemed against the profile's Controller;
+        with an ambiguous multi-Controller profile store --profile is
+        required (fail closed, the code is never stored cross-Controller).
 
     gms-agent status
         Show installed version, detected clients, profile and auth state.
@@ -50,9 +56,11 @@ features/system/agent_package_builder.py and tools/build_agent_package.py):
       tests/
       kk.plugin.json  kimi.plugin.json  .codex-plugin/plugin.json
 
-Identity model: one host token shared by the client profiles (audit still
-separates the client via GMS_AGENT_CLIENT metadata); per-client tokens can
-be introduced later by enrolling with dedicated profiles.
+Identity model: profile = one Controller binding. One enrollment → one
+token written to every profile that points at the host's unique
+Controller; on a multi-Controller host enroll/update require an explicit
+--profile/--server (fail closed). Per-client tokens can be introduced
+later by enrolling with dedicated profiles.
 """
 
 # Thin argparse shell: the lifecycle logic lives in
@@ -163,7 +171,12 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
             with opener.open(request, timeout=timeout) as response:
                 return response.read()
 
+        # The inner gms-agent ends with raise SystemExit(main()); runpy
+        # re-raises it here. The extract dir is therefore released in a
+        # finally clause — cleanup behind the exec point was unreachable
+        # and leaked a full package under /tmp on every bootstrap run.
         registry_base = f"{server}/api/agent/packages/gms-remote-test"
+        extract_dir: Path | None = None
         try:
             manifest = json.loads(http_get(f"{registry_base}/manifest", 60))
             artifact = (manifest.get("artifacts") or {}).get("universal") or {}
@@ -273,6 +286,7 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
                 archive_path.unlink(missing_ok=True)
             except Exception:
                 shutil.rmtree(extract_dir, ignore_errors=True)
+                extract_dir = None
                 raise
             inner = extract_dir / "gms-remote-test"
             root = inner if (inner / "scripts" / "gms-agent").is_file() else extract_dir
@@ -280,13 +294,17 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
             sys.argv = [str(root / "scripts" / "gms-agent"), *sys.argv[1:]]
             sys.path.insert(0, str(root / "scripts"))
             runpy.run_path(str(root / "scripts" / "gms-agent"), run_name="__main__")
-            shutil.rmtree(extract_dir, ignore_errors=True)
             return 0
-        except SystemExit:
-            raise
+        except SystemExit as exit_event:
+            # Propagate the inner CLI's exit code unchanged (success OR
+            # failure); the finally clause below owns the staging cleanup.
+            raise exit_event
         except (OSError, ValueError, RuntimeError, zipfile.BadZipFile) as error:
             print(f"Error: bootstrap 失败: {error}", file=sys.stderr)
             return 6
+        finally:
+            if extract_dir is not None:
+                shutil.rmtree(extract_dir, ignore_errors=True)
 
     # Only bootstrap when executed as a script; a bare import (tests loading
     # the standalone copy to inspect local_package_root) must not trigger
@@ -380,20 +398,34 @@ def main() -> int:
     p_install.add_argument("--package", default="", help="package root to install (default: this archive; standalone script bootstraps from the registry)")
     p_install.add_argument("--enroll-code", default="", dest="enroll_code",
                            help="one-shot enrollment code; exchanged for the agent service token right after install")
+    p_install.add_argument(
+        "--profile", default="",
+        help="explicit profile name (default: <client>-<host>-<sha256(server)[:8]> so each Controller gets its own profile)",
+    )
     p_install.set_defaults(func=cmd_install)
 
     p_update = sub.add_parser("update", help="update from the Controller Agent Package Registry")
     p_update.add_argument("--server", default="")
+    p_update.add_argument(
+        "--profile", default="",
+        help="disambiguate the Controller on a multi-profile host (fail-closed otherwise)",
+    )
     p_update.add_argument("--force", action="store_true")
     p_update.set_defaults(func=cmd_update)
 
     p_rollback = sub.add_parser("rollback", help="switch `current` (and every client) back to an installed version")
     p_rollback.add_argument("version")
+    p_rollback.add_argument("--server", default="")
+    p_rollback.add_argument("--profile", default="")
     p_rollback.set_defaults(func=cmd_rollback)
 
     p_enroll = sub.add_parser("enroll", help="exchange a one-shot enrollment code for a service token")
     p_enroll.add_argument("code")
     p_enroll.add_argument("--server", default="")
+    p_enroll.add_argument(
+        "--profile", default="",
+        help="write the token for exactly this profile (default: every profile pointing at the host's unique Controller; ambiguous hosts must pass --profile)",
+    )
     p_enroll.set_defaults(func=cmd_enroll)
 
     p_status = sub.add_parser("status", help="show installation state")

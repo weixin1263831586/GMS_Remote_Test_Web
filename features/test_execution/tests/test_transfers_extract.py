@@ -155,7 +155,7 @@ class RemoteSuiteExtractTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RemoteSuiteDownloadTests(unittest.IsolatedAsyncioTestCase):
-    """P1-10/P1-11 回归：远程套件下载的退出码顺序与事件循环阻塞。"""
+    """回归：远程套件下载的退出码顺序与事件循环阻塞。"""
 
     class _FakeRequest:
         def __init__(self):

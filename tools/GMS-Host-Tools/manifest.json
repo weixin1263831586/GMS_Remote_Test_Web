@@ -1,0 +1,27 @@
+{
+  "_comment": "Deployment-only artifact manifest (never tracked binaries). Provision with scripts/prepare_gms_host_tools.sh; URLs/SHA256 are supplied per-deployment via configs/runtime.json. See README.md in this directory.",
+  "artifacts": {
+    "jdk-11": {
+      "role": "fallback Java runtime for older CTS/GTS tools (jadx wrapper)",
+      "tracked_in_git": false,
+      "install_path": "tools/GMS-Host-Tools/jdk-11",
+      "provision": {
+        "script": "scripts/prepare_gms_host_tools.sh",
+        "url_env": "GMS_HOST_TOOLS_JDK_URL",
+        "sha256_env": "GMS_HOST_TOOLS_JDK_SHA256",
+        "verification": "mandatory SHA-256; tarball must contain exactly one bin/java plus release/legal metadata"
+      }
+    },
+    "platform-tools-gms-linux.zip": {
+      "role": "unmodified Google Android SDK Platform-Tools (adb/fastboot)",
+      "tracked_in_git": false,
+      "install_path": "tools/GMS-Host-Tools/platform-tools-gms-linux.zip",
+      "provision": {
+        "script": "scripts/prepare_gms_host_tools.sh",
+        "url_env": "GMS_HOST_TOOLS_PLATFORM_URL",
+        "sha256_env": "GMS_HOST_TOOLS_PLATFORM_SHA256",
+        "default_source": "https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip"
+      }
+    }
+  }
+}

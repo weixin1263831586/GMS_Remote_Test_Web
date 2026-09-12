@@ -25,7 +25,7 @@ gms_rt_shell_exec with an approval token, ...) or a human-run CLI, never
 prompt text. Interactive commands (terminal-open, terminal-push,
 devices-scrcpy) are denied outright.
 
-Authentication model (2026-09-09 audit):
+Authentication model (ADR 0006):
 - Agents authenticate exclusively with an Agent Service Token
   (GMS_AUTH_TOKEN_FILE, 0600, enrolled via gms_rt_agent_enroll). No
   platform or admin password ever flows through MCP.
@@ -64,6 +64,7 @@ Tools:
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -77,14 +78,14 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.18.0"
+SERVER_VERSION = "0.20.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
 # The catalog only changes across gms-rt-system-update; refresh it lazily.
 SAFETY_CACHE_TTL_SECONDS = 300
 
-# Agent authentication mode (2026-09-09 audit). When set to
+# Agent authentication mode (ADR 0006). When set to
 # "service-token" (the installer writes it into every agent MCP env), the
 # password-based tools (gms_rt_auth_login, gms_rt_auth_elevate) and the
 # human-session approval mint (gms_rt_approval_create) are NOT registered:
@@ -103,6 +104,57 @@ _SERVICE_TOKEN_MODE = (
     or str(os.environ.get("GMS_AGENT_AUTH_MODE", "")).strip().lower()
     == "service-token"
 )
+
+# Token-file freshness (2026-09-11 反馈（MCP/CLI 认证状态不一致）): the launcher freezes
+# GMS_AUTH_TOKEN_FILE at MCP startup from the profile TOML. When enroll (or
+# an operator) rewrites the profile's token_file — e.g. the code was
+# enrolled under a different profile name — this process keeps pointing at
+# the stale path while fresh CLI invocations resolve the new one, so MCP
+# and CLI disagree about authentication. Re-resolve the selected profile's
+# token_file before each CLI call, cached by (profile name, TOML content
+# fingerprint): mtime/size are too coarse — a same-second rewrite to an
+# equally long token_file (old.token -> new.token) keeps both identical, so
+# a stat-based stamp would serve the stale path forever. Hashing the bytes
+# makes the refresh exactly as reliable as the file itself; still exactly
+# one profile per server, no routing change.
+_TOKEN_FILE_CACHE: dict[str, tuple[str, str]] = {}
+
+
+def _current_profile_token_file() -> str:
+    """token_file from the selected profile TOML, "" when unavailable."""
+
+    profile = str(os.environ.get("GMS_RT_PROFILE", "")).strip()
+    if not profile or profile == "default":
+        return ""
+    try:
+        from gms_agent import profile_store
+
+        if not profile_store.validate_profile_name(profile):
+            return ""
+        path = profile_store.profile_path(profile)
+        raw = path.read_bytes() if path.is_file() else b""
+        stamp = hashlib.sha256(raw).hexdigest()
+    except Exception:
+        return ""
+    cached = _TOKEN_FILE_CACHE.get(profile)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    try:
+        token_file = str(profile_store.load_profile(profile).get("token_file", ""))
+    except Exception:
+        token_file = ""
+    _TOKEN_FILE_CACHE[profile] = (stamp, token_file)
+    return token_file
+
+
+def _fresh_token_file_env() -> dict[str, str]:
+    """Env overrides that keep GMS_AUTH_TOKEN_FILE in sync with the profile."""
+
+    current = str(os.environ.get("GMS_AUTH_TOKEN_FILE", "")).strip()
+    resolved = _current_profile_token_file()
+    if resolved and resolved != current:
+        return {"GMS_AUTH_TOKEN_FILE": resolved}
+    return {}
 
 # Tools hidden in service-token mode (human-session credential tools).
 _HUMAN_SESSION_TOOLS = (
@@ -185,6 +237,11 @@ def _sdk_fast_call(command: str, args: list[str]) -> tuple[str, bool] | None:
             from gms_agent import GmsClient
 
             _sdk_client = GmsClient()
+        # Profile TOML moved the token file (2026-09-11 反馈): follow it, then
+        # request() re-reads the file contents itself.
+        fresh_token = _fresh_token_file_env().get("GMS_AUTH_TOKEN_FILE")
+        if fresh_token and fresh_token != _sdk_client.token_path:
+            _sdk_client.refresh_token(fresh_token)
         if "{job_id}" in endpoint:
             if not positional:
                 return None
@@ -505,8 +562,14 @@ def run_cli(
     if effective_timeout <= 0:
         effective_timeout = DEFAULT_TIMEOUT_SECONDS
     child_env = None
+    merged_env_extra: dict[str, str] = {}
     if env_extra:
-        child_env = {**os.environ, **env_extra}
+        merged_env_extra.update(env_extra)
+    # Token-file freshness (2026-09-11 反馈): explicit env_extra wins over the profile
+    # re-resolution so typed tools keep their explicit overrides.
+    merged_env_extra.update(_fresh_token_file_env())
+    if merged_env_extra:
+        child_env = {**os.environ, **merged_env_extra}
     try:
         completed = subprocess.run(
             argv,
@@ -819,6 +882,9 @@ def agent_enroll_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     out_file = str(arguments.get("out_file") or "").strip()
     if out_file:
         args.extend(["--out", out_file])
+    profile = str(arguments.get("profile") or "").strip()
+    if profile:
+        args.extend(["--profile", profile])
     return run_cli("gms-rt-agent-enroll", args)
 
 
@@ -892,7 +958,7 @@ def auth_elevate_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 def _resolve_worker_for_device(
     device: str, worker_id: str | None
 ) -> tuple[str | None, str | None]:
-    """Authoritative worker_id resolution for a device (audit §六).
+    """Authoritative worker_id resolution for a device (ADR 0006).
 
     Returns (worker_id, error). Explicit worker_id wins. Otherwise the
     cluster inventory must match exactly one worker; zero/ambiguous matches
@@ -1165,7 +1231,7 @@ def test_start_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
                 except (TypeError, ValueError):
                     return "max_wait must be an integer", True
         return run_cli("gms-rt-test-start", args)
-    # worker_id (audit §六): resolve the owning worker authoritatively when
+    # worker_id (ADR 0006): resolve the owning worker authoritatively when
     # not explicit; ambiguity is an error, never a guess.
     resolved_worker, worker_error = _resolve_worker_for_device(
         device, arguments.get("worker_id")
@@ -1316,7 +1382,7 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             "available through this MCP tool",
             True,
         )
-    # Security boundary (2026-09-03 audit §13): the generic runner only
+    # Security boundary: the generic runner only
     # executes commands the CLI itself marks agent_safe_unattended.
     # Mutating/high-risk operations must go through the dedicated typed
     # tools (gms_rt_test_start, ...) or a human-run CLI, never prompt text.
@@ -1379,8 +1445,7 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 # The Controller catalog marks gms-rt-devices-shell "manual" because arbitrary
 # shell access is interactive by definition. This typed tool exposes a strictly
 # read-only subset so agents can diagnose devices (props, services, logs,
-# filesystem state) without weakening the catalog security boundary
-# (2026-09-05 audit follow-up).
+# filesystem state) without weakening the catalog security boundary.
 _SHELL_READONLY_BINARIES = frozenset({
     "cat", "df", "dumpsys", "getprop", "logcat", "ls", "pidof", "ps",
     "settings", "stat", "uptime", "vmstat", "wm",
@@ -1901,8 +1966,8 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 # by nature, so the generic runner (gms_rt_run) denies it outright. This
 # typed tool is the approval-token escape hatch for one-shot commands: the
 # caller must pass a one-shot approval token that the SERVER validates
-# against tool+device+SHA256(command), TTL and single use (2026-09-08 audit
-# §五). A client-declared authorized=true boolean was never a security
+# against tool+device+SHA256(command), TTL and single use (ADR 0006).
+# A client-declared authorized=true boolean was never a security
 # boundary — any MCP client could pass true itself. Read-only diagnosis
 # should still go through gms_rt_shell (allowlist, no approval needed).
 _SHELL_EXEC_MAX_COMMAND_CHARS = 2000
@@ -1963,7 +2028,7 @@ def tools() -> list[dict[str, Any]]:
     if _SERVICE_TOKEN_MODE:
         # Service-token mode: the human-session credential tools are not even
         # advertised, so an agent context cannot express a password login or
-        # self-mint an approval (2026-09-09 audit).
+        # self-mint an approval (ADR 0006).
         all_tools = [
             tool
             for tool in all_tools
@@ -2390,6 +2455,15 @@ def _all_tools() -> list[dict[str, Any]]:
                         "description": (
                             "Optional token file path (default "
                             "~/.local/state/gms-remote-test/<profile>.token, 0600)."
+                        ),
+                    },
+                    "profile": {
+                        "type": "string",
+                        "description": (
+                            "Optional profile name. On hosts with multiple "
+                            "registered profiles the token file must match "
+                            "the caller's MCP registration; pass the profile "
+                            "name so enroll resolves its token_file path."
                         ),
                     },
                 },
@@ -3142,6 +3216,13 @@ def _all_tools() -> list[dict[str, Any]]:
                         "type": "boolean",
                         "description": "Reuse a recent ready snapshot (cache_hit flag).",
                     },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": (
+                            "Only validate preconditions (base_url + credentials); "
+                            "do not create a snapshot."
+                        ),
+                    },
                     "wait": {"type": "boolean"},
                     "max_wait": {"type": "integer", "minimum": 0, "maximum": 21600},
                 },
@@ -3509,7 +3590,7 @@ class ToolContent:
 
 
 # --------------------------------------------------------------------------
-# Redmine evidence / APK / SDK typed tools (2026-09-08 plan §9-§12)
+# Redmine evidence / APK / SDK typed tools
 # --------------------------------------------------------------------------
 
 def _int_arg(arguments: dict[str, Any], name: str, default: int, minimum: int, maximum: int) -> int:
@@ -3535,6 +3616,9 @@ def redmine_issue_fetch_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         args.extend(["--download", download])
     if arguments.get("no_refresh"):
         args.append("--no-refresh")
+    if arguments.get("dry_run"):
+        # 2026-09-11 反馈：只校验前置条件，不建快照。
+        args.append("--dry-run")
     if arguments.get("wait"):
         args.append("--wait")
         args.extend(["--max-wait", str(_int_arg(arguments, "max_wait", 300, 5, 3600))])
@@ -3633,7 +3717,7 @@ def redmine_image_tool(arguments: dict[str, Any]) -> ToolContent:
 
     The Controller endpoint enforces size limits and returns base64 with the
     original artifact metadata; oversized images surface as tool errors with
-    a download hint instead of being silently cropped (plan §10).
+    a download hint instead of being silently cropped.
     """
     artifact_id = str(arguments.get("artifact_id") or "").strip()
     if not artifact_id:
@@ -3726,7 +3810,7 @@ def sdk_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     result_id = str(arguments.get("result_id") or "").strip()
     if not result_id:
         return "missing required field: result_id", True
-    # 计划 §12：只传 result_id；source/path/commit 已绑定在 token 内。
+    # 只传 result_id；source/path/commit 已绑定在 token 内。
     args: list[str] = [result_id]
     if arguments.get("offset") is not None:
         args.extend(["--offset", str(_int_arg(arguments, "offset", 0, 0, 10_000_000))])

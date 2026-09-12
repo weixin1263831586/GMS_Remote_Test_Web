@@ -1956,6 +1956,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/issues/{issue_id}/evidence/latest"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/redmine-agent/issues/{issue_id}/fetch"

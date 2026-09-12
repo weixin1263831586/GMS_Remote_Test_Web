@@ -1,4 +1,4 @@
-"""工单 P0-1/P0-2/P1-1/P1-2 相关模块的单元测试（全 mock，不碰真设备）。"""
+"""工单相关模块的单元测试（全 mock，不碰真设备）。"""
 
 import tempfile
 import unittest

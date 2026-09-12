@@ -48,7 +48,7 @@ def _owner_id(request: Request) -> str:
 
 
 def _require_apk_scope(request: Request) -> None:
-    """APK 全链路统一 scope（2026-09-08 计划 §11）：上传/分析/读取结果
+    """APK 全链路统一 scope：上传/分析/读取结果
     都要求 ``apk.analyze_own``；人类角色默认已持有，Agent Token 需显式授权。
     """
     require_agent_scope("apk.analyze_own")(request)
@@ -492,7 +492,7 @@ async def download_apk_source(task_id: str, request: Request):
 @router.get("/api/apk/doctor")
 @handle_api_errors
 async def apk_doctor(request: Request):
-    """JADX/Java 环境健康检查（计划 §11.3）。
+    """JADX/Java 环境健康检查。
 
     不返回完整环境变量集合；只报告 jadx 路径、版本探测结果和修复建议。
     """

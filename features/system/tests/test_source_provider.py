@@ -1,4 +1,4 @@
-"""SDK local_git provider 测试（计划 §12/§16）。
+"""SDK local_git provider 测试。
 
 用临时 git 仓库验证：
 - revision 解析为 commit，read 返回解析后 commit 和 blob 哈希；

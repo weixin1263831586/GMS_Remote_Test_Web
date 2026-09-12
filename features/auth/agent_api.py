@@ -1,12 +1,15 @@
 """Agent token / enrollment / approval API endpoints.
 
-Extracted from api.py (2026-09-08 audit) so the auth API stays under the
+Extracted from api.py so the auth API stays under the
 reviewable-size limit. Mounted onto the /api/auth router from api.py.
 """
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 
 from foundation.responses import error_response
 
@@ -24,7 +27,7 @@ from .service import CurrentUser, auth_service
 router = APIRouter()  # mounted onto the /api/auth router in api.py
 
 # ---------------------------------------------------------------------------
-# Agent Service Tokens (2026-09-08 audit §二/§四)
+# Agent Service Tokens (ADR 0006)
 # ---------------------------------------------------------------------------
 
 @router.get("/agent-scopes")
@@ -109,6 +112,7 @@ async def auth_create_agent_enrollment(
             allowed_workers=req.get("allowed_workers"),
             allowed_devices=req.get("allowed_devices"),
             expires_days=req.get("expires_days"),
+            ttl_minutes=req.get("ttl_minutes"),
         )
     except (ValueError, TypeError) as exc:
         return error_response(str(exc), status_code=400)
@@ -137,20 +141,37 @@ async def auth_agent_enroll(request: Request, req: dict):
         response.headers["Retry-After"] = str(max(1, retry_after))
         return response
     try:
-        record = auth_service.redeem_agent_enrollment(str(req.get("code") or ""))
+        record, failure = auth_service.redeem_agent_enrollment(
+            str(req.get("code") or "")
+        )
     except (ValueError, TypeError):
-        record = None
+        record, failure = None, {"reason": "invalid"}
     if record is None:
         auth_service.record_auth_failure("agent-enroll", "code", source_ip)
-        return error_response(
-            "配对码无效、已使用或已过期", status_code=403
-        )
+        # 三态可区分（2026-09-11 反馈）：已使用 / 已过期 / 不存在，
+        # 各附机器可读 reason 与时间戳，CLI 据此给人话提示。
+        reason = str(failure.get("reason") or "invalid")
+        if reason == "expired":
+            response = error_response(
+                "配对码已过期",
+                status_code=410,
+            )
+            detail = {"reason": "expired", "expires_at": failure.get("expires_at", "")}
+        elif reason == "used":
+            response = error_response("配对码已被使用", status_code=403)
+            detail = {"reason": "used", "used_at": failure.get("used_at", "")}
+        else:
+            response = error_response("配对码不存在", status_code=403)
+            detail = {"reason": "invalid"}
+        response_json = json.loads(response.body.decode("utf-8"))
+        response_json["detail"] = detail
+        return JSONResponse(status_code=response.status_code, content=response_json)
     auth_service.clear_auth_failures("agent-enroll", "code", source_ip)
     return {"success": True, "token": record}
 
 
 # ---------------------------------------------------------------------------
-# One-shot Approval Tokens (2026-09-08 audit §五)
+# One-shot Approval Tokens (ADR 0006)
 # ---------------------------------------------------------------------------
 
 _APPROVAL_TOOLS = {

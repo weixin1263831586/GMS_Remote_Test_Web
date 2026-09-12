@@ -81,11 +81,17 @@ def collect_versions() -> dict[str, str]:
 
     cli_match = re.search(r'^GMS_RT_VERSION="([^"]*)"$', CLI_SCRIPT.read_text(encoding="utf-8"), re.M)
     mcp_match = re.search(r'^SERVER_VERSION = "([^"]*)"$', MCP_SERVER.read_text(encoding="utf-8"), re.M)
+    sdk_match = re.search(
+        r'^__version__ = "([^"]*)"$',
+        (AGENT_DIR / "runtime" / "gms_agent" / "__init__.py").read_text(encoding="utf-8"),
+        re.M,
+    )
     versions = {"package.yaml": read_package_version()}
     for path in MANIFESTS:
         versions[str(path.relative_to(REPO_ROOT))] = manifest_version(path)
     versions[str(CLI_SCRIPT.relative_to(REPO_ROOT))] = cli_match.group(1) if cli_match else ""
     versions[str(MCP_SERVER.relative_to(REPO_ROOT))] = mcp_match.group(1) if mcp_match else ""
+    versions["runtime/gms_agent/__init__.py (SDK __version__)"] = sdk_match.group(1) if sdk_match else ""
     return versions
 
 
@@ -119,6 +125,15 @@ def main() -> int:
     )
     replace_once(
         MCP_SERVER, r'^SERVER_VERSION = "[^"]*"$', f'SERVER_VERSION = "{args.version}"', "SERVER_VERSION"
+    )
+    # SDK __version__ participates in the same contract — it used to be
+    # stuck on a historical release number (0.13.0) because the bump flow
+    # never rewrote it.
+    replace_once(
+        AGENT_DIR / "runtime" / "gms_agent" / "__init__.py",
+        r'^__version__ = "[^"]*"$',
+        f'__version__ = "{args.version}"',
+        "SDK __version__",
     )
     for manifest in MANIFESTS:
         bump_manifest(manifest, args.version)

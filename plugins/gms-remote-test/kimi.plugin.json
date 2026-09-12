@@ -1,7 +1,7 @@
 {
   "name": "gms-remote-test",
-  "version": "0.18.0",
-  "description": "Operate the GMS Remote Test platform through the bundled gms-rt CLI: device inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware burn, USB/IP, VPN. Self-contained; requires GMS_REMOTE_TEST_SERVER. Authenticates via GMS_AUTH_TOKEN_FILE (Agent Service Token, 0600 file) so no platform password ever flows through the model; adds read-only device shell (gms_rt_shell), typed logcat capture (gms_rt_logcat), one-shot approved device shell (gms_rt_shell_exec with server-side approval tokens), admin step-up elevation (gms_rt_auth_elevate) and typed firmware burn (gms_rt_burn_firmware, approval-token gated); jobs output is rendered one line per job.",
+  "version": "0.20.0",
+  "description": "Operate the GMS Remote Test platform through the bundled gms-rt CLI: device inventory, CTS/GTS/VTS/STS execution, durable job status, reports, firmware burn, USB/IP, VPN. Self-contained: after `gms-agent install` the Controller URL, TLS CA and Agent Service Token load from the gms-agent profile (TOML), so no manual environment setup is needed; explicit environment variables are supported only as overrides. Authenticates via GMS_AUTH_TOKEN_FILE (Agent Service Token, 0600 file) so no platform password ever flows through the model; adds read-only device shell (gms_rt_shell), typed logcat capture (gms_rt_logcat), one-shot approved device shell (gms_rt_shell_exec with server-side approval tokens), admin step-up elevation (gms_rt_auth_elevate) and typed firmware burn (gms_rt_burn_firmware, approval-token gated); jobs output is rendered one line per job.",
   "keywords": [
     "gms",
     "cts",
@@ -30,17 +30,17 @@
   "requiresEnv": [
     {
       "name": "GMS_REMOTE_TEST_SERVER",
-      "description": "Base URL of the GMS Remote Test Controller, e.g. https://CONTROLLER:5001",
-      "required": true
+      "description": "Controller URL override, e.g. https://CONTROLLER:5001. Normally loaded from the gms-agent profile written by `gms-agent install`; only set this to override that profile.",
+      "required": false
     },
     {
       "name": "GMS_AUTH_TOKEN_FILE",
-      "description": "Path to a 0600 Agent Service Token file (enroll once with gms-rt-agent-enroll); replaces password login for agents",
+      "description": "Path to a 0600 Agent Service Token file. Normally loaded from the gms-agent profile (written by `gms-agent install` + `gms-agent enroll`); only set this to override that profile.",
       "required": false
     },
     {
       "name": "GMS_CURL_CA_CERT",
-      "description": "Path to a trusted CA bundle for the Controller's TLS certificate; set GMS_CURL_INSECURE=1 only for controlled self-signed deployments",
+      "description": "Path to a trusted CA bundle for the Controller's TLS certificate. Normally loaded from the gms-agent profile; set GMS_CURL_INSECURE=1 only for controlled self-signed deployments.",
       "required": false
     }
   ]

@@ -51,24 +51,16 @@ class ReleasePackagingTests(unittest.TestCase):
             "--exclude '.certs/'",
             "--exclude '.gitignore'",
             "--exclude '.env.production'",
-            "--exclude 'configs/env.production'",
-            "--exclude 'configs/certs/'",
-            "--exclude 'configs/runtime.json'",
-            "--exclude 'configs/user_tools_data.json'",
-            "--exclude 'configs/redmine_user_map.json'",
+            "--exclude '/1.txt'",
+            "--exclude '/2.txt'",
+            "--exclude '/3.txt'",
             "--exclude 'data/'",
             "--exclude '/*.png'",
             "--exclude '*.map'",
             "--exclude '/dist/'",
             "--exclude '/tools/gms-worker-native/target/'",
-            "--exclude 'configs/config_runtime.json'",
-            "--exclude 'docs/android-cli-ui-control-integration.md'",
-            "--exclude 'docs/build-server-integration-assessment.md'",
-            "--exclude 'docs/multi-host-cluster-implementation-plan.md'",
-            "--exclude 'docs/refactor-parity-audit.md'",
-            "--exclude 'tools/GMS-Host-Tools/gts-rockchip.json'",
-            "--exclude 'tools/GMS-Host-Tools/jdk-11/'",
-            "--exclude 'tools/GMS-Host-Tools/platform-tools-gms-linux.zip'",
+            "--exclude '/tools/GMS-Host-Tools/jdk-11/'",
+            "--exclude '/tools/GMS-Host-Tools/platform-tools-gms-linux.zip'",
             "Environment=GMS_ENV=production",
             'bootstrap_token = values.get("GMS_BOOTSTRAP_TOKEN", "").strip()',
             'bootstrap_token = secrets.token_urlsafe(48)',
@@ -78,29 +70,20 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertIn(expected, source)
 
         self.assertEqual(
-            source.count("--exclude 'tools/GMS-Host-Tools/jdk-11/'"), 2
+            source.count("--exclude '/tools/GMS-Host-Tools/jdk-11/'"), 2
         )
         self.assertEqual(
             source.count(
-                "--exclude 'tools/GMS-Host-Tools/platform-tools-gms-linux.zip'"
+                "--exclude '/tools/GMS-Host-Tools/platform-tools-gms-linux.zip'"
             ),
             2,
         )
 
-        for internal_document in (
-            "docs/android-cli-ui-control-integration.md",
-            "docs/build-server-integration-assessment.md",
-            "docs/code-audit-2026-07.md",
-            "docs/code-audit-2026-08-12.md",
-            "docs/multi-host-cluster-implementation-plan.md",
-            "docs/product-integration-cluster-audit-2026-07-15.md",
-            "docs/product-release-checklist-2026-07-15.md",
-            "docs/refactor-baseline.md",
-            "docs/refactor-parity-audit.md",
-            "docs/refactor-verification.md",
-            "docs/wiki-knowledge-base-plan.md",
-        ):
-            self.assertEqual(source.count(f"--exclude '{internal_document}'"), 2)
+        # The release boundary is the configs allowlist (CONFIG_RSYNC_FILTERS)
+        # plus the generic excludes above; historical per-file docs excludes
+        # were removed once the files themselves no longer exist. The
+        # verifier's DENIED_NAMES still catch scratch files (1/2/3.txt) if a
+        # future regression reintroduces them.
 
         # EnvironmentFile was removed: the runtime environment JSON is loaded in-process
         # by bootstrap.env_loader, so systemd no longer needs it.
@@ -321,11 +304,10 @@ class ReleasePackagingTests(unittest.TestCase):
     def test_release_verifier_rejects_development_and_internal_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "docs").mkdir()
             (root / "web").mkdir()
             (root / ".gitignore").write_text("data/\n", encoding="utf-8")
-            (root / "docs/code-audit-2026-08-12.md").write_text(
-                "internal release policy",
+            (root / "2.txt").write_text(
+                "scratch review notes must never ship",
                 encoding="utf-8",
             )
             (root / "web/app.js.map").write_text("{}", encoding="utf-8")
@@ -338,7 +320,7 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertTrue(any(".gitignore" in item for item in findings))
         self.assertTrue(any("jdk-11" in item for item in findings))
         self.assertTrue(any("platform-tools-gms-linux.zip" in item for item in findings))
-        self.assertTrue(any("internal document" in item for item in findings))
+        self.assertTrue(any("2.txt" in item for item in findings))
         self.assertTrue(any("source map" in item for item in findings))
 
 

@@ -1,6 +1,6 @@
 """Evidence fetch engine: ``EvidenceFetcher`` for issue/attachment download.
 
-Split from ``evidence.py`` (2026-09-08 plan §7) to keep both modules under the
+Split from ``evidence.py`` to keep both modules under the
 600-line review limit. All shared limits, errors, credentials helpers and the
 owner evidence store stay in ``evidence.py``; this module accesses them via
 ``evidence.`` attributes where tests rely on runtime patching.
@@ -70,11 +70,31 @@ class EvidenceFetcher:
         credentials = _evidence.load_owner_credentials(self.owner_id)
         base_url = _evidence.owner_base_url(self.owner_id)
         if not base_url:
-            self._fail(snapshot_id, issue_id, "redmine.base_url 未配置")
-            raise EvidenceError("Redmine 未配置", status_code=409)
+            self._fail(
+                snapshot_id,
+                issue_id,
+                "redmine.base_url 未配置；请在 Web UI『设置』页配置 Redmine 地址后再抓取证据",
+            )
+            raise EvidenceError(
+                "Redmine base_url 未配置；请在 Web UI『设置』页配置 Redmine 地址",
+                status_code=409,
+            )
         if not credentials.headers():
-            self._fail(snapshot_id, issue_id, "owner 未配置 Redmine 凭据")
-            raise EvidenceAuthError("Redmine 凭据未配置")
+            # 2026-09-11 反馈：错误必须自带修复路径。agent 与 enroll
+            # 账号共享 owner 存储，人在 Web UI 为该账号配置即可解除阻断。
+            self._fail(
+                snapshot_id,
+                issue_id,
+                "owner 账号未配置 Redmine 凭据；请由 enroll 该 agent 的账号在 Web UI『设置』页"
+                "配置用户名/密码或 API Key（agent 与该账号共享 owner 存储），"
+                "或由该账号调用 POST /api/redmine-agent/config/credentials；"
+                "配置后可用 gms-rt-redmine-credentials-status 验证",
+            )
+            raise EvidenceAuthError(
+                "owner 账号未配置 Redmine 凭据；请由 enroll 该 agent 的账号在 Web UI『设置』页"
+                "配置凭据（或调用 POST /api/redmine-agent/config/credentials），"
+                "再用 gms-rt-redmine-credentials-status 验证"
+            )
 
         self.store.update_snapshot(snapshot_id, status="fetching")
         errors: list[dict[str, str]] = []
@@ -226,7 +246,7 @@ class EvidenceFetcher:
             ) as response:
                 return await self._read_issue_response(response)
         except aiohttp.ClientError as exc:
-            # 连接失败/超时/断流必须进入 failed 终态（计划 §7：issue 本体
+            # 连接失败/超时/断流必须进入 failed 终态（issue 本体
             # 失败必须显式报告），不能让快照永久停在 fetching。
             raise EvidenceError(
                 f"Redmine 网络请求失败: {type(exc).__name__}", status_code=502
@@ -355,6 +375,13 @@ class EvidenceFetcher:
                     self._atomic_write(self.store.resolve_internal(derived_rel), derived)
                 except (UnicodeDecodeError, OSError) as exc:
                     derived_error = f"派生 UTF-8 文本失败: {type(exc).__name__}"
+        elif kind == "archive" and data[:2] == b"PK":
+            # 2026-09-11 反馈（反馈 2026-09-11）：zip 内文本成员（logcat /
+            # test_result.xml 等）派生成可检索文本，命中可以
+            # attachment:<file>.zip!/<member>:L<line> 引用。
+            derived_rel, derived_error = self._extract_zip_derived_text(
+                artifact_id, snapshot_rel, data
+            )
 
         size_note = ""
         if declared and declared != len(data):
@@ -375,6 +402,75 @@ class EvidenceFetcher:
                 "Redmine attachment %s 大小不一致: %s", attachment.get("id"), size_note
             )
         return len(data)
+
+    # -------------------------------------------------- zip derived text (2026-09-11 反馈)
+
+    def _extract_zip_derived_text(
+        self, artifact_id: str, snapshot_rel: str, data: bytes
+    ) -> tuple[str, str]:
+        """Extract text members of a zip into one derived text file.
+
+        Returns ``(derived_rel, error_note)``. Only text-suffixed members
+        within the size/member budgets are included; the markers let search
+        cite ``attachment:<file>.zip!/<member>:L<line>``. Never writes member
+        files, so zip-slip and decompression-bomb risk is bounded by the
+        per-member and total byte caps checked before reading.
+        """
+
+        import io
+        import zipfile
+
+        from .evidence import (
+            TEXT_KIND_EXTENSIONS,
+            ZIP_MEMBER_DERIVED_TOTAL_MAX_BYTES,
+            ZIP_MEMBER_TEXT_MAX_BYTES,
+            ZIP_MEMBER_TEXT_MAX_MEMBERS,
+            zip_member_marker,
+        )
+
+        chunks: list[str] = []
+        total = 0
+        included = 0
+        skipped_large = 0
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                for info in archive.infolist():
+                    if info.is_dir():
+                        continue
+                    if included >= ZIP_MEMBER_TEXT_MAX_MEMBERS:
+                        break
+                    suffix = Path(info.filename).suffix.lower()
+                    if suffix not in TEXT_KIND_EXTENSIONS:
+                        continue
+                    if info.file_size > ZIP_MEMBER_TEXT_MAX_BYTES:
+                        skipped_large += 1
+                        continue
+                    if total + info.file_size > ZIP_MEMBER_DERIVED_TOTAL_MAX_BYTES:
+                        break
+                    try:
+                        raw = archive.read(info)
+                    except (zipfile.BadZipFile, OSError, RuntimeError):
+                        continue
+                    encoding = _detect_text_encoding(raw) or "utf-8"
+                    text = raw.decode(encoding, errors="replace")
+                    block = f"{zip_member_marker(info.filename)}\n{text}"
+                    chunks.append(block)
+                    total += len(block.encode("utf-8"))
+                    included += 1
+        except (zipfile.BadZipFile, OSError) as exc:
+            return "", f"zip 解包失败: {type(exc).__name__}"
+        if not included:
+            return "", ""
+        derived_rel = f"{snapshot_rel}/derived/{artifact_id}.txt"
+        payload = ("\n".join(chunks) + "\n").encode("utf-8")
+        try:
+            self._atomic_write(self.store.resolve_internal(derived_rel), payload)
+        except OSError as exc:
+            return "", f"派生 zip 文本失败: {type(exc).__name__}"
+        note = ""
+        if skipped_large:
+            note = f"跳过 {skipped_large} 个超阈值 zip 成员"
+        return derived_rel, note
 
     # ------------------------------------------------------------- normalize
 

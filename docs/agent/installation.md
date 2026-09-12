@@ -21,8 +21,17 @@
 - **5 分钟 TTL**：过期作废（服务端 `ENROLLMENT_TTL_MINUTES = 5`）。
 - 配套属性在铸造时确定，兑换方无法自选：scopes（权限范围，
   取自平台 `AGENT_SCOPES` 词表，如 `devices.read`、`tests.execute`、
-  `jobs.read` 等）、`allowed_workers` / `allowed_devices`（worker/设备 ACL，
-  `*` 或逗号分隔列表）、`expires_days`（token 有效期，默认 90 天）。
+  `jobs.read` 等）。Web UI 铸造页的默认勾选集合（2026-09-11 反馈后）
+  为：`devices.read`、`devices.lease`、`devices.use_leased`、
+  `tests.execute`、`tests.cancel`、`jobs.read`、`reports.read`，以及
+  只读证据/分析链 `redmine.read`、`artifacts.read_own`、
+  `apk.analyze_own`、`sdk.read`——即默认能跑通 Skill 文档化的
+  Redmine evidence 工作流；`devices.inventory` 等写操作类仍需手动
+  勾选。任务开始前可用 `gms-rt-auth-scopes-check` 自检缺口、
+  `gms-rt-redmine-credentials-status` 自检凭据。另包括
+  `allowed_workers` / `allowed_devices`（worker/设备 ACL，
+  `*` 或逗号分隔列表）、`expires_days`（token 有效期，默认 90 天）、
+  `ttl_minutes`（配对码 TTL，默认 5 分钟，可 1–30 定制）。
 - 兑换端点 `POST /api/auth/agent-enroll` 不要求会话，但按来源 IP 做持久化
   限速，防止对配对码的匿名爆破。
 
@@ -50,6 +59,14 @@ curl -fsSL --cacert "$GMS_INSTALL_CA_CERT" \
 - 受控实验环境若使用自签名证书，可按部署策略使用 installer 支持的
   insecure bootstrap（`GMS_INSTALL_INSECURE=1`）；不要在公网或不可信网络中
   关闭 TLS 校验。
+- **运行时同样不得用 insecure（2026-09-11 反馈 S-2）**：bootstrap 用
+  `GMS_INSTALL_INSECURE=1` 只是一次性引导手段，安装完成后必须让 profile
+  信任 Controller CA——把 CA 证书下发到 Agent 主机（如
+  `/etc/gms/controller-ca.pem`），重新 enroll/写 profile 时带上
+  `ca_cert` 字段（见 [profiles.md](profiles.md)），或运行时导出
+  `GMS_CURL_CA_CERT=/etc/gms/controller-ca.pem` 并移除
+  `GMS_CURL_INSECURE=1`。`gms-rt-system-selfcheck` 会对
+  `tls_insecure: true` 给出修复提示。
 - bootstrap 下载走 Controller Agent Package Registry
   （`/api/agent/packages/gms-remote-test/manifest` + universal 包）：
   同源 URL、拒绝重定向、校验 SHA-256 与 Ed25519 manifest 签名（已固定
@@ -65,6 +82,12 @@ curl -fsSL --cacert "$GMS_INSTALL_CA_CERT" \
 gms-agent install --client auto --server https://CONTROLLER:5001
 gms-agent enroll <CODE>
 ```
+
+默认 profile 名包含 Controller 身份（`<client>-<host>-<sha256(server)[:8]>`），
+同一台主机为多个 Controller 安装时各占一个 profile、互不覆盖；需要可读
+名字时加 `--profile gms-prod`。多 Controller 主机上 `enroll` / `update`
+必须用 `--profile`（或 `--server`）消歧，否则 fail closed（见
+[profiles.md](profiles.md) 的 Controller 解析契约）。
 
 ## 第 3 步：`gms-agent doctor --json` 验收
 

@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.18.0"
+GMS_RT_VERSION="0.20.0"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -500,6 +500,17 @@ gms-rt-auth-status() {
     local response
     response=$(api_call "/auth/status") || return $?
     format_elevated_until "$response" | jq '.'
+    # 本地凭据形态对照（反馈 2026-09-11 P1-3）：token 文件 mtime 让
+    # 「MCP 缓存的旧 token vs 新落盘文件」的不一致 10 秒内可见。
+    if [ "$GMS_RT_OUTPUT" != "json" ] && [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
+        local mtime
+        mtime=$(stat -c '%y' "$GMS_AUTH_TOKEN_FILE" 2>/dev/null | cut -d'.' -f1)
+        if [ -n "$mtime" ]; then
+            info "local token file: $GMS_AUTH_TOKEN_FILE (modified $mtime)"
+        else
+            warning "local token file: $GMS_AUTH_TOKEN_FILE (not readable)"
+        fi
+    fi
 }
 
 gms-rt-auth-login() {
@@ -648,15 +659,83 @@ gms-rt-auth-elevation-reset() {
 # Agent Service Token commands (2026-09-08 audit §二/§三/§五)
 # ==============================================================================
 
+# Resolve the token output path for enrollment from a profile TOML's
+# `token_file = "..."` line; echoes empty when the profile has no TOML.
+_gms_enroll_profile_token_file() {
+    local profile="$1"
+    local toml="${XDG_CONFIG_HOME:-${HOME}/.config}/gms-agent/profiles/${profile}.toml"
+    [ -r "$toml" ] || return 0
+    sed -n 's/^[[:space:]]*token_file[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$toml" | head -n 1
+}
+
+# Pick the enrollment token destination, profile-aware (feedback
+# 2026-09-11 P1-1). Order: --out > --profile > explicitly selected
+# GMS_RT_PROFILE with a TOML > the single registered profile > legacy
+# default path. Multiple profiles without an explicit choice is a usage
+# error (fail-closed, mirrors the launcher's profile selection rule).
+_gms_enroll_resolve_out_file() {
+    local out_flag="$1" profile_flag="$2"
+    if [ -n "$out_flag" ]; then
+        printf '%s\n' "$out_flag"
+        return 0
+    fi
+    local profiles_root="${XDG_CONFIG_HOME:-${HOME}/.config}/gms-agent/profiles"
+    local candidate=""
+    if [ -n "$profile_flag" ]; then
+        candidate=$(_gms_enroll_profile_token_file "$profile_flag")
+        : "${candidate:=${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${profile_flag}.token}"
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+    if [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
+        # 调用方显式导出的落点（如 MCP 注册 env）：尊重之。
+        printf '%s\n' "$GMS_AUTH_TOKEN_FILE"
+        return 0
+    fi
+    if [ -n "${GMS_RT_PROFILE:-}" ] && [ "${GMS_RT_PROFILE}" != "default" ] \
+        && [ -r "${profiles_root}/${GMS_RT_PROFILE}.toml" ]; then
+        # 显式导出的 GMS_RT_PROFILE 且确有对应 profile：视为显式选择。
+        candidate=$(_gms_enroll_profile_token_file "$GMS_RT_PROFILE")
+        : "${candidate:=${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.token}"
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+    local registered=()
+    if [ -d "$profiles_root" ]; then
+        while IFS= read -r toml_path; do
+            registered+=("$(basename "$toml_path" .toml)")
+        done < <(ls "$profiles_root"/*.toml 2>/dev/null | LC_ALL=C sort)
+    fi
+    case "${#registered[@]}" in
+        1)
+            candidate=$(_gms_enroll_profile_token_file "${registered[0]}")
+            : "${candidate:=${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${registered[0]}.token}"
+            printf '%s\n' "$candidate"
+            ;;
+        0)
+            printf '%s\n' "${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.token"
+            ;;
+        *)
+            error "Multiple agent profiles registered on this host:"
+            local name
+            for name in "${registered[@]}"; do
+                error "  - $name"
+            done
+            error "Re-run with --profile <name> (or --out FILE) so the token lands where the caller's MCP registration expects it."
+            return "$GMS_RT_EXIT_USAGE"
+            ;;
+    esac
+}
+
 # Exchange a one-shot enrollment code for an Agent Service Token and store it
 # as a 0600 file. Run once per build server; afterwards every CLI/MCP call in
 # that profile authenticates via GMS_AUTH_TOKEN_FILE with no platform
 # password anywhere on the agent path.
 gms-rt-agent-enroll() {
     local code="${1:-}"
-    local out_file="${GMS_AUTH_TOKEN_FILE:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.token}"
+    local out_flag="" profile_flag=""
     [ -n "$code" ] || {
-        error "Usage: gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE]"
+        error "Usage: gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE] [--profile NAME]"
         return "$GMS_RT_EXIT_USAGE"
     }
     shift
@@ -664,16 +743,30 @@ gms-rt-agent-enroll() {
         case "$1" in
             --out)
                 shift
-                [ "$#" -gt 0 ] && { out_file="$1"; } || {
+                [ "$#" -gt 0 ] && { out_flag="$1"; } || {
                     error "--out requires a path"
                     return "$GMS_RT_EXIT_USAGE"
                 }
                 ;;
-            --out=*) out_file="${1#*=}" ;;
+            --out=*) out_flag="${1#*=}" ;;
+            --profile)
+                shift
+                [ "$#" -gt 0 ] && { profile_flag="$1"; } || {
+                    error "--profile requires a profile name"
+                    return "$GMS_RT_EXIT_USAGE"
+                }
+                ;;
+            --profile=*) profile_flag="${1#*=}" ;;
             *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
         esac
         shift
     done
+    local out_file
+    out_file=$(_gms_enroll_resolve_out_file "$out_flag" "$profile_flag") || return "$?"
+    [ -n "$out_file" ] || {
+        error "Failed to resolve the enrollment token output path"
+        return "$GMS_RT_EXIT_USAGE"
+    }
     check_jq || return 1
     _refresh_tls_args
     local data response
@@ -689,7 +782,26 @@ gms-rt-agent-enroll() {
     body=$(_body_from_http_response "$response")
     http_status=$(_status_from_http_response "$response")
     if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
-        error "Enrollment failed: $(extract_api_error "$body")"
+        # 三态可区分（反馈 2026-09-11 P1-2）：服务端 detail.reason 决定
+        # 人话提示，避免"已用/已过期/无效"混成一团。
+        local reason detail_time
+        reason=$(echo "$body" | jq -r '.detail.reason // empty')
+        case "$reason" in
+            used)
+                detail_time=$(iso_to_local_time "$(echo "$body" | jq -r '.detail.used_at // empty')")
+                error "Enrollment failed: 配对码已被使用（消耗于 ${detail_time:-未知时间}）。请管理员重新铸造。"
+                ;;
+            expired)
+                detail_time=$(iso_to_local_time "$(echo "$body" | jq -r '.detail.expires_at // empty')")
+                error "Enrollment failed: 配对码已过期（过期于 ${detail_time:-未知时间}；默认 TTL 5 分钟）。请管理员重新铸造。"
+                ;;
+            invalid)
+                error "Enrollment failed: 配对码不存在。请核对管理员提供的配对码。"
+                ;;
+            *)
+                error "Enrollment failed: $(extract_api_error "$body")"
+                ;;
+        esac
         return "$GMS_RT_EXIT_PERMISSION"
     fi
     local token scopes
@@ -702,9 +814,11 @@ gms-rt-agent-enroll() {
     umask 077
     printf '%s\n' "$token" > "$out_file"
     unset token data code response body
+    local used_profile="${profile_flag:-${GMS_RT_PROFILE}}"
     success "Agent token enrolled (0600): $out_file"
-    jq -cn --arg file "$out_file" --arg scopes "${scopes:-}" \
-        '{ok: true, token_file: $file, mode: "0600", scopes: ($scopes | split(",") | map(select(length > 0)))}'
+    [ -n "$profile_flag" ] && warning "Token written for profile '$profile_flag'; MCP/CLI in other profiles keep their own token files."
+    jq -cn --arg file "$out_file" --arg scopes "${scopes:-}" --arg profile "$used_profile" \
+        '{ok: true, token_file: $file, mode: "0600", profile: $profile, scopes: ($scopes | split(",") | map(select(length > 0)))}'
 }
 
 # Show which credential mode the CLI currently uses (token file or cookie).
@@ -722,6 +836,68 @@ gms-rt-auth-credential-mode() {
         jq -cn --arg jar "$GMS_AUTH_COOKIE_JAR" --arg profile "$GMS_RT_PROFILE" \
             '{mode: "session_cookie", cookie_jar: $jar, profile: $profile}'
     fi
+}
+
+# Pre-flight scope check (feedback 2026-09-11 P0-1): verify the current
+# credential carries the scopes a documented workflow needs BEFORE the first
+# 403. Default requirement = the Redmine evidence analysis chain; override
+# with --requires s1,s2. Exit code is authoritative for automation.
+gms-rt-auth-scopes-check() {
+    local requires=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --requires)
+                shift
+                [ $# -gt 0 ] || { error "--requires requires a comma-separated scope list"; return "$GMS_RT_EXIT_USAGE"; }
+                requires="$1"
+                ;;
+            --requires=*) requires="${1#*=}" ;;
+            -h|--help)
+                echo "Usage: gms-rt-auth-scopes-check [--requires s1,s2]"
+                echo "  Default requirement: redmine.read,artifacts.read_own,apk.analyze_own,sdk.read"
+                echo "  Exits with the permission exit code when any required scope is missing."
+                return 0
+                ;;
+            *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
+        esac
+        shift
+    done
+    : "${requires:=redmine.read,artifacts.read_own,apk.analyze_own,sdk.read}"
+    check_jq || return 1
+    local response call_status
+    response=$(api_call "/auth/agent-scopes" "GET")
+    call_status=$?
+    if [ "$call_status" -ne 0 ]; then
+        error "Scope check failed: $(extract_api_error "$response")"
+        return "$call_status"
+    fi
+    local result
+    result=$(echo "$response" | jq -c --arg requires "$requires" '
+        (.granted // []) as $granted
+        | ($requires | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0)) | unique) as $required
+        | {required: $required, granted: ($granted | unique), missing: ($required - ($granted | unique))}') || {
+        error "Failed to parse agent-scopes response"
+        return "$GMS_RT_EXIT_OPERATION"
+    }
+    local missing_count
+    missing_count=$(echo "$result" | jq '.missing | length')
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        echo "$result" | jq --argjson ok "$( [ "$missing_count" -eq 0 ] && echo true || echo false )" '. + {ok: $ok}'
+    else
+        echo "required scopes: $(echo "$result" | jq -r '.required | join(", ")')"
+        echo "granted scopes:  $(echo "$result" | jq -r '.granted | join(", ")')"
+        if [ "$(echo "$result" | jq '.granted | length')" -eq 0 ]; then
+            warning "No agent-token scopes visible (human or anonymous session; scope checks apply to agent tokens)"
+        fi
+        if [ "$missing_count" -eq 0 ]; then
+            success "All required scopes granted"
+        else
+            error "Missing scopes: $(echo "$result" | jq -r '.missing | join(", ")')"
+            error "Ask an admin to mint a new enrollment with these scopes: gms-rt-agent-enroll-code --name <NAME> --scopes <list>"
+        fi
+    fi
+    [ "$missing_count" -eq 0 ] || return "$GMS_RT_EXIT_PERMISSION"
+    return 0
 }
 
 # Create a one-shot approval token (must run under a human session).
@@ -798,7 +974,7 @@ gms-rt-agent-tokens() {
 # this on the Controller host; the build server then runs
 # gms-rt-agent-enroll <CODE> once to exchange it for a Service Token.
 gms-rt-agent-enroll-code() {
-    local name="" scopes="" workers="*" devices="*" expires_days="90"
+    local name="" scopes="" workers="*" devices="*" expires_days="90" ttl_minutes=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --name) shift; name="${1:-}" ;;
@@ -811,12 +987,15 @@ gms-rt-agent-enroll-code() {
             --devices=*) devices="${1#*=}" ;;
             --expires-days) shift; expires_days="${1:-}" ;;
             --expires-days=*) expires_days="${1#*=}" ;;
+            # 配对码 TTL（1–30 分钟，默认 5）：手工转录/交接慢的场景可放宽。
+            --ttl-minutes) shift; ttl_minutes="${1:-}" ;;
+            --ttl-minutes=*) ttl_minutes="${1#*=}" ;;
             *) { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; } ;;
         esac
         shift
     done
     [ -n "$name" ] || {
-        error "Usage: gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N]"
+        error "Usage: gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N] [--ttl-minutes N]"
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return 1
@@ -824,8 +1003,10 @@ gms-rt-agent-enroll-code() {
     local data response
     data=$(jq -cn --arg name "$name" --arg scopes "$scopes" \
         --arg workers "$workers" --arg devices "$devices" --argjson days "$expires_days" \
+        --argjson ttl "${ttl_minutes:-5}" \
         '{name: $name, scopes: ($scopes | split(",") | map(select(length > 0))),
-          allowed_workers: $workers, allowed_devices: $devices, expires_days: $days}')
+          allowed_workers: $workers, allowed_devices: $devices, expires_days: $days,
+          ttl_minutes: $ttl}')
     response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
         "${CURL_AUTH_ARGS[@]}" -sS -X POST "${API_BASE}/auth/agent-enrollment-codes" \
         -H "Content-Type: application/json" -d "$data" \
@@ -839,6 +1020,12 @@ gms-rt-agent-enroll-code() {
     fi
     # The one-shot code is secret material: print once, never log it twice.
     echo "$body" | jq '.enrollment'
+    # 人话补充（反馈 2026-09-11 P1-2）：绝对过期时刻让"还剩多久"可见。
+    local expires_iso
+    expires_iso=$(echo "$body" | jq -r '.enrollment.expires_at // empty')
+    [ -n "$expires_iso" ] && [ "$GMS_RT_OUTPUT" != "json" ] && {
+        info "配对码有效至 $(iso_to_local_time "$expires_iso")（TTL $(echo "$body" | jq -r '.enrollment.ttl_minutes // 5') 分钟，一次性使用）"
+    }
 }
 
 # Revoke an Agent Service Token by id (admin + elevation required).
@@ -954,10 +1141,20 @@ gms-rt-cluster-resolve() {
     esac
 }
 
-# Extract error message from API response
+# Extract error message from API response.
+# FastAPI HTTPException detail can be an object (e.g. scope errors carry
+# {message, scope_required}); surface the server-side detail instead of
+# collapsing it to "Unknown error" (feedback 2026-09-11 P0-2).
 extract_api_error() {
     local response="$1"
-    echo "$response" | jq -r '.detail // .error // .message // "Unknown error"' 2>/dev/null || echo "Unknown error"
+    echo "$response" | jq -r '
+        if (.detail | type) == "object" then
+            (.detail.message // .detail.msg // "Request failed")
+            + (if .detail.scope_required then " (missing scope: \(.detail.scope_required); check gms-rt-auth-scopes-check)" else "" end)
+            + (if .detail.agent_forbidden then " (agent tokens cannot call this endpoint)" else "" end)
+        else
+            (.detail // .error // .message // "Unknown error")
+        end' 2>/dev/null || echo "Unknown error"
 }
 
 # Render an ISO-8601 UTC timestamp in the local timezone for human reading;
@@ -2647,14 +2844,16 @@ gms-rt-redmine-issue-fetch() {
     local download="all"
     local refresh=1
     local do_wait=0
+    local dry_run=0
     local max_wait=300
     local argument
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none|analyzable|all] [--refresh|--no-refresh] [--wait] [--max-wait SECONDS]"
+                echo "Usage: gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none|analyzable|all] [--refresh|--no-refresh] [--wait] [--max-wait SECONDS] [--dry-run]"
                 echo "  Create/refresh a full evidence snapshot (raw JSON, journals, attachments)."
                 echo "  --refresh is the default; --no-refresh may reuse a recent ready snapshot (response carries cache_hit)."
+                echo "  --dry-run only validates preconditions (base_url/credentials) without creating a snapshot."
                 return 0
                 ;;
             --download)
@@ -2668,6 +2867,7 @@ gms-rt-redmine-issue-fetch() {
             --no-refresh) refresh=0 ;;
             --refresh) refresh=1 ;;
             --wait) do_wait=1 ;;
+            --dry-run) dry_run=1 ;;
             --max-wait)
                 shift
                 [ $# -gt 0 ] || { error "--max-wait requires a value"; return "$GMS_RT_EXIT_USAGE"; }
@@ -2683,11 +2883,42 @@ gms-rt-redmine-issue-fetch() {
     [ -z "$issue_ref" ] && { error "Issue ID or URL required. Usage: gms-rt-redmine-issue-fetch <issue_id_or_url> [options]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
-    local payload
+    if [ "$dry_run" = "1" ]; then
+        # 2026-09-11 反馈：只校验前置条件，不建快照。凭据端点 human-only，
+        # agent 用只读的 credentials-status 判断配置状态即可。
+        local pre
+        pre=$(api_call "/redmine-agent/config/credentials" "GET")
+        local pre_status=$?
+        if [ "$pre_status" -ne 0 ]; then
+            error "Precondition check failed: $(extract_api_error "$pre")"
+            return "$pre_status"
+        fi
+        local configured
+        configured=$(echo "$pre" | jq -r '.data.configured // false')
+        if [ "$configured" != "true" ]; then
+            error "Redmine credentials not configured for this owner. Ask the enrolling account to set them in the Web UI settings page, then verify with gms-rt-redmine-credentials-status."
+            return "$GMS_RT_EXIT_PERMISSION"
+        fi
+        if [ "$GMS_RT_OUTPUT" = "json" ]; then
+            jq -cn '{success: true, dry_run: true, ok: true, message: "preconditions met (base_url + credentials configured)"}'
+        else
+            success "Preconditions met: Redmine base_url and credentials are configured."
+        fi
+        return 0
+    fi
+
+    local payload response snapshot_id
     payload=$(jq -cn --argjson refresh "$refresh" --arg download "$download" \
         '{refresh: $refresh, download: $download}')
-    local snapshot_id
-    snapshot_id=$(api_call "/redmine-agent/issues/$(_urlencode "$issue_ref")/evidence" "POST" "$payload" | jq -r '.data.snapshot_id // empty')
+    response=$(api_call "/redmine-agent/issues/$(_urlencode "$issue_ref")/evidence" "POST" "$payload")
+    local call_status=$?
+    if [ "$call_status" -ne 0 ]; then
+        # api_call 已把服务器错误 body 打到 stdout；这里给出人话根因
+        #（scope/凭据/issue 不存在），不再让错误详情被 jq 过滤吞掉。
+        error "Evidence snapshot creation failed: $(extract_api_error "$response")"
+        return "$call_status"
+    fi
+    snapshot_id=$(echo "$response" | jq -r '.data.snapshot_id // empty')
     if [ -z "$snapshot_id" ]; then
         error "Failed to create evidence snapshot for '$issue_ref'"
         return "$GMS_RT_EXIT_OPERATION"
@@ -2720,8 +2951,44 @@ gms-rt-redmine-issue-fetch() {
 
 gms-rt-redmine-issue-show() {
     local snapshot_id="$1"
-    [ -z "$snapshot_id" ] && { error "Snapshot ID required. Usage: gms-rt-redmine-issue-show <snapshot_id>"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$snapshot_id" ] && { error "Snapshot ID or issue ID required. Usage: gms-rt-redmine-issue-show <snapshot_id | issue_id> (--issue forces issue-id interpretation)"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
+    local force_issue=0
+    if [ "$2" = "--issue" ] || [ "$1" = "--issue" ]; then
+        # 显式声明第一个参数是 issue_id（2026-09-11 反馈：参数语义混淆）。
+        if [ "$1" = "--issue" ]; then
+            snapshot_id="$2"
+        fi
+        force_issue=1
+    fi
+    # 2026-09-11 反馈：第一个参数历史上必须是 snapshot_id，传 issue_id
+    # 会得到费解的 "Snapshot not readable"。约定：ev_ 前缀或含连字符视为
+    # snapshot_id；纯数字视为 issue_id 并解析最新快照；--issue/--snapshot
+    # 可显式消歧。
+    case "$snapshot_id" in
+        --snapshot)
+            snapshot_id="$2"
+            ;;
+        --issue)
+            snapshot_id="$2"
+            force_issue=1
+            ;;
+    esac
+    if [ "$force_issue" = "1" ] || [[ "$snapshot_id" =~ ^[0-9]+$ ]]; then
+        local latest_resp resolved status_line
+        latest_resp=$(api_call "/redmine-agent/issues/$(_urlencode "$snapshot_id")/evidence/latest" "GET")
+        local latest_status=$?
+        if [ "$latest_status" -ne 0 ]; then
+            error "$(extract_api_error "$latest_resp")"
+            return "$latest_status"
+        fi
+        status_line=$(echo "$latest_resp" | jq -r '.data.status // ""')
+        if [ "$status_line" != "ready" ]; then
+            warning "latest snapshot for issue $snapshot_id is '$status_line' (not ready); showing it anyway"
+        fi
+        snapshot_id=$(echo "$latest_resp" | jq -r '.data.snapshot_id // empty')
+        [ -z "$snapshot_id" ] && { error "Failed to resolve latest snapshot"; return "$GMS_RT_EXIT_OPERATION"; }
+    fi
     local status_resp description_resp
     status_resp=$(api_call "/redmine-agent/evidence/$snapshot_id" "GET")
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
@@ -2733,11 +3000,16 @@ gms-rt-redmine-issue-show() {
     fi
     if echo "$status_resp" | jq -e '.success' > /dev/null; then
         echo "$status_resp" | jq -r '.data | "snapshot: \(.snapshot_id)\nissue: \(.issue_id)\nstatus: \(.status) complete=\(.complete)\njournals: \(.journal_count)  attachments: \(.attachment_count)/\(.downloaded_count) downloaded\nfetched_at: \(.fetched_at)  source_updated: \(.source_updated_on)\nsha256: \(.content_sha256)"'
+        # failed/partial 快照必须把服务端 errors[] 透传出来（反馈
+        # 2026-09-11 P0-2：MCP 可见而 CLI 不可见导致排障绕路）。
+        if echo "$status_resp" | jq -e '.data.status == "failed" or .data.status == "partial" or ((.data.errors // []) | length > 0)' >/dev/null; then
+            echo "errors:"
+            echo "$status_resp" | jq -r '.data.errors[]? | "  [\(.stage // "issue")] \(.message // .)"'
+        fi
         description_resp=$(api_call "/redmine-agent/evidence/$snapshot_id/issue" "GET")
         echo "$description_resp" | jq -r '.data | "\nsubject: \(.subject)\nstatus: \(.status)  tracker: \(.tracker)\n\n--- description (first 2000 chars, use gms-rt-artifact-read for more) ---\n\(.description.text[:2000])"'
     else
-        error "Snapshot not readable"
-        echo "$status_resp" | jq '.'
+        error "Snapshot not readable: $(extract_api_error "$status_resp")"
         return "$GMS_RT_EXIT_OPERATION"
     fi
 }
@@ -2792,22 +3064,39 @@ gms-rt-redmine-attachment-download() {
     [ -z "$artifact_id" ] && { error "Artifact ID required. Usage: gms-rt-redmine-attachment-download <artifact_id> [output_path]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
     [ -n "$output" ] || output="gms-evidence-$artifact_id.bin"
-    local curl_status status_file
+    local curl_status status_file tmp_output
     status_file=$(mktemp "${TMPDIR:-/tmp}/gms-rt-dl-status.XXXXXX") || return "$GMS_RT_EXIT_OPERATION"
+    tmp_output=$(mktemp "${TMPDIR:-/tmp}/gms-rt-dl-body.XXXXXX") || { rm -f -- "$status_file"; return "$GMS_RT_EXIT_OPERATION"; }
     _refresh_tls_args
-    _ensure_auth_cookie_jar || { rm -f -- "$status_file"; return "$GMS_RT_EXIT_OPERATION"; }
+    _ensure_auth_cookie_jar || { rm -f -- "$status_file" "$tmp_output"; return "$GMS_RT_EXIT_OPERATION"; }
+    # 先落临时文件：非 200 时响应体是 JSON 错误（如 scope_required），
+    # 不能写进目标输出再整文件删除（反馈 2026-09-11 P0-2 的详情丢失根因）。
     curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
-        -o "$output" -w '%{http_code}' --max-time "$CURL_TIMEOUT" \
+        -o "$tmp_output" -w '%{http_code}' --max-time "$CURL_TIMEOUT" \
         "${API_BASE}/redmine-agent/artifacts/$artifact_id/download" > "$status_file"
     curl_status=$(cat "$status_file" 2>/dev/null)
     rm -f -- "$status_file"
     case "$curl_status" in
         200)
+            mv -f -- "$tmp_output" "$output" || {
+                rm -f -- "$tmp_output"
+                error "Failed to write $output"
+                return "$GMS_RT_EXIT_OPERATION"
+            }
+            ;;
+        000|'')
+            rm -f -- "$tmp_output"
+            error "Download failed (network error)"
+            return "$GMS_RT_EXIT_NETWORK"
             ;;
         *)
-            error "Download failed (HTTP ${curl_status:-network error})"
-            [ -f "$output" ] && rm -f -- "$output"
-            return "$GMS_RT_EXIT_OPERATION"
+            local error_body exit_code
+            error_body=$(cat "$tmp_output" 2>/dev/null || true)
+            rm -f -- "$tmp_output"
+            exit_code=$(_http_exit_code "$curl_status")
+            error "Download failed (HTTP $curl_status): $(extract_api_error "$error_body")"
+            _record_api_exit_code "$exit_code"
+            return "$exit_code"
             ;;
     esac
     local size sha
@@ -2821,6 +3110,41 @@ gms-rt-redmine-attachment-download() {
         success "Saved $output ($size bytes)"
         [ -n "$sha" ] && echo "sha256: $sha"
     fi
+}
+
+# Pre-flight credential check (feedback 2026-09-11 P0-3): reports whether the
+# owner account behind the current credential has Redmine credentials
+# configured. Equivalent to GET /redmine-agent/config/credentials; never
+# returns secret material.
+gms-rt-redmine-credentials-status() {
+    check_jq || return 1
+    local response call_status
+    response=$(api_call "/redmine-agent/config/credentials" "GET")
+    call_status=$?
+    if [ "$call_status" -ne 0 ]; then
+        error "Credentials status check failed: $(extract_api_error "$response")"
+        return "$call_status"
+    fi
+    local configured username api_key_configured
+    configured=$(echo "$response" | jq -r '.data.configured // false')
+    username=$(echo "$response" | jq -r '.data.username // ""')
+    api_key_configured=$(echo "$response" | jq -r '.data.api_key_configured // false')
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        jq -cn --arg configured "$configured" --arg username "$username" \
+            --arg api_key_configured "$api_key_configured" \
+            '{configured: ($configured == "true"), username: $username, api_key_configured: ($api_key_configured == "true")}'
+    else
+        echo "configured: $configured"
+        [ -n "$username" ] && echo "username:  $username"
+        echo "api_key:   $api_key_configured"
+    fi
+    if [ "$configured" != "true" ]; then
+        warning "Owner account has no Redmine credentials; evidence fetch will fail."
+        warning "Ask the enrolling account owner to configure them in the Web UI settings page"
+        warning "(agent shares the owner storage; POST /config/credentials is human-only)."
+        return "$GMS_RT_EXIT_PERMISSION"
+    fi
+    return 0
 }
 
 gms-rt-artifact-read() {
@@ -5096,9 +5420,10 @@ _gms_rt_command_usage() {
         gms-rt-adb-forward-stop) printf '%s' 'gms-rt-adb-forward-stop <source_worker_id> <target_worker_id>' ;;
         gms-rt-auth-login) printf '%s' 'gms-rt-auth-login [username] [--password-stdin]' ;;
         gms-rt-auth-elevate) printf '%s' 'gms-rt-auth-elevate [admin_username] [--password-stdin]' ;;
-        gms-rt-agent-enroll) printf '%s' 'gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE]' ;;
+        gms-rt-auth-scopes-check) printf '%s' 'gms-rt-auth-scopes-check [--requires s1,s2]' ;;
+        gms-rt-agent-enroll) printf '%s' 'gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE] [--profile NAME]' ;;
         gms-rt-agent-tokens) printf '%s' 'gms-rt-agent-tokens' ;;
-        gms-rt-agent-enroll-code) printf '%s' 'gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N]' ;;
+        gms-rt-agent-enroll-code) printf '%s' 'gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N] [--ttl-minutes N]' ;;
         gms-rt-agent-token-revoke) printf '%s' 'gms-rt-agent-token-revoke <TOKEN_ID>' ;;
         gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <gms_rt_tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]' ;;
         gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]' ;;
@@ -5160,10 +5485,11 @@ _gms_rt_command_usage() {
         gms-rt-users-detect) printf '%s' 'gms-rt-users-detect <ip> [username] [password]' ;;
         gms-rt-users-set-username) printf '%s' 'gms-rt-users-set-username [username]' ;;
         gms-rt-redmine-issue-fetch) printf '%s' 'gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none|analyzable|all] [--refresh|--no-refresh] [--wait] [--max-wait SECONDS]' ;;
-        gms-rt-redmine-issue-show) printf '%s' 'gms-rt-redmine-issue-show <snapshot_id>' ;;
+        gms-rt-redmine-issue-show) printf '%s' 'gms-rt-redmine-issue-show <snapshot_id | issue_id> [--issue|--snapshot]' ;;
         gms-rt-redmine-journals) printf '%s' 'gms-rt-redmine-journals <snapshot_id> [--limit N] [--cursor C]' ;;
         gms-rt-redmine-attachments) printf '%s' 'gms-rt-redmine-attachments <snapshot_id>' ;;
         gms-rt-redmine-attachment-download) printf '%s' 'gms-rt-redmine-attachment-download <artifact_id> [output_path]' ;;
+        gms-rt-redmine-credentials-status) printf '%s' 'gms-rt-redmine-credentials-status' ;;
         gms-rt-artifact-read) printf '%s' 'gms-rt-artifact-read <artifact_id> [--offset N] [--limit N]' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'gms-rt-redmine-artifact-image <artifact_id>' ;;
         gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N]' ;;
@@ -5187,6 +5513,7 @@ _gms_rt_command_summary() {
         gms-rt-auth-elevate) printf '%s' 'Activate administrator elevation for the current human session' ;;
         gms-rt-auth-elevation-reset) printf '%s' 'Clear administrator elevation from the current human session' ;;
         gms-rt-auth-credential-mode) printf '%s' 'Show whether this CLI invocation uses an Agent Token file or a session cookie' ;;
+        gms-rt-auth-scopes-check) printf '%s' 'Pre-flight check that the current credential carries required agent scopes (default: Redmine evidence chain)' ;;
         gms-rt-agent-enroll) printf '%s' 'Exchange a one-shot enrollment code for an Agent Service Token stored as a 0600 file' ;;
         gms-rt-agent-tokens) printf '%s' 'List Agent Service Tokens (admin; metadata only, raw tokens are never stored)' ;;
         gms-rt-agent-enroll-code) printf '%s' 'Mint a one-shot enrollment code for a build server agent (admin + elevation)' ;;
@@ -5254,10 +5581,11 @@ _gms_rt_command_summary() {
         gms-rt-apk-search) printf '%s' 'Search decompiled sources by filename (name), file content (content), or Java symbol definition (symbol)' ;;
         gms-rt-apk-download) printf '%s' 'Download the decompiled source ZIP of an analysis task' ;;
         gms-rt-redmine-issue-fetch) printf '%s' 'Create/refresh a full Redmine evidence snapshot (raw JSON, journals, attachments)' ;;
-        gms-rt-redmine-issue-show) printf '%s' 'Show snapshot completeness plus issue fields and description head' ;;
+        gms-rt-redmine-issue-show) printf '%s' 'Show snapshot completeness plus issue fields and description head; accepts snapshot_id or issue_id (resolves the latest snapshot)' ;;
         gms-rt-redmine-journals) printf '%s' 'Read full (untruncated) issue journals with cursor pagination' ;;
         gms-rt-redmine-attachments) printf '%s' 'List evidence artifacts with kind, size, sha256, and per-attachment status' ;;
         gms-rt-redmine-attachment-download) printf '%s' 'Stream one evidence artifact original to a client path (reports saved path/bytes/sha256)' ;;
+        gms-rt-redmine-credentials-status) printf '%s' 'Pre-flight check that the owner account has Redmine credentials configured (no secret material returned)' ;;
         gms-rt-artifact-read) printf '%s' 'Read a text/log artifact derived text by char window (--offset/--limit)' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling)' ;;
         gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs' ;;
@@ -5367,7 +5695,7 @@ gms-rt-system-commands() {
             summary: ($fields[2] // ""),
             usage: ($fields[1] // ($name + " [arguments]")),
             mode: ($name | mode),
-            requires_auth: ($name | test("^(gms-rt-agent-enroll|gms-rt-auth-(credential-mode|login|status)|gms-rt-system-(capabilities|command-describe|commands|health|help|selfcheck|update|version)|gms-rt-test-modules)$") | not),
+            requires_auth: ($name | test("^(gms-rt-agent-enroll|gms-rt-auth-(credential-mode|login|status|scopes-check)|gms-rt-system-(capabilities|command-describe|commands|health|help|selfcheck|update|version)|gms-rt-test-modules)$") | not),
             requires_elevation: ($name | test(
                 "burn-|config-update|devices-bootloader-(lock|unlock)|adb-forward-"
                 + "|desktop-|terminal-(open|push)|usbip-(install|connect|disconnect)"
@@ -5529,6 +5857,17 @@ gms-rt-system-selfcheck() {
         "$HOME"/android-gts-*; do
         [ -d "$candidate" ] && suite_dirs+=("$candidate")
     done
+
+    # --- TLS trust (2026-09-11 feedback S-2) ------------------------------------
+    # insecure 模式禁用证书校验，信任链可被 MITM 替换——与 SKILL.md 对
+    # bootstrap 阶段的禁令同理，运行时 API 调用也不该用 -k。
+    local tls_insecure=false
+    if [[ "$SERVER_URL" == https://* ]] \
+        && [ -z "${GMS_CURL_CA_CERT:-}" ] \
+        && [ "${GMS_CURL_INSECURE:-0}" = "1" ]; then
+        tls_insecure=true
+        hints+=("TLS verification is disabled (GMS_CURL_INSECURE=1 without GMS_CURL_CA_CERT): the controller CA can be replaced by a MITM. Install the controller CA (see docs/agent/installation.md, e.g. GMS_CURL_CA_CERT=/etc/gms/controller-ca.pem) and unset GMS_CURL_INSECURE.")
+    fi
     suites_json=$(printf '%s\n' "${suite_dirs[@]:-}" | jq -R 'select(length > 0)' | jq -s '.')
     hints_json=$(printf '%s\n' "${hints[@]:-}" | jq -R 'select(length > 0)' | jq -s '.')
 
@@ -5540,6 +5879,7 @@ gms-rt-system-selfcheck() {
         --arg agent_client "${GMS_AGENT_CLIENT:-}" \
         --argjson agent_process "$([ "${GMS_AGENT_PROCESS:-0}" = "1" ] && echo true || echo false)" \
         --argjson ca_configured "$([ -n "${GMS_CURL_CA_CERT:-}" ] && echo true || echo false)" \
+        --argjson tls_insecure "$tls_insecure" \
         --argjson credential "$credential_mode" \
         --argjson auth "$auth_json" \
         --argjson health "$health_json" \
@@ -5557,6 +5897,7 @@ gms-rt-system-selfcheck() {
             agent_client: (if $agent_client == "" then null else $agent_client end),
             agent_process: $agent_process,
             ca_configured: $ca_configured,
+            tls_insecure: $tls_insecure,
             credential: $credential,
             auth: {ok: $auth_ok, status: (if $auth_ok then $auth else null end)},
             server_health: {ok: $health_ok, status: (if $health_ok then $health else null end)},
@@ -5582,6 +5923,7 @@ ${YELLOW}Authentication:${NC}
   gms-rt-auth-login [username]   - Log in and save an API session
   gms-rt-auth-status             - Show the current authentication status
   gms-rt-auth-credential-mode    - Show whether the CLI uses an Agent Token or session cookie
+  gms-rt-auth-scopes-check       - Pre-flight required agent scopes (default: Redmine evidence chain)
   gms-rt-auth-logout             - Revoke and remove the saved session
   gms-rt-auth-elevate [username] - Verify an admin for sensitive operations
   gms-rt-auth-elevation-reset    - Clear administrator elevation
@@ -5678,6 +6020,7 @@ ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-redmine-journals        - Read full journals with cursor pagination
   gms-rt-redmine-attachments     - List artifacts (kind, size, sha256, status)
   gms-rt-redmine-attachment-download - Save one artifact original locally
+  gms-rt-redmine-credentials-status - Pre-flight check for owner Redmine credentials
   gms-rt-redmine-artifact-image  - Return an image artifact as base64 plus metadata
   gms-rt-artifact-read           - Read artifact derived text by char window
   gms-rt-artifact-search         - Search description/journals/artifact text

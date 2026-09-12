@@ -1,4 +1,4 @@
-"""Tests for certification error rule detection (§5.3)."""
+"""Tests for certification error rule detection."""
 
 from __future__ import annotations
 

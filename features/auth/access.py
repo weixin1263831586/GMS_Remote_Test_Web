@@ -12,7 +12,7 @@ def get_authenticated_user(request: Request) -> CurrentUser | None:
     user = getattr(request.state, "current_user", None)
     if isinstance(user, CurrentUser):
         return user
-    # Agent Service Token (2026-09-08 audit §二): Bearer credentials from the
+    # Agent Service Token (ADR 0006): Bearer credentials from the
     # Authorization header. An invalid/unknown Bearer token fails closed —
     # it must not silently fall back to cookie auth or dev-mode anonymity
     # (request.state.credentials_rejected marks the difference).

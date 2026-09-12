@@ -1,4 +1,4 @@
-"""evidence artifact -> APK 分析导入及源码正文检索（2026-09-08 计划 §11）。
+"""evidence artifact -> APK 分析导入及源码正文检索。
 
 - ``POST /api/redmine-agent/artifacts/{artifact_id}/apk-analysis``
   在 owner 内部把已保存的 APK 原件复制进现有 APK 任务目录，再复用
@@ -50,7 +50,7 @@ SOURCE_READ_MAX_LINES = 4000
 
 
 def _validate_apk_structure(path: str) -> None:
-    """伪装 ZIP 拒绝（计划 §11/§16）：ZIP 完整性 + AndroidManifest.xml + DEX。
+    """伪装 ZIP 拒绝：ZIP 完整性 + AndroidManifest.xml + DEX。
 
     仅改名为 .apk 的普通 ZIP、损坏 ZIP、缺 manifest/DEX 的包都必须在
     进入 JADX 前被 422 拒绝。
@@ -169,7 +169,7 @@ async def create_apk_analysis_from_artifact(artifact_id: str, request: Request):
     except ValueError as exc:
         shutil.rmtree(task_dir, ignore_errors=True)
         return _error(EvidenceError(str(exc), status_code=429))
-    # source_ref：让分析结论可追溯到原附件（§11.1）。
+    # source_ref：让分析结论可追溯到原附件。
     with firmware_runtime.global_state.apk_analysis_tasks_lock:
         task = firmware_runtime.global_state.apk_analysis_tasks.get(task_id)
         if task is not None:

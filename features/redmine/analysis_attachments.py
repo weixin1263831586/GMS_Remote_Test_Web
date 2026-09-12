@@ -225,7 +225,7 @@ class AttachmentAnalysisMixin:
         metadata = self._read_image_metadata(path)
         details: dict[str, Any] = {"type": "image", **metadata}
 
-        # OCR is optional (Redmine.txt §5.3): use pytesseract if present, else
+        # OCR is optional: use pytesseract if present, else
         # return an empty string. Failure here must never block the main flow.
         ocr_text = self._run_ocr(path)
         detected = detect_certification_errors(ocr_text)

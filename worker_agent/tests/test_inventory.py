@@ -13,7 +13,7 @@ def test_detailed_probe_serves_from_cache_and_enriches_in_background():
     """heartbeat 只读缓存快照，绝不同步做 ADB detail 往返（防假离线）。
 
     detail 属性由后台 enrichment 线程填充；首轮 heartbeat 的详情字段
-    允许为空，最坏晚到一轮（评审第七节的设计契约）。
+    允许为空，最坏晚到一轮（设计契约：detail 由后台 enrichment 异步填充）。
 
     注意：首轮"详情为空"不是硬契约——seed 之后、同步读取之前，后台
     线程可能恰好完成首轮 refresh（全量测试套件下 CPU 竞争会放大这个

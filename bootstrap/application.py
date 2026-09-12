@@ -236,7 +236,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             trace_id = request_id
         request.state.request_id = request_id
         request.state.trace_id = trace_id
-        # 2026-09-08 audit §二: resolve through the Bearer-aware helper so an
+        # Resolve through the Bearer-aware helper so an
         # Agent Service Token in the Authorization header wins over any
         # cookie, and an invalid Bearer token does NOT silently fall back to
         # cookie or anonymous identity (fail closed).
@@ -272,7 +272,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
                 not _is_public_path(path, request.method)
                 and not _is_service_authenticated_path(path, request.method)
             )
-            # 2026-09-08 audit §二: an Authorization header with an invalid
+            # An Authorization header with an invalid
             # Bearer token must fail closed even when auth is not globally
             # enforced (dev mode) — rejected credentials never downgrade to
             # anonymous access.

@@ -415,6 +415,45 @@ class EvidencePipelineTests(unittest.TestCase):
             errors = stored["errors"] or []
             self.assertTrue(errors and errors[0]["stage"] == "issue")
 
+    def test_missing_credentials_error_carries_remediation(self):
+        """2026-09-11 反馈回归：凭据缺失的报错必须带自助修复指引（Web UI / API）。"""
+        import asyncio
+
+        import features.redmine.evidence as evidence
+        from features.redmine.evidence import EvidenceAuthError, EvidenceFetcher
+
+        with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
+            fetcher = EvidenceFetcher("owner-a")
+            snapshot = fetcher.create_snapshot(648526, download="none")
+            with patch.object(
+                evidence, "load_owner_credentials",
+                lambda owner: evidence._OwnerCredentials(),
+            ), self.assertRaises(EvidenceAuthError) as ctx:
+                asyncio.run(fetcher.run(snapshot))
+            message = str(ctx.exception)
+            self.assertIn("Web UI", message)
+            self.assertIn("config/credentials", message)
+            stored = fetcher.store.get_snapshot(snapshot["snapshot_id"])
+            self.assertEqual(stored["status"], "failed")
+            self.assertIn("Web UI", stored["errors"][0]["message"])
+
+    def test_missing_base_url_error_carries_remediation(self):
+        """2026-09-11 反馈回归：base_url 缺失的报错必须指向 Web UI 设置页。"""
+        import asyncio
+
+        from features.redmine.evidence import EvidenceError, EvidenceFetcher
+
+        with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
+            fetcher = EvidenceFetcher("owner-a")
+            snapshot = fetcher.create_snapshot(648526, download="none")
+            with patch(
+                "features.redmine.evidence.owner_base_url",
+                lambda owner: "",
+            ), self.assertRaises(EvidenceError) as ctx:
+                asyncio.run(fetcher.run(snapshot))
+            self.assertIn("base_url", str(ctx.exception))
+            self.assertIn("Web UI", str(ctx.exception))
+
     def test_runner_crash_marks_snapshot_failed(self):
         """P1 回归：run() 未预期异常时 _runner 兜底必须把快照推进 failed。"""
         import asyncio

@@ -60,10 +60,14 @@ jobs:
       - name: Ruff lint
         run: ruff check .
 
-  unit:
-    name: unit-and-feature
+  # 历史上这里是一个 `pytest tests features worker_agent/tests -q` 大 job：
+  # 某个域卡住会把整组测试 cancel 掉，已经出现的 failure 连 failure
+  # summary 都来不及打印。按域拆分后每组独立判定，失败时上传 JUnit 与
+  # durations 定位。
+  unit-foundation:
+    name: unit-foundation
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -76,12 +80,157 @@ jobs:
           # requirements-dev.txt 包含 requirements.txt + pytest/httpx
           # （TestClient 硬依赖）等测试专用依赖，生产部署不装它。
           pip install -r requirements-dev.txt
-      - name: Unit + feature + worker_agent tests
-        # tests/e2e 依赖 Playwright 浏览器，由独立 browser-e2e job 执行，
-        # 避免 browser 故障与 unit 故障混在一起。
-        run: pytest tests features worker_agent/tests --ignore=tests/e2e -q
+      - name: Foundation / bootstrap / top-level tests
+        run: |
+          mkdir -p artifacts
+          pytest tests foundation bootstrap conftest.py \
+            --ignore=tests/e2e --ignore=tests/architecture --ignore=tests/soak \
+            -q --junitxml=artifacts/unit-foundation.xml --durations=30
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-unit-foundation
+          path: artifacts/
+          if-no-files-found: ignore
+
+  unit-feature-auth-system:
+    name: unit-auth-system-users
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Auth / system / users feature tests
+        run: |
+          mkdir -p artifacts
+          pytest features/auth features/system features/users \
+            -q --junitxml=artifacts/unit-auth-system.xml --durations=30
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-unit-auth-system
+          path: artifacts/
+          if-no-files-found: ignore
+
+  unit-feature-devices-firmware:
+    name: unit-devices-firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Devices / firmware / cluster feature tests
+        run: |
+          mkdir -p artifacts
+          pytest features/devices features/firmware features/cluster \
+            -q --junitxml=artifacts/unit-devices-firmware.xml --durations=30
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-unit-devices-firmware
+          path: artifacts/
+          if-no-files-found: ignore
+
+  unit-feature-test-execution:
+    name: unit-test-execution-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Test execution / build / automation feature tests
+        run: |
+          mkdir -p artifacts
+          pytest features/test_execution features/build features/automation \
+            -q --junitxml=artifacts/unit-execution.xml --durations=30
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-unit-execution
+          path: artifacts/
+          if-no-files-found: ignore
+
+  unit-feature-assistant-reports:
+    name: unit-assistant-reports-rest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Assistant / reports / redmine / gerrit / knowledge / email tests
+        run: |
+          mkdir -p artifacts
+          pytest features/assistant features/reports features/redmine \
+                 features/gerrit features/knowledge features/email \
+            -q --junitxml=artifacts/unit-assistant-reports.xml --durations=30
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-unit-assistant-reports
+          path: artifacts/
+          if-no-files-found: ignore
+
+  worker-agent:
+    name: worker-agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Worker agent tests
+        run: |
+          mkdir -p artifacts
+          pytest worker_agent/tests \
+            -q --junitxml=artifacts/worker-agent.xml --durations=30
       - name: Soak tests (self-skipping without real devices)
         run: pytest tests/soak -q
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-worker-agent
+          path: artifacts/
+          if-no-files-found: ignore
 
   security:
     name: security-and-architecture
@@ -174,7 +323,13 @@ jobs:
     name: release-ready
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [secret-scan, lint, unit, security, agent-package, browser-e2e]
+    needs: [
+      secret-scan, lint,
+      unit-foundation, unit-feature-auth-system, unit-feature-devices-firmware,
+      unit-feature-test-execution, unit-feature-assistant-reports,
+      worker-agent,
+      security, agent-package, browser-e2e,
+    ]
     if: always()
     steps:
       - name: Require every gate green

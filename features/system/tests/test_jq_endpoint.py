@@ -1,4 +1,4 @@
-"""Controller jq binary endpoint tests (2026-09-08 audit §十二 fix).
+"""Controller jq binary endpoint tests.
 
 `/api/system/tools/jq` serves the pinned jq binary so air-gapped build
 servers can complete the skill installer bootstrap without GitHub access.

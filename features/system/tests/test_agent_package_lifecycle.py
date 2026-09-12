@@ -29,7 +29,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GMS_AGENT = REPO_ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-agent"
 PLUGIN_DIR = REPO_ROOT / "plugins" / "gms-remote-test"
-PACKAGE_VERSION = "0.13.1"
+# An arbitrary fixture version — deliberately NOT any real release
+# number, so the test can never collide with (or silently depend on)
+# the running checkout's version (see package.yaml).
+FIXTURE_PACKAGE_VERSION = "9.8.7"
 
 
 def load_gms_agent_module():
@@ -111,14 +114,14 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.agent.installed_version(), "9.9.9")
 
     def test_update_installs_new_version_into_new_directory(self):
-        # The running checkout is 0.13.1; an update package is 9.9.9 — the
+        # The running checkout is the fixture version; an update package is 9.9.9 — the
         # install must land in versions/9.9.9, NOT the running version's dir.
-        old = build_registry_tree(PACKAGE_VERSION, self.home / "old")
-        self.agent.install_runtime(old, PACKAGE_VERSION, "b" * 64)
+        old = build_registry_tree(FIXTURE_PACKAGE_VERSION, self.home / "old")
+        self.agent.install_runtime(old, FIXTURE_PACKAGE_VERSION, "b" * 64)
         new = build_registry_tree("9.9.9", self.home / "new", mutate_marker="1")
         target = self.agent.install_runtime(new, "9.9.9", "c" * 64)
         self.assertEqual(target.name, "9.9.9")
-        self.assertTrue((self.agent.VERSIONS_DIR / PACKAGE_VERSION / "scripts").is_dir())
+        self.assertTrue((self.agent.VERSIONS_DIR / FIXTURE_PACKAGE_VERSION / "scripts").is_dir())
         self.assertEqual(self.agent.installed_version(), "9.9.9")
 
     # --- 2. version directories are immutable ---------------------------
@@ -215,8 +218,8 @@ class LifecycleTests(unittest.TestCase):
             self.agent.safe_extract(archive, self.home / "out")
 
     def test_safe_extract_accepts_canonical_package(self):
-        package = build_registry_tree(PACKAGE_VERSION, self.home / "src")
-        data = zipsafe_package(package, PACKAGE_VERSION)
+        package = build_registry_tree(FIXTURE_PACKAGE_VERSION, self.home / "src")
+        data = zipsafe_package(package, FIXTURE_PACKAGE_VERSION)
         archive = self.home / "good.zip"
         archive.write_bytes(data)
         out = self.home / "out"

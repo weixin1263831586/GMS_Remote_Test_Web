@@ -81,7 +81,13 @@ gms-rt-system-selfcheck --json   # 验收：auth / health / devices / suites
 
 Agent Package 自包含 `gms-rt` CLI、MCP Server、SDK、Skill 与各 Client Manifest，无需 clone 本仓库；Service Token 落盘为 `0600` 文件，Agent 不接触 Web 登录密码。
 
-详见 [docs/agent/](docs/agent/overview.md) 与 [docs/cli/gms-rt.md](docs/cli/gms-rt.md)。
+安装即配置：`gms-agent install` 会把 Controller URL / CA / token 路径写入
+Agent profile（TOML，默认名 `<client>-<host>-<sha256(server)[:8]>`）并在
+MCP 启动时自动注入环境，**无需手工 export `GMS_REMOTE_TEST_SERVER`**；
+显式环境变量仅作为覆盖手段。同一台主机可安装多个 Controller（每个
+Controller 一个 profile），enroll / update 支持用 `--profile` 消歧。
+
+详见 [docs/agent/](docs/agent/overview.md)、[docs/agent/profiles.md](docs/agent/profiles.md) 与 [docs/cli/gms-rt.md](docs/cli/gms-rt.md)。
 
 ## 支持的设备接入路径
 
@@ -98,7 +104,7 @@ Agent Package 自包含 `gms-rt` CLI、MCP Server、SDK、Skill 与各 Client Ma
 
 | 环境 | 完整烧写 | 说明 |
 |---|---|---|
-| Local Ubuntu | ✅ | Controller 本机 update.img / GSI |
+| Local USB（Ubuntu 执行主机 / Worker） | ✅ | 在设备所属执行主机上经 SSH 使用 `upgrade_tool uf` 烧写 update.img / GSI（Controller / Worker / 执行主机可分离部署） |
 | Windows USB/IP | ✅ | USB 所有权交还 Source 后由 Source Agent + RKDevTool 源端烧写，完成后重建 USB/IP |
 | Linux USB/IP full | ❌ | 暂未支持，fail closed |
 

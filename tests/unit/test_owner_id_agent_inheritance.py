@@ -4,7 +4,7 @@ Agent Service Token principals must resolve owner-scoped data (Redmine
 credentials, evidence stores, ...) to their token's owner account
 (``owner_user_id``) instead of the synthetic ``agent:<token_id>`` id, so a
 credential configured once under the enrolling account is visible to its
-agents (2026-09-09 audit: agent owner never saw Redmine credentials).
+agents (the agent owner never saw Redmine credentials before this fix).
 """
 
 from __future__ import annotations

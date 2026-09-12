@@ -15,7 +15,9 @@ DENIED_NAMES = {
     ".editorconfig",
     ".gitignore",
     ".env.production",
+    "1.txt",
     "2.txt",
+    "3.txt",
     "AGENTS.md",
     "conftest.py",
     "env.production",
@@ -40,24 +42,10 @@ DENIED_COMPONENTS = {
     "__pycache__",
     "certs",
     "scripts_local",
-    "superpowers",
     "tests",
     "jdk-11",
 }
 DENIED_SUFFIXES = {".map"}
-INTERNAL_DOCUMENTS = {
-    "docs/android-cli-ui-control-integration.md",
-    "docs/build-server-integration-assessment.md",
-    "docs/code-audit-2026-07.md",
-    "docs/code-audit-2026-08-12.md",
-    "docs/multi-host-cluster-implementation-plan.md",
-    "docs/product-integration-cluster-audit-2026-07-15.md",
-    "docs/product-release-checklist-2026-07-15.md",
-    "docs/refactor-baseline.md",
-    "docs/refactor-parity-audit.md",
-    "docs/refactor-verification.md",
-    "docs/wiki-knowledge-base-plan.md",
-}
 SENSITIVE_KEYS = {
     "api_key",
     "authorization",
@@ -126,8 +114,6 @@ def verify_release_tree(root: Path) -> list[str]:
             continue
         if path.name in DENIED_NAMES:
             findings.append(f"runtime file: {relative}")
-        if relative_text in INTERNAL_DOCUMENTS:
-            findings.append(f"internal document: {relative}")
         if path.suffix.lower() in DENIED_SUFFIXES:
             findings.append(f"source map: {relative}")
         if path.is_symlink():

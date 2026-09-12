@@ -29,6 +29,49 @@ def _make_ssh():
     return ssh, stdout, stderr
 
 
+def _emulate_channel(stdout_bytes: bytes, stderr_bytes: bytes = b"",
+                     exit_code: int = 0) -> MagicMock:
+    """Build a channel mock that behaves like a REAL paramiko channel
+    under foundation.ssh_executor.run's concurrent drain loop.
+
+    A bare MagicMock makes `recv_ready()` always truthy while `recv()`
+    returns a fresh (len==0) MagicMock: `made_progress` stays true forever,
+    nothing accumulates — the drain loop spins at 100% CPU allocating new
+    mocks until the host runs out of memory. That OOM/hang is exactly the
+    "63% … runner shutdown" the CI used to hit. Real semantics: each ready
+    flag is one-shot and recv() yields the actual bytes.
+    """
+
+    channel = MagicMock()
+    out_pending = [bool(stdout_bytes)]
+    err_pending = [bool(stderr_bytes)]
+
+    def _recv_ready() -> bool:
+        seen, out_pending[0] = out_pending[0], False
+        return seen
+
+    def _recv_stderr_ready() -> bool:
+        seen, err_pending[0] = err_pending[0], False
+        return seen
+
+    channel.recv_ready.side_effect = _recv_ready
+    channel.recv.side_effect = [stdout_bytes] if stdout_bytes else []
+    channel.recv_stderr_ready.side_effect = _recv_stderr_ready
+    channel.recv_stderr.side_effect = [stderr_bytes] if stderr_bytes else []
+    channel.exit_status_ready.return_value = True
+    channel.recv_exit_status.return_value = exit_code
+    return channel
+
+
+def _ssh_with_channel(stdout_bytes: bytes, stderr_bytes: bytes = b"",
+                      exit_code: int = 0) -> tuple[MagicMock, MagicMock]:
+    stdout = MagicMock()
+    stdout.channel = _emulate_channel(stdout_bytes, stderr_bytes, exit_code)
+    ssh = MagicMock()
+    ssh.exec_command.return_value = (MagicMock(), stdout, MagicMock())
+    return ssh, stdout
+
+
 class WindowsExecTests(unittest.TestCase):
     def test_combines_stdout_and_stderr(self) -> None:
         ssh, stdout, _stderr = _make_ssh()
@@ -100,31 +143,19 @@ class EnqueueTaskTests(unittest.TestCase):
 
 class WaitResultTests(unittest.TestCase):
     def test_returns_parsed_result(self) -> None:
-        ssh = MagicMock()
-        stdout = MagicMock()
-        stdout.channel.recv_exit_status.return_value = 0
-        stdout.read.return_value = json.dumps(
-            {"status": "SUCCESS", "log_tail": "ok"},
-        ).encode()
-        stderr = MagicMock()
-        stderr.read.return_value = b""
-        ssh.exec_command.return_value = (MagicMock(), stdout, stderr)
+        ssh, _stdout = _ssh_with_channel(
+            json.dumps({"status": "SUCCESS", "log_tail": "ok"}).encode(),
+        )
 
         with patch.object(
             source_flash.time, "sleep", new=lambda _s: None,
         ):
             result = wait_result(ssh, r"C:\Users\hcq\gms-flash-queue",
                                  "flash-D1-1")
-        self.assertEqual(result["status"]  , "SUCCESS")
+        self.assertEqual(result["status"], "SUCCESS")
 
     def test_raises_on_timeout(self) -> None:
-        ssh = MagicMock()
-        stdout = MagicMock()
-        stdout.channel.recv_exit_status.return_value = 1
-        stdout.read.return_value = b""
-        stderr = MagicMock()
-        stderr.read.return_value = b""
-        ssh.exec_command.return_value = (MagicMock(), stdout, stderr)
+        ssh, _stdout = _ssh_with_channel(b"", exit_code=1)
 
         calls = {"n": 0}
 
@@ -145,15 +176,28 @@ class RunSourceFlashTests(unittest.TestCase):
         sftp = MagicMock()
         sftp.stat.return_value = None
         ssh.open_sftp.return_value = sftp
-        stdout = MagicMock()
-        stdout.channel.recv_exit_status.return_value = 0
-        stdout.read.return_value = json.dumps({
+        ssh.exec_command.return_value = (
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+        )
+        # Patch exec_command AFTER capturing the channel-emulating stdout:
+        # wait_result's `type` probe must return the SUCCESS result exactly
+        # once (one-shot ready flags), then "not found" on later polls.
+        success = json.dumps({
             "status": "SUCCESS",
             "log_tail": "Download Firmware Success",
         }).encode()
-        stderr = MagicMock()
-        stderr.read.return_value = b""
-        ssh.exec_command.return_value = (MagicMock(), stdout, stderr)
+        stdout = MagicMock()
+        stdout.channel = _emulate_channel(success)
+        ssh.exec_command.side_effect = [
+            (MagicMock(), stdout, MagicMock()),
+            # poll 2+: result not written yet — command succeeds, empty stdout
+            *(
+                (MagicMock(), MagicMock(), MagicMock())
+                for _ in range(50)
+            ),
+        ]
 
         with (
             patch.object(source_flash, "open_windows_ssh", return_value=ssh),
@@ -179,16 +223,20 @@ class RunSourceFlashTests(unittest.TestCase):
         sftp = MagicMock()
         sftp.stat.return_value = None
         ssh.open_sftp.return_value = sftp
-        stdout = MagicMock()
-        stdout.channel.recv_exit_status.return_value = 0
-        stdout.read.return_value = json.dumps({
+        failure = json.dumps({
             "status": "FAILED",
             "log_tail": "Download Firmware Fail",
             "error": "",
         }).encode()
-        stderr = MagicMock()
-        stderr.read.return_value = b""
-        ssh.exec_command.return_value = (MagicMock(), stdout, stderr)
+        stdout = MagicMock()
+        stdout.channel = _emulate_channel(failure)
+        ssh.exec_command.side_effect = [
+            (MagicMock(), stdout, MagicMock()),
+            *(
+                (MagicMock(), MagicMock(), MagicMock())
+                for _ in range(50)
+            ),
+        ]
 
         with (
             patch.object(source_flash, "open_windows_ssh", return_value=ssh),
