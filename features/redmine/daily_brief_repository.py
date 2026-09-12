@@ -30,8 +30,9 @@ RUN_COLUMNS = (
 )
 ISSUE_COLUMNS = (
     "run_id", "issue_id", "buckets", "priority", "priority_score",
-    "fingerprint", "status", "started_at", "finished_at", "duration_ms",
-    "attempt_count", "error", "error_type", "raw_response", "result",
+    "fingerprint", "subject", "status", "started_at", "finished_at",
+    "duration_ms", "attempt_count", "error", "error_type", "raw_response",
+    "result",
 )
 
 
@@ -101,6 +102,7 @@ class DailyBriefRepository:
                     priority TEXT NOT NULL DEFAULT 'P3',
                     priority_score INTEGER NOT NULL DEFAULT 0,
                     fingerprint TEXT NOT NULL DEFAULT '',
+                    subject TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'pending',
                     started_at TEXT NOT NULL DEFAULT '',
                     finished_at TEXT NOT NULL DEFAULT '',
@@ -114,6 +116,15 @@ class DailyBriefRepository:
                 )
                 """
             )
+            # 旧库迁移：subject 列（2026-09 新增，供 UI 单行标题展示）。
+            issue_cols = {row[1] for row in conn.execute(
+                "PRAGMA table_info(redmine_daily_brief_issues)"
+            )}
+            if "subject" not in issue_cols:
+                conn.execute(
+                    "ALTER TABLE redmine_daily_brief_issues "
+                    "ADD COLUMN subject TEXT NOT NULL DEFAULT ''"
+                )
 
     # ------------------------------------------------------------------ runs
 

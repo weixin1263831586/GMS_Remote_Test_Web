@@ -125,6 +125,7 @@ class DailyBriefIssue:
     priority: str = "P3"
     priority_score: int = 0
     fingerprint: str = ""
+    subject: str = ""
     status: str = "pending"
     started_at: str = ""
     finished_at: str = ""
@@ -143,6 +144,7 @@ class DailyBriefIssue:
             "priority": self.priority,
             "priority_score": self.priority_score,
             "fingerprint": self.fingerprint,
+            "subject": self.subject,
             "status": self.status,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
