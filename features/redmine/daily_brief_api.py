@@ -1,9 +1,9 @@
-"""Daily Brief triage 只读端点 + 运行 API（Phase 3/8/35/36）。
+"""Daily Brief triage 只读端点 + 持久任务入队 API。
 
 - ``GET  /daily-brief/triage``：当天待处理 issue 快照（CLI/MCP 同源）。
 - ``GET  /daily-brief/latest``、``/daily-brief/{date}``：查看晨报。
 - ``GET  /daily-brief/config``、``PUT /daily-brief/config``：配置。
-- ``POST /daily-brief/run``：手动触发（后台执行，立即返回 run_id）。
+- ``POST /daily-brief/run``：手动触发（持久化入队，立即返回 run_id）。
 - ``POST /daily-brief/{date}/refresh``：delta 刷新（第二阶段启用入口）。
 - ``POST /daily-brief/{date}/issues/{issue_id}/reanalyze``：单 issue 重分析。
 
@@ -13,7 +13,6 @@ triage 数据严格来自 ``build_daily_triage_snapshot``（内部唯一调用
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime
 
@@ -24,7 +23,8 @@ from features.auth import require_agent_scope, require_human_principal_when_auth
 from features.users import owner_id_from_request
 
 from .api import get_redmine_config_for_request
-from .daily_brief_models import BRIEF_MODES, RUN_STATUSES
+from .daily_brief_dispatch import enqueue_reanalysis, enqueue_refresh, enqueue_run
+from .daily_brief_models import BRIEF_MODES
 from .daily_brief_service import (
     DEFAULT_BRIEF_CONFIG,
     DailyBriefService,
@@ -35,11 +35,7 @@ from .statistics_api import _has_redmine_credentials, _missing_credentials_paylo
 
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api/redmine-agent")
-
-# 手动 run 的后台任务登记（进程内；重启由 repository 层标记 failed）。
-_RUN_TASKS: dict[str, asyncio.Task] = {}
 
 
 def _require_read(request: Request) -> None:
@@ -147,21 +143,13 @@ async def run_daily_brief(
             content={"success": False, "error": "force must be a boolean"},
             status_code=400,
         )
-    started = service.start_run(mode=mode, force=force)
+    started = enqueue_run(service, mode=mode, force=force)
     if "run_id" not in started:
         return JSONResponse(
             content={"success": False, "error": started.get("error", "failed to start run")},
             status_code=409,
         )
-    run_id = started["run_id"]
-    if started.get("reused") or started.get("already_running"):
-        # 幂等：当天已有有效 run，直接返回现状，不再启动后台任务。
-        return {"success": True, "data": started}
-
-    task = asyncio.create_task(service.execute_run(run_id))
-    _RUN_TASKS[run_id] = task
-    task.add_done_callback(lambda _t, rid=run_id: _RUN_TASKS.pop(rid, None))
-    return {"success": True, "data": {"run_id": run_id, "status": "pending"}}
+    return {"success": True, "data": started}
 
 
 @router.get("/daily-brief/{brief_date}")
@@ -192,15 +180,12 @@ async def refresh_daily_brief(request: Request, brief_date: str):
             status_code=400,
         )
     service = _service_for_request(request)
-    result = service.start_refresh(brief_date)
+    result = enqueue_refresh(service, brief_date)
     if "run_id" not in result:
         return JSONResponse(
             content={"success": False, "error": result.get("error", "refresh not started")},
             status_code=409,
         )
-    task = asyncio.create_task(service.execute_run(result["run_id"]))
-    _RUN_TASKS[result["run_id"]] = task
-    task.add_done_callback(lambda _t, rid=result["run_id"]: _RUN_TASKS.pop(rid, None))
     return {"success": True, "data": result}
 
 
@@ -208,8 +193,8 @@ async def refresh_daily_brief(request: Request, brief_date: str):
 async def reanalyze_issue(request: Request, brief_date: str, issue_id: int):
     _require_human(request)
     service = _service_for_request(request)
-    result = await service.reanalyze_issue(brief_date, issue_id)
-    if result.get("status") in RUN_STATUSES or "run_id" in result:
+    result = enqueue_reanalysis(service, brief_date, issue_id)
+    if "run_id" in result:
         return {"success": True, "data": result}
     return JSONResponse(
         content={"success": False, "error": result.get("error", "reanalyze failed")},

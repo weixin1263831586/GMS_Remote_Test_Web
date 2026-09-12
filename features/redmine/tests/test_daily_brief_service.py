@@ -78,8 +78,22 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config["model"], "glm-4")
         self.assertEqual(config["max_turns"], DEFAULT_BRIEF_CONFIG["max_turns"])
 
-    def test_backend_direct_allowed(self):
-        self.assertEqual(normalize_daily_brief_config({"analysis_backend": "direct"})["analysis_backend"], "direct")
+    def test_enabled_defaults_to_opt_in(self):
+        """晨报默认关闭：未显式 enabled=true 的 owner 不进入 nightly 调度。"""
+        self.assertFalse(DEFAULT_BRIEF_CONFIG["enabled"])
+        self.assertFalse(normalize_daily_brief_config({})["enabled"])
+        self.assertTrue(normalize_daily_brief_config({"enabled": True})["enabled"])
+
+    def test_backend_direct_is_rejected(self):
+        """direct 从未实现，不得作为可配置枚举残留。"""
+        self.assertEqual(
+            normalize_daily_brief_config({"analysis_backend": "direct"})["analysis_backend"],
+            "kkagent",
+        )
+        self.assertEqual(
+            normalize_daily_brief_config({"analysis_backend": "kkagent"})["analysis_backend"],
+            "kkagent",
+        )
 
     def test_save_and_get_roundtrip(self):
         with TemporaryDirectory() as tmp:
@@ -334,6 +348,139 @@ class CrashRecoveryTests(unittest.TestCase):
         recovered = self.service.repository.get_run("db_stale")
         self.assertEqual(recovered.status, "failed")
         self.assertEqual(recovered.error, "interrupted by process restart")
+
+
+class FrozenSnapshotTests(unittest.TestCase):
+    """冻结快照持久化：崩溃重试不得改变同一 run 的输入事实。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.service = make_service(self.root)
+
+    def _execute_failed_run(self, service) -> str:
+        from unittest.mock import AsyncMock
+
+        started = service.start_run("nightly")
+
+        async def fail_analyze(entry):
+            return KkAgentAnalysisResult(ok=False, error="crash", error_type="kkagent_error")
+
+        with patch.object(service, "build_triage", AsyncMock(return_value=dict(SNAPSHOT))), \
+                patch.object(service, "_build_analyzer") as builder:
+            builder.return_value.analyze = fail_analyze
+            import asyncio
+            asyncio.run(service.execute_run(started["run_id"]))
+        return started["run_id"]
+
+    def test_crash_retry_reuses_persisted_frozen_snapshot(self):
+        """进程崩溃（新 service 实例 = 新进程语义）后重试：不得重新拉取
+        Redmine（build_triage 不再调用），分析输入仍是冻结快照。"""
+        from unittest.mock import AsyncMock
+
+        run_id = self._execute_failed_run(self.service)
+        frozen_before = self.service.repository.get_snapshot(run_id)
+        self.assertIsNotNone(frozen_before)
+
+        # 模拟进程重启：全新 service 实例，仅共享 SQLite。
+        restarted = make_service(self.root)
+        retry = restarted.start_run("nightly")
+        self.assertEqual(retry["run_id"], run_id)
+
+        async def ok_analyze(entry):
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        triage = AsyncMock(return_value=dict(SNAPSHOT))
+        with patch.object(restarted, "build_triage", triage), \
+                patch.object(restarted, "_build_analyzer") as builder:
+            builder.return_value.analyze = ok_analyze
+            import asyncio
+            run = asyncio.run(restarted.execute_run(run_id))
+
+        triage.assert_not_called()  # 冻结快照优先，Redmine 变化不影响重试
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.snapshot_hash, "hash-1")
+        self.assertEqual(
+            {item.issue_id for item in restarted.repository.list_issues(run_id)},
+            {101, 102},
+        )
+
+    def test_sync_failed_marks_run_and_report(self):
+        from unittest.mock import AsyncMock
+
+        snapshot = dict(SNAPSHOT)
+        snapshot["source_sync_status"] = "sync_failed"
+        snapshot["synced"] = False
+        started = self.service.start_run("nightly")
+
+        async def ok_analyze(entry):
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        with patch.object(self.service, "build_triage", AsyncMock(return_value=snapshot)), \
+                patch.object(self.service, "_build_analyzer") as builder:
+            builder.return_value.analyze = ok_analyze
+            import asyncio
+            run = asyncio.run(self.service.execute_run(started["run_id"]))
+
+        self.assertEqual(run.source_sync_status, "sync_failed")
+        self.assertEqual(run.report_json["source_sync_status"], "sync_failed")
+        self.assertIn("本地镜像", run.report_markdown)
+
+    def test_concurrent_execute_run_joins_single_execution(self):
+        """同 run_id 并发 execute_run：只执行一次快照/分析（RunCoordinator）。"""
+        from unittest.mock import AsyncMock
+
+        started = self.service.start_run("nightly")
+        calls: list[int] = []
+
+        async def ok_analyze(entry):
+            calls.append(entry["issue_id"])
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        triage = AsyncMock(return_value=dict(SNAPSHOT))
+
+        async def scenario():
+            with patch.object(self.service, "build_triage", triage), \
+                    patch.object(self.service, "_build_analyzer") as builder:
+                builder.return_value.analyze = ok_analyze
+                await asyncio.gather(
+                    self.service.execute_run(started["run_id"]),
+                    self.service.execute_run(started["run_id"]),
+                )
+
+        import asyncio
+        asyncio.run(scenario())
+
+        triage.assert_called_once()
+        self.assertEqual(sorted(calls), [101, 102])  # 每个 issue 只分析一次
+
+    def test_reanalyze_blocked_while_run_executing(self):
+        from unittest.mock import AsyncMock
+
+        started = self.service.start_run("nightly")
+        import asyncio
+
+        async def scenario():
+            async def slow_analyze(entry):
+                await asyncio.sleep(0.05)
+                return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+            triage = AsyncMock(return_value=dict(SNAPSHOT))
+            with patch.object(self.service, "build_triage", triage), \
+                    patch.object(self.service, "_build_analyzer") as builder:
+                builder.return_value.analyze = slow_analyze
+                task = asyncio.create_task(self.service.execute_run(started["run_id"]))
+                await asyncio.sleep(0.01)  # 让 run 进入 executing
+                blocked = await self.service.reanalyze_issue(
+                    self.service.repository.get_run(started["run_id"]).brief_date, 101
+                )
+                run = await task
+            return blocked, run
+
+        blocked, run = asyncio.run(scenario())
+        self.assertIn("still executing", blocked.get("error", ""))
+        self.assertEqual(run.status, "completed")
 
 
 def _async_value(value):  # pragma: no cover - 保留给未来同步 mock 使用

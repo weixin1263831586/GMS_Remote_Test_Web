@@ -80,6 +80,7 @@ class DailyBriefRun:
     finished_at: str = ""
     snapshot_at: str = ""
     snapshot_hash: str = ""
+    source_sync_status: str = ""
     issue_count: int = 0
     waiting_my_reply_count: int = 0
     no_reply_3_days_count: int = 0
@@ -102,6 +103,7 @@ class DailyBriefRun:
             "finished_at": self.finished_at,
             "snapshot_at": self.snapshot_at,
             "snapshot_hash": self.snapshot_hash,
+            "source_sync_status": self.source_sync_status,
             "issue_count": self.issue_count,
             "waiting_my_reply_count": self.waiting_my_reply_count,
             "no_reply_3_days_count": self.no_reply_3_days_count,

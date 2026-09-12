@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import signal
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,6 +41,43 @@ def _strip_ansi(text: str) -> str:
 
 # stderr 摘要长度上限。
 STDERR_SUMMARY_LIMIT = 500
+PROCESS_STOP_GRACE_SECONDS = 5.0
+
+# 子进程输出捕获上限：流式读取，固定保留头部 + 尾部，
+# 中间部分丢弃，避免冗长日志把 stdout/stderr 全量吃进内存后才截断。
+# JSON 信封在输出末尾、启动信息在开头，两端都有用；256KB 尾部足够
+# 覆盖最终 JSON 与最近的错误日志。
+CAPTURE_HEAD_BYTES = 16 * 1024
+CAPTURE_TAIL_BYTES = 256 * 1024
+
+
+async def read_stream_capped(
+    stream: asyncio.StreamReader,
+    head: int = CAPTURE_HEAD_BYTES,
+    tail: int = CAPTURE_TAIL_BYTES,
+) -> bytes:
+    """读取子进程输出到 EOF，内存占用上限约 head+tail 字节。"""
+    head_buf = bytearray()
+    tail_buf = bytearray()
+    truncated = False
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            break
+        if len(head_buf) < head:
+            take = min(head - len(head_buf), len(chunk))
+            head_buf.extend(chunk[:take])
+            chunk = chunk[take:]
+            if not chunk:
+                continue
+        tail_buf.extend(chunk)
+        if len(tail_buf) > tail:
+            del tail_buf[: len(tail_buf) - tail]
+            truncated = True
+    if truncated:
+        # 丢弃点做标记：下游解析失败时能看出输出被截断过。
+        return bytes(head_buf) + b"\n...[truncated]...\n" + bytes(tail_buf)
+    return bytes(head_buf) + bytes(tail_buf)
 
 
 def _summarize_stderr(text: str) -> str:
@@ -195,6 +233,7 @@ class KkAgentRedmineAnalyzer:
         model: str = "",
         cwd: str | None = None,
         env_extra: dict[str, str] | None = None,
+        interrupted_retries: int = 1,
     ):
         self.binary = binary
         self.max_turns = int(max_turns)
@@ -202,6 +241,7 @@ class KkAgentRedmineAnalyzer:
         self.model = str(model or "").strip()
         self.cwd = cwd
         self.env_extra = dict(env_extra or {})
+        self.interrupted_retries = max(0, int(interrupted_retries))
 
     def build_prompt(self, entry: dict[str, Any]) -> str:
         return PROMPT_TEMPLATE.format(
@@ -227,6 +267,19 @@ class KkAgentRedmineAnalyzer:
         return command
 
     async def analyze(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
+        """执行 headless 分析；仅信号中断可自动重试一次。"""
+        outcome: KkAgentAnalysisResult | None = None
+        for attempt in range(self.interrupted_retries + 1):
+            outcome = await self._analyze_once(entry)
+            if outcome.error_type != "interrupted" or attempt >= self.interrupted_retries:
+                return outcome
+            logger.warning(
+                "kkagent was interrupted for issue %s; retrying once",
+                entry.get("issue_id"),
+            )
+        return outcome  # pragma: no cover - loop always returns
+
+    async def _analyze_once(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
         """执行一次 headless 分析并校验 schema。"""
         prompt = self.build_prompt(entry)
         command = self.build_command(prompt)
@@ -250,6 +303,9 @@ class KkAgentRedmineAnalyzer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                # 隔离于 Web/Worker 的进程组。宿主重启时只取消 Worker，
+                # 再由下面的受控清理终止 kkagent 及其 MCP 子进程树。
+                start_new_session=os.name == "posix",
             )
         except FileNotFoundError:
             return KkAgentAnalysisResult(
@@ -258,31 +314,93 @@ class KkAgentRedmineAnalyzer:
             )
         try:
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=self.timeout_seconds
+                asyncio.gather(
+                    read_stream_capped(process.stdout),
+                    read_stream_capped(process.stderr),
+                ),
+                timeout=self.timeout_seconds,
             )
-        except asyncio.TimeoutError:
-            process.kill()
             await process.wait()
+        except asyncio.TimeoutError:
+            await self._terminate_process_tree(process)
             return KkAgentAnalysisResult(
                 ok=False,
                 error=f"kkagent timed out after {self.timeout_seconds}s",
                 error_type="timeout",
                 exit_code=process.returncode,
             )
+        except asyncio.CancelledError:
+            # wait_for/调用方取消不得遗留 kkagent 或 stdio MCP 孤儿进程。
+            cleanup = asyncio.create_task(self._terminate_process_tree(process))
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                await cleanup
+            raise
 
         raw = stdout.decode("utf-8", errors="replace").strip()
         exit_code = process.returncode
         if exit_code != 0:
+            stderr_text = stderr.decode("utf-8", errors="replace")
+            summary = _summarize_stderr(stderr_text)
+            interrupted = self._interrupted_exit(exit_code, stderr_text)
             return KkAgentAnalysisResult(
                 ok=False,
-                error=_summarize_stderr(
-                    stderr.decode("utf-8", errors="replace")
-                ) or f"exit {exit_code}",
-                error_type="kkagent_error",
+                error=(
+                    f"kkagent interrupted ({self._signal_label(exit_code)})"
+                    if interrupted else summary or f"exit {exit_code}"
+                ),
+                error_type="interrupted" if interrupted else "kkagent_error",
                 raw_output=raw[:20000],
                 exit_code=exit_code,
             )
         return self.parse_output(raw, exit_code)
+
+    @staticmethod
+    def _interrupted_exit(exit_code: int | None, stderr: str) -> bool:
+        if exit_code is None:
+            return False
+        signal_codes = {
+            -signal.SIGINT,
+            -signal.SIGTERM,
+            128 + signal.SIGINT,
+            128 + signal.SIGTERM,
+        }
+        return exit_code in signal_codes or "KeyboardInterrupt" in stderr
+
+    @staticmethod
+    def _signal_label(exit_code: int | None) -> str:
+        if exit_code in (-signal.SIGINT, 128 + signal.SIGINT):
+            return "SIGINT"
+        if exit_code in (-signal.SIGTERM, 128 + signal.SIGTERM):
+            return "SIGTERM"
+        return f"exit {exit_code}"
+
+    @staticmethod
+    async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
+        """TERM→grace→KILL 并回收独立进程组中的 kkagent/MCP。"""
+        if process.returncode is not None:
+            return
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        else:  # pragma: no cover - Windows fallback
+            process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=PROCESS_STOP_GRACE_SECONDS)
+            return
+        except asyncio.TimeoutError:
+            pass
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:  # pragma: no cover - Windows fallback
+            process.kill()
+        await process.wait()
 
     def parse_output(self, raw: str, exit_code: int | None = None) -> KkAgentAnalysisResult:
         """解析并校验 kkagent 的 JSON 输出。"""

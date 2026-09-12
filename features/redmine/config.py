@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 from typing import Any
@@ -158,7 +157,7 @@ class RedmineConfig:
         persisted = self.manager.save_runtime(runtime)
         if persisted:
             Path(self.manager.runtime_config_path).chmod(0o600)
-        return saved
+        return persisted
 
     def get_redmine_stats_config(self) -> dict[str, Any]:
         return normalize_redmine_stats_config(
@@ -202,16 +201,10 @@ class RedmineConfig:
         name: str,
         payload: dict[str, Any],
     ) -> bool:
-        runtime_path = Path(self.manager.runtime_config_path)
-        try:
-            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            runtime = {}
-        if not isinstance(runtime, dict):
-            runtime = {}
-        runtime[name] = payload
-        self.manager.save_runtime(runtime)
-        return True
+        # save_runtime merges top-level keys, so pass only the changed
+        # section: no stale full-document read, and the real persistence
+        # result is propagated instead of an unconditional True.
+        return bool(self.manager.save_runtime({name: payload}))
 
 
 config_manager = RedmineConfig(settings.project_root)
