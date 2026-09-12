@@ -214,6 +214,14 @@ class DailyBriefRepository:
             ).fetchone()
             return self._row_to_issue(row) if row else None
 
+    def delete_issues(self, run_id: str) -> int:
+        """清空一次 run 的旧 issue，供人工强制重跑时替换冻结快照。"""
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM redmine_daily_brief_issues WHERE run_id=?", (run_id,)
+            )
+            return cursor.rowcount
+
     def reset_stale_running(self, older_than_iso: str) -> int:
         """进程崩溃恢复：把长时间 running/pending 的 run 标记为 failed。"""
         with self._lock, self._connect() as conn:

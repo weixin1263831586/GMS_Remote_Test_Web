@@ -156,6 +156,19 @@ class DailyBriefApiTests(unittest.TestCase):
         self.assertEqual(second["run_id"], first)
         self.assertTrue(second.get("reused") or second.get("already_running"))
 
+        forced = self.client.post(
+            "/api/redmine-agent/daily-brief/run", json={"force": True}
+        ).json()["data"]
+        self.assertEqual(forced["run_id"], first)
+        self.assertFalse(forced.get("reused", False))
+
+    def test_manual_run_rejects_non_boolean_force(self):
+        resp = self.client.post(
+            "/api/redmine-agent/daily-brief/run", json={"force": "yes"}
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("boolean", resp.json()["error"])
+
     def test_run_rejects_invalid_mode(self):
         resp = self.client.post(
             "/api/redmine-agent/daily-brief/run?mode=weekly"

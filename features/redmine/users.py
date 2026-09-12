@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from foundation.config import settings
+from foundation.config_paths import owner_config_path, sanitize_owner_id
 
 
 DB_PATH = settings.data_root / "redmine/redmine.sqlite3"
@@ -15,8 +16,7 @@ DOCS_DIR = settings.data_root / "redmine/docs"
 
 
 def owner_redmine_root(owner_id: str) -> Path:
-    safe_owner = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(owner_id or "").strip())
-    return settings.data_root / "redmine/by_user" / (safe_owner or "anonymous")
+    return settings.data_root / "redmine/by_user" / sanitize_owner_id(owner_id)
 
 
 def owner_db_path(owner_id: str) -> Path:
@@ -32,7 +32,7 @@ def owner_attachments_dir(owner_id: str) -> Path:
 
 
 def owner_runtime_config_path(owner_id: str) -> Path:
-    return owner_redmine_root(owner_id) / "config_runtime.json"
+    return owner_config_path(settings.project_root, "redmine", owner_id)
 
 
 def owner_user_map_path(owner_id: str) -> Path:

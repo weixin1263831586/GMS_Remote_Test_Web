@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from features.redmine.config import RedmineConfig
 from features.redmine.daily_brief_repository import DailyBriefRepository
 from features.redmine.daily_brief_service import (
     DEFAULT_BRIEF_CONFIG,
@@ -64,6 +65,9 @@ def make_service(root: Path, owner: str = "u1") -> DailyBriefService:
 
 
 class ConfigTests(unittest.TestCase):
+    def test_default_parallelism_is_single_kkagent_process(self):
+        self.assertEqual(normalize_daily_brief_config({})["max_parallel_issues"], 1)
+
     def test_defaults_and_clamping(self):
         config = normalize_daily_brief_config({
             "max_parallel_issues": 99, "analysis_backend": "weird",
@@ -84,6 +88,16 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(service.save_config(manager, {"max_issues": 10, "model": "m1"}))
             self.assertEqual(service.get_config(manager)["max_issues"], 10)
             self.assertEqual(service.get_config(manager)["model"], "m1")
+
+    def test_redmine_config_facade_supports_daily_brief_runtime(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager = RedmineConfig(project_root=root)
+            manager.runtime_config_path = root / "owner" / "config_runtime.json"
+            service = make_service(root)
+
+            self.assertTrue(service.save_config(manager, {"agent_profile": "kkagent-owner"}))
+            self.assertEqual(service.get_config(manager)["agent_profile"], "kkagent-owner")
 
 
 class RunLifecycleTests(unittest.TestCase):
@@ -111,6 +125,59 @@ class RunLifecycleTests(unittest.TestCase):
         retry = self.service.start_run("nightly")
         self.assertEqual(retry["run_id"], run_id)
         self.assertEqual(retry["status"], "pending")
+
+    def test_force_reruns_completed_manual_run(self):
+        first = self.service.start_run("manual")
+        run = self.service.repository.get_run(first["run_id"])
+        run.status = "completed"
+        run.finished_at = "2026-09-12T10:00:00"
+        run.report_json = {"counts": {"completed": 2}}
+        run.report_markdown = "old"
+        self.service.repository.update_run(run)
+
+        reused = self.service.start_run("manual")
+        self.assertTrue(reused["reused"])
+        forced = self.service.start_run("manual", force=True)
+        self.assertEqual(forced["run_id"], first["run_id"])
+        self.assertEqual(forced["status"], "pending")
+        refreshed = self.service.repository.get_run(first["run_id"])
+        self.assertEqual(refreshed.finished_at, "")
+        self.assertEqual(refreshed.report_json, {})
+        self.assertEqual(refreshed.report_markdown, "")
+
+    def test_force_rerun_replaces_old_issue_snapshot(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        async def fake_analyze(entry):
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        started = self.service.start_run("manual")
+        with self._patch_snapshot(), patch.object(self.service, "_build_analyzer") as builder:
+            builder.return_value.analyze = fake_analyze
+            asyncio.run(self.service.execute_run(started["run_id"]))
+        self.assertEqual(
+            {item.issue_id for item in self.service.repository.list_issues(started["run_id"])},
+            {101, 102},
+        )
+
+        self.service.start_run("manual", force=True)
+        replacement = dict(SNAPSHOT)
+        replacement["issues"] = [dict(SNAPSHOT["issues"][0])]
+        replacement["counts"] = {
+            "waiting_my_reply": 1, "no_reply_3_days": 0, "total": 1
+        }
+        with patch.object(
+            self.service, "build_triage", AsyncMock(return_value=replacement)
+        ), patch.object(self.service, "_build_analyzer") as builder:
+            builder.return_value.analyze = fake_analyze
+            run = asyncio.run(self.service.execute_run(started["run_id"]))
+
+        self.assertEqual(run.issue_count, 1)
+        self.assertEqual(
+            [item.issue_id for item in self.service.repository.list_issues(started["run_id"])],
+            [101],
+        )
 
     def test_execute_run_completes_with_fake_analyzer(self):
         started = self.service.start_run("nightly")
@@ -182,6 +249,43 @@ class RunLifecycleTests(unittest.TestCase):
         payload = self.service.run_payload(self.service.repository.get_run(run_id))
         for issue in payload["issues"]:
             self.assertNotIn("raw_response", issue)
+
+    def test_reanalyze_refreshes_run_summary_and_uses_persisted_subject(self):
+        started = self.service.start_run("manual")
+        run_id = started["run_id"]
+
+        async def initial_analyze(entry):
+            if entry.get("issue_id") == 101:
+                return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+            return KkAgentAnalysisResult(
+                ok=False, error="bad output", error_type="schema_mismatch"
+            )
+
+        import asyncio
+        with self._patch_snapshot(), patch.object(self.service, "_build_analyzer") as builder:
+            builder.return_value.analyze = initial_analyze
+            run = asyncio.run(self.service.execute_run(run_id))
+        self.assertEqual(run.report_json["counts"]["completed"], 1)
+        self.assertEqual(run.report_json["counts"]["failed"], 1)
+
+        seen_entry = {}
+
+        async def retry_analyze(entry):
+            seen_entry.update(entry)
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        with patch.object(self.service, "_build_analyzer") as builder:
+            builder.return_value.analyze = retry_analyze
+            result = asyncio.run(self.service.reanalyze_issue(run.brief_date, 102))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(seen_entry["subject"], "B")
+        refreshed = self.service.repository.get_run(run_id)
+        self.assertEqual(refreshed.status, "completed")
+        self.assertEqual(refreshed.report_json["counts"]["completed"], 2)
+        self.assertEqual(refreshed.report_json["counts"]["failed"], 0)
+        subjects = {item["subject"] for item in refreshed.report_json["top_priorities"]}
+        self.assertEqual(subjects, {"A", "B"})
 
 
 class AnalyzerBindingTests(unittest.TestCase):

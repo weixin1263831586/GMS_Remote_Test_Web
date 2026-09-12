@@ -69,6 +69,9 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(loaded.result["problem_summary"], "x")
         self.assertEqual(loaded.buckets, ["waiting_my_reply"])
 
+        self.assertEqual(self.repo.delete_issues(run.run_id), 2)
+        self.assertEqual(self.repo.list_issues(run.run_id), [])
+
     def test_reset_stale_running_marks_interrupted_runs(self):
         run = make_run(status="analyzing", started_at="2026-09-13T00:00:00")
         self.repo.create_run(run)

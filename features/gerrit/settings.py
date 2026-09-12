@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from foundation.config import ConfigManager, settings
+from foundation.config import ConfigManager
+from foundation.config_paths import ensure_owner_config_dir, owner_config_path
 from foundation.secrets import decrypt_secret, encrypt_secret
 
 from .config import (
@@ -29,19 +30,9 @@ class GerritConfig:
 
     def for_owner(self, owner_id: str) -> GerritConfig:
         manager = GerritConfig(self.project_root)
-        safe_owner = "".join(
-            ch if ch.isalnum() or ch in ("-", "_") else "_"
-            for ch in str(owner_id or "").strip()
+        runtime_path = ensure_owner_config_dir(
+            owner_config_path(self.project_root, "gerrit", owner_id)
         )
-        if not safe_owner:
-            raise ValueError("owner_id is required")
-        runtime_path = (
-            settings.data_root
-            / "gerrit/by_user"
-            / safe_owner
-            / "config_runtime.json"
-        )
-        runtime_path.parent.mkdir(parents=True, exist_ok=True)
         manager.runtime_config_path = runtime_path
         return manager
 

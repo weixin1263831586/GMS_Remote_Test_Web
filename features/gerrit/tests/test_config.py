@@ -170,8 +170,9 @@ class GerritConfigTests(unittest.TestCase):
             root = Path(tmp)
             (root / "configs").mkdir()
             (root / "foundation").mkdir()
-            fake_settings = SimpleNamespace(data_root=root / "data")
-            with patch("features.gerrit.settings.settings", fake_settings), patch.object(
+            # per-owner 配置路径由 project_root 推导（canonical 在
+            # configs/secrets/<feature>/by_user/），无需 patch settings。
+            with patch.object(
                 gerrit_api, "config_manager", GerritConfig(root)
             ):
                 alice_cfg = gerrit_api._config_for_request(request_for("alice-isolated"))
@@ -182,11 +183,11 @@ class GerritConfigTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     Path(alice_cfg.runtime_config_path),
-                    root / "data/gerrit/by_user/alice-isolated/config_runtime.json",
+                    root / "configs/secrets/gerrit/by_user/alice-isolated/config_runtime.json",
                 )
                 self.assertEqual(
                     Path(bob_cfg.runtime_config_path),
-                    root / "data/gerrit/by_user/bob-isolated/config_runtime.json",
+                    root / "configs/secrets/gerrit/by_user/bob-isolated/config_runtime.json",
                 )
 
     def test_gerrit_department_config_is_derived_from_redmine_user_map_when_runtime_config_empty(self):

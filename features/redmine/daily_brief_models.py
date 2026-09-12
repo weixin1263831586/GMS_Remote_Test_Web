@@ -164,10 +164,14 @@ ISSUE_RESULT_REQUIRED_FIELDS = (
     "recommended_actions",
     "suggested_solution",
     "evidence",
+    "similar_issues",
+    "history_checked",
     "confidence",
 )
 ROOT_CAUSE_TYPES = ("confirmed", "likely", "possible", "unknown")
 RISK_LEVELS = ("high", "medium", "low")
+SIMILARITY_LEVELS = ("same", "similar", "related")
+MAX_SIMILAR_ISSUES = 4
 
 
 def validate_issue_result(result: dict[str, Any]) -> list[str]:
@@ -197,6 +201,28 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
         errors.append("evidence must be a list")
     if not isinstance(result.get("recommended_actions") or [], list):
         errors.append("recommended_actions must be a list")
+    similar = result.get("similar_issues")
+    if not isinstance(similar, list):
+        errors.append("similar_issues must be a list")
+    else:
+        kept: list[dict[str, Any]] = []
+        for item in similar[:MAX_SIMILAR_ISSUES]:
+            if not isinstance(item, dict):
+                errors.append("similar_issues entries must be objects")
+                kept = []  # 任意一条非法即整体不合规，避免半可信列表入库
+                break
+            try:
+                item["issue_id"] = int(item.get("issue_id"))
+            except (TypeError, ValueError):
+                errors.append(f"similar_issues entry has invalid issue_id: {item.get('issue_id')!r}")
+                continue
+            similarity = str(item.get("similarity") or "related")
+            if similarity not in SIMILARITY_LEVELS:
+                similarity = "related"
+            item["similarity"] = similarity
+            kept.append(item)
+        result["similar_issues"] = kept
+    result["history_checked"] = bool(result.get("history_checked"))
     if confidence_below_review_threshold(result):
         result["needs_human_review"] = True
     return errors

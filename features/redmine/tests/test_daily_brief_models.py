@@ -26,6 +26,8 @@ class ValidIssueResultTests(unittest.TestCase):
             "recommended_actions": [{"step": 1, "action": "复查 logcat"}],
             "suggested_solution": "升级安全补丁后重跑",
             "evidence": [{"source": "journal", "reference": "#12", "fact": "…"}],
+            "similar_issues": [],
+            "history_checked": True,
             "confidence": 0.85,
             "root_cause_type": "likely",
             "risk": "medium",
@@ -122,3 +124,47 @@ class ModelRowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SimilarIssuesValidationTests(unittest.TestCase):
+    """v4 schema：similar_issues / history_checked 校验。"""
+
+    def _valid(self) -> dict:
+        base = ValidIssueResultTests._valid(self)
+        base["similar_issues"] = [
+            {"issue_id": 646504, "subject": "RK3576 SSI merge", "similarity": "same",
+             "reusable_fix": "同 SSI merge 流程可复用", "reference_fact": "结案 #33"},
+        ]
+        base["history_checked"] = True
+        return base
+
+    def test_valid_v4_result_passes(self):
+        self.assertEqual(validate_issue_result(self._valid()), [])
+
+    def test_missing_similar_issues_fails(self):
+        result = ValidIssueResultTests._valid(self)
+        result.pop("similar_issues")
+        errors = validate_issue_result(result)
+        self.assertTrue(any("similar_issues" in e for e in errors))
+        result2 = ValidIssueResultTests._valid(self)
+        result2.pop("history_checked")
+        errors2 = validate_issue_result(result2)
+        self.assertTrue(any("history_checked" in e for e in errors2))
+
+    def test_invalid_similar_entry_cleaned_and_flagged(self):
+        result = self._valid()
+        result["similar_issues"] = [
+            {"issue_id": "not-a-number", "similarity": "same"},
+            {"issue_id": 123, "similarity": "bogus"},
+        ]
+        errors = validate_issue_result(result)
+        self.assertTrue(any("issue_id" in e for e in errors))
+        kept = result["similar_issues"]
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0]["similarity"], "related")  # 非法级别回落
+
+    def test_history_checked_coerced_to_bool(self):
+        result = self._valid()
+        result["history_checked"] = "yes"
+        validate_issue_result(result)
+        self.assertIs(result["history_checked"], True)

@@ -26,7 +26,7 @@ systemd timer 00:00 (Persistent=true)
 | `features/redmine/daily_brief_repository.py` | per-owner SQLite（runs/issues，幂等唯一索引） |
 | `features/redmine/daily_brief_snapshot.py` | triage 快照（去重/bucket/fingerprint/delta） |
 | `features/redmine/daily_brief_service.py` | 编排：幂等 run、并发控制、失败隔离、聚合 |
-| `features/redmine/kkagent_analyzer.py` | headless kkagent 分析器 + prompt v1 |
+| `features/redmine/kkagent_analyzer.py` | headless kkagent 分析器 + prompt v3 证据质量门禁 |
 | `features/redmine/daily_brief_api.py` | REST API（triage/run/config/latest/refresh） |
 | `features/redmine/daily_brief_cli.py` | systemd 入口（run-nightly/run-delta/doctor） |
 | `agent/gms-remote-test/skill/references/redmine-daily-triage.md` | Agent 分析规范（skill） |
@@ -48,7 +48,7 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
   "agent_profile": "",
   "max_turns": 12,
   "issue_timeout_seconds": 600,
-  "max_parallel_issues": 2,
+  "max_parallel_issues": 1,
   "max_issues": 50,
   "stale_days": 3,
   "list_limit": 100
@@ -57,6 +57,8 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 
 - `model` 为空时使用 kkagent 当前默认模型；
 - `analysis_backend` 可选 `direct`（保留 fallback 能力，默认 kkagent）。
+- `max_parallel_issues` 默认 1：同机多个 headless kkagent 会话可能互相中断；
+  仅在确认当前 kkagent 运行时支持会话隔离后才提高。
 - `agent_profile` 绑定该 owner 的本机 kkagent agent profile 名
   （`~/.config/gms-agent/profiles/<name>.toml`）。多 owner 部署必须逐 owner
   设置：分析子进程据此注入 `GMS_RT_PROFILE`，且**不继承**宿主进程的
@@ -79,7 +81,7 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 | GET | `/api/redmine-agent/daily-brief/triage` | 当天待处理清单（CLI/MCP 同源） |
 | GET | `/api/redmine-agent/daily-brief/latest` | 最新晨报 |
 | GET | `/api/redmine-agent/daily-brief/{date}` | 指定日期晨报 |
-| POST | `/api/redmine-agent/daily-brief/run` | 手动触发（后台执行，返回 run_id） |
+| POST | `/api/redmine-agent/daily-brief/run` | 手动触发（后台执行，返回 run_id；请求体 `{"force": true}` 强制重跑当天结果） |
 | POST | `/api/redmine-agent/daily-brief/{date}/refresh` | delta 刷新 |
 | POST | `/api/redmine-agent/daily-brief/{date}/issues/{id}/reanalyze` | 单 issue 重分析 |
 | GET/PUT | `/api/redmine-agent/daily-brief/config` | 配置读写 |
@@ -113,9 +115,12 @@ sudo systemctl enable --now gms-redmine-daily-brief-delta.timer   # 可选
 
 ## 可靠性
 
-- 幂等：owner+date+mode 唯一；completed/partial 复用，failed 可重试；
+- 幂等：owner+date+mode 唯一；默认复用 completed/partial，人工可在请求体传
+  `{"force": true}` 替换当天快照并重跑，failed 可重试；
 - 失败隔离：单 issue 失败 → run=partial；全部失败 → failed；
 - 崩溃恢复：进程重启后 `reset_stale_running` 把僵尸 running 标记 failed；
+- 生成前由同一次 kkagent 会话完成证据质量门禁：核对最新评论、检索相关
+  文本附件、区分客户陈述与已验证事实、保留方案适用条件并校准置信度；
 - `Persistent=true`：00:00 停机则开机补跑；flock 防同机并发。
 
 ## 已知限制（第一阶段）

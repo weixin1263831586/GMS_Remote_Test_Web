@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 
@@ -1688,6 +1689,7 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         for name in (
             "gms_rt_redmine_issue_fetch", "gms_rt_redmine_issue",
             "gms_rt_redmine_triage",
+            "gms_rt_redmine_history_search",
             "gms_rt_redmine_journals", "gms_rt_redmine_attachments",
             "gms_rt_redmine_artifact_search", "gms_rt_redmine_artifact_read",
             "gms_rt_redmine_image", "gms_rt_apk_analyze_attachment",
@@ -1719,6 +1721,34 @@ class RedmineEvidenceToolTests(unittest.TestCase):
             # 越界参数被 clamp 到 schema 上限，不透传原始输入。
             mcp_server.redmine_triage_tool({"stale_days": 999})
             self.assertEqual(captured["args"], ["--stale-days", "30"])
+
+    def test_history_search_tool_maps_arguments_to_cli(self):
+        captured: dict[str, Any] = {}
+
+        def fake_run_cli(command: str, args: list[str] | None = None):
+            captured["command"] = command
+            captured["args"] = list(args or [])
+            return "{}", False
+
+        with patch.object(mcp_server, "run_cli", fake_run_cli):
+            self.assertIn(
+                "gms_rt_redmine_history_search", mcp_server._TOOL_HANDLERS,
+            )
+            # 空 query 是参数错误，不发起 CLI 调用。
+            mcp_server.redmine_history_search_tool({})
+            self.assertNotIn("command", captured)
+            mcp_server.redmine_history_search_tool({"q": "  "})
+            self.assertNotIn("command", captured)
+
+            mcp_server.redmine_history_search_tool({
+                "q": "RK3562 Android16 SSI", "limit": 10,
+                "exclude_issue_id": 650761, "resolved_only": True,
+            })
+            self.assertEqual(captured, {
+                "command": "gms-rt-redmine-history-search",
+                "args": ["RK3562 Android16 SSI", "--limit", "10",
+                         "--exclude-issue-id", "650761", "--resolved-only"],
+            })
 
     def test_schemas_use_closed_objects(self):
         for tool in mcp_server.tools():
