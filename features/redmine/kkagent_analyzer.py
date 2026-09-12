@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,10 +24,42 @@ from .daily_brief_models import validate_issue_result
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "redmine_daily_triage_v1"
+PROMPT_VERSION = "redmine_daily_triage_v2"
 
 # kkagent 可执行文件名（PATH 查找）；可通过配置覆盖绝对路径。
 KKAGENT_BINARY = "kkagent"
+
+# ANSI 转义序列（颜色/光标控制/回车）：kkagent 的 stderr 日志即使设了
+# NO_COLOR 也可能残留控制符，入库前统一剥除，避免 Web 端显示乱码。
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\r")
+
+
+def _strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text).strip()
+
+
+# stderr 摘要长度上限。
+STDERR_SUMMARY_LIMIT = 500
+
+
+def _summarize_stderr(text: str) -> str:
+    """从 kkagent 的日志流里提取可读的失败原因。
+
+    失败的真实原因（LLM 限流、配置错误等）几乎总在 ERROR 级行里；头部
+    的 INFO/WARN 启动信息对排障没用。优先 ERROR 行，不足再从日志
+    **尾部**补齐（越靠后越接近失败点），绝不只截开头。
+    """
+    lines = [ln.strip() for ln in _strip_ansi(text).splitlines() if ln.strip()]
+    error_lines = [ln for ln in lines if " ERROR " in ln or ln.startswith("ERROR")]
+    if error_lines:
+        return "; ".join(error_lines)[:STDERR_SUMMARY_LIMIT]
+    tail: list[str] = []
+    for ln in reversed(lines):
+        candidate = " | ".join([ln, *tail])
+        if len(candidate) > STDERR_SUMMARY_LIMIT:
+            break
+        tail.insert(0, ln)
+    return " | ".join(tail)[:STDERR_SUMMARY_LIMIT]
 
 # kkagent 子进程不得继承宿主进程的 Agent 身份环境：多 owner 分析时，
 # 泄漏的 GMS_RT_PROFILE / token 路径会让 MCP 以错误 owner（或 gms 服务
@@ -76,6 +109,19 @@ Confidence rules: 0.90+ requires explicit log/code/test evidence; 0.70-0.89
 adequate evidence with some inference; 0.50-0.69 partial evidence; below 0.50
 you must NOT claim a confirmed root cause. Never fabricate completed tests,
 never claim a fix, never promise timelines, never submit anything to Redmine.
+
+BREVITY (hard limits, Chinese output — write 中文 unless the field name says _en):
+- problem_summary: ONE sentence, <= 60 字, 只说“什么现象/卡在哪”，不铺陈背景。
+- customer_request: <= 60 字，客户要什么。
+- current_blocker: <= 60 字。
+- root_cause: <= 120 字，先给结论，再补一句依据；不要复述原始描述。
+- evidence: at most 5 items, each fact <= 40 字。
+- recommended_actions: at most 5 steps, each action <= 30 字，reason 可省略。
+- suggested_solution: <= 150 字，分点用 ①②③，不要长段落。
+- missing_information: at most 5 items, each <= 20 字。
+- suggested_reply_zh / suggested_reply_en: each <= 300 字，只写要回复客户的核心内容。
+Do not pad with pleasantries or repeat the issue text; cut every sentence that
+does not help the reader act.
 """
 
 
@@ -122,14 +168,14 @@ class KkAgentRedmineAnalyzer:
         )
 
     def build_command(self, prompt: str) -> list[str]:
+        # 注意：kkagent 0.4.x 的 CLI 没有 --model 参数（传了会 exit 2）。
+        # 模型经 KKAGENT_DEFAULT_MODEL 环境变量按次覆盖（见 analyze）。
         command = [
             self.binary,
             "--output-format", "json",
             "--max-turns", str(self.max_turns),
+            "-p", prompt,
         ]
-        if self.model:
-            command += ["--model", self.model]
-        command += ["-p", prompt]
         return command
 
     async def analyze(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
@@ -142,6 +188,12 @@ class KkAgentRedmineAnalyzer:
             if key not in MCP_IDENTITY_ENV_KEYS
         }
         env.update(self.env_extra)
+        # kkagent 的 stderr 默认带终端颜色；无人值守捕获时应为纯文本。
+        env.setdefault("NO_COLOR", "1")
+        # 模型选择：CLI 无 --model 参数，用环境变量按次覆盖（不影响全局
+        # 默认模型）。配置 model 为空时不注入，沿用 kkagent 自身默认。
+        if self.model:
+            env["KKAGENT_DEFAULT_MODEL"] = self.model
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -175,7 +227,9 @@ class KkAgentRedmineAnalyzer:
         if exit_code != 0:
             return KkAgentAnalysisResult(
                 ok=False,
-                error=stderr.decode("utf-8", errors="replace").strip()[:500] or f"exit {exit_code}",
+                error=_summarize_stderr(
+                    stderr.decode("utf-8", errors="replace")
+                ) or f"exit {exit_code}",
                 error_type="kkagent_error",
                 raw_output=raw[:20000],
                 exit_code=exit_code,
@@ -194,6 +248,14 @@ class KkAgentRedmineAnalyzer:
                 exit_code=exit_code,
             )
         result = parsed.get("result") if isinstance(parsed.get("result"), dict) else None
+        if result is None:
+            # kkagent --output-format json 信封把模型最终回复放在 message
+            # 字符串字段。可能是裸 JSON、markdown 围栏，或围栏前带说明散文
+            # （如“证据不足，以下为保守分析”）——统一交给 _json_from_message
+            # 提取；只做严格 json.loads，不做猜测修复。
+            inner = self._json_from_message(parsed.get("message"))
+            if isinstance(inner, dict):
+                result = inner
         result = result if result is not None else parsed
         if not isinstance(result, dict):
             return KkAgentAnalysisResult(
@@ -212,6 +274,36 @@ class KkAgentRedmineAnalyzer:
             )
         return KkAgentAnalysisResult(ok=True, result=result, raw_output=raw[:20000],
                                      exit_code=exit_code)
+
+    @staticmethod
+    def _json_from_message(message: Any) -> dict[str, Any] | None:
+        """从 message 字符串提取 JSON 对象。
+
+        接受三种形态（kkagent 0.4.x 实测均出现过）：
+        - 裸 JSON 对象；
+        - 整体包在 ```json ...``` 围栏内；
+        - 说明散文 + 围栏 JSON（模型在证据不足时的常见输出）。
+
+        只做严格 json.loads；提取不到返回 None，由上层报 invalid_ai_output。
+        """
+        if not isinstance(message, str):
+            return None
+        text = message.strip()
+        fence_start = text.find("```")
+        if fence_start >= 0:
+            after = text[fence_start + 3:]
+            if after.startswith("json"):
+                after = after[4:]
+            fence_end = after.find("```")
+            if fence_end > 0:
+                text = after[:fence_end].strip()
+        if not text.startswith("{"):
+            return None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     @staticmethod
     def _extract_json(raw: str) -> dict[str, Any] | None:
@@ -237,6 +329,7 @@ class KkAgentRedmineAnalyzer:
 
 
 __all__ = [
+    "ANSI_ESCAPE_RE",
     "KKAGENT_BINARY",
     "MCP_IDENTITY_ENV_KEYS",
     "PROMPT_VERSION",

@@ -266,6 +266,7 @@ class DailyBriefService:
                 priority=str(entry.get("priority") or "P3"),
                 priority_score=int(entry.get("priority_score") or 0),
                 fingerprint=str(entry.get("fingerprint") or ""),
+                subject=str(entry.get("subject") or ""),
                 status="pending",
             ))
         # 快照 entry 暂存到内存（run 级），分析阶段直接消费冻结数据。
