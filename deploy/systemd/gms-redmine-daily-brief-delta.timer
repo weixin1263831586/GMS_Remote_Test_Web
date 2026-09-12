@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh GMS Redmine AI Daily Brief at 08:40 (delta)
+
+[Timer]
+OnCalendar=*-*-* 08:40:00
+Persistent=true
+Unit=gms-redmine-daily-brief-delta.service
+
+[Install]
+WantedBy=timers.target

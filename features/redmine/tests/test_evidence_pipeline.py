@@ -416,7 +416,7 @@ class EvidencePipelineTests(unittest.TestCase):
             self.assertTrue(errors and errors[0]["stage"] == "issue")
 
     def test_missing_credentials_error_carries_remediation(self):
-        """2026-09-11 反馈回归：凭据缺失的报错必须带自助修复指引（Web UI / API）。"""
+        """凭据缺失的报错必须带自助修复指引（Web UI / API）。"""
         import asyncio
 
         import features.redmine.evidence as evidence
@@ -438,7 +438,7 @@ class EvidencePipelineTests(unittest.TestCase):
             self.assertIn("Web UI", stored["errors"][0]["message"])
 
     def test_missing_base_url_error_carries_remediation(self):
-        """2026-09-11 反馈回归：base_url 缺失的报错必须指向 Web UI 设置页。"""
+        """base_url 缺失的报错必须指向 Web UI 设置页。"""
         import asyncio
 
         from features.redmine.evidence import EvidenceError, EvidenceFetcher

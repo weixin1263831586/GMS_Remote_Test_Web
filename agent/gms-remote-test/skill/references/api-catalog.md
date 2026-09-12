@@ -60,7 +60,7 @@ human user in their own shell.
 | Config and files | `gms-rt-config-read`, `gms-rt-config-update`, `gms-rt-files-progress` |
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-selfcheck`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
 | Code search | `gms-rt-opengrok-search` |
-| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
+| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
 | SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |
 
 Related commands intentionally have different contracts:
@@ -83,7 +83,7 @@ Related commands intentionally have different contracts:
 - `gms-rt-apk-status` without a task id lists all analysis tasks;
   `gms-rt-apk-manifest --permissions` returns only declared permissions.
 
-## Redmine evidence workflow (read-only, 2026-09-08 plan)
+## Redmine evidence workflow (read-only)
 
 Pre-flight checklist (run both before the first fetch; ~10 seconds to
 discover a scope or credential gap instead of failing at step 4):

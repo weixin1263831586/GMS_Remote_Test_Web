@@ -140,14 +140,15 @@ class RedmineConfig:
         username: str,
         password: str,
     ) -> bool:
+        """加密保存 Redmine 用户名/密码；已保存的 API Key 保持共存。"""
         runtime = self.manager.get_runtime_config()
-        runtime["redmine_auth"] = {
-            "username": username,
-            "encrypted_password": encrypt_secret(password),
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        }
-        saved = self.manager.save_runtime(runtime)
-        if saved:
+        saved = dict(runtime.get("redmine_auth") or {})
+        saved["username"] = username
+        saved["encrypted_password"] = encrypt_secret(password)
+        saved["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        runtime["redmine_auth"] = saved
+        persisted = self.manager.save_runtime(runtime)
+        if persisted:
             Path(self.manager.runtime_config_path).chmod(0o600)
         return saved
 

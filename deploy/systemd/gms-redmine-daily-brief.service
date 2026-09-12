@@ -1,0 +1,23 @@
+[Unit]
+Description=GMS Redmine AI Daily Brief (nightly full analysis)
+Documentation=file:///opt/gms-remote-test/docs/redmine-daily-brief.md
+After=network-online.target gms-remote-test.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 按部署路径调整 WorkingDirectory / ExecStart 的 venv
+WorkingDirectory=/opt/gms-remote-test
+ExecStart=/opt/gms-remote-test/.venv/bin/python -m features.redmine.daily_brief_cli run-nightly
+# 不给晨报任何特权：只读写 GMS data root
+User=gms
+Group=gms
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/gms-remote-test/data
+# 凌晨分析可能较长；单 issue 超时由配置控制，这里只兜底
+TimeoutStartSec=4h
+
+[Install]
+WantedBy=multi-user.target

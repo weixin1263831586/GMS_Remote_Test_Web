@@ -59,7 +59,7 @@ ANALYZABLE_KINDS = {"text", "log", "image", "pdf", "archive", "apk"}
 
 _TEXT_ENCODINGS = ("utf-8", "gb18030", "utf-16", "latin-1")
 _DERIVED_TEXT_MAX_BYTES = 64 * 1024 * 1024
-# 2026-09-11 反馈（反馈 2026-09-11）：zip 内文本成员的派生文本限制。单成员解压后
+# zip 内文本成员的派生文本限制。单成员解压后
 # 超过阈值、成员数超上限或总量超上限都会跳过剩余成员（可审计地记录在
 # artifact error 里），防止 zip 炸弹拖垮 fetch 或搜索。
 ZIP_MEMBER_TEXT_MAX_BYTES = 2 * 1024 * 1024
@@ -217,7 +217,7 @@ def owner_base_url(owner_id: str) -> str:
 
 
 def preflight_owner_fetch(owner_id: str) -> str:
-    """抓取前置校验（2026-09-11 反馈：失败快照缺 pre-flight）。
+    """抓取前置校验（在建快照之前确认配置，避免失败快照）。
 
     在建快照之前确认 owner 已配置 base_url 与 Redmine 凭据，缺失时立即
     抛 ``EvidenceError``（409/401），快速失败且不留 failed 垃圾快照。

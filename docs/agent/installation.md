@@ -21,8 +21,7 @@
 - **5 分钟 TTL**：过期作废（服务端 `ENROLLMENT_TTL_MINUTES = 5`）。
 - 配套属性在铸造时确定，兑换方无法自选：scopes（权限范围，
   取自平台 `AGENT_SCOPES` 词表，如 `devices.read`、`tests.execute`、
-  `jobs.read` 等）。Web UI 铸造页的默认勾选集合（2026-09-11 反馈后）
-  为：`devices.read`、`devices.lease`、`devices.use_leased`、
+  `jobs.read` 等）。Web UI 铸造页的默认勾选集合为：`devices.read`、`devices.lease`、`devices.use_leased`、
   `tests.execute`、`tests.cancel`、`jobs.read`、`reports.read`，以及
   只读证据/分析链 `redmine.read`、`artifacts.read_own`、
   `apk.analyze_own`、`sdk.read`——即默认能跑通 Skill 文档化的
@@ -59,7 +58,7 @@ curl -fsSL --cacert "$GMS_INSTALL_CA_CERT" \
 - 受控实验环境若使用自签名证书，可按部署策略使用 installer 支持的
   insecure bootstrap（`GMS_INSTALL_INSECURE=1`）；不要在公网或不可信网络中
   关闭 TLS 校验。
-- **运行时同样不得用 insecure（2026-09-11 反馈 S-2）**：bootstrap 用
+- **运行时同样不得用 insecure**：bootstrap 用
   `GMS_INSTALL_INSECURE=1` 只是一次性引导手段，安装完成后必须让 profile
   信任 Controller CA——把 CA 证书下发到 Agent 主机（如
   `/etc/gms/controller-ca.pem`），重新 enroll/写 profile 时带上

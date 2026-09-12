@@ -1,7 +1,7 @@
 """Redmine 凭据端点（从 api.py 拆出，S-1 拆分）。
 
 `GET /config/credentials` 报告配置状态；`POST /config/credentials`
-human-only 保存（反馈 2026-09-11 S-1：agent token 不得写凭据，写入记
+human-only 保存（agent token 不得写凭据，写入记
 安全审计）。复用 api.py 的 helper（owner 推导 / 统计缓存失效）。
 """
 
@@ -39,7 +39,7 @@ async def get_credentials_status(request: Request):
 async def save_credentials(request: Request):
     """保存 Redmine 凭据到登录用户的运行时配置（human-only）。
 
-    安全边界（反馈 2026-09-11 S-1）：只接受人工会话。Agent Service
+    安全边界：只接受人工会话。Agent Service
     Token 与该账号共享 owner 存储，凭据必须由人掌握——agent 调用直接
     403 并返回修复指引；写入成功记入安全审计链（不含凭据内容）。
     """
@@ -52,7 +52,7 @@ async def save_credentials(request: Request):
     except HTTPException as exc:
         detail = getattr(exc, "detail", None)
         if isinstance(detail, dict) and detail.get("agent_forbidden"):
-            # 依赖层只报“被拒”；这里补上自助修复路径（2026-09-11 反馈）：
+            # 依赖层只报“被拒”；这里补上自助修复路径：
             # agent 与 enroll 账号共享 owner 存储，人在 Web UI 配置即可。
             return JSONResponse(
                 status_code=403,

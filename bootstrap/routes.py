@@ -45,6 +45,7 @@ from features.gerrit.settings import config_manager as gerrit_config_manager
 from features.redmine import api as redmine
 from features.redmine import apk_import_api as redmine_apk_import
 from features.redmine import credentials_api as redmine_credentials
+from features.redmine import daily_brief_api as redmine_daily_brief
 from features.redmine import evidence_api as redmine_evidence
 from features.redmine import evidence_search_api as redmine_evidence_search
 from features.redmine import reply_api as redmine_reply
@@ -144,6 +145,7 @@ ALL_ROUTERS = [
     redmine.page_router,
     redmine_evidence.router,
     redmine_evidence_search.router,
+    redmine_daily_brief.router,
     redmine_credentials.router,
     redmine_apk_import.router,
     redmine_apk_import.apk_router,

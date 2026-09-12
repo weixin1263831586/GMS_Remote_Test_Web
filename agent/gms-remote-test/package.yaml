@@ -14,7 +14,7 @@
 # declaration (CLI GMS_RT_VERSION, MCP SERVER_VERSION, the three manifests)
 # from this file.
 name: gms-remote-test
-version: 0.20.1
+version: 0.21.0
 description: >-
   GMS Remote Test agent runtime: gms-rt CLI, MCP server and the operational
   Skill for device inventory, CTS/GTS/VTS/STS execution, durable jobs,

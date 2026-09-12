@@ -120,6 +120,8 @@ described in [references/api-catalog.md](references/api-catalog.md).
   [references/project-map.md](references/project-map.md)
 - code-change verification rules:
   [references/project-maintenance.md](references/project-maintenance.md)
+- daily-brief analysis contract (triage workflow, output schema, safety):
+  [references/redmine-daily-triage.md](references/redmine-daily-triage.md)
 
 ## Maintain this repository
 

@@ -1,8 +1,9 @@
     :root { color-scheme: dark; --bg:#0b0d12; --panel:#131720; --panel2:#191f2b; --border:#2b3342; --text:#e8edf7; --muted:#96a1b5; --primary:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --high:#ef4444; --medium:#f59e0b; --low:#6b7280; }
     * { box-sizing: border-box; }
-    html { scrollbar-gutter: stable; overflow-y: scroll; overflow-x: hidden; scroll-padding-top:86px; }
+    html { scrollbar-gutter: stable; overflow-y: scroll; overflow-x: hidden; scroll-padding-top:56px; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
-    header { position:sticky; top:0; z-index:1000; display:grid; grid-template-columns:max-content minmax(0, 1fr) 700px 340px; align-items:center; column-gap:16px; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
+    /* Tabs 与工具栏同一行：Tabs 靠左，搜索/筛选/按钮靠右；窄屏时回退为两行。 */
+    header { position:sticky; top:0; z-index:1000; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:14px; padding:6px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     .header-right { display:flex; align-items:center; gap:12px; flex-shrink:0; flex-wrap:wrap; }
     .muted { color:var(--muted); font-size:13px; line-height:1.6; }
@@ -13,16 +14,25 @@
     button.danger:hover { background:#991b1b; }
     button:disabled { opacity:.55; cursor:not-allowed; }
     .btn-group { display:flex; gap:6px; flex-wrap:wrap; }
-    /* 固定头部工具栏布局，避免状态文本引发重排。 */
-    .header-spacer { min-width:0; }
-    header .filter-bar { width:700px; min-width:700px; justify-content:flex-start; flex-wrap:nowrap; }
-    header .btn-group { flex-wrap:nowrap; }
-    header .btn-group { width:340px; min-width:340px; justify-content:flex-end; }
-    header .btn-group > button { width:78px; min-width:78px; white-space:nowrap; box-sizing:border-box; padding:0 6px; }
-    header .btn-group > button[title="设置"] { width:38px; min-width:38px; }
-    header .filter-bar input { width:260px; min-width:260px; }
-    header .filter-bar select { width:100px; min-width:100px; }
-    header .filter-bar input#syncAssigneeInput { width:200px; min-width:200px; }
+    /* 工具栏与 Tabs 同行，整体靠右；控件略微缩小，筛选区与按钮区以细分隔线区分。 */
+    .header-toolbar { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex:1 1 auto; min-width:0; overflow-x:auto; overflow-y:hidden; padding-bottom:1px; scrollbar-width:thin; }
+    header .filter-bar { flex:0 1 auto; min-width:0; justify-content:flex-end; flex-wrap:nowrap; gap:6px; }
+    header .btn-group { flex:0 0 auto; flex-wrap:nowrap; justify-content:flex-end; gap:5px; padding-left:9px; margin-left:1px; border-left:1px solid var(--border); }
+    header .filter-bar input, header .filter-bar select, header .btn-group > button { height:28px; font-size:12px; border-radius:6px; white-space:nowrap; }
+    header .filter-bar input::placeholder { color:#7c879b; }
+    header .filter-bar input:focus, header .filter-bar select:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(59,130,246,.18); }
+    header .filter-bar input#searchInput { width:clamp(140px, 12vw, 200px); min-width:140px; }
+    header .filter-bar select { width:86px; min-width:86px; }
+    header .filter-bar input#syncAssigneeInput { width:132px; min-width:132px; }
+    header .btn-group > button { width:72px; min-width:72px; padding:0; text-align:center; }
+    header .btn-group > .settings-btn { width:72px; min-width:72px; }
+
+    /* 屏幕不够宽时，Tabs 与工具栏各自独占一行，避免挤压。 */
+    @media (max-width:1199px) {
+        header { flex-wrap:wrap; }
+        .tabs { flex:1 1 100%; width:100%; }
+        .header-toolbar { flex:1 1 100%; justify-content:flex-start; }
+    }
 
     /* Modal */
     .modal { display:none; position:fixed; inset:0; width:100vw; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:10000; padding:clamp(8px,2.5vw,20px); overflow:hidden; overscroll-behavior:contain; }
@@ -59,8 +69,8 @@
     #settingsModal .modal-title { font-size:16px; }
 
     /* Tabs — inline in header, left side */
-    .tabs { display:flex; gap:0; }
-    .tab { padding:8px 16px; cursor:pointer; font-size:13px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; }
+    .tabs { display:flex; gap:0; flex:0 1 auto; min-width:min-content; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
+    .tab { flex:0 0 auto; padding:8px 10px; cursor:pointer; font-size:13px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
     .tab:hover { color:var(--text); }
     .tab.active { color:var(--primary); border-bottom-color:var(--primary); }
 
@@ -175,7 +185,7 @@
     .clickable-stat { cursor:pointer; transition:transform .15s,box-shadow .15s; }
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
     .stats-section { margin-bottom:18px; }
-    .stats-section[id], .dept-user-block[id], .project-user-block[id] { scroll-margin-top:86px; }
+    .stats-section[id], .dept-user-block[id], .project-user-block[id] { scroll-margin-top:56px; }
     .stats-section h2 { font-size:15px; margin:0 0 10px; }
     .dashboard-summary-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap; min-height:30px; }
     .dashboard-summary-title { margin:0; font-size:15px; line-height:30px; }
@@ -240,27 +250,18 @@
     details summary { cursor:pointer; font-size:13px; color:var(--muted); font-weight:600; }
     pre { white-space:pre-wrap; word-break:break-word; background:#090c11; border:1px solid var(--border); border-radius:6px; padding:10px; color:#d7e1f5; font-size:12px; }
 
-    @media (max-width:1800px) {
-        header {
-            grid-template-columns:minmax(0,1fr) 340px;
-            grid-template-areas:"tabs actions" "filters filters";
-            row-gap:8px;
-        }
-        header > .tabs { grid-area:tabs; min-width:0; overflow-x:auto; }
-        header > .header-spacer { display:none; }
-        header > .filter-bar { grid-area:filters; width:100%; min-width:0; }
-        header > .btn-group { grid-area:actions; }
-    }
-    @media (max-width:900px) { header { grid-template-columns:1fr; grid-template-areas:"tabs" "filters" "actions"; row-gap:8px; } .tabs { margin-left:0; width:100%; } header .filter-bar { width:100%; min-width:0; } header .filter-bar input { width:140px; min-width:140px; } header .btn-group { width:100%; min-width:0; justify-content:flex-start; } .two-col { grid-template-columns:1fr; } .issue-mini { grid-template-columns:1fr; gap:6px; align-items:start; } .issue-mini-right { justify-content:flex-start; flex-wrap:wrap; } .issue-mini-right-meta { text-align:left; } }
     @media (max-width:900px) {
-        .tabs { overflow-x:auto; flex-wrap:nowrap; }
-        .tab { flex:0 0 auto; }
-        header .filter-bar, header .btn-group { flex-wrap:wrap; }
-        header .filter-bar input, header .filter-bar select {
-            flex:1 1 140px;
-            width:auto !important;
-            min-width:0;
-        }
+        header { flex-wrap:wrap; padding-inline:10px; gap:6px; }
+        .tabs { flex:1 1 100%; width:100%; overflow-x:auto; flex-wrap:nowrap; }
+        .header-toolbar { flex:1 1 100%; justify-content:flex-start; }
+        header .filter-bar, header .btn-group { flex-wrap:nowrap; }
+        header .btn-group { border-left:0; padding-left:0; margin-left:0; }
+        header .filter-bar input#searchInput { width:150px; min-width:150px; }
+        header .filter-bar input#syncAssigneeInput { width:110px; min-width:110px; }
+        .two-col { grid-template-columns:1fr; }
+        .issue-mini { grid-template-columns:1fr; gap:6px; align-items:start; }
+        .issue-mini-right { justify-content:flex-start; flex-wrap:wrap; }
+        .issue-mini-right-meta { text-align:left; }
     }
 
     /* ---- Knowledge base: case cards + actions ---- */

@@ -1,4 +1,4 @@
-"""POST /config/credentials 安全边界测试（反馈 2026-09-11 S-1）。
+"""POST /config/credentials 安全边界测试。
 
 - human 会话可以写入；
 - Agent Service Token 必须被拒（403 + 修复指引）；

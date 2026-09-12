@@ -1,4 +1,4 @@
-"""Enrollment-code service (split from agent_tokens.py, 2026-09-11 反馈).
+"""Enrollment-code service (split from agent_tokens.py).
 
 AgentTokenEnrollmentMixin holds the one-shot enrollment-code lifecycle
 (``create_agent_enrollment`` / ``redeem_agent_enrollment``). Mixed into
@@ -58,8 +58,8 @@ class AgentTokenEnrollmentMixin:
         form is what makes this acceptable).
 
         ``ttl_minutes`` (1–30, default ``ENROLLMENT_TTL_MINUTES``) lets an
-        admin widen the exchange window for slow hand-off (feedback
-        2026-09-11 2026-09-11 反馈) while keeping it short by default.
+        admin widen the exchange window for slow hand-off while keeping
+        it short by default.
         """
         if ttl_minutes is None:
             ttl_minutes = self.ENROLLMENT_TTL_MINUTES
@@ -113,8 +113,8 @@ class AgentTokenEnrollmentMixin:
         leaked code cannot grant more than the admin approved.
 
         Returns ``(record, reason)`` where a successful redeem yields the
-        token record and ``{}``. Failures are distinguishable (feedback
-        2026-09-11 2026-09-11 反馈): ``{"reason": "used", "used_at": ...}``,
+        token record and ``{}``. Failures are distinguishable:
+        ``{"reason": "used", "used_at": ...}``,
         ``{"reason": "expired", "expires_at": ...}`` or
         ``{"reason": "invalid"}``.
         """

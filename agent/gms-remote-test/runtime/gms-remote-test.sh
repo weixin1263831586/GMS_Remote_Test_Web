@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.20.1"
+GMS_RT_VERSION="0.21.0"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -118,7 +118,7 @@ CURL_EXIT_SSL_CERT=60
 # stays revoked regardless of the local file.
 GMS_RT_PROFILE="${GMS_RT_PROFILE:-default}"
 GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.cookies}"
-# Agent Service Token (2026-09-08 audit §二): when GMS_AUTH_TOKEN_FILE points
+# Agent Service Token: when GMS_AUTH_TOKEN_FILE points
 # at a 0600 token file, every request carries Authorization: Bearer <token>
 # instead of the session cookie. The CLI never prints the token and agents
 # only ever learn the path. Token auth is mutually exclusive with the
@@ -127,7 +127,7 @@ GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/sta
 # session cookie (the server treats that combination as a privilege mix).
 # Human mode stays Cookie only.
 GMS_AUTH_TOKEN_FILE="${GMS_AUTH_TOKEN_FILE:-}"
-# Default-path discovery (2026-09-10): gms-rt-agent-enroll writes
+# Default-path discovery: gms-rt-agent-enroll writes
 # ${XDG_STATE_HOME}/gms-remote-test/${GMS_RT_PROFILE}.token when --out is not
 # given, but this variable previously stayed empty, so a fresh shell/CLI (or
 # an MCP server whose registration env lacks the variable) silently fell back
@@ -500,7 +500,7 @@ gms-rt-auth-status() {
     local response
     response=$(api_call "/auth/status") || return $?
     format_elevated_until "$response" | jq '.'
-    # 本地凭据形态对照（反馈 2026-09-11 P1-3）：token 文件 mtime 让
+    # 本地凭据形态对照：token 文件 mtime 让
     # 「MCP 缓存的旧 token vs 新落盘文件」的不一致 10 秒内可见。
     if [ "$GMS_RT_OUTPUT" != "json" ] && [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
         local mtime
@@ -656,7 +656,7 @@ gms-rt-auth-elevation-reset() {
 }
 
 # ==============================================================================
-# Agent Service Token commands (2026-09-08 audit §二/§三/§五)
+# Agent Service Token commands
 # ==============================================================================
 
 # Resolve the token output path for enrollment from a profile TOML's
@@ -687,8 +687,8 @@ _gms_enroll_profile_controller_field() {
         }' "$toml"
 }
 
-# Pick the enrollment token destination, profile-aware (feedback
-# 2026-09-11 P1-1). Order: --out > --profile > explicitly selected
+# Pick the enrollment token destination, profile-aware.
+# Order: --out > --profile > explicitly selected
 # GMS_RT_PROFILE with a TOML > the single registered profile > legacy
 # default path. Multiple profiles without an explicit choice is a usage
 # error (fail-closed, mirrors the launcher's profile selection rule).
@@ -836,7 +836,7 @@ gms-rt-agent-enroll() {
     body=$(_body_from_http_response "$response")
     http_status=$(_status_from_http_response "$response")
     if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
-        # 三态可区分（反馈 2026-09-11 P1-2）：服务端 detail.reason 决定
+        # 三态可区分：服务端 detail.reason 决定
         # 人话提示，避免"已用/已过期/无效"混成一团。
         local reason detail_time
         reason=$(echo "$body" | jq -r '.detail.reason // empty')
@@ -892,7 +892,7 @@ gms-rt-auth-credential-mode() {
     fi
 }
 
-# Pre-flight scope check (feedback 2026-09-11 P0-1): verify the current
+# Pre-flight scope check: verify the current
 # credential carries the scopes a documented workflow needs BEFORE the first
 # 403. Default requirement = the Redmine evidence analysis chain; override
 # with --requires s1,s2. Exit code is authoritative for automation.
@@ -1074,7 +1074,7 @@ gms-rt-agent-enroll-code() {
     fi
     # The one-shot code is secret material: print once, never log it twice.
     echo "$body" | jq '.enrollment'
-    # 人话补充（反馈 2026-09-11 P1-2）：绝对过期时刻让"还剩多久"可见。
+    # 人话补充：绝对过期时刻让"还剩多久"可见。
     local expires_iso
     expires_iso=$(echo "$body" | jq -r '.enrollment.expires_at // empty')
     [ -n "$expires_iso" ] && [ "$GMS_RT_OUTPUT" != "json" ] && {
@@ -1107,7 +1107,7 @@ gms-rt-agent-token-revoke() {
 }
 
 # ==============================================================================
-# Cluster worker/device discovery (2026-09-08 audit §六)
+# Cluster worker/device discovery
 # ==============================================================================
 
 gms-rt-cluster-workers() {
@@ -1199,7 +1199,7 @@ gms-rt-cluster-resolve() {
 # Extract error message from API response.
 # FastAPI HTTPException detail can be an object (e.g. scope errors carry
 # {message, scope_required}); surface the server-side detail instead of
-# collapsing it to "Unknown error" (feedback 2026-09-11 P0-2).
+# collapsing it to "Unknown error".
 extract_api_error() {
     local response="$1"
     echo "$response" | jq -r '
@@ -1636,7 +1636,7 @@ gms-rt-burn-firmware() {
     [ ! -f "$firmware_path" ] && { error "Firmware file not found: $firmware_path"; return 1; }
     check_jq || return 1
     devices=$(_resolve_devices "$devices")
-    # Agent token sessions burn only with a one-shot approval (§五); human
+    # Agent token sessions burn only with a one-shot approval; human
     # admin sessions may omit it. Forwarded to the server via env.
     GMS_RT_BURN_APPROVAL_TOKEN="$approval_token"
     export GMS_RT_BURN_APPROVAL_TOKEN
@@ -2485,7 +2485,7 @@ gms-rt-devices-shell() {
     [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID [--approval-token TOKEN] [COMMAND]"; return 1; }
 
     shift
-    # One-shot approval token (2026-09-08 audit §五): with this flag the CLI
+    # One-shot approval token: with this flag the CLI
     # validates-and-consumes the approval server-side (tool+device+command
     # binding, 5-min TTL, single use) before running the command.
     local approval_token=""
@@ -2563,8 +2563,8 @@ gms-rt-devices-shell() {
         # allowlist). Binaries with mutating subcommands (settings/cmd/am/
         # pm/dpm/content/device_config/wm/logcat/dmesg/dumpsys) are verified
         # per-subcommand below — the first token alone is NOT sufficient
-        # (audit round 3: a forged marker previously let `settings put`
-        # through because only the leading binary was checked).
+        # (a forged marker previously let `settings put` through when only
+        # the leading binary was checked).
         local _ro_first
         _ro_first=${shell_command%% *}
         # Binaries whose read-only surface is unconditional.
@@ -2891,7 +2891,7 @@ gms-rt-opengrok-search() {
 }
 
 # ==============================================================================
-# Redmine Evidence Commands (2026-09-08 plan: read-only evidence chain)
+# Redmine Evidence Commands (read-only evidence chain)
 # ==============================================================================
 
 gms-rt-redmine-issue-fetch() {
@@ -2995,13 +2995,13 @@ gms-rt-redmine-issue-show() {
     check_jq
     local force_issue=0
     if [ "$2" = "--issue" ] || [ "$1" = "--issue" ]; then
-        # 显式声明第一个参数是 issue_id（2026-09-11 反馈：参数语义混淆）。
+        # 显式声明第一个参数是 issue_id。
         if [ "$1" = "--issue" ]; then
             snapshot_id="$2"
         fi
         force_issue=1
     fi
-    # 2026-09-11 反馈：第一个参数历史上必须是 snapshot_id，传 issue_id
+    # 第一个参数历史上必须是 snapshot_id，传 issue_id
     # 会得到费解的 "Snapshot not readable"。约定：ev_ 前缀或含连字符视为
     # snapshot_id；纯数字视为 issue_id 并解析最新快照；--issue/--snapshot
     # 可显式消歧。
@@ -3040,8 +3040,8 @@ gms-rt-redmine-issue-show() {
     fi
     if echo "$status_resp" | jq -e '.success' > /dev/null; then
         echo "$status_resp" | jq -r '.data | "snapshot: \(.snapshot_id)\nissue: \(.issue_id)\nstatus: \(.status) complete=\(.complete)\njournals: \(.journal_count)  attachments: \(.attachment_count)/\(.downloaded_count) downloaded\nfetched_at: \(.fetched_at)  source_updated: \(.source_updated_on)\nsha256: \(.content_sha256)"'
-        # failed/partial 快照必须把服务端 errors[] 透传出来（反馈
-        # 2026-09-11 P0-2：MCP 可见而 CLI 不可见导致排障绕路）。
+        # failed/partial 快照必须把服务端 errors[] 透传出来（MCP
+        # 可见而 CLI 不可见会导致排障绕路）。
         if echo "$status_resp" | jq -e '.data.status == "failed" or .data.status == "partial" or ((.data.errors // []) | length > 0)' >/dev/null; then
             echo "errors:"
             echo "$status_resp" | jq -r '.data.errors[]? | "  [\(.stage // "issue")] \(.message // .)"'
@@ -3110,7 +3110,7 @@ gms-rt-redmine-attachment-download() {
     _refresh_tls_args
     _ensure_auth_cookie_jar || { rm -f -- "$status_file" "$tmp_output"; return "$GMS_RT_EXIT_OPERATION"; }
     # 先落临时文件：非 200 时响应体是 JSON 错误（如 scope_required），
-    # 不能写进目标输出再整文件删除（反馈 2026-09-11 P0-2 的详情丢失根因）。
+    # 不能写进目标输出再整文件删除（否则错误详情会丢失）。
     curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
         -o "$tmp_output" -w '%{http_code}' --max-time "$CURL_TIMEOUT" \
         "${API_BASE}/redmine-agent/artifacts/$artifact_id/download" > "$status_file"
@@ -3152,10 +3152,76 @@ gms-rt-redmine-attachment-download() {
     fi
 }
 
-# Pre-flight credential check (feedback 2026-09-11 P0-3): reports whether the
+# Pre-flight credential check: reports whether the
 # owner account behind the current credential has Redmine credentials
 # configured. Equivalent to GET /redmine-agent/config/credentials; never
 # returns secret material.
+# 当天待处理 triage（waiting_my_reply / no_reply_3_days 去重）。
+# 只读：数据来自个人看板 workload 统计，本命令不做任何业务判断。
+gms-rt-redmine-triage() {
+    local stale_days=""
+    local list_limit=""
+    local refresh=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                echo "Usage: gms-rt-redmine-triage [--stale-days N] [--list-limit N] [--refresh]"
+                echo "  List today's pending Redmine issues (waiting_my_reply + no_reply_3_days, deduped)."
+                echo "  Read-only; source of truth is the personal dashboard workload statistics."
+                return 0
+                ;;
+            --stale-days)
+                shift
+                [ $# -gt 0 ] || { error "--stale-days requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                stale_days="$1"
+                ;;
+            --list-limit)
+                shift
+                [ $# -gt 0 ] || { error "--list-limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                list_limit="$1"
+                ;;
+            --refresh) refresh=1 ;;
+            *) error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE" ;;
+        esac
+        shift
+    done
+    check_jq || return 1
+
+    local query=""
+    [ -n "$stale_days" ] && query="${query}&stale_days=${stale_days}"
+    [ -n "$list_limit" ] && query="${query}&list_limit=${list_limit}"
+    [ "$refresh" = "1" ] && query="${query}&refresh=true"
+    [ -n "$query" ] && query="?${query#&}"
+
+    local response call_status
+    response=$(api_call "/redmine-agent/daily-brief/triage${query}" "GET")
+    call_status=$?
+    if [ "$call_status" -ne 0 ]; then
+        error "Redmine triage failed: $(extract_api_error "$response")"
+        return "$call_status"
+    fi
+    local configured
+    configured=$(echo "$response" | jq -r '.data.configured // true')
+    if [ "$configured" = "false" ]; then
+        if [ "$GMS_RT_OUTPUT" = "json" ]; then
+            echo "$response" | jq '.'
+        else
+            error "Redmine credentials not configured for this owner account."
+            warning "Ask the enrolling account owner to configure them in the Web UI settings page."
+        fi
+        return "$GMS_RT_EXIT_PERMISSION"
+    fi
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        echo "$response" | jq '.data'
+    else
+        echo "$response" | jq -r '"generated_at: \(.data.generated_at)  snapshot: \(.data.snapshot_hash[0:12])",
+            "waiting_my_reply: \(.data.counts.waiting_my_reply)  no_reply_3_days: \(.data.counts.no_reply_3_days)  total: \(.data.counts.total)"'
+        echo "$response" | jq -r '.data.issues[] |
+            "\(.priority)  #\(.issue_id)  [\((.buckets // []) | join(","))]  unreplied=\(.unreplied_days // 0)  \(.subject)"'
+    fi
+    return 0
+}
+
 gms-rt-redmine-credentials-status() {
     check_jq || return 1
     local response call_status
@@ -3230,7 +3296,7 @@ gms-rt-artifact-search() {
     local query=""
     local limit=50
     local positional=()
-    # 计划 §8 契约：<snapshot_id> --query QUERY；同时兼容两个位置参数。
+    # 契约：<snapshot_id> --query QUERY；同时兼容两个位置参数。
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --query)
@@ -3358,11 +3424,11 @@ gms-rt-sdk-search() {
 }
 
 gms-rt-sdk-read() {
-    # 计划 §12：read 只接受自包含 opaque result_id；source/path/commit
+    # read 只接受自包含 opaque result_id；source/path/commit
     # 由 result_id 载荷携带，客户端不再拼接自由路径。
     local result_id=""
     local offset=0 limit=400
-    # 位置参数形式：gms-rt-sdk-read SDK_RESULT_ID（计划 §8 契约）。
+    # 位置参数形式：gms-rt-sdk-read SDK_RESULT_ID（同上契约）。
     if [ $# -ge 1 ]; then
         case "$1" in
             -*) : ;;
@@ -4775,7 +4841,7 @@ gms-rt-test-suites-result() {
     fi
 }
 
-# P1-3：列出套件可用模块（解析 testcases/ 目录，精确/模糊过滤）。
+# 列出套件可用模块（解析 testcases/ 目录，精确/模糊过滤）。
 # 用法: gms-rt-test-modules <suite_path|suite_name> [--filter PATTERN]
 gms-rt-test-modules() {
     local suite_path=""
@@ -5530,6 +5596,7 @@ _gms_rt_command_usage() {
         gms-rt-redmine-attachments) printf '%s' 'gms-rt-redmine-attachments <snapshot_id>' ;;
         gms-rt-redmine-attachment-download) printf '%s' 'gms-rt-redmine-attachment-download <artifact_id> [output_path]' ;;
         gms-rt-redmine-credentials-status) printf '%s' 'gms-rt-redmine-credentials-status' ;;
+        gms-rt-redmine-triage) printf '%s' 'gms-rt-redmine-triage [--stale-days N] [--list-limit N] [--refresh]' ;;
         gms-rt-artifact-read) printf '%s' 'gms-rt-artifact-read <artifact_id> [--offset N] [--limit N]' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'gms-rt-redmine-artifact-image <artifact_id>' ;;
         gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N]' ;;
@@ -5626,6 +5693,7 @@ _gms_rt_command_summary() {
         gms-rt-redmine-attachments) printf '%s' 'List evidence artifacts with kind, size, sha256, and per-attachment status' ;;
         gms-rt-redmine-attachment-download) printf '%s' 'Stream one evidence artifact original to a client path (reports saved path/bytes/sha256)' ;;
         gms-rt-redmine-credentials-status) printf '%s' 'Pre-flight check that the owner account has Redmine credentials configured (no secret material returned)' ;;
+        gms-rt-redmine-triage) printf '%s' "List today's pending Redmine issues (waiting_my_reply + no_reply_3_days, deduped; read-only)" ;;
         gms-rt-artifact-read) printf '%s' 'Read a text/log artifact derived text by char window (--offset/--limit)' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling)' ;;
         gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs' ;;
@@ -5694,7 +5762,7 @@ gms-rt-system-commands() {
             then "mutating"
             else "read_only"
             end;
-        # 2026-09-08 plan §9: explicit capability hints so safety classification
+        # Explicit capability hints so safety classification
         # never depends on the mode regex alone. Downstream consumers ignore
         # unknown fields; server-side scope checks are never skipped because
         # of these hints.
@@ -5898,7 +5966,7 @@ gms-rt-system-selfcheck() {
         [ -d "$candidate" ] && suite_dirs+=("$candidate")
     done
 
-    # --- TLS trust (2026-09-11 feedback S-2) ------------------------------------
+    # --- TLS trust ----------------------------------------------------------------
     # insecure 模式禁用证书校验，信任链可被 MITM 替换——与 SKILL.md 对
     # bootstrap 阶段的禁令同理，运行时 API 调用也不该用 -k。
     local tls_insecure=false
@@ -6056,6 +6124,7 @@ ${YELLOW}APK Analysis:${NC}
 
 ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-redmine-issue-fetch     - Create/refresh a full evidence snapshot (journals untruncated, attachments hashed)
+  gms-rt-redmine-triage          - List today's pending issues (waiting_my_reply + no_reply_3_days)
   gms-rt-redmine-issue-show      - Show snapshot completeness and issue fields
   gms-rt-redmine-journals        - Read full journals with cursor pagination
   gms-rt-redmine-attachments     - List artifacts (kind, size, sha256, status)

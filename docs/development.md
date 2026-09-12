@@ -139,8 +139,8 @@ python tools/sync_agent_package.py .
 ## 文档政策
 
 - **源码注释不得引用不存在的评审文档编号**：注释里只应引用真实存在的 ADR
-  或文档；避免出现已废弃/不存在的审计编号（`audit §`、`P1-7`、
-  `2026-09-08 计划` 一类）。该政策由
+  或文档；不得出现带日期的审计/评审轮次引用、审计分节号或评审编号等
+  已废弃标记。该政策由
   `tests/architecture/test_review_markers.py` 静态强制；清理存量时把引用
   改为指向真实 ADR（如 `ADR 0006`）或直接描述行为本身。
 - **架构决策写入 `docs/architecture/adr/`**，采用 `NNNN-title.md` 命名，按既有

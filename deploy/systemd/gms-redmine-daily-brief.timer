@@ -1,0 +1,11 @@
+[Unit]
+Description=Run GMS Redmine AI Daily Brief at 00:00 daily
+
+[Timer]
+OnCalendar=*-*-* 00:00:00
+# 服务器 00:00 停机时，启动后补跑当天错过的执行
+Persistent=true
+Unit=gms-redmine-daily-brief.service
+
+[Install]
+WantedBy=timers.target

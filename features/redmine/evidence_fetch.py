@@ -96,7 +96,7 @@ class EvidenceFetcher:
                 status_code=409,
             )
         if not credentials.headers():
-            # 2026-09-11 反馈：错误必须自带修复路径。agent 与 enroll
+            # 错误必须自带修复路径。agent 与 enroll
             # 账号共享 owner 存储，人在 Web UI 为该账号配置即可解除阻断。
             self._fail(
                 snapshot_id,
@@ -403,7 +403,7 @@ class EvidenceFetcher:
                 except (UnicodeDecodeError, OSError) as exc:
                     derived_error = f"派生 UTF-8 文本失败: {type(exc).__name__}"
         elif kind == "archive" and data[:2] == b"PK":
-            # 2026-09-11 反馈（反馈 2026-09-11）：zip 内文本成员（logcat /
+            # zip 内文本成员（logcat /
             # test_result.xml 等）派生成可检索文本，命中可以
             # attachment:<file>.zip!/<member>:L<line> 引用。
             derived_rel, derived_error = extract_zip_derived_text(

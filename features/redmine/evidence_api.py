@@ -145,7 +145,7 @@ async def create_evidence_snapshot(
                 "data": _snapshot_payload(existing, cache_hit=True),
             }
 
-    # 快照 pre-flight（2026-09-11 反馈）：凭据/地址缺失时在建快照之前
+    # 快照 pre-flight：凭据/地址缺失时在建快照之前
     # 快速失败，不再留 failed 垃圾快照（evidence_fetch.run 内仍保留同一
     # 校验作为后台任务兜底）。
     try:
@@ -229,7 +229,7 @@ async def get_evidence_status(snapshot_id: str, request: Request):
 @router.get("/issues/{issue_id}/evidence/latest")
 @handle_api_errors
 async def get_latest_evidence_snapshot(issue_id: str, request: Request):
-    """该 owner 某 issue 的最新快照（2026-09-11 反馈：issue-show 参数语义）。
+    """该 owner 某 issue 的最新快照（issue-show 参数语义）。
 
     issue-show 收到 issue_id 时用它解析 snapshot_id；优先返回最近 ready
     快照，若只有 running/partial/failed 则返回最近一条并附带其 status，

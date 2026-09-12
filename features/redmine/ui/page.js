@@ -500,6 +500,7 @@ function switchTab(tab) {
   if (target === 'runs') return loadRuns();
   if (target === 'department') return loadDepartmentOverdue(false);
   if (target === 'project') return loadProjectDashboard(false);
+  if (target === 'daily-brief') return loadDailyBrief();
   if (target === 'stats') return loadStatistics();
   return Promise.resolve();
 }
@@ -520,6 +521,8 @@ async function refreshCurrentTab() {
       await loadDepartmentOverdue(true);
     } else if (currentTab === 'project') {
       await loadProjectDashboard(true);
+    } else if (currentTab === 'daily-brief') {
+      await loadDailyBrief();
     } else {
       await loadStatistics(true);
     }
@@ -2655,3 +2658,167 @@ function syncRedmineStatusRefresh(event) {
 }
 window.addEventListener('gms:embedded-visibility', syncRedmineStatusRefresh);
 syncRedmineStatusRefresh();
+
+// ==================== AI 晨报（Redmine Daily Brief） ====================
+// 数据源：GET /api/redmine-agent/daily-brief/latest（只读展示；生成/重分析走 POST）。
+
+var dailyBriefCache = null;
+
+async function loadDailyBrief() {
+  var card = document.getElementById('dailyBriefCard');
+  if (!card) return;
+  try {
+    var data = await api('/api/redmine-agent/daily-brief/latest');
+    dailyBriefCache = (data && data.success !== false) ? data : null;
+    card.innerHTML = renderDailyBriefInner(dailyBriefCache);
+  } catch (e) {
+    card.innerHTML = renderDailyBriefInner(null);
+  }
+}
+
+function renderDailyBriefInner(data) {
+  if (!data || !data.run) {
+    return '<div style="padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+      + '<b>🤖 AI 晨报</b><span class="muted">暂无晨报</span>'
+      + '<button class="ka-btn" onclick="startDailyBriefRun()">立即生成</button>'
+      + '</div>';
+  }
+  var run = data.run || {};
+  var issues = data.issues || [];
+  var counts = (run.report_json && run.report_json.counts) || {};
+  var statusBadge = ({
+    completed: '<b style="color:var(--ok,#22c55e)">完成</b>',
+    partial: '<b style="color:#eab308">部分完成</b>',
+    failed: '<b style="color:var(--danger,#ef4444)">失败</b>',
+    analyzing: '<b style="color:#eab308">分析中…</b>',
+    pending: '<b style="color:#eab308">排队中</b>',
+    snapshotting: '<b style="color:#eab308">生成快照中…</b>',
+  })[run.status] || esc(run.status);
+  var head = '<div style="padding:14px 16px">'
+    + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
+    + '<b>🤖 AI 晨报</b>' + statusBadge
+    + '<span class="muted">' + esc(run.brief_date || '') + (run.finished_at ? ' · 生成于 ' + esc(String(run.finished_at).replace('T', ' ').slice(0, 16)) : '') + '</span>'
+    + '<span style="flex:1"></span>'
+    + (run.status === 'completed' || run.status === 'partial'
+        ? '<button class="ka-btn" onclick="startDailyBriefRun()">重新分析</button>' : '')
+    + '</div>'
+    + '<div style="display:flex;gap:18px;flex-wrap:wrap">'
+    + '<span>今日待处理 <b>' + esc(counts.total != null ? counts.total : run.issue_count || 0) + '</b></span>'
+    + '<span>待回复 <b>' + esc(run.waiting_my_reply_count || 0) + '</b></span>'
+    + '<span>超3天未回复 <b>' + esc(run.no_reply_3_days_count || 0) + '</b></span>'
+    + '<span>需人工确认 <b>' + esc(counts.needs_human_review || 0) + '</b></span>'
+    + '</div></div>';
+  if (!issues.length) return head;
+  var rows = issues.slice(0, 8).map(function (issue) {
+    var r = issue.result || {};
+    var prio = issue.priority === 'P1' ? '🔴' : (issue.priority === 'P2' ? '🟡' : '⚪');
+    return '<div style="padding:10px 16px;border-top:1px solid var(--border-color, #eee)">'
+      + '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">'
+      + '<span>' + prio + ' <b>#' + esc(issue.issue_id) + '</b></span>'
+      + '<span>' + esc(r.problem_summary || '（待分析）') + '</span>'
+      + '<span class="muted">等待 ' + esc(issue.fingerprint ? '' : '') + '置信度 ' + esc(r.confidence != null ? r.confidence : '-') + (r.needs_human_review ? ' · 需人工确认' : '') + '</span>'
+      + '<span style="flex:1"></span>'
+      + '<button class="ka-btn" onclick="showDailyBriefIssue(' + esc(issue.issue_id) + ')">查看分析</button>'
+      + '<button class="ka-btn" onclick="openRedmineIssue(' + esc(issue.issue_id) + ')">打开Redmine</button>'
+      + '</div>'
+      + '<div class="muted" style="margin-top:4px">' + esc(r.suggested_solution || r.current_blocker || '') + '</div>'
+      + '</div>';
+  }).join('');
+  var more = issues.length > 8 ? '<div class="muted" style="padding:8px 16px">…共 ' + issues.length + ' 个 issue</div>' : '';
+  return head + rows + more;
+}
+
+function openRedmineIssue(issueId) {
+  var base = redmineBase();  // 已有 helper：statsConfig.redmine.base_url 去尾部斜杠
+  if (!base) { notifyUser('未配置 Redmine 地址', '请先在设置页配置 Redmine base_url', 'warning'); return; }
+  window.open(base + '/issues/' + issueId, '_blank');
+}
+
+function showDailyBriefIssue(issueId) {
+  var issue = (dailyBriefCache && (dailyBriefCache.issues || []).find(function (i) { return String(i.issue_id) === String(issueId); }));
+  if (!issue) return;
+  var r = issue.result || {};
+  var section = function (title, body) {
+    return body ? '<div style="margin:10px 0"><b>' + title + '</b><div style="white-space:pre-wrap;margin-top:4px">' + esc(body) + '</div></div>' : '';
+  };
+  var ev = (r.evidence || []).map(function (e) { return '· [' + esc(e.source || '') + '] ' + esc(e.reference || '') + '：' + esc(e.fact || ''); }).join('\n');
+  var actions = (r.recommended_actions || []).map(function (a) { return (a.step || '·') + '. ' + esc(a.action || '') + (a.reason ? '（' + esc(a.reason) + '）' : ''); }).join('\n');
+  var missing = (r.missing_information || []).map(esc).join('、');
+  var modalId = 'dailyBriefIssueModal-' + Date.now();
+  var modal = document.createElement('div');
+  modal.id = modalId;
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:760px">
+      <div class="modal-header">
+        <span class="modal-title">🤖 AI 分析 · #${esc(issueId)}</span>
+        <span class="modal-close" onclick="removeDynamicModal('${modalId}')">&times;</span>
+      </div>
+      <div class="modal-body">
+        ${section('客户最后诉求', r.customer_request)}
+        ${section('当前状态', r.current_status)}
+        ${section('AI 问题摘要', r.problem_summary)}
+        ${section('根因分析（' + (r.root_cause_type || 'unknown') + '）', r.root_cause)}
+        ${section('关键证据', ev)}
+        ${section('建议排查步骤', actions)}
+        ${section('建议解决方案', r.suggested_solution)}
+        ${section('缺失资料', missing)}
+        ${section('建议英文回复', r.suggested_reply_en)}
+        ${section('建议中文回复', r.suggested_reply_zh)}
+        <div class="muted">AI 置信度：${esc(r.confidence != null ? r.confidence : '-')}${r.needs_human_review ? ' · 需人工确认' : ''}</div>
+      </div>
+      <div class="modal-buttons">
+        <button class="secondary" onclick="removeDynamicModal('${modalId}')">关闭</button>
+        <button class="secondary" onclick="copyDailyBriefReply(${esc(issueId)}, 'en')">复制英文回复</button>
+        <button onclick="copyDailyBriefReply(${esc(issueId)}, 'zh')">复制中文回复</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  showModal(modalId);
+}
+
+function copyDailyBriefReply(issueId, lang) {
+  var issue = (dailyBriefCache && (dailyBriefCache.issues || []).find(function (i) { return String(i.issue_id) === String(issueId); }));
+  var text = issue && issue.result && (lang === 'en' ? issue.result.suggested_reply_en : issue.result.suggested_reply_zh) || '';
+  if (!text) { notifyUser('无回复草稿', '该 issue 尚未生成回复草稿', 'warning'); return; }
+  navigator.clipboard.writeText(text).then(function () {
+    notifyUser('已复制', (lang === 'en' ? '英文' : '中文') + '回复草稿已复制到剪贴板', 'success');
+  }, function () {
+    notifyUser('复制失败', '浏览器拒绝了剪贴板权限', 'warning');
+  });
+}
+
+async function startDailyBriefRun() {
+  try {
+    // api() 已解包 envelope：返回值即 data.data 本体。
+    var data = await api('/api/redmine-agent/daily-brief/run', { method: 'POST' }) || {};
+    if (data.configured === false) { notifyUser('未配置凭据', data.message || '请先在设置页保存 Redmine 凭据', 'warning'); return; }
+    if (data.reused) { notifyUser('晨报已存在', '当天晨报已完成，未重复生成', 'info'); loadDailyBrief(); return; }
+    if (data.already_running) { notifyUser('正在生成', '当天晨报已在执行中', 'info'); return; }
+    if (data.run_id) {
+      notifyUser('已开始生成', 'AI 正在分析，稍后自动刷新（run ' + data.run_id.slice(0, 10) + '…）', 'success');
+      pollDailyBriefRun(data.run_id);
+    } else {
+      notifyUser('启动失败', data.error || '未知错误', 'error');
+    }
+  } catch (e) {
+    notifyUser('启动失败', String(e), 'error');
+  }
+}
+
+function pollDailyBriefRun(runId, attempt) {
+  var n = attempt || 0;
+  if (n > 120) { loadDailyBrief(); return; }
+  setTimeout(async function () {
+    try {
+      var data = await api('/api/redmine-agent/daily-brief/latest');
+      var run = data && data.run;
+      if (run && run.run_id === runId && (run.status === 'completed' || run.status === 'partial' || run.status === 'failed')) {
+        loadDailyBrief();
+        notifyUser('晨报已更新', '状态：' + run.status, run.status === 'failed' ? 'warning' : 'success');
+        return;
+      }
+    } catch (_) { /* 轮询失败静默重试 */ }
+    pollDailyBriefRun(runId, n + 1);
+  }, 5000);
+}

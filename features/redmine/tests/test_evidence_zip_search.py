@@ -1,4 +1,4 @@
-"""2026-09-11 反馈回归：zip 附件内文本成员参与检索。
+"""zip 附件内文本成员参与检索。
 
 从 test_evidence_pipeline.py 拆出，保持各自 <600 行。复用该模块的假
 Redmine fixture，验证 zip 内 logcat / test_result.xml 被派生成带成员

@@ -162,7 +162,7 @@ class RunCliTests(unittest.TestCase):
         self.assertIn("denied", text)
 
     def test_run_cli_refreshes_token_file_from_profile_toml(self):
-        """2026-09-11 反馈回归：profile TOML 的 token_file 变化必须反映到子进程 env。
+        """profile TOML 的 token_file 变化必须反映到子进程 env。
 
         launcher 在启动时固化 GMS_AUTH_TOKEN_FILE；enroll 换了 profile 的
         token 落点后，MCP 子进程若还用旧路径就会与 CLI 认证状态分裂。
@@ -1687,6 +1687,7 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         names = {tool["name"] for tool in mcp_server.tools()}
         for name in (
             "gms_rt_redmine_issue_fetch", "gms_rt_redmine_issue",
+            "gms_rt_redmine_triage",
             "gms_rt_redmine_journals", "gms_rt_redmine_attachments",
             "gms_rt_redmine_artifact_search", "gms_rt_redmine_artifact_read",
             "gms_rt_redmine_image", "gms_rt_apk_analyze_attachment",
@@ -1695,6 +1696,29 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         ):
             self.assertIn(name, names)
             self.assertIn(name, mcp_server._TOOL_HANDLERS)
+
+    def test_triage_tool_maps_arguments_to_cli(self):
+        captured: dict[str, Any] = {}
+
+        def fake_run_cli(command: str, args: list[str] | None = None):
+            captured["command"] = command
+            captured["args"] = list(args or [])
+            return "{}", False
+
+        with patch.object(mcp_server, "run_cli", fake_run_cli):
+            mcp_server.redmine_triage_tool({})
+            self.assertEqual(captured, {"command": "gms-rt-redmine-triage", "args": []})
+
+            mcp_server.redmine_triage_tool({
+                "stale_days": 5, "list_limit": 50, "refresh": True,
+            })
+            self.assertEqual(captured["args"], [
+                "--stale-days", "5", "--list-limit", "50", "--refresh",
+            ])
+
+            # 越界参数被 clamp 到 schema 上限，不透传原始输入。
+            mcp_server.redmine_triage_tool({"stale_days": 999})
+            self.assertEqual(captured["args"], ["--stale-days", "30"])
 
     def test_schemas_use_closed_objects(self):
         for tool in mcp_server.tools():
