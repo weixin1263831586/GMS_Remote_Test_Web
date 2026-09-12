@@ -187,25 +187,15 @@ package_web_app() {
             --exclude '.gitignore' \
             --exclude '.certs/' \
             --exclude '.env.production' \
-            --exclude 'configs/env.production' \
-            --exclude 'configs/local/' \
-            --exclude 'configs/secrets/' \
-            --exclude 'configs/config.json' \
-            --exclude 'configs/cluster.json' \
-            --exclude 'configs/build_servers.json' \
-            --exclude 'configs/automation_profiles.json' \
-            --exclude 'configs/certs/' \
-            --exclude 'configs/runtime.json' \
-            --exclude 'configs/worker_tokens.json' \
-            --exclude 'configs/user_tools_data.json' \
-            --exclude 'configs/redmine_user_map.json' \
             --exclude '.venv/' \
             --exclude '.pytest_cache/' \
             --exclude '.ruff_cache/' \
             --exclude 'AGENTS.md' \
             --exclude 'conftest.py' \
             --exclude 'pyproject.toml' \
-            --exclude '2.txt' \
+            --exclude '/1.txt' \
+            --exclude '/2.txt' \
+            --exclude '/3.txt' \
             --exclude '/*.png' \
             --exclude '*.map' \
             --exclude '__pycache__/' \
@@ -216,6 +206,9 @@ package_web_app() {
             --exclude '/dist/' \
             --exclude '/tools/gms-worker-native/target/' \
             --exclude '/tools/adbproxy-rs/target/' \
+            --exclude '/tools/GMS-Host-Tools/jdk-11/' \
+            --exclude '/tools/GMS-Host-Tools/platform-tools-gms-linux.zip' \
+            --exclude 'plugins/codesearch/config/config.json' \
             --exclude 'logs/' \
             --exclude '*.log' \
             --exclude '*.log.backup.*' \
@@ -224,24 +217,6 @@ package_web_app() {
             --exclude 'scripts_local/' \
             --exclude 'tests/' \
             --exclude '*/tests/' \
-            --exclude 'docs/superpowers/' \
-            --exclude 'docs/android-cli-ui-control-integration.md' \
-            --exclude 'docs/build-server-integration-assessment.md' \
-            --exclude 'docs/code-audit-2026-07.md' \
-            --exclude 'docs/code-audit-2026-08-12.md' \
-            --exclude 'docs/multi-host-cluster-implementation-plan.md' \
-            --exclude 'docs/product-integration-cluster-audit-2026-07-15.md' \
-            --exclude 'docs/product-release-checklist-2026-07-15.md' \
-            --exclude 'docs/refactor-baseline.md' \
-            --exclude 'docs/refactor-parity-audit.md' \
-            --exclude 'docs/refactor-verification.md' \
-            --exclude 'docs/wiki-knowledge-base-plan.md' \
-            --exclude 'configs/config_runtime.json' \
-            --exclude 'configs/client_ssh_credentials.local.json' \
-            --exclude 'configs/redmine_auth.json' \
-            --exclude 'tools/GMS-Host-Tools/gts-rockchip.json' \
-            --exclude 'tools/GMS-Host-Tools/jdk-11/' \
-            --exclude 'tools/GMS-Host-Tools/platform-tools-gms-linux.zip' \
             "${PROJECT_DIR}/" "${package_root}/"
         mkdir -p "${package_root}/data"
         python3 "${PROJECT_DIR}/scripts/sanitize_release_config.py" \
@@ -316,18 +291,6 @@ copy_project() {
             --exclude '.gitignore' \
             --exclude '.certs/' \
             --exclude '.env.production' \
-            --exclude 'configs/env.production' \
-            --exclude 'configs/local/' \
-            --exclude 'configs/secrets/' \
-            --exclude 'configs/config.json' \
-            --exclude 'configs/cluster.json' \
-            --exclude 'configs/build_servers.json' \
-            --exclude 'configs/automation_profiles.json' \
-            --exclude 'configs/certs/' \
-            --exclude 'configs/runtime.json' \
-            --exclude 'configs/worker_tokens.json' \
-            --exclude 'configs/user_tools_data.json' \
-            --exclude 'configs/redmine_user_map.json' \
             --exclude '.venv/' \
             --exclude '__pycache__/' \
             --exclude '*.pyc' \
@@ -337,7 +300,9 @@ copy_project() {
             --exclude 'AGENTS.md' \
             --exclude 'conftest.py' \
             --exclude 'pyproject.toml' \
-            --exclude '2.txt' \
+            --exclude '/1.txt' \
+            --exclude '/2.txt' \
+            --exclude '/3.txt' \
             --exclude '/*.png' \
             --exclude '*.map' \
             --exclude 'data/' \
@@ -348,28 +313,12 @@ copy_project() {
             --exclude '/dist/' \
             --exclude '/tools/gms-worker-native/target/' \
             --exclude '/tools/adbproxy-rs/target/' \
+            --exclude '/tools/GMS-Host-Tools/jdk-11/' \
+            --exclude '/tools/GMS-Host-Tools/platform-tools-gms-linux.zip' \
+            --exclude 'plugins/codesearch/config/config.json' \
             --exclude 'scripts_local/' \
             --exclude 'tests/' \
             --exclude '*/tests/' \
-            --exclude 'docs/superpowers/' \
-            --exclude 'docs/android-cli-ui-control-integration.md' \
-            --exclude 'docs/build-server-integration-assessment.md' \
-            --exclude 'docs/code-audit-2026-07.md' \
-            --exclude 'docs/code-audit-2026-08-12.md' \
-            --exclude 'docs/multi-host-cluster-implementation-plan.md' \
-            --exclude 'docs/product-integration-cluster-audit-2026-07-15.md' \
-            --exclude 'docs/product-release-checklist-2026-07-15.md' \
-            --exclude 'docs/refactor-baseline.md' \
-            --exclude 'docs/refactor-parity-audit.md' \
-            --exclude 'docs/refactor-verification.md' \
-            --exclude 'docs/wiki-knowledge-base-plan.md' \
-            --exclude 'plugins/codesearch/config/config.json' \
-            --exclude 'configs/config_runtime.json' \
-            --exclude 'configs/client_ssh_credentials.local.json' \
-            --exclude 'configs/redmine_auth.json' \
-            --exclude 'tools/GMS-Host-Tools/gts-rockchip.json' \
-            --exclude 'tools/GMS-Host-Tools/jdk-11/' \
-            --exclude 'tools/GMS-Host-Tools/platform-tools-gms-linux.zip' \
             "${PROJECT_DIR}/" "${INSTALL_DIR}/"
     fi
     sudo chown -R "${RUN_USER}:${RUN_GROUP}" "${INSTALL_DIR}"

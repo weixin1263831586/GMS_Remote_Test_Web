@@ -1,4 +1,4 @@
-"""只读 SDK 源码 provider（2026-09-08 计划 §12）。
+"""只读 SDK 源码 provider。
 
 统一 ``SourceProvider`` 接口；首期实现 ``local_git``：
 
@@ -37,7 +37,7 @@ READ_MAX_LINES = 4000
 
 # result_id 是自包含的 opaque token：``src1_<base64url(payload)>_<hmac16>``。
 # payload 内编码 source_id/commit/path；HMAC 防篡改，后续 read 只接受
-# result_id，不再接受自由 path/commit（计划 §12「后续 read 只接受 result_id」）。
+# result_id，不再接受自由 path/commit。
 RESULT_ID_PREFIX = "src1_"
 _COMMIT_RE = re.compile(r"^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$")
 

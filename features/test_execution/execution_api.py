@@ -39,7 +39,7 @@ async def start_test(
     if not req.devices:
         return error_response("No devices selected", 400)
 
-    # Agent Service Token enforcement (2026-09-08 audit §四/§六): agents must
+    # Agent Service Token enforcement (ADR 0006): agents must
     # hold tests.execute and may only target workers/devices in their ACL.
     from features.auth import (
         ensure_agent_device_allowed,

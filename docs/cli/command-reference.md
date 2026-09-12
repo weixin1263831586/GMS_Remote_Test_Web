@@ -10,8 +10,8 @@
 | `gms-rt-adb-forward-start` | Forward selected device serials from one Worker to another through adbproxy-rs | gms-rt-adb-forward-start <source_worker_id> <target_worker_id> <serial> [serial...] |
 | `gms-rt-adb-forward-status` | List ADB proxy Workers and active source-to-target assignments |  |
 | `gms-rt-adb-forward-stop` | Stop one ADB proxy source-to-target Worker assignment | gms-rt-adb-forward-stop <source_worker_id> <target_worker_id> |
-| `gms-rt-agent-enroll` | Exchange a one-shot enrollment code for an Agent Service Token stored as a 0600 file | gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE] |
-| `gms-rt-agent-enroll-code` | Mint a one-shot enrollment code for a build server agent (admin + elevation) | gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2\|*] [--devices d1,d2\|*] [--expires-days N] |
+| `gms-rt-agent-enroll` | Exchange a one-shot enrollment code for an Agent Service Token stored as a 0600 file | gms-rt-agent-enroll <ENROLLMENT_CODE> [--out FILE] [--profile NAME] |
+| `gms-rt-agent-enroll-code` | Mint a one-shot enrollment code for a build server agent (admin + elevation) | gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2\|*] [--devices d1,d2\|*] [--expires-days N] [--ttl-minutes N] |
 | `gms-rt-agent-token-revoke` | Revoke an Agent Service Token by id (admin + elevation) | gms-rt-agent-token-revoke <TOKEN_ID> |
 | `gms-rt-agent-tokens` | List Agent Service Tokens (admin; metadata only, raw tokens are never stored) | gms-rt-agent-tokens |
 | `gms-rt-apk-analyze` | Resolve a module artifact, copy it from the suite, and start jadx decompilation | gms-rt-apk-analyze <module_query> [--types cts,vts,gts,sts] [--prefer apk\|jar] [--wait] [--max-wait SECONDS] |
@@ -31,6 +31,7 @@
 | `gms-rt-auth-elevation-reset` | Clear administrator elevation from the current human session |  |
 | `gms-rt-auth-login` | Create and save a human API session (password prompt or --password-stdin) | gms-rt-auth-login [username] [--password-stdin] |
 | `gms-rt-auth-logout` | Revoke the current human API session and remove its local cookie jar |  |
+| `gms-rt-auth-scopes-check` | Pre-flight check that the current credential carries required agent scopes (default: Redmine evidence chain) | gms-rt-auth-scopes-check [--requires s1,s2] |
 | `gms-rt-auth-status` | Show whether authentication is required and describe the current principal/session |  |
 | `gms-rt-burn-firmware` | Transfer and burn a firmware image, with optional approved Agent execution and online wait | gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]] |
 | `gms-rt-burn-gsi` | Transfer and burn a GSI image, with optional online wait | gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]] |
@@ -73,8 +74,9 @@
 | `gms-rt-redmine-artifact-image` | Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling) | gms-rt-redmine-artifact-image <artifact_id> |
 | `gms-rt-redmine-attachment-download` | Stream one evidence artifact original to a client path (reports saved path/bytes/sha256) | gms-rt-redmine-attachment-download <artifact_id> [output_path] |
 | `gms-rt-redmine-attachments` | List evidence artifacts with kind, size, sha256, and per-attachment status | gms-rt-redmine-attachments <snapshot_id> |
+| `gms-rt-redmine-credentials-status` | Pre-flight check that the owner account has Redmine credentials configured (no secret material returned) | gms-rt-redmine-credentials-status |
 | `gms-rt-redmine-issue-fetch` | Create/refresh a full Redmine evidence snapshot (raw JSON, journals, attachments) | gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none\|analyzable\|all] [--refresh\|--no-refresh] [--wait] [--max-wait SECONDS] |
-| `gms-rt-redmine-issue-show` | Show snapshot completeness plus issue fields and description head | gms-rt-redmine-issue-show <snapshot_id> |
+| `gms-rt-redmine-issue-show` | Show snapshot completeness plus issue fields and description head; accepts snapshot_id or issue_id (resolves the latest snapshot) | gms-rt-redmine-issue-show <snapshot_id \| issue_id> [--issue\|--snapshot] |
 | `gms-rt-redmine-journals` | Read full (untruncated) issue journals with cursor pagination | gms-rt-redmine-journals <snapshot_id> [--limit N] [--cursor C] |
 | `gms-rt-reports-analyze` | Analyze a local report file or a uniquely resolved saved report | gms-rt-reports-analyze <local_report.zip\|test_result.xml\|report_timestamp\|keyword> |
 | `gms-rt-reports-delete` | Delete one saved report by timestamp | gms-rt-reports-delete <report_timestamp> |

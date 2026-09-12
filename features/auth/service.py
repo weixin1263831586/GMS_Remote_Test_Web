@@ -12,7 +12,7 @@ from typing import Any
 
 from foundation.config import settings
 
-from .agent_tokens import AgentTokenServiceMixin
+from .agent_tokens import AgentTokenEnrollmentMixin, AgentTokenServiceMixin
 from .approval_tokens import ApprovalTokenServiceMixin
 from .constants import (  # noqa: F401  (re-exported for back-compat)
     AGENT_ROLE,
@@ -80,7 +80,7 @@ def _last_seen_recent(last_seen_at: str | None, now: datetime) -> bool:
 
 
 class AuthService(
-    AgentTokenServiceMixin, ApprovalTokenServiceMixin, AuthRateLimitMixin
+    AgentTokenServiceMixin, AgentTokenEnrollmentMixin, ApprovalTokenServiceMixin, AuthRateLimitMixin
 ):
     _REQUIRED_TABLES = frozenset({"platform_users", "platform_sessions", "platform_auth_attempts"})
 

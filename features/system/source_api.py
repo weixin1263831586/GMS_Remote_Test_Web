@@ -1,4 +1,4 @@
-"""SDK 源码搜索/读取 API（计划 §12 + §8 CLI 契约）。
+"""SDK 源码搜索/读取 API。
 
 - ``GET /api/sdk/sources``          列出管理员配置的 provider
 - ``GET /api/sdk/revision``         解析 revision -> commit 元数据

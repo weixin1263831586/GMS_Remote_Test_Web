@@ -389,7 +389,7 @@ def process_task(task_path: str) -> None:
 
 
 def _claim_task(task_path: str) -> bool:
-    """Atomically claim a task file (P0-1, exactly-once).
+    """Atomically claim a task file (exactly-once).
 
     os.replace 同一目录下是原子操作：两个 Agent 实例同时扫描时只有一个
     能把 <task>.json 改名为 <task>.claim，另一个必然抛 FileNotFoundError。

@@ -206,6 +206,12 @@ async def download_skills_zip(
         headers = {
             "Content-Disposition": f'attachment; filename="{zip_filename}"',
             "X-GMS-SHA256": zip_sha256,
+            # Legacy compatibility wrapper: the modern install path is
+            # GET /api/agent/install (bootstrap → gms-agent). Advertise the
+            # successor so old clients/scripts migrate before removal.
+            "Deprecation": "true",
+            "Sunset": "Wed, 31 Dec 2025 23:59:59 GMT",
+            'Link': '</api/agent/install.sh>; rel="successor-version"',
         }
         if zip_signature:
             headers.update({
@@ -224,7 +230,7 @@ async def download_skills_zip(
         return error_response("技能包下载失败", status_code=500)
 
 
-# 2026-09-08 audit §十二: enterprise build servers often cannot reach
+# Enterprise build servers often cannot reach
 # github.com, so the installer prefers a jq binary served by the Controller
 # itself over the GitHub fallback. Integrity is double-checked: the endpoint
 # only serves the pinned file pinned path, and the installer verifies the
@@ -234,7 +240,7 @@ async def download_skills_zip(
 
 @router.get("/api/system/tools/jq")
 async def download_jq_binary(request: Request):
-    """Serve the pinned jq binary for the skill installer (§十二)."""
+    """Serve the pinned jq binary for the skill installer."""
     return await jq_binary.serve(request)
 
 

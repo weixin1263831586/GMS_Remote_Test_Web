@@ -1,4 +1,4 @@
-"""One-shot approval token storage (2026-09-08 audit §五).
+"""One-shot approval token storage (ADR 0006).
 
 Split out of agent_tokens.py after the burn approval gained
 server-side operation derivation, pushing the module past its reviewable
@@ -36,7 +36,7 @@ class ApprovalTokenServiceMixin:
     """One-shot approval token storage; mixed into AuthService."""
 
     # ------------------------------------------------------------------
-    # One-shot Approval Tokens (2026-09-08 audit §五)
+    # One-shot Approval Tokens (ADR 0006)
     # ------------------------------------------------------------------
 
     @staticmethod

@@ -10,6 +10,10 @@ let agentAccessLoadSequence = 0;
 const AGENT_ACCESS_DEFAULT_SCOPES = [
     'devices.read', 'devices.lease', 'devices.use_leased',
     'tests.execute', 'tests.cancel', 'jobs.read', 'reports.read',
+    // 只读证据/分析链（反馈 2026-09-11 P0-1）：默认勾选让 mint 出的
+    // enrollment 能直接跑通 SKILL 文档化的 Redmine 工作流；写操作类
+    // scope（devices.inventory 等）仍需手动勾选。
+    'redmine.read', 'artifacts.read_own', 'apk.analyze_own', 'sdk.read',
 ];
 
 const AGENT_ACCESS_SCOPE_LABELS = {
@@ -49,8 +53,8 @@ function agentAccessToggle(show) {
 
     panel.style.display = visible ? 'flex' : 'none';
     mainView.style.display = visible ? 'none' : '';
-    const pageTitle = document.getElementById('users-page-title');
-    if (pageTitle) pageTitle.textContent = visible ? '🔑 Agent 接入管理' : '👥 用户管理';
+    // 左上角页面标题保持“👥 用户管理”不变：视图切换由下方
+    // “用户列表 / 🔑 Agent 接入”页签的 active 态表达，不重写标题。
 
     const usersTab = document.getElementById('users-list-tab');
     const agentTab = document.getElementById('agent-access-tab');

@@ -65,7 +65,7 @@ def load_binary() -> tuple[bytes, str, str | None]:
 
 
 async def serve(request: Request) -> Response:
-    """Serve the pinned jq binary for the skill installer (§十二).
+    """Serve the pinned jq binary for the skill installer.
 
     The Controller is the trust root for the whole agent bootstrap chain
     (same origin as the ZIP and the Ed25519 signing key), so fetching jq

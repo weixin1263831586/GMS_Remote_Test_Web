@@ -1,6 +1,6 @@
 """Agent Service Token / Approval Token / Enrollment services.
 
-Extracted from service.py (2026-09-08 audit) so the auth service stays under
+Extracted from service.py so the auth service stays under
 the reviewable-size limit. AgentTokenServiceMixin is mixed into AuthService
 and reuses its _connect/_lock/hash_token helpers.
 """
@@ -48,7 +48,7 @@ class AgentTokenServiceMixin:
     """Agent token / approval / enrollment storage; mixed into AuthService."""
 
     # ------------------------------------------------------------------
-    # Agent Service Tokens (2026-09-08 audit §二/§四)
+    # Agent Service Tokens (ADR 0006)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -234,132 +234,8 @@ class AgentTokenServiceMixin:
             return True
         return value in {part.strip() for part in allowed.split(",") if part.strip()}
 
-    # ------------------------------------------------------------------
-    # Enrollment Codes (2026-09-08 audit §三)
-    # ------------------------------------------------------------------
 
-    ENROLLMENT_TTL_MINUTES = 5
-
-    def create_agent_enrollment(
-        self,
-        *,
-        name: str,
-        creator: CurrentUser,
-        scopes: list[str] | str | None,
-        allowed_workers: str | list[str] | None = None,
-        allowed_devices: str | list[str] | None = None,
-        expires_days: int | None = DEFAULT_AGENT_TOKEN_DAYS,
-    ) -> dict[str, Any]:
-        """Mint a one-shot enrollment code; the raw code is returned once.
-
-        Entropy: token_hex(3)×3 = 3×24 = 72 bits. 72 bits plus the 5-minute TTL and per-IP
-        rate limiting keeps online guessing impractical; the code is stored
-        hashed so a leaked DB row is not directly usable. The endpoint is
-        anonymous and rate-limited per IP, but the code itself must still
-        resist offline guessing (code review 2026-08: 24-bit groups — a
-        single 24-bit group — were rejected as too small; the three-group
-        form is what makes this acceptable).
-        """
-        code = "-".join(secrets.token_hex(3).upper() for _ in range(3))
-        now = _utcnow()
-        expires_at = now + timedelta(minutes=self.ENROLLMENT_TTL_MINUTES)
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                "DELETE FROM platform_agent_enrollments WHERE expires_at <= ? OR used_at IS NOT NULL",
-                (_to_iso(now),),
-            )
-            conn.execute(
-                """
-                INSERT INTO platform_agent_enrollments (
-                    code_hash, name, created_by, scopes, allowed_workers,
-                    allowed_devices, expires_days, created_at, expires_at, used_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                """,
-                (
-                    self.hash_token(code),
-                    str(name or "").strip() or "agent",
-                    creator.id,
-                    self.normalize_scopes(scopes),
-                    self._normalize_acl(allowed_workers),
-                    self._normalize_acl(allowed_devices),
-                    max(1, int(expires_days or DEFAULT_AGENT_TOKEN_DAYS)),
-                    _to_iso(now),
-                    _to_iso(expires_at),
-                ),
-            )
-            conn.commit()
-        return {
-            "code": code,
-            "name": str(name or "").strip() or "agent",
-            "expires_at": _to_iso(expires_at),
-            "ttl_minutes": self.ENROLLMENT_TTL_MINUTES,
-        }
-
-    def redeem_agent_enrollment(self, code: str) -> dict[str, Any] | None:
-        """Atomically redeem one enrollment code; returns the token record.
-
-        The enrollment (not the caller) decides scopes/ACLs/expiry, so a
-        leaked code cannot grant more than the admin approved.
-        """
-        code = str(code or "").strip().upper()
-        if not code:
-            return None
-        code_hash = self.hash_token(code)
-        now = _utcnow()
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT name, created_by, scopes, allowed_workers, allowed_devices,
-                       expires_days, expires_at, used_at
-                FROM platform_agent_enrollments
-                WHERE code_hash = ?
-                """,
-                (code_hash,),
-            ).fetchone()
-            if not row or row["used_at"]:
-                return None
-            try:
-                if _from_iso(row["expires_at"]) <= now:
-                    return None
-            except ValueError:
-                return None
-            cursor = conn.execute(
-                "UPDATE platform_agent_enrollments SET used_at = ? "
-                "WHERE code_hash = ? AND used_at IS NULL",
-                (_to_iso(now), code_hash),
-            )
-            if cursor.rowcount != 1:
-                return None
-            token = secrets.token_urlsafe(32)
-            token_id = f"agt_{secrets.token_hex(8)}"
-            token_expires_at = now + timedelta(days=int(row["expires_days"]))
-            conn.execute(
-                """
-                INSERT INTO platform_agent_tokens (
-                    id, token_hash, name, owner_user_id, scopes,
-                    allowed_workers, allowed_devices,
-                    created_at, expires_at, revoked_at, last_used_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
-                """,
-                (
-                    token_id,
-                    self.hash_token(token),
-                    str(row["name"]),
-                    str(row["created_by"]),
-                    row["scopes"],
-                    row["allowed_workers"],
-                    row["allowed_devices"],
-                    _to_iso(now),
-                    _to_iso(token_expires_at),
-                ),
-            )
-            conn.commit()
-        return {
-            "id": token_id,
-            "name": str(row["name"]),
-            "token": token,
-            "scopes": [s for s in str(row["scopes"] or "").split(",") if s],
-            "allowed_workers": str(row["allowed_workers"] or "*"),
-            "allowed_devices": str(row["allowed_devices"] or "*"),
-            "expires_at": _to_iso(token_expires_at),
-        }
+# Enrollment-code lifecycle moved to agent_enrollment.py (line-budget split);
+# re-exported so ``from .agent_tokens import AgentTokenEnrollmentMixin`` and
+# the AuthService mixin order stay stable for back-compat.
+from .agent_enrollment import AgentTokenEnrollmentMixin  # noqa: E402,F401

@@ -3,16 +3,16 @@
 Covers the post-refactor installer surface with real function calls and
 failure injection:
 
-* P0-1  `install_cli_dispatcher` must link `gms-agent` to the real CLI
+* `install_cli_dispatcher` must link `gms-agent` to the real CLI
         entry point (scripts/gms-agent), never to the gms-rt dispatcher,
         while gms-rt-* links still go through the dispatcher (argv0 → $1).
-* P0-3  `write_enrollment_token` must resolve TOML-only profiles — no
+* `write_enrollment_token` must resolve TOML-only profiles — no
         FileNotFoundError when the legacy <client>.env store is absent.
-* P1-5  mcp_launcher resolves the client from a pinned GMS_RT_PROFILE's
+* mcp_launcher resolves the client from a pinned GMS_RT_PROFILE's
         `client =` field instead of the kimi→codex→kkagent probe.
-* P1-7  `fetch_registry_package(expected_version=…)` rejects a manifest
+* `fetch_registry_package(expected_version=…)` rejects a manifest
         that changed between the version decision and the download.
-* P1-9  `register_kkagent_plugin` fails closed on a corrupt registry and
+* `register_kkagent_plugin` fails closed on a corrupt registry and
         never overwrites other plugins' registrations; writes are atomic.
 * 其他  sync_one fixes a lost executable bit even when content matches.
 * 其他  gms_agent.client._load_token rejects a token file owned by
@@ -121,7 +121,7 @@ def shutil_copytree(src: Path, dst: Path) -> None:
 
 
 class TestCliDispatcherLinks(EnvSandbox):
-    """P0-1: gms-agent → scripts/gms-agent; gms-rt-* → dispatcher."""
+    """gms-agent → scripts/gms-agent; gms-rt-* → dispatcher."""
 
     def test_gms_agent_link_points_to_cli_entry_point(self):
         self.make_installed_runtime()
@@ -179,8 +179,102 @@ class TestCliDispatcherLinks(EnvSandbox):
         self.assertTrue(user_managed.is_file())
 
 
+class TestMultiControllerFailClosed(EnvSandbox):
+    """多 Controller 主机的写路径与 Controller 解析必须 fail closed。
+
+    锁定 ADR 0003 的完整闭环：默认 profile 名包含 Controller 身份
+    （两个 Controller 各占一个文件，绝不互相覆盖）；resolve_controller
+    只在「全部 profile 恰好指向唯一 Controller」时自动选择；enroll 在
+    歧义主机上拒绝落盘，one-shot 配对码不允许被存到另一个 Controller 的
+    profile 里。
+    """
+
+    def test_default_profile_name_includes_controller_identity(self):
+        a = pm.profile_store.default_profile_name("codex", "https://ctrl-a:5001")
+        b = pm.profile_store.default_profile_name("codex", "https://ctrl-b:5001")
+        self.assertNotEqual(a, b)
+        self.assertTrue(a.startswith("codex-"))
+        # Same controller → same name (idempotent re-install overwrites
+        # itself, which is fine; a DIFFERENT controller never does).
+        self.assertEqual(
+            a, pm.profile_store.default_profile_name("codex", "https://ctrl-a:5001/")
+        )
+
+    def test_install_default_write_profile_never_overwrites_other_controller(self):
+        name_a = pm.write_profile("codex", "https://ctrl-a:5001", "")
+        name_b = pm.write_profile("codex", "https://ctrl-b:5001", "")
+        self.assertNotEqual(name_a, name_b)
+        self.assertEqual(
+            pm.profile_store.controller_url(pm.load_profile(name_a)),
+            "https://ctrl-a:5001",
+        )
+        self.assertEqual(
+            pm.profile_store.controller_url(pm.load_profile(name_b)),
+            "https://ctrl-b:5001",
+        )
+
+    def test_resolve_controller_explicit_server_wins(self):
+        pm.write_profile_toml(
+            "codex-a", "codex", "https://ctrl-a:5001", ""
+        )
+        with mock.patch.dict(os.environ, {"GMS_REMOTE_TEST_SERVER": ""}):
+            server, _ca = pm.resolve_controller("https://explicit:5001", "")
+        self.assertEqual(server, "https://explicit:5001")
+
+    def test_resolve_controller_explicit_profile(self):
+        pm.write_profile_toml("codex-a", "codex", "https://ctrl-a:5001", "")
+        pm.write_profile_toml("codex-b", "codex", "https://ctrl-b:5001", "")
+        with mock.patch.dict(os.environ, {"GMS_REMOTE_TEST_SERVER": ""}):
+            server, _ca = pm.resolve_controller("", "codex-b")
+        self.assertEqual(server, "https://ctrl-b:5001")
+
+    def test_resolve_controller_unique_profile_set_is_automatic(self):
+        pm.write_profile_toml("codex-x", "codex", "https://only:5001", "")
+        pm.write_profile_toml("kimi-y", "kimi", "https://only:5001", "")
+        with mock.patch.dict(os.environ, {"GMS_REMOTE_TEST_SERVER": ""}):
+            server, _ca = pm.resolve_controller("", "")
+        self.assertEqual(server, "https://only:5001")
+
+    def test_resolve_controller_without_profiles_fails_closed(self):
+        with mock.patch.dict(os.environ, {"GMS_REMOTE_TEST_SERVER": ""}), self.assertRaises(SystemExit) as ctx:
+            pm.resolve_controller("", "")
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_resolve_controller_ambiguous_host_fails_closed(self):
+        pm.write_profile_toml("codex-a", "codex", "https://ctrl-a:5001", "")
+        pm.write_profile_toml("codex-b", "codex", "https://ctrl-b:5001", "")
+        with mock.patch.dict(os.environ, {"GMS_REMOTE_TEST_SERVER": ""}), self.assertRaises(SystemExit):
+            pm.resolve_controller("", "")
+        # And crucially: ambiguity does NOT fall through to another client's
+        # sole controller.
+        pm.write_profile_toml("kimi-c", "kimi", "https://ctrl-c:5001", "")
+        with mock.patch.dict(os.environ, {"GMS_REMOTE_TEST_SERVER": ""}), self.assertRaises(SystemExit):
+            pm.resolve_controller("", "")
+
+    def test_write_enrollment_token_ambiguous_host_writes_nothing(self):
+        pm.write_profile_toml("codex-a", "codex", "https://ctrl-a:5001", "")
+        pm.write_profile_toml("codex-b", "codex", "https://ctrl-b:5001", "")
+        self.assertEqual(pm.write_enrollment_token("tok-1"), [])
+        self.assertEqual(list(pm.profile_store.STATE_DIR.glob("*.token")), [])
+
+    def test_write_enrollment_token_explicit_profile(self):
+        pm.write_profile_toml("codex-a", "codex", "https://ctrl-a:5001", "")
+        pm.write_profile_toml("codex-b", "codex", "https://ctrl-b:5001", "")
+        written = pm.write_enrollment_token("tok-1", profile="codex-a")
+        self.assertEqual(written, [str(pm.profile_store.token_file("codex-a"))])
+        self.assertEqual(
+            pm.profile_store.token_file("codex-b").exists(), False
+        )
+
+    def test_write_enrollment_token_unique_controller_covers_all_profiles(self):
+        pm.write_profile_toml("hand-named", "codex", "https://only:5001", "")
+        pm.write_profile_toml("kimi-default", "kimi", "https://only:5001", "")
+        written = pm.write_enrollment_token("tok-9")
+        self.assertEqual(len(written), 2)
+
+
 class TestEnrollTomlOnly(EnvSandbox):
-    """P0-3: enrollment token must persist for TOML-only profiles."""
+    """Enrollment token must persist for TOML-only profiles."""
 
     def test_write_enrollment_token_resolves_toml_profile(self):
         profile = pm.profile_name("codex")
@@ -201,7 +295,7 @@ class TestEnrollTomlOnly(EnvSandbox):
 
 
 class TestLauncherProfilePinning(EnvSandbox):
-    """P1-5: a pinned GMS_RT_PROFILE selects its own client, not the probe."""
+    """A pinned GMS_RT_PROFILE selects its own client, not the probe."""
 
     def test_profile_client_field_wins_over_probe_order(self):
         # Kimi configured first (probe would pick kimi); codex profile pinned.
@@ -342,7 +436,7 @@ class TestLocalRuntimeOnlyInstall(EnvSandbox):
 
 
 class TestUpdateManifestPin(EnvSandbox):
-    """P1-7: manifest swap between decision and download must be rejected."""
+    """A manifest swap between decision and download must be rejected."""
 
     def test_fetch_rejects_version_mismatch(self):
         manifest = {
@@ -361,7 +455,7 @@ class TestUpdateManifestPin(EnvSandbox):
 
 
 class TestKkagentRegistryFailClosed(EnvSandbox):
-    """P1-9: corrupt registry → fail closed, other plugins survive."""
+    """Corrupt registry → fail closed, other plugins survive."""
 
     def test_corrupt_registry_aborts_with_backup(self):
         target = self.root / "plugin-payload"

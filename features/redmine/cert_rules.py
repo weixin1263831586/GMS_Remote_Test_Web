@@ -1,4 +1,4 @@
-"""Rule-based certification error detection (Redmine.txt §5.3).
+"""Rule-based certification error detection.
 
 Shared by attachment analysis (OCR'd screenshots of BTS/EDLA reports) and the
 case extractor. Returns the detected error patterns, the partitions mentioned,

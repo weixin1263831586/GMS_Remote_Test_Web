@@ -340,6 +340,7 @@ class SerialConsoleService:
                     self._wait_retry(runtime, retry_delay)
                     retry_delay = min(retry_delay * 2, 30.0)
                     continue
+                handle = None
                 try:
                     constructor = self._serial_constructor()
                     handle = constructor(
@@ -355,14 +356,27 @@ class SerialConsoleService:
                         runtime.error = ""
                     retry_delay = self.retry_interval
                     while not runtime.stop_event.is_set() and self._desired(port_key):
+                        # 句柄已被并发关闭（控制台断开/停止采集/热插拔）时
+                        # 直接退出本轮，不把关闭后的读错误当作串口故障。
+                        if runtime.handle is not handle:
+                            break
                         size = max(1, min(int(getattr(handle, "in_waiting", 0) or 1), 65536))
                         data = handle.read(size)
                         if not data:
                             continue
                         self._record_data(port_key, runtime, bytes(data))
                 except Exception as exc:
-                    with self._lock:
-                        runtime.error = self._friendly_serial_error(exc)
+                    # pyserial close() 先置 fd=None 再置 is_open=False，竞态窗口内
+                    # read()/in_waiting 会抛 "'NoneType' object cannot be
+                    # interpreted as an integer"。主动停止或句柄已被外部接管的
+                    # 关闭属预期行为，不写入 runtime.error。
+                    intentional_close = (
+                        runtime.stop_event.is_set()
+                        or (handle is not None and runtime.handle is not handle)
+                    )
+                    if not intentional_close:
+                        with self._lock:
+                            runtime.error = self._friendly_serial_error(exc)
                     self._close_handle(runtime)
                     if runtime.stop_event.is_set() or not self._desired(port_key):
                         break

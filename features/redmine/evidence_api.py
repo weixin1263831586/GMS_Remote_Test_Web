@@ -1,4 +1,4 @@
-"""Redmine 证据快照只读 API（2026-09-08 计划 §8）。
+"""Redmine 证据快照只读 API。
 
 所有端点：
 - 从认证身份推导 owner（禁止任何 owner_id 参数）；
@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -123,7 +122,7 @@ async def create_evidence_snapshot(
             EvidenceError(f"download 必须是 {DOWNLOAD_POLICIES} 之一", status_code=422)
         )
 
-    from features.redmine.evidence import owner_base_url
+    from features.redmine.evidence import owner_base_url, preflight_owner_fetch
 
     try:
         base_url = owner_base_url(owner_id)
@@ -133,7 +132,7 @@ async def create_evidence_snapshot(
 
     store = owner_evidence_store(owner_id)
     if not refresh:
-        # 计划 §8：refresh=false 只允许复用短 TTL 内的 ready 快照；
+        # refresh=false 只允许复用短 TTL 内的 ready 快照；
         # partial/failed 一律重新抓取。
         existing = store.latest_snapshot_for_issue(numeric_id)
         if (
@@ -145,6 +144,14 @@ async def create_evidence_snapshot(
                 "success": True,
                 "data": _snapshot_payload(existing, cache_hit=True),
             }
+
+    # 快照 pre-flight（2026-09-11 反馈）：凭据/地址缺失时在建快照之前
+    # 快速失败，不再留 failed 垃圾快照（evidence_fetch.run 内仍保留同一
+    # 校验作为后台任务兜底）。
+    try:
+        preflight_owner_fetch(owner_id)
+    except EvidenceError as exc:
+        return _error_response(exc)
 
     fetcher = EvidenceFetcher(owner_id, store=store)
     snapshot = fetcher.create_snapshot(numeric_id, download=download)
@@ -199,6 +206,48 @@ async def get_evidence_status(snapshot_id: str, request: Request):
     except EvidenceError as exc:
         return _error_response(exc)
     return {"success": True, "data": _snapshot_payload(snapshot)}
+
+
+@router.get("/issues/{issue_id}/evidence/latest")
+@handle_api_errors
+async def get_latest_evidence_snapshot(issue_id: str, request: Request):
+    """该 owner 某 issue 的最新快照（2026-09-11 反馈：issue-show 参数语义）。
+
+    issue-show 收到 issue_id 时用它解析 snapshot_id；优先返回最近 ready
+    快照，若只有 running/partial/failed 则返回最近一条并附带其 status，
+    便于 CLI 区分「无快照」与「快照未就绪」。
+    """
+    require = require_agent_scope("redmine.read")
+    require(request)
+    owner_id = _owner(request)
+    from features.redmine.evidence import owner_base_url
+
+    try:
+        base_url = owner_base_url(owner_id)
+        numeric_id = parse_issue_ref(issue_id, base_url)
+    except EvidenceError as exc:
+        return _error_response(exc)
+    store = owner_evidence_store(owner_id)
+    candidates = store.list_snapshots_for_issue(numeric_id, limit=20)
+    if not candidates:
+        return _error_response(
+            EvidenceError(
+                f"issue {numeric_id} 还没有证据快照；先运行 "
+                f"gms-rt-redmine-issue-fetch {numeric_id}",
+                status_code=404,
+            )
+        )
+    ready = [s for s in candidates if str(s.get("status")) == "ready"]
+    snapshot = (ready or candidates)[0]
+    return {
+        "success": True,
+        "data": {
+            "issue_id": numeric_id,
+            "snapshot_id": snapshot.get("snapshot_id"),
+            "status": snapshot.get("status"),
+            "ready": str(snapshot.get("status")) == "ready",
+        },
+    }
 
 
 @router.get("/evidence/{snapshot_id}/wait")
@@ -488,103 +537,3 @@ async def read_evidence_artifact_image(artifact_id: str, request: Request):
         },
     }
 
-
-# -------------------------------------------------------------------- search
-
-@router.get("/evidence/{snapshot_id}/search")
-@handle_api_errors
-async def search_evidence(
-    snapshot_id: str,
-    request: Request,
-    q: str = Query(..., min_length=1, max_length=SEARCH_MAX_QUERY_CHARS),
-    limit: int = Query(SEARCH_DEFAULT_LIMIT, ge=1, le=SEARCH_MAX_LIMIT),
-):
-    require = require_agent_scope("redmine.read")
-    require(request)
-    owner_id = _owner(request)
-    try:
-        snapshot = _get_snapshot(owner_id, snapshot_id)
-    except EvidenceError as exc:
-        return _error_response(exc)
-    needle = q
-    matches: list[dict[str, Any]] = []
-
-    manifest = snapshot.get("manifest") or {}
-    description = str(manifest.get("description") or "")
-    _collect_text_match(matches, "description", "", description, needle, None)
-    for journal in manifest.get("journals") or []:
-        notes = str(journal.get("notes") or "")
-        hit = _collect_text_match(matches, "journal", "", notes, needle, journal)
-        if not hit:
-            for detail in journal.get("details") or []:
-                blob = json.dumps(detail, ensure_ascii=False)
-                _collect_text_match(matches, "journal_detail", "", blob, needle, journal)
-
-    store = owner_evidence_store(owner_id)
-    for artifact in store.list_artifacts(snapshot["snapshot_id"]):
-        with store._connect() as conn:
-            row = conn.execute(
-                "SELECT derived_text_path, stored_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
-                (str(artifact.get("artifact_id")),),
-            ).fetchone()
-        candidates = [str(row["derived_text_path"] or ""), str(row["stored_path"] or "")] if row else []
-        for rel in candidates:
-            # 空候选（如无派生文本）只跳过本项；用 break 会让后面的
-            # stored_path 永远不被扫描（真机 #648526 验收发现的缺陷）。
-            if not rel:
-                continue
-            if len(matches) >= limit:
-                break
-            try:
-                path = store.resolve_internal(rel)
-            except ValueError:
-                continue
-            if not path.is_file():
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            _collect_text_match(matches, "artifact", "", text, needle, artifact)
-            break
-
-    matches = matches[:limit]
-    return {
-        "success": True,
-        "data": {
-            "snapshot_id": snapshot.get("snapshot_id"),
-            "query": q,
-            "total": len(matches),
-            "limited": len(matches) >= limit,
-            "matches": matches,
-        },
-    }
-
-
-def _collect_text_match(
-    matches: list[dict[str, Any]],
-    kind: str,
-    path: str,
-    text: str,
-    needle: str,
-    meta: dict[str, Any] | None,
-) -> bool:
-    index = text.find(needle)
-    if index < 0:
-        return False
-    start = max(0, index - SNIPPET_CONTEXT_CHARS)
-    end = min(len(text), index + len(needle) + SNIPPET_CONTEXT_CHARS)
-    entry: dict[str, Any] = {
-        "kind": kind,
-        "path": path,
-        "char_index": index,
-        "snippet": text[start:end],
-    }
-    if meta is not None:
-        if kind in {"journal", "journal_detail"}:
-            entry["journal_id"] = meta.get("id")
-        else:
-            entry["artifact_id"] = meta.get("artifact_id")
-            entry["filename"] = meta.get("filename")
-    matches.append(entry)
-    return True

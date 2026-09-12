@@ -85,6 +85,14 @@ Related commands intentionally have different contracts:
 
 ## Redmine evidence workflow (read-only, 2026-09-08 plan)
 
+Pre-flight checklist (run both before the first fetch; ~10 seconds to
+discover a scope or credential gap instead of failing at step 4):
+
+```bash
+gms-rt-auth-scopes-check --json --non-interactive   # required: redmine.read, artifacts.read_own, apk.analyze_own, sdk.read
+gms-rt-redmine-credentials-status --json --non-interactive  # configured must be true
+```
+
 The evidence chain is read-only against Redmine and owner-scoped on the
 Controller. Snapshots keep raw issue JSON (SHA-256 pinned), full journals
 (no truncation), and attachment originals with per-artifact audit status.
@@ -92,10 +100,16 @@ Controller. Snapshots keep raw issue JSON (SHA-256 pinned), full journals
 ```bash
 # 1. Create/refresh a full snapshot (refresh always contacts Redmine)
 gms-rt-redmine-issue-fetch 648526 --refresh --download all --wait --json --non-interactive
-#    (--refresh is the default; --no-refresh may reuse a fresh ready snapshot)
+#    (--refresh is the default; --no-refresh may reuse a fresh ready snapshot;
+#     --dry-run only validates preconditions — base_url + credentials — without
+#     creating a snapshot)
 
 # 2. Inspect completeness (complete=false means gaps — check errors[])
+#    The first argument accepts a snapshot_id OR a plain issue_id (the
+#    latest snapshot for that issue is resolved server-side; use --issue /
+#    --snapshot to disambiguate explicitly)
 gms-rt-redmine-issue-show SNAP --json --non-interactive
+gms-rt-redmine-issue-show 648526 --json --non-interactive
 
 # 3. Read journals in pages (limit<=100, follow next_cursor)
 gms-rt-redmine-journals SNAP --limit 50 --json --non-interactive
@@ -103,7 +117,10 @@ gms-rt-redmine-journals SNAP --limit 50 --json --non-interactive
 # 4. List artifacts (kind/size/sha256/status per attachment)
 gms-rt-redmine-attachments SNAP --json --non-interactive
 
-# 5. Search across description/journals/artifact text
+# 5. Search across description/journals/artifact text. Text members inside
+#    .zip attachments (logcat, test_result.xml, ...) are extracted at fetch
+#    time and searchable too; zip hits are cited as
+#    attachment:<file>.zip!/<member> with a line number.
 gms-rt-artifact-search SNAP --query 'AssertionError' --json --non-interactive
 
 # 6. Read long text by window (offset/limit chars)

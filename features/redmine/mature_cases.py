@@ -1,6 +1,6 @@
 """Aggregation of duplicate issues into a single "mature case".
 
-A mature case (Redmine.txt §4) is the canonical, approved answer for a
+A mature case is the canonical, approved answer for a
 recurring problem, e.g. "RK3576 Android16 BTS — VBMeta test key". It is built
 from one or more source case facts: shared scope fields are taken by majority
 vote, the root cause / solution prefer closed-then-confirmed issues, and the
@@ -197,7 +197,7 @@ class MatureCaseBuilder:
     @staticmethod
     def _aggregate_evidence(facts: list[dict[str, Any]]) -> dict[str, Any]:
         """Merge each source case_fact's structured evidence (attachments +
-        journals timeline) into the mature case (Redmine.txt §4 evidence)."""
+        journals timeline) into the mature case evidence."""
         def _evidence_of(fact: dict[str, Any]) -> dict[str, Any]:
             ev = fact.get("evidence_json") or fact.get("evidence") or {}
             return decode_json_obj(ev)

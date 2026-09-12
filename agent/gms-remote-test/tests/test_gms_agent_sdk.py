@@ -131,6 +131,46 @@ def test_token_file_with_loose_permissions_is_rejected(monkeypatch, tmp_path):
     assert client.token == ""
 
 
+def test_request_rereads_rotated_token_file(monkeypatch, tmp_path):
+    """2026-09-11 反馈回归：MCP 的长生命周期 client 不能固化启动时的 token。
+
+    enroll 轮换 token 文件（或换路径）后，下一次 request() 必须拿到
+    新凭据，否则 MCP 认证状态与 CLI 分裂（gms_rt_auth_status 报旧值）。
+    """
+    token_file = tmp_path / "agent.token"
+    token_file.write_text("token-v1\n")
+    token_file.chmod(0o600)
+    monkeypatch.setenv("GMS_REMOTE_TEST_SERVER", "https://controller:5001")
+    monkeypatch.setenv("GMS_AUTH_TOKEN_FILE", str(token_file))
+    client = GmsClient()
+    assert client.token == "token-v1"
+
+    captured: dict = {}
+
+    def fake_urlopen(request, timeout=0, context=None):
+        captured["auth"] = request.get_header("Authorization")
+        raise urllib.error.HTTPError(request.full_url, 500, "boom", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    # 就地轮换：文件内容变化必须体现在下一次请求头里。
+    token_file.write_text("token-v2\n")
+    with pytest.raises(GmsApiError):
+        client.request("GET", "/cluster/workers")
+    assert captured["auth"] == "Bearer token-v2"
+
+    # 换路径轮换（enroll 移动 token 落点）也要跟上：MCP 适配层先
+    # refresh_token() 指到新文件，request() 再重读内容。
+    new_file = tmp_path / "rotated.token"
+    new_file.write_text("token-v3\n")
+    new_file.chmod(0o600)
+    client.refresh_token(str(new_file))
+    with pytest.raises(GmsApiError):
+        client.request("GET", "/cluster/workers")
+    assert captured["auth"] == "Bearer token-v3"
+    assert client.token_path == str(new_file)
+
+
 def test_mcp_fast_path_falls_back_without_server(monkeypatch):
     spec = importlib.util.spec_from_file_location("mcp_server_under_test", SCRIPTS / "mcp_server.py")
     mcp = importlib.util.module_from_spec(spec)

@@ -184,7 +184,7 @@ async def get_firmware_upload_progress(request: Request):
 
 
 async def _require_elevated_admin_or_agent_approval(request: Request) -> None:
-    """Burn authorization gate (2026-09-08 audit §五, fix for agent burn).
+    """Burn authorization gate (ADR 0006).
 
     Two credential paths may authorize a firmware burn:
 
@@ -208,12 +208,18 @@ async def _require_elevated_admin_or_agent_approval(request: Request) -> None:
 @router.post("/api/burn/firmware")
 async def burn_firmware(
     request: Request,
-    h: str | None = Query(None),
     help: bool = Query(False),
+    h: str | None = Query(
+        None, deprecated=True,
+        description="历史 shorthand，等价于 help；仅为兼容保留",
+    ),
     _authorized=Depends(_require_elevated_admin_or_agent_approval),
 ):
     """Firmware burning - supports file upload."""
-    resp = runtime.generate_help_or_continue(help, "POST", "/api/burn/firmware")
+    # `h` 是历史 shorthand（?h=1）：真实生效并标记 deprecated，避免
+    # "看起来支持但实际无效"的 API 参数。
+    show_help = help or bool(h)
+    resp = runtime.generate_help_or_continue(show_help, "POST", "/api/burn/firmware")
     if resp:
         return resp
 
@@ -223,8 +229,6 @@ async def burn_firmware(
     # canonical device list (one approval covers the whole multi-device
     # operation; per-device consumption always failed on the second device).
     # Human admin sessions are unaffected.
-    from features.auth import AGENT_ROLE, get_authenticated_user
-
     caller = get_authenticated_user(request)
     agent_burn = caller is not None and caller.role == AGENT_ROLE
     if agent_burn:

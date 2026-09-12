@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.redmine import evidence_api
+from features.redmine import evidence_api, evidence_search_api
 
 
 def _make_config_manager(base_url: str):
@@ -130,6 +130,7 @@ class EvidenceApiTests(unittest.TestCase):
             return await call_next(request)
 
         app.include_router(evidence_api.router)
+        app.include_router(evidence_search_api.router)
         self.client = TestClient(app)
 
     def tearDown(self):
@@ -238,6 +239,81 @@ class EvidenceApiTests(unittest.TestCase):
         kinds = {item["kind"] for item in data["matches"]}
         self.assertIn("artifact", kinds)
 
+    def test_search_cites_zip_member_with_line(self):
+        """2026-09-11 反馈（zip 内容可检索）端点级：archive 派生文本命中给出 zip!/member 行级引用。"""
+        from features.redmine.evidence import zip_member_marker
+        from features.redmine.evidence_store import owner_evidence_store
+
+        store = owner_evidence_store("owner-a")
+        artifact = store.create_artifact(
+            snapshot_id=self.snapshot["snapshot_id"],
+            attachment_id="776657",
+            filename="tradefed-logs.zip",
+            original_filename="tradefed-logs.zip",
+            content_type="application/zip",
+            kind="archive",
+            declared_size=128,
+        )
+        derived_rel = (
+            f"648526/{self.snapshot['snapshot_id']}/derived/{artifact['artifact_id']}.txt"
+        )
+        derived_path = store.resolve_internal(derived_rel)
+        derived_path.parent.mkdir(parents=True, exist_ok=True)
+        derived_path.write_text(
+            f"{zip_member_marker('logs/logcat.txt')}\n"
+            "noise line\n"
+            "get_ad_selection_data bind ok\n",
+            encoding="utf-8",
+        )
+        store.update_artifact(
+            artifact["artifact_id"],
+            status="ready",
+            size_bytes=128,
+            sha256="c" * 64,
+            stored_path=derived_rel,
+            derived_text_path=derived_rel,
+            detected_content_type="application/zip",
+        )
+        url = f"/api/redmine-agent/evidence/{self.snapshot['snapshot_id']}/search"
+        response = self.client.get(
+            url + "?q=get_ad_selection_data", headers={"x-test-owner": "owner-a"}
+        )
+        matches = response.json()["data"]["matches"]
+        self.assertTrue(matches)
+        entry = matches[0]
+        self.assertEqual(
+            entry["path"], "attachment:tradefed-logs.zip!logs/logcat.txt"
+        )
+        self.assertEqual(entry["line"], 2)
+        self.assertEqual(entry["zip_member"], "logs/logcat.txt")
+
+    def test_latest_endpoint_resolves_newest_snapshot_for_issue(self):
+        """2026-09-11 反馈：issue-show 双参数——latest 端点按 issue 解析。"""
+        from features.redmine.evidence_store import owner_evidence_store
+
+        store = owner_evidence_store("owner-a")
+        store.create_snapshot(issue_id=648526, download_policy="none")
+        second = store.create_snapshot(issue_id=648526, download_policy="none")
+        store.update_snapshot(
+            second["snapshot_id"], status="ready", content_sha256="d" * 64
+        )
+        response = self.client.get(
+            "/api/redmine-agent/issues/648526/evidence/latest",
+            headers={"x-test-owner": "owner-a"},
+        )
+        data = response.json()["data"]
+        self.assertEqual(data["snapshot_id"], second["snapshot_id"])
+        self.assertEqual(data["status"], "ready")
+        self.assertTrue(data["ready"])
+
+    def test_latest_endpoint_404_with_fetch_hint_when_no_snapshot(self):
+        response = self.client.get(
+            "/api/redmine-agent/issues/999999/evidence/latest",
+            headers={"x-test-owner": "owner-a"},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("issue-fetch", response.json()["error"])
+
     def test_artifact_download_streams_original(self):
         response = self.client.get(
             f"/api/redmine-agent/artifacts/{self.artifact_id}/download",
@@ -262,6 +338,58 @@ class EvidenceApiTests(unittest.TestCase):
             headers={"x-test-owner": "owner-a"},
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_create_preflight_blocks_missing_credentials_without_snapshot(self):
+        """2026-09-11 反馈：凭据缺失时建快照前 4xx 快速失败，不留垃圾快照。"""
+        from features.redmine.evidence_store import owner_evidence_store
+
+        store = owner_evidence_store("owner-a")
+        _owner_creds = __import__(
+            "features.redmine.evidence", fromlist=["_OwnerCredentials"]
+        )._OwnerCredentials
+        before = store.latest_snapshot_for_issue(648526)
+        with patch(
+            "features.redmine.evidence.load_owner_credentials",
+            lambda owner: _owner_creds(),
+        ):
+            response = self.client.post(
+                "/api/redmine-agent/issues/648526/evidence",
+                json={"download": "none", "refresh": True},
+                headers={"x-test-owner": "owner-a"},
+            )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(store.latest_snapshot_for_issue(648526), before)
+
+    def test_create_preflight_blocks_missing_base_url_without_snapshot(self):
+        """2026-09-11 反馈：base_url 缺失同样在建快照前 4xx 快速失败。"""
+        from features.redmine.evidence_store import owner_evidence_store
+
+        store = owner_evidence_store("owner-a")
+        before = store.latest_snapshot_for_issue(648526)
+        with patch("features.redmine.evidence.owner_base_url", lambda owner: ""):
+            response = self.client.post(
+                "/api/redmine-agent/issues/648526/evidence",
+                json={"download": "none", "refresh": True},
+                headers={"x-test-owner": "owner-a"},
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(store.latest_snapshot_for_issue(648526), before)
+
+    def test_preflight_owner_fetch_returns_base_url_when_configured(self):
+        from features.redmine.evidence import preflight_owner_fetch
+
+        with patch(
+            "features.redmine.evidence.owner_base_url",
+            lambda owner: "http://redmine.example/",
+        ), patch(
+            "features.redmine.evidence.load_owner_credentials",
+            lambda owner: __import__(
+                "features.redmine.evidence", fromlist=["_OwnerCredentials"]
+            )._OwnerCredentials(api_key="k"),
+        ):
+            self.assertEqual(
+                preflight_owner_fetch("owner-a"), "http://redmine.example/"
+            )
 
 
 if __name__ == "__main__":

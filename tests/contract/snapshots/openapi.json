@@ -3459,7 +3459,7 @@
     },
     "/api/apk/doctor": {
       "get": {
-        "description": "JADX/Java 环境健康检查（计划 §11.3）。\n\n不返回完整环境变量集合；只报告 jadx 路径、版本探测结果和修复建议。",
+        "description": "JADX/Java 环境健康检查。\n\n不返回完整环境变量集合；只报告 jadx 路径、版本探测结果和修复建议。",
         "responses": {
           "200": {
             "content": {
@@ -5751,6 +5751,18 @@
         "parameters": [
           {
             "in": "query",
+            "name": "help",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Help",
+              "type": "boolean"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "历史 shorthand，等价于 help；仅为兼容保留",
+            "in": "query",
             "name": "h",
             "required": false,
             "schema": {
@@ -5762,17 +5774,9 @@
                   "type": "null"
                 }
               ],
+              "deprecated": true,
+              "description": "历史 shorthand，等价于 help；仅为兼容保留",
               "title": "H"
-            }
-          },
-          {
-            "in": "query",
-            "name": "help",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Help",
-              "type": "boolean"
             }
           }
         ],
@@ -15091,7 +15095,7 @@
     },
     "/api/redmine-agent/config/credentials": {
       "get": {
-        "description": "报告登录用户的 Redmine 凭据是否已配置（不回传明文）。\n\n凭据统一落盘到 configs/config_runtime.json，与统计端点读取的配置一致。\nAPI Key 只报告是否存在（计划 §5.3），绝不回传内容。",
+        "description": "报告登录用户的 Redmine 凭据是否已配置（不回传明文）。\n\n凭据统一落盘到 configs/config_runtime.json，与统计端点读取的配置一致。\nAPI Key 只报告是否存在，绝不回传内容。",
         "responses": {
           "200": {
             "content": {
@@ -15105,7 +15109,7 @@
         "summary": "Get Credentials Status"
       },
       "post": {
-        "description": "保存 Redmine 凭据到登录用户的运行时配置。\n\n凭据随登录用户落盘，看板/统计端点据此读取。密码与可选的 API Key\n均经 Fernet 加密落盘（0600）。",
+        "description": "保存 Redmine 凭据到登录用户的运行时配置（human-only）。\n\n安全边界（反馈 2026-09-11 S-1）：只接受人工会话。Agent Service\nToken 与该账号共享 owner 存储，凭据必须由人掌握——agent 调用直接\n403 并返回修复指引；写入成功记入安全审计链（不含凭据内容）。",
         "responses": {
           "200": {
             "content": {
@@ -16074,6 +16078,43 @@
           }
         },
         "summary": "Create Evidence Snapshot"
+      }
+    },
+    "/api/redmine-agent/issues/{issue_id}/evidence/latest": {
+      "get": {
+        "description": "该 owner 某 issue 的最新快照（2026-09-11 反馈：issue-show 参数语义）。\n\nissue-show 收到 issue_id 时用它解析 snapshot_id；优先返回最近 ready\n快照，若只有 running/partial/failed 则返回最近一条并附带其 status，\n便于 CLI 区分「无快照」与「快照未就绪」。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Latest Evidence Snapshot"
       }
     },
     "/api/redmine-agent/issues/{issue_id}/fetch": {
@@ -18526,7 +18567,7 @@
     },
     "/api/system/tools/jq": {
       "get": {
-        "description": "Serve the pinned jq binary for the skill installer (§十二).",
+        "description": "Serve the pinned jq binary for the skill installer.",
         "responses": {
           "200": {
             "content": {

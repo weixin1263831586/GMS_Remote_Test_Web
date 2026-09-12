@@ -396,7 +396,7 @@ class SensitiveRouteAuthorizationTests(unittest.TestCase):
 
     def test_migration_allowlist_only_shrinks(self):
         """Encode the ratchet: bound to the entries listed above at review time."""
-        # 2026-09-08: +1 for /agent-enroll (pairing-code redemption boundary —
+        # +1 for /agent-enroll (pairing-code redemption boundary —
         # the build server has no session yet; the one-shot code IS the
         # credential, scopes/ACLs/expiry come from the server-side record).
         self.assertLessEqual(

@@ -1,4 +1,4 @@
-"""Agent Bearer auth + approval-token API boundary tests (2026-09-08 audit).
+"""Agent Bearer auth + approval-token API boundary tests.
 
 Exercises the FastAPI endpoints end to end with the TestClient:
 - POST /api/auth/agent-tokens (elevated admin) returns a one-time raw token

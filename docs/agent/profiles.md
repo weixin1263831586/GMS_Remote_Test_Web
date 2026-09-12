@@ -20,9 +20,12 @@ legacy `<client>.env` 文件已删除——profile 本体只使用 TOML。
 ~/.local/state/gms-remote-test/<profile>.token       该 profile 的 Service Token（0600）
 ```
 
-profile 名必须匹配 `^[A-Za-z0-9_.-]+$`（单一路径段）。默认 profile 名由
-主机推导：`<client>-<host>-<uid>`（如 `kkagent-build01-1000`），因此同一台
-主机上不同 Controller 各占一个 profile 文件。TOML 为固定形状
+profile 名必须匹配 `^[A-Za-z0-9_.-]+$`（单一路径段）。`gms-agent install`
+的默认 profile 名包含 Controller 身份：
+`<client>-<host>-<sha256(server)[:8]>`（如 `codex-build01-3f2a9c1d`）——
+同一台主机上同一 client 的不同 Controller 各占一个 profile 文件，不会
+相互覆盖；需要可读名字时用 `gms-agent install --profile NAME` 显式指定
+（如 `gms-prod` / `gms-dev`）。TOML 为固定形状
 （顶层 `profile` / `client` + `[controller]` 的 `url` / `ca_cert` /
 可选 `insecure` + `[auth]` 的 `mode = "service-token"` / `token_file`），
 写入走 `profile_store.write_profile_toml()`（temp-file 语义外的 0600 保证、
@@ -46,6 +49,24 @@ profile 名必须匹配 `^[A-Za-z0-9_.-]+$`（单一路径段）。默认 profil
 只做展示与校验，不做隐式选择。`gms-agent profile list|show|use` 是人工
 检视与绑定的入口；多 Controller 主机上未显式指定的调用会失败并提示可用
 profile 列表——这是有意为之的失败（fail-closed），把歧义交给人决策。
+
+### 生命周期命令的 Controller 解析（fail-closed）
+
+`gms-agent enroll / update / rollback` 用同一条规则确定目标 Controller
+（`package_manager.resolve_controller()`），优先级从高到低：
+
+1. 显式 `--server URL`；
+2. 环境 `GMS_REMOTE_TEST_SERVER`（或 bootstrap 内嵌 URL）；
+3. 显式 `--profile NAME` → 该 profile 记录的 Controller；
+4. 全部 profile 恰好指向**唯一** Controller → 自动使用。
+
+0 个或多个不同 Controller → 报错退出（exit 2），要求 `--server` /
+`--profile`。旧实现的「按 client 逐个找第一个可用 profile」回退已删除：
+codex 侧歧义不允许静默掉到 kimi 的 Controller。
+
+`gms-agent enroll` 在歧义主机上必须 `--profile`（one-shot 配对码只兑换给
+明确的 Controller）；唯一 Controller 时 token 写入所有指向它的 profile
+（按 TOML 实际内容枚举，手工命名的 profile 同样覆盖）。
 
 ## 环境变量与选择顺序
 

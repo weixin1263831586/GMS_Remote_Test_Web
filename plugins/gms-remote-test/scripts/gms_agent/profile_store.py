@@ -20,6 +20,7 @@ Fail-closed 选择契约（多 Controller 编译服务器的 Agent 路由保证�
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import socket
@@ -55,10 +56,33 @@ def token_file(profile: str) -> Path:
 
 
 def profile_name(client: str) -> str:
-    """Host-scoped default profile name: <client>-<host>-<uid>."""
+    """Legacy host-scoped profile name: <client>-<host>-<uid>.
+
+    Kept only as a deterministic name for tests/diagnostics that build a
+    sandbox profile without a Controller. `write_profile` no longer uses
+    it: the install default is `default_profile_name()` — the profile
+    identity includes the Controller, so two Controllers on one host get
+    two separate profiles instead of silently overwriting each other.
+    """
 
     host = socket.gethostname().split(".")[0]
     return f"{client}-{host}-{os.getuid()}"
+
+
+def default_profile_name(client: str, server: str) -> str:
+    """Install default profile name: <client>-<host>-<sha256(server)[:8]>.
+
+    The Controller identity (a short digest of its base URL) is part of the
+    profile identity: installing Controller A and Controller B for the same
+    client on the same host must produce two distinct profiles
+    (codex-build01-1a2b3c4d / codex-build01-9f8e7d6c), never a silent
+    overwrite. A readable name can be chosen explicitly with
+    `gms-agent install --profile NAME`.
+    """
+
+    host = socket.gethostname().split(".")[0]
+    digest = hashlib.sha256(server.rstrip("/").encode("utf-8")).hexdigest()[:8]
+    return f"{client}-{host}-{digest}"
 
 
 def list_profiles() -> list[str]:

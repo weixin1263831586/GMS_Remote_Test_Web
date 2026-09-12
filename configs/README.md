@@ -67,6 +67,20 @@ cp -n configs/examples/automation_profiles.example.json configs/local/automation
 保留原有显式路径覆盖能力。构建模板的 `{参数}` 与应用的 `${环境变量}`
 不是同一种语法，不应互换。
 
+## 旧路径兼容期限（canonical + legacy 回退）
+
+`foundation/config_paths.py` 中的「canonical 缺失 → 回退 legacy」逻辑是
+**迁移期兼容层**，不是永久架构。为避免新目录结构退化为「新代码永久维护
+所有旧目录」，兼容层按以下节奏收敛：
+
+- **0.19**：canonical + legacy 双读（当前状态）；旧路径命中时输出
+  warning 日志（含迁移提示），便于统计仍有旧布局的部署；
+- **0.20**：canonical only——legacy 回退删除，旧路径存在时启动告警
+  并指向 `scripts/migrate_config_layout.py`。
+
+新增代码禁止引入新的 canonical→legacy 回退；需要兼容旧路径时必须在本表
+登记期限。
+
 ## 旧布局迁移与回退
 
 旧版根目录文件仍可读取。迁移必须在 Controller 和本机 Worker 停止后执行；

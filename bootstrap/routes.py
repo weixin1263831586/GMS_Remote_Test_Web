@@ -44,7 +44,9 @@ from features.gerrit.service import query_gerrit_dual_mode
 from features.gerrit.settings import config_manager as gerrit_config_manager
 from features.redmine import api as redmine
 from features.redmine import apk_import_api as redmine_apk_import
+from features.redmine import credentials_api as redmine_credentials
 from features.redmine import evidence_api as redmine_evidence
+from features.redmine import evidence_search_api as redmine_evidence_search
 from features.redmine import reply_api as redmine_reply
 from features.redmine.api import configure_redmine_service
 from features.redmine.dashboard import (
@@ -141,6 +143,8 @@ ALL_ROUTERS = [
     redmine.router,
     redmine.page_router,
     redmine_evidence.router,
+    redmine_evidence_search.router,
+    redmine_credentials.router,
     redmine_apk_import.router,
     redmine_apk_import.apk_router,
     redmine_reply.router,
@@ -200,7 +204,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             get_or_create_user_state=get_or_create_user_state,
         )
         configure_client_ssh_authenticator(client_manager.detect_username)
-        # SDK 源码 provider（2026-09-08 计划 §12）：provider 列表只来自部署
+        # SDK 源码 provider：provider 列表只来自部署
         # 配置；result_id 签名密钥从 master secret 派生，重启后仍可验证。
         from features.system.source_provider import (
             configure_source_registry,

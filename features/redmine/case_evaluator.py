@@ -1,10 +1,10 @@
 """Compare internal case output against a reference (GMS assistant / manual).
 
-This is the **evaluation-only** channel (Redmine.txt §1, §5.8). Reference
+This is the **evaluation-only** channel. Reference
 outputs are stored in ``redmine_reference_outputs`` and never feed the
 production auto-reply (see :mod:`reply_drafter`).
 
-Dimensions compared (§5.8): title, platform, android version, test module,
+Dimensions compared: title, platform, android version, test module,
 failing case, symptoms, root cause, solution, verification steps, notes,
 rules. Produces a 0–100 score, missing fields and mismatch fields.
 """

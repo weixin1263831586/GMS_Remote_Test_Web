@@ -1,7 +1,7 @@
 """tools/usbipd provenance manifest 校验。
 
 随平台分发的 ``tools/usbipd`` 是一个 ELF 二进制，Git 历史无法证明它来自
-usbip 仓库哪个 commit（2026-09-03 联合审计 P1-5）。``tools/usbipd.provenance.json``
+usbip 仓库哪个 commit。``tools/usbipd.provenance.json``
 记录 source commit、版本、sha256 等溯源信息；本测试保证：
 
 1. 清单存在且字段齐全；

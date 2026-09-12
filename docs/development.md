@@ -56,7 +56,9 @@ bootstrap/           →  foundation/ / features/
 - **文件行数预算**（`test_file_size_rules.py`）：`bootstrap/`、`foundation/`、
   `features/`、`workflows/` 下**未被登记**的新 Python 模块上限 **600 行**；
   历史超限模块登记在 `MIGRATION_LINE_LIMITS` 中，不得超过各自登记值（债务可
-  缩小、不可增长）。
+  缩小、不可增长）。真正拆小文件后应同步收紧预算值，可用
+  `python tools/update_size_baseline.py --shrink-only` 一键把预算降到当前
+  实际行数（只降不升；增长中的文件保持原预算让门禁继续报警）。
 - **前端体积预算**（`test_frontend_size_rules.py`）：扫描 `web/shell/`、
   `web/static/css/`、`web/static/js/`。未登记文件默认上限 HTML **100 KB**、
   JS **50 KB**、CSS **50 KB**；历史超限文件登记在 `MIGRATION_BYTE_LIMITS`
@@ -137,7 +139,10 @@ python tools/sync_agent_package.py .
 ## 文档政策
 
 - **源码注释不得引用不存在的评审文档编号**：注释里只应引用真实存在的 ADR
-  或文档；避免出现已废弃/不存在的审计编号。
+  或文档；避免出现已废弃/不存在的审计编号（`audit §`、`P1-7`、
+  `2026-09-08 计划` 一类）。该政策由
+  `tests/architecture/test_review_markers.py` 静态强制；清理存量时把引用
+  改为指向真实 ADR（如 `ADR 0006`）或直接描述行为本身。
 - **架构决策写入 `docs/architecture/adr/`**，采用 `NNNN-title.md` 命名，按既有
   ADR 的结构（背景 / 决策 / 理由 / 后果）撰写，并在「关联代码」中标明受约束的
   模块与架构测试。

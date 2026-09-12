@@ -73,6 +73,27 @@ class _FakeSerial:
         self.closed = True
 
 
+class _CloseRaceSerial(_FakeSerial):
+    """复现 pyserial close() 竞态：fd 已置 None、is_open 仍为 True 时 read() 抛 TypeError。"""
+
+    def __init__(self, chunks: list[bytes]):
+        super().__init__(chunks)
+        self.read_blocked = threading.Event()
+        self.closed_event = threading.Event()
+
+    def read(self, size: int) -> bytes:
+        if self.chunks:
+            return super().read(size)
+        # 模拟阻塞在 os.read() 的捕获线程：close() 并发发生后才抛出竞态错误。
+        self.read_blocked.set()
+        self.closed_event.wait(timeout=5)
+        raise TypeError("'NoneType' object cannot be interpreted as an integer")
+
+    def close(self):
+        super().close()
+        self.closed_event.set()
+
+
 class SerialConsoleStoreTests(unittest.TestCase):
     def test_binding_round_trip_update_and_delete(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -190,6 +211,46 @@ class SerialConsoleServiceTests(unittest.TestCase):
         try:
             self.assertEqual(asyncio.run(exercise()), "loader> ")
             self.assertEqual(service.list_log_dates(self.stable_name), [])
+        finally:
+            service.stop()
+
+    def test_concurrent_close_race_does_not_record_spurious_error(self):
+        handles: list[_CloseRaceSerial] = []
+
+        def factory(**_kwargs) -> _CloseRaceSerial:
+            handle = _CloseRaceSerial([b"U-Boot 2024\n"])
+            handles.append(handle)
+            return handle
+
+        service = self.make_service(serial_factory=factory)
+        service.update_binding(
+            self.stable_name,
+            {"baudrate": 115200, "capture_enabled": False},
+        )
+
+        async def exercise():
+            subscriber_id, _queue, _backlog = await service.subscribe(self.stable_name)
+            return subscriber_id
+
+        try:
+            subscriber_id = asyncio.run(exercise())
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not handles:
+                time.sleep(0.01)
+            self.assertTrue(handles, "捕获线程未创建串口句柄")
+            self.assertTrue(handles[0].data_read.wait(timeout=2))
+            # 等捕获线程阻塞在 read() 内，再走生产路径：用户点击控制台
+            # “关闭”→ 退订 → 无订阅且无采集 → _stop_worker 并发关句柄。
+            self.assertTrue(handles[0].read_blocked.wait(timeout=2))
+            service.unsubscribe(self.stable_name, subscriber_id)
+            runtime = service._runtime(self.stable_name)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and runtime.thread and runtime.thread.is_alive():
+                time.sleep(0.01)
+            # pyserial close() 竞态窗口内 read() 抛出的 TypeError 不应
+            # 被当作串口故障残留在 runtime.error 中展示给用户。
+            self.assertEqual(runtime.error, "")
+            self.assertIn("U-Boot 2024", "".join(runtime.backlog))
         finally:
             service.stop()
 

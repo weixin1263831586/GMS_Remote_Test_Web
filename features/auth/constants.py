@@ -7,11 +7,11 @@ import with service.py (which mixes the AgentTokenServiceMixin in).
 from __future__ import annotations
 
 
-# Agent Service Token principal role (2026-09-08 audit §四): agent tokens are
+# Agent Service Token principal role (ADR 0006): agent tokens are
 # not a role ladder step; their power comes entirely from AGENT_SCOPES.
 AGENT_ROLE = "agent_service"
 
-# Agent Service Token scopes (2026-09-08 audit §四). Scopes reuse the
+# Agent Service Token scopes (ADR 0006). Scopes reuse the
 # platform permission vocabulary so ``has_permission`` composes naturally;
 # role-based admin gates (require_role) never match an agent principal.
 AGENT_SCOPES: dict[str, str] = {
@@ -23,9 +23,8 @@ AGENT_SCOPES: dict[str, str] = {
     "tests.cancel": "cancel own test jobs",
     "jobs.read": "read durable job status/events",
     "reports.read": "read finished test reports",
-    # Redmine evidence / APK analysis / SDK source scopes (2026-09-08 plan:
-    # redmine-cli-agent-implementation-plan.md §5.1). Read-only analysis chain;
-    # Redmine stays GET-only this phase.
+    # Redmine evidence / APK analysis / SDK source scopes (ADR 0006).
+    # Read-only analysis chain; Redmine stays GET-only this phase.
     "redmine.read": "read Redmine issues/attachments visible to the owner identity",
     "artifacts.read_own": "read own evidence artifacts and derived text",
     "apk.analyze_own": "run JADX analysis on own artifacts and read results",
@@ -42,7 +41,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "reports.read",
         "devices.use_leased",
         # Human operators use the evidence/APK/SDK readers through their own
-        # Redmine identity and per-owner storage (2026-09-08 plan §5.1); agent
+        # Redmine identity and per-owner storage (ADR 0006); agent
         # tokens must be granted the matching scopes explicitly.
         "redmine.read",
         "artifacts.read_own",

@@ -161,12 +161,33 @@ async def auth_status(request: Request):
         if user
         else None
     )
+    # principal_type / credential_mode（2026-09-11 反馈）：让
+    # gms_rt_auth_status 一次就能看出「现在是 agent token 还是人工会话」，
+    # token 文件轮换后不必再对比 CLI/MCP 两端输出猜不一致。
+    # auth_required 保持「部署是否全局强制认证」语义（Web UI 依赖），
+    # 与 authenticated 并非互斥。
+    if getattr(request.state, "auth_method", None) == "agent_token":
+        principal_type = "agent_service"
+        credential_mode = "agent_token"
+    elif user is not None:
+        principal_type = "user"
+        credential_mode = "session_cookie"
+    else:
+        principal_type = ""
+        credential_mode = "none"
     return JSONResponse(
         content={
             "authenticated": user is not None,
             "auth_required": authentication_required(),
+            # needs_authentication（2026-09-11 反馈）：无歧义的派生
+            # 语义——「这次请求还要不要再出示凭据」。auth_required 只描述
+            # 部署策略（Web UI 依赖），与 authenticated 并非互斥，agent
+            # 一律读 needs_authentication。
+            "needs_authentication": bool(authentication_required()) and user is None,
             "setup_required": auth_service.setup_required(),
             "bootstrap_token_required": bootstrap_token_required(),
+            "principal_type": principal_type,
+            "credential_mode": credential_mode,
             "user": user.as_dict() if user else None,
             "elevated": bool(elevated_until),
             "elevated_until": elevated_until,

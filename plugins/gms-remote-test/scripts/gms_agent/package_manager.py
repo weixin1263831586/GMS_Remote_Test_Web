@@ -161,41 +161,86 @@ def installed_version() -> str | None:
 # HTTP / registry
 # ---------------------------------------------------------------------------
 
-def server_url_from_env() -> str:
-    url = (
-        os.environ.get("GMS_REMOTE_TEST_SERVER", "")
+def server_url_from_env(profile: str = "") -> str:
+    return resolve_controller("", profile)[0]
+
+
+def resolve_controller(explicit_server: str = "", explicit_profile: str = "") -> tuple[str, str]:
+    """Resolve the (Controller URL, CA cert) for update/enroll/rollback.
+
+    Fail-closed multi-Controller rule (ADR 0003) — precedence:
+
+      1. explicit ``--server`` wins;
+      2. else the environment (``GMS_REMOTE_TEST_SERVER`` or the
+         bootstrap-embedded URL);
+      3. else an explicit ``--profile`` → that profile's Controller;
+      4. else the UNIQUE Controller across ALL installed profiles —
+         zero profiles or more than one distinct Controller is an error,
+         never a per-client first-match guess.
+
+    A client with ambiguous profiles must NOT fall through to another
+    client's sole Controller: the CA/token of Controller B must never be
+    silently used against Controller A. Pass ``explicit_profile`` (or
+    ``--server``) to disambiguate; the CA is returned only for an explicit
+    profile whose trust store was recorded at install time.
+    """
+
+    server = (
+        explicit_server.rstrip("/")
+        or os.environ.get("GMS_REMOTE_TEST_SERVER", "")
         # Bootstrap installs embed the Controller URL at download time
         # (GET /api/agent/install); an explicit env var still wins.
         or "__GMS_AGENT_DEFAULT_SERVER__"
-    )
-    if not url or url.startswith("__GMS_"):
-        # update/rollback on an already-installed host: the profile recorded
-        # the Controller URL at activation time — reuse it instead of failing.
-        profile_server, _ = profile_server_and_ci_or_none()
+    ).rstrip("/")
+    if server and not server.startswith("__GMS_"):
+        return server, ""
+    if explicit_profile:
+        flat = profile_store.load_profile(explicit_profile)
+        profile_server = profile_store.controller_url(flat)
         if profile_server:
-            return profile_server.rstrip("/")
+            return profile_server, profile_store.ca_cert(flat)
         print(
-            "Error: GMS_REMOTE_TEST_SERVER 未设置且未找到已安装 profile"
-            "（gms-agent 不会猜测 Controller 地址）",
+            f"Error: profile {explicit_profile} 不存在或缺少 Controller URL",
             file=sys.stderr,
         )
         raise SystemExit(2)
-    return url.rstrip("/")
+    unique_server, unique_ca = profile_server_and_ci_or_none()
+    if unique_server:
+        return unique_server, unique_ca
+    print(
+        "Error: GMS_REMOTE_TEST_SERVER 未设置且本机没有指向唯一 Controller 的"
+        " profile（gms-agent 不会猜测 Controller 地址；"
+        "请使用 --server URL 或 --profile NAME 指定）",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 
 def profile_server_and_ci_or_none() -> tuple[str, str]:
-    """Best-effort (server, ca) lookup across installed client profiles.
+    """Unique (server, ca) across ALL installed profiles — fail closed.
 
-    Never raises: update/rollback only need a hint where the Controller is;
-    a corrupt/unreadable profile store simply yields ("", "")."""
+    Returns ("", "") when the host has zero profiles or more than one
+    DISTINCT Controller: a corrupt/unreadable store is indistinguishable
+    from "no profile", and a multi-Controller host must resolve the
+    ambiguity explicitly (--server / --profile), never via a per-client
+    first-match that let codex-ambiguous hosts silently route to kimi's
+    Controller."""
+
     try:
-        for client in CLIENTS:
-            server, ca = profile_server_and_ca(client)
-            if server:
-                return server, ca
+        server = ""
+        ca = ""
+        for name in profile_store.list_profiles():
+            flat = profile_store.load_profile(name)
+            url = profile_store.controller_url(flat)
+            if not url:
+                continue
+            if server and server != url:
+                return "", ""
+            if not server:
+                server, ca = url, profile_store.ca_cert(flat)
+        return server, ca
     except Exception:
-        pass
-    return "", ""
+        return "", ""
 
 
 def http_get(url: str, ca_cert: str = "", timeout: int = 60) -> tuple[bytes, dict[str, str]]:
@@ -613,7 +658,7 @@ def _profile_insecure(name: str) -> bool:
     return os.environ.get("GMS_INSTALL_INSECURE", "") == "1"
 
 
-def write_profile(client: str, server: str, ca_cert: str) -> str:
+def write_profile(client: str, server: str, ca_cert: str, profile: str = "") -> str:
     """Write the client profile (TOML only).
 
     ~/.config/gms-agent/profiles/<profile>.toml (0600) is the single
@@ -621,10 +666,18 @@ def write_profile(client: str, server: str, ca_cert: str) -> str:
     legacy <client>.env duplicate was removed: two stores invited
     first-match drift with multiple Controllers.
 
+    The default profile identity includes the Controller
+    (default_profile_name(): <client>-<host>-<sha256(server)[:8]>) so two
+    Controllers for one client on one host occupy two profile files instead
+    of silently overwriting each other; ``profile`` pins an explicit name
+    (gms-agent install --profile NAME).
+
     See docs/architecture/adr/0003-agent-profile-store.md.
     """
 
-    name = profile_name(client)
+    name = profile or profile_store.default_profile_name(client, server)
+    if not profile_store.validate_profile_name(name):
+        raise ValueError(f"非法 profile 名: {name!r}")
     insecure = _profile_insecure(name)
     profile_store.write_profile_toml(name, client, server, ca_cert, insecure)
     return name
@@ -1073,7 +1126,9 @@ class suppress_oserror:
         return exc_type is not None and issubclass(exc_type, OSError)
 
 
-def activate_clients(clients: list[str], server: str, ca_cert: str) -> None:
+def activate_clients(
+    clients: list[str], server: str, ca_cert: str, profile: str = "",
+) -> list[str]:
     """Whole-package activation: skill + client registration + profile all
     derive from CURRENT_LINK, so update/rollback refresh them together
     with the runtime.
@@ -1082,21 +1137,29 @@ def activate_clients(clients: list[str], server: str, ca_cert: str) -> None:
     mixed state — the first failure aborts activation (install fails
     loudly; update keeps the new runtime but reports which client broke
     and exits non-zero).
+
+    Returns the written profile names (install hands them to the enroll
+    step so a one-shot code lands in exactly the profile just activated).
     """
+
+    written: list[str] = []
     for client in clients:
         print(f"Configuring {client}:")
-        name = write_profile(client, server, ca_cert)
+        name = write_profile(client, server, ca_cert, profile)
+        written.append(name)
         install_skill(client, CURRENT_LINK)
         if client == "kkagent":
             install_plugin_for_kkagent(CURRENT_LINK)
         else:
             reconcile_mcp(client, server, name, ca_cert)
+    return written
 
 
 def reactivate_clients(
     server: str,
     ca_cert: str,
     previous_target: Path | None = None,
+    allow_server_fallback: bool = False,
 ) -> list[str]:
     """Transactional whole-package re-activation for update/rollback.
 
@@ -1105,6 +1168,11 @@ def reactivate_clients(
     fallback) so write_profile and reconcile_mcp can never disagree — the
     old rollback path passed the UNresolved ``server_i`` to
     reconcile_mcp(), writing an empty server into the MCP config.
+
+    ``server`` is only a FALLBACK for clients whose profile lacks a URL:
+    with ``allow_server_fallback=False`` (update/rollback default) a
+    profile-less URL makes the activation fail loudly instead of silently
+    pointing the client at a controller chosen by the environment.
 
     ``previous_target`` is the versions/<v>/ directory the caller came
     FROM (before install_runtime flipped current). Activation failure
@@ -1124,11 +1192,12 @@ def reactivate_clients(
     try:
         for client in clients:
             profile_server, profile_ca = profile_server_and_ca(client)
-            resolved_server = profile_server or server
+            resolved_server = profile_server or (server if allow_server_fallback else "")
             resolved_ca = profile_ca or ca_cert
             if not resolved_server:
                 raise RuntimeError(
-                    f"{client}: 无法确定 Controller URL（profile 与环境均未提供）"
+                    f"{client}: 无法确定 Controller URL"
+                    f"（profile 缺失且未提供 --server{'，update/rollback 不使用环境回退' if not allow_server_fallback else ''}）"
                 )
             print(f"Re-activating {client}:")
             name = write_profile(client, resolved_server, resolved_ca)
@@ -1150,7 +1219,7 @@ def reactivate_clients(
             try:
                 for client in clients:
                     profile_server, profile_ca = profile_server_and_ca(client)
-                    server_c = profile_server or server
+                    server_c = profile_server or (server if allow_server_fallback else "")
                     if not server_c:
                         print(
                             f"  MCP ({client}): 无法确定 Controller URL，补偿仅刷新本地文件",
@@ -1179,6 +1248,10 @@ def cmd_install(args: argparse.Namespace) -> int:
 
 def _cmd_install_locked(args: argparse.Namespace) -> int:
     ca_cert = os.environ.get("GMS_INSTALL_CA_CERT", "")
+    profile = (getattr(args, "profile", "") or "").strip()
+    if profile and not profile_store.validate_profile_name(profile):
+        print(f"Error: 非法 profile 名: {profile!r}", file=sys.stderr)
+        return 2
     source_root = local_package_root(args.package, script_dir=SCRIPT_DIR)
     clients = (
         []
@@ -1192,7 +1265,7 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
             print("未检测到 codex/kimi/kkagent；将仅安装运行时与 CLI。")
     server = args.server or ""
     if source_root is None or clients:
-        server = server or server_url_from_env()
+        server = server or resolve_controller(server, profile)[0]
         if not _controller_url_valid(server):
             print(
                 "Error: Controller URL 无效；要求 http(s)://host[:port]，"
@@ -1231,8 +1304,9 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
     cli_links = install_cli_dispatcher()
     print(f"  CLI: {cli_links[0]} (+{len(cli_links) - 1} gms-rt-*/gms-agent command links)")
 
+    written_profiles: list[str] = []
     if clients:
-        activate_clients(clients, server, ca_cert)
+        written_profiles = activate_clients(clients, server, ca_cert, profile)
 
     print("\nDetected & configured:", ", ".join(clients) if clients else "(none)")
 
@@ -1243,7 +1317,10 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
     enroll_code = (getattr(args, "enroll_code", "") or "").strip()
     if not enroll_code:
         print("Next: create an enrollment code in the Controller web UI, then run:")
-        print("  gms-agent enroll <CODE>")
+        if len(written_profiles) == 1:
+            print(f"  gms-agent enroll <CODE> --profile {written_profiles[0]}")
+        else:
+            print("  gms-agent enroll <CODE>")
         return 0
     print("\nEnrolling provided one-shot code ...")
     args.code = enroll_code
@@ -1260,7 +1337,8 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def _cmd_update_locked(args: argparse.Namespace) -> int:
-    server = args.server or server_url_from_env()
+    profile = (getattr(args, "profile", "") or "").strip()
+    server, _ca = resolve_controller(args.server, profile)
     ca_cert = os.environ.get("GMS_INSTALL_CA_CERT", "")
     current = installed_version() or runtime_version()
     try:
@@ -1331,6 +1409,10 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
     # from it (no mixed runtime/skill/plugin state), then the error
     # propagates.
     try:
+        # Update re-activation is profile-authoritative: a client whose
+        # profile lacks a Controller URL fails the activation loudly instead
+        # of silently inheriting the environment/--server value (which may
+        # belong to another Controller on a multi-Controller host).
         reactivated = reactivate_clients(
             server, ca_cert, previous_target=VERSIONS_DIR / current
         )
@@ -1364,7 +1446,6 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     # profiles are the authoritative per-client store. The env value is
     # only a tolerant fallback; a client with NEITHER fails the activation
     # below (with compensation) instead of writing an empty server.
-    fallback_server = os.environ.get("GMS_REMOTE_TEST_SERVER", "").rstrip("/")
     rollback_from = installed_version()
     flip_current(target)
     print(f"Rolled back: {CURRENT_LINK} -> {target}")
@@ -1376,9 +1457,19 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     # reconcile_mcp can no longer receive an empty server while
     # write_profile got the environment fallback.
     previous_target = VERSIONS_DIR / rollback_from if rollback_from else None
+    server, ca_cert = "", ""
+    explicit_server = (getattr(args, "server", "") or "").strip()
+    explicit_profile = (getattr(args, "profile", "") or "").strip()
+    if explicit_server or explicit_profile:
+        # Explicit Controller for the re-activation — resolve once, same
+        # fail-closed rule as update/enroll.
+        server, ca_cert = resolve_controller(explicit_server, explicit_profile)
     try:
         reactivated = reactivate_clients(
-            fallback_server, "", previous_target=previous_target
+            server,
+            ca_cert,
+            previous_target=previous_target,
+            allow_server_fallback=bool(server),
         )
     except (SystemExit, Exception):
         # Compensation already restored the pre-rollback whole-package
@@ -1398,9 +1489,20 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
 # enroll
 # ---------------------------------------------------------------------------
 
-def write_enrollment_token(token: str, profile: str | None = None, client: str | None = None) -> list[str]:
-    """Persist an enrolled Agent Service Token (0600) for every configured
-    client profile; returns the written token-file paths.
+def write_enrollment_token(
+    token: str, profile: str | None = None, client: str | None = None,
+) -> list[str]:
+    """Persist an enrolled Agent Service Token (0600); returns written paths.
+
+    Resolution contract (multi-Controller fail-closed):
+
+    - explicit ``profile`` → exactly that profile's token file;
+    - else one distinct Controller across ALL installed profiles → write
+      to every profile pointing at it (enumerated from the TOML store,
+      never re-derived from the client, so a hand-named profile such as
+      codex-prod gets the token);
+    - else (zero or ambiguous) → write nothing and return [] — the caller
+      must not guess which Controller a one-shot code belongs to.
 
     cmd_enroll used to derive the profile from the legacy
     <client>.env store only, so a TOML-only host crashed with
@@ -1418,8 +1520,13 @@ def write_enrollment_token(token: str, profile: str | None = None, client: str |
         token_file.write_text(token + "\n", encoding="utf-8")
         token_file.chmod(0o600)
         return [str(token_file)]
-    for client_name in configured_clients():
-        name = profile_name(client_name)
+    unique_server, _ca = profile_server_and_ci_or_none()
+    if not unique_server:
+        return []
+    for name in profile_store.list_profiles():
+        flat = profile_store.load_profile(name)
+        if profile_store.controller_url(flat) != unique_server:
+            continue
         token_file = profile_store.token_file(name)
         token_file.write_text(token + "\n", encoding="utf-8")
         token_file.chmod(0o600)
@@ -1428,7 +1535,8 @@ def write_enrollment_token(token: str, profile: str | None = None, client: str |
 
 
 def cmd_enroll(args: argparse.Namespace) -> int:
-    server = args.server or server_url_from_env()
+    profile = (getattr(args, "profile", "") or "").strip()
+    server, _ca = resolve_controller(getattr(args, "server", ""), profile)
     code = args.code
     if not code:
         print("Error: 需要 one-shot enrollment code", file=sys.stderr)
@@ -1466,14 +1574,13 @@ def cmd_enroll(args: argparse.Namespace) -> int:
     if not token:
         print("Error: 响应缺少 token", file=sys.stderr)
         return 7
-    # Host-identity model: one enrollment → one token shared by every
-    # configured client profile (the audit trail separates clients via
-    # GMS_AGENT_CLIENT). Enroll once per client identity by re-running with
-    # dedicated profiles if per-agent revocation is ever required.
-    # Resolution must cover TOML-only profiles — the token
-    # is written BEFORE any output so a later failure cannot lose it.
+    # The token is written BEFORE any output so a later
+    # failure cannot lose it. The exchange happens against the SAME
+    # Controller the target profile(s) point at (resolve_controller above):
+    # a one-shot code redeemed against Controller A is never stored into a
+    # Controller B profile.
     try:
-        written = write_enrollment_token(token)
+        written = write_enrollment_token(token, profile=profile)
     except OSError as error:
         print(f"Error: token 写盘失败（配对码已消费，请重新生成）: {error}", file=sys.stderr)
         return 8
@@ -1482,8 +1589,16 @@ def cmd_enroll(args: argparse.Namespace) -> int:
     if scopes:
         print(f"Scopes: {', '.join(scopes)}")
     if not written:
-        print("Warning: 没有已配置的 client profile；先运行 gms-agent install", file=sys.stderr)
-        return 0
+        eligible = " ".join(profile_store.list_profiles()) or "(none)"
+        print(
+            "Error: 本机没有指向唯一 Controller 的 eligible profile，"
+            "token 未落盘（one-shot code 已消费，请重新生成）；"
+            f"现安装的 profiles: {eligible}。请用 gms-agent install 配置 "
+            "或用 --profile 指定目标。",
+            file=sys.stderr,
+        )
+        return 8
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1623,14 +1738,24 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Runtime root: {RUNTIME_ROOT}")
     print(f"Detected:     {', '.join(detect_clients()) or '(none)'}")
     for client in configured_clients():
-        state = "configured"
-        token_ref = ""
+        # Report the EXACT ambiguity instead of silently displaying the
+        # first sorted profile's token state (first-item display used to
+        # mask a multi-Controller host as "configured + token OK").
         candidates = profile_store.profile_candidates(client)
-        if candidates:
+        if len(candidates) == 1:
             flat = load_profile(candidates[0].stem)
             token_path = flat.get("token_file", "")
+            token_ref = ""
             if token_path:
                 ref = Path(token_path)
                 token_ref = " + token" if ref.is_file() else " + token MISSING"
+            state = "configured"
+        elif len(candidates) > 1:
+            state = f"AMBIGUOUS ({len(candidates)} profiles: "
+            state += ", ".join(path.stem for path in candidates) + ")"
+            token_ref = " — use `gms-agent profile use <NAME>` to disambiguate"
+        else:
+            state = "unconfigured"
+            token_ref = ""
         print(f"  {client}: {state}{token_ref}")
     return 0

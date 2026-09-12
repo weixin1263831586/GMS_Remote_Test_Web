@@ -109,6 +109,7 @@ class GmsClient:
         if not self.server_url:
             raise GmsApiError("GMS_REMOTE_TEST_SERVER 未设置", EXIT_USAGE)
         token_path = token_file or os.environ.get("GMS_AUTH_TOKEN_FILE", "")
+        self.token_path = token_path
         self.token = _load_token(Path(token_path)) if token_path else ""
         self.ca_cert = ca_cert or os.environ.get("GMS_CURL_CA_CERT", "")
         self.insecure = insecure or os.environ.get("GMS_CURL_INSECURE", "") == "1"
@@ -116,6 +117,24 @@ class GmsClient:
         self._ssl_context: ssl.SSLContext | None = None
 
     # -- low level ---------------------------------------------------------
+
+    def refresh_token(self, token_path: str | None = None) -> None:
+        """Re-read the token file before a request (2026-09-11 反馈（MCP/CLI 认证状态不一致）).
+
+        A long-lived client (the MCP adapter keeps one singleton) would
+        otherwise keep authenticating with the token captured at startup,
+        even after enroll rotated the file. Re-reading a 0600 file per
+        request is cheap and keeps MCP auth state in lockstep with the CLI.
+        An explicit ``token_path`` also follows the profile TOML when enroll
+        moved the token to a new file.
+        """
+
+        if token_path:
+            self.token_path = token_path
+        if self.token_path:
+            self.token = _load_token(Path(self.token_path))
+        else:
+            self.token = ""
 
     def _ssl(self) -> ssl.SSLContext | None:
         if not self.server_url.startswith("https://"):
@@ -143,6 +162,8 @@ class GmsClient:
 
             query = "?" + urlencode({k: v for k, v in params.items() if v is not None})
         url = f"{self.server_url}/api{endpoint}{query}"
+        # Pick up token rotations/enroll-paths between calls (2026-09-11 反馈).
+        self.refresh_token()
         data = None
         headers = {"Accept": "application/json"}
         if self.token:

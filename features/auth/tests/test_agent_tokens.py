@@ -1,6 +1,6 @@
 """Agent Service Token / Approval Token / Enrollment unit tests.
 
-Covers the 2026-09-08 audit changes:
+Covers:
 - agent token create/list/revoke + principal resolution with scopes
 - one-shot approval token binding (tool+device+command hash, TTL, single use)
 - enrollment code redeem (one-shot, TTL) and worker/device ACL checks
@@ -201,8 +201,9 @@ class EnrollmentServiceTests(unittest.TestCase):
         )
         code = enrollment["code"]
         self.assertLessEqual(enrollment["ttl_minutes"], 5)
-        record = self.service.redeem_agent_enrollment(code)
+        record, failure = self.service.redeem_agent_enrollment(code)
         self.assertIsNotNone(record)
+        self.assertEqual(failure, {})
         self.assertIn("tests.execute", record["scopes"])
         self.assertEqual(record["allowed_workers"], "w1")
         principal, agent_record = self.service.get_agent_token_principal(
@@ -212,13 +213,63 @@ class EnrollmentServiceTests(unittest.TestCase):
         self.assertTrue(
             self.service.agent_acl_allows(agent_record, "workers", "w1")
         )
-        # One shot: the same code can never redeem again.
-        self.assertIsNone(self.service.redeem_agent_enrollment(code))
-        self.assertIsNone(self.service.redeem_agent_enrollment(code.lower()))
+        # One shot: the same code can never redeem again (distinguishable
+        # reason, 2026-09-11 反馈（注册码三态区分）).
+        record2, failure2 = self.service.redeem_agent_enrollment(code)
+        self.assertIsNone(record2)
+        self.assertEqual(failure2["reason"], "used")
+        self.assertIn("used_at", failure2)
+        record3, failure3 = self.service.redeem_agent_enrollment(code.lower())
+        self.assertIsNone(record3)
+        self.assertEqual(failure3["reason"], "used")
 
     def test_bogus_code_rejected(self):
-        self.assertIsNone(self.service.redeem_agent_enrollment("AAAA-BBBB-CCCC"))
-        self.assertIsNone(self.service.redeem_agent_enrollment(""))
+        record, failure = self.service.redeem_agent_enrollment("AAAA-BBBB-CCCC")
+        self.assertIsNone(record)
+        self.assertEqual(failure["reason"], "invalid")
+        record, failure = self.service.redeem_agent_enrollment("")
+        self.assertIsNone(record)
+        self.assertEqual(failure["reason"], "invalid")
+
+    def test_expired_code_reports_expiry(self):
+        enrollment = self.service.create_agent_enrollment(
+            name="expired-agent",
+            creator=self.admin,
+            scopes=["tests.execute"],
+        )
+        code = enrollment["code"]
+        # 直接把过期时间改到过去，模拟 TTL 流逝。
+        from datetime import datetime, timedelta
+
+        past = (datetime.utcnow() - timedelta(minutes=1)).strftime(
+            "%Y-%m-%dT%H:%M:%S.%f"
+        )
+        with self.service._lock, self.service._connect() as conn:
+            conn.execute(
+                "UPDATE platform_agent_enrollments SET expires_at = ? WHERE code_hash = ?",
+                (past, self.service.hash_token(code)),
+            )
+            conn.commit()
+        record, failure = self.service.redeem_agent_enrollment(code)
+        self.assertIsNone(record)
+        self.assertEqual(failure["reason"], "expired")
+        self.assertTrue(failure.get("expires_at"))
+
+    def test_custom_ttl_minutes(self):
+        enrollment = self.service.create_agent_enrollment(
+            name="ttl-agent",
+            creator=self.admin,
+            scopes=["tests.execute"],
+            ttl_minutes=15,
+        )
+        self.assertEqual(enrollment["ttl_minutes"], 15)
+        with self.assertRaises(ValueError):
+            self.service.create_agent_enrollment(
+                name="ttl-bad",
+                creator=self.admin,
+                scopes=["tests.execute"],
+                ttl_minutes=45,
+            )
 
 
 if __name__ == "__main__":

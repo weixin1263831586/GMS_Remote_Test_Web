@@ -5,7 +5,7 @@ analysis (see :mod:`features.redmine.analysis_resolution`) rather than calling
 the AI model again. This module adds rule-based classification on top:
 chip platform, Android version, certification type, module, error signature,
 region — plus maps the issue's analysis text into the case-fact vocabulary
-defined by ``Redmine.txt`` §5.4.
+defined by this module.
 """
 
 from __future__ import annotations
@@ -374,7 +374,7 @@ class RedmineCaseExtractor:
 
     @staticmethod
     def _summarize_journals(journals: list) -> list[dict[str, str]]:
-        """Structured journal timeline for evidence (Redmine.txt §4 evidence.journals)."""
+        """Structured journal timeline for the mature-case evidence journals."""
         summarized: list[dict[str, str]] = []
         for item in (journals or [])[:30]:
             if not isinstance(item, dict):
