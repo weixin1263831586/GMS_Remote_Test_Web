@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.21.0"
+GMS_RT_VERSION="0.21.1"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -3222,6 +3222,67 @@ gms-rt-redmine-triage() {
     return 0
 }
 
+gms-rt-redmine-history-search() {
+    local query=""
+    local limit=""
+    local exclude_issue_id=""
+    local resolved_only=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                echo "Usage: gms-rt-redmine-history-search <query> [--limit N] [--exclude-issue-id N] [--resolved-only]"
+                echo "  Search ALL historical Redmine issues (local archive + Redmine site search) for"
+                echo "  same/similar problems and reusable fixes. Read-only, scoped to the owner account."
+                return 0
+                ;;
+            --limit)
+                shift
+                [ $# -gt 0 ] || { error "--limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                limit="$1"
+                ;;
+            --exclude-issue-id)
+                shift
+                [ $# -gt 0 ] || { error "--exclude-issue-id requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                exclude_issue_id="$1"
+                ;;
+            --resolved-only) resolved_only=1 ;;
+            -*)
+                # Allow the query to start with a dash (rare) only via explicit
+                # value forms; otherwise reject unknown options.
+                error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE" ;;
+            *)
+                [ -z "$query" ] && query="$1" || { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; }
+                ;;
+        esac
+        shift
+    done
+    [ -n "$query" ] || { error "Query required. Usage: gms-rt-redmine-history-search <query> [options]"; return "$GMS_RT_EXIT_USAGE"; }
+    check_jq || return 1
+
+    local qs="?q=$(_urlencode "$query")"
+    [ -n "$limit" ] && qs="${qs}&limit=${limit}"
+    [ -n "$exclude_issue_id" ] && qs="${qs}&exclude_issue_id=${exclude_issue_id}"
+    [ "$resolved_only" = "1" ] && qs="${qs}&resolved_only=true"
+
+    local response call_status
+    response=$(api_call "/redmine-agent/history/search${qs}" "GET")
+    call_status=$?
+    if [ "$call_status" -ne 0 ]; then
+        error "Redmine history search failed: $(extract_api_error "$response")"
+        return "$call_status"
+    fi
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        echo "$response" | jq '.data'
+    else
+        echo "$response" | jq -r '.data.items[] |
+            "\(.is_resolved == true | if . then "[已解决]" else "[未解决]" end)  #\(.issue_id)  [\(.source // "local_db")]  \(.subject)"' \
+            2>/dev/null || echo "$response" | jq '.data'
+        echo "$response" | jq -r '.data.items[] | select(.solution != "" and .solution != null) |
+            "  #\(.issue_id) fix: \(.solution)"' 2>/dev/null || true
+    fi
+    return 0
+}
+
 gms-rt-redmine-credentials-status() {
     check_jq || return 1
     local response call_status
@@ -5597,6 +5658,7 @@ _gms_rt_command_usage() {
         gms-rt-redmine-attachment-download) printf '%s' 'gms-rt-redmine-attachment-download <artifact_id> [output_path]' ;;
         gms-rt-redmine-credentials-status) printf '%s' 'gms-rt-redmine-credentials-status' ;;
         gms-rt-redmine-triage) printf '%s' 'gms-rt-redmine-triage [--stale-days N] [--list-limit N] [--refresh]' ;;
+        gms-rt-redmine-history-search) printf '%s' 'gms-rt-redmine-history-search <query> [--limit N] [--exclude-issue-id N] [--resolved-only]' ;;
         gms-rt-artifact-read) printf '%s' 'gms-rt-artifact-read <artifact_id> [--offset N] [--limit N]' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'gms-rt-redmine-artifact-image <artifact_id>' ;;
         gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N]' ;;
@@ -5694,6 +5756,7 @@ _gms_rt_command_summary() {
         gms-rt-redmine-attachment-download) printf '%s' 'Stream one evidence artifact original to a client path (reports saved path/bytes/sha256)' ;;
         gms-rt-redmine-credentials-status) printf '%s' 'Pre-flight check that the owner account has Redmine credentials configured (no secret material returned)' ;;
         gms-rt-redmine-triage) printf '%s' "List today's pending Redmine issues (waiting_my_reply + no_reply_3_days, deduped; read-only)" ;;
+        gms-rt-redmine-history-search) printf '%s' "Search all historical Redmine issues (local archive + site search) for similar problems and reusable fixes (read-only)" ;;
         gms-rt-artifact-read) printf '%s' 'Read a text/log artifact derived text by char window (--offset/--limit)' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling)' ;;
         gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs' ;;
@@ -6125,6 +6188,7 @@ ${YELLOW}APK Analysis:${NC}
 ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-redmine-issue-fetch     - Create/refresh a full evidence snapshot (journals untruncated, attachments hashed)
   gms-rt-redmine-triage          - List today's pending issues (waiting_my_reply + no_reply_3_days)
+  gms-rt-redmine-history-search  - Search historical issues for similar problems and reusable fixes
   gms-rt-redmine-issue-show      - Show snapshot completeness and issue fields
   gms-rt-redmine-journals        - Read full journals with cursor pagination
   gms-rt-redmine-attachments     - List artifacts (kind, size, sha256, status)

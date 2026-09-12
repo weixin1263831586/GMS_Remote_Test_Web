@@ -175,12 +175,21 @@ def plan_migration(root: Path) -> tuple[dict[Path, dict], list[Path]]:
 def migrate(root: Path, *, apply: bool = False) -> dict:
     root = root.resolve()
     if not apply:
+        # ADR-0007 的 per-owner 迁移独立于主布局迁移（后者可能在已迁移
+        # 部署上因遗留文件拒绝执行），dry-run 时先报告它的计划。
+        result = dict(migrate_owner_configs(root, apply=False))
         writes, originals = plan_migration(root)
-        return {"targets": [str(path.relative_to(root)) for path in writes], "original_files": len(originals), "applied": False}
+        result.update({
+            "targets": [str(path.relative_to(root)) for path in writes],
+            "original_files": len(originals),
+            "applied": False,
+        })
+        return result
     with _offline_controller_lock(root / "data"):
+        owner_result = migrate_owner_configs(root, apply=True)
         writes, originals = plan_migration(root)
         if not writes:
-            return {"applied": False, "already_migrated": True}
+            return {"applied": False, "already_migrated": True, **owner_result}
         before = _effective_configuration(root)
         certs = root / "configs/certs"
         target_certs = root / "configs/secrets/certs"
@@ -241,7 +250,81 @@ def migrate(root: Path, *, apply: bool = False) -> dict:
             raise
         # The manifest records paths only. Original values remain exclusively in
         # private recovery files and never enter CLI output.
-        return {"applied": True, "files_written": len(created), "backup": str(backup)}
+        return {
+            "applied": True,
+            "files_written": len(created),
+            "backup": str(backup),
+            **owner_result,
+        }
+
+
+def migrate_owner_configs(root: Path, *, apply: bool = False) -> dict:
+    """ADR-0007：把 per-owner 的 config_runtime.json（含加密凭据）从
+    ``data/<feature>/by_user/<owner>/`` 搬进 ``configs/secrets/<feature>/by_user/<owner>/``。
+
+    与主布局迁移解耦：幂等（canonical 已存在则跳过并保留原文件）、
+    可回退（原文件先备份到 data/config-migration-backups/owner-configs-*）。
+    """
+    root = root.resolve()
+    legacy_files: list[tuple[Path, Path]] = []
+    for feature in ("redmine", "gerrit"):
+        by_user = runtime_data_root(root) / feature / "by_user"
+        if not by_user.is_dir():
+            continue
+        for path in sorted(by_user.glob("*/config_runtime.json")):
+            owner = path.parent.name
+            canonical = root / "configs" / "secrets" / feature / "by_user" / owner / "config_runtime.json"
+            if canonical.exists():
+                continue  # 已迁移；遗留文件留给运维确认后手动清理
+            legacy_files.append((path.resolve(), canonical))
+    if not apply:
+        return {
+            "owner_configs": {
+                "targets": [str(dst.relative_to(root)) for _, dst in legacy_files],
+                "applied": False,
+            }
+        }
+    if not legacy_files:
+        return {"owner_configs": {"applied": False, "nothing_to_move": True}}
+    backup_root = root / "data/config-migration-backups"
+    backup_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    backup = Path(tempfile.mkdtemp(prefix="owner-configs-", dir=backup_root))
+    created: list[Path] = []
+    moved: list[Path] = []
+    manifest = {
+        "originals": [str(src.relative_to(root)) for src, _ in legacy_files],
+        "targets": [str(dst.relative_to(root)) for _, dst in legacy_files],
+    }
+    write_private_json(backup / "manifest.json", manifest)
+    try:
+        for source, destination in legacy_files:
+            payload = read_json_object(source)
+            target = backup / source.relative_to(root)
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            shutil.copyfile(source, target)
+            target.chmod(0o600)
+            write_private_json(destination, payload)
+            created.append(destination)
+            if read_json_object(destination) != payload:
+                raise ValueError("Owner configuration verification failed")
+        for source, _ in legacy_files:
+            source.unlink()
+            moved.append(source)
+    except Exception:
+        for destination in created:
+            destination.unlink(missing_ok=True)
+        for source in moved:
+            if not source.exists():
+                shutil.copyfile(backup / source.relative_to(root), source)
+                source.chmod(0o600)
+        raise
+    return {
+        "owner_configs": {
+            "applied": True,
+            "files_moved": len(created),
+            "backup": str(backup),
+        }
+    }
 
 
 def rollback(root: Path, backup: Path) -> dict:
@@ -259,7 +342,24 @@ def rollback(root: Path, backup: Path) -> dict:
         *(str(path.relative_to(root)) for path in RuntimeConfigStore(root).paths.values()),
     }
     originals, targets = manifest.get("originals"), manifest.get("targets")
-    if not isinstance(originals, list) or not isinstance(targets, list) or not set(originals) <= allowed_originals or not set(targets) <= allowed_targets:
+    # ADR-0007 的 per-owner 备份（owner-configs-*）允许 data/<feature>/by_user
+    # 与 configs/secrets/<feature>/by_user 两类路径。
+    def _is_owner_config(name: object) -> bool:
+        if not isinstance(name, str):
+            return False
+        parts = name.split("/")
+        return (
+            len(parts) == 6 and parts[-1] == "config_runtime.json"
+            and parts[2] in ("redmine", "gerrit") and parts[3] == "by_user"
+            and ((parts[0] == "data" and parts[1] in ("redmine", "gerrit"))
+                 or parts[:2] == ["configs", "secrets"])
+        )
+    if not isinstance(originals, list) or not isinstance(targets, list):
+        raise ValueError("Invalid migration recovery manifest")
+    owner_only = bool(originals) and all(_is_owner_config(n) for n in originals + targets)
+    if not owner_only and (
+        not set(originals) <= allowed_originals or not set(targets) <= allowed_targets
+    ):
         raise ValueError("Invalid migration recovery manifest")
     if not originals:
         raise ValueError("Recovery manifest contains no original configuration")

@@ -141,7 +141,13 @@ async def run_daily_brief(
     if not _has_redmine_credentials(request):
         return _missing_credentials_payload()
     service = _service_for_request(request)
-    started = service.start_run(mode=mode)
+    force = (payload or {}).get("force", False) if isinstance(payload, dict) else False
+    if not isinstance(force, bool):
+        return JSONResponse(
+            content={"success": False, "error": "force must be a boolean"},
+            status_code=400,
+        )
+    started = service.start_run(mode=mode, force=force)
     if "run_id" not in started:
         return JSONResponse(
             content={"success": False, "error": started.get("error", "failed to start run")},

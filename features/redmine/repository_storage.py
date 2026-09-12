@@ -130,6 +130,73 @@ class RepositoryStorageMixin:
                 ).fetchall()
         return [dict(row) for row in rows]
 
+    # 历史检索返回给 agent 的精简字段：solution/patch_direction 是"参考修复"
+    # 的核心；不返回 journals/doc 全文，避免撑爆分析上下文。
+    HISTORY_RESULT_FIELDS = (
+        "issue_id", "subject", "status_name", "is_resolved",
+        "category", "component", "soc_platform", "android_version",
+        "fixed_version", "solution", "patch_direction", "summary",
+        "updated_on", "closed_on",
+    )
+    HISTORY_TEXT_LIMITS = {"solution": 400, "patch_direction": 200, "summary": 300}
+
+    def search_history(
+        self,
+        query: str,
+        exclude_issue_id: int = 0,
+        limit: int = 8,
+        resolved_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """跨工单历史检索：查找同题/类似问题的已归档分析与修复方案。
+
+        Daily Brief 相似参考与 gms-rt-redmine-history-search 共用。FTS 优先
+        （bm25 相关性），失败降级 LIKE；排序“已解决优先、相关性次之”，
+        让“可参考修复”的工单排前面。
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        exclude = int(exclude_issue_id or 0)
+        limit = max(1, min(int(limit or 8), 20))
+        resolved_filter = " AND i.is_resolved = 1" if resolved_only else ""
+        with self.connect() as conn:
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT i.*, bm25(redmine_agent_issue_fts) AS rank
+                    FROM redmine_agent_issue_fts f
+                    JOIN redmine_agent_issues i ON i.issue_id = f.issue_id
+                    WHERE redmine_agent_issue_fts MATCH ? AND i.issue_id != ?{resolved_filter}
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    (self._fts_query(query), exclude, limit * 3),
+                ).fetchall()
+            except Exception as exc:
+                logger.warning("search_history FTS failed, falling back to LIKE: %s", exc)
+                like = f"%{query[:80]}%"
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM redmine_agent_issues
+                    WHERE issue_id != ? AND (subject LIKE ? OR description LIKE ?
+                       OR summary LIKE ? OR solution LIKE ? OR doc_content LIKE ?){resolved_filter.replace("i.", "")}
+                    ORDER BY updated_on DESC
+                    LIMIT ?
+                    """,
+                    (exclude, like, like, like, like, like, limit * 3),
+                ).fetchall()
+        items = [dict(row) for row in rows]
+        items.sort(key=lambda row: (not bool(row.get("is_resolved")), row.get("rank") or 0))
+        trimmed: list[dict[str, Any]] = []
+        for row in items[:limit]:
+            item = {key: row.get(key) for key in self.HISTORY_RESULT_FIELDS}
+            item["is_resolved"] = bool(row.get("is_resolved"))
+            for key, cap in self.HISTORY_TEXT_LIMITS.items():
+                text = str(item.get(key) or "")
+                item[key] = text if len(text) <= cap else text[:cap] + "…"
+            trimmed.append(item)
+        return trimmed
+
     def record_status_change(self, issue_id: int, old_status: str, new_status: str) -> None:
         if old_status == new_status:
             return

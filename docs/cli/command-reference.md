@@ -75,9 +75,11 @@
 | `gms-rt-redmine-attachment-download` | Stream one evidence artifact original to a client path (reports saved path/bytes/sha256) | gms-rt-redmine-attachment-download <artifact_id> [output_path] |
 | `gms-rt-redmine-attachments` | List evidence artifacts with kind, size, sha256, and per-attachment status | gms-rt-redmine-attachments <snapshot_id> |
 | `gms-rt-redmine-credentials-status` | Pre-flight check that the owner account has Redmine credentials configured (no secret material returned) | gms-rt-redmine-credentials-status |
-| `gms-rt-redmine-issue-fetch` | Create/refresh a full Redmine evidence snapshot (raw JSON, journals, attachments) | gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none\|analyzable\|all] [--refresh\|--no-refresh] [--wait] [--max-wait SECONDS] |
+| `gms-rt-redmine-history-search` | GMS Remote Test CLI operation | gms-rt-redmine-history-search <query> [--limit N] [--exclude-issue-id N] [--resolved-only] |
+| `gms-rt-redmine-issue-fetch` | Create/refresh a full Redmine evidence snapshot (raw JSON, journals, attachments) | gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none\|analyzable\|all] [--refresh\|--no-refresh] [--wait] [--max-wait SECONDS] [--dry-run] |
 | `gms-rt-redmine-issue-show` | Show snapshot completeness plus issue fields and description head; accepts snapshot_id or issue_id (resolves the latest snapshot) | gms-rt-redmine-issue-show <snapshot_id \| issue_id> [--issue\|--snapshot] |
 | `gms-rt-redmine-journals` | Read full (untruncated) issue journals with cursor pagination | gms-rt-redmine-journals <snapshot_id> [--limit N] [--cursor C] |
+| `gms-rt-redmine-triage` | GMS Remote Test CLI operation | gms-rt-redmine-triage [--stale-days N] [--list-limit N] [--refresh] |
 | `gms-rt-reports-analyze` | Analyze a local report file or a uniquely resolved saved report | gms-rt-reports-analyze <local_report.zip\|test_result.xml\|report_timestamp\|keyword> |
 | `gms-rt-reports-delete` | Delete one saved report by timestamp | gms-rt-reports-delete <report_timestamp> |
 | `gms-rt-reports-download` | Download a saved report tree into a local output directory | gms-rt-reports-download <report_timestamp> [output_dir] |

@@ -78,3 +78,51 @@ class RepositorySearchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HistorySearchTests(unittest.TestCase):
+    """search_history：跨工单历史检索（相似问题 + 可参考修复）。"""
+
+    def _repo_with_issues(self) -> RedmineAgentDB:
+        repo = RedmineAgentDB(Path(tempfile.mktemp(suffix=".sqlite3")), Path(tempfile.mkdtemp()))
+        repo.upsert_issue({
+            "issue_id": 646504, "run_id": "t", "status_name": "Closed",
+            "subject": "RK3576 Android16 SSI merge 编译错误",
+            "description": "SSI+GRF 合包", "journals_json": [], "attachments_json": [],
+            "failures_json": [], "references_json": [], "ai_json": {},
+            "is_resolved": 1, "solution": "SSI 包先 apply，再 merge GRF 补丁，最后替换 apex 签名",
+        })
+        repo.upsert_issue({
+            "issue_id": 650761, "run_id": "t", "status_name": "Feedback",
+            "subject": "RK3562 Android16 SSI SDK 支持咨询",
+            "description": "Android16 SDK 是否支持 RK3562", "journals_json": [],
+            "attachments_json": [], "failures_json": [], "references_json": [],
+            "ai_json": {}, "is_resolved": 0,
+        })
+        return repo
+
+    def test_search_history_returns_resolved_first_with_fix(self):
+        repo = self._repo_with_issues()
+        hits = repo.search_history("Android16 SSI", exclude_issue_id=650761, limit=5)
+        self.assertTrue(hits)
+        self.assertEqual(hits[0]["issue_id"], 646504)
+        self.assertTrue(hits[0]["is_resolved"])
+        self.assertIn("merge", hits[0]["solution"])
+        self.assertNotIn(650761, [h["issue_id"] for h in hits])
+
+    def test_search_history_trims_and_limits(self):
+        repo = self._repo_with_issues()
+        repo.upsert_issue({
+            "issue_id": 1, "run_id": "t", "status_name": "Closed",
+            "subject": "Android16 SSI 其他", "description": "x", "journals_json": [],
+            "attachments_json": [], "failures_json": [], "references_json": [],
+            "ai_json": {}, "is_resolved": 1, "solution": "长" * 1000,
+        })
+        hits = repo.search_history("Android16 SSI", limit=2)
+        self.assertEqual(len(hits), 2)
+        long_fix = next(h for h in hits if h["issue_id"] == 1)
+        self.assertLessEqual(len(long_fix["solution"]), 401)  # 400 + 省略号
+
+    def test_search_history_empty_query(self):
+        repo = self._repo_with_issues()
+        self.assertEqual(repo.search_history("   "), [])

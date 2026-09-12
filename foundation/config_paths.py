@@ -69,6 +69,36 @@ def user_tools_path(project_root: Path | str) -> Path:
     return _prefer_existing(runtime_data_root(root) / "settings/user_tools.json", root / "configs/user_tools_data.json")
 
 
+def sanitize_owner_id(owner_id: object) -> str:
+    """owner 标识清洗为单级安全目录名（空值回退 anonymous，防路径穿越）。"""
+    safe = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_"
+        for ch in str(owner_id or "").strip()
+    )
+    return safe or "anonymous"
+
+
+def owner_config_path(project_root: Path | str, feature: str, owner_id: str) -> Path:
+    """按用户隔离的「配置/凭据」路径（ADR-0007）。
+
+    canonical 在 ``configs/secrets/<feature>/by_user/<owner>/config_runtime.json``：
+    属于配置/凭证，随部署持久，删 ``data/`` 不得影响；legacy 落在
+    ``<data_root>/<feature>/by_user/<owner>/config_runtime.json``（0.20 前的
+    位置），迁移期 canonical 缺失时回退读取，写入优先 canonical。
+    """
+    owner = sanitize_owner_id(owner_id)
+    canonical = config_root(project_root) / "secrets" / feature / "by_user" / owner / "config_runtime.json"
+    legacy = runtime_data_root(project_root) / feature / "by_user" / owner / "config_runtime.json"
+    return _prefer_existing(canonical, legacy)
+
+
+def ensure_owner_config_dir(path: Path) -> Path:
+    """创建 per-owner 配置目录，权限 0700（父目录缺级时一并收紧）。"""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.chmod(0o700)
+    return path
+
+
 def automation_profiles_path(project_root: Path | str) -> Path:
     root = config_root(project_root)
     return _prefer_existing(root / "local/automation_profiles.json", root / "automation_profiles.json")

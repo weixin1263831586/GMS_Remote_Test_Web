@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from foundation.config import ConfigManager, settings
+from foundation.config_paths import ensure_owner_config_dir
 from foundation.secrets import decrypt_secret, encrypt_secret
 
 from .dashboard import (
@@ -51,10 +52,17 @@ class RedmineConfig:
     def invalidate_cache(self) -> None:
         self.manager.invalidate_cache()
 
+    def get_runtime_config(self) -> dict[str, Any]:
+        """Expose the owner-scoped runtime document to feature services."""
+        return self.manager.get_runtime_config()
+
+    def save_runtime(self, runtime: dict[str, Any]) -> bool:
+        """Persist the complete owner-scoped runtime document."""
+        return bool(self.manager.save_runtime(runtime))
+
     def for_owner(self, owner_id: str) -> RedmineConfig:
         manager = RedmineConfig(self.project_root)
-        runtime_path = owner_runtime_config_path(owner_id)
-        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path = ensure_owner_config_dir(owner_runtime_config_path(owner_id))
         manager.runtime_config_path = runtime_path
         return manager
 

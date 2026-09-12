@@ -3,7 +3,7 @@
 职责：
 - 快照冻结（build_daily_triage_snapshot 的唯一编排入口）；
 - 幂等 run（owner+date+mode 唯一；completed 复用 / failed 可重试）；
-- 并发控制（max_parallel_issues，默认 2）与单 issue 失败隔离；
+- 并发控制（max_parallel_issues，默认 1）与单 issue 失败隔离；
 - 汇总报告（counts / top_priorities / 每日 Markdown）。
 
 不负责：调度（systemd/手动 API 触发）、UI、Redmine 写操作（全链路只读）。
@@ -50,7 +50,7 @@ DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     "agent_profile": "",
     "max_turns": 12,
     "issue_timeout_seconds": 600,
-    "max_parallel_issues": 2,
+    "max_parallel_issues": 1,
     "max_issues": 50,
     "stale_days": DEFAULT_STALE_DAYS,
     "list_limit": DEFAULT_LIST_LIMIT,
@@ -152,22 +152,26 @@ class DailyBriefService:
 
     # ------------------------------------------------------------------ run
 
-    def start_run(self, mode: str = "manual") -> dict[str, Any]:
+    def start_run(self, mode: str = "manual", *, force: bool = False) -> dict[str, Any]:
         """创建（或复用）当天 run。幂等规则见 repository.create_run。"""
         self._recover_interrupted_runs(self.get_config())
         brief_date = brief_date_today()
         existing = self.repository.find_run(self.owner_id, brief_date, mode)
         if existing is not None:
-            if existing.status in ("completed", "partial"):
+            if existing.status in ("completed", "partial") and not force:
                 return {"run_id": existing.run_id, "status": existing.status,
                         "reused": True}
             if existing.status in ("pending", "snapshotting", "analyzing"):
                 return {"run_id": existing.run_id, "status": existing.status,
                         "already_running": True}
-            # failed → 允许 retry：复用同一 run 记录。
+            # failed 或人工 force → 复用同一 run 记录并替换旧快照。
             existing.status = "pending"
             existing.error = ""
             existing.started_at = _now()
+            existing.finished_at = ""
+            existing.report_json = {}
+            existing.report_markdown = ""
+            existing.prompt_version = PROMPT_VERSION
             self.repository.update_run(existing)
             return {"run_id": existing.run_id, "status": "pending"}
 
@@ -258,6 +262,9 @@ class DailyBriefService:
         run.started_at = run.started_at or _now()
         self.repository.update_run(run)
 
+        # retry/force 会复用 run_id；先删旧快照条目，避免已不在今日待办中的
+        # issue 残留在新晨报里。
+        self.repository.delete_issues(run.run_id)
         for entry in issues:
             self.repository.upsert_issue(DailyBriefIssue(
                 run_id=run.run_id,
@@ -286,7 +293,7 @@ class DailyBriefService:
             item.issue_id for item in self.repository.list_issues(run.run_id)
             if item.status in ("pending", "failed")
         ]
-        semaphore = asyncio.Semaphore(max(1, int(config.get("max_parallel_issues") or 2)))
+        semaphore = asyncio.Semaphore(max(1, int(config.get("max_parallel_issues") or 1)))
         analyzer = self._build_analyzer(config)
 
         async def _one(issue_id: int) -> None:
@@ -318,7 +325,7 @@ class DailyBriefService:
         try:
             timeout = max(1, int(config.get("issue_timeout_seconds") or 600))
             max_issues = max(1, int(config.get("max_issues") or 50))
-            parallel = max(1, int(config.get("max_parallel_issues") or 2))
+            parallel = max(1, int(config.get("max_parallel_issues") or 1))
             worst_seconds = timeout * ((max_issues + parallel - 1) // parallel)
             cutoff = datetime.now() - timedelta(seconds=worst_seconds + 3600)
             marked = self.repository.reset_stale_running(cutoff.isoformat(timespec="seconds"))
@@ -384,7 +391,10 @@ class DailyBriefService:
             {
                 "issue_id": i.issue_id,
                 "priority": i.priority,
-                "subject": (self._snapshot_entries(run.run_id).get(i.issue_id) or {}).get("subject", ""),
+                "subject": (
+                    (self._snapshot_entries(run.run_id).get(i.issue_id) or {}).get("subject")
+                    or i.subject
+                ),
                 "problem_summary": (i.result or {}).get("problem_summary", ""),
                 "confidence": (i.result or {}).get("confidence"),
             }
@@ -430,6 +440,16 @@ class DailyBriefService:
             lines.append(f"- 客户诉求：{result.get('customer_request', '')}")
             lines.append(f"- 根因（{result.get('root_cause_type', 'unknown')}）：{result.get('root_cause', '')}")
             lines.append(f"- 建议：{result.get('suggested_solution', '')}")
+            similar = result.get("similar_issues") or []
+            if similar:
+                refs = "；".join(
+                    f"#{item.get('issue_id')}（{item.get('similarity', 'related')}）"
+                    + (f"：{item.get('reusable_fix')}" if item.get("reusable_fix") else "")
+                    for item in similar
+                )
+                lines.append(f"- 相似工单：{refs}")
+            elif not result.get("history_checked"):
+                lines.append("- 相似工单：未检索（历史库不可用或未执行）")
             confidence = result.get("confidence")
             lines.append(f"- 置信度：{confidence}{'（需人工确认）' if result.get('needs_human_review') else ''}")
             lines.append("")
@@ -449,14 +469,19 @@ class DailyBriefService:
         if record is None:
             return {"error": f"issue {issue_id} not in run {run.run_id}"}
         config = self.get_config()
-        entry = {"issue_id": issue_id}
+        # 初次 run 完成后内存快照会释放；重分析仍需把持久化的标题、桶和
+        # 规则优先级交给模型，避免 MCP 暂时不可用时退化成只有 issue id。
+        entry = {
+            "issue_id": issue_id,
+            "subject": record.subject,
+            "buckets": record.buckets,
+            "priority_name": record.priority,
+        }
         analyzer = self._build_analyzer(config)
         await self._analyze_one(run, issue_id, entry, analyzer, config)
-        run.report_json = dict(run.report_json or {})
-        run.status = "partial" if any(
-            i.status == "failed" for i in self.repository.list_issues(run.run_id)
-        ) else "completed"
-        self.repository.update_run(run)
+        # 单条状态变化必须同步刷新整份汇总，否则页头的成功/失败/人工确认
+        # 数量、Markdown 与 run.status 会互相矛盾。
+        self._summarize_phase(run)
         refreshed = self.repository.get_issue(run.run_id, issue_id)
         return {"run_id": run.run_id, "issue_id": issue_id, "status": refreshed.status}
 

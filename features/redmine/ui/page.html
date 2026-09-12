@@ -117,7 +117,7 @@
 
 <div id="tab-daily-brief" class="tab-content">
   <section class="stats-section" id="sec-daily-brief">
-    <div class="card" id="dailyBriefCard"><div class="muted" style="padding:16px">🤖 AI 晨报加载中…</div></div>
+    <div class="card daily-brief-card" id="dailyBriefCard"><div class="muted" style="padding:16px">🤖 AI 晨报加载中…</div></div>
   </section>
 </div>
 
@@ -255,6 +255,27 @@
       <div>
         <label>Redmine 密码</label>
         <input type="password" id="settingRedminePass" placeholder="留空则不修改">
+      </div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+      <div class="settings-subsection-title">AI 晨报</div>
+      <label class="setting-checkbox-row">
+        <input type="checkbox" data-daily-brief-setting="enabled">
+        <span>启用每日晨报</span>
+      </label>
+      <div>
+        <label>取证 Agent Profile</label>
+        <input type="text" data-daily-brief-setting="agent_profile" placeholder="例如：kkagent-host-1a2b3c4d">
+        <div class="setting-help">必须是已完成服务令牌注册的本机 profile；留空时 AI 无法读取 Redmine 日志和附件。</div>
+      </div>
+      <div class="setting-inline-grid">
+        <div>
+          <label>分析模型</label>
+          <input type="text" data-daily-brief-setting="model" placeholder="留空使用 kkagent 默认模型">
+        </div>
+        <div>
+          <label>并发分析数</label>
+          <input type="number" min="1" max="4" data-daily-brief-setting="max_parallel_issues" value="1">
+        </div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div>

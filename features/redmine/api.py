@@ -560,6 +560,74 @@ async def search_issues(request: Request, q: str = Query(..., min_length=1), lim
     return {"success": True, "data": {"items": service.repository.search_issues(q, limit)}}
 
 
+@router.get("/history/search")
+async def search_issue_history(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=256),
+    limit: int = Query(8, ge=1, le=20),
+    exclude_issue_id: int = Query(0, ge=0),
+    resolved_only: bool = Query(False),
+):
+    """跨工单历史检索（agent 只读）：同题/类似问题与可参考修复。
+
+    数据源两部分合并：
+    1. 本 owner 的本地归档库（nightly 分析沉淀的 solution/patch_direction）；
+    2. Redmine 站内主题搜索（覆盖全部历史工单，含未同步到本库的）。
+    供 Daily Brief 相似参考与 gms-rt-redmine-history-search 使用；本地命中
+    优先（字段更全），远端失败时降级为仅本地结果。
+    """
+    from features.auth import require_agent_scope
+
+    require = require_agent_scope("redmine.read")
+    require(request)
+    service = get_redmine_service_for_request(request)
+    items = service.repository.search_history(
+        q, exclude_issue_id=exclude_issue_id, limit=limit, resolved_only=resolved_only
+    )
+    for item in items:
+        item["source"] = "local_db"
+    seen = {int(item["issue_id"]) for item in items}
+    remote_error = ""
+    remaining = max(0, limit - len(items))
+    if remaining:
+        try:
+            client = service.agent._make_client()
+            try:
+                rows = await asyncio.wait_for(
+                    client.search_issues_by_subject(q, limit=remaining),
+                    timeout=15,
+                )
+            finally:
+                await client.close()
+            for row in rows:
+                ref_id = int(row.get("issue_id") or 0)
+                if not ref_id or ref_id == exclude_issue_id or ref_id in seen:
+                    continue
+                items.append({
+                    "issue_id": ref_id,
+                    "subject": row.get("subject") or "",
+                    "status_name": row.get("status_name") or "",
+                    "is_resolved": "关闭" in str(row.get("status_name") or "") or "已解决" in str(row.get("status_name") or ""),
+                    "summary": "",
+                    "solution": "",
+                    "patch_direction": "",
+                    "fixed_version": "",
+                    "category": "",
+                    "component": "",
+                    "soc_platform": "",
+                    "android_version": "",
+                    "updated_on": row.get("updated_on") or "",
+                    "closed_on": "",
+                    "source": "redmine_search",
+                })
+        except Exception as exc:
+            remote_error = str(exc)[:200]
+    return {
+        "success": True,
+        "data": {"query": q, "items": items, "remote_search_error": remote_error},
+    }
+
+
 @router.get("/statistics")
 async def get_statistics(request: Request):
     service = get_redmine_service_for_request(request)

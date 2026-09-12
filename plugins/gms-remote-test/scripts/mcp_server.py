@@ -78,7 +78,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.21.0"
+SERVER_VERSION = "0.21.1"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2079,6 +2079,7 @@ _TOOLSETS = {
             "gms_rt_redmine_issue_fetch",
             "gms_rt_redmine_issue",
             "gms_rt_redmine_triage",
+            "gms_rt_redmine_history_search",
             "gms_rt_redmine_journals",
             "gms_rt_redmine_attachments",
             "gms_rt_redmine_artifact_search",
@@ -3246,6 +3247,33 @@ def _all_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "gms_rt_redmine_history_search",
+            "description": (
+                "Search ALL historical Redmine issues (owner's local archive "
+                "plus Redmine site search) for the same or a similar problem "
+                "and reusable fixes: returns issue id, subject, resolution "
+                "status, solution/patch_direction when archived. Read-only. "
+                "Use exclude_issue_id to skip the issue currently being "
+                "analyzed."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "q": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Keyword query, e.g. 'RK3562 Android16 SSI'.",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                    "exclude_issue_id": {"type": "integer", "minimum": 0},
+                    "resolved_only": {"type": "boolean"},
+                },
+                "required": ["q"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_redmine_triage",
             "description": (
                 "List TODAY's pending Redmine issues for the owner account: "
@@ -3672,6 +3700,22 @@ def redmine_triage_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-redmine-triage", args)
 
 
+def redmine_history_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Search ALL historical Redmine issues for similar problems + fixes."""
+    query = str(arguments.get("q") or arguments.get("query") or "").strip()
+    if not query:
+        return "q (query) is required", True
+    args: list[str] = [query]
+    if arguments.get("limit"):
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 8, 1, 20))])
+    exclude = arguments.get("exclude_issue_id")
+    if exclude:
+        args.extend(["--exclude-issue-id", str(_int_arg(arguments, "exclude_issue_id", 0, 0, 99_999_999))])
+    if arguments.get("resolved_only"):
+        args.append("--resolved-only")
+    return run_cli("gms-rt-redmine-history-search", args)
+
+
 def redmine_journals_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     snapshot_id = str(arguments.get("snapshot_id") or "").strip()
     if not snapshot_id:
@@ -3897,6 +3941,7 @@ _TOOL_HANDLERS = {
     "gms_rt_redmine_issue_fetch": redmine_issue_fetch_tool,
     "gms_rt_redmine_issue": redmine_issue_tool,
     "gms_rt_redmine_triage": redmine_triage_tool,
+    "gms_rt_redmine_history_search": redmine_history_search_tool,
     "gms_rt_redmine_journals": redmine_journals_tool,
     "gms_rt_redmine_attachments": redmine_attachments_tool,
     "gms_rt_redmine_artifact_search": redmine_artifact_search_tool,

@@ -23,13 +23,17 @@ configs/
     ├── environment.json            # 密码、API Key、Webhook/Bootstrap Token
     ├── runtime_credentials.json    # 加密 SSH、Redmine 等凭证
     ├── worker_tokens.json          # 按 Worker ID 保存的 Token
-    └── certs/                      # 部署证书与私钥
+    ├── certs/                      # 部署证书与私钥
+    ├── redmine/by_user/<owner>/config_runtime.json   # 按用户 Redmine 配置/加密凭据（ADR-0007）
+    └── gerrit/by_user/<owner>/config_runtime.json    # 按用户 Gerrit 配置/加密凭据（ADR-0007）
 
-data/                               # 全部忽略
+data/                               # 全部忽略；只放可再生运行数据
 ├── settings/preferences.json        # Web 用户设置及未分类的兼容配置
 ├── settings/user_tools.json         # 客户端工具配置
 ├── devices/runtime.json             # USB/IP 分配、来源、网络质量历史
 ├── redmine/legacy/redmine_user_map.json  # 旧全局映射；不自动分配给某个用户
+├── redmine/by_user/<owner>/         # Redmine 镜像库/附件/快照/晨报等可再生数据
+├── gerrit/by_user/<owner>/          # Gerrit 可再生数据（配置已迁至 secrets，ADR-0007）
 └── config-migration-backups/         # 原配置及回退时保留的新配置，含敏感数据
 ```
 
@@ -79,7 +83,10 @@ cp -n configs/examples/automation_profiles.example.json configs/local/automation
   并指向 `scripts/migrate_config_layout.py`。
 
 新增代码禁止引入新的 canonical→legacy 回退；需要兼容旧路径时必须在本表
-登记期限。
+登记期限。`owner_config_path`（ADR-0007）是当前已登记的回退项：
+`configs/secrets/<feature>/by_user/<owner>/config_runtime.json` 为 canonical，
+legacy 指向 `data/<feature>/by_user/<owner>/config_runtime.json`，随 0.20
+一并收敛。
 
 ## 旧布局迁移与回退
 
