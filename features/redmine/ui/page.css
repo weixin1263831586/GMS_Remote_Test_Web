@@ -252,7 +252,9 @@
 
     @media (max-width:900px) {
         header { flex-wrap:wrap; padding-inline:10px; gap:6px; }
-        .tabs { flex:1 1 100%; width:100%; overflow-x:auto; flex-wrap:nowrap; }
+        /* min-width:min-content 会让 7 个 tab 撑爆 360px 视口；这里必须
+           归零后 overflow-x:auto 才能生效（tab 条内部横向滚动）。 */
+        .tabs { flex:1 1 100%; width:100%; min-width:0; overflow-x:auto; flex-wrap:nowrap; }
         .header-toolbar { flex:1 1 100%; justify-content:flex-start; }
         header .filter-bar, header .btn-group { flex-wrap:nowrap; }
         header .btn-group { border-left:0; padding-left:0; margin-left:0; }

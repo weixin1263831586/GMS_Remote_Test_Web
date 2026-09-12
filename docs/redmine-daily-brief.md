@@ -14,6 +14,8 @@ systemd timer 00:00 (Persistent=true)
       → 冻结快照（counts + issues + SHA256 fingerprint）
       → KkAgentRedmineAnalyzer（headless，--output-format json，无 yolo）
       → 聚合报告 + Markdown → daily_brief.sqlite3（per-owner）
+Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
+      → 同一套 DailyBriefService / KkAgentRedmineAnalyzer
 08:40 timer → run-delta：fingerprint 未变的 issue 跳过，只重分析变化项
 09:00 → 个人看板顶部「AI 晨报」卡片
 ```
@@ -28,6 +30,7 @@ systemd timer 00:00 (Persistent=true)
 | `features/redmine/daily_brief_service.py` | 编排：幂等 run、并发控制、失败隔离、聚合 |
 | `features/redmine/kkagent_analyzer.py` | headless kkagent 分析器 + prompt v3 证据质量门禁 |
 | `features/redmine/daily_brief_api.py` | REST API（triage/run/config/latest/refresh） |
+| `features/redmine/daily_brief_worker.py` | Web 入队任务的独立 Worker、租约与优雅停止 |
 | `features/redmine/daily_brief_cli.py` | systemd 入口（run-nightly/run-delta/doctor） |
 | `agent/gms-remote-test/skill/references/redmine-daily-triage.md` | Agent 分析规范（skill） |
 | `deploy/systemd/gms-redmine-daily-brief*` | timer/service 单元 |
@@ -42,7 +45,7 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 
 ```json
 {
-  "enabled": true,
+  "enabled": false,
   "analysis_backend": "kkagent",
   "model": "",
   "agent_profile": "",
@@ -55,8 +58,11 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 }
 ```
 
+- `enabled` 默认 `false`（opt-in）：晨报会消耗 kkagent 分析资源，owner
+  在设置里显式开启后才进入 nightly 调度。
 - `model` 为空时使用 kkagent 当前默认模型；
-- `analysis_backend` 可选 `direct`（保留 fallback 能力，默认 kkagent）。
+- `analysis_backend` 仅支持 `kkagent`；历史上可配置 `direct` 但从未实现，
+  已从枚举移除（旧配置值会被规范化回 `kkagent`）。
 - `max_parallel_issues` 默认 1：同机多个 headless kkagent 会话可能互相中断；
   仅在确认当前 kkagent 运行时支持会话隔离后才提高。
 - `agent_profile` 绑定该 owner 的本机 kkagent agent profile 名
@@ -81,7 +87,7 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 | GET | `/api/redmine-agent/daily-brief/triage` | 当天待处理清单（CLI/MCP 同源） |
 | GET | `/api/redmine-agent/daily-brief/latest` | 最新晨报 |
 | GET | `/api/redmine-agent/daily-brief/{date}` | 指定日期晨报 |
-| POST | `/api/redmine-agent/daily-brief/run` | 手动触发（后台执行，返回 run_id；请求体 `{"force": true}` 强制重跑当天结果） |
+| POST | `/api/redmine-agent/daily-brief/run` | 手动触发（持久化入队，返回 run_id/job_id；请求体 `{"force": true}` 强制重跑当天结果） |
 | POST | `/api/redmine-agent/daily-brief/{date}/refresh` | delta 刷新 |
 | POST | `/api/redmine-agent/daily-brief/{date}/issues/{id}/reanalyze` | 单 issue 重分析 |
 | GET/PUT | `/api/redmine-agent/daily-brief/config` | 配置读写 |
@@ -98,6 +104,7 @@ Agent 侧 CLI/MCP：`gms-rt-redmine-triage` / `gms_rt_redmine_triage`
 ```bash
 sudo cp deploy/systemd/gms-redmine-daily-brief*.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo systemctl enable --now gms-redmine-daily-brief-worker.service
 sudo systemctl enable --now gms-redmine-daily-brief.timer
 sudo systemctl enable --now gms-redmine-daily-brief-delta.timer   # 可选
 ```
@@ -118,14 +125,23 @@ sudo systemctl enable --now gms-redmine-daily-brief-delta.timer   # 可选
 - 幂等：owner+date+mode 唯一；默认复用 completed/partial，人工可在请求体传
   `{"force": true}` 替换当天快照并重跑，failed 可重试；
 - 失败隔离：单 issue 失败 → run=partial；全部失败 → failed；
+- Web 触发只写 SQLite job 队列，不在 uvicorn 事件循环内持有长任务；Worker
+  以租约领取并定期续租，异常退出后任务自动重新入队；
+- kkagent 使用独立进程组；超时/Worker 停止时按 TERM→等待→KILL 回收
+  kkagent 与全部 stdio MCP 子进程，信号退出单独标记为 interrupted；
 - 崩溃恢复：进程重启后 `reset_stale_running` 把僵尸 running 标记 failed；
 - 生成前由同一次 kkagent 会话完成证据质量门禁：核对最新评论、检索相关
   文本附件、区分客户陈述与已验证事实、保留方案适用条件并校准置信度；
+- 冻结快照持久化：快照随 run 落盘（SQLite），失败/崩溃重试复用同一份
+  输入事实，Redmine 数据变化不改变既有 run 的分析基准；人工 force 重跑
+  才会重新冻结；
+- pre-sync 失败可见：快照带 `source_sync_status`（synced / sync_failed /
+  skipped），失败降级本地镜像时 run 与 Markdown 报告明确标注数据可能过期；
+- 同 run 执行协调：force/refresh/reanalyze 与进行中任务汇合为单次执行，
+  不并发写同一 run；
 - `Persistent=true`：00:00 停机则开机补跑；flock 防同机并发。
 
 ## 已知限制（第一阶段）
 
 - 08:40 delta、历史晨报趋势、persistent issue 连续天数统计已具备数据
-  基础，UI 聚合视图后续迭代；
-- `analysis_backend=direct`（UniversalAIAnalyzer fallback）尚未接线，
-  当前仅 kkagent。
+  基础，UI 聚合视图后续迭代。

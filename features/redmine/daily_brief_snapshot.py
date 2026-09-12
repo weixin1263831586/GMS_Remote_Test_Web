@@ -252,8 +252,12 @@ async def build_daily_triage_snapshot(
     user_map = organization_user_map
 
     # 默认先同步 Redmine（本地 SQLite 只是镜像；不同步会分析过期数据）。
+    # pre-sync 失败不阻断晨报（本地镜像兜底），但必须在快照里显式标记
+    # source_sync_status，让 run/报告可见数据可能是过期的。
     synced = False
+    source_sync_status = "skipped"  # refresh=False：明确跳过同步
     if refresh:
+        source_sync_status = "sync_failed"
         try:
             stats_cfg: dict[str, Any] = {}
             try:
@@ -266,6 +270,8 @@ async def build_daily_triage_snapshot(
                 list_limit=list_limit,
                 window_days=int(stats_cfg.get("window_days") or 0),
             )
+            if synced:
+                source_sync_status = "synced"
         except Exception:
             logger.warning("daily brief pre-sync failed for %s; using local snapshot", owner_id)
 
@@ -297,6 +303,7 @@ async def build_daily_triage_snapshot(
         "generated_at": snapshot_at.isoformat(timespec="seconds"),
         "stale_days": stale_days,
         "synced": synced,
+        "source_sync_status": source_sync_status,
         "owner": {"id": owner_id, "names": owner_names, "user_id": identity.get("user_id")},
         "counts": {
             "waiting_my_reply": len(waiting),

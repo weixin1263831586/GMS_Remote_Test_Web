@@ -1,0 +1,24 @@
+[Unit]
+Description=GMS Redmine AI Daily Brief durable worker
+Documentation=file:///opt/gms-remote-test/docs/redmine-daily-brief.md
+After=network-online.target gms-remote-test.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/gms-remote-test
+ExecStart=/opt/gms-remote-test/.venv/bin/python -m features.redmine.daily_brief_worker
+User=gms
+Group=gms
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/gms-remote-test/data
+# TERM 只发给 Worker；它会对独立进程组中的 kkagent/MCP 做 TERM→KILL 清理。
+KillMode=mixed
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target

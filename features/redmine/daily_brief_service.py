@@ -41,7 +41,11 @@ from .users import _now
 logger = logging.getLogger(__name__)
 
 DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
-    "enabled": True,
+    # opt-in：晨报会消耗 kkagent 分析资源，默认关闭，owner 在设置里显式
+    # 开启后才进入 nightly 调度（不得默认启用）。
+    "enabled": False,
+    # 当前唯一实现的分析后端。历史上允许 "direct" 但从未实现，已从枚举
+    # 移除；旧配置里的 "direct" 会被规范化回 "kkagent"。
     "analysis_backend": "kkagent",
     "model": "",
     # 绑定到该 owner 的本机 kkagent agent profile 名（~/.config/gms-agent/
@@ -70,8 +74,8 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
             pass
 
     config["enabled"] = bool(payload.get("enabled", config["enabled"]))
-    backend = str(payload.get("analysis_backend") or config["analysis_backend"])
-    config["analysis_backend"] = backend if backend in ("kkagent", "direct") else "kkagent"
+    backend = str(payload.get("analysis_backend") or config["analysis_backend"]).strip()
+    config["analysis_backend"] = backend if backend in ("kkagent",) else "kkagent"
     config["model"] = str(payload.get("model") or "").strip()
     # profile 名只允许安全字符，避免注入 env / 路径。
     profile = str(payload.get("agent_profile") or "").strip()
@@ -87,6 +91,10 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
 
 class DailyBriefService:
     """一个 owner 一个实例（内部持有该 owner 的 repository）。"""
+
+    # 同 run_id 的执行协调器（跨实例/跨请求共享）：防止 force 重试、
+    # refresh、reanalyze 与仍在运行的旧任务并发写同一 run。
+    _RUN_EXECUTIONS: dict[str, asyncio.Task[DailyBriefRun | None]] = {}
 
     def __init__(self, owner_id: str, config_manager: Any | None = None):
         self.owner_id = str(owner_id or "anonymous")
@@ -152,6 +160,25 @@ class DailyBriefService:
 
     # ------------------------------------------------------------------ run
 
+    def _reset_run_for_retry(self, run: DailyBriefRun, *, refreeze: bool) -> None:
+        """失败/强制重跑时复用同一 run 记录。
+
+        refreeze=True（force / 已完成 run 的新一轮）：删除冻结快照与旧
+        issue，重跑会重新冻结当日最新事实；refreeze=False（崩溃/失败重试）：
+        保留冻结快照，重试与首次执行消费完全相同的输入。
+        """
+        run.status = "pending"
+        run.error = ""
+        run.started_at = _now()
+        run.finished_at = ""
+        run.report_json = {}
+        run.report_markdown = ""
+        run.prompt_version = PROMPT_VERSION
+        if refreeze:
+            self.repository.delete_snapshot(run.run_id)
+            self.repository.delete_issues(run.run_id)
+        self.repository.update_run(run)
+
     def start_run(self, mode: str = "manual", *, force: bool = False) -> dict[str, Any]:
         """创建（或复用）当天 run。幂等规则见 repository.create_run。"""
         self._recover_interrupted_runs(self.get_config())
@@ -164,15 +191,10 @@ class DailyBriefService:
             if existing.status in ("pending", "snapshotting", "analyzing"):
                 return {"run_id": existing.run_id, "status": existing.status,
                         "already_running": True}
-            # failed 或人工 force → 复用同一 run 记录并替换旧快照。
-            existing.status = "pending"
-            existing.error = ""
-            existing.started_at = _now()
-            existing.finished_at = ""
-            existing.report_json = {}
-            existing.report_markdown = ""
-            existing.prompt_version = PROMPT_VERSION
-            self.repository.update_run(existing)
+            # failed（保留冻结快照重试）或人工 force（重新冻结）→ 复用 run。
+            self._reset_run_for_retry(
+                existing, refreeze=bool(force or existing.status in ("completed", "partial"))
+            )
             return {"run_id": existing.run_id, "status": "pending"}
 
         run = DailyBriefRun(
@@ -196,6 +218,17 @@ class DailyBriefService:
         nightly = self.repository.find_run(self.owner_id, brief_date, "nightly")
         if nightly is None:
             return {"error": f"no nightly run for {brief_date}; run nightly first"}
+        existing = self.repository.find_run(self.owner_id, brief_date, "delta")
+        if existing is not None:
+            if existing.status in ("pending", "snapshotting", "analyzing"):
+                return {"run_id": existing.run_id, "status": existing.status,
+                        "already_running": True}
+            # failed → 保留冻结快照重试；completed/partial → 新一轮增量，
+            # 重新冻结（重新计算相对 nightly 的 delta）。
+            self._reset_run_for_retry(
+                existing, refreeze=existing.status in ("completed", "partial")
+            )
+            return {"run_id": existing.run_id, "status": "pending"}
         run = DailyBriefRun(
             owner_id=self.owner_id,
             brief_date=brief_date,
@@ -212,58 +245,111 @@ class DailyBriefService:
         return {"run_id": run.run_id, "status": "snapshotting"}
 
     async def execute_run(self, run_id: str) -> DailyBriefRun | None:
-        """执行 run 全流程：快照 → 分析 → 汇总。异常只落到 run.error。"""
+        """执行 run 全流程：快照 → 分析 → 汇总。异常只落到 run.error。
+
+        同 run_id 的并发调用会汇合到进行中的任务（RunCoordinator 语义），
+        避免 force/refresh/reanalyze 与残留旧任务并发写同一 run。
+        """
+        running = self._RUN_EXECUTIONS.get(run_id)
+        if running is not None and not running.done():
+            try:
+                await running
+            except Exception:
+                logger.exception("joined daily brief run %s failed", run_id)
+            return self.repository.get_run(run_id)
+
         run = self.repository.get_run(run_id)
         if run is None:
             logger.error("daily brief run %s not found", run_id)
             return None
         config = self.get_config()
+        task = asyncio.current_task()
+        if task is not None:
+            self._RUN_EXECUTIONS[run_id] = task
         try:
             run = await self._snapshot_phase(run, config)
             await self._analyze_phase(run, config)
             run = self._summarize_phase(run)
+        except asyncio.CancelledError:
+            # 独立 Worker 停止时先留下明确、可恢复的持久状态；Worker 的
+            # job requeue 随后会把它转回 pending。
+            run.status = "failed"
+            run.error = "interrupted while analysis worker was stopping"
+            run.finished_at = _now()
+            self.repository.update_run(run)
+            raise
         except Exception as exc:
             logger.exception("daily brief run %s failed", run_id)
             run.status = "failed"
             run.error = str(exc)[:1000]
             run.finished_at = _now()
             self.repository.update_run(run)
+        finally:
+            if task is not None and self._RUN_EXECUTIONS.get(run_id) is task:
+                self._RUN_EXECUTIONS.pop(run_id, None)
         return self.repository.get_run(run_id)
+
+    @classmethod
+    def run_is_executing(cls, run_id: str) -> bool:
+        """该 run_id 是否仍有存活执行任务（API 幂等入口参考）。"""
+        task = cls._RUN_EXECUTIONS.get(run_id)
+        return task is not None and not task.done()
 
     async def _snapshot_phase(self, run: DailyBriefRun, config: dict[str, Any]) -> DailyBriefRun:
         run.status = "snapshotting"
         self.repository.update_run(run)
-        snapshot = await self.build_triage(
-            stale_days=int(config.get("stale_days") or DEFAULT_STALE_DAYS),
-            list_limit=int(config.get("list_limit") or DEFAULT_LIST_LIMIT),
-        )
-        issues = snapshot["issues"][: int(config.get("max_issues") or 50)]
 
-        if run.mode == "delta":
-            previous = self.repository.find_run(self.owner_id, run.brief_date, "nightly")
-            prev_issues = []
-            if previous is not None:
-                prev_issues = [
-                    {"issue_id": item.issue_id, "fingerprint": item.fingerprint}
-                    for item in self.repository.list_issues(previous.run_id)
-                ]
-            delta = detect_delta(prev_issues, issues)
-            issues = delta["changed"]
-            snapshot["counts"]["delta_total"] = len(issues)
+        # 冻结快照优先：失败重试/崩溃恢复复用同一份输入事实，Redmine 数据
+        # 变化不得改变同一 run 的分析基准（快照已随 run 持久化到 SQLite）。
+        frozen = self.repository.get_snapshot(run.run_id)
+        if frozen is None:
+            snapshot = await self.build_triage(
+                stale_days=int(config.get("stale_days") or DEFAULT_STALE_DAYS),
+                list_limit=int(config.get("list_limit") or DEFAULT_LIST_LIMIT),
+            )
+            issues = list(snapshot["issues"])[: int(config.get("max_issues") or 50)]
 
-        run.snapshot_at = snapshot["generated_at"]
-        run.snapshot_hash = snapshot["snapshot_hash"]
+            if run.mode == "delta":
+                previous = self.repository.find_run(self.owner_id, run.brief_date, "nightly")
+                prev_issues = []
+                if previous is not None:
+                    prev_issues = [
+                        {"issue_id": item.issue_id, "fingerprint": item.fingerprint}
+                        for item in self.repository.list_issues(previous.run_id)
+                    ]
+                delta = detect_delta(prev_issues, issues)
+                issues = delta["changed"]
+                snapshot["counts"]["delta_total"] = len(issues)
+
+            frozen = {
+                "brief_date": snapshot.get("brief_date", run.brief_date),
+                "generated_at": snapshot.get("generated_at", ""),
+                "snapshot_hash": snapshot.get("snapshot_hash", ""),
+                "source_sync_status": str(
+                    snapshot.get("source_sync_status")
+                    or ("synced" if snapshot.get("synced") else "skipped")
+                ),
+                "counts": dict(snapshot.get("counts") or {}),
+                "issues": issues,
+            }
+            self.repository.save_snapshot(run.run_id, frozen)
+
+        issues = list(frozen.get("issues") or [])
+        counts = dict(frozen.get("counts") or {})
+        run.snapshot_at = str(frozen.get("generated_at") or "")
+        run.snapshot_hash = str(frozen.get("snapshot_hash") or "")
+        run.source_sync_status = str(frozen.get("source_sync_status") or "")
         run.issue_count = len(issues)
-        run.waiting_my_reply_count = snapshot["counts"]["waiting_my_reply"]
-        run.no_reply_3_days_count = snapshot["counts"]["no_reply_3_days"]
+        run.waiting_my_reply_count = int(counts.get("waiting_my_reply") or 0)
+        run.no_reply_3_days_count = int(counts.get("no_reply_3_days") or 0)
         run.analysis_backend = str(config.get("analysis_backend") or "kkagent")
         run.model_name = str(config.get("model") or "")
         run.status = "analyzing"
         run.started_at = run.started_at or _now()
         self.repository.update_run(run)
 
-        # retry/force 会复用 run_id；先删旧快照条目，避免已不在今日待办中的
-        # issue 残留在新晨报里。
+        # retry/force(refreeze) 会复用 run_id；先删旧快照条目，避免已不在
+        # 今日待办中的 issue 残留在新晨报里。
         self.repository.delete_issues(run.run_id)
         for entry in issues:
             self.repository.upsert_issue(DailyBriefIssue(
@@ -276,16 +362,18 @@ class DailyBriefService:
                 subject=str(entry.get("subject") or ""),
                 status="pending",
             ))
-        # 快照 entry 暂存到内存（run 级），分析阶段直接消费冻结数据。
-        self._snapshot_entries(run.run_id, {int(e["issue_id"]): e for e in issues})
         return run
 
-    _SNAPSHOT_ENTRY_CACHE: dict[str, dict[int, dict[str, Any]]] = {}
-
-    def _snapshot_entries(self, run_id: str, entries: dict[int, dict[str, Any]] | None = None):
-        if entries is not None:
-            self._SNAPSHOT_ENTRY_CACHE[run_id] = entries
-        return self._SNAPSHOT_ENTRY_CACHE.get(run_id, {})
+    def _snapshot_entries(self, run_id: str) -> dict[int, dict[str, Any]]:
+        """冻结快照的 issue entries（持久化读取，崩溃重试后仍然可用）。"""
+        frozen = self.repository.get_snapshot(run_id)
+        entries: dict[int, dict[str, Any]] = {}
+        for entry in (frozen or {}).get("issues") or []:
+            try:
+                entries[int(entry["issue_id"])] = entry
+            except (KeyError, TypeError, ValueError):
+                continue
+        return entries
 
     async def _analyze_phase(self, run: DailyBriefRun, config: dict[str, Any]) -> None:
         entries = self._snapshot_entries(run.run_id)
@@ -406,6 +494,7 @@ class DailyBriefService:
             "counts": counts,
             "top_priorities": top,
             "snapshot_hash": run.snapshot_hash,
+            "source_sync_status": run.source_sync_status,
             "analysis_backend": run.analysis_backend,
             "model": run.model_name,
         }
@@ -421,7 +510,6 @@ class DailyBriefService:
             run.error = ""
         run.finished_at = _now()
         self.repository.update_run(run)
-        self._SNAPSHOT_ENTRY_CACHE.pop(run.run_id, None)
         return run
 
     @staticmethod
@@ -433,6 +521,11 @@ class DailyBriefService:
             f"超 {run.no_reply_3_days_count and ''}3 天未回复 {counts.get('no_reply_3_days', 0)}），"
             f"成功分析 {counts.get('completed', 0)}，失败 {counts.get('failed', 0)}。"
         )
+        if run.source_sync_status in ("sync_failed", "skipped"):
+            lines.append(
+                f"> 注意：快照源同步状态为 {run.source_sync_status}，"
+                "本报告基于本地镜像（数据可能落后于 Redmine）。"
+            )
         lines.append("")
         for issue in completed:
             result = issue.result or {}
@@ -468,10 +561,13 @@ class DailyBriefService:
         record = self.repository.get_issue(run.run_id, issue_id)
         if record is None:
             return {"error": f"issue {issue_id} not in run {run.run_id}"}
+        if self.run_is_executing(run.run_id):
+            return {"error": f"run {run.run_id} is still executing; retry after it finishes"}
         config = self.get_config()
-        # 初次 run 完成后内存快照会释放；重分析仍需把持久化的标题、桶和
-        # 规则优先级交给模型，避免 MCP 暂时不可用时退化成只有 issue id。
-        entry = {
+        # 优先取冻结快照里的 entry（完整字段），持久化快照不在时退化为
+        # issue 记录上的标题、桶和规则优先级，避免 MCP 暂时不可用时退化
+        # 成只有 issue id。
+        entry = self._snapshot_entries(run.run_id).get(issue_id) or {
             "issue_id": issue_id,
             "subject": record.subject,
             "buckets": record.buckets,

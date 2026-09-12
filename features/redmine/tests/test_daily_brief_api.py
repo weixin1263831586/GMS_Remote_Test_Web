@@ -137,18 +137,22 @@ class DailyBriefApiTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ run
 
-    def test_manual_run_creates_and_completes(self):
+    def test_manual_run_is_durably_queued_without_web_background_task(self):
         resp = self.client.post("/api/redmine-agent/daily-brief/run")
         self.assertEqual(resp.status_code, 200)
-        run_id = resp.json()["data"]["run_id"]
+        queued = resp.json()["data"]
+        run_id = queued["run_id"]
         self.assertTrue(run_id.startswith("db_"))
+        self.assertTrue(queued["job_id"].startswith("dbj_"))
+        self.assertEqual(queued["status"], "pending")
 
         latest = self.client.get("/api/redmine-agent/daily-brief/latest")
         payload = latest.json()["data"]
         self.assertEqual(payload["run"]["run_id"], run_id)
-        self.assertIn(payload["run"]["status"], ("completed", "partial"))
-        self.assertEqual(payload["issues"][0]["result"]["problem_summary"], "summary")
-        self.assertNotIn("raw_response", payload["issues"][0])
+        self.assertEqual(payload["run"]["status"], "pending")
+        self.assertEqual(payload["issues"], [])
+        repo = brief_repo.owner_daily_brief_repository("owner-a")
+        self.assertEqual(repo.get_job(queued["job_id"])["status"], "queued")
 
     def test_manual_run_is_idempotent_same_day(self):
         first = self.client.post("/api/redmine-agent/daily-brief/run").json()["data"]["run_id"]
@@ -160,7 +164,7 @@ class DailyBriefApiTests(unittest.TestCase):
             "/api/redmine-agent/daily-brief/run", json={"force": True}
         ).json()["data"]
         self.assertEqual(forced["run_id"], first)
-        self.assertFalse(forced.get("reused", False))
+        self.assertTrue(forced.get("already_running"))
 
     def test_manual_run_rejects_non_boolean_force(self):
         resp = self.client.post(

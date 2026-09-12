@@ -967,7 +967,7 @@ function showSettingsModal() {
       document.getElementById('settingRedminePass').value = '';
       try {
         dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config') || {};
-        dailyBriefSetting('enabled').checked = dailyBriefConfigCache.enabled !== false;
+        dailyBriefSetting('enabled').checked = dailyBriefConfigCache.enabled === true;
         dailyBriefSetting('agent_profile').value = dailyBriefConfigCache.agent_profile || '';
         dailyBriefSetting('model').value = dailyBriefConfigCache.model || '';
         dailyBriefSetting('max_parallel_issues').value = dailyBriefConfigCache.max_parallel_issues || 1;
@@ -2767,7 +2767,7 @@ function renderDailyBriefInner(data) {
     if (issue.status === 'failed') {
       var etype = String(issue.error_type || '').trim();
       var err = String(issue.error || '').trim();
-      var errorLabel = ({ schema_mismatch: '返回格式不兼容', invalid_ai_output: 'AI 返回无法解析', kkagent_error: '分析服务异常', timeout: '分析超时', kkagent_unavailable: '分析服务不可用' })[etype] || etype;
+      var errorLabel = ({ schema_mismatch: '返回格式不兼容', invalid_ai_output: 'AI 返回无法解析', kkagent_error: '分析服务异常', interrupted: '分析进程被中断', timeout: '分析超时', kkagent_unavailable: '分析服务不可用' })[etype] || etype;
       return '<span class="daily-brief-state failed" title="' + esc(err) + '">❌ 分析失败'
         + (errorLabel ? ' · ' + esc(errorLabel) : '') + '</span>';
     }
@@ -2871,10 +2871,15 @@ async function reanalyzeDailyBriefIssue(issueId, button) {
   button.disabled = true;
   button.textContent = '⏳ 分析中…';
   try {
-    await api('/api/redmine-agent/daily-brief/' + encodeURIComponent(run.brief_date) + '/issues/' + encodeURIComponent(issueId) + '/reanalyze', {method: 'POST'});
+    var queued = await api('/api/redmine-agent/daily-brief/' + encodeURIComponent(run.brief_date) + '/issues/' + encodeURIComponent(issueId) + '/reanalyze', {method: 'POST'}) || {};
+    if (dailyBriefCache && dailyBriefCache.run) dailyBriefCache.run.status = queued.status || 'pending';
+    var issue = dailyBriefCache && (dailyBriefCache.issues || []).find(function (item) { return String(item.issue_id) === String(issueId); });
+    if (issue) issue.status = 'pending';
+    dailyBriefManualPoll = true;
     await loadDailyBrief();
     removeDynamicModal(button.closest('.modal').id);
-    notifyUser('分析已更新', 'Defect #' + issueId + ' 已完成重新分析', 'success');
+    notifyUser('已加入分析队列', 'Defect #' + issueId + ' 将由独立 Worker 重新分析', 'success');
+    pollDailyBriefRun(queued.run_id || run.run_id);
   } catch (e) {
     button.disabled = false;
     button.textContent = original;

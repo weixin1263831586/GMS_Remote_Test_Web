@@ -111,6 +111,53 @@ class SnapshotScopingTests(unittest.TestCase):
         self.assertIn("Zhang San", captured["owner_names"])
         self.assertEqual(snapshot["owner"]["user_id"], 7)
 
+    def test_source_sync_status_reflects_pre_sync_outcome(self):
+        """pre-sync 失败不静默：快照必须带 source_sync_status。"""
+
+        class _Repo:
+            def get_workload_statistics(self, **kwargs):
+                return {"lists": {"waiting_my_reply": [], "no_reply_3_days": []}}
+
+        user = SimpleNamespace(id=7, firstname="San", lastname="Zhang",
+                               login="zhangsan", mail="z@x.com")
+        service = SimpleNamespace(
+            agent=_FakeAgent(user, {}),
+            repository=_Repo(),
+        )
+        with patch.object(snapshot_mod, "get_redmine_service_for_owner",
+                          lambda owner: service), \
+                patch.object(snapshot_mod, "load_redmine_user_map_for_owner",
+                             lambda owner: []):
+
+            async def _raise(*args, **kwargs):
+                raise RuntimeError("redmine down")
+
+            # pre-sync 抛异常 → sync_failed
+            with patch.object(snapshot_mod, "_sync_owner_issue_snapshots", _raise):
+                failed = asyncio.run(
+                    build_daily_triage_snapshot("owner-a", refresh=True)
+                )
+            self.assertEqual(failed["source_sync_status"], "sync_failed")
+            self.assertFalse(failed["synced"])
+
+            # pre-sync 成功 → synced
+            with patch.object(snapshot_mod, "_sync_owner_issue_snapshots", _async(True)):
+                ok = asyncio.run(
+                    build_daily_triage_snapshot("owner-a", refresh=True)
+                )
+            self.assertEqual(ok["source_sync_status"], "synced")
+            self.assertTrue(ok["synced"])
+
+            # refresh=False 显式跳过 → skipped
+            from unittest.mock import AsyncMock
+
+            with patch.object(snapshot_mod, "_sync_owner_issue_snapshots", AsyncMock(return_value=True)) as sync:
+                skipped = asyncio.run(
+                    build_daily_triage_snapshot("owner-a", refresh=False)
+                )
+            self.assertEqual(skipped["source_sync_status"], "skipped")
+            sync.assert_not_called()
+
 
 def _async(value):
     async def coro(*args, **kwargs):

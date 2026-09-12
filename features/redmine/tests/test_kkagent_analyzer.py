@@ -59,6 +59,11 @@ def _write_fake_kkagent(directory: Path, behavior: str) -> Path:
             f"sys.stdout.write(json.dumps(json.loads(open({str(os.environ.get('FAKE_RESULT_PATH', ''))!r}).read())))\n"
         ),
         "fail": "import sys; sys.stderr.write('model unreachable'); sys.exit(3)",
+        "interrupted": (
+            "import sys\n"
+            "sys.stderr.write('Traceback (most recent call last):\\nKeyboardInterrupt\\n')\n"
+            "sys.exit(130)\n"
+        ),
         # stderr 带 ANSI 颜色转义（模拟 0.4.x 诊断日志）+ 限流失败，非零退出。
         "noisy": (
             "import sys\n"
@@ -165,6 +170,31 @@ class KkAgentAnalyzerTests(unittest.TestCase):
         self.assertEqual(outcome.error_type, "kkagent_error")
         self.assertEqual(outcome.exit_code, 3)
 
+    def test_signal_exit_is_interrupted_not_generic_kkagent_error(self):
+        import asyncio
+
+        analyzer = self._analyzer(
+            "interrupted", timeout_seconds=20, interrupted_retries=0
+        )
+        outcome = asyncio.run(self._run(analyzer))
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.error_type, "interrupted")
+        self.assertIn("SIGINT", outcome.error)
+
+    def test_interrupted_exit_retries_once(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        analyzer = self._analyzer("ok", interrupted_retries=1)
+        interrupted = type("Outcome", (), {"error_type": "interrupted"})()
+        success = type("Outcome", (), {"error_type": "", "ok": True})()
+        with patch.object(
+            analyzer, "_analyze_once", AsyncMock(side_effect=[interrupted, success])
+        ) as analyze_once:
+            outcome = asyncio.run(analyzer.analyze(ENTRY))
+        self.assertIs(outcome, success)
+        self.assertEqual(analyze_once.await_count, 2)
+
     def test_invalid_json_is_invalid_ai_output(self):
         import asyncio
         outcome = asyncio.run(self._run(self._analyzer("garbage", timeout_seconds=20)))
@@ -185,6 +215,96 @@ class KkAgentAnalyzerTests(unittest.TestCase):
         outcome = asyncio.run(self._run(analyzer))
         self.assertFalse(outcome.ok)
         self.assertEqual(outcome.error_type, "timeout")
+
+    def test_subprocess_starts_in_an_independent_posix_session(self):
+        import asyncio
+
+        seen = {}
+        original = asyncio.create_subprocess_exec
+
+        async def capture(*args, **kwargs):
+            seen.update(kwargs)
+            return await original(*args, **kwargs)
+
+        analyzer = self._analyzer("ok", timeout_seconds=30)
+        with patch("asyncio.create_subprocess_exec", capture):
+            outcome = asyncio.run(self._run(analyzer))
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual(seen["start_new_session"], os.name == "posix")
+
+    def test_cancellation_cleans_up_process_tree(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        class _HangingStream:
+            """模仿 PIPE 流：read 永远挂起，直到任务被取消。"""
+
+            async def read(self, size=-1):
+                await asyncio.Event().wait()
+
+        class Process:
+            pid = 12345
+            returncode = None
+            stdout = _HangingStream()
+            stderr = _HangingStream()
+
+            async def communicate(self):
+                await asyncio.Event().wait()
+
+        analyzer = KkAgentRedmineAnalyzer(interrupted_retries=0)
+
+        async def scenario():
+            with patch(
+                "asyncio.create_subprocess_exec", AsyncMock(return_value=Process())
+            ), patch.object(
+                analyzer, "_terminate_process_tree", AsyncMock()
+            ) as terminate:
+                task = asyncio.create_task(analyzer.analyze(ENTRY))
+                await asyncio.sleep(0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                terminate.assert_awaited_once()
+
+        asyncio.run(scenario())
+
+    def test_stream_capture_is_memory_capped(self):
+        """stdout/stderr 流式截断：超限输出只保留头尾，内存上限固定。"""
+        import asyncio
+
+        from features.redmine.kkagent_analyzer import (
+            CAPTURE_HEAD_BYTES,
+            CAPTURE_TAIL_BYTES,
+            read_stream_capped,
+        )
+
+        async def scenario():
+            reader = asyncio.StreamReader()
+            payload = (b"x" * 65536) * 40  # 2.5MB，远超 head+tail 上限
+            reader.feed_data(payload)
+            reader.feed_eof()
+            return await read_stream_capped(reader)
+
+        captured = asyncio.run(scenario())
+        self.assertLessEqual(len(captured), CAPTURE_HEAD_BYTES + CAPTURE_TAIL_BYTES + 64)
+        self.assertIn(b"...[truncated]...", captured)
+        # 头尾内容仍在（启动信息 + 最终输出语义）。
+        self.assertTrue(captured.startswith(b"x"))
+        self.assertTrue(captured.endswith(b"x"))
+
+    def test_stream_capture_small_output_untouched(self):
+        import asyncio
+
+        from features.redmine.kkagent_analyzer import read_stream_capped
+
+        async def scenario():
+            reader = asyncio.StreamReader()
+            reader.feed_data(b'{"result": {"ok": true}}')
+            reader.feed_eof()
+            return await read_stream_capped(reader)
+
+        captured = asyncio.run(scenario())
+        self.assertEqual(captured, b'{"result": {"ok": true}}')
 
     def test_missing_binary(self):
         analyzer = KkAgentRedmineAnalyzer(binary=str(self.dir / "no-such-kkagent"))
