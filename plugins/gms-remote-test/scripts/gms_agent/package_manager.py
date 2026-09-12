@@ -170,10 +170,10 @@ def resolve_controller(explicit_server: str = "", explicit_profile: str = "") ->
 
     Fail-closed multi-Controller rule (ADR 0003) — precedence:
 
-      1. explicit ``--server`` wins;
-      2. else the environment (``GMS_REMOTE_TEST_SERVER`` or the
+      1. an explicit ``--profile`` pins that profile's Controller;
+      2. an explicit ``--server`` wins when no profile is selected;
+      3. else the environment (``GMS_REMOTE_TEST_SERVER`` or the
          bootstrap-embedded URL);
-      3. else an explicit ``--profile`` → that profile's Controller;
       4. else the UNIQUE Controller across ALL installed profiles —
          zero profiles or more than one distinct Controller is an error,
          never a per-client first-match guess.
@@ -185,8 +185,26 @@ def resolve_controller(explicit_server: str = "", explicit_profile: str = "") ->
     profile whose trust store was recorded at install time.
     """
 
+    requested_server = explicit_server.rstrip("/")
+    if explicit_profile:
+        flat = profile_store.load_profile(explicit_profile)
+        profile_server = profile_store.controller_url(flat)
+        if profile_server:
+            if requested_server and requested_server != profile_server:
+                print(
+                    f"Error: --server {requested_server} 与 profile "
+                    f"{explicit_profile} 的 Controller {profile_server} 不一致",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+            return profile_server, profile_store.ca_cert(flat)
+        print(
+            f"Error: profile {explicit_profile} 不存在或缺少 Controller URL",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     server = (
-        explicit_server.rstrip("/")
+        requested_server
         or os.environ.get("GMS_REMOTE_TEST_SERVER", "")
         # Bootstrap installs embed the Controller URL at download time
         # (GET /api/agent/install); an explicit env var still wins.
@@ -194,16 +212,6 @@ def resolve_controller(explicit_server: str = "", explicit_profile: str = "") ->
     ).rstrip("/")
     if server and not server.startswith("__GMS_"):
         return server, ""
-    if explicit_profile:
-        flat = profile_store.load_profile(explicit_profile)
-        profile_server = profile_store.controller_url(flat)
-        if profile_server:
-            return profile_server, profile_store.ca_cert(flat)
-        print(
-            f"Error: profile {explicit_profile} 不存在或缺少 Controller URL",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
     unique_server, unique_ca = profile_server_and_ci_or_none()
     if unique_server:
         return unique_server, unique_ca
@@ -243,14 +251,23 @@ def profile_server_and_ci_or_none() -> tuple[str, str]:
         return "", ""
 
 
-def http_get(url: str, ca_cert: str = "", timeout: int = 60) -> tuple[bytes, dict[str, str]]:
+def http_get(
+    url: str,
+    ca_cert: str = "",
+    timeout: int = 60,
+    insecure: bool | None = None,
+) -> tuple[bytes, dict[str, str]]:
+    import ssl
+
     context = None
     if url.startswith("https://"):
-        import ssl
-
         if ca_cert:
             context = ssl.create_default_context(cafile=ca_cert)
-        elif os.environ.get("GMS_INSTALL_INSECURE") == "1":
+        elif (
+            insecure
+            if insecure is not None
+            else os.environ.get("GMS_INSTALL_INSECURE") == "1"
+        ):
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
@@ -399,6 +416,7 @@ def fetch_registry_package(
     server: str,
     ca_cert: str,
     expected_version: str = "",
+    insecure: bool | None = None,
 ) -> tuple[Path, Path, str, str]:
     """Download + verify the registry package; returns (root, staging, version, tree_sha256).
 
@@ -419,7 +437,9 @@ def fetch_registry_package(
     and pinned; a second fetch that disagrees is rejected.
     """
     try:
-        raw, _headers = http_get(f"{registry_base(server)}/manifest", ca_cert)
+        raw, _headers = http_get(
+            f"{registry_base(server)}/manifest", ca_cert, insecure=insecure
+        )
         manifest = json.loads(raw)
     except (urllib.error.URLError, OSError, ValueError) as error:
         raise RuntimeError(f"无法读取 Controller 包清单: {error}") from error
@@ -440,7 +460,9 @@ def fetch_registry_package(
     if not expected_sha:
         raise RuntimeError("清单缺少 SHA-256；拒绝无完整性校验的包")
     try:
-        data, _headers = http_get(artifact_url, ca_cert, timeout=600)
+        data, _headers = http_get(
+            artifact_url, ca_cert, timeout=600, insecure=insecure
+        )
     except (urllib.error.URLError, OSError) as error:
         raise RuntimeError(f"包下载失败: {error}") from error
     actual_sha = hashlib.sha256(data).hexdigest()
@@ -1160,6 +1182,7 @@ def reactivate_clients(
     ca_cert: str,
     previous_target: Path | None = None,
     allow_server_fallback: bool = False,
+    profile: str = "",
 ) -> list[str]:
     """Transactional whole-package re-activation for update/rollback.
 
@@ -1191,7 +1214,17 @@ def reactivate_clients(
     restore_version = restore_target.name if restore_target else installed_version()
     try:
         for client in clients:
-            profile_server, profile_ca = profile_server_and_ca(client)
+            selected = ""
+            if profile:
+                explicit = profile_store.load_profile(profile)
+                if explicit.get("client") == client:
+                    selected = profile
+            if not selected:
+                candidate = profile_store.resolve_profile(client)
+                selected = candidate.stem if candidate else ""
+            selected_flat = profile_store.load_profile(selected) if selected else {}
+            profile_server = profile_store.controller_url(selected_flat)
+            profile_ca = profile_store.ca_cert(selected_flat)
             resolved_server = profile_server or (server if allow_server_fallback else "")
             resolved_ca = profile_ca or ca_cert
             if not resolved_server:
@@ -1200,7 +1233,7 @@ def reactivate_clients(
                     f"（profile 缺失且未提供 --server{'，update/rollback 不使用环境回退' if not allow_server_fallback else ''}）"
                 )
             print(f"Re-activating {client}:")
-            name = write_profile(client, resolved_server, resolved_ca)
+            name = write_profile(client, resolved_server, resolved_ca, selected)
             install_skill(client, CURRENT_LINK)
             if client == "kkagent":
                 install_plugin_for_kkagent(CURRENT_LINK)
@@ -1218,7 +1251,17 @@ def reactivate_clients(
             flip_current(restore_target)
             try:
                 for client in clients:
-                    profile_server, profile_ca = profile_server_and_ca(client)
+                    selected = ""
+                    if profile:
+                        explicit = profile_store.load_profile(profile)
+                        if explicit.get("client") == client:
+                            selected = profile
+                    if not selected:
+                        candidate = profile_store.resolve_profile(client)
+                        selected = candidate.stem if candidate else ""
+                    selected_flat = profile_store.load_profile(selected) if selected else {}
+                    profile_server = profile_store.controller_url(selected_flat)
+                    profile_ca = profile_store.ca_cert(selected_flat)
                     server_c = profile_server or (server if allow_server_fallback else "")
                     if not server_c:
                         print(
@@ -1229,7 +1272,9 @@ def reactivate_clients(
                     if client == "kkagent":
                         install_plugin_for_kkagent(CURRENT_LINK)
                     elif server_c:
-                        name = write_profile(client, server_c, profile_ca or ca_cert)
+                        name = write_profile(
+                            client, server_c, profile_ca or ca_cert, selected
+                        )
                         reconcile_mcp(client, server_c, name, profile_ca or ca_cert)
             except (Exception, SystemExit) as rollback_error:  # best effort
                 print(
@@ -1258,6 +1303,26 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
         if args.client == "none"
         else (detect_clients() if args.client == "auto" else [args.client])
     )
+    if profile and len(clients) > 1:
+        print(
+            "Error: --profile 只能绑定一个客户端；请用 --client 指定 "
+            "codex、kimi 或 kkagent 后分别安装",
+            file=sys.stderr,
+        )
+        return 2
+    install_server = (args.server or "").rstrip("/")
+    if profile and install_server:
+        existing_profile = profile_store.load_profile(profile)
+        existing_server = profile_store.controller_url(existing_profile)
+        if existing_server and existing_server != install_server:
+            print(
+                f"Error: profile {profile} 已绑定 {existing_server}；"
+                "拒绝保留旧 token 后改绑其他 Controller",
+                file=sys.stderr,
+            )
+            return 2
+        if existing_server:
+            ca_cert = profile_store.ca_cert(existing_profile)
     if not clients:
         if args.client == "none":
             print("已选择 --client none；将仅安装运行时与 CLI。")
@@ -1265,7 +1330,12 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
             print("未检测到 codex/kimi/kkagent；将仅安装运行时与 CLI。")
     server = args.server or ""
     if source_root is None or clients:
-        server = server or resolve_controller(server, profile)[0]
+        if not server:
+            server, profile_ca = resolve_controller("", profile)
+            if profile:
+                ca_cert = profile_ca
+            else:
+                ca_cert = ca_cert or profile_ca
         if not _controller_url_valid(server):
             print(
                 "Error: Controller URL 无效；要求 http(s)://host[:port]，"
@@ -1285,7 +1355,12 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
             print("未检测到本地包；从 Controller Agent Package Registry 引导下载…")
             try:
                 source_root, staging_to_cleanup, version, sha256 = fetch_registry_package(
-                    server, ca_cert
+                    server,
+                    ca_cert,
+                    insecure=(
+                        profile_store.load_profile(profile).get("insecure") == "true"
+                        if profile else None
+                    ),
                 )
             except RuntimeError as error:
                 print(f"Error: {error}", file=sys.stderr)
@@ -1338,11 +1413,21 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 def _cmd_update_locked(args: argparse.Namespace) -> int:
     profile = (getattr(args, "profile", "") or "").strip()
-    server, _ca = resolve_controller(args.server, profile)
-    ca_cert = os.environ.get("GMS_INSTALL_CA_CERT", "")
+    server, profile_ca = resolve_controller(args.server, profile)
+    ca_cert = (
+        profile_ca
+        if profile
+        else os.environ.get("GMS_INSTALL_CA_CERT", "") or profile_ca
+    )
+    profile_insecure = (
+        profile_store.load_profile(profile).get("insecure") == "true"
+        if profile else None
+    )
     current = installed_version() or runtime_version()
     try:
-        raw, _headers = http_get(f"{registry_base(server)}/manifest", ca_cert)
+        raw, _headers = http_get(
+            f"{registry_base(server)}/manifest", ca_cert, insecure=profile_insecure
+        )
         manifest = json.loads(raw)
     except (urllib.error.URLError, OSError, ValueError) as error:
         print(f"Error: 无法读取 Controller 包清单: {error}", file=sys.stderr)
@@ -1386,7 +1471,10 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
         # fetch so a racing manifest cannot swap the artifact between the
         # comparison and the download (TOCTOU downgrade).
         source_root, staging, version, sha256 = fetch_registry_package(
-            server, ca_cert, expected_version=latest
+            server,
+            ca_cert,
+            expected_version=latest,
+            insecure=profile_insecure,
         )
     except RuntimeError as error:
         print(f"Error: {error}", file=sys.stderr)
@@ -1414,7 +1502,10 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
         # of silently inheriting the environment/--server value (which may
         # belong to another Controller on a multi-Controller host).
         reactivated = reactivate_clients(
-            server, ca_cert, previous_target=VERSIONS_DIR / current
+            server,
+            ca_cert,
+            previous_target=VERSIONS_DIR / current,
+            profile=profile,
         )
     except (SystemExit, Exception):
         # reactivate_clients already compensated back to the whole-package
@@ -1442,6 +1533,14 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     if not (target / "scripts" / "gms-remote-test.sh").is_file():
         print(f"Error: 未安装版本 {version}", file=sys.stderr)
         return 2
+    server, ca_cert = "", ""
+    explicit_server = (getattr(args, "server", "") or "").strip()
+    explicit_profile = (getattr(args, "profile", "") or "").strip()
+    if explicit_server or explicit_profile:
+        # Resolve before flipping current: invalid/conflicting routing input
+        # must leave the installed package untouched.
+        server, ca_cert = resolve_controller(explicit_server, explicit_profile)
+
     # Rollback never requires the global GMS_REMOTE_TEST_SERVER: TOML
     # profiles are the authoritative per-client store. The env value is
     # only a tolerant fallback; a client with NEITHER fails the activation
@@ -1457,19 +1556,13 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     # reconcile_mcp can no longer receive an empty server while
     # write_profile got the environment fallback.
     previous_target = VERSIONS_DIR / rollback_from if rollback_from else None
-    server, ca_cert = "", ""
-    explicit_server = (getattr(args, "server", "") or "").strip()
-    explicit_profile = (getattr(args, "profile", "") or "").strip()
-    if explicit_server or explicit_profile:
-        # Explicit Controller for the re-activation — resolve once, same
-        # fail-closed rule as update/enroll.
-        server, ca_cert = resolve_controller(explicit_server, explicit_profile)
     try:
         reactivated = reactivate_clients(
             server,
             ca_cert,
             previous_target=previous_target,
             allow_server_fallback=bool(server),
+            profile=explicit_profile,
         )
     except (SystemExit, Exception):
         # Compensation already restored the pre-rollback whole-package
@@ -1516,7 +1609,12 @@ def write_enrollment_token(
     os.chmod(state_dir, 0o700)
     written: list[str] = []
     if profile:
-        token_file = profile_store.token_file(profile)
+        flat = profile_store.load_profile(profile)
+        token_value = flat.get("token_file", "")
+        if not flat.get("profile") or not token_value:
+            return []
+        token_file = Path(token_value).expanduser()
+        token_file.parent.mkdir(parents=True, exist_ok=True)
         token_file.write_text(token + "\n", encoding="utf-8")
         token_file.chmod(0o600)
         return [str(token_file)]
@@ -1527,7 +1625,11 @@ def write_enrollment_token(
         flat = profile_store.load_profile(name)
         if profile_store.controller_url(flat) != unique_server:
             continue
-        token_file = profile_store.token_file(name)
+        token_value = flat.get("token_file", "")
+        if not token_value:
+            continue
+        token_file = Path(token_value).expanduser()
+        token_file.parent.mkdir(parents=True, exist_ok=True)
         token_file.write_text(token + "\n", encoding="utf-8")
         token_file.chmod(0o600)
         written.append(str(token_file))
@@ -1536,7 +1638,7 @@ def write_enrollment_token(
 
 def cmd_enroll(args: argparse.Namespace) -> int:
     profile = (getattr(args, "profile", "") or "").strip()
-    server, _ca = resolve_controller(getattr(args, "server", ""), profile)
+    server, profile_ca = resolve_controller(getattr(args, "server", ""), profile)
     code = args.code
     if not code:
         print("Error: 需要 one-shot enrollment code", file=sys.stderr)
@@ -1552,10 +1654,18 @@ def cmd_enroll(args: argparse.Namespace) -> int:
 
     context = None
     if server.startswith("https://"):
-        ca = os.environ.get("GMS_INSTALL_CA_CERT", "")
+        ca = (
+            profile_ca
+            if profile
+            else os.environ.get("GMS_INSTALL_CA_CERT", "") or profile_ca
+        )
+        profile_insecure = (
+            profile_store.load_profile(profile).get("insecure") == "true"
+            if profile else os.environ.get("GMS_INSTALL_INSECURE") == "1"
+        )
         if ca:
             context = ssl.create_default_context(cafile=ca)
-        elif os.environ.get("GMS_INSTALL_INSECURE") == "1":
+        elif profile_insecure:
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE

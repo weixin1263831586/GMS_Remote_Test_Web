@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import re
 from dataclasses import dataclass, field
@@ -67,6 +68,9 @@ ZIP_MEMBER_DERIVED_TOTAL_MAX_BYTES = 32 * 1024 * 1024
 # 派生文本里的成员分隔标记（行级），search 用它还原
 # ``attachment:<file>.zip!/<member>`` 引用与行号。
 _ZIP_MEMBER_MARKER_RE = re.compile(r"^<<<zip-member:(.*?)>>>$")
+_ZIP_MEMBER_V2_RE = re.compile(
+    r"(?m)^<<<zip-member-v2:([A-Za-z0-9_-]+):([0-9]+)>>>\n"
+)
 _ZIP_MEMBER_MARKER_PREFIX = "<<<zip-member:"
 _ZIP_MEMBER_MARKER_SUFFIX = ">>>"
 
@@ -75,8 +79,36 @@ def zip_member_marker(name: str) -> str:
     return f"{_ZIP_MEMBER_MARKER_PREFIX}{name}{_ZIP_MEMBER_MARKER_SUFFIX}"
 
 
+def zip_member_block(name: str, text: str) -> str:
+    """Frame one member so member content cannot forge the next marker."""
+
+    encoded_name = base64.urlsafe_b64encode(name.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"<<<zip-member-v2:{encoded_name}:{len(text)}>>>\n{text}"
+
+
 def split_zip_derived_text(text: str) -> list[tuple[str, str]]:
     """按成员标记切派生文本 → [(member_name, member_text), ...]。"""
+
+    framed: list[tuple[str, str]] = []
+    cursor = 0
+    saw_framed_marker = False
+    while match := _ZIP_MEMBER_V2_RE.search(text, cursor):
+        saw_framed_marker = True
+        try:
+            encoded = match.group(1)
+            padding = "=" * (-len(encoded) % 4)
+            name = base64.urlsafe_b64decode(encoded + padding).decode("utf-8")
+            length = int(match.group(2))
+        except (ValueError, UnicodeDecodeError):
+            cursor = match.end()
+            continue
+        end = match.end() + length
+        if end > len(text):
+            break
+        framed.append((name, text[match.end():end]))
+        cursor = end
+    if saw_framed_marker:
+        return framed
 
     members: list[tuple[str, list[str]]] = []
     current_name = ""

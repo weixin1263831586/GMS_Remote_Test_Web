@@ -43,6 +43,7 @@ from .evidence import (
     owner_evidence_store,
 )
 from .evidence_store import EvidenceStore
+from .evidence_zip import extract_zip_derived_text
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,21 @@ class EvidenceFetcher:
         if download not in DOWNLOAD_POLICIES:
             raise EvidenceError(f"download 策略必须是 {DOWNLOAD_POLICIES} 之一", status_code=422)
         return self.store.create_snapshot(issue_id=int(issue_id), download_policy=download)
+
+    async def probe_issue(self, issue_id: int) -> None:
+        """Validate that the configured identity can read this issue, without storing it."""
+
+        base_url = _evidence.preflight_owner_fetch(self.owner_id)
+        credentials = _evidence.load_owner_credentials(self.owner_id)
+        raw_bytes, _content_type = await self._fetch_issue_json(
+            base_url, int(issue_id), credentials
+        )
+        try:
+            issue = json.loads(raw_bytes.decode("utf-8")).get("issue")
+        except (UnicodeDecodeError, json.JSONDecodeError, AttributeError) as exc:
+            raise EvidenceError("Redmine 返回了非 JSON 响应", status_code=502) from exc
+        if not isinstance(issue, dict) or int(issue.get("id") or 0) != int(issue_id):
+            raise EvidenceError("Redmine 响应缺少匹配的 issue.id", status_code=502)
 
     async def run(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         issue_id = int(snapshot["issue_id"])
@@ -217,6 +233,17 @@ class EvidenceFetcher:
                             continue
                         total_budget -= spent
                         downloaded += 1
+                        updated_artifact = self.store.get_artifact(
+                            str(artifact["artifact_id"])
+                        ) or {}
+                        if str(updated_artifact.get("status")) == "partial":
+                            errors.append({
+                                "stage": "derive",
+                                "message": (
+                                    f"attachment {attachment.get('id')}: "
+                                    f"{updated_artifact.get('error') or '派生索引不完整'}"
+                                ),
+                            })
 
         final_status = "ready" if not errors else "partial"
         self.store.update_snapshot(
@@ -379,8 +406,8 @@ class EvidenceFetcher:
             # 2026-09-11 反馈（反馈 2026-09-11）：zip 内文本成员（logcat /
             # test_result.xml 等）派生成可检索文本，命中可以
             # attachment:<file>.zip!/<member>:L<line> 引用。
-            derived_rel, derived_error = self._extract_zip_derived_text(
-                artifact_id, snapshot_rel, data
+            derived_rel, derived_error = extract_zip_derived_text(
+                self.store, self._atomic_write, artifact_id, snapshot_rel, data
             )
 
         size_note = ""
@@ -389,7 +416,7 @@ class EvidenceFetcher:
 
         self.store.update_artifact(
             artifact_id,
-            status="ready",
+            status="partial" if derived_error else "ready",
             size_bytes=len(data),
             sha256=digest.hexdigest(),
             stored_path=target_rel,
@@ -402,75 +429,6 @@ class EvidenceFetcher:
                 "Redmine attachment %s 大小不一致: %s", attachment.get("id"), size_note
             )
         return len(data)
-
-    # -------------------------------------------------- zip derived text (2026-09-11 反馈)
-
-    def _extract_zip_derived_text(
-        self, artifact_id: str, snapshot_rel: str, data: bytes
-    ) -> tuple[str, str]:
-        """Extract text members of a zip into one derived text file.
-
-        Returns ``(derived_rel, error_note)``. Only text-suffixed members
-        within the size/member budgets are included; the markers let search
-        cite ``attachment:<file>.zip!/<member>:L<line>``. Never writes member
-        files, so zip-slip and decompression-bomb risk is bounded by the
-        per-member and total byte caps checked before reading.
-        """
-
-        import io
-        import zipfile
-
-        from .evidence import (
-            TEXT_KIND_EXTENSIONS,
-            ZIP_MEMBER_DERIVED_TOTAL_MAX_BYTES,
-            ZIP_MEMBER_TEXT_MAX_BYTES,
-            ZIP_MEMBER_TEXT_MAX_MEMBERS,
-            zip_member_marker,
-        )
-
-        chunks: list[str] = []
-        total = 0
-        included = 0
-        skipped_large = 0
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                for info in archive.infolist():
-                    if info.is_dir():
-                        continue
-                    if included >= ZIP_MEMBER_TEXT_MAX_MEMBERS:
-                        break
-                    suffix = Path(info.filename).suffix.lower()
-                    if suffix not in TEXT_KIND_EXTENSIONS:
-                        continue
-                    if info.file_size > ZIP_MEMBER_TEXT_MAX_BYTES:
-                        skipped_large += 1
-                        continue
-                    if total + info.file_size > ZIP_MEMBER_DERIVED_TOTAL_MAX_BYTES:
-                        break
-                    try:
-                        raw = archive.read(info)
-                    except (zipfile.BadZipFile, OSError, RuntimeError):
-                        continue
-                    encoding = _detect_text_encoding(raw) or "utf-8"
-                    text = raw.decode(encoding, errors="replace")
-                    block = f"{zip_member_marker(info.filename)}\n{text}"
-                    chunks.append(block)
-                    total += len(block.encode("utf-8"))
-                    included += 1
-        except (zipfile.BadZipFile, OSError) as exc:
-            return "", f"zip 解包失败: {type(exc).__name__}"
-        if not included:
-            return "", ""
-        derived_rel = f"{snapshot_rel}/derived/{artifact_id}.txt"
-        payload = ("\n".join(chunks) + "\n").encode("utf-8")
-        try:
-            self._atomic_write(self.store.resolve_internal(derived_rel), payload)
-        except OSError as exc:
-            return "", f"派生 zip 文本失败: {type(exc).__name__}"
-        note = ""
-        if skipped_large:
-            note = f"跳过 {skipped_large} 个超阈值 zip 成员"
-        return derived_rel, note
 
     # ------------------------------------------------------------- normalize
 

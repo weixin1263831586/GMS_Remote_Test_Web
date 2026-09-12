@@ -147,7 +147,9 @@ _ASSISTANT_BOOT_SHELL = """<!doctype html>
     try {
       var doc = frame.contentDocument;
       var bodyText = doc && doc.body ? (doc.body.textContent || '') : '';
-      if (bodyText.indexOf('GMS助手服务暂不可用') !== -1) { fail(); return; }
+      var payload = null;
+      try { payload = JSON.parse(bodyText); } catch (parseError) { payload = null; }
+      if (payload && payload.boot_error === true) { fail(); return; }
     } catch (err) { /* cross-origin: trust the load event */ }
     settle();
   });
@@ -236,6 +238,14 @@ def _rewrite_gms_assistant_content(
     return text
 
 
+def _assistant_boot_error(message: str, request: Request, status_code: int) -> JSONResponse:
+    return JSONResponse(
+        content={"success": False, "boot_error": True, "error": message,
+                 "request_id": getattr(request.state, "request_id", None)},
+        status_code=status_code,
+    )
+
+
 async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str = ""):
     """Same-origin HTTPS proxy for the external GMS assistant upstream."""
     upstream = _gms_assistant_upstream()
@@ -258,9 +268,8 @@ code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
 </main>""",
                 status_code=200,
             )
-        return JSONResponse(
-            content={"success": False, "error": "GMS助手未配置，请设置 external_services.gms_assistant_url"},
-            status_code=503,
+        return _assistant_boot_error(
+            "GMS助手未配置，请设置 external_services.gms_assistant_url", request, 503
         )
     upstream_url = f"{upstream}/{path}"
     if request.url.query:
@@ -383,26 +392,12 @@ code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
             _GMS_ASSISTANT_MAX_RESPONSE_BYTES,
             upstream_url,
         )
-        return JSONResponse(
-            content={
-                "success": False,
-                "error": "GMS助手服务暂不可用",
-                "request_id": getattr(request.state, "request_id", None),
-            },
-            status_code=502,
-        )
+        return _assistant_boot_error("GMS助手服务暂不可用", request, 502)
     except Exception:
         # 详细异常只写服务端日志；前端只拿到通用错误与 request_id，
         # 避免把内部连接细节（地址/超时/证书错误）泄漏给浏览器。
         logger.exception("[GMS_ASSISTANT_PROXY] 代理失败 %s", upstream_url)
-        return JSONResponse(
-            content={
-                "success": False,
-                "error": "GMS助手服务暂不可用",
-                "request_id": getattr(request.state, "request_id", None),
-            },
-            status_code=502,
-        )
+        return _assistant_boot_error("GMS助手服务暂不可用", request, 502)
 
 
 @router.api_route(

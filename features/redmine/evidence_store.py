@@ -175,7 +175,7 @@ class EvidenceStore:
                 """
                 SELECT * FROM redmine_evidence_snapshots
                 WHERE issue_id = ?
-                ORDER BY created_at DESC, snapshot_id DESC
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT 1
                 """,
                 (int(issue_id),),
@@ -194,7 +194,7 @@ class EvidenceStore:
                 """
                 SELECT * FROM redmine_evidence_snapshots
                 WHERE issue_id = ?
-                ORDER BY created_at DESC, snapshot_id DESC
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT ?
                 """,
                 (int(issue_id), int(limit)),

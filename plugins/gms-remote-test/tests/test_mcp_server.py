@@ -200,8 +200,11 @@ class RunCliTests(unittest.TestCase):
 
             with patch.object(mcp_server.subprocess, "run", fake_run):
                 mcp_server.run_cli("gms-rt-redmine-journals", ["SNAP"])
-            # 同路径：不覆盖（merged env 为空 → env=None，继承即可）
-            self.assertEqual(seen["env"], None)
+            # 同路径也显式传递当前 profile 值，使 SDK 从 B 切回 A 时不会
+            # 因启动环境本来就是 A 而漏掉刷新。
+            self.assertEqual(
+                seen["env"].get("GMS_AUTH_TOKEN_FILE"), str(old_token)
+            )
 
             # TOML 指向新文件：子进程 env 必须换到新路径。缓存按内容指纹
             # 失效，因此同一秒写入、等长的 old.token -> new.token 也必须
@@ -211,6 +214,12 @@ class RunCliTests(unittest.TestCase):
                 mcp_server.run_cli("gms-rt-redmine-journals", ["SNAP"])
             self.assertEqual(
                 seen["env"].get("GMS_AUTH_TOKEN_FILE"), str(new_token)
+            )
+            os.environ["GMS_AUTH_TOKEN_FILE"] = str(new_token)
+            toml_path.write_text(f'[auth]\ntoken_file = "{old_token}"\n')
+            self.assertEqual(
+                mcp_server._fresh_token_file_env()["GMS_AUTH_TOKEN_FILE"],
+                str(old_token),
             )
         finally:
             profile_store.PROFILE_ROOT = saved_root

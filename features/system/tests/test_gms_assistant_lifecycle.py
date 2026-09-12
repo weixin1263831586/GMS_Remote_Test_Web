@@ -108,6 +108,7 @@ class GmsAssistantBootShellTests(_IsolatedEnvTestCase):
         self.assertIn("assistant-upstream-frame", body)
         self.assertIn("assistant-boot", body)
         self.assertIn("重试", body)
+        self.assertIn("payload.boot_error === true", body)
         # The boot marker opts the inner frame into proxying.
         self.assertIn("__gms_boot=upstream", body)
         self.assertNotIn("__GMS_BOOT_MARKER__", body)
@@ -129,6 +130,7 @@ class GmsAssistantBootShellTests(_IsolatedEnvTestCase):
         _stop_upstream_patch(client)
         self.assertEqual(response.status_code, 503)
         self.assertNotIn("assistant-boot", response.text)
+        self.assertTrue(response.json()["boot_error"])
 
     def test_dev_proxy_routes_absent_by_default(self):
         app = _load_app()
@@ -327,6 +329,7 @@ class GmsAssistantProxySecurityTests(_IsolatedEnvTestCase):
         self.assertEqual(len(captured), 1)
         payload = resp.json()
         self.assertFalse(payload["success"])
+        self.assertTrue(payload["boot_error"])
         # Same generic text as the dial-failure path so the boot shell's
         # same-origin peek keeps detecting hard failures.
         self.assertEqual(payload["error"], "GMS助手服务暂不可用")

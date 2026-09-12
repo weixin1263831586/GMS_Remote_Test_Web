@@ -154,6 +154,24 @@ async def create_evidence_snapshot(
         return _error_response(exc)
 
     fetcher = EvidenceFetcher(owner_id, store=store)
+    if bool(body.get("dry_run", False)):
+        try:
+            await fetcher.probe_issue(numeric_id)
+        except EvidenceError as exc:
+            return _error_response(exc)
+        return {
+            "success": True,
+            "data": {
+                "dry_run": True,
+                "issue_id": numeric_id,
+                "preconditions": {
+                    "base_url_configured": True,
+                    "credentials_configured": True,
+                    "issue_reference_valid": True,
+                },
+            },
+        }
+
     snapshot = fetcher.create_snapshot(numeric_id, download=download)
     start_evidence_fetch(owner_id, snapshot)
     return JSONResponse(
@@ -536,4 +554,3 @@ async def read_evidence_artifact_image(artifact_id: str, request: Request):
             "derived_sha256": artifact.get("sha256") or "",
         },
     }
-

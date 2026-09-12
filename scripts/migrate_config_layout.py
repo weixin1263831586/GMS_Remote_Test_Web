@@ -99,6 +99,23 @@ def _externalize_secrets(config: dict, environment: dict) -> None:
         _set(config, keys, f"${{{variable}}}")
 
 
+def _rewrite_moved_path_references(root: Path, environment: dict) -> None:
+    """Keep environment overrides aligned with files moved by this migration."""
+
+    for key, value in list(environment.items()):
+        if not isinstance(value, str):
+            continue
+        for source, destination in SIMPLE_MOVES.items():
+            replacements = {
+                source: destination,
+                f"${{PROJECT_ROOT}}/{source}": f"${{PROJECT_ROOT}}/{destination}",
+                str(root / source): str(root / destination),
+            }
+            if value in replacements:
+                environment[key] = replacements[value]
+                break
+
+
 def plan_migration(root: Path) -> tuple[dict[Path, dict], list[Path]]:
     if runtime_data_root(root) != root / "data":
         raise ValueError("Offline migration requires the deployment data root inside the selected project")
@@ -130,6 +147,7 @@ def plan_migration(root: Path) -> tuple[dict[Path, dict], list[Path]]:
         if path.exists():
             originals.append(path)
     _externalize_secrets(config, environment)
+    _rewrite_moved_path_references(root, environment)
     # Keep the previous top-level override semantics, and move host identity out
     # of the product configuration. AI defaults deliberately remain static.
     for key in set(config) & set(runtime) - {"ai_models"}:

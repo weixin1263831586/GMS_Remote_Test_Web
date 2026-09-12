@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import codecs
 import contextlib
-import errno
 import logging
 import os
 import re
@@ -23,6 +22,7 @@ import pyudev
 
 from foundation.config import settings
 
+from .serial_console_errors import friendly_serial_error
 from .serial_console_storage import (
     SUPPORTED_NEWLINES,
     BindingStore,
@@ -65,6 +65,8 @@ class _PortRuntime:
 
 
 class SerialConsoleService:
+    _friendly_serial_error = staticmethod(friendly_serial_error)
+
     def __init__(
         self,
         data_root: str | Path,
@@ -262,23 +264,6 @@ class SerialConsoleService:
             return self.serial_factory
         return load_serial_module().Serial
 
-    @staticmethod
-    def _friendly_serial_error(exc: Exception) -> str:
-        number = getattr(exc, "errno", None)
-        text = str(exc)
-        lowered = text.lower()
-        if number in {errno.EACCES, errno.EPERM} or "permission denied" in lowered:
-            return "串口权限不足：服务用户需加入 dialout 组并重新登录"
-        if number == errno.EBUSY or "resource busy" in lowered or "device or resource busy" in lowered:
-            return "串口被占用，请关闭 picocom/minicom 等程序"
-        if "no such file" in lowered or number == errno.ENOENT:
-            return "串口已拔出或设备节点不存在"
-        if number in {errno.EIO, getattr(errno, "EPROTO", 71)} or any(
-            marker in lowered for marker in ("input/output error", "protocol error")
-        ):
-            return "USB 串口通信异常：请重新插拔 FTDI 或更换 USB 端口，系统将自动重连"
-        return f"串口错误：{text}"
-
     def _resolve_port(self, port_key: str) -> dict[str, Any] | None:
         key = validate_port_key(port_key)
         return next((item for item in self._physical_ports() if item["port_key"] == key), None)
@@ -376,7 +361,7 @@ class SerialConsoleService:
                     )
                     if not intentional_close:
                         with self._lock:
-                            runtime.error = self._friendly_serial_error(exc)
+                            runtime.error = friendly_serial_error(exc)
                     self._close_handle(runtime)
                     if runtime.stop_event.is_set() or not self._desired(port_key):
                         break
@@ -548,7 +533,7 @@ class SerialConsoleService:
             with runtime.io_lock:
                 return int(handle.write(encoded))
         except Exception as exc:
-            raise RuntimeError(self._friendly_serial_error(exc)) from exc
+            raise RuntimeError(friendly_serial_error(exc)) from exc
 
     def handle_udev_event(self, action: str, device) -> None:
         devname = str(getattr(device, "device_node", "") or "")

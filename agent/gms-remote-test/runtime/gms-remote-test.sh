@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.20.0"
+GMS_RT_VERSION="0.20.1"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -668,6 +668,25 @@ _gms_enroll_profile_token_file() {
     sed -n 's/^[[:space:]]*token_file[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$toml" | head -n 1
 }
 
+_gms_enroll_profile_controller_field() {
+    local profile="$1" field="$2"
+    local toml="${XDG_CONFIG_HOME:-${HOME}/.config}/gms-agent/profiles/${profile}.toml"
+    [ -r "$toml" ] || return 0
+    awk -F'=' -v wanted="$field" '
+        /^\[/ { in_controller = ($0 ~ /^\[controller\]/); next }
+        in_controller {
+            key = $1
+            gsub(/^[ \t]+|[ \t]+$/, "", key)
+            if (key == wanted) {
+                value = substr($0, index($0, "=") + 1)
+                gsub(/^[ \t]+|[ \t]+$/, "", value)
+                gsub(/^"|"$/, "", value)
+                print value
+                exit
+            }
+        }' "$toml"
+}
+
 # Pick the enrollment token destination, profile-aware (feedback
 # 2026-09-11 P1-1). Order: --out > --profile > explicitly selected
 # GMS_RT_PROFILE with a TOML > the single registered profile > legacy
@@ -761,6 +780,41 @@ gms-rt-agent-enroll() {
         esac
         shift
     done
+    local SERVER_URL="$SERVER_URL" API_BASE="$API_BASE"
+    local GMS_CURL_CA_CERT="${GMS_CURL_CA_CERT:-}"
+    local GMS_CURL_INSECURE="${GMS_CURL_INSECURE:-0}"
+    if [ -n "$profile_flag" ]; then
+        [[ "$profile_flag" =~ ^[A-Za-z0-9_.-]+$ ]] || {
+            error "Invalid profile name: $profile_flag"
+            return "$GMS_RT_EXIT_USAGE"
+        }
+        local profile_toml profile_server profile_ca profile_insecure env_server
+        profile_toml="${XDG_CONFIG_HOME:-${HOME}/.config}/gms-agent/profiles/${profile_flag}.toml"
+        [ -r "$profile_toml" ] || {
+            error "Profile '$profile_flag' does not exist or is not readable"
+            return "$GMS_RT_EXIT_USAGE"
+        }
+        profile_server=$(_gms_enroll_profile_controller_field "$profile_flag" url)
+        [ -n "$profile_server" ] || {
+            error "Profile '$profile_flag' has no Controller URL"
+            return "$GMS_RT_EXIT_USAGE"
+        }
+        env_server="${GMS_REMOTE_TEST_SERVER%/}"
+        if [ -n "$env_server" ] && [ "$env_server" != "${profile_server%/}" ]; then
+            error "GMS_REMOTE_TEST_SERVER and profile '$profile_flag' select different Controllers"
+            return "$GMS_RT_EXIT_USAGE"
+        fi
+        SERVER_URL="${profile_server%/}"
+        API_BASE="${SERVER_URL}/api"
+        profile_ca=$(_gms_enroll_profile_controller_field "$profile_flag" ca_cert)
+        profile_insecure=$(_gms_enroll_profile_controller_field "$profile_flag" insecure)
+        GMS_CURL_CA_CERT="$profile_ca"
+        if [ "$profile_insecure" = "true" ]; then
+            GMS_CURL_INSECURE=1
+        else
+            GMS_CURL_INSECURE=0
+        fi
+    fi
     local out_file
     out_file=$(_gms_enroll_resolve_out_file "$out_flag" "$profile_flag") || return "$?"
     [ -n "$out_file" ] || {
@@ -1026,6 +1080,7 @@ gms-rt-agent-enroll-code() {
     [ -n "$expires_iso" ] && [ "$GMS_RT_OUTPUT" != "json" ] && {
         info "配对码有效至 $(iso_to_local_time "$expires_iso")（TTL $(echo "$body" | jq -r '.enrollment.ttl_minutes // 5') 分钟，一次性使用）"
     }
+    return 0
 }
 
 # Revoke an Agent Service Token by id (admin + elevation required).
@@ -2853,7 +2908,7 @@ gms-rt-redmine-issue-fetch() {
                 echo "Usage: gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none|analyzable|all] [--refresh|--no-refresh] [--wait] [--max-wait SECONDS] [--dry-run]"
                 echo "  Create/refresh a full evidence snapshot (raw JSON, journals, attachments)."
                 echo "  --refresh is the default; --no-refresh may reuse a recent ready snapshot (response carries cache_hit)."
-                echo "  --dry-run only validates preconditions (base_url/credentials) without creating a snapshot."
+                echo "  --dry-run validates the issue reference, read access, base_url, and credentials without creating a snapshot."
                 return 0
                 ;;
             --download)
@@ -2883,33 +2938,10 @@ gms-rt-redmine-issue-fetch() {
     [ -z "$issue_ref" ] && { error "Issue ID or URL required. Usage: gms-rt-redmine-issue-fetch <issue_id_or_url> [options]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
-    if [ "$dry_run" = "1" ]; then
-        # 2026-09-11 反馈：只校验前置条件，不建快照。凭据端点 human-only，
-        # agent 用只读的 credentials-status 判断配置状态即可。
-        local pre
-        pre=$(api_call "/redmine-agent/config/credentials" "GET")
-        local pre_status=$?
-        if [ "$pre_status" -ne 0 ]; then
-            error "Precondition check failed: $(extract_api_error "$pre")"
-            return "$pre_status"
-        fi
-        local configured
-        configured=$(echo "$pre" | jq -r '.data.configured // false')
-        if [ "$configured" != "true" ]; then
-            error "Redmine credentials not configured for this owner. Ask the enrolling account to set them in the Web UI settings page, then verify with gms-rt-redmine-credentials-status."
-            return "$GMS_RT_EXIT_PERMISSION"
-        fi
-        if [ "$GMS_RT_OUTPUT" = "json" ]; then
-            jq -cn '{success: true, dry_run: true, ok: true, message: "preconditions met (base_url + credentials configured)"}'
-        else
-            success "Preconditions met: Redmine base_url and credentials are configured."
-        fi
-        return 0
-    fi
-
     local payload response snapshot_id
     payload=$(jq -cn --argjson refresh "$refresh" --arg download "$download" \
-        '{refresh: $refresh, download: $download}')
+        --argjson dry_run "$dry_run" \
+        '{refresh: $refresh, download: $download, dry_run: $dry_run}')
     response=$(api_call "/redmine-agent/issues/$(_urlencode "$issue_ref")/evidence" "POST" "$payload")
     local call_status=$?
     if [ "$call_status" -ne 0 ]; then
@@ -2917,6 +2949,14 @@ gms-rt-redmine-issue-fetch() {
         #（scope/凭据/issue 不存在），不再让错误详情被 jq 过滤吞掉。
         error "Evidence snapshot creation failed: $(extract_api_error "$response")"
         return "$call_status"
+    fi
+    if [ "$dry_run" = "1" ]; then
+        if [ "$GMS_RT_OUTPUT" = "json" ]; then
+            echo "$response" | jq '.'
+        else
+            success "Preconditions met: issue reference, Redmine base_url, and credentials are valid."
+        fi
+        return 0
     fi
     snapshot_id=$(echo "$response" | jq -r '.data.snapshot_id // empty')
     if [ -z "$snapshot_id" ]; then
@@ -5484,7 +5524,7 @@ _gms_rt_command_usage() {
         gms-rt-usbip-status) printf '%s' 'gms-rt-usbip-status <user@ip>' ;;
         gms-rt-users-detect) printf '%s' 'gms-rt-users-detect <ip> [username] [password]' ;;
         gms-rt-users-set-username) printf '%s' 'gms-rt-users-set-username [username]' ;;
-        gms-rt-redmine-issue-fetch) printf '%s' 'gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none|analyzable|all] [--refresh|--no-refresh] [--wait] [--max-wait SECONDS]' ;;
+        gms-rt-redmine-issue-fetch) printf '%s' 'gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none|analyzable|all] [--refresh|--no-refresh] [--wait] [--max-wait SECONDS] [--dry-run]' ;;
         gms-rt-redmine-issue-show) printf '%s' 'gms-rt-redmine-issue-show <snapshot_id | issue_id> [--issue|--snapshot]' ;;
         gms-rt-redmine-journals) printf '%s' 'gms-rt-redmine-journals <snapshot_id> [--limit N] [--cursor C]' ;;
         gms-rt-redmine-attachments) printf '%s' 'gms-rt-redmine-attachments <snapshot_id>' ;;
