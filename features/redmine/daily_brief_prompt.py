@@ -5,6 +5,18 @@ from __future__ import annotations
 
 PROMPT_TEMPLATE = """You are analyzing one Redmine issue for a daily brief.
 
+OUTPUT LANGUAGE (hard requirement, verified by the caller): ALL free-text
+fields MUST be written in Simplified Chinese (简体中文) — problem_summary,
+customer_request, current_blocker, root_cause, evidence[].fact,
+recommended_actions[].action/reason, suggested_solution,
+similar_issues[].reusable_fix/reference_fact, missing_information,
+suggested_reply_zh and detailed_report. The ONLY English fields are
+suggested_reply_en, identifiers (issue ids, paths, commands, log lines,
+commit hashes, test-case names) and enum values. A technically perfect
+answer written in English is a CONTRACT VIOLATION: the daily-brief readers
+are Chinese-speaking support engineers. Quote logs/commands verbatim, but
+every sentence you write yourself must be 中文.
+
 Use the read-only GMS MCP tools when you need more evidence:
 - gms_rt_redmine_issue_fetch / gms_rt_redmine_journals / gms_rt_redmine_attachments
 - gms_rt_artifact_search / gms_rt_artifact_read (search first, read a window second)
@@ -127,6 +139,10 @@ BREVITY (hard limits, Chinese output — write 中文 unless the field name says
 - suggested_reply_zh / suggested_reply_en: each <= 300 字，只写要回复客户的核心内容。
 Do not pad with pleasantries or repeat the issue text; cut every sentence that
 does not help the reader act.
+
+FINAL CHECK before returning the JSON: re-read every field — if any
+self-written sentence is in English (identifiers and log quotes excepted),
+rewrite it in 简体中文 before answering. suggested_reply_en 是唯一整段英文的字段。
 """
 
 

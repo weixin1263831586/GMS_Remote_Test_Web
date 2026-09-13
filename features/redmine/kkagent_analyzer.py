@@ -26,7 +26,7 @@ from .daily_brief_prompt import PROMPT_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "redmine_daily_triage_v5"
+PROMPT_VERSION = "redmine_daily_triage_v6"
 
 # kkagent 可执行文件名（PATH 查找）；可通过配置覆盖绝对路径。
 KKAGENT_BINARY = "kkagent"
