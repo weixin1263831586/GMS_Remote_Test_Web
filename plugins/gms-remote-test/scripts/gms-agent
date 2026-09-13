@@ -397,7 +397,8 @@ def main() -> int:
     p_install.add_argument("--server", default="", help="Controller base URL (default $GMS_REMOTE_TEST_SERVER)")
     p_install.add_argument("--package", default="", help="package root to install (default: this archive; standalone script bootstraps from the registry)")
     p_install.add_argument("--enroll-code", default="", dest="enroll_code",
-                           help="one-shot enrollment code; exchanged for the agent service token right after install")
+                           help="one-shot enrollment code; exchanged for the agent service token right after install "
+                                "(prefer $GMS_AGENT_ENROLL_CODE which never appears in argv/ps)")
     p_install.add_argument(
         "--profile", default="",
         help="explicit profile name (default: <client>-<host>-<sha256(server)[:8]> so each Controller gets its own profile)",

@@ -75,9 +75,43 @@ def cluster_page():
     ui_dir = Path(__file__).with_name("ui")
     html = (ui_dir / "page.html").read_text(encoding="utf-8")
     html = html.replace("{{CLUSTER_CSS}}", (ui_dir / "page.css").read_text(encoding="utf-8"))
-    html = html.replace("{{CLUSTER_JS}}", (ui_dir / "page.js").read_text(encoding="utf-8"))
     html = html.replace("{{DEFAULT_MAX_JOBS}}", str(ClusterConfig.load().default_max_jobs))
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@page_router.get("/cluster/page.js")
+def cluster_page_js():
+    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。
+
+    运行配置由模板以 body data 属性注入，page.js 头部读取。
+    """
+    ui_dir = Path(__file__).with_name("ui")
+    js = ui_dir / "page.js"
+    return Response(
+        js.read_text(encoding="utf-8"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@page_router.get("/cluster/page-boot.js")
+def cluster_page_boot_js():
+    """embedded-workspace 就绪标记脚本（原单行内联块外置）。"""
+    ui_dir = Path(__file__).with_name("ui")
+    js = ui_dir / "page-boot.js"
+    return Response(
+        js.read_text(encoding="utf-8"), media_type="application/javascript"
+    )
+
+
+@page_router.get("/cluster/page-echarts.js")
+def cluster_page_echarts_js():
+    """ECharts 本地 vendor 加载器（原单行内联块外置）。"""
+    ui_dir = Path(__file__).with_name("ui")
+    js = ui_dir / "page-echarts.js"
+    return Response(
+        js.read_text(encoding="utf-8"), media_type="application/javascript"
+    )
 
 
 @router.post("/workers/register")

@@ -1022,7 +1022,9 @@ def reconcile_mcp(client: str, server: str, name: str, ca_cert: str) -> None:
     # GMS_AGENT_AUTH_MODE=service-token），而不是直接 exec mcp_server.py——
     # 后者会绕过 launcher 的安全边界，重新暴露密码/提权/审批工具。
     result = subprocess.run(
-        [
+        # argv 由已安装包内部路径与白名单 client/server 组装，无 shell；
+        # 注册目标强制走 mcp_launcher.py 的服务令牌边界（见上注释）。
+        [  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
             sys.executable,
             str(CURRENT_LINK / "scripts" / "agent_mcp_config.py"),
             client,
@@ -1389,7 +1391,12 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
         print("Runtime/CLI installation complete; no client profile was changed.")
         return 0
 
+    # One-shot enrollment code: environment variable wins over argv so the
+    # secret never shows up in `ps`/shell history/audit command lines.
     enroll_code = (getattr(args, "enroll_code", "") or "").strip()
+    env_code = os.environ.get("GMS_AGENT_ENROLL_CODE", "").strip()
+    if env_code:
+        enroll_code = env_code
     if not enroll_code:
         print("Next: create an enrollment code in the Controller web UI, then run:")
         if len(written_profiles) == 1:
@@ -1399,6 +1406,8 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
         return 0
     print("\nEnrolling provided one-shot code ...")
     args.code = enroll_code
+    # argv 中不得残留配对码:消费后立即清空原参数,防 subprocess 派生泄漏。
+    args.enroll_code = ""
     return cmd_enroll(args)
 
 

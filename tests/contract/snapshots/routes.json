@@ -2744,6 +2744,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/automation/page.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/cluster"
   },
   {
@@ -2768,7 +2774,31 @@
     "methods": [
       "GET"
     ],
+    "path": "/cluster/page-boot.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/cluster/page-echarts.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/cluster/page.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/devices-console"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/devices-console/page.js"
   },
   {
     "methods": [
@@ -2798,6 +2828,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/gerrit-dashboard/page.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/gms-assistant"
   },
   {
@@ -2821,7 +2857,19 @@
     "methods": [
       "GET"
     ],
+    "path": "/gms-update-monitor/page.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/mainline-known-issues"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/mainline-known-issues/page.js"
   },
   {
     "methods": [
@@ -2881,6 +2929,12 @@
       "GET"
     ],
     "path": "/redmine-agent"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/redmine-agent/page.js"
   },
   {
     "methods": [

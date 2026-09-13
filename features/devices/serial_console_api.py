@@ -14,7 +14,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from features.auth import (
@@ -75,10 +75,19 @@ def devices_console_page(_user=Depends(require_authenticated_user_when_auth_requ
     html = html.replace(
         "{{CONSOLE_CSS}}", (ui_dir / "page.css").read_text(encoding="utf-8")
     )
-    html = html.replace(
-        "{{CONSOLE_JS}}", (ui_dir / "page.js").read_text(encoding="utf-8")
-    )
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@page_router.get("/devices-console/page.js")
+def devices_console_page_js():
+    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
+    ui_dir = Path(__file__).with_name("ui")
+    js = ui_dir / "page.js"
+    return Response(
+        js.read_text(encoding="utf-8"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @router.get("/ports", dependencies=_READ_ACCESS)

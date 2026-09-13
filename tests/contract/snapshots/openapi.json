@@ -256,7 +256,7 @@
           "file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -269,7 +269,7 @@
             "anyOf": [
               {
                 "items": {
-                  "format": "binary",
+                  "contentMediaType": "application/octet-stream",
                   "type": "string"
                 },
                 "type": "array"
@@ -284,7 +284,7 @@
             "anyOf": [
               {
                 "items": {
-                  "format": "binary",
+                  "contentMediaType": "application/octet-stream",
                   "type": "string"
                 },
                 "type": "array"
@@ -389,7 +389,7 @@
           "vendor_file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -423,7 +423,7 @@
             "type": "string"
           },
           "firmware_file": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "Firmware File",
             "type": "string"
           },
@@ -454,7 +454,7 @@
           "system_file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -466,7 +466,7 @@
           "vendor_file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -505,7 +505,7 @@
           "vendor_file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -548,7 +548,7 @@
           "file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -599,7 +599,7 @@
           "file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -617,7 +617,7 @@
           "file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -672,7 +672,7 @@
           "file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -787,7 +787,7 @@
           "file": {
             "anyOf": [
               {
-                "format": "binary",
+                "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
               {
@@ -3213,7 +3213,7 @@
     },
     "/api/agent/install.sh": {
       "get": {
-        "description": "一行安装器: curl -kfsSL .../api/agent/install.sh | bash -s -- [配对码]",
+        "description": "一行安装器: curl -fsSL .../api/agent/install.sh | bash -s -- [配对码]",
         "responses": {
           "200": {
             "content": {
@@ -20924,6 +20924,22 @@
         "summary": "Automation Page"
       }
     },
+    "/automation/page.js": {
+      "get": {
+        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Automation Page Js"
+      }
+    },
     "/cluster": {
       "get": {
         "responses": {
@@ -21034,6 +21050,54 @@
         "summary": "Cluster Novnc Http Proxy"
       }
     },
+    "/cluster/page-boot.js": {
+      "get": {
+        "description": "embedded-workspace 就绪标记脚本（原单行内联块外置）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cluster Page Boot Js"
+      }
+    },
+    "/cluster/page-echarts.js": {
+      "get": {
+        "description": "ECharts 本地 vendor 加载器（原单行内联块外置）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cluster Page Echarts Js"
+      }
+    },
+    "/cluster/page.js": {
+      "get": {
+        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。\n\n运行配置由模板以 body data 属性注入，page.js 头部读取。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cluster Page Js"
+      }
+    },
     "/devices-console": {
       "get": {
         "responses": {
@@ -21049,6 +21113,22 @@
           }
         },
         "summary": "Devices Console Page"
+      }
+    },
+    "/devices-console/page.js": {
+      "get": {
+        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Devices Console Page Js"
       }
     },
     "/gerrit-dashboard": {
@@ -21068,6 +21148,22 @@
         "summary": "Gerrit Dashboard Page"
       }
     },
+    "/gerrit-dashboard/page.js": {
+      "get": {
+        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Gerrit Dashboard Page Js"
+      }
+    },
     "/gms-update-monitor": {
       "get": {
         "responses": {
@@ -21085,6 +21181,22 @@
         "summary": "Gms Update Monitor Page"
       }
     },
+    "/gms-update-monitor/page.js": {
+      "get": {
+        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Gms Update Monitor Page Js"
+      }
+    },
     "/mainline-known-issues": {
       "get": {
         "responses": {
@@ -21100,6 +21212,22 @@
           }
         },
         "summary": "Mainline Known Issues Page"
+      }
+    },
+    "/mainline-known-issues/page.js": {
+      "get": {
+        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mainline Known Issues Page Js"
       }
     },
     "/notes": {
@@ -21209,6 +21337,22 @@
           }
         },
         "summary": "Redmine Agent Page"
+      }
+    },
+    "/redmine-agent/page.js": {
+      "get": {
+        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Redmine Agent Page Js"
       }
     },
     "/templates/architecture.html": {

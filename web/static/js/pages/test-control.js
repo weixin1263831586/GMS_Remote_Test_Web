@@ -281,7 +281,7 @@ async function showConfig() {
 
     // Generate config form with actual values
     modalBody.innerHTML = `
-        <form onsubmit="event.preventDefault(); saveConfig();" autocomplete="off">
+        <form id="test-control-config-form" autocomplete="off">
         <div class="modal-form-row">
             <label>测试主机用户:</label>
             <input type="text" id="config-ubuntu-user" value="${config.ubuntu_user || ''}" autocomplete="username" />
@@ -354,7 +354,7 @@ async function showConfig() {
             <div class="modal-form-row" style="margin-top:8px;gap:6px;">
                 <input type="text" id="client-cred-host" placeholder="user@ip，例如 gms@192.168.1.100" autocomplete="off" style="flex:2;" />
                 <input type="password" id="client-cred-password" placeholder="SSH 密码" autocomplete="new-password" style="flex:1.5;" />
-                <button class="btn-xxs btn-primary" onclick="addClientCredential()">添加/更新</button>
+                <button class="btn-xxs btn-primary" id="client-cred-add-btn" type="button">添加/更新</button>
             </div>
             <small style="color:var(--text-secondary);margin-top:4px;">填入已有主机的地址+新密码可覆盖更新；密码不会回显明文。</small>
         </div>
@@ -383,7 +383,7 @@ async function showConfig() {
             <div class="modal-form-row" style="margin-top:8px;gap:6px;">
                 <input type="text" id="static-route-destination" placeholder="目标网段，例如 10.10.10.0/24 或 10.10.10.29/32" autocomplete="off" style="flex:2;" />
                 <input type="text" id="static-route-gateway" placeholder="网关，例如 192.0.2.1" autocomplete="off" style="flex:1.5;" />
-                <button class="btn-xxs btn-primary" onclick="addStaticRouteRow()">添加</button>
+                <button class="btn-xxs btn-primary" id="static-route-add-btn" type="button">添加</button>
             </div>
             <small style="color:var(--text-secondary);margin-top:4px;">程序启动和每次保存时自动应用（幂等）。修改路由表需要 root；普通用户运行时需配置 sudoers 免密 ip route。</small>
         </div>
@@ -392,8 +392,24 @@ async function showConfig() {
     ModalManager.open('config-modal');
     const footer = document.getElementById('config-modal-footer');
     if (footer) footer.style.display = '';
+    _bindConfigModalHandlers(modalBody);
     loadClientCredentials();
     loadStaticRoutes();
+}
+
+// 配置模态内动态渲染控件的事件绑定（CSP 收紧前置：去掉 inline handler）。
+function _bindConfigModalHandlers(scope) {
+    const form = scope.querySelector('#test-control-config-form');
+    if (form) {
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            saveConfig();
+        });
+    }
+    const addCredBtn = scope.querySelector('#client-cred-add-btn');
+    if (addCredBtn) addCredBtn.addEventListener('click', addClientCredential);
+    const addRouteBtn = scope.querySelector('#static-route-add-btn');
+    if (addRouteBtn) addRouteBtn.addEventListener('click', addStaticRouteRow);
 }
 
 async function showGmsAssistantConfig() {
@@ -580,10 +596,13 @@ function renderStaticRoutesTable(routes) {
             <td style="padding:5px 6px;font-family:monospace;">${escapeHtml(route.destination)}</td>
             <td style="padding:5px 6px;font-family:monospace;">${escapeHtml(route.gateway)}</td>
             <td style="padding:5px 6px;text-align:center;">
-                <button class="btn-xxs" onclick="deleteStaticRouteRow(this)">删除</button>
+                <button class="btn-xxs" type="button" data-action="delete-static-route">删除</button>
             </td>
         </tr>
     `).join('');
+    tbody.querySelectorAll('[data-action="delete-static-route"]').forEach((btn) => {
+        btn.addEventListener('click', () => deleteStaticRouteRow(btn));
+    });
 }
 
 function addStaticRouteRow() {

@@ -4,6 +4,12 @@ from pathlib import Path
 
 
 CALL_ATTR_RE = re.compile(r'on(?:click|change|input|submit|keydown|mouseover|mouseout)=["\']([^"\']+)["\']')
+# act-bridge 委托目标：data-click="fnName" 等（值为函数名，非表达式）。
+DELEGATED_TARGET_RE = re.compile(
+    r'data-(?:click|change|input|submit|keydown|keyup|dblclick|'
+    r'dragstart|dragend|dragover|drop|blur|focus|error)=["\']'
+    r'([A-Za-z_$][\w$]*)["\']'
+)
 FUNCTION_RE = re.compile(r'\bfunction\s+([A-Za-z_$][\w$]*)\s*\(')
 WINDOW_ASSIGN_RE = re.compile(r'\bwindow\.([A-Za-z_$][\w$]*)\s*=')
 CONST_FUNCTION_RE = re.compile(
@@ -39,6 +45,17 @@ BUILTINS = {
 
 def read_text(path: str) -> str:
     return Path(path).read_text(encoding="utf-8", errors="ignore")
+
+
+def read_shell_bundle() -> str:
+    """shell.html 及其外置脚本（CSP 前置迁移后 shell 主脚本已拆分到
+    web/static/js/shell/shell-*.js）。断言面向"shell 前端整体"，
+    组合读取避免迁移后断言盯不住源码。"""
+    parts = [Path("web/shell/shell.html").read_text(encoding="utf-8", errors="ignore")]
+    shell_dir = Path("web/static/js/shell")
+    for js_file in sorted(shell_dir.glob("*.js")):
+        parts.append(read_text(str(js_file)))
+    return "\n".join(parts)
 
 
 def read_all_frontend_js() -> str:
@@ -105,7 +122,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("暂无匹配的在线设备", cluster_page)
 
     def test_host_pages_share_short_lived_cluster_directory(self):
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
         workspace_devices = read_text("web/static/js/shell/workspace-devices.js")
         terminal = read_text("web/static/js/shell/shell-terminal.js")
         terminal_start = terminal.index("async function loadTerminalClusterHosts()")
@@ -119,7 +136,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("hosts = await window.loadClusterHostDirectory()", workspace_devices)
 
     def test_page_initialization_is_deduplicated_and_rejections_are_handled(self):
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
 
         self.assertIn("const pendingAuthPageInitializers = new Set()", shell)
         self.assertIn("if (pendingAuthPageInitializers.has(pageName)) return", shell)
@@ -127,7 +144,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("initializePageSafely(pageName)", shell)
 
     def test_shell_stops_boot_when_navigation_bundle_is_unavailable(self):
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
         navigation = read_text("web/static/js/navigation.js")
 
         self.assertIn("window.GmsNavigationReady !== true", shell)
@@ -148,7 +165,7 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_report_page_reuses_recent_data_and_parallelizes_initial_requests(self):
         reports = read_text("web/static/js/pages/test-reports.js")
         navigation = read_text("web/static/js/navigation.js")
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
 
         self.assertIn("const REPORTS_REENTRY_CACHE_MS = 10000", reports)
         self.assertIn("const [data] = await Promise.all([", reports)
@@ -179,7 +196,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         )
 
     def test_main_app_inline_handlers_resolve_to_global_functions(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         script_paths = list(Path("web/static/js").glob("*.js"))
         script_paths.extend(Path("web/static/js/shell").glob("*.js"))
         script_paths.extend(Path("web/static/js/pages").glob("*.js"))
@@ -191,6 +208,38 @@ class FrontendIntegrityTests(unittest.TestCase):
 
         self.assertEqual(missing, [])
 
+    def test_act_bridge_targets_resolve_to_globals(self):
+        """act-bridge 委托目标（data-click/data-change/...）必须解析到全局函数。
+
+        inline onXXX 已全部迁移为 act-bridge 声明式属性（CSP 收紧前置），
+        分发时按名称查 window；这里静态校验所有页面引用的目标都有定义
+        （含惰性 window.* 赋值），防止点击时才在控制台报 no function。
+        """
+        # 嵌入式页面脚本 + shell 全部 JS + shell.html
+        sources = [read_shell_bundle()]
+        for base in (
+            Path("web/static/js"),
+            Path("features/redmine/ui"),
+            Path("features/automation/ui"),
+            Path("features/cluster/ui"),
+            Path("features/devices/ui"),
+            Path("features/gerrit/ui"),
+            Path("features/system/mainline_issues/ui"),
+            Path("features/system/update_monitor/ui"),
+        ):
+            sources.extend(
+                read_text(str(p))
+                for p in sorted(base.rglob("*.js"))
+                if "vendor" not in p.parts
+            )
+        combined = "\n".join(sources)
+        funcs = declared_functions(combined)
+
+        missing = sorted(set(DELEGATED_TARGET_RE.findall(combined)) - funcs)
+        self.assertEqual(
+            missing, [], "act-bridge 委托目标未定义（运行时会 console.warn）"
+        )
+
     def test_embedded_dashboard_inline_handlers_resolve_locally(self):
         for label, paths in [
             (
@@ -200,9 +249,28 @@ class FrontendIntegrityTests(unittest.TestCase):
                     "features/redmine/ui/page.js",
                 ],
             ),
-            ("gerrit", ["features/gerrit/ui/page.html"]),
-            ("update-monitor", ["features/system/update_monitor/ui/page.html"]),
-            ("mainline", ["features/system/mainline_issues/ui/page.html"]),
+            # CSP 前置迁移：gerrit/update-monitor/mainline 脚本外置 page.js。
+            (
+                "gerrit",
+                [
+                    "features/gerrit/ui/page.html",
+                    "features/gerrit/ui/page.js",
+                ],
+            ),
+            (
+                "update-monitor",
+                [
+                    "features/system/update_monitor/ui/page.html",
+                    "features/system/update_monitor/ui/page.js",
+                ],
+            ),
+            (
+                "mainline",
+                [
+                    "features/system/mainline_issues/ui/page.html",
+                    "features/system/mainline_issues/ui/page.js",
+                ],
+            ),
             (
                 "automation",
                 [
@@ -268,7 +336,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("contextJobId !== state.clusterJobId && !reportProvenanceOnly", navigation)
 
     def test_opengrok_tool_icon_does_not_probe_the_external_service(self):
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
         icon_auto = read_text("web/static/js/shell/icon-auto.js")
 
         self.assertIn(
@@ -279,7 +347,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertNotIn("/default/img/apple-touch-icon.png", icon_auto)
 
     def test_login_explains_client_ssh_account_and_finishes_identity_prefill(self):
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
         api_script = read_text("web/static/js/api.js")
 
         self.assertIn("SSH用户名@客户端IP，例如 ", shell)
@@ -300,7 +368,7 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_firmware_upload_stages_before_burn_and_keeps_errors_retryable(self):
         firmware = read_text("web/static/js/pages/firmware-burn.js")
         chunks = read_text("web/static/js/chunk-upload.js")
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
 
         self.assertIn("stage_only: '1'", firmware)
         self.assertIn("finalizeForm.append('finalize_upload', '1')", firmware)
@@ -342,7 +410,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_cluster_mode_switch_stays_on_page_and_desktop_elevates_first(self):
         navigation = read_all_frontend_js()
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
 
         toggle_start = navigation.index("async function toggleClusterMode()")
         toggle_end = navigation.index("window.toggleClusterMode", toggle_start)
@@ -354,7 +422,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn(desktop_initializer, shell)
 
     def test_test_host_uses_one_cluster_worker_selector(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         navigation = read_all_frontend_js()
 
         self.assertEqual(len(re.findall(r'id=["\']cluster-worker["\']', main_text)), 1)
@@ -378,28 +446,29 @@ class FrontendIntegrityTests(unittest.TestCase):
         )
 
     def test_skill_toolbar_prefers_installer_and_labels_zip_as_offline_only(self):
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
         navigation = read_all_frontend_js()
         api_constants = read_text("web/static/js/api-constants.js")
 
-        self.assertIn('onclick="copySkillInstallCommand()"', shell)
+        self.assertIn('data-click="copySkillInstallCommand"', shell)
         self.assertIn("📋 安装/更新命令", shell)
-        self.assertIn('onclick="downloadSkillsZip()"', shell)
+        self.assertIn('data-click="downloadSkillsZip"', shell)
         self.assertIn("📦 离线包", shell)
         self.assertIn("function buildSkillInstallCommand()", navigation)
         self.assertIn("function copySkillInstallCommand()", navigation)
+        # TLS fail-closed:复制的安装命令永远不再包含 -k 降级。
         self.assertIn(
-            "window.location.protocol === 'https:' ? '-kfsSL' : '-fsSL'",
+            'return `curl -fsSL "${window.location.origin}/api/agent/install.sh" | bash`',
             navigation,
         )
+        self.assertNotIn("-kfsSL", navigation)
         self.assertIn(
-            'curl -kfsSL "https://server:5001/api/agent/install.sh" | bash',
+            'curl -fsSL "https://server:5001/api/agent/install.sh" | bash',
             api_constants,
         )
-        self.assertIn(
-            "{% if request.url.scheme == 'https' %}-kfsSL{% else %}-fsSL{% endif %}",
-            shell,
-        )
+        self.assertNotIn("-kfsSL", api_constants)
+        self.assertIn('curl -fsSL "{{ request.url.scheme }}://', shell)
+        self.assertNotIn("-kfsSL", shell)
         self.assertIn("apiPath === '/api/agent/install.sh'", navigation)
         self.assertIn("apiPath === '/api/system/skills'", navigation)
         self.assertIn("全部独立gms-rt-*命令", api_constants)
@@ -437,7 +506,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         )
 
     def test_public_shell_never_embeds_configured_vnc_password(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
 
         self.assertNotIn("config.vnc_password", main_text)
         self.assertNotIn("DEFAULT_VNC_PASSWORD", main_text)
@@ -445,7 +514,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("/api/desktop/novnc/access", main_text)
 
     def test_desktop_async_mount_cannot_replace_another_worker(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
 
         self.assertIn("function hostWorkspaceMountIsCurrent", main_text)
         self.assertIn("generation === hostWorkspace.renderGeneration", main_text)
@@ -463,7 +532,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         )
 
     def test_terminal_pane_refresh_does_not_render_all_panes(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         refresh = re.search(
             r"function refreshTerminalWorkspacePane\(i\)\{(?P<body>.*?)\n        \}",
             main_text,
@@ -477,7 +546,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertNotIn("renderTerminalWorkspace()", body)
 
     def test_terminal_workspace_deduplicates_pending_pane_mounts(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
 
         self.assertIn("mountingPanes:new Map()", main_text)
         self.assertIn("!terminalWorkspace.mountingPanes.has(index)", main_text)
@@ -486,7 +555,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("terminalWorkspace.mountingPanes.clear()", main_text)
 
     def test_notification_toggle_waits_for_notification_script(self):
-        shell = read_text("web/shell/shell.html")
+        shell = read_shell_bundle()
         notifications = read_text("web/static/js/notifications.js")
 
         self.assertIn("notifications.js?v=20260903-toggle-ready", shell)
@@ -499,7 +568,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("notificationToggle.disabled = false", notifications)
 
     def test_device_shell_uses_visible_adb_workspace_without_timer_injection(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
 
         self.assertIn("mode: 'adb'", main_text)
         self.assertIn("serialNo: rawSerial", main_text)
@@ -513,7 +582,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertNotIn("input: `adb -s ${rawSerial} shell", main_text)
 
     def test_host_workspaces_wait_for_directory_and_recover_expired_elevation(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
 
         self.assertIn("await mergeClusterDesktopHosts()", main_text)
         self.assertIn("const hostsReady = initDesktopHosts()", main_text)
@@ -530,7 +599,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("frame.allow = 'clipboard-read; clipboard-write'", main_text)
 
     def test_suite_host_selector_and_assistant_url_start_in_stable_layout(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         navigation_text = read_all_frontend_js()
 
         self.assertRegex(
@@ -541,7 +610,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn('id="gms-assistant-url" style="width:100%;box-sizing:border-box;"', main_text)
 
     def test_suite_report_copy_modal_uses_worker_and_suite_choices(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         common_text = read_text("web/static/css/common.css")
         navigation_text = read_all_frontend_js()
 
@@ -565,17 +634,17 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("target_worker_id: targetWorkerId", navigation_text)
 
     def test_manual_suite_refresh_forces_reload_and_has_busy_feedback(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         navigation_text = read_all_frontend_js()
 
         self.assertIn('id="refresh-suites-btn" class="btn-xxs ui-refresh-action"', main_text)
-        self.assertIn('onclick="refreshTestSuites()"', main_text)
+        self.assertIn('data-click="refreshTestSuites"', main_text)
         self.assertIn("await loadTestSuites(true)", navigation_text)
         self.assertIn("button.textContent = '刷新中…'", navigation_text)
         self.assertIn("if (forceRefresh) return loadTestSuites(true)", navigation_text)
 
     def test_single_mode_hides_multi_host_controls_and_sidebar_has_descriptions(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         navigation_text = read_all_frontend_js()
 
         self.assertIn("SIDEBAR_PAGE_DESCRIPTIONS", main_text)
@@ -603,7 +672,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_terminal_page_switch_avoids_hidden_or_duplicate_resize(self):
         main_text = (
-            read_text("web/shell/shell.html")
+            read_shell_bundle()
             + read_text("web/static/js/shell/shell-terminal.js")
         )
 
@@ -613,7 +682,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("applyTerminalHost(select.value, false, false)", main_text)
 
     def test_device_management_inventory_is_scoped_by_single_cluster_mode(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         navigation_text = read_all_frontend_js()
 
         self.assertIn("requestedDevicesManagementScope", main_text)
@@ -624,7 +693,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("loadDevicesManagement().catch", navigation_text)
 
     def test_device_management_renders_fastboot_and_plural_usbip_ids(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         controls = read_text("web/static/js/pages/test-control.js")
 
         self.assertIn("device.protocol === 'fastboot'", main_text)
@@ -674,7 +743,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("if (!state.authRequired)", read_all_frontend_js())
 
     def test_user_actions_use_stable_grid_and_safe_event_binding(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         navigation_text = read_all_frontend_js()
         css_text = read_text("web/static/css/common.css")
 
@@ -686,7 +755,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("grid-template-columns: 44px 44px", css_text)
 
     def test_config_override_device_mutations_prompt_before_request(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
 
         self.assertIn("dcfgRequireElevation('应用设备 RRO 配置覆盖')", main_text)
         self.assertIn("dcfgRequireElevation('撤销设备 RRO 配置覆盖')", main_text)
@@ -697,7 +766,14 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_modal_pages_support_escape_close(self):
         for label, paths in [
-            ("main", ["web/shell/shell.html"]),
+            (
+                "main",
+                [
+                    "web/shell/shell.html",
+                    "web/static/js/shell/shell-main.js",
+                    "web/static/js/shell/esc-close.js",
+                ],
+            ),
             (
                 "redmine",
                 [
@@ -705,7 +781,13 @@ class FrontendIntegrityTests(unittest.TestCase):
                     "features/redmine/ui/page.js",
                 ],
             ),
-            ("gerrit", ["features/gerrit/ui/page.html"]),
+            (
+                "gerrit",
+                [
+                    "features/gerrit/ui/page.html",
+                    "features/gerrit/ui/page.js",
+                ],
+            ),
         ]:
             with self.subTest(page=label):
                 text = "\n".join(read_text(path) for path in paths)
@@ -713,13 +795,18 @@ class FrontendIntegrityTests(unittest.TestCase):
                 self.assertTrue("Escape" in text or "ModalManager" in text)
 
     def test_user_facing_result_prompts_avoid_blocking_alerts(self):
-        main_text = read_text("web/shell/shell.html")
+        main_text = read_shell_bundle()
         self.assertNotIn("alert(", main_text)
         self.assertIn("gms-dashboard-notification", main_text)
         self.assertIn("redmine-agent-notification", main_text)
         self.assertIn("gms-update-monitor-notification", main_text)
 
-        for path in ["features/redmine/ui/page.js", "features/gerrit/ui/page.html", "features/system/update_monitor/ui/page.html"]:
+        # gerrit/update_monitor 的 notifyUser 随 CSP 前置迁移外置到 page.js。
+        for path in [
+            "features/redmine/ui/page.js",
+            "features/gerrit/ui/page.js",
+            "features/system/update_monitor/ui/page.js",
+        ]:
             with self.subTest(path=path):
                 text = read_text(path)
                 self.assertIn("function notifyUser", text)
@@ -731,11 +818,18 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_modal_ids_and_function_declarations_are_not_duplicated(self):
         checked_paths = [
             "web/shell/shell.html",
+            *[
+                str(path)
+                for path in sorted(Path("web/static/js/shell").glob("*.js"))
+            ],
             "features/redmine/ui/page.html",
             "features/redmine/ui/page.js",
             "features/gerrit/ui/page.html",
+            "features/gerrit/ui/page.js",
             "features/system/update_monitor/ui/page.html",
+            "features/system/update_monitor/ui/page.js",
             "features/system/mainline_issues/ui/page.html",
+            "features/system/mainline_issues/ui/page.js",
             "features/automation/ui/page.html",
             "features/automation/ui/page.js",
             *[str(path) for path in Path("web/static/js").glob("*.js")],

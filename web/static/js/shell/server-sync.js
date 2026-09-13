@@ -137,13 +137,11 @@ function renderAllCategories(grid) {
                     </div>
                     <div style="display: flex; gap: 6px;">
                         <button type="button" data-tools-action="add-tool" data-category="${escapeIconAttr(category)}" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
-                            onmouseover="this.style.opacity='0.85';"
-                            onmouseout="this.style.opacity='1';">
+                            class="hover-dim">
                             添加工具
                         </button>
                         <button type="button" data-tools-action="delete-category" data-category="${escapeIconAttr(category)}" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
-                            onmouseover="this.style.opacity='0.85';"
-                            onmouseout="this.style.opacity='1';"
+                            class="hover-dim"
                             title="删除分类">
                             🗑️
                         </button>
@@ -194,13 +192,11 @@ function renderSingleCategory(grid, category) {
                 </div>
                 <div style="display: flex; gap: 6px;">
                     <button type="button" data-tools-action="add-tool" data-category="${escapeIconAttr(category)}" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
-                        onmouseover="this.style.opacity='0.85';"
-                        onmouseout="this.style.opacity='1';">
+                        class="hover-dim">
                         添加工具
                     </button>
                     <button type="button" data-tools-action="delete-category" data-category="${escapeIconAttr(category)}" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
-                        onmouseover="this.style.opacity='0.85';"
-                        onmouseout="this.style.opacity='1';"
+                        class="hover-dim"
                         title="删除分类">
                         🗑️
                     </button>
@@ -229,14 +225,12 @@ function renderToolCard(tool, category, index, cardColor) {
     const safeCategory = escapeIconAttr(category);
     const safeUrl = escapeIconAttr(tool?.url || '');
     return `
-        <div class="tool-card" data-tool-category="${safeCategory}" data-tool-index="${index}" data-tools-action="open-tool" data-url="${safeUrl}" draggable="true"
-             style="background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;"
-             onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-md)'; this.style.borderColor='${cardColor}';"
-             onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'; this.style.borderColor='var(--border-color)';"
-             ondragstart="handleToolDragStart(event)"
-             ondragend="handleToolDragEnd(event)"
-             ondragover="handleToolDragOver(event)"
-             ondrop="handleToolDrop(event)">
+        <div class="tool-card sync-card" data-tool-category="${safeCategory}" data-tool-index="${index}" data-tools-action="open-tool" data-url="${safeUrl}" draggable="true"
+             style="--card-accent: ${cardColor}; background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;"
+             data-dragstart="handleToolDragStart" data-r0="event"
+             data-dragend="handleToolDragEnd" data-r1="event"
+             data-dragover="handleToolDragOver" data-r2="event"
+             data-drop="handleToolDrop" data-r3="event">
 
             <div class="tool-icon" style="width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: 24px; pointer-events: none;">
                 ${renderToolIcon(tool.icon, tool)}
@@ -250,15 +244,11 @@ function renderToolCard(tool, category, index, cardColor) {
 
             <div class="tool-actions" style="display: flex; gap: 3px; width: 100%;">
                 <button type="button" class="btn-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${safeCategory}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;"
-                        onmouseover="this.style.background='var(--primary-color)'; this.style.color='white'; this.style.borderColor='var(--primary-color)';"
-                        onmouseout="this.style.background='transparent'; this.style.color='var(--text-secondary)'; this.style.borderColor='var(--border-color)';">
+                        style="flex: 1; padding: 2px 3px; border-radius: 3px; font-size: 12px; cursor: pointer; line-height: 1;">
                     ✏️
                 </button>
                 <button type="button" class="btn-delete" aria-label="删除工具" data-tools-action="delete-tool" data-category="${safeCategory}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;"
-                        onmouseover="this.style.background='var(--danger-color)'; this.style.color='white'; this.style.borderColor='var(--danger-color)';"
-                        onmouseout="this.style.background='transparent'; this.style.color='var(--text-muted)'; this.style.borderColor='var(--border-color)';">
+                        style="flex: 1; padding: 2px 3px; border-radius: 3px; font-size: 12px; cursor: pointer; line-height: 1;">
                     🗑️
                 </button>
             </div>

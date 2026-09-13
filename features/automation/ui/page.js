@@ -987,7 +987,7 @@ async function loadDevices(forceRefresh = false) {
                         : '');
                 const label = `${id}${transportLabel}${unavailable ? `（${statusLabel(deviceState)}）` : ''}`;
                 const flashUnsupported = currentFlashMode() !== 'skip' && transport === 'adb_proxy';
-                return `<label class="checkbox-item${unavailable || flashUnsupported ? ' muted' : ''}"><input type="checkbox" value="${esc(id)}" data-transport="${esc(transport)}" data-base-disabled="${unavailable ? 'true' : 'false'}"${unavailable || flashUnsupported ? ' disabled' : ''} onchange="handleDeviceSelection(this)"> <span>${esc(label)}</span></label>`;
+                return `<label class="checkbox-item${unavailable || flashUnsupported ? ' muted' : ''}"><input type="checkbox" value="${esc(id)}" data-transport="${esc(transport)}" data-base-disabled="${unavailable ? 'true' : 'false'}"${unavailable || flashUnsupported ? ' disabled' : ''} data-change="handleDeviceSelection" data-r0="el"> <span>${esc(label)}</span></label>`;
             }).join('')
             : '<div class="muted">未发现设备</div>';
         await applyAutomationWorkspaceContext(atsWorkspaceContext);
@@ -1064,7 +1064,7 @@ async function loadRuns() {
         return;
     }
     const html = atsRuns.map(run => `
-        <article class="run-card${run.id === selectedRunId ? ' active' : ''}" onclick="loadEvents('${esc(run.id)}')">
+        <article class="run-card${run.id === selectedRunId ? ' active' : ''}" data-click="loadEvents" data-a0="${esc(run.id)}">
             <div class="run-main">
                 <div class="run-title">
                     <span class="badge ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
@@ -1087,7 +1087,7 @@ async function loadRuns() {
                     </div>
                     <div>
                         <div class="field-label">报告</div>
-                        <div class="run-value">${run.report_timestamp ? `<button type="button" onclick="openRunAnalysis(event, '${esc(run.id)}')">分析报告</button>` : '<span class="muted">-</span>'}</div>
+                        <div class="run-value">${run.report_timestamp ? `<button type="button" data-click="openRunAnalysis" data-r0="event" data-a1="${esc(run.id)}">分析报告</button>` : '<span class="muted">-</span>'}</div>
                     </div>
                     ${(FAILURE_STATUSES.has(run.status) && run.error) ? `
                     <div style="grid-column: 1 / -1">
@@ -1098,13 +1098,13 @@ async function loadRuns() {
                 ${renderStageBar(run.status, run.current_stage)}
             </div>
             <div class="run-actions">
-                <button type="button" onclick="event.stopPropagation(); loadEvents('${esc(run.id)}')">日志</button>
-                <button type="button" onclick="event.stopPropagation(); loadTrace('${esc(run.id)}')">链路</button>
+                <button type="button" data-click="loadEvents" data-a0="${esc(run.id)}" data-stop>日志</button>
+                <button type="button" data-click="loadTrace" data-a0="${esc(run.id)}" data-stop>链路</button>
                 ${TERMINAL_STATUSES.has(run.status)
-                    ? `<button type="button" onclick="event.stopPropagation(); retryRun('${esc(run.id)}')">重试</button>`
+                    ? `<button type="button" data-click="retryRun" data-a0="${esc(run.id)}" data-stop>重试</button>`
                     : run.status === 'flashing'
                     ? '<button type="button" class="danger" disabled title="刷机过程中断电或终止可能损坏设备">刷机中不可取消</button>'
-                    : `<button type="button" class="danger" onclick="event.stopPropagation(); cancelRun('${esc(run.id)}')">取消</button>`}
+                    : `<button type="button" class="danger" data-click="cancelRun" data-a0="${esc(run.id)}" data-stop>取消</button>`}
             </div>
         </article>
     `).join('');
@@ -1128,8 +1128,8 @@ async function loadRuns() {
                         </div>
                     </div>
                     <div class="report-card-actions">
-                        <button type="button" onclick="openRunReport(event, '${esc(run.id)}')">报告详情</button>
-                        <button type="button" class="primary" onclick="openRunAnalysis(event, '${esc(run.id)}')">分析报告</button>
+                        <button type="button" data-click="openRunReport" data-r0="event" data-a1="${esc(run.id)}">报告详情</button>
+                        <button type="button" class="primary" data-click="openRunAnalysis" data-r0="event" data-a1="${esc(run.id)}">分析报告</button>
                     </div>
                 </article>
             `).join('')
@@ -1155,7 +1155,7 @@ async function loadEvents(runId) {
     const traceButton = qs('events-trace-button');
     if (traceButton) traceButton.disabled = false;
     qs('automation-runs').querySelectorAll('.run-card').forEach(el => el.classList.remove('active'));
-    const card = qs('automation-runs').querySelector(`.run-card[onclick="loadEvents('${runId}')"]`);
+    const card = qs('automation-runs').querySelector(`.run-card[data-click="loadEvents"][data-a0="${runId}"]`);
     if (card) card.classList.add('active');
     const [data, trace] = await Promise.all([
         api(`/api/automation/runs/${encodeURIComponent(runId)}/timeline`),
@@ -1229,7 +1229,7 @@ async function renderRunLogLinks(trace) {
     if (!target) return;
     const links = [];
     if (trace?.build_job_id) {
-        links.push(`<button type="button" onclick="jumpToBuildLog('${esc(trace.build_job_id)}')">构建原始日志</button>`);
+        links.push(`<button type="button" data-click="jumpToBuildLog" data-a0="${esc(trace.build_job_id)}">构建原始日志</button>`);
     }
     if (trace?.cluster_job_id) {
         try {
@@ -1329,9 +1329,9 @@ async function loadBuildJobs() {
     qs('build-jobs').innerHTML = buildJobs.length
         ? buildJobs.map(job => {
             const terminal = TERMINAL_STATUSES.has(job.status);
-            return `<div class="build-job ${job.id === selectedBuildJobId ? 'active' : ''}" onclick="loadBuildLog('${esc(job.id)}')">
+            return `<div class="build-job ${job.id === selectedBuildJobId ? 'active' : ''}" data-click="loadBuildLog" data-a0="${esc(job.id)}">
                 <div class="build-job-head"><span class="badge ${esc(job.status)}" title="${esc(job.status)}">${esc(statusLabel(job.status))}</span><strong>${esc(job.template_id)}</strong>
-                ${terminal ? `<button type="button" class="build-job-delete" title="删除历史任务" onclick="event.stopPropagation(); deleteBuildJob('${esc(job.id)}')">删除</button>` : ''}</div>
+                ${terminal ? `<button type="button" class="build-job-delete" title="删除历史任务" data-click="deleteBuildJob" data-a0="${esc(job.id)}" data-stop>删除</button>` : ''}</div>
                 <div class="muted">${esc(job.id)} / ${esc(job.remote_workspace || '')}</div>
                 <div class="build-job-source">${job.automation_run_id ? `ATS ${esc(job.automation_run_id)}` : '独立调试构建'}</div>
                 <div>${esc((job.artifacts || [])[0]?.path || job.error || '')}</div></div>`;
@@ -1696,7 +1696,7 @@ async function loadTrace(runId) {
             traceField('模板', build.template_id),
             traceField('工作目录', build.remote_workspace),
             traceField('产物', (build.artifacts || [])[0]?.path || ''),
-            data.build_job_id ? `<div class="trace-key">任务</div><div class="trace-val"><a href="#" onclick="event.preventDefault(); jumpToBuildLog('${esc(data.build_job_id)}')">${esc(data.build_job_id)}</a></div>` : '',
+            data.build_job_id ? `<div class="trace-key">任务</div><div class="trace-val"><a href="#" data-click="jumpToBuildLog" data-a0="${esc(data.build_job_id)}" data-prevent>${esc(data.build_job_id)}</a></div>` : '',
         ].join('') : '<div class="muted">无关联构建任务。</div>';
 
         qs('trace-artifact').innerHTML = [
@@ -1725,7 +1725,7 @@ async function loadTrace(runId) {
             ...Object.entries(summary).slice(0, 8).map(([k, v]) => traceField(k, typeof v === 'object' ? JSON.stringify(v) : v)),
         ].join('');
         qs('trace-report').innerHTML = reportRows
-            + (data.report_timestamp ? `<div class="trace-link-row"><button type="button" onclick="closeTrace(); openRunReport(event, '${esc(runId)}')">报告详情</button> <button type="button" class="primary" onclick="closeTrace(); openRunAnalysis(event, '${esc(runId)}')">分析报告</button></div>` : '')
+            + (data.report_timestamp ? `<div class="trace-link-row"><button type="button" data-click="closeTraceOpenReport" data-r0="event" data-a1="${esc(runId)}">报告详情</button> <button type="button" class="primary" data-click="closeTraceOpenAnalysis" data-r0="event" data-a1="${esc(runId)}">分析报告</button></div>` : '')
             || '<div class="muted">尚未生成报告。</div>';
 
         openTrace();
@@ -1893,3 +1893,14 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.dataset.automationReady = 'true';
     loadAll(true).finally(() => window.GmsEmbeddedWorkspace?.markReady());
 });
+
+
+// act-bridge 委托目标（替代历史 inline handler）。
+function onLunchTargetChange(){invalidateRunPreflight();updateStepIndicators();}
+function refreshLunchOptionsForced(){refreshLunchOptions({forceRefresh:true});}
+function onAutomationWorkerChange(){invalidateRunPreflight();syncAutomationWorkspaceSelection();loadDevices(true);loadTestSuitesForAutomation();updateStepIndicators();}
+function onTestTypeChange(){renderSuiteOptions();syncAutomationWorkspaceSelection();updateStepIndicators();}
+function onTestSuiteChange(){invalidateRunPreflight();syncAutomationWorkspaceSelection();updateStepIndicators();}
+function loadTraceSelected(){if(selectedRunId)loadTrace(selectedRunId);}
+function closeTraceOpenReport(event,runId){closeTrace();openRunReport(event,runId);}
+function closeTraceOpenAnalysis(event,runId){closeTrace();openRunAnalysis(event,runId);}

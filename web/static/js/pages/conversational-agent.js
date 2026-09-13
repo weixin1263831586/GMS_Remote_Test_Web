@@ -184,8 +184,8 @@ function renderAgentMessages(session) {
         if (plan && session.status === 'planning') {
             actions += `
                 <div class="agent-actions">
-                    <button class="btn-xs" onclick="confirmAgentPlan()">执行计划</button>
-                    <button class="btn-xs" onclick="sendAgentMessage(false, '重新规划')">重新规划</button>
+                    <button class="btn-xs" data-click="confirmAgentPlan">执行计划</button>
+                    <button class="btn-xs" data-click="sendAgentMessage" data-a0="false" data-a1="重新规划">重新规划</button>
                 </div>
             `;
         }
@@ -194,9 +194,9 @@ function renderAgentMessages(session) {
         if (reportTimestamp) {
             actions += `
                 <div class="agent-actions">
-                    <button class="btn-xs" onclick="openAgentReportAnalysis('${escapeJsAttr(reportTimestamp)}')">打开报告分析</button>
-                    <button class="btn-xs" onclick="switchPage('reports', null)">报告管理</button>
-                    ${apkTaskId ? `<button class="btn-xs" onclick="openAgentApkAnalysis('${escapeJsAttr(apkTaskId)}')">打开APK分析</button>` : ''}
+                    <button class="btn-xs" data-click="openAgentReportAnalysis" data-a0="${escapeJsAttr(reportTimestamp)}">打开报告分析</button>
+                    <button class="btn-xs" data-click="switchPage" data-a0="reports" data-a1="null">报告管理</button>
+                    ${apkTaskId ? `<button class="btn-xs" data-click="openAgentApkAnalysis" data-a0="${escapeJsAttr(apkTaskId)}">打开APK分析</button>` : ''}
                 </div>
             `;
         }
@@ -205,9 +205,9 @@ function renderAgentMessages(session) {
         if (quickActions.length > 0) {
             const actionBtns = quickActions.map(a => {
                 if (a.page) {
-                    return `<button class="btn-xs" onclick="openAgentPageAction('${escapeJsAttr(a.page)}', '${escapeJsAttr(JSON.stringify(a.params || {}))}')">${escapeHtml(a.label)}</button>`;
+                    return `<button class="btn-xs" data-click="openAgentPageAction" data-a0="${escapeJsAttr(a.page)}" data-a1="${escapeJsAttr(JSON.stringify(a.params || {}))}">${escapeHtml(a.label)}</button>`;
                 } else if (a.action) {
-                    return `<button class="btn-xs" onclick="sendAgentAction('${escapeJsAttr(a.action)}', '${escapeJsAttr(JSON.stringify(a.params || {}))}', '${escapeJsAttr(a.label || a.action)}')">${escapeHtml(a.label)}</button>`;
+                    return `<button class="btn-xs" data-click="sendAgentAction" data-a0="${escapeJsAttr(a.action)}" data-a1="${escapeJsAttr(JSON.stringify(a.params || {}))}" data-a2="${escapeJsAttr(a.label || a.action)}">${escapeHtml(a.label)}</button>`;
                 }
                 return '';
             }).filter(Boolean).join('');
@@ -220,7 +220,7 @@ function renderAgentMessages(session) {
         if (!data.auto_open && !reportTimestamp && !quickActions.length && targetPage && targetPage !== 'agent') {
             actions += `
                 <div class="agent-actions">
-                    <button class="btn-xs" onclick="switchPage('${escapeJsAttr(targetPage)}', null)">打开页面</button>
+                    <button class="btn-xs" data-click="switchPage" data-a0="${escapeJsAttr(targetPage)}" data-a1="null">打开页面</button>
                 </div>
             `;
         }

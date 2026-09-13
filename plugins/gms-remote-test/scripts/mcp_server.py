@@ -78,7 +78,7 @@ from typing import Any
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.21.1"
+SERVER_VERSION = "0.22.0"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024

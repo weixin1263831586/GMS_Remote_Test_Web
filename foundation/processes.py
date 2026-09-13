@@ -67,11 +67,13 @@ def run_local_shell_command(command: str, timeout: int = 30) -> CommandResult:
     """
     process = None
     try:
-        process = subprocess.Popen(
+        # 审计过的 shell-string 边界（见上方 docstring）：调用方负责转义
+        # 动态 token，全仓 shell 出口收敛在此与 SSHExecutor 两处。
+        process = subprocess.Popen(  # nosemgrep: gitlab.bandit.B602
             command,
             # Callers use this boundary for audited pipelines/redirection and
             # quote every dynamic token before it reaches the local shell.
-            shell=True,  # nosec B602
+            shell=True,  # nosec B602  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

@@ -113,6 +113,54 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn('loop.call_soon_threadsafe(enqueue_usb_event, event)', source)
         self.assertNotIn('queue.Empty', source)
 
+    def test_release_installer_and_agent_runtime_have_no_tls_downgrade(self):
+        """供应链门禁:release installer / agent runtime 不得出现静默 TLS 降级。
+
+        curl -k / --insecure / wget --no-check-certificate / verify=False /
+        ssl=False 只允许出现在显式 opt-in(GMS_INSTALL_ALLOW_INSECURE /
+        GMS_INSTALL_INSECURE)守护分支或测试/文档中,不得作为默认下载路径。
+        """
+        guarded = (
+            'GMS_INSTALL_ALLOW_INSECURE',
+            'GMS_INSTALL_INSECURE',
+        )
+        scanned = [
+            Path('features/system/agent_package_registry.py'),
+            Path('agent/gms-remote-test/runtime/gms-agent'),
+            Path('agent/gms-remote-test/runtime/gms_agent/package_manager.py'),
+        ]
+        downgrade_patterns = (
+            '-kfsSL',
+            '--no-check-certificate',
+            'curl_insecure=True',
+            'ssl=False',
+        )
+        for path in scanned:
+            self.assertTrue(path.exists(), path)
+            source = path.read_text(encoding='utf-8')
+            for window in (
+                line for line in source.splitlines() if any(
+                    pattern in line for pattern in downgrade_patterns
+                )
+            ):
+                context = '\n'.join(
+                    source.splitlines()[
+                        max(0, source.splitlines().index(window) - 12):
+                        source.splitlines().index(window) + 1
+                    ]
+                )
+                self.assertTrue(
+                    any(guard in context for guard in guarded),
+                    f'{path}: TLS 降级行缺少显式开关守护: {window.strip()}',
+                )
+        # verify=False 属于硬禁止:任何位置都不允许。
+        for path in scanned:
+            self.assertNotIn(
+                'verify=False',
+                path.read_text(encoding='utf-8'),
+                path,
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

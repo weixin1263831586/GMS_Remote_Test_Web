@@ -38,7 +38,9 @@ class LocalPtyChannel:
         if self.pid == 0:
             try:
                 os.chdir(self.cwd)
-                os.execvpe(command[0], command, self.env)
+                # pty 子进程按设计直接 exec 用户选择的终端程序：
+                # argv 列表、无 shell 拼接，serial/用户名等动态值不经解释器。
+                os.execvpe(command[0], command, self.env)  # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
             except Exception as exc:
                 os.write(
                     2,

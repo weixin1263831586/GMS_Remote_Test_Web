@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from features.auth import (
     CurrentUser,
@@ -24,6 +24,16 @@ from .api_support import *
 async def gms_update_monitor_page():
     page_path = Path(__file__).with_name('ui') / 'page.html'
     return HTMLResponse(page_path.read_text(encoding='utf-8'))
+
+
+@page_router.get('/gms-update-monitor/page.js')
+def gms_update_monitor_page_js():
+    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
+    page_path = Path(__file__).with_name('ui') / 'page.html'
+    js = page_path.parent / 'page.js'
+    return Response(
+        js.read_text(encoding='utf-8'), media_type='application/javascript'
+    )
 
 @router.get('/sources')
 async def gms_update_monitor_sources():

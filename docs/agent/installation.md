@@ -53,11 +53,19 @@ curl -fsSL --cacert "$GMS_INSTALL_CA_CERT" \
   https://CONTROLLER:5001/api/agent/install.sh | bash -s -- <ENROLLMENT_CODE>
 ```
 
+配对码由 install.sh 经 `GMS_AGENT_ENROLL_CODE` 环境变量传给
+`gms-agent install`（不会出现在 `ps`、shell history 或审计命令行中）；
+`gms-agent install --enroll-code` 仍兼容，但环境变量优先。
+
 说明：
 
-- 受控实验环境若使用自签名证书，可按部署策略使用 installer 支持的
-  insecure bootstrap（`GMS_INSTALL_INSECURE=1`）；不要在公网或不可信网络中
-  关闭 TLS 校验。
+- install.sh 与前端复制的安装命令默认严格校验 TLS（`curl -fsSL`，系统
+  信任链）。自签名部署必须在目标主机先导出
+  `GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt`。
+- 受控实验环境若使用自签名证书且无法下发 CA，可按部署策略使用 installer
+  的显式降级开关（`GMS_INSTALL_ALLOW_INSECURE=1`，bootstrap 阶段传导为
+  `GMS_INSTALL_INSECURE=1`）；生产环境 Controller 渲染的 install.sh 会
+  直接拒绝该降级。不要在公网或不可信网络关闭 TLS 校验。
 - **运行时同样不得用 insecure**：bootstrap 用
   `GMS_INSTALL_INSECURE=1` 只是一次性引导手段，安装完成后必须让 profile
   信任 Controller CA——把 CA 证书下发到 Agent 主机（如
@@ -81,6 +89,9 @@ curl -fsSL --cacert "$GMS_INSTALL_CA_CERT" \
 gms-agent install --client auto --server https://CONTROLLER:5001
 gms-agent enroll <CODE>
 ```
+
+分步安装时也可用环境变量传码（避免 argv 暴露）：
+`GMS_AGENT_ENROLL_CODE=<CODE> gms-agent install ...`。
 
 默认 profile 名包含 Controller 身份（`<client>-<host>-<sha256(server)[:8]>`），
 同一台主机为多个 Controller 安装时各占一个 profile、互不覆盖；需要可读

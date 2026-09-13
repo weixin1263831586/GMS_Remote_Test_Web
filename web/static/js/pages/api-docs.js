@@ -166,7 +166,7 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
         <div class="modal-content" style="max-width: 700px; max-height: 85vh; overflow-y: auto;">
             <div class="modal-header">
                 <span class="modal-title">📝 Redmine回复</span>
-                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
+                <span class="modal-close" data-click="_actCloseModal" data-a0="${modalId}">&times;</span>
             </div>
             <div class="modal-body">
                 <div style="margin-bottom: 16px;">
@@ -183,18 +183,18 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">📎 附件</label>
                     <input type="file" id="${fileInputId}" data-redmine-files multiple
                            style="display: none;"
-                           onchange="updateRedmineFileList('${fileInputId}', '${fileListId}')">
+                           data-change="updateRedmineFileList" data-a0="${fileInputId}" data-a1="${fileListId}">
                     <div id="${fileInputId}-drop" class="redmine-drop-zone" data-redmine-drop
-                         onclick="document.getElementById('${fileInputId}').click()"
+                         data-click="_actClickById" data-a0="${fileInputId}"
                          style="padding: 20px 14px; background: var(--secondary-bg); color: var(--text-muted); border: 2px dashed var(--border-color); border-radius: 6px; cursor: pointer; font-size: 12px; width: 100%; text-align: center; transition: all 0.2s; user-select: none;">
                         📎 拖拽文件到此处，或点击选择文件
                     </div>
                     <div id="${fileListId}" style="margin-top: 8px;"></div>
                 </div>
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                    <button onclick="ModalManager.close('${modalId}')"
+                    <button data-click="_actCloseModal" data-a0="${modalId}"
                             style="padding: 8px 16px; background: var(--secondary-bg); color: var(--text-primary); border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">取消</button>
-                    <button onclick="confirmAndSendRedmineReply('${modalId}')"
+                    <button data-click="confirmAndSendRedmineReply" data-a0="${modalId}"
                             style="padding: 8px 16px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">确认并发送</button>
                 </div>
             </div>
@@ -243,7 +243,7 @@ function updateRedmineFileList(fileInputId, fileListId) {
         const size = f.size >= 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : (f.size / 1024).toFixed(0) + ' KB';
         return `<div class="redmine-file-item">
             <span class="redmine-file-name">📎 ${escapeHtml(f.name)} <span class="redmine-file-size">(${size})</span></span>
-            <span class="redmine-file-remove" onclick="removeRedmineFile('${fileInputId}', '${fileListId}', ${i})">✕</span>
+            <span class="redmine-file-remove" data-click="removeRedmineFile" data-a0="${fileInputId}" data-a1="${fileListId}" data-a2="${i}">✕</span>
         </div>`;
     }).join('');
 }
@@ -880,10 +880,8 @@ function displayApiDocs(apis) {
                 <!-- Column 3: Skill Usage -->
                 <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 20%;">
                     <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-size: 11px; color: var(--primary-color); font-weight: 600; line-height: 1.3; cursor: pointer; transition: all 0.2s;"
-                             onclick="copySkillCommand(this)"
-                             onmouseover="this.style.color='var(--success-color)';"
-                             onmouseout="this.style.color='var(--primary-color)';"
+                        <div class="api-skill-copy" style="font-size: 11px; font-weight: 600; line-height: 1.3; cursor: pointer; transition: all 0.2s;"
+                             data-click="copySkillCommand" data-r0="el"
                              title="点击复制 skill 命令">
                             ${api.skill ? escapeHtml(api.skill) : '<span style="color: var(--text-secondary);">-</span>'}
                         </div>
@@ -897,14 +895,13 @@ function displayApiDocs(apis) {
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <pre
                                  data-cmd="${escapedCurlCmd}"
-                                 style="margin: 0; padding: 2px 6px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; color: var(--success-color); overflow-x: auto; white-space: nowrap; cursor: pointer; transition: all 0.2s; line-height: 1.3; display: block; flex: 1; background: transparent; border: none; text-overflow: ellipsis;"
-                                 onclick="copyCurlCommandFromData(this)"
-                                 onmouseover="this.style.color='var(--primary-color)';"
-                                 onmouseout="this.style.color='var(--success-color)';"
+                                 style="margin: 0; padding: 2px 6px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; overflow-x: auto; white-space: nowrap; cursor: pointer; transition: all 0.2s; line-height: 1.3; display: block; flex: 1; background: transparent; border: none; text-overflow: ellipsis;"
+                                 class="api-curl-pre"
+                                 data-click="copyCurlCommandFromData" data-r0="el"
                                  title="点击复制 curl 命令">${escapeHtml(displayCurlCmd)}</pre>
                             <button
                                 id="expand-btn-${index}"
-                                onclick="toggleApiDetails('${index}')"
+                                data-click="toggleApiDetails" data-a0="${index}"
                                 style="background: var(--primary-color); color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 600; min-width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;"
                                 title="点击展开/收起详情">
                                 <span id="expand-icon-${index}">▶</span>
@@ -916,7 +913,7 @@ function displayApiDocs(apis) {
                             <div style="border-top: 1px solid var(--border-color); padding-top: 8px; margin-top: 4px;">
                                 <!-- Full Curl Command -->
                                 <div style="font-size: 11px; font-weight: 600; margin-bottom: 4px; color: var(--text-primary);">📜 完整curl命令:</div>
-                                <pre style="font-family: 'Monaco', 'Menlo', monospace; font-size: 10px; color: var(--success-color); background: var(--darker-bg); padding: 6px; border-radius: 4px; margin-bottom: 8px; white-space: pre-wrap; word-break: break-all; cursor: pointer;" onclick="navigator.clipboard.writeText(this.textContent); this.style.background='var(--success-color)'; this.style.color='white'; setTimeout(() => { this.style.background='var(--darker-bg)'; this.style.color='var(--success-color)'; }, 200);" title="点击复制">${escapeHtml(curlCmdObj.full)}</pre>
+                                <pre style="font-family: 'Monaco', 'Menlo', monospace; font-size: 10px; color: var(--success-color); background: var(--darker-bg); padding: 6px; border-radius: 4px; margin-bottom: 8px; white-space: pre-wrap; word-break: break-all; cursor: pointer;" data-click="copyPreWithFlash" data-r0="el" title="点击复制">${escapeHtml(curlCmdObj.full)}</pre>
 
                                 <!-- Title with star if core API -->
                                 <div style="font-size: 12px; font-weight: 700; color: var(--primary-color); margin-bottom: 6px;">
@@ -1029,10 +1026,11 @@ function closeUsageExamplesModal() {
 
 /**
  * 生成与当前 Controller 地址绑定的一键安装命令。
+ * TLS 默认严格校验(-fsSL);自签名部署在目标主机导出
+ * GMS_INSTALL_CA_CERT 后再执行,不再输出 -k。
  */
 function buildSkillInstallCommand() {
-    const curlOptions = window.location.protocol === 'https:' ? '-kfsSL' : '-fsSL';
-    return `curl ${curlOptions} "${window.location.origin}/api/agent/install.sh" | bash`;
+    return `curl -fsSL "${window.location.origin}/api/agent/install.sh" | bash`;
 }
 
 /**
@@ -1184,4 +1182,28 @@ window.copyToClipboard = function(text, element) {
         successMsg: '✓ 已复制：' + text,
         element: element
     });
+};
+
+
+// act-bridge 委托目标（替代历史 inline handler）。
+window.updateRedmineFileList = updateRedmineFileList;
+window.removeRedmineFile = removeRedmineFile;
+window.confirmAndSendRedmineReply = confirmAndSendRedmineReply;
+
+window._actCloseModal = function (modalId) {
+    ModalManager.close(modalId);
+};
+
+window._actClickById = function (elementId) {
+    document.getElementById(elementId).click();
+};
+
+window.copyPreWithFlash = function (pre) {
+    navigator.clipboard.writeText(pre.textContent);
+    pre.style.background = 'var(--success-color)';
+    pre.style.color = 'white';
+    setTimeout(() => {
+        pre.style.background = 'var(--darker-bg)';
+        pre.style.color = 'var(--success-color)';
+    }, 200);
 };

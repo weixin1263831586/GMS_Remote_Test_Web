@@ -26,8 +26,15 @@ class SidebarNavigationConfigTests(unittest.TestCase):
         self.assertEqual(visible_pages, ["test", "redmine-agent"])
 
     def test_sidebar_visibility_modal_is_wired_in_template(self):
-        template = Path("web/shell/shell.html").read_text(encoding="utf-8")
-        self.assertIn('onclick="openSidebarVisibilityModal()"', template)
+        # CSP 前置迁移后 shell 脚本外置，按"模板+外置 shell 脚本"组合读取；
+        # inline onclick 已迁移为 act-bridge data-click 声明。
+        template_parts = [Path("web/shell/shell.html").read_text(encoding="utf-8")]
+        template_parts += [
+            p.read_text(encoding="utf-8")
+            for p in sorted(Path("web/static/js/shell").glob("*.js"))
+        ]
+        template = "\n".join(template_parts)
+        self.assertIn('data-click="openSidebarVisibilityModal"', template)
         self.assertIn('id="sidebar-visibility-modal"', template)
         for marker in ('id="sidebar-settings-panel-guide"', "function switchSidebarSettingsTab", "function openGuideImageLightbox", 'id="guide-image-modal"'):
             self.assertIn(marker, template)

@@ -161,6 +161,7 @@ class DailyBriefRepository:
                     status TEXT NOT NULL DEFAULT 'queued',
                     attempt_count INTEGER NOT NULL DEFAULT 0,
                     worker_id TEXT NOT NULL DEFAULT '',
+                    lease_token TEXT NOT NULL DEFAULT '',
                     lease_expires_at TEXT NOT NULL DEFAULT '',
                     requested_at TEXT NOT NULL DEFAULT '',
                     started_at TEXT NOT NULL DEFAULT '',
@@ -169,6 +170,16 @@ class DailyBriefRepository:
                 )
                 """
             )
+            # 旧库迁移：lease_token 列（2026-09 加入，防旧 Worker 在租约
+            # 被新 Worker 重新获取后覆盖新状态）。
+            job_cols = {row[1] for row in conn.execute(
+                "PRAGMA table_info(redmine_daily_brief_jobs)"
+            )}
+            if "lease_token" not in job_cols:
+                conn.execute(
+                    "ALTER TABLE redmine_daily_brief_jobs "
+                    "ADD COLUMN lease_token TEXT NOT NULL DEFAULT ''"
+                )
             conn.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_brief_jobs_active
@@ -180,21 +191,28 @@ class DailyBriefRepository:
     # ------------------------------------------------------------------ runs
 
     def create_run(self, run: DailyBriefRun) -> DailyBriefRun | None:
-        """插入 run；同 owner+date+mode 已存在时返回既有记录（幂等）。"""
+        """插入 run；同 owner+date+mode 已存在时返回既有记录（幂等）。
+
+        跨进程一致性由 SQLite 承担：ON CONFLICT DO NOTHING 的原子插入
+        代替 SELECT→判断→INSERT（Web 进程、Worker、nightly/delta CLI 可能
+        并发创建同一 owner+date+mode 的 run，Python 进程内锁无法覆盖）。
+        """
         now = _now()
         with self._lock, self._connect() as conn:
-            existing = conn.execute(
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                f"INSERT INTO redmine_daily_brief_runs ({', '.join(RUN_COLUMNS)}, created_at, updated_at) "
+                f"VALUES ({', '.join('?' * len(RUN_COLUMNS))}, ?, ?) "
+                "ON CONFLICT(owner_id, brief_date, mode) DO NOTHING",
+                [*self._run_params(run), now, now],
+            )
+            if cursor.rowcount == 1:
+                return run
+            row = conn.execute(
                 "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND brief_date=? AND mode=?",
                 (run.owner_id, run.brief_date, run.mode),
             ).fetchone()
-            if existing is not None:
-                return self._row_to_run(existing)
-            conn.execute(
-                f"INSERT INTO redmine_daily_brief_runs ({', '.join(RUN_COLUMNS)}, created_at, updated_at) "
-                f"VALUES ({', '.join('?' * len(RUN_COLUMNS))}, ?, ?)",
-                [*self._run_params(run), now, now],
-            )
-        return run
+            return self._row_to_run(row) if row else None
 
     def get_run(self, run_id: str) -> DailyBriefRun | None:
         with self._connect() as conn:
@@ -303,7 +321,15 @@ class DailyBriefRepository:
     def enqueue_job(
         self, run_id: str, *, kind: str = "run", issue_id: int = 0
     ) -> tuple[dict[str, Any], bool]:
-        """持久化一个 Web 请求；同一目标已有活动 job 时幂等复用。"""
+        """持久化一个 Web 请求；同一目标已有活动 job 时幂等复用。
+
+        合流（coalescing）键是 (run_id, kind, issue_id)，与部分唯一索引
+        idx_brief_jobs_active 一致：
+        - reanalyze #100 进行中 + 再次 reanalyze #100 → 合流复用；
+        - reanalyze #100 进行中 + reanalyze #200 → 两个独立 job（绝不能
+          只按 run_id 去重，否则不同 issue 的请求会被静默吞掉）；
+        - run 级 job 与 issue 级 job 各自独立排队。
+        """
         if kind not in JOB_KINDS:
             raise ValueError(f"unsupported daily brief job kind: {kind}")
         target_issue = int(issue_id or 0)
@@ -313,7 +339,7 @@ class DailyBriefRepository:
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             run = conn.execute(
-                "SELECT run_id FROM redmine_daily_brief_runs WHERE run_id=?", (run_id,)
+                "SELECT run_id, status FROM redmine_daily_brief_runs WHERE run_id=?", (run_id,)
             ).fetchone()
             if run is None:
                 raise ValueError(f"daily brief run not found: {run_id}")
@@ -326,23 +352,38 @@ class DailyBriefRepository:
                 if issue is None:
                     raise ValueError(f"issue {target_issue} not found in run {run_id}")
             existing = conn.execute(
-                "SELECT * FROM redmine_daily_brief_jobs WHERE run_id=? "
-                "AND status IN ('queued','running') ORDER BY requested_at LIMIT 1",
-                (run_id,),
+                "SELECT * FROM redmine_daily_brief_jobs WHERE run_id=? AND kind=? "
+                "AND issue_id=? AND status IN ('queued','running') "
+                "ORDER BY requested_at LIMIT 1",
+                (run_id, kind, target_issue),
             ).fetchone()
             if existing is not None:
                 return dict(existing), False
             job_id = "dbj_" + uuid.uuid4().hex
+            try:
+                conn.execute(
+                    "INSERT INTO redmine_daily_brief_jobs "
+                    "(job_id,run_id,kind,issue_id,status,requested_at) "
+                    "VALUES (?,?,?,?, 'queued', ?)",
+                    (job_id, run_id, kind, target_issue, now),
+                )
+            except sqlite3.IntegrityError:
+                # 跨进程并发：另一进程刚为同一 (run,kind,issue) 插入。
+                existing = conn.execute(
+                    "SELECT * FROM redmine_daily_brief_jobs WHERE run_id=? AND kind=? "
+                    "AND issue_id=? AND status IN ('queued','running') "
+                    "ORDER BY requested_at LIMIT 1",
+                    (run_id, kind, target_issue),
+                ).fetchone()
+                if existing is None:
+                    raise
+                return dict(existing), False
+            # 重排队时刷新 started_at：否则历史 completed run 的旧时间戳会让
+            # reset_stale_running() 把刚排队的任务当成超时僵尸标成 failed。
             conn.execute(
-                "INSERT INTO redmine_daily_brief_jobs "
-                "(job_id,run_id,kind,issue_id,status,requested_at) "
-                "VALUES (?,?,?,?, 'queued', ?)",
-                (job_id, run_id, kind, target_issue, now),
-            )
-            conn.execute(
-                "UPDATE redmine_daily_brief_runs SET status='pending', finished_at='', "
-                "error='', updated_at=? WHERE run_id=?",
-                (_now(), run_id),
+                "UPDATE redmine_daily_brief_runs SET status='pending', started_at=?, "
+                "finished_at='', error='', updated_at=? WHERE run_id=?",
+                (_now(), _now(), run_id),
             )
             if kind == "issue":
                 conn.execute(
@@ -362,7 +403,13 @@ class DailyBriefRepository:
             ).fetchone())
 
     def claim_next_job(self, worker_id: str, lease_seconds: int = 90) -> dict[str, Any] | None:
-        """领取最早 job，并把租约过期的未完成任务安全放回队列。"""
+        """领取最早 job，并把租约过期的未完成任务安全放回队列。
+
+        领取时生成一次性 lease_token；后续 renew/finish/requeue 都以
+        (job_id, lease_token) 做 CAS——租约过期被其他 Worker 重新领取后，
+        旧 Worker 的迟到写入不会再覆盖新状态（worker_id 可能相同，例如
+        同主机 systemd 重启）。
+        """
         now = self._utc_now()
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -377,14 +424,14 @@ class DailyBriefRepository:
                 if item["run_status"] in TERMINAL_RUN_STATUSES:
                     conn.execute(
                         "UPDATE redmine_daily_brief_jobs SET status='completed',worker_id='',"
-                        "lease_expires_at='',finished_at=? WHERE job_id=?",
+                        "lease_token='',lease_expires_at='',finished_at=? WHERE job_id=?",
                         (now, item["job_id"]),
                     )
                     continue
                 conn.execute(
                     "UPDATE redmine_daily_brief_jobs SET status='queued',worker_id='',"
-                    "lease_expires_at='',error='worker lease expired; queued for retry' "
-                    "WHERE job_id=?",
+                    "lease_token='',lease_expires_at='',"
+                    "error='worker lease expired; queued for retry' WHERE job_id=?",
                     (item["job_id"],),
                 )
                 conn.execute(
@@ -404,11 +451,12 @@ class DailyBriefRepository:
             ).fetchone()
             if row is None:
                 return None
+            lease_token = uuid.uuid4().hex
             cursor = conn.execute(
                 "UPDATE redmine_daily_brief_jobs SET status='running',worker_id=?,"
-                "lease_expires_at=?,started_at=?,attempt_count=attempt_count+1,error='' "
-                "WHERE job_id=? AND status='queued'",
-                (worker_id, self._lease_expiry(lease_seconds), now, row["job_id"]),
+                "lease_token=?,lease_expires_at=?,started_at=?,attempt_count=attempt_count+1,"
+                "error='' WHERE job_id=? AND status='queued'",
+                (worker_id, lease_token, self._lease_expiry(lease_seconds), now, row["job_id"]),
             )
             if cursor.rowcount != 1:
                 return None
@@ -416,33 +464,39 @@ class DailyBriefRepository:
                 "SELECT * FROM redmine_daily_brief_jobs WHERE job_id=?", (row["job_id"],)
             ).fetchone())
 
-    def renew_job(self, job_id: str, worker_id: str, lease_seconds: int = 90) -> bool:
+    def renew_job(
+        self, job_id: str, worker_id: str, lease_token: str, lease_seconds: int = 90
+    ) -> bool:
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
                 "UPDATE redmine_daily_brief_jobs SET lease_expires_at=? "
-                "WHERE job_id=? AND worker_id=? AND status='running'",
-                (self._lease_expiry(lease_seconds), job_id, worker_id),
+                "WHERE job_id=? AND worker_id=? AND lease_token=? AND status='running'",
+                (self._lease_expiry(lease_seconds), job_id, worker_id, lease_token),
             )
             return cursor.rowcount == 1
 
-    def finish_job(self, job_id: str, worker_id: str, *, error: str = "") -> bool:
+    def finish_job(
+        self, job_id: str, worker_id: str, lease_token: str, *, error: str = ""
+    ) -> bool:
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
                 "UPDATE redmine_daily_brief_jobs SET status=?,worker_id='',"
-                "lease_expires_at='',finished_at=?,error=? "
-                "WHERE job_id=? AND worker_id=? AND status='running'",
+                "lease_token='',lease_expires_at='',finished_at=?,error=? "
+                "WHERE job_id=? AND worker_id=? AND lease_token=? AND status='running'",
                 ("failed" if error else "completed", self._utc_now(), error[:1000],
-                 job_id, worker_id),
+                 job_id, worker_id, lease_token),
             )
             return cursor.rowcount == 1
 
-    def requeue_job(self, job_id: str, worker_id: str, *, reason: str) -> bool:
+    def requeue_job(
+        self, job_id: str, worker_id: str, lease_token: str, *, reason: str
+    ) -> bool:
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
                 "UPDATE redmine_daily_brief_jobs SET status='queued',worker_id='',"
-                "lease_expires_at='',error=? WHERE job_id=? AND worker_id=? "
-                "AND status='running'",
-                (reason[:1000], job_id, worker_id),
+                "lease_token='',lease_expires_at='',error=? WHERE job_id=? AND worker_id=? "
+                "AND lease_token=? AND status='running'",
+                (reason[:1000], job_id, worker_id, lease_token),
             )
             if cursor.rowcount:
                 row = conn.execute(

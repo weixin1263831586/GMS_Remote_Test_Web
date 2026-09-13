@@ -155,5 +155,83 @@ class DailyBriefWorkerTests(unittest.TestCase):
         self.assertEqual(self.repository.get_job(job["job_id"])["status"], "completed")
 
 
+class OwnerFairnessTests(unittest.TestCase):
+    """owner round-robin 游标:字母序靠前的 owner 不得垄断 claim 起点。"""
+
+    def test_cursor_rotates_start_offset_each_round(self):
+        from features.redmine.daily_brief_worker import OwnerFairnessCursor
+
+        owners = ["a", "b", "c"]
+        cursor = OwnerFairnessCursor()
+        first = cursor.rotate(owners)
+        second = cursor.rotate(owners)
+        third = cursor.rotate(owners)
+        fourth = cursor.rotate(owners)
+        self.assertEqual(first[0], "a")
+        self.assertEqual(second[0], "b")
+        self.assertEqual(third[0], "c")
+        self.assertEqual(fourth[0], "a")  # 循环
+        # 轮转不丢成员。
+        self.assertEqual(sorted(first), sorted(owners))
+
+    def test_cursor_handles_empty_and_single(self):
+        from features.redmine.daily_brief_worker import OwnerFairnessCursor
+
+        cursor = OwnerFairnessCursor()
+        self.assertEqual(cursor.rotate([]), [])
+        self.assertEqual(cursor.rotate(["only"]), ["only"])
+        self.assertEqual(cursor.rotate(["only"]), ["only"])
+
+
+class UnexpectedExitConvergenceTests(unittest.TestCase):
+    """run_claimed_job 异常逃逸时,租约归属仍必须收敛。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repository = DailyBriefRepository(Path(self._tmp.name))
+        self.worker_id = "conv-worker"
+
+    def test_unexpected_exit_marks_job_failed_not_stuck_running(self):
+        from features.redmine.daily_brief_worker import run_claimed_job
+
+        self.repository.create_run(DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-13", mode="manual", run_id="db_conv"
+        ))
+        job, _ = self.repository.enqueue_job("db_conv", kind="run")
+        claimed = self.repository.claim_next_job(self.worker_id, lease_seconds=30)
+        self.assertEqual(claimed["job_id"], job["job_id"])
+
+        def factory(_owner):
+            async def execute_run(_run_id):
+                await asyncio.Event().wait()
+            return SimpleNamespace(execute_run=execute_run)
+
+        # 为触发 finally 兜底,让 asyncio.wait 自身抛错。
+        async def scenario_unexpected():
+            with patch(
+                "features.redmine.daily_brief_worker.asyncio.wait",
+                side_effect=RuntimeError("event loop exploded"),
+            ):
+                return await run_claimed_job(
+                    self.repository,
+                    claimed,
+                    self.worker_id,
+                    asyncio.Event(),
+                    lease_seconds=30,
+                    service_factory=factory,
+                )
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(scenario_unexpected())
+        # finally 兜底:job 被标 failed(而不是留 running 等 lease 过期)。
+        self.assertEqual(
+            self.repository.get_job(job["job_id"])["status"], "failed"
+        )
+        run = self.repository.get_run("db_conv")
+        self.assertEqual(run.status, "pending")
+        self.assertIn("unexpected exit", run.error)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -342,8 +342,13 @@ class CrashRecoveryTests(unittest.TestCase):
 
         from features.redmine.daily_brief_models import DailyBriefRun
 
+        # brief_date 必须避开"今天"：恢复把 stale run 标记 failed 后，
+        # start_run 会按产品逻辑复用【当天】的 nightly run 并重置为
+        # pending 重试——与当天同日的 stale run 会遮蔽恢复断言
+        # （该断言只在非当天日期下成立）。
+        brief_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
         stale = DailyBriefRun(
-            owner_id="u1", brief_date="2026-09-13", mode="nightly",
+            owner_id="u1", brief_date=brief_date, mode="nightly",
             run_id="db_stale", status="analyzing",
             started_at=(datetime.now() - timedelta(days=3)).isoformat(timespec="seconds"),
         )

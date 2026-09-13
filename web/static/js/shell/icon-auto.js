@@ -101,7 +101,7 @@ function unwrapIconValue(iconValue) {
 function renderIconImage(iconValue, altText = '图标', size = '100%') {
     const src = escapeIconAttr(proxiedIconUrl(unwrapIconValue(iconValue)));
     const alt = escapeIconAttr(altText);
-    return `<img src="${src}" alt="${alt}" style="width: ${size}; height: ${size}; object-fit: contain;" onerror="this.parentElement.textContent='🌐'">`;
+    return `<img src="${src}" alt="${alt}" style="width: ${size}; height: ${size}; object-fit: contain;" data-error="iconErrorToEmoji">`;
 }
 
 const LEGACY_TOOL_ICON_OVERRIDES = {
@@ -144,7 +144,7 @@ function renderIconImageWithFallback(primaryIcon, fallbackIcon, altText = '图�
     const primarySrc = escapeIconAttr(unwrapIconValue(primaryIcon));
     const fallbackSrc = escapeIconAttr(proxiedIconUrl(unwrapIconValue(fallbackIcon)));
     const alt = escapeIconAttr(altText);
-    return `<img src="${primarySrc}" data-fallback-src="${fallbackSrc}" alt="${alt}" style="width: ${size}; height: ${size}; object-fit: contain;" onerror="const fb=this.getAttribute('data-fallback-src'); if(fb && this.src.indexOf(fb) === -1){this.src=fb;}else{this.parentElement.textContent='🌐';}">`;
+    return `<img src="${primarySrc}" data-fallback-src="${fallbackSrc}" alt="${alt}" style="width: ${size}; height: ${size}; object-fit: contain;" data-error="iconErrorFallbackChain">`;
 }
 
 function getDisplayToolIcon(icon, tool) {
@@ -218,15 +218,39 @@ function showIconPreview(iconValue) {
         const previewUrl = proxiedIconUrl(imgUrl);
         previewImage.src = previewUrl;
         previewImage.style.display = 'block';
-        previewContainer.innerHTML = `<img src="${escapeIconAttr(previewUrl)}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 32px;\\'>🌐</span>'">`;
+        previewContainer.innerHTML = `<img src="${escapeIconAttr(previewUrl)}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" data-error="iconPreviewError">`;
     } else if (isImageIconUrl(iconValue)) {
         const previewUrl = proxiedIconUrl(iconValue);
         previewImage.src = previewUrl;
         previewImage.style.display = 'block';
-        previewContainer.innerHTML = `<img src="${escapeIconAttr(previewUrl)}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" onerror="this.parentElement.innerHTML='<span style=\\'font-size: 32px;\\'>🌐</span>'">`;
+        previewContainer.innerHTML = `<img src="${escapeIconAttr(previewUrl)}" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;" data-error="iconPreviewError">`;
     } else {
         // Emoji
         previewImage.style.display = 'none';
         previewContainer.innerHTML = `<span style="font-size: 32px;">${escapeHtml(iconValue || '🌐')}</span>`;
     }
 }
+
+
+// act-bridge error 委托目标（替代历史 inline onerror）。
+// 触发语义: `this` = 出错的 <img>。
+function iconErrorToEmoji() {
+    this.parentElement.textContent = '🌐';
+}
+
+function iconErrorFallbackChain() {
+    const fb = this.getAttribute('data-fallback-src');
+    if (fb && this.src.indexOf(fb) === -1) {
+        this.src = fb;
+    } else {
+        this.parentElement.textContent = '🌐';
+    }
+}
+
+function iconPreviewError() {
+    this.parentElement.innerHTML = '<span style="font-size: 32px;">🌐</span>';
+}
+
+window.iconErrorToEmoji = iconErrorToEmoji;
+window.iconErrorFallbackChain = iconErrorFallbackChain;
+window.iconPreviewError = iconPreviewError;

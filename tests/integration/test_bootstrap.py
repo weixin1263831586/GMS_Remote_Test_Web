@@ -153,8 +153,10 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(app.version, '4.0.0')
 
     def test_create_app_registers_health_route(self):
+        from tests.contract.snapshot_tools import flatten_app_routes
+
         app = create_app()
-        paths = {route.path for route in app.routes}
+        paths = {route.path for route in flatten_app_routes(app)}
         self.assertIn('/api/system/health', paths)
 
     def test_requests_return_stable_request_and_trace_ids(self):

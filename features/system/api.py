@@ -261,7 +261,7 @@ async def agent_install_bootstrap(request: Request):
 
 @router.get("/api/agent/install.sh")
 async def agent_install_sh_endpoint(request: Request):
-    """一行安装器: curl -kfsSL .../api/agent/install.sh | bash -s -- [配对码]"""
+    """一行安装器: curl -fsSL .../api/agent/install.sh | bash -s -- [配对码]"""
     return await agent_package_registry.agent_install_sh(request)
 
 

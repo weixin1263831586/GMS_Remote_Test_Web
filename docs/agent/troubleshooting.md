@@ -40,8 +40,10 @@
 - 运行期用 `GMS_CURL_CA_CERT` 指向 CA；仅在受控自签名环境使用
   `GMS_CURL_INSECURE=1`（profile `insecure = true` 会映射它）——不要在
   公网或不可信网络关闭校验。
-- 自签名环境安装时可使用 installer 支持的 insecure bootstrap
-  （`GMS_INSTALL_INSECURE=1`）；该策略会被写入 profile 并在后续
+- 自签名环境安装时可使用 installer 的显式降级开关
+  （`GMS_INSTALL_ALLOW_INSECURE=1`，bootstrap 阶段等价于
+  `GMS_INSTALL_INSECURE=1`）；生产环境 Controller 渲染的 install.sh
+  会直接拒绝该降级（exit 4）。该策略会被写入 profile 并在后续
   update/rollback 重新激活时保持（sticky）。
 
 ## Profile 歧义

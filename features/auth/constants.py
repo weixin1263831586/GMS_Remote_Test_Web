@@ -47,6 +47,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "artifacts.read_own",
         "apk.analyze_own",
         "sdk.read",
+        # 敏感副作用操作细分权限:登录 ≠ 允许发邮件。
+        "email.send",
     }),
     "device_operator": frozenset({
         "tests.execute",
@@ -60,6 +62,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "artifacts.read_own",
         "apk.analyze_own",
         "sdk.read",
+        "email.send",
     }),
     "admin": frozenset({"*"}),
     "worker_service": frozenset({

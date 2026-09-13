@@ -859,6 +859,78 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         output = subprocess.check_output(["node", "-e", script], text=True).strip()
         self.assertEqual(output, '["2026-06-12","2026-06-13"]')
 
+    def test_redmine_markdown_link_href_has_scheme_whitelist(self):
+        """Markdown 链接 URL 必须过 sanitizeHref 白名单(评审 P1)。
+
+        _inlineMd 的输入已 esc():javascript:/data: 等危险 scheme 渲染为
+        href="#",合法 http(s) 与站内相对路径原样保留。
+        """
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        match = re.search(
+            r"function esc\(s\) \{.*?\n\}(?=\nfunction)", source, re.S
+        )
+        href_match = re.search(
+            r"function sanitizeHref\(raw\) \{.*?\n\}", source, re.S
+        )
+        inline_match = re.search(
+            r"function _inlineMd\(text\) \{.*?\n\}", source, re.S
+        )
+        for found in (match, href_match, inline_match):
+            self.assertIsNotNone(found)
+        script = (
+            "const window = { location: { origin: 'https://gms.example.com' } };\n"
+            + match.group(0) + "\n"
+            + href_match.group(0) + "\n"
+            + inline_match.group(0) + "\n"
+            + "const cases = [\n"
+            "  '[x](javascript:alert(1))',\n"
+            "  '[x](data:text/html,<b>), [y](vbscript:msgbox), [z](file:///etc/passwd)',\n"
+            "  '[ok](https://redmine.example.com/issues/123), [rel](/api/redmine-agent/issues/1), [up](../escape), [dot](./x), [plain](not-a-url)',\n"
+            "  '[proto-rel](//evil.com/x)'\n"
+            "];\n"
+            "console.log(cases.map(c => _inlineMd(esc(c))).join('\\n'));\n"
+        )
+        output = subprocess.check_output(
+            ["node", "-e", script], text=True
+        )
+        # 危险 scheme → href="#"(esc 后的 javascript:alert 变体同样拒绝)。
+        self.assertNotIn("javascript:", output.replace("href=", ""))
+        self.assertNotIn("data:text/html", output.replace("href=", ""))
+        self.assertNotIn("vbscript:", output.replace("href=", ""))
+        self.assertNotIn("file://", output.replace("href=", ""))
+        self.assertNotIn("//evil.com", output)
+        # 合法绝对地址与站内相对路径保留。
+        self.assertIn(
+            'href="https://redmine.example.com/issues/123"', output
+        )
+        self.assertIn('href="/api/redmine-agent/issues/1"', output)
+        # ../、./、裸文本一律拒绝为 #。
+        for blocked in ("../escape", "./x", "not-a-url"):
+            self.assertNotIn(blocked, output)
+
+    def test_redmine_markdown_link_renderer_keeps_label_escaped(self):
+        """链接 label(已 esc)不再二次转义,url 再过 esc 防 attr 注出。"""
+        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        match = re.search(
+            r"function esc\(s\) \{.*?\n\}(?=\nfunction)", source, re.S
+        )
+        href_match = re.search(
+            r"function sanitizeHref\(raw\) \{.*?\n\}", source, re.S
+        )
+        inline_match = re.search(
+            r"function _inlineMd\(text\) \{.*?\n\}", source, re.S
+        )
+        script = (
+            "const window = { location: { origin: 'https://gms.example.com' } };\n"
+            + match.group(0) + "\n"
+            + href_match.group(0) + "\n"
+            + inline_match.group(0) + "\n"
+            + "console.log(_inlineMd(esc('[a<b onclick=\\\"x\\\"](&#39;)](https://ok.example.com/?q=1&z=2)')));\n"
+        )
+        output = subprocess.check_output(["node", "-e", script], text=True)
+        self.assertIn("https://ok.example.com/?q=1&amp;z=2", output)
+        self.assertNotIn('" onclick', output)
+
     def test_redmine_trend_detail_title_displays_inclusive_end_date(self):
         source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
         match = re.search(r"function utcDateText\(date\) \{.*?function displayTrendRange\(range\) \{.*?\n\}", source, re.S)
@@ -908,7 +980,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertIn("'#' + id", source)
 
     def test_gerrit_week_trend_click_uses_iso_week_start(self):
-        source = Path("features/gerrit/ui/page.html").read_text(encoding="utf-8")
+        # CSP 前置迁移后页面脚本外置为 features/gerrit/ui/page.js。
+        source = Path("features/gerrit/ui/page.js").read_text(encoding="utf-8")
         match = re.search(r"function utcDateText\(date\) \{.*?function trendLabelToDateRange\(granularity, label\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(JSON.stringify(trendLabelToDateRange('week', '2026-W24')));"
@@ -916,7 +989,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, '["2026-06-08","2026-06-15"]')
 
     def test_gerrit_trend_detail_title_displays_inclusive_end_date(self):
-        source = Path("features/gerrit/ui/page.html").read_text(encoding="utf-8")
+        # CSP 前置迁移后页面脚本外置为 features/gerrit/ui/page.js。
+        source = Path("features/gerrit/ui/page.js").read_text(encoding="utf-8")
         match = re.search(r"function utcDateText\(date\) \{.*?function displayTrendRange\(range\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(displayTrendRange(['2026-06-08', '2026-06-15']));"
@@ -924,7 +998,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, "2026-06-08 至 2026-06-14")
 
     def test_gerrit_trend_detail_uses_created_date_endpoint(self):
-        source = Path("features/gerrit/ui/page.html").read_text(encoding="utf-8")
+        # CSP 前置迁移后页面脚本外置为 features/gerrit/ui/page.js。
+        source = Path("features/gerrit/ui/page.js").read_text(encoding="utf-8")
         self.assertIn("/api/gerrit-dashboard/changes-by-date?", source)
         self.assertIn("owners: owners.join(',')", source)
         self.assertIn("scope: trendScope || currentTab || ''", source)
