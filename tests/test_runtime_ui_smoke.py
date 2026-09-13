@@ -731,6 +731,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "artifacts.read_own",
                     "apk.analyze_own",
                     "sdk.read",
+                    "build.read",
+                    "build.execute",
+                    "build.cancel",
                 ]),
             )
             self.assertTrue(

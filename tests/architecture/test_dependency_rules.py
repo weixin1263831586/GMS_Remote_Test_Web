@@ -106,3 +106,20 @@ class DependencyRuleTests(unittest.TestCase):
                     if symbol.startswith('_'):
                         offenders.append((relative, f'from {module} import {symbol}'))
         self.assertEqual(offenders, [])
+
+    def test_bootstrap_never_imports_foundation_private_symbols(self):
+        """``bootstrap`` may only use foundation's public API surface.
+
+        ``foundation.secrets._load_key`` style imports couple the composition
+        root to implementation details; if a capability is needed, foundation
+        must expose it (e.g. ``derive_application_key``).
+        """
+        offenders = []
+        for path in (ROOT / 'bootstrap').rglob('*.py'):
+            relative = str(path.relative_to(ROOT))
+            if '__pycache__' in relative:
+                continue
+            for module, symbol in imported_symbols(path):
+                if module.startswith('foundation.') and symbol.startswith('_'):
+                    offenders.append((relative, f'from {module} import {symbol}'))
+        self.assertEqual(offenders, [])

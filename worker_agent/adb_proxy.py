@@ -1100,6 +1100,12 @@ def _managed_running(path: Path, expected: str) -> bool:
         os.kill(pid, 0)
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
         return expected.encode() in cmdline
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # 进程存在但属于其他 uid:此时无法读 cmdline 验证归属,保守视为
+        # 存活,避免把别的用户启动的 adb server 误停/误判为已退出。
+        return True
     except (OSError, ValueError):
         return False
 

@@ -140,6 +140,63 @@ class RunLifecycleTests(unittest.TestCase):
         retry = self.service.start_run("nightly")
         self.assertEqual(retry["run_id"], run_id)
         self.assertEqual(retry["status"], "pending")
+        # cancelled → 同样可重试,且重试清掉取消标志
+        run = self.service.repository.get_run(run_id)
+        run.status = "cancelled"
+        self.service.repository.update_run(run)
+        self.service.repository.request_cancel(run_id)  # 残留标志
+        retry2 = self.service.start_run("nightly")
+        self.assertEqual(retry2["run_id"], run_id)
+        self.assertFalse(self.service.repository.is_cancel_requested(run_id))
+
+    def test_request_cancel_converges_run_to_cancelled(self):
+        """用户停止:执行循环在 issue 边界读到标志,收敛为 cancelled 终态。"""
+        import asyncio
+
+        started = self.service.start_run("nightly")
+        run_id = started["run_id"]
+
+        async def fake_analyze(entry):
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        async def scenario():
+            with self._patch_snapshot(), patch.object(self.service, "_build_analyzer") as builder:
+                builder.return_value.analyze = fake_analyze
+                task = asyncio.create_task(self.service.execute_run(run_id))
+                await asyncio.sleep(0)  # 让执行任务起跑
+                requested = self.service.request_cancel()
+                self.assertTrue(requested.get("cancel_requested"))
+                return await task
+
+        run = asyncio.run(scenario())
+        self.assertEqual(run.status, "cancelled")
+        self.assertEqual(run.error, "")
+        self.assertTrue(run.finished_at)
+
+    def test_request_cancel_is_noop_for_terminal_run(self):
+        started = self.service.start_run("nightly")
+        run = self.service.repository.get_run(started["run_id"])
+        run.status = "completed"
+        self.service.repository.update_run(run)
+
+        result = self.service.request_cancel()
+
+        self.assertTrue(result.get("already_terminal"))
+        self.assertFalse(self.service.repository.is_cancel_requested(started["run_id"]))
+
+    def test_execute_run_returns_cancelled_state_for_late_queue_task(self):
+        """cancelled 已终态:迟到的队列任务直接返回,不复活 run。"""
+        import asyncio
+
+        started = self.service.start_run("nightly")
+        run = self.service.repository.get_run(started["run_id"])
+        run.status = "cancelled"
+        run.finished_at = "2026-09-13T10:00:00"
+        self.service.repository.update_run(run)
+
+        result = asyncio.run(self.service.execute_run(started["run_id"]))
+
+        self.assertEqual(result.status, "cancelled")
 
     def test_force_reruns_completed_manual_run(self):
         first = self.service.start_run("manual")
@@ -328,6 +385,14 @@ class AnalyzerBindingTests(unittest.TestCase):
         config = normalize_daily_brief_config({"agent_profile": "bad name;rm -rf"})
         self.assertEqual(config["agent_profile"], "")
 
+    def test_default_max_turns_is_20(self):
+        """默认步数预算覆盖典型证据链（issue #646220 用 12 步不够）。"""
+        self.assertEqual(DEFAULT_BRIEF_CONFIG["max_turns"], 20)
+        analyzer = self.service._build_analyzer({})
+        self.assertEqual(analyzer.max_turns, DEFAULT_BRIEF_CONFIG["max_turns"])
+        analyzer = self.service._build_analyzer({"max_turns": 30})
+        self.assertEqual(analyzer.max_turns, 30)
+
 
 class CrashRecoveryTests(unittest.TestCase):
     """启动前把中断遗留的 run 标记为 failed。"""
@@ -490,12 +555,6 @@ class FrozenSnapshotTests(unittest.TestCase):
         blocked, run = asyncio.run(scenario())
         self.assertIn("still executing", blocked.get("error", ""))
         self.assertEqual(run.status, "completed")
-
-
-def _async_value(value):  # pragma: no cover - 保留给未来同步 mock 使用
-    async def coro(**kwargs):
-        return value
-    return coro()
 
 
 if __name__ == "__main__":

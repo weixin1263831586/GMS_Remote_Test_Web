@@ -5,6 +5,7 @@ from typing import Any
 
 from . import runtime
 from .usbip import usbip_manager
+from .usbip_protocol import recompute_protocol_mode
 from .usbip_transaction import USBIP_PORT_COMMAND, parse_usbip_port_entries
 
 
@@ -94,20 +95,9 @@ def _scope_protocol_status(
                 if serial in expected_devices
             ]
 
-    if scoped.get("fastboot"):
-        scoped["mode"] = "fastboot"
-    elif scoped.get("recovery") or scoped.get("sideload"):
-        scoped["mode"] = "recovery"
-    elif scoped.get("adb_ready"):
-        scoped["mode"] = "adb"
-    elif scoped.get("unauthorized"):
-        scoped["mode"] = "unauthorized"
-    elif scoped.get("offline"):
-        scoped["mode"] = "offline"
-    elif scoped.get("adb"):
-        scoped["mode"] = "adb_non_device"
-    else:
-        scoped["mode"] = "unknown"
+    # mode 推导只有这一份实现(usbip_protocol.recompute_protocol_mode);
+    # 过滤后重算,禁止保留全局探测的遗留 mode。
+    scoped["mode"] = recompute_protocol_mode(scoped)
     return scoped
 
 

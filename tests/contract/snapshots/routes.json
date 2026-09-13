@@ -1862,6 +1862,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/redmine-agent/daily-brief/{brief_date}/cancel"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/reanalyze"
   },
   {

@@ -11,7 +11,9 @@ from typing import Any
 
 
 BRIEF_MODES = ("nightly", "delta", "manual")
-RUN_STATUSES = ("pending", "snapshotting", "analyzing", "completed", "partial", "failed")
+RUN_STATUSES = (
+    "pending", "snapshotting", "analyzing", "completed", "partial", "failed", "cancelled",
+)
 ISSUE_STATUSES = ("pending", "running", "completed", "failed", "stale")
 
 # 优先级由规则生成 base score，AI 只做有限调整；排序必须 deterministic。

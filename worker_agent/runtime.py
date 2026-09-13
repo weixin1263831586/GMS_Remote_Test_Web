@@ -564,8 +564,13 @@ class WorkerRuntime:
         try:
             os.kill(pid, 0)
             return True
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
             return False
+        except PermissionError:
+            # POSIX:权限拒绝说明进程存在(属于其他 uid,如 sudo 启动的
+            # fastboot/upgrade_tool),只是当前用户无权发信号。误判为
+            # "不存在"会让 recoverable_jobs 把活进程标记为 failed。
+            return True
 
     def recoverable_jobs(self) -> list[dict[str, Any]]:
         with self.connect() as conn:

@@ -55,6 +55,32 @@ def build_adb_devices_command(adb_server_socket: str | None = None) -> str:
     )
 
 
+def recompute_protocol_mode(status: dict[str, Any]) -> str:
+    """Derive ``mode`` from the attribution lists — the single source of truth.
+
+    Any code that filters/mutates the attribution lists (scope, reconnect
+    keep-alive probes) must re-derive ``mode`` through this function. A stale
+    global ``mode`` must never survive filtering: on a multi-device Ubuntu
+    host the global mode can be contributed by a device outside the current
+    USB/IP assignment (e.g. a locally attached fastboot device), and keeping
+    it would yield ``mode="fastboot"`` with ``fastboot==[]`` — a
+    self-contradictory status that downstream burn/reconnect logic trusts.
+    """
+    if status.get("fastboot"):
+        return "fastboot"
+    if status.get("recovery") or status.get("sideload"):
+        return "recovery"
+    if status.get("adb_ready"):
+        return "adb"
+    if status.get("unauthorized"):
+        return "unauthorized"
+    if status.get("offline"):
+        return "offline"
+    if status.get("adb"):
+        return "adb_non_device"
+    return "unknown"
+
+
 def probe_protocol_status(
     ssh_manager,
     ssh,
@@ -97,20 +123,8 @@ def probe_protocol_status(
     except Exception as exc:
         logger.debug("[USB/IP] fastboot protocol probe failed: %s", exc)
 
-    if status["fastboot"]:
-        status["mode"] = "fastboot"
-    elif status["recovery"] or status["sideload"]:
-        status["mode"] = "recovery"
-    elif status["adb_ready"]:
-        status["mode"] = "adb"
-    elif status["unauthorized"]:
-        status["mode"] = "unauthorized"
-    elif status["offline"]:
-        status["mode"] = "offline"
-    elif status["adb"]:
-        status["mode"] = "adb_non_device"
+    status["mode"] = recompute_protocol_mode(status)
     return status
-
 
 def scope_protocol_status(
     protocol_status: dict[str, Any],
@@ -144,8 +158,10 @@ def scope_protocol_status(
         values = scoped.get(key) or []
         if isinstance(values, list):
             scoped[key] = [serial for serial in values if serial in allowed]
-    if scoped.get("adb_ready"):
-        scoped["mode"] = "adb"
+    # 过滤后必须重算 mode:全局 mode 可能由 scope 外设备(如直连
+    # fastboot 设备)贡献,保留它会产生 mode="fastboot" 而 fastboot=[]
+    # 的自相矛盾状态,烧录/重连逻辑会把残留 mode 当真。
+    scoped["mode"] = recompute_protocol_mode(scoped)
     return scoped
 
 

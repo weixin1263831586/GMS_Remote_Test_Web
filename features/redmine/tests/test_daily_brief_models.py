@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from features.redmine.daily_brief_models import (
+    RUN_STATUSES,
     DailyBriefIssue,
     DailyBriefRun,
     base_priority_score,
@@ -117,6 +118,9 @@ class DetectDeltaTests(unittest.TestCase):
 
 
 class ModelRowTests(unittest.TestCase):
+    def test_cancelled_is_a_supported_terminal_status(self):
+        self.assertIn("cancelled", RUN_STATUSES)
+
     def test_run_and_issue_rows_roundtrip_fields(self):
         run = DailyBriefRun(owner_id="u1", brief_date="2026-09-13", mode="nightly", run_id="db_x")
         row = run.to_row()

@@ -202,6 +202,29 @@ async def reanalyze_issue(request: Request, brief_date: str, issue_id: int):
     )
 
 
+@router.post("/daily-brief/{brief_date}/cancel")
+async def cancel_daily_brief(request: Request, brief_date: str):
+    """请求停止该日期最新一次晨报 run（协作式取消）。
+
+    独立 Worker 执行靠 DB 标志位在 issue 边界生效；同进程执行额外
+    task.cancel()。已终态的 run 幂等返回 already_terminal。
+    """
+    _require_human(request)
+    if not _is_brief_date(brief_date):
+        return JSONResponse(
+            content={"success": False, "error": "brief_date must be YYYY-MM-DD"},
+            status_code=400,
+        )
+    service = _service_for_request(request)
+    result = service.request_cancel(brief_date)
+    if result.get("error"):
+        return JSONResponse(
+            content={"success": False, "error": result["error"]},
+            status_code=404,
+        )
+    return {"success": True, "data": result}
+
+
 def _is_brief_date(value: str) -> bool:
     try:
         datetime.strptime(value, "%Y-%m-%d")

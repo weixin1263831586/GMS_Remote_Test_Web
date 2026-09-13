@@ -186,6 +186,27 @@ class DailyBriefApiTests(unittest.TestCase):
         body = resp.json()
         self.assertFalse(body["data"]["configured"])
 
+    def test_cancelled_run_allows_single_issue_reanalysis(self):
+        """UI 在 cancelled 详情中仍提供单条重试，API 必须可达。"""
+        queued = self.client.post(
+            "/api/redmine-agent/daily-brief/run"
+        ).json()["data"]
+        repo = brief_repo.owner_daily_brief_repository("owner-a")
+        run = repo.get_run(queued["run_id"])
+        repo.upsert_issue(brief_repo.DailyBriefIssue(
+            run_id=run.run_id, issue_id=101, buckets=[], status="pending"
+        ))
+        self.assertTrue(repo.request_cancel(run.run_id))
+        run.status = "cancelled"
+        repo.update_run(run)
+
+        response = self.client.post(
+            f"/api/redmine-agent/daily-brief/{run.brief_date}/issues/101/reanalyze"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(repo.is_cancel_requested(run.run_id))
+
     # ------------------------------------------------------------------ date
 
     def test_get_brief_for_date_validates_and_404(self):

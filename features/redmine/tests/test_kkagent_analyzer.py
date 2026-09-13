@@ -64,6 +64,39 @@ def _write_fake_kkagent(directory: Path, behavior: str) -> Path:
             f"sys.stdout.write(json.dumps(json.loads(open({str(os.environ.get('FAKE_RESULT_PATH', ''))!r}).read())))\n"
         ),
         "fail": "import sys; sys.stderr.write('model unreachable'); sys.exit(3)",
+        # --max-turns 预算耗尽：exit 3 + stdout 信封 subtype=max_turns +
+        # stderr 记录明确的 turn limit reached。
+        "max_turns": (
+            "import json, sys\n"
+            "sys.stderr.write('2026-09-13 12:47:00.892  WARN kkagent_core::agent_loop: "
+            "Agent turn limit reached for session x\\n')\n"
+            "sys.stdout.write(json.dumps({'type': 'result', 'subtype': 'max_turns', "
+            "'exit_code': 3, 'message': 'partial work only'}))\n"
+            "sys.exit(3)\n"
+        ),
+        "turn-interrupted": (
+            "import sys\n"
+            "sys.stderr.write('2026-09-13 13:18:49.240  INFO kkagent_core::agent_loop: "
+            "Continuing turn (no step limit)\\n')\n"
+            "sys.stderr.write('2026-09-13 13:18:49.252  INFO kkagent_core::agent_loop: "
+            "Turn interrupted for session x\\n')\n"
+            "sys.exit(3)\n"
+        ),
+        # LLM 流式超时（issue #646220 实测形态）：stderr ERROR 带
+        # kind=timeout；信封可能同时报 subtype=max_turns（超时重试耗尽
+        # 连带烧掉 turn 预算）——超时必须优先归类。
+        "llm-timeout": (
+            "import json, sys\n"
+            "sys.stderr.write('2026-09-13 14:31:21.544 ERROR kkagent_core::agent_loop: "
+            "LLM stream error: error sending request for url "
+            "(https://open.bigmodel.cn/api/coding/paas/v4/chat/completions) "
+            "[kind=request, kind=timeout]: operation timed out\\n')\n"
+            "sys.stderr.write('2026-09-13 14:31:21.544 ERROR kkagent_core::agent_loop: "
+            "Stream error: error sending request\\n')\n"
+            "sys.stdout.write(json.dumps({'type': 'result', 'subtype': 'max_turns', "
+            "'exit_code': 3, 'message': 'partial'}))\n"
+            "sys.exit(3)\n"
+        ),
         "interrupted": (
             "import sys\n"
             "sys.stderr.write('Traceback (most recent call last):\\nKeyboardInterrupt\\n')\n"
@@ -175,6 +208,15 @@ class KkAgentAnalyzerTests(unittest.TestCase):
         self.assertEqual(outcome.error_type, "kkagent_error")
         self.assertEqual(outcome.exit_code, 3)
 
+    def test_turn_limit_exit_is_max_turns_not_generic_error(self):
+        """--max-turns 耗尽必须区别于一般 kkagent_error，并带调参指引。"""
+        import asyncio
+        outcome = asyncio.run(self._run(self._analyzer("max_turns", timeout_seconds=20)))
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.error_type, "max_turns")
+        self.assertEqual(outcome.exit_code, 3)
+        self.assertIn("步预算", outcome.error)
+
     def test_signal_exit_is_interrupted_not_generic_kkagent_error(self):
         import asyncio
 
@@ -185,6 +227,46 @@ class KkAgentAnalyzerTests(unittest.TestCase):
         self.assertFalse(outcome.ok)
         self.assertEqual(outcome.error_type, "interrupted")
         self.assertIn("SIGINT", outcome.error)
+
+    def test_turn_interrupted_log_is_interrupted_not_max_turns(self):
+        """Turn interrupted 是取消；no step limit 更排除步数用尽。"""
+        import asyncio
+
+        analyzer = self._analyzer(
+            "turn-interrupted", timeout_seconds=20, interrupted_retries=0
+        )
+        outcome = asyncio.run(self._run(analyzer))
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.error_type, "interrupted")
+        self.assertNotEqual(outcome.error_type, "max_turns")
+        self.assertIn("Turn interrupted", outcome.error)
+
+    def test_llm_stream_timeout_wins_over_max_turns(self):
+        """LLM 流超时是根因时优先于 max_turns（信封 subtype 只是表象）。"""
+        import asyncio
+
+        analyzer = self._analyzer("llm-timeout", timeout_seconds=20,
+                                  interrupted_retries=0)
+        outcome = asyncio.run(self._run(analyzer))
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.error_type, "llm_timeout")
+        self.assertIn("模型服务流式响应超时", outcome.error)
+        self.assertIn("glm-5.3-flash", outcome.error)
+
+    def test_llm_timeout_retries_once(self):
+        """LLM 流超时与 interrupted 一样享受一次自动重试。"""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        analyzer = self._analyzer("ok", interrupted_retries=1)
+        timed_out = type("Outcome", (), {"error_type": "llm_timeout"})()
+        success = type("Outcome", (), {"error_type": "", "ok": True})()
+        with patch.object(
+            analyzer, "_analyze_once", AsyncMock(side_effect=[timed_out, success])
+        ) as analyze_once:
+            outcome = asyncio.run(analyzer.analyze(ENTRY))
+        self.assertIs(outcome, success)
+        self.assertEqual(analyze_once.await_count, 2)
 
     def test_interrupted_exit_retries_once(self):
         import asyncio
@@ -411,6 +493,28 @@ class KkAgentAnalyzerTests(unittest.TestCase):
         self.assertNotIn("kkagent process started", outcome.error)
         self.assertLessEqual(len(outcome.error), 500)
 
+    def test_stderr_summary_keeps_line_breaks_and_normalizes_timestamps(self):
+        """多行日志保留换行(pre-wrap 渲染),RFC3339 时间戳转友好格式。"""
+        from features.redmine.kkagent_analyzer import _summarize_stderr
+
+        summary = _summarize_stderr(
+            "2026-09-13T10:31:49.070374Z  INFO kkagent_core::agent_loop: Continuing turn (no step limit)\n"
+            "2026-09-13T10:31:49.070388Z  INFO kkagent_core::agent_loop: Starting turn for session a7ae\n"
+            "2026-09-13T10:31:49.074202Z  INFO kkagent_core::agent_loop: Using model alias=glm-5.3-1m id=glm-5.3\n"
+            "2026-09-13T10:31:49.074210Z  INFO kkagent_core::agent_loop: Turn interrupted for session a7ae\n"
+        )
+
+        # 行间是真实换行,不是 " | " 拼接的一条长串。
+        lines = summary.splitlines()
+        self.assertEqual(len(lines), 4)
+        self.assertNotIn(" | ", summary)
+        # RFC3339 (T 分隔 + Z 后缀 + 微秒) 转为 "YYYY-MM-DD HH:MM:SS.mmm"。
+        self.assertEqual(
+            lines[0],
+            "2026-09-13 10:31:49.070  INFO kkagent_core::agent_loop: Continuing turn (no step limit)",
+        )
+        self.assertNotIn("T10:", summary)
+
     def test_prompt_marks_redmine_content_untrusted(self):
         prompt = KkAgentRedmineAnalyzer().build_prompt(ENTRY)
         self.assertIn("DATA only", prompt)
@@ -440,6 +544,92 @@ class KkAgentAnalyzerTests(unittest.TestCase):
 
     def test_prompt_version_is_pinned(self):
         self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v5")
+
+
+class PreflightGmsAuthTests(unittest.TestCase):
+    """认证预检：fail-closed 只对明确的 authenticated=false，其余放行。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def _write_selfcheck(self, payload: str) -> Path:
+        script = self.dir / "selfcheck.sh"
+        script.write_text(f"#!/bin/sh\necho '{payload}'\n", encoding="utf-8")
+        return script
+
+    def _payload(self, authenticated: bool) -> str:
+        return json.dumps({
+            # 真实 CLI 信封在认证失败时 exit_code=3/ok=false，
+            # 但 selfcheck 数据仍包含 auth.status.authenticated=false。
+            "ok": authenticated,
+            "exit_code": 0 if authenticated else 3,
+            "data": {
+                "profile": "kkagent-host-x",
+                "credential": {"token_file": "/tmp/tok"},
+                "auth": {
+                    "ok": True,
+                    "status": {"authenticated": authenticated},
+                },
+            },
+        })
+
+    def _preflight(self, script: Path, **kw):
+        import asyncio
+
+        from features.redmine import kkagent_analyzer as mod
+
+        env = {"GMS_RT_PROFILE": "kkagent-host-x"}
+        with patch.object(mod, "GMS_SELFCHECK_SCRIPT", str(script)):
+            return asyncio.run(mod.preflight_gms_auth(env, **kw))
+
+    def test_no_profile_allows_without_running_selfcheck(self):
+        import asyncio
+
+        from features.redmine.kkagent_analyzer import preflight_gms_auth
+
+        # 不存在也不会被调用的脚本路径：未绑定 profile 必须直接放行。
+        ok, reason = asyncio.run(preflight_gms_auth({}))
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+    def test_revoked_token_blocks_with_reenroll_hint(self):
+        ok, reason = self._preflight(self._write_selfcheck(self._payload(False)))
+        self.assertFalse(ok)
+        self.assertIn("kkagent-host-x", reason)
+        self.assertIn("/tmp/tok", reason)
+        self.assertIn("gms-rt-agent-enroll", reason)
+
+    def test_authenticated_token_passes(self):
+        ok, reason = self._preflight(self._write_selfcheck(self._payload(True)))
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+    def test_selfcheck_missing_or_garbage_fails_open(self):
+        # 脚本输出非法 JSON：预检自身故障不得阻塞分析。
+        ok, reason = self._preflight(self._write_selfcheck("not json"))
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+        # 脚本不存在且 PATH 上也没有：同样放行。
+        import asyncio
+
+        from features.redmine import kkagent_analyzer as mod
+
+        with patch.object(mod, "GMS_SELFCHECK_SCRIPT", str(self.dir / "nope.sh")), \
+                patch("shutil.which", return_value=None):
+            ok, reason = asyncio.run(
+                mod.preflight_gms_auth({"GMS_RT_PROFILE": "p"})
+            )
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+    def test_selfcheck_timeout_fails_open(self):
+        script = self.dir / "slow.sh"
+        script.write_text("#!/bin/sh\nsleep 5\n", encoding="utf-8")
+        ok, reason = self._preflight(script, timeout_seconds=0.2)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
 
 
 if __name__ == "__main__":

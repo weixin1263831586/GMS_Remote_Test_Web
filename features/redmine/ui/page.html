@@ -277,6 +277,11 @@
           <input type="number" min="1" max="4" data-daily-brief-setting="max_parallel_issues" value="1">
         </div>
       </div>
+      <div>
+        <label>单条分析步数上限</label>
+        <input type="number" min="1" max="50" data-daily-brief-setting="max_turns" value="20">
+        <div class="setting-help">单条工单允许 AI 执行的最大步数；证据链较长时失败提示「步数预算耗尽」可调大后重试。</div>
+      </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div>
         <label>SMTP 服务器</label>

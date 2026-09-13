@@ -44,10 +44,16 @@ class BuildAccessTests(unittest.TestCase):
         async def test_identity(request: Request, call_next):
             username = request.headers.get("X-Test-User", "alice")
             role = request.headers.get("X-Test-Role", "user")
+            scopes = [
+                item
+                for item in request.headers.get("X-Test-Scopes", "").split(",")
+                if item.strip()
+            ]
             request.state.current_user = CurrentUser(
                 id=f"id-{username}",
                 username=username,
                 role=role,
+                extra_permissions=frozenset(scopes),
             )
             return await call_next(request)
 
@@ -98,6 +104,75 @@ class BuildAccessTests(unittest.TestCase):
 
         self.assertEqual(listed.status_code, 401)
         self.assertEqual(fetched.status_code, 401)
+
+    def test_zero_scope_agent_token_cannot_create_build_job(self):
+        """零 scope Agent token:身份合法但没有 build.execute,必须 403。"""
+
+        response = self.client.post(
+            "/api/build/jobs",
+            headers={
+                "X-Test-User": "kkagent",
+                "X-Test-Role": "agent_service",
+            },
+            json={"server_id": "server", "template_id": "template"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIsNone(self.service.created_request)
+
+    def test_agent_token_with_build_execute_scope_creates_build_job(self):
+        response = self.client.post(
+            "/api/build/jobs",
+            headers={
+                "X-Test-User": "kkagent",
+                "X-Test-Role": "agent_service",
+                "X-Test-Scopes": "build.execute",
+            },
+            json={"server_id": "server", "template_id": "template"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.service.created_request["owner"], "id-kkagent")
+
+    def test_zero_scope_agent_token_cannot_discover_or_cancel(self):
+        # cancel 类路由挂无条件 require_permission:任何模式下零 scope 都被拒。
+        cancel = self.client.post(
+            "/api/build/jobs/alice-job/cancel",
+            headers={"X-Test-User": "kkagent", "X-Test-Role": "agent_service"},
+        )
+        self.assertEqual(cancel.status_code, 403)
+
+        # discover 类路由用 require_permission_when_auth_required:
+        # 仅在强制认证部署(生产)下校验权限,dev 模式保持开放语义。
+        app = FastAPI()
+        app.include_router(build_api.router)
+
+        @app.middleware("http")
+        async def test_identity(request: Request, call_next):
+            username = request.headers.get("X-Test-User", "kkagent")
+            role = request.headers.get("X-Test-Role", "agent_service")
+            request.state.current_user = CurrentUser(
+                id=f"id-{username}", username=username, role=role
+            )
+            return await call_next(request)
+
+        env = {"GMS_ENV": "production", "GMS_AUTH_REQUIRED": "true"}
+        with patch.dict(os.environ, env), TestClient(app) as client:
+            discover = client.post(
+                "/api/build/discover/workspaces",
+                headers={"X-Test-User": "kkagent", "X-Test-Role": "agent_service"},
+                json={"server_id": "server"},
+            )
+        self.assertEqual(discover.status_code, 403)
+
+    def test_human_roles_keep_build_access(self):
+        response = self.client.post(
+            "/api/build/jobs",
+            headers={"X-Test-User": "alice", "X-Test-Role": "user"},
+            json={"server_id": "server", "template_id": "template"},
+        )
+
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":

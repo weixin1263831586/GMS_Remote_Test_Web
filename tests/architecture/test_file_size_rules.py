@@ -19,7 +19,7 @@ MIGRATION_LINE_LIMITS = {
     'features/cluster/tests/test_cluster.py': 667,
     'features/auth/service.py': 608,
     'features/auth/agent_tokens.py': 365,
-    'features/auth/constants.py': 84,  # +3: email.send 人类角色
+    'features/auth/constants.py': 98,  # +14: build.* scopes 与人类角色权限(ADR 0006)
     'features/auth/tests/test_auth_api.py': 602,
     'features/auth/tests/test_security_boundary.py': 472,
     'features/devices/config_override.py': 732,
@@ -37,7 +37,7 @@ MIGRATION_LINE_LIMITS = {
     'features/redmine/knowledge_service.py': 599,
     # 2026-09 并发收敛:enqueue 去重键修正 + runs ON CONFLICT + job lease_token
     # CAS + 旧库迁移分支;后续拆 jobs 队列到独立模块时应回落 600。
-    'features/redmine/daily_brief_repository.py': 606,
+    'features/redmine/daily_brief_repository.py': 652,  # +46: 协作式取消(cancel_requested 列+请求/查询/清除)
     # +72: sanitizeHref scheme 白名单回归(node 执行测试)。
     'features/redmine/tests/test_dashboard_stats.py': 1165,
     'features/reports/analysis_api.py': 752,  # +40: reports.read 门禁 helper
@@ -56,7 +56,7 @@ MIGRATION_LINE_LIMITS = {
     'features/devices/integrations_api.py': 2463,  # assignments 存储层已拆至 usbip_assignments.py
     'features/devices/reconnect.py': 942,
     'features/devices/tests/test_adb_proxy_service.py': 911,  # adb proxy 重启/断连 guard 回归桩
-    'features/devices/tests/test_usbip_flash_modes.py': 808,
+    'features/devices/tests/test_usbip_flash_modes.py': 851,  # +43: scoped mode 重算回归
     'features/devices/tests/test_usbip_linux_source.py': 990,
     'features/devices/tests/test_usbip_reconnect.py': 3121,
     'features/devices/usbip_linux_source.py': 818,
