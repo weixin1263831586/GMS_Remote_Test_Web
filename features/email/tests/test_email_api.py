@@ -70,6 +70,53 @@ class EmailApiTests(unittest.TestCase):
         send_email_mock.assert_not_called()
 
     @patch("features.email.api.send_email")
+    def test_recipient_count_cannot_be_bypassed_via_semicolons(self, send_email_mock):
+        """单项内嵌分号必须先拆分再计数,否则上限形同虚设。"""
+        self._login()
+        packed = ";".join(f"user{i}@example.com" for i in range(40))
+
+        response = self.client.post(
+            "/api/email/send",
+            json={"to": [packed], "subject": "s", "body": "b"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("收件人数量超限", response.json()["error"])
+        send_email_mock.assert_not_called()
+
+    @patch("features.email.api.send_email")
+    def test_crlf_header_injection_is_rejected(self, send_email_mock):
+        """内嵌 CRLF/空白/分隔符的地址在 API 边界被拒绝(头注入防护)。"""
+        self._login()
+
+        for bad_to in (
+            ["a@b.com\r\nBcc: evil@x.com"],
+            ["a b@c.com"],
+            ["<script>@x.com"],
+            ["a@b.com,extra@y.com;third@z.com,<bad>@x.com"],
+        ):
+            with self.subTest(to=bad_to):
+                response = self.client.post(
+                    "/api/email/send", json={"to": bad_to, "subject": "s", "body": "b"}
+                )
+                self.assertEqual(response.status_code, 400)
+                send_email_mock.assert_not_called()
+
+    @patch("features.email.api.send_email")
+    def test_subject_crlf_is_stripped_not_rejected(self, send_email_mock):
+        """主题中的 CRLF 被折叠为空格(不拒绝合法换行输入,也不注入头)。"""
+        self._login()
+        send_email_mock.return_value = {"sent": True, "mode": "smtp", "recipients": []}
+
+        response = self.client.post(
+            "/api/email/send",
+            json={"to": ["dev@example.com"], "subject": "line1\r\nBcc: evil@x.com", "body": "b"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(send_email_mock.call_args[0][1], "line1 Bcc: evil@x.com")
+
+    @patch("features.email.api.send_email")
     def test_body_size_is_capped(self, send_email_mock):
         self._login()
 

@@ -1,4 +1,5 @@
 import json
+import re
 import stat
 import subprocess
 import tempfile
@@ -129,29 +130,28 @@ class SecurityHardeningTests(unittest.TestCase):
             Path('agent/gms-remote-test/runtime/gms-agent'),
             Path('agent/gms-remote-test/runtime/gms_agent/package_manager.py'),
         ]
+        # 用正则而非固定子串,覆盖 -k / -ksSL / -kfsSL / --insecure 等变体,
+        # 以及 wget 的 --no-check-certificate 与 Python 侧的显式关闭。
         downgrade_patterns = (
-            '-kfsSL',
-            '--no-check-certificate',
-            'curl_insecure=True',
-            'ssl=False',
+            re.compile(r'\bcurl\b[^\n]*\s(?:-[a-zA-Z]*k[a-zA-Z]*|--insecure)\b'),
+            re.compile(r'--no-check-certificate\b'),
+            re.compile(r'curl_insecure\s*=\s*True'),
+            re.compile(r'\bssl\s*=\s*False'),
+            re.compile(r'\bverify\s*=\s*False'),
         )
+
         for path in scanned:
             self.assertTrue(path.exists(), path)
-            source = path.read_text(encoding='utf-8')
-            for window in (
-                line for line in source.splitlines() if any(
-                    pattern in line for pattern in downgrade_patterns
-                )
-            ):
-                context = '\n'.join(
-                    source.splitlines()[
-                        max(0, source.splitlines().index(window) - 12):
-                        source.splitlines().index(window) + 1
-                    ]
-                )
+            lines = path.read_text(encoding='utf-8').splitlines()
+            for index, line in enumerate(lines):
+                if not any(pattern.search(line) for pattern in downgrade_patterns):
+                    continue
+                # 按真实行号取上文窗口;避免 splitlines().index() 对重复行
+                # 只返回首个索引、让未守护的降级行借用别处的守护上下文。
+                context = '\n'.join(lines[max(0, index - 12): index + 1])
                 self.assertTrue(
                     any(guard in context for guard in guarded),
-                    f'{path}: TLS 降级行缺少显式开关守护: {window.strip()}',
+                    f'{path}:{index + 1}: TLS 降级行缺少显式开关守护: {line.strip()}',
                 )
         # verify=False 属于硬禁止:任何位置都不允许。
         for path in scanned:
@@ -160,6 +160,40 @@ class SecurityHardeningTests(unittest.TestCase):
                 path.read_text(encoding='utf-8'),
                 path,
             )
+
+    def test_tls_gate_detects_bypass_samples(self):
+        """门禁自检:未守护的降级样例必须被判为违规,守护样例必须放行。
+
+        防止正则/窗口逻辑回退成永远通过的橡皮图章。
+        """
+        downgrade_patterns = (
+            re.compile(r'\bcurl\b[^\n]*\s(?:-[a-zA-Z]*k[a-zA-Z]*|--insecure)\b'),
+            re.compile(r'--no-check-certificate\b'),
+            re.compile(r'curl_insecure\s*=\s*True'),
+            re.compile(r'\bssl\s*=\s*False'),
+            re.compile(r'\bverify\s*=\s*False'),
+        )
+
+        def flags(source: str) -> list[int]:
+            return [
+                index
+                for index, line in enumerate(source.splitlines())
+                if any(pattern.search(line) for pattern in downgrade_patterns)
+            ]
+
+        unguarded = 'curl -kfsSL https://example.com/x.sh\n'
+        self.assertEqual(len(flags(unguarded)), 1, 'curl -kfsSL 应命中')
+        self.assertEqual(len(flags('curl -k https://x/y\n')), 1, 'curl -k 应命中')
+        self.assertEqual(
+            len(flags('wget --no-check-certificate https://x\n')), 1,
+            'wget --no-check-certificate 应命中',
+        )
+        self.assertEqual(len(flags('curl -fsSL https://x/y\n')), 0, '严格 curl 不应命中')
+        self.assertEqual(
+            len(flags('if [ -n "$GMS_INSTALL_INSECURE" ]; then\n  curl -fsSL -k u\nfi\n')),
+            1,
+            '守护分支内的 -k 仍应命中(交由上文窗口判定守护)',
+        )
 
 
 if __name__ == '__main__':

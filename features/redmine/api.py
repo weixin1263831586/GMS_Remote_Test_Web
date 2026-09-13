@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from features.auth import require_authenticated_user
 from features.email import send_email
 from features.redmine.agent import RedmineAgent
 from features.redmine.config import config_manager
@@ -776,6 +777,12 @@ async def create_project_profile(request: Request):
 
 @router.post("/reminders/email")
 async def send_department_reminder_email(request: Request):
+    user = require_authenticated_user(request)
+    if not user.has_permission("email.send"):
+        return JSONResponse(
+            status_code=403,
+            content={"success": False, "error": "没有发送邮件的权限 (email.send)"},
+        )
     body = await request.json()
     user_id = str(body.get("user_id") or "").strip()
     issue_ids = [str(item or "").strip() for item in body.get("issue_ids") or [] if str(item or "").strip()]

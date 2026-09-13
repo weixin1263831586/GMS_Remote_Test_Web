@@ -123,6 +123,7 @@
 
     // Listen for embedded dashboard notifications from iframes
     window.addEventListener('message', function(e) {
+        if (e.origin !== window.location.origin) return;
         const allowedTypes = new Set([
             'redmine-agent-notification',
             'gms-dashboard-notification',
@@ -130,7 +131,9 @@
             'automation-notification',
             'cluster-notification'
         ]);
-        if (e.data && allowedTypes.has(e.data.type)) {
+        const fromEmbeddedFrame = Array.from(document.querySelectorAll('iframe'))
+            .some(frame => frame.contentWindow === e.source);
+        if (fromEmbeddedFrame && e.data && allowedTypes.has(e.data.type)) {
             if (typeof notifyOperationResult === 'function') {
                 notifyOperationResult(e.data.title, e.data.message, e.data.level || 'info');
             }

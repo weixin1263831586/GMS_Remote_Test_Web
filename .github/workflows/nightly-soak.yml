@@ -5,6 +5,9 @@ on:
     - cron: "30 18 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: nightly-android-soak
   cancel-in-progress: false

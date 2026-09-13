@@ -9,7 +9,8 @@
  *
  * 属性约定（元素上声明，委托分发）：
  *   data-click / data-change / data-input / data-submit /
- *   data-keydown / data-keyup / data-dblclick / data-focus / data-blur
+ *   data-keydown / data-keyup / data-keypress / data-dblclick /
+ *   data-toggle / data-focus / data-blur
  *       值 = 要调用的全局函数名（必须已在 window 上，含惰性解析——
  *       分发时才查找，允许函数晚于标记定义）。
  *   data-a0..data-an  按位实参，自动类型推断：
@@ -17,8 +18,8 @@
  *   data-r0..data-rn  元素相对实参（优先于同位 data-aN）：
  *       "value" | "checked" | "el"（元素自身，等价旧 handler 里的 this）
  *       | "event"（事件对象）。
- *   data-key          keydown/keyup 过滤器：keyCode 数字（如 "13"）或
- *                     key 名（如 "Enter"）；不匹配时静默跳过。
+ *   data-key          keydown/keyup/keypress 过滤器：keyCode 数字（如 "13"）
+ *                     或 key 名（如 "Enter"）；不匹配时静默跳过。
  *   data-prevent      存在即先 event.preventDefault()（等价旧 handler
  *                     开头的 event.preventDefault(); 语句）。
  *   data-stop         存在即先 event.stopPropagation()（等价旧 handler
@@ -31,9 +32,12 @@
     'use strict';
 
     var DELEGATED = ['click', 'change', 'input', 'submit', 'keydown', 'keyup',
-        'dblclick', 'dragstart', 'dragend', 'dragover', 'dragenter', 'drop'];
-    // focus/blur/error 不冒泡；资源 error/load 仅在捕获阶段经过祖先。
-    var CAPTURED = ['focus', 'blur', 'error', 'load', 'mouseover', 'mouseout'];
+        'keypress', 'dblclick', 'dragstart', 'dragend', 'dragover',
+        'dragenter', 'drop'];
+    // focus/blur/error/toggle 不冒泡（toggle 在 details 上触发）；
+    // 资源 error/load 仅在捕获阶段经过祖先。
+    var CAPTURED = ['focus', 'blur', 'error', 'load', 'mouseover', 'mouseout',
+        'toggle'];
 
     function resolveFn(name) {
         try {
@@ -98,7 +102,7 @@
     function dispatch(el, event, type) {
         var name = el.getAttribute('data-' + type);
         if (!name) return;
-        if ((type === 'keydown' || type === 'keyup')) {
+        if ((type === 'keydown' || type === 'keyup' || type === 'keypress')) {
             var filter = el.getAttribute('data-key');
             if (filter !== null && !keyMatches(event, filter)) return;
         }

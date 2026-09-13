@@ -784,6 +784,31 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
     def test_expired_terminal_elevation_prompts_and_reconnects_after_auth(self):
         page = self.new_page()
+        elevation_requests = []
+
+        def grant_elevation(route):
+            elevation_requests.append(route.request.post_data_json)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "success": True,
+                        "elevated": True,
+                        "elevated_until": "2099-01-01T00:00:00+00:00",
+                        "admin_verified": True,
+                        "user": {
+                            "id": "ui-admin",
+                            "username": "ui-admin",
+                            "role": "admin",
+                            "display_name": "UI Smoke Admin",
+                        },
+                        "client_id": "ui-admin",
+                    }
+                ),
+            )
+
+        page.route("**/api/auth/elevate", grant_elevation)
         try:
             self.goto_shell(page)
             page.wait_for_function("typeof recoverTerminalElevation === 'function'")
@@ -811,6 +836,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "state.elevated && window.__terminalElevationReconnect && window.__parallelElevationResult === true"
             )
             expect(page.locator("#elevate-modal")).not_to_have_class(re.compile(r"show"))
+            self.assertEqual(len(elevation_requests), 1)
+            self.assertEqual(elevation_requests[0].get("username"), "ui-admin")
         finally:
             page.close()
 
@@ -7307,18 +7334,17 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(frame.locator("#library-worker-0 option").first).to_have_attribute(
                 "value", "ats-worker-controller"
             )
-            self.assertTrue(
-                card.evaluate(
-                    """card => {
-                      const tests = card.querySelector('.host-tests');
-                      const warning = card.querySelector('.host-warning');
-                      return Boolean(
-                        tests && warning
-                        && (tests.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING)
-                        && getComputedStyle(tests).borderTopWidth === '1px'
-                      );
-                    }"""
-                )
+            frame.wait_for_function(
+                """card => {
+                  const tests = card.querySelector('.host-tests');
+                  const warning = card.querySelector('.host-warning');
+                  return Boolean(
+                    tests && warning
+                    && (tests.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING)
+                    && getComputedStyle(tests).borderTopWidth === '1px'
+                  );
+                }""",
+                arg=card.element_handle(),
             )
         finally:
             page.close()
@@ -8036,14 +8062,22 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         page = self.new_page()
         try:
             self.goto_shell(page)
-            page.evaluate(
+            # Navigate through the shell API so unrelated first-run modals do
+            # not intercept the sidebar pointer action in isolated runs.
+            page.evaluate("switchPage('gerrit-dashboard', null)")
+            gerrit = self.frame_for(page, "#gerrit-dashboard-frame")
+            # frame_for may briefly observe the lazy iframe's initial
+            # about:blank document (origin "null") under a busy full-suite
+            # run; wait for the real same-origin dashboard before posting.
+            gerrit.wait_for_function("window.location.origin !== 'null'")
+            gerrit.evaluate(
                 """
-                window.postMessage({
+                window.parent.postMessage({
                     type: 'gms-dashboard-notification',
                     title: '运行时通知测试',
                     message: 'iframe bridge ok',
                     level: 'success'
-                }, '*');
+                }, window.location.origin);
                 """
             )
             expect(page.locator(".notification-badge")).to_be_visible()

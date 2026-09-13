@@ -911,15 +911,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
     def test_redmine_markdown_link_renderer_keeps_label_escaped(self):
         """链接 label(已 esc)不再二次转义,url 再过 esc 防 attr 注出。"""
         source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
-        match = re.search(
-            r"function esc\(s\) \{.*?\n\}(?=\nfunction)", source, re.S
-        )
-        href_match = re.search(
-            r"function sanitizeHref\(raw\) \{.*?\n\}", source, re.S
-        )
-        inline_match = re.search(
-            r"function _inlineMd\(text\) \{.*?\n\}", source, re.S
-        )
+        match = re.search(r"function esc\(s\) \{.*?\n\}(?=\nfunction)", source, re.S)
+        href_match = re.search(r"function sanitizeHref\(raw\) \{.*?\n\}", source, re.S)
+        inline_match = re.search(r"function _inlineMd\(text\) \{.*?\n\}", source, re.S)
         script = (
             "const window = { location: { origin: 'https://gms.example.com' } };\n"
             + match.group(0) + "\n"

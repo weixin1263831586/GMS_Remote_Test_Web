@@ -23,9 +23,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # 只匹配 HTML 属性形态的 inline handler（onxxx="..." / onxxx='...'）。
 # JS 里的 ``el.onclick = ...`` 属性赋值不受 CSP 限制，不在此门禁范围。
+# 事件名覆盖 act-bridge（web/static/js/shell/act-bridge.js）支持的全集，
+# 防止新事件名（如 keypress/toggle）绕过门禁却仍触发 CSP。
 INLINE_HANDLER_RE = re.compile(
-    r"\bon(?:click|change|input|submit|keydown|keyup|load|error|"
-    r"mouseover|mouseout|focus|blur)\s*=\s*[\"']"
+    r"\bon(?:click|change|input|submit|keydown|keyup|keypress|load|error|"
+    r"mouseover|mouseout|focus|blur|dblclick|dragstart|dragend|dragover|"
+    r"dragenter|drop|toggle|contextmenu|scroll)\s*=\s*[\"']"
 )
 
 # web/static/js 树：已全部归零，无基线条目——任何新增直接违规。

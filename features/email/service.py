@@ -3,13 +3,41 @@
 from __future__ import annotations
 
 import os
+import re
 import smtplib
 from email.encoders import encode_base64
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 from pathlib import Path
 from typing import Any
+
+
+_SAFE_ADDRESS_RE = re.compile(r'[^\s,;<>"@]+@[^\s,;<>"@]+')
+
+
+def normalize_email_addresses(
+    email_input: str | list[str] | None,
+) -> list[str] | None:
+    """Split and validate envelope/header addresses; ``None`` means invalid."""
+    if email_input is None:
+        return []
+    if not isinstance(email_input, (str, list)):
+        return None
+    if isinstance(email_input, list) and not all(
+        isinstance(item, str) for item in email_input
+    ):
+        return None
+    addresses = split_emails(email_input)
+    if any(not _SAFE_ADDRESS_RE.fullmatch(address) for address in addresses):
+        return None
+    return addresses
+
+
+def _safe_header_text(value: Any) -> str:
+    """Collapse CR/LF and other folding whitespace before MIME headers."""
+    return ' '.join(str(value or '').split())
 
 
 def split_emails(email_input: str | list[str] | None) -> list[str]:
@@ -108,15 +136,24 @@ def send_email(
             "error": "163 企业邮箱 SMTP 需要用户名和授权码（注意：是邮箱 SMTP 授权码，不是 Redmine 登录密码），请在 Redmine 看板「设置 → SMTP」中填写",
         }
 
-    final_to_list = split_emails(to)
-    final_cc_list = split_emails(cc)
+    final_to_list = normalize_email_addresses(to)
+    final_cc_list = normalize_email_addresses(cc)
+    if final_to_list is None or final_cc_list is None:
+        return {"sent": False, "mode": "invalid", "error": "收件人邮箱地址无效"}
     if not final_to_list:
         return {"sent": False, "mode": "unconfigured", "error": "收件人列表为空"}
+    safe_from = normalize_email_addresses(from_addr)
+    if not safe_from or len(safe_from) != 1:
+        return {"sent": False, "mode": "unconfigured", "error": "发件人邮箱地址无效"}
+    from_addr = safe_from[0]
+    subject = _safe_header_text(subject)
+    if not subject:
+        return {"sent": False, "mode": "invalid", "error": "邮件主题为空"}
 
     message = MIMEMultipart()
-    display_name = sender_name or email_cfg.get("sender_name")
+    display_name = _safe_header_text(sender_name or email_cfg.get("sender_name"))
     if display_name:
-        message["From"] = f"{display_name} <{from_addr}>"
+        message["From"] = formataddr((display_name, from_addr))
     else:
         message["From"] = from_addr
     message["To"] = ", ".join(final_to_list)
@@ -141,7 +178,7 @@ def send_email(
                 missing_attachments.append(abs_path)
             continue
         try:
-            filename = resolved.name
+            filename = _safe_header_text(resolved.name)[:255]
             with resolved.open("rb") as fh:
                 part = MIMEBase("application", "octet-stream")
                 part.set_payload(fh.read())

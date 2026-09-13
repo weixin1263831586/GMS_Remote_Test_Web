@@ -24,7 +24,7 @@
       level = level || 'info';
       try {
         if (window.parent && window.parent !== window) {
-          window.parent.postMessage({type:'gms-update-monitor-notification', title:title, message:message, level:level}, '*');
+          window.parent.postMessage({type:'gms-update-monitor-notification', title:title, message:message, level:level}, window.location.origin);
         }
       } catch (_) {}
       showToast(title + (message ? ': ' + message : ''), level);
@@ -186,4 +186,3 @@
     document.querySelectorAll('.tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
     try { window.sessionStorage.setItem(UPDATE_MONITOR_TAB_STORAGE_KEY, tab); } catch (_) {}
     loadAll();
-  

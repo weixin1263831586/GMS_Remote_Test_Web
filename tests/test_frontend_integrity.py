@@ -6,8 +6,9 @@ from pathlib import Path
 CALL_ATTR_RE = re.compile(r'on(?:click|change|input|submit|keydown|mouseover|mouseout)=["\']([^"\']+)["\']')
 # act-bridge 委托目标：data-click="fnName" 等（值为函数名，非表达式）。
 DELEGATED_TARGET_RE = re.compile(
-    r'data-(?:click|change|input|submit|keydown|keyup|dblclick|'
-    r'dragstart|dragend|dragover|drop|blur|focus|error)=["\']'
+    r'data-(?:click|change|input|submit|keydown|keyup|keypress|dblclick|'
+    r'dragstart|dragend|dragover|dragenter|drop|toggle|blur|focus|error|load|'
+    r'mouseover|mouseout)=["\']'
     r'([A-Za-z_$][\w$]*)["\']'
 )
 FUNCTION_RE = re.compile(r'\bfunction\s+([A-Za-z_$][\w$]*)\s*\(')
@@ -50,11 +51,20 @@ def read_text(path: str) -> str:
 def read_shell_bundle() -> str:
     """shell.html 及其外置脚本（CSP 前置迁移后 shell 主脚本已拆分到
     web/static/js/shell/shell-*.js）。断言面向"shell 前端整体"，
-    组合读取避免迁移后断言盯不住源码。"""
-    parts = [Path("web/shell/shell.html").read_text(encoding="utf-8", errors="ignore")]
-    shell_dir = Path("web/static/js/shell")
-    for js_file in sorted(shell_dir.glob("*.js")):
-        parts.append(read_text(str(js_file)))
+    组合读取避免迁移后断言盯不住源码；仅纳入模板实际引用的 shell
+    脚本，孤儿文件不能替 wiring 断言兜底。"""
+    html = Path("web/shell/shell.html").read_text(encoding="utf-8", errors="ignore")
+    parts = [html]
+    sources = re.findall(
+        r'<script\b[^>]*\bsrc=["\']([^"\']+)["\']', html, re.IGNORECASE
+    )
+    for source in sources:
+        source_path = source.split("?", 1)[0]
+        if not source_path.startswith("/static/js/shell/"):
+            continue
+        js_file = Path("web/static") / source_path.removeprefix("/static/")
+        if js_file.is_file():
+            parts.append(read_text(str(js_file)))
     return "\n".join(parts)
 
 
@@ -811,8 +821,13 @@ class FrontendIntegrityTests(unittest.TestCase):
                 text = read_text(path)
                 self.assertIn("function notifyUser", text)
                 self.assertIn("postMessage", text)
+                self.assertIn("window.location.origin", text)
+                self.assertNotIn("}, '*')", text)
                 self.assertNotIn("alert(", text)
 
+        bridge = read_text("web/static/js/shell/shell-late-init.js")
+        self.assertIn("e.origin !== window.location.origin", bridge)
+        self.assertIn("frame.contentWindow === e.source", bridge)
         self.assertNotIn("_sendParentNotification", read_text("features/redmine/ui/page.js"))
 
     def test_modal_ids_and_function_declarations_are_not_duplicated(self):
@@ -932,6 +947,7 @@ class WorkspaceIdentityRegressions(unittest.TestCase):
             # GerritModalState），不在平台 Shell 的 ModalManager 管辖内。
             "features/redmine/ui/page.js",
             "features/redmine/ui/page.html",
+            "features/gerrit/ui/page.js",
             "features/gerrit/ui/page.html",
         }
         # shell.html 中合法的 display 写入目标（非对话框元素）。

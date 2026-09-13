@@ -32,6 +32,7 @@ from gms_agent.client import (  # noqa: E402
     EXIT_OK,
     EXIT_OPERATION,
     EXIT_PERMISSION,
+    EXIT_USAGE,
     _http_exit_code,
 )
 
@@ -60,6 +61,24 @@ def test_missing_server_url_raises_usage_error(monkeypatch):
     with pytest.raises(GmsApiError) as excinfo:
         GmsClient()
     assert excinfo.value.exit_code == 2
+
+
+@pytest.mark.parametrize(
+    "server_url",
+    [
+        "file:///etc/passwd",
+        "ftp://controller.example",
+        "https://user:secret@controller.example",
+        "https://controller.example/api",
+        "https://controller.example?target=other",
+        "https://controller.example/#fragment",
+        "https://controller.example:invalid",
+    ],
+)
+def test_invalid_controller_origins_are_rejected(server_url):
+    with pytest.raises(GmsApiError) as excinfo:
+        GmsClient(server_url=server_url)
+    assert excinfo.value.exit_code == EXIT_USAGE
 
 
 def test_request_success_envelope(server, monkeypatch):

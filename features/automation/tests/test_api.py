@@ -14,6 +14,7 @@ from features.automation.executors import HttpAutomationExecutor
 from features.automation.profiles import save_profiles
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
+from tests.contract.snapshot_tools import read_page_bundle, read_shell_bundle
 
 
 def build_service(
@@ -30,6 +31,21 @@ def build_service(
         store=AutomationStore(base / 'automation.sqlite3'),
         profiles_path=profiles_path,
         gerrit_query=gerrit_query,
+    )
+
+
+def online_worker_cluster(repository, **extra) -> SimpleNamespace:
+    """预检用在线 worker 集群桩（三处 preflight 测试共享）。"""
+    return SimpleNamespace(
+        effective_enabled=True,
+        repository=repository,
+        has_command_agent=lambda _worker_id: True,
+        list_workers=lambda: [{
+            'id': 'worker-1', 'status': 'online',
+            'running_jobs': 0, 'max_jobs': 1,
+            'disk_free_gb': 100, 'memory_available_gb': 32,
+        }],
+        **extra,
     )
 
 
@@ -287,16 +303,7 @@ class AutomationApiTests(unittest.TestCase):
                     'id': f'{worker_id}:ABC', 'serial': 'ABC', 'state': 'available'
                 }]
 
-        cluster = SimpleNamespace(
-            effective_enabled=True,
-            repository=Repository(),
-            has_command_agent=lambda _worker_id: True,
-            list_workers=lambda: [{
-                'id': 'worker-1', 'status': 'online',
-                'running_jobs': 0, 'max_jobs': 1,
-                'disk_free_gb': 100, 'memory_available_gb': 32,
-            }],
-        )
+        cluster = online_worker_cluster(Repository())
         with TemporaryDirectory() as tmp:
             service = AutomationService(
                 store=AutomationStore(Path(tmp) / 'automation.sqlite3'),
@@ -335,16 +342,7 @@ class AutomationApiTests(unittest.TestCase):
                     'state': 'available',
                 }]
 
-        cluster = SimpleNamespace(
-            effective_enabled=True,
-            repository=Repository(),
-            has_command_agent=lambda _worker_id: True,
-            list_workers=lambda: [{
-                'id': 'worker-1', 'status': 'online',
-                'running_jobs': 0, 'max_jobs': 1,
-                'disk_free_gb': 100, 'memory_available_gb': 32,
-            }],
-        )
+        cluster = online_worker_cluster(Repository())
         with TemporaryDirectory() as tmp:
             service = AutomationService(
                 store=AutomationStore(Path(tmp) / 'automation.sqlite3'),
@@ -381,16 +379,8 @@ class AutomationApiTests(unittest.TestCase):
                     'state': 'available', 'transport': 'adb_proxy',
                 }]
 
-        cluster = SimpleNamespace(
-            effective_enabled=True,
-            repository=Repository(),
-            config=SimpleNamespace(local_worker_id='ats-worker-controller'),
-            has_command_agent=lambda _worker_id: True,
-            list_workers=lambda: [{
-                'id': 'worker-1', 'status': 'online',
-                'running_jobs': 0, 'max_jobs': 1,
-                'disk_free_gb': 100, 'memory_available_gb': 32,
-            }],
+        cluster = online_worker_cluster(
+            Repository(), config=SimpleNamespace(local_worker_id='ats-worker-controller'),
         )
         with TemporaryDirectory() as tmp:
             service = AutomationService(
@@ -412,13 +402,8 @@ class AutomationApiTests(unittest.TestCase):
                 })
 
     def test_index_template_has_gms_ats_nav_entry(self):
-        # CSP 前置迁移后 shell 脚本外置，按"模板+外置 shell 脚本"组合读取。
-        template_parts = [Path('web/shell/shell.html').read_text(encoding='utf-8')]
-        template_parts += [
-            p.read_text(encoding='utf-8')
-            for p in sorted(Path('web/static/js/shell').glob('*.js'))
-        ]
-        template = '\n'.join(template_parts)
+        # shell 脚本已外置：标记可能落在模板或外置脚本，统一走 bundle helper。
+        template = read_shell_bundle()
         self.assertIn('data-page="automation"', template)
         self.assertIn('id="page-automation"', template)
         self.assertIn('src="/automation"', template)
@@ -435,10 +420,8 @@ class AutomationApiTests(unittest.TestCase):
         self.assertIn('id="automation-flash-mode"', html)
         self.assertIn('id="automation-create-run"', html)
         self.assertIn('id="automation-runs"', html)
-        # CSP 前置迁移后页面脚本外置为 /automation/page.js，API 引用在
-        # page.js 里；模板（<script src>）与脚本内容一起校验。
+        js = read_page_bundle('features/automation/ui/page.html')
         self.assertIn('/automation/page.js', html)
-        js = Path('features/automation/ui/page.js').read_text(encoding='utf-8')
         self.assertIn('/api/automation/runs', js)
         self.assertIn('/api/automation/gerrit/poll', js)
         self.assertIn('/api/automation/worker/tick', js)
