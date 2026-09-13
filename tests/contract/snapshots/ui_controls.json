@@ -338,6 +338,7 @@
       "startCreateInternalCase",
       "startDailyBriefRun",
       "startScan",
+      "stopDailyBriefRun",
       "submitAddDepartment",
       "submitAddProject",
       "submitAddUser",

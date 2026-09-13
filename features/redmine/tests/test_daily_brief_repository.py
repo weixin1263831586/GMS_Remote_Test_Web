@@ -203,6 +203,21 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         refreshed = self.repo.get_run(run.run_id)
         self.assertGreater(refreshed.started_at, "2025-01-01")
 
+    def test_enqueue_new_work_clears_cancel_request(self):
+        """已停止 run 的显式重试必须清掉旧取消标志。"""
+        run = make_run(status="analyzing")
+        self.repo.create_run(run)
+        self.assertTrue(self.repo.request_cancel(run.run_id))
+        run.status = "cancelled"
+        self.repo.update_run(run)
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=100, buckets=[], status="pending"
+        ))
+
+        self.repo.enqueue_job(run.run_id, kind="issue", issue_id=100)
+
+        self.assertFalse(self.repo.is_cancel_requested(run.run_id))
+
     def test_stale_worker_cannot_overwrite_reclaimed_job(self):
         """租约过期被新 Worker 领取后,旧 Worker 的写入必须被拒绝。"""
         run = make_run(status="completed")

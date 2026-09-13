@@ -613,6 +613,49 @@ class UsbipAttachVerificationTests(unittest.TestCase):
         # 原始全局探测保留在 unscoped，供诊断展示。
         self.assertEqual(scoped["unscoped"]["adb_ready"], ["RK3562GMS7"])
 
+    def test_scoped_mode_is_rederived_when_global_mode_came_from_out_of_scope_device(self):
+        # 多设备 Ubuntu：全局 mode=fastboot 由 scope 外设备(FB001，来自
+        # 别的来源/assignment)贡献；本次 assignment 只有 DUT001 且 offline。
+        # 过滤后必须重算 mode=offline——保留遗留 "fastboot" 会产生
+        # mode 与设备列表自相矛盾的状态，烧录/重连逻辑会信以为真。
+        manager = USBIPManager()
+        scoped = manager._scope_protocol_status(
+            {
+                "adb": {"DUT001": "offline"},
+                "adb_ready": [],
+                "recovery": [],
+                "sideload": [],
+                "unauthorized": [],
+                "offline": ["DUT001"],
+                "fastboot": ["FB001"],
+                "mode": "fastboot",
+            },
+            ["DUT001"],
+        )
+        self.assertEqual(scoped["fastboot"], [])
+        self.assertEqual(scoped["offline"], ["DUT001"])
+        self.assertEqual(scoped["mode"], "offline")
+
+    def test_scoped_mode_recovered_after_filtering_to_empty_attribution(self):
+        # scope 内设备枚举延迟：所有归因列表过滤后为空时,mode 必须回落
+        # unknown,而不是残留全局探测的任意 mode。
+        manager = USBIPManager()
+        scoped = manager._scope_protocol_status(
+            {
+                "adb": {"FB001": "fastboot-not-adb"},
+                "adb_ready": [],
+                "recovery": [],
+                "sideload": [],
+                "unauthorized": [],
+                "offline": [],
+                "fastboot": ["FB001"],
+                "mode": "fastboot",
+            },
+            ["DUT001"],
+        )
+        self.assertEqual(scoped["mode"], "unknown")
+        self.assertEqual(scoped["fastboot"], [])
+
 
 class UsbipSerialMigrationTests(unittest.TestCase):
     def test_migration_updates_exact_assignment_and_preserves_sibling_state(self):

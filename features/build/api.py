@@ -11,6 +11,8 @@ from features.auth import (
     get_authenticated_user,
     principal_owner_id,
     require_authenticated_user_when_auth_required,
+    require_permission,
+    require_permission_when_auth_required,
 )
 from features.build.repository import BuildStore
 from features.build.service import BuildExecutionError, BuildNotFoundError, BuildService
@@ -71,7 +73,7 @@ async def list_build_templates(enabled_only: bool = Query(False)):
 async def discover_build_workspaces(
     req: dict[str, Any],
     _user: CurrentUser | None = Depends(
-        require_authenticated_user_when_auth_required
+        require_permission_when_auth_required("build.read")
     ),
 ):
     try:
@@ -90,7 +92,7 @@ async def discover_build_workspaces(
 async def discover_lunch_options(
     req: dict[str, Any],
     _user: CurrentUser | None = Depends(
-        require_authenticated_user_when_auth_required
+        require_permission_when_auth_required("build.read")
     ),
 ):
     try:
@@ -111,6 +113,10 @@ async def create_build_job(
     req: dict[str, Any],
     request: Request,
     start: bool = Query(True),
+    # 认证 ≠ 授权:Agent Service Token 权力只来自显式 scope(ADR 0006),
+    # 零 scope token 不得创建/启动编译任务——该路由最终会在构建服务器
+    # 上执行 shell 命令,必须有 build.execute 门禁。
+    _user: CurrentUser = Depends(require_permission("build.execute")),
 ):
     try:
         body = dict(req or {})
@@ -151,7 +157,11 @@ async def get_build_job(
 
 
 @router.post("/jobs/{job_id}/poll")
-async def poll_build_job(job_id: str, request: Request):
+async def poll_build_job(
+    job_id: str,
+    request: Request,
+    _user: CurrentUser = Depends(require_permission("build.execute")),
+):
     try:
         _owned_build_job(job_id, request)
         job = await run_in_threadpool(build_service.poll_job, job_id)
@@ -167,6 +177,7 @@ async def set_build_job_password(
     job_id: str,
     req: dict[str, Any],
     request: Request,
+    _user: CurrentUser = Depends(require_permission("build.execute")),
 ):
     try:
         _owned_build_job(job_id, request)
@@ -196,7 +207,11 @@ async def tail_build_log(
 
 
 @router.post("/jobs/{job_id}/cancel")
-async def cancel_build_job(job_id: str, request: Request):
+async def cancel_build_job(
+    job_id: str,
+    request: Request,
+    _user: CurrentUser = Depends(require_permission("build.cancel")),
+):
     try:
         _owned_build_job(job_id, request)
         job = await run_in_threadpool(build_service.cancel_job, job_id)
@@ -208,7 +223,11 @@ async def cancel_build_job(job_id: str, request: Request):
 
 
 @router.delete("/jobs/{job_id}")
-async def delete_build_job(job_id: str, request: Request):
+async def delete_build_job(
+    job_id: str,
+    request: Request,
+    _user: CurrentUser = Depends(require_permission("build.cancel")),
+):
     try:
         _owned_build_job(job_id, request)
         build_service.delete_job(job_id)

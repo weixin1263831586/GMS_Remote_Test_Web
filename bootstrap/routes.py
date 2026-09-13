@@ -212,11 +212,11 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             configure_source_registry,
             load_provider_configs,
         )
-        from foundation.secrets import _load_key as _load_master_key
+        from foundation.secrets import derive_application_key
 
         configure_source_registry(
             load_provider_configs(config_manager.load_config()),
-            b"gms-sdk-source-v1:" + _load_master_key(),
+            derive_application_key("gms-sdk-source-v1:"),
         )
         configure_firmware_dependencies(
             config_manager=config_manager,

@@ -29,6 +29,13 @@ AGENT_SCOPES: dict[str, str] = {
     "artifacts.read_own": "read own evidence artifacts and derived text",
     "apk.analyze_own": "run JADX analysis on own artifacts and read results",
     "sdk.read": "search/read admin-configured SDK source providers",
+    # Build orchestration scopes (ADR 0006 least-privilege): creating or
+    # driving a build job eventually executes shell commands on build
+    # servers, so agents must be granted these explicitly — a valid token
+    # with zero scopes is rejected by the build API.
+    "build.read": "discover build servers/workspaces/lunch options",
+    "build.execute": "create, start, poll and supply passwords for build jobs",
+    "build.cancel": "cancel or delete build jobs",
 }
 
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
@@ -49,6 +56,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "sdk.read",
         # 敏感副作用操作细分权限:登录 ≠ 允许发邮件。
         "email.send",
+        # Build 面向人类操作员开放;agent token 需显式 build.* scope。
+        "build.read",
+        "build.execute",
+        "build.cancel",
     }),
     "device_operator": frozenset({
         "tests.execute",
@@ -63,6 +74,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "apk.analyze_own",
         "sdk.read",
         "email.send",
+        "build.read",
+        "build.execute",
+        "build.cancel",
     }),
     "admin": frozenset({"*"}),
     "worker_service": frozenset({

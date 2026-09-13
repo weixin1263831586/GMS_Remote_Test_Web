@@ -22,7 +22,9 @@ from .daily_brief_models import (
     DailyBriefIssue,
     DailyBriefRun,
 )
+from .daily_brief_report import summarize_daily_brief
 from .daily_brief_repository import (
+    TERMINAL_RUN_STATUSES,
     DailyBriefRepository,
     new_run_id,
     owner_daily_brief_repository,
@@ -34,11 +36,32 @@ from .daily_brief_snapshot import (
     build_daily_triage_snapshot,
     detect_delta,
 )
-from .kkagent_analyzer import PROMPT_VERSION, KkAgentRedmineAnalyzer
+from .kkagent_analyzer import (
+    PROMPT_VERSION,
+    KkAgentRedmineAnalyzer,
+    preflight_gms_auth,
+)
 from .users import _now
 
 
 logger = logging.getLogger(__name__)
+
+
+class _RunCancelledError(Exception):
+    """协作式取消：执行循环在 issue 边界读到取消标志后抛出。"""
+
+
+def _analyzer_env_extra(profile: Any) -> dict[str, str]:
+    """kkagent 子进程的 MCP 身份环境；未绑定 profile 时返回空（fail-closed）。"""
+    name = str(profile or "").strip()
+    if not name:
+        return {}
+    return {
+        "GMS_RT_PROFILE": name,
+        "GMS_AGENT_CLIENT": "kkagent",
+        "GMS_AGENT_AUTH_MODE": "service-token",
+    }
+
 
 DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     # opt-in：晨报会消耗 kkagent 分析资源，默认关闭，owner 在设置里显式
@@ -52,7 +75,10 @@ DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     # profiles/<name>.toml）。为空则不注入任何 MCP 身份——分析仍可运行，
     # 但 MCP 取证工具会以未配置身份失败（fail-closed，不回退他人凭据）。
     "agent_profile": "",
-    "max_turns": 12,
+    # 健全经验值：完整跑一轮 fetch+journals+history_search+综合，12 步常在
+    # 证据链较长时不够（issue #646220 实测烧满后以 max_turns 中断）；
+    # 20 步覆盖典型分析，仍可按 owner 在设置里调 1-50。
+    "max_turns": 20,
     "issue_timeout_seconds": 600,
     "max_parallel_issues": 1,
     "max_issues": 50,
@@ -177,7 +203,36 @@ class DailyBriefService:
         if refreeze:
             self.repository.delete_snapshot(run.run_id)
             self.repository.delete_issues(run.run_id)
+        # 复用 run 重新执行前清除上一轮的取消标志。
+        self.repository.clear_cancel(run.run_id)
         self.repository.update_run(run)
+
+    def request_cancel(self, brief_date: str | None = None) -> dict[str, Any]:
+        """请求停止该日期最新的一次 run（协作式取消）。
+
+        独立 Worker 执行时靠 DB 标志位：执行循环在 issue 边界轮询并收敛
+        为 cancelled 终态；同进程执行（Web 侧复用路径）额外对执行任务
+        task.cancel()，让正在跑的单个 issue 也尽快停止。
+        """
+        date = brief_date or brief_date_today()
+        run = self.repository.latest_run(self.owner_id, date)
+        if run is None:
+            return {"error": f"no daily brief run for {date}"}
+        if run.status in TERMINAL_RUN_STATUSES:
+            return {
+                "run_id": run.run_id,
+                "status": run.status,
+                "already_terminal": True,
+            }
+        requested = self.repository.request_cancel(run.run_id)
+        task = self._RUN_EXECUTIONS.get(run.run_id)
+        if task is not None and not task.done():
+            task.cancel()
+        return {
+            "run_id": run.run_id,
+            "status": run.status,
+            "cancel_requested": bool(requested),
+        }
 
     def start_run(self, mode: str = "manual", *, force: bool = False) -> dict[str, Any]:
         """创建（或复用）当天 run。幂等规则见 repository.create_run。"""
@@ -191,7 +246,7 @@ class DailyBriefService:
             if existing.status in ("pending", "snapshotting", "analyzing"):
                 return {"run_id": existing.run_id, "status": existing.status,
                         "already_running": True}
-            # failed（保留冻结快照重试）或人工 force（重新冻结）→ 复用 run。
+            # failed/cancelled（保留冻结快照重试）或人工 force（重新冻结）→ 复用 run。
             self._reset_run_for_retry(
                 existing, refreeze=bool(force or existing.status in ("completed", "partial"))
             )
@@ -262,15 +317,48 @@ class DailyBriefService:
         if run is None:
             logger.error("daily brief run %s not found", run_id)
             return None
+        if run.status in TERMINAL_RUN_STATUSES:
+            # 已收敛（含用户停止后的 cancelled）：迟到/重复的队列任务
+            # 直接返回持久状态，不得复活已终态的 run。
+            return run
         config = self.get_config()
         task = asyncio.current_task()
         if task is not None:
             self._RUN_EXECUTIONS[run_id] = task
         try:
+            if self.repository.is_cancel_requested(run_id):
+                raise _RunCancelledError()
+            # 认证预检：token 被吊销时逐条分析只会把 turn 预算烧在 MCP
+            # 401 上，不如整 run 快速失败并给出重注册指引（fail-closed；
+            # 预检自身故障则放行，不阻塞分析）。
+            auth_ok, auth_reason = await preflight_gms_auth(
+                _analyzer_env_extra(config.get("agent_profile"))
+            )
+            if not auth_ok:
+                run.status = "failed"
+                run.error = auth_reason[:1000]
+                run.finished_at = _now()
+                self.repository.update_run(run)
+                return self.repository.get_run(run_id)
             run = await self._snapshot_phase(run, config)
             await self._analyze_phase(run, config)
             run = self._summarize_phase(run)
+        except _RunCancelledError:
+            # 用户请求停止：收敛为明确的终态 cancelled（非错误），
+            # 已完成的 issue 结果保留，未开始的保持 pending 可续跑。
+            run.status = "cancelled"
+            run.error = ""
+            run.finished_at = _now()
+            self.repository.update_run(run)
         except asyncio.CancelledError:
+            if self.repository.is_cancel_requested(run_id):
+                # request_cancel 对进程内执行任务的定向 task.cancel()：
+                # 属于用户停止，收敛为 cancelled 终态后正常返回（不外抛）。
+                run.status = "cancelled"
+                run.error = ""
+                run.finished_at = _now()
+                self.repository.update_run(run)
+                return self.repository.get_run(run_id)
             # 独立 Worker 停止时先留下明确、可恢复的持久状态；Worker 的
             # job requeue 随后会把它转回 pending。
             run.status = "failed"
@@ -391,14 +479,9 @@ class DailyBriefService:
         await asyncio.gather(*[_one(issue_id) for issue_id in pending_ids])
 
     def _build_analyzer(self, config: dict[str, Any]) -> KkAgentRedmineAnalyzer:
-        env_extra: dict[str, str] = {}
-        profile = str(config.get("agent_profile") or "").strip()
-        if profile:
-            env_extra["GMS_RT_PROFILE"] = profile
-            env_extra["GMS_AGENT_CLIENT"] = "kkagent"
-            env_extra["GMS_AGENT_AUTH_MODE"] = "service-token"
+        env_extra = _analyzer_env_extra(config.get("agent_profile"))
         return KkAgentRedmineAnalyzer(
-            max_turns=int(config.get("max_turns") or 12),
+            max_turns=int(config.get("max_turns") or DEFAULT_BRIEF_CONFIG["max_turns"]),
             timeout_seconds=int(config.get("issue_timeout_seconds") or 600),
             model=str(config.get("model") or ""),
             env_extra=env_extra,
@@ -435,6 +518,11 @@ class DailyBriefService:
         record = self.repository.get_issue(run.run_id, issue_id)
         if record is None:
             return
+        # 协作式取消点：每个 issue 开始前查一次标志位（廉价 SELECT）。
+        # 用户点「停止分析」后，正在跑的 issue 由 task.cancel()/gather 兜底，
+        # 未开始的 issue 从这里直接终止整个 phase。
+        if self.repository.is_cancel_requested(run.run_id):
+            raise _RunCancelledError()
         record.status = "running"
         record.started_at = _now()
         record.attempt_count += 1
@@ -460,102 +548,11 @@ class DailyBriefService:
         self.repository.upsert_issue(record)
 
     def _summarize_phase(self, run: DailyBriefRun) -> DailyBriefRun:
-        issues = self.repository.list_issues(run.run_id)
-        completed = [i for i in issues if i.status == "completed"]
-        failed = [i for i in issues if i.status == "failed"]
-
-        counts = {
-            "total": len(issues),
-            "waiting_my_reply": run.waiting_my_reply_count,
-            "no_reply_3_days": run.no_reply_3_days_count,
-            "completed": len(completed),
-            "failed": len(failed),
-            "needs_human_review": sum(
-                1 for i in completed
-                if bool((i.result or {}).get("needs_human_review"))
-            ),
-        }
-        top = [
-            {
-                "issue_id": i.issue_id,
-                "priority": i.priority,
-                "subject": (
-                    (self._snapshot_entries(run.run_id).get(i.issue_id) or {}).get("subject")
-                    or i.subject
-                ),
-                "problem_summary": (i.result or {}).get("problem_summary", ""),
-                "confidence": (i.result or {}).get("confidence"),
-            }
-            for i in sorted(completed, key=lambda x: -x.priority_score)[:5]
-        ]
-        run.report_json = {
-            "brief_date": run.brief_date,
-            "generated_at": _now(),
-            "counts": counts,
-            "top_priorities": top,
-            "snapshot_hash": run.snapshot_hash,
-            "source_sync_status": run.source_sync_status,
-            "analysis_backend": run.analysis_backend,
-            "model": run.model_name,
-        }
-        run.report_markdown = self._render_markdown(run, completed, failed)
-        if failed and not completed:
-            run.status = "failed"
-            run.error = f"{len(failed)} issue analyses failed"
-        elif failed or len(completed) < len(issues):
-            run.status = "partial"
-            run.error = "" if completed else "all issue analyses failed"
-        else:
-            run.status = "completed"
-            run.error = ""
-        run.finished_at = _now()
-        self.repository.update_run(run)
-        return run
-
-    @staticmethod
-    def _render_markdown(run: DailyBriefRun, completed: list[DailyBriefIssue], failed: list[DailyBriefIssue]) -> str:
-        lines = [f"# Redmine AI 晨报 {run.brief_date}", ""]
-        counts = run.report_json.get("counts", {})
-        lines.append(
-            f"共 {counts.get('total', 0)} 个待处理（待回复 {counts.get('waiting_my_reply', 0)} / "
-            f"超 {run.no_reply_3_days_count and ''}3 天未回复 {counts.get('no_reply_3_days', 0)}），"
-            f"成功分析 {counts.get('completed', 0)}，失败 {counts.get('failed', 0)}。"
+        return summarize_daily_brief(
+            self.repository,
+            run,
+            self._snapshot_entries(run.run_id),
         )
-        if run.source_sync_status in ("sync_failed", "skipped"):
-            lines.append(
-                f"> 注意：快照源同步状态为 {run.source_sync_status}，"
-                "本报告基于本地镜像（数据可能落后于 Redmine）。"
-            )
-        lines.append("")
-        for issue in completed:
-            result = issue.result or {}
-            lines.append(f"## {issue.priority} #{issue.issue_id} {result.get('problem_summary', '')}")
-            lines.append(f"- 客户诉求：{result.get('customer_request', '')}")
-            lines.append(f"- 根因（{result.get('root_cause_type', 'unknown')}）：{result.get('root_cause', '')}")
-            lines.append(f"- 建议：{result.get('suggested_solution', '')}")
-            detailed = str(result.get("detailed_report") or "").strip()
-            if detailed:
-                lines.append("")
-                lines.append("### 详细分析报告")
-                lines.append(detailed)
-                lines.append("")
-            similar = result.get("similar_issues") or []
-            if similar:
-                refs = "；".join(
-                    f"#{item.get('issue_id')}（{item.get('similarity', 'related')}）"
-                    + (f"：{item.get('reusable_fix')}" if item.get("reusable_fix") else "")
-                    for item in similar
-                )
-                lines.append(f"- 相似工单：{refs}")
-            elif not result.get("history_checked"):
-                lines.append("- 相似工单：未检索（历史库不可用或未执行）")
-            confidence = result.get("confidence")
-            lines.append(f"- 置信度：{confidence}{'（需人工确认）' if result.get('needs_human_review') else ''}")
-            lines.append("")
-        if failed:
-            lines.append("## 分析失败")
-            lines.extend(f"- #{i.issue_id}: {i.error}" for i in failed)
-        return "\n".join(lines)
 
     # ------------------------------------------------------------------ single
 
@@ -570,6 +567,13 @@ class DailyBriefService:
         if self.run_is_executing(run.run_id):
             return {"error": f"run {run.run_id} is still executing; retry after it finishes"}
         config = self.get_config()
+        # 认证预检：token 失效时直接拒绝单条重分析（HTTP 404 携带原因），
+        # 不再让该 issue 烧满 turn 预算后以 max_turns 失败。
+        auth_ok, auth_reason = await preflight_gms_auth(
+            _analyzer_env_extra(config.get("agent_profile"))
+        )
+        if not auth_ok:
+            return {"error": auth_reason}
         # 优先取冻结快照里的 entry（完整字段），持久化快照不在时退化为
         # issue 记录上的标题、桶和规则优先级，避免 MCP 暂时不可用时退化
         # 成只有 issue id。

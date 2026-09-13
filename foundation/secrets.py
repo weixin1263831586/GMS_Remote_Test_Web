@@ -85,3 +85,16 @@ def validate_secret_configuration() -> None:
     """Fail early when the configured encryption key is absent or invalid."""
 
     _load_key()
+
+
+def derive_application_key(purpose: str) -> bytes:
+    """Derive a stable per-purpose key from the deployment master secret.
+
+    Public API for composition roots: callers must not know how the master
+    key is loaded (env injection vs key file), only that keys derived here
+    survive restarts and stay namespaced per ``purpose``. Use a short ASCII
+    purpose label, e.g. ``derive_application_key(b"gms-sdk-source-v1:")``.
+    """
+
+    purpose_bytes = purpose.encode("ascii") if isinstance(purpose, str) else bytes(purpose)
+    return purpose_bytes + _load_key()

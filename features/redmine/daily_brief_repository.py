@@ -37,7 +37,7 @@ ISSUE_COLUMNS = (
     "result",
 )
 JOB_KINDS = frozenset({"run", "issue"})
-TERMINAL_RUN_STATUSES = frozenset({"completed", "partial", "failed"})
+TERMINAL_RUN_STATUSES = frozenset({"completed", "partial", "failed", "cancelled"})
 
 
 def new_run_id() -> str:
@@ -98,6 +98,16 @@ class DailyBriefRepository:
                 ON redmine_daily_brief_runs(owner_id, brief_date, mode)
                 """
             )
+            # 协作式取消：API 写标志位，执行循环轮询后收敛为 cancelled。
+            # 幂等迁移——旧库补列，新库建表语句本身也不含此列（控制面
+            # 状态不属于 RUN_COLUMNS 数据面，避免经 update_run 被覆写）。
+            try:
+                conn.execute(
+                    "ALTER TABLE redmine_daily_brief_runs "
+                    "ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0"
+                )
+            except sqlite3.OperationalError:
+                pass  # column already exists
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS redmine_daily_brief_issues (
@@ -256,6 +266,40 @@ class DailyBriefRepository:
             )
             return bool(cursor.rowcount)
 
+    # ------------------------------------------------------------------ cancel
+
+    def request_cancel(self, run_id: str) -> bool:
+        """Request cooperative cancellation; no-op for terminal runs.
+
+        独立于 update_run 走专用语句：cancel_requested 是控制面标志，
+        不进 RUN_COLUMNS，避免执行循环每次 upsert run 时把它写回 0。
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE redmine_daily_brief_runs SET cancel_requested=1, "
+                f"updated_at=? WHERE run_id=? AND status NOT IN "
+                f"({', '.join('?' * len(TERMINAL_RUN_STATUSES))})",
+                (_now(), run_id, *TERMINAL_RUN_STATUSES),
+            )
+            return bool(cursor.rowcount)
+
+    def is_cancel_requested(self, run_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT cancel_requested FROM redmine_daily_brief_runs WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            return bool(row and row["cancel_requested"])
+
+    def clear_cancel(self, run_id: str) -> None:
+        """复用 run 重新执行前清除取消标志（见 _reset_run_for_retry）。"""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE redmine_daily_brief_runs SET cancel_requested=0, "
+                "updated_at=? WHERE run_id=?",
+                (_now(), run_id),
+            )
+
     # ------------------------------------------------------------------ issues
 
     def upsert_issue(self, issue: DailyBriefIssue) -> None:
@@ -382,7 +426,7 @@ class DailyBriefRepository:
             # reset_stale_running() 把刚排队的任务当成超时僵尸标成 failed。
             conn.execute(
                 "UPDATE redmine_daily_brief_runs SET status='pending', started_at=?, "
-                "finished_at='', error='', updated_at=? WHERE run_id=?",
+                "finished_at='', error='', cancel_requested=0, updated_at=? WHERE run_id=?",
                 (_now(), _now(), run_id),
             )
             if kind == "issue":

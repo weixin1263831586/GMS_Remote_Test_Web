@@ -15387,6 +15387,43 @@
         "summary": "Get Brief For Date"
       }
     },
+    "/api/redmine-agent/daily-brief/{brief_date}/cancel": {
+      "post": {
+        "description": "请求停止该日期最新一次晨报 run（协作式取消）。\n\n独立 Worker 执行靠 DB 标志位在 issue 边界生效；同进程执行额外\ntask.cancel()。已终态的 run 幂等返回 already_terminal。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_date",
+            "required": true,
+            "schema": {
+              "title": "Brief Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Daily Brief"
+      }
+    },
     "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/reanalyze": {
       "post": {
         "parameters": [
