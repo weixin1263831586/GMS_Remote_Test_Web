@@ -2386,7 +2386,7 @@
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="device-pswd" placeholder="请输入SSH密码" onkeypress="handleDevicePasswordKeyPress(event)" autocomplete="current-password" />
+                    <input type="password" id="device-pswd" placeholder="请输入SSH密码" data-keypress="handleDevicePasswordKeyPress" data-r0="event" autocomplete="current-password" />
                 </div>
                 </form>
                 <div class="modal-buttons">
@@ -2480,11 +2480,11 @@
                 </div>
                 <div class="modal-form-row">
                     <label>用户名:</label>
-                    <input type="text" id="username-detect-username" placeholder="请输入客户端用户名" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="username" />
+                    <input type="text" id="username-detect-username" placeholder="请输入客户端用户名" data-keypress="handleUsernameDetectKeyPress" data-r0="event" autocomplete="username" />
                 </div>
                 <div class="modal-form-row">
                     <label>SSH密码:</label>
-                    <input type="password" id="username-detect-password" placeholder="可选，用于SSH验证" onkeypress="handleUsernameDetectKeyPress(event)" autocomplete="current-password" />
+                    <input type="password" id="username-detect-password" placeholder="可选，用于SSH验证" data-keypress="handleUsernameDetectKeyPress" data-r0="event" autocomplete="current-password" />
                 </div>
                 </form>
                 <div class="modal-ssh-info">
@@ -2518,7 +2518,7 @@
                     <div class="modal-form-row">
                         <label>管理员密码:</label>
                         <div class="password-input-wrap">
-                            <input type="password" id="elevate-password" placeholder="管理员密码" onkeypress="if(event.key==='Enter'){event.preventDefault();submitElevateForm();}" autocomplete="current-password" />
+                            <input type="password" id="elevate-password" placeholder="管理员密码" data-keypress="submitElevateForm" data-key="Enter" data-prevent autocomplete="current-password" />
                             <button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-label="显示密码" title="显示密码"></button>
                         </div>
                     </div>
@@ -2640,7 +2640,7 @@
                 <div class="modal-info-text">连接远端固件主机认证失败，请输入 SSH 密码。</div>
                 <div class="modal-form-row">
                     <label>SSH 密码:</label>
-                    <input type="password" id="firmware-share-password-input" placeholder="仅本会话使用，不持久保存" onkeypress="handleFirmwareSharePasswordKeyPress(event)" autocomplete="current-password" />
+                    <input type="password" id="firmware-share-password-input" placeholder="仅本会话使用，不持久保存" data-keypress="handleFirmwareSharePasswordKeyPress" data-r0="event" autocomplete="current-password" />
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" data-click="closeFirmwareSharePasswordModal">取消</button>

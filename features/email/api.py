@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from features.auth import require_authenticated_user
-from features.email.service import send_email
+from features.email.service import normalize_email_addresses, send_email
 from foundation.responses import error_response, success_response
 
 
@@ -61,16 +61,15 @@ def _rate_limited(username: str) -> bool:
 
 
 def _normalize_recipients(value: Any) -> list[str] | None:
-    """to/cc 归一化为字符串列表;非法类型返回 None(调用方报 400)。"""
-    if value is None:
-        return []
-    if isinstance(value, str):
-        value = [item for item in (part.strip() for part in value.split(",")) if item]
-    if not isinstance(value, list) or not all(
-        isinstance(item, str) and item.strip() for item in value
-    ):
-        return None
-    return [item.strip() for item in value]
+    """to/cc 归一化为合法地址列表;非法类型/地址返回 None(调用方报 400)。
+
+    与 service.split_emails 的分隔语义保持一致(逗号、分号均拆分),
+    否则 ``["a@x.com;b@x.com;..."]`` 一项即可绕过收件人数量上限。
+    每项必须是单个不含空白/CRLF/分隔符的地址:SMTP 头(To/Cc)由地址
+    列表 join 生成,内嵌 CRLF 等于向邮件基础设施注入任意头
+    (header injection),必须在 API 边界拒绝。
+    """
+    return normalize_email_addresses(value)
 
 
 # SMTP 凭证存放在 redmine 配置树；组合根在启动时注入按请求解析 manager 的 provider。
@@ -129,7 +128,8 @@ async def send_email_endpoint(request: Request):
     cc = _normalize_recipients(body.get("cc"))
     if to is None or cc is None:
         return error_response("to/cc 必须是邮箱地址列表", status_code=400)
-    subject = str(body.get("subject") or "").strip()
+    subject = " ".join(str(body.get("subject") or "").split())
+    # subject 进入 Subject 头;剥离 \r/\n 等空白折叠字符防止头注入。
     content = body.get("body")
     if not to:
         return error_response("to is required", status_code=400)
@@ -186,7 +186,8 @@ async def send_email_endpoint(request: Request):
             attachments[0].parent
         ] if attachments else []
     if body.get("sender_name"):
-        kwargs["sender_name"] = str(body.get("sender_name")).strip()
+        # sender_name 拼入 From 头的显示名,同样剥离 CRLF。
+        kwargs["sender_name"] = " ".join(str(body.get("sender_name")).split())
 
     try:
         result = await asyncio.to_thread(send_email, to, subject, content, **kwargs)

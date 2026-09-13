@@ -267,7 +267,6 @@ async def get_latest_evidence_snapshot(issue_id: str, request: Request):
         },
     }
 
-
 @router.get("/evidence/{snapshot_id}/wait")
 @handle_api_errors
 async def wait_evidence_snapshot(

@@ -165,7 +165,7 @@ function notifyUser(title, message, level) {
   level = level || 'info';
   try {
     if (window.parent && window.parent !== window) {
-      window.parent.postMessage({type:'gms-dashboard-notification', title:title, message:message, level:level}, '*');
+      window.parent.postMessage({type:'gms-dashboard-notification', title:title, message:message, level:level}, window.location.origin);
     }
   } catch (_) {}
   var old = document.getElementById('gerrit-local-toast');

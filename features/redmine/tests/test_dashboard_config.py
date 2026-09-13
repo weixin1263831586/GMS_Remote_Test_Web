@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from features.redmine.config import RedmineConfig as ConfigManager
+from tests.contract.snapshot_tools import read_shell_bundle
 
 
 class SidebarNavigationConfigTests(unittest.TestCase):
@@ -26,14 +27,9 @@ class SidebarNavigationConfigTests(unittest.TestCase):
         self.assertEqual(visible_pages, ["test", "redmine-agent"])
 
     def test_sidebar_visibility_modal_is_wired_in_template(self):
-        # CSP 前置迁移后 shell 脚本外置，按"模板+外置 shell 脚本"组合读取；
+        # shell 脚本已外置：标记可能落在模板或外置脚本，统一走 bundle helper；
         # inline onclick 已迁移为 act-bridge data-click 声明。
-        template_parts = [Path("web/shell/shell.html").read_text(encoding="utf-8")]
-        template_parts += [
-            p.read_text(encoding="utf-8")
-            for p in sorted(Path("web/static/js/shell").glob("*.js"))
-        ]
-        template = "\n".join(template_parts)
+        template = read_shell_bundle()
         self.assertIn('data-click="openSidebarVisibilityModal"', template)
         self.assertIn('id="sidebar-visibility-modal"', template)
         for marker in ('id="sidebar-settings-panel-guide"', "function switchSidebarSettingsTab", "function openGuideImageLightbox", 'id="guide-image-modal"'):

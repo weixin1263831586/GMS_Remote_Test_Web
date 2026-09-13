@@ -122,7 +122,7 @@ async def run_claimed_job(
     写入会被安全拒绝，而不是覆盖新状态。
 
     状态收敛兜底（finally）：无论 work/heartbeat 哪条路径异常退出，只要
-    job 仍处于本租约的 running 状态，就必然落到 finish(failed)——而不是
+    job 仍处于本租约的 running 状态，就立即回到 queued 等待重试，而不是
     等待下一次 lease expiration 才恢复。
     """
     job_id = str(job["job_id"])
@@ -181,38 +181,49 @@ async def run_claimed_job(
             await work
         except Exception as exc:
             logger.exception("daily brief job %s failed", job_id)
-            repository.finish_job(job_id, worker_id, lease_token, error=str(exc))
-            outcome = "done"
-            run = repository.get_run(str(job["run_id"]))
-            if run is not None and run.status not in TERMINAL_RUN_STATUSES:
-                run.status = "failed"
-                run.error = str(exc)[:1000]
-                run.finished_at = _now()
-                repository.update_run(run)
+            finished = repository.finish_job(
+                job_id, worker_id, lease_token, error=str(exc)
+            )
+            outcome = "done" if finished else "lease-lost"
+            # 只有仍持有租约的 Worker 才能收敛 run。若 finish_job 的 CAS
+            # 失败，任务已被其他 Worker 接管；此时旧 Worker 再写 run
+            # 会覆盖新执行者的 pending/analyzing/completed 状态。
+            if finished:
+                run = repository.get_run(str(job["run_id"]))
+                if run is not None and run.status not in TERMINAL_RUN_STATUSES:
+                    run.status = "failed"
+                    run.error = str(exc)[:1000]
+                    run.finished_at = _now()
+                    repository.update_run(run)
+            else:
+                logger.warning(
+                    "daily brief job %s failure ignored after lease loss", job_id
+                )
         else:
-            repository.finish_job(job_id, worker_id, lease_token)
-            outcome = "done"
+            finished = repository.finish_job(job_id, worker_id, lease_token)
+            outcome = "done" if finished else "lease-lost"
+            if not finished:
+                logger.warning(
+                    "daily brief job %s completion ignored after lease loss", job_id
+                )
         return True
     finally:
         if outcome is None:
-            # 异常逃逸(如 asyncio.wait 本身出错):确保租约归属收敛。
-            # lease_token CAS 保证:若租约已被接管,这条写入自然失败;
-            # 若仍归属本 Worker,任务立即标 failed 供重试,而不是
-            # 等 lease_expires_at 超时。
+            # 异常逃逸(如 asyncio.wait 本身出错):确保任务回到可重试状态。
+            # 必须用 requeue_job 而非 finish_job:finish_job 会把 job 置为
+            # 终态 failed,claim_next_job 不再领取,错误消息声称的
+            # "queued for retry" 不会发生(任务实际丢失);requeue_job 把
+            # job 与 run 在同一事务里收敛回 queued/pending,与
+            # claim_next_job 的过期恢复语义一致。
+            # lease_token CAS 保证:若租约已被接管,这条写入自然失败。
             try:
-                if repository.finish_job(
+                if repository.requeue_job(
                     job_id, worker_id, lease_token,
-                    error="worker unexpected exit; queued for retry via requeue",
+                    reason="worker unexpected exit; queued for retry",
                 ):
                     logger.error(
-                        "daily brief job %s converged to failed after unexpected exit",
-                        job_id,
+                        "daily brief job %s requeued after unexpected exit", job_id
                     )
-                    run = repository.get_run(str(job["run_id"]))
-                    if run is not None and run.status not in TERMINAL_RUN_STATUSES:
-                        run.status = "pending"
-                        run.error = "worker unexpected exit; queued for retry"
-                        repository.update_run(run)
             except Exception:
                 logger.exception(
                     "daily brief job %s failed to converge after unexpected exit", job_id
@@ -238,13 +249,23 @@ async def worker_loop(
                 claimed = repository, job
                 break
         if claimed is not None:
-            if not await run_claimed_job(
-                *claimed,
-                worker_id,
-                stop_event,
-                lease_seconds=lease_seconds,
-                service_factory=service_factory,
-            ):
+            try:
+                keep_running = await run_claimed_job(
+                    *claimed,
+                    worker_id,
+                    stop_event,
+                    lease_seconds=lease_seconds,
+                    service_factory=service_factory,
+                )
+            except Exception:
+                # 单次任务异常不应终止整个 worker:run_claimed_job 的
+                # finally 已尝试 requeue 收敛租约,这里只记录并继续下一轮
+                # (否则 asyncio.run 崩溃会让进程退出,剩余任务全部无人处理)。
+                logger.exception(
+                    "daily brief worker continuing after unexpected job error"
+                )
+                continue
+            if not keep_running:
                 break
             continue
         try:

@@ -662,7 +662,7 @@ function notifyUser(title, message, level) {
   level = level || 'info';
   try {
     if (window.parent && window.parent !== window) {
-      window.parent.postMessage({type:'redmine-agent-notification', title:title, message:message, level:level}, '*');
+      window.parent.postMessage({type:'redmine-agent-notification', title:title, message:message, level:level}, window.location.origin);
     }
   } catch (_) {}
   var old = document.getElementById('redmine-local-toast');
@@ -1256,7 +1256,7 @@ function renderIssueCard(item) {
       ${refsHtml}
     </div>` : ''}
 
-    <details class="issue-doc-details" ontoggle="loadIssueDocOnToggle(this, ${item.issue_id})">
+    <details class="issue-doc-details" data-toggle="loadIssueDocOnToggle" data-r0="el" data-a1="${item.issue_id}">
       <summary>📄 完整文档</summary>
       <div class="formatted-doc muted">展开后加载完整文档…</div>
     </details>

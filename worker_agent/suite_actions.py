@@ -96,16 +96,24 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                 and download_port == controller_port
                 and is_controller_download_path
             )
+            controller_authorization = ""
             if parsed.scheme == "https":
                 import ssl
                 if is_controller_callback:
-                    headers["Authorization"] = f"Bearer {config.token}"
+                    controller_authorization = f"Bearer {config.token}"
                     ssl_context = ssl.create_default_context(
                         cafile=config.controller_ca or None
                     )
             elif is_controller_callback:
-                headers["Authorization"] = f"Bearer {config.token}"
+                controller_authorization = f"Bearer {config.token}"
             request = urllib.request.Request(url, headers=headers)
+            if controller_authorization:
+                # urllib copies ordinary request headers across redirects.
+                # Mark the Worker bearer as unredirected so a Controller
+                # callback cannot bounce it to a different origin.
+                request.add_unredirected_header(
+                    "Authorization", controller_authorization
+                )
             with urllib.request.urlopen(request, timeout=60, context=ssl_context) as response, temporary.open("wb") as output:
                 try:
                     expected_bytes = int((getattr(response, "headers", None) or {}).get("Content-Length") or 0)
@@ -434,5 +442,4 @@ def scan_suites(config: WorkerConfig) -> list[dict[str, Any]]:
                     "available": os.access(executable, os.X_OK),
                 })
     return suites
-
 

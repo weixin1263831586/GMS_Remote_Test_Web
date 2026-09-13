@@ -19,6 +19,7 @@ import os
 import ssl
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -89,6 +90,26 @@ def _load_token(token_path: Path) -> str:
         return ""
 
 
+def _controller_url_valid(value: str) -> bool:
+    """Accept only a credential-free HTTP(S) Controller origin."""
+    if any(character in value for character in "\r\n\t"):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        _ = parsed.port
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme in {"http", "https"}
+        and parsed.hostname
+        and not parsed.username
+        and not parsed.password
+        and not parsed.query
+        and not parsed.fragment
+        and parsed.path in {"", "/"}
+    )
+
+
 class GmsClient:
     """Minimal stdlib-only HTTP client for the Controller API.
 
@@ -108,6 +129,11 @@ class GmsClient:
         self.server_url = (server_url or os.environ.get("GMS_REMOTE_TEST_SERVER", "")).rstrip("/")
         if not self.server_url:
             raise GmsApiError("GMS_REMOTE_TEST_SERVER 未设置", EXIT_USAGE)
+        if not _controller_url_valid(self.server_url):
+            raise GmsApiError(
+                "GMS_REMOTE_TEST_SERVER 必须是无凭据、无路径的 HTTP(S) Controller 地址",
+                EXIT_USAGE,
+            )
         token_path = token_file or os.environ.get("GMS_AUTH_TOKEN_FILE", "")
         self.token_path = token_path
         self.token = _load_token(Path(token_path)) if token_path else ""

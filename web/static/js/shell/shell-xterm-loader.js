@@ -33,4 +33,3 @@
 
     // 标记：xterm.js 尚未加载
     window.xtermLoaded = false;
-    

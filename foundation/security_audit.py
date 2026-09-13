@@ -136,7 +136,12 @@ class SecurityAuditLogger:
     def validate_configuration(self) -> None:
         """Load the signing key and reject an already-corrupt audit chain."""
 
-        self._audit_key()
+        # Production servers may start several uvicorn workers at once. Key
+        # bootstrap uses O_EXCL, so serialize the initial create/read through
+        # the same process lock used by audit appends; otherwise two workers
+        # can both observe a missing key and one crashes with FileExistsError.
+        with self._lock, self._cross_process_lock():
+            self._audit_key()
         result = self.verify_chain()
         if not result.get('valid'):
             raise RuntimeError(

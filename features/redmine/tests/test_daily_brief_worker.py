@@ -154,6 +154,43 @@ class DailyBriefWorkerTests(unittest.TestCase):
         self.assertEqual(self.repository.get_issue("db_test", 101).status, "completed")
         self.assertEqual(self.repository.get_job(job["job_id"])["status"], "completed")
 
+    def test_stale_worker_failure_does_not_overwrite_new_lease_run_state(self):
+        """租约被接管后，旧 Worker 的失败不得覆盖新 Worker 的 run。"""
+        self.repository.create_run(DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-13", mode="manual", run_id="db_test"
+        ))
+        job = self._claim()
+
+        async def execute_run(_run_id):
+            self.assertTrue(self.repository.requeue_job(
+                job["job_id"], self.worker_id, job["lease_token"],
+                reason="simulated lease handoff",
+            ))
+            replacement = self.repository.claim_next_job(
+                "replacement-worker", lease_seconds=30
+            )
+            self.assertIsNotNone(replacement)
+            run = self.repository.get_run("db_test")
+            run.status = "analyzing"
+            run.error = ""
+            self.repository.update_run(run)
+            raise RuntimeError("stale worker failed after handoff")
+
+        fake_service = SimpleNamespace(execute_run=execute_run)
+        self.assertTrue(asyncio.run(run_claimed_job(
+            self.repository,
+            job,
+            self.worker_id,
+            asyncio.Event(),
+            lease_seconds=30,
+            service_factory=lambda _owner: fake_service,
+        )))
+
+        current_job = self.repository.get_job(job["job_id"])
+        self.assertEqual(current_job["status"], "running")
+        self.assertEqual(current_job["worker_id"], "replacement-worker")
+        self.assertEqual(self.repository.get_run("db_test").status, "analyzing")
+
 
 class OwnerFairnessTests(unittest.TestCase):
     """owner round-robin 游标:字母序靠前的 owner 不得垄断 claim 起点。"""
@@ -192,7 +229,7 @@ class UnexpectedExitConvergenceTests(unittest.TestCase):
         self.repository = DailyBriefRepository(Path(self._tmp.name))
         self.worker_id = "conv-worker"
 
-    def test_unexpected_exit_marks_job_failed_not_stuck_running(self):
+    def test_unexpected_exit_requeues_job_not_stuck_running(self):
         from features.redmine.daily_brief_worker import run_claimed_job
 
         self.repository.create_run(DailyBriefRun(
@@ -224,13 +261,19 @@ class UnexpectedExitConvergenceTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             asyncio.run(scenario_unexpected())
-        # finally 兜底:job 被标 failed(而不是留 running 等 lease 过期)。
+        # finally 兜底必须 requeue(而不是 finish_job 标终态 failed):
+        # job 回到 queued 供 claim_next_job 重试,run 回到 pending。
         self.assertEqual(
-            self.repository.get_job(job["job_id"])["status"], "failed"
+            self.repository.get_job(job["job_id"])["status"], "queued"
         )
         run = self.repository.get_run("db_conv")
         self.assertEqual(run.status, "pending")
         self.assertIn("unexpected exit", run.error)
+
+        # requeue 后能被再次认领,验证重试路径真正可达。
+        reclaimed = self.repository.claim_next_job("conv-worker-2", lease_seconds=30)
+        self.assertIsNotNone(reclaimed)
+        self.assertEqual(reclaimed["job_id"], job["job_id"])
 
 
 if __name__ == "__main__":

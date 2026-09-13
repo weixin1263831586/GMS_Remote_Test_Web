@@ -72,6 +72,24 @@ def test_audit_key_autogenerates_when_file_missing(tmp_path, monkeypatch):
     assert len(key) >= 32
 
 
+def test_audit_configuration_serializes_key_bootstrap(tmp_path, monkeypatch):
+    """并发启动的生产 Worker 必须共享同一把新建审计密钥。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    key_path = tmp_path / "secrets" / "audit_hmac.key"
+    monkeypatch.delenv("GMS_AUDIT_HMAC_KEY", raising=False)
+    monkeypatch.setenv("GMS_AUDIT_HMAC_KEY_FILE", str(key_path))
+    monkeypatch.setenv("GMS_ENV", "production")
+
+    log_path = str(tmp_path / "audit.jsonl")
+    loggers = [SecurityAuditLogger(log_path) for _ in range(4)]
+    with ThreadPoolExecutor(max_workers=len(loggers)) as executor:
+        list(executor.map(lambda audit: audit.validate_configuration(), loggers))
+
+    keys = {audit._audit_key() for audit in loggers}
+    assert len(keys) == 1
+
+
 def test_skill_signing_key_autogenerates_when_missing(tmp_path, monkeypatch):
     key_path = tmp_path / "secrets" / "skill-signing-ed25519.pem"
     monkeypatch.setenv(SIGNING_KEY_ENV, str(key_path))

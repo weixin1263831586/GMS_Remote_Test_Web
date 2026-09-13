@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import subprocess
 import tarfile
+import urllib.request
 import zipfile
 from unittest.mock import Mock, patch
 
@@ -214,6 +215,15 @@ def test_controller_suite_download_sends_worker_token(tmp_path):
 
     request = opened.call_args.args[0]
     assert request.get_header("Authorization") == "Bearer worker-secret"
+    redirected = urllib.request.HTTPRedirectHandler().redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://downloads.example.test/stolen.zip",
+    )
+    assert redirected.get_header("Authorization") is None
 
 
 def test_controller_suite_download_routes_browser_alias_through_controller(tmp_path):

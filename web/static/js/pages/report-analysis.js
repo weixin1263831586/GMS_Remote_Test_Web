@@ -462,7 +462,7 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
                 <div class="modal-form-row">
                     <label>密码</label>
                     <input type="password" id="redmine-password" placeholder="输入 Redmine 密码" autocomplete="current-password"
-                           onkeypress="if(event.key === 'Enter') submitRedmineAuth('${escapedUrl}')">
+                           data-keypress="submitRedmineAuth" data-a0="${escapedUrl}" data-key="Enter" data-prevent>
                 </div>
                 </form>
                 <div class="modal-buttons">

@@ -65,6 +65,32 @@ class SendEmailTests(unittest.TestCase):
         self.assertFalse(result["sent"])
         self.assertIn("收件人", result["error"])
 
+    @patch("features.email.service.smtplib.SMTP_SSL")
+    def test_header_injection_is_rejected_or_collapsed_for_all_callers(self, smtp_cls):
+        invalid = send_email(
+            "dev@example.com\r\nBcc: evil@example.com",
+            "subject",
+            "body",
+            manager=_fake_manager(QIYE_CFG),
+        )
+        self.assertFalse(invalid["sent"])
+        smtp_cls.assert_not_called()
+
+        smtp = smtp_cls.return_value.__enter__.return_value
+        result = send_email(
+            "dev@example.com",
+            "line 1\r\nBcc: evil@example.com",
+            "body",
+            sender_name="Daily\r\nReply-To: evil@example.com",
+            manager=_fake_manager(QIYE_CFG),
+        )
+        self.assertTrue(result["sent"])
+        raw = smtp.sendmail.call_args.args[2]
+        message = message_from_string(raw)
+        self.assertEqual(message["Subject"], "line 1 Bcc: evil@example.com")
+        self.assertIsNone(message["Bcc"])
+        self.assertIsNone(message["Reply-To"])
+
     def test_qiye_163_requires_username_and_password(self):
         cfg = {"smtp_host": "smtphz.qiye.163.com", "smtp_port": 465}
         result = send_email("a@x.com", "s", "b", manager=_fake_manager(cfg))

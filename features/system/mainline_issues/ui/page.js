@@ -55,4 +55,3 @@
     loadSummary().then(() => reload()).catch(err => {
       document.getElementById('summary').textContent = err.message;
     });
-  

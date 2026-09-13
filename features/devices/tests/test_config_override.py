@@ -27,8 +27,11 @@ from foundation.command_result import CommandResult
 # CI runner 可能没有 adb 二进制;单元测试只 mock run_local_shell_command,
 # 但 _run_adb() 在 mock 生效前就会解析 adb 路径。这里统一把 adb 解析固定
 # 为假路径,让测试在无 Android platform-tools 的环境稳定运行。
+# 注册为模块级 cleanup(测试进程收尾时自动 stop),避免全局 mock
+# 泄漏污染同进程中随后运行的其他测试模块。
 patch.object(co, "_adb_path", return_value="/usr/bin/adb").start()
 patch.object(ce, "_adb_path", return_value="/usr/bin/adb").start()
+unittest.addModuleCleanup(patch.stopall)
 
 
 # validate_override + _split_array_items

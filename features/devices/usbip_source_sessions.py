@@ -406,15 +406,27 @@ def bind_usbipd_devices(
                 )
                 continue
 
+            # usbipd list 输出按行解析:findstr 是子串匹配,busid "2-1" 会
+            # 同时命中 "2-1"、"2-11" 等行;状态判定必须只看 busid 所属行,
+            # 否则多设备同源时会把别的设备的状态归因到当前设备。
+            # usbipd list 行格式:"  2-1    0abc  <vid:pid>  <desc>  <STATE>"。
+            state_line = next(
+                (
+                    line
+                    for line in list_result.stdout.splitlines()
+                    if re.search(rf"(?:^|\s){re.escape(busid)}\s", line)
+                ),
+                "",
+            )
             # usbipd 状态是整词（STATE 列：Not Shared / Shared / Attached），
             # "Not Shared" 含子串 "Shared"，必须按词边界判定而非 substring。
-            if re.search(r'\bShared\b', list_result.stdout) and not re.search(
-                r'\bNot Shared\b', list_result.stdout
+            if re.search(r'\bShared\b', state_line) and not re.search(
+                r'\bNot Shared\b', state_line
             ):
                 logger.info(f"Device {busid} already shared")
                 bound.append(busid)
                 continue
-            elif re.search(r'\bAttached\b', list_result.stdout):
+            elif re.search(r'\bAttached\b', state_line):
                 # Detach first
                 detach_result = ssh_manager.execute_command(
                     ssh,

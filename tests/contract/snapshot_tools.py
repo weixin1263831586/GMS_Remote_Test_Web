@@ -13,11 +13,13 @@ SNAPSHOTS = Path(__file__).with_name('snapshots')
 # 的 data-* 声明（见 web/static/js/shell/act-bridge.js），名单改从
 # data-click/data-change/... 抽取，继续用于冻结契约与完整性校验。
 INLINE_HANDLER_RE = re.compile(
-    r'data-(?:click|change|input|submit|keydown|keyup|dblclick|'
-    r'dragstart|dragend|dragover|drop|blur|focus|error)=["\']'
+    r'data-(?:click|change|input|submit|keydown|keyup|keypress|dblclick|'
+    r'dragstart|dragend|dragover|dragenter|drop|toggle|blur|focus|error|load|'
+    r'mouseover|mouseout)=["\']'
     r'([^"\']+)["\']'
 )
 ID_RE = re.compile(r'\bid=["\']([^"\']+)["\']')
+SCRIPT_SRC_RE = re.compile(r'<script\b[^>]*\bsrc=["\']([^"\']+)["\']', re.IGNORECASE)
 
 
 def write_json(name: str, value: Any) -> None:
@@ -40,6 +42,44 @@ def flatten_app_routes(app) -> list[Any]:
 
     return _flatten(app)
 
+
+def read_shell_bundle() -> str:
+    """shell.html 模板 + 模板实际引用的本地 shell 脚本。
+
+    CSP 前置迁移后 shell 主脚本外置到 ``web/static/js/shell/*.js``：
+    "模板里应包含某标记"类断言可能命中模板或外置脚本，统一用本函数
+    读取，避免每个测试各自内联拼接样板。只读取模板真实引用的脚本，
+    防止孤儿文件让 wiring 测试产生假阳性。
+    """
+    html = (ROOT / 'web/shell/shell.html').read_text(encoding='utf-8')
+    parts = [html]
+    for source in SCRIPT_SRC_RE.findall(html):
+        source_path = source.split('?', 1)[0]
+        if not source_path.startswith('/static/js/shell/'):
+            continue
+        path = ROOT / 'web/static' / source_path.removeprefix('/static/')
+        if path.is_file():
+            parts.append(path.read_text(encoding='utf-8'))
+    return '\n'.join(parts)
+
+
+def read_page_bundle(html_relative: str) -> str:
+    """嵌入式页面 page.html + 同目录 page.js 的组合文本。
+
+    页面脚本外置后，"HTML 里的 API/标记引用"部分落在 page.js；
+    需要跨两者断言时用本函数。
+    """
+    html = ROOT / html_relative
+    html_text = html.read_text(encoding='utf-8')
+    parts = [html_text]
+    js = html.with_suffix('.js')
+    references_page_js = any(
+        source.split('?', 1)[0].endswith('/page.js')
+        for source in SCRIPT_SRC_RE.findall(html_text)
+    )
+    if references_page_js and js.is_file():
+        parts.append(js.read_text(encoding='utf-8'))
+    return '\n'.join(parts)
 
 def normalized_routes(app) -> list[dict[str, Any]]:
     result = []

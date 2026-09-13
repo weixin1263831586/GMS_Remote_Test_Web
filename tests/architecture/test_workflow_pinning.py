@@ -35,7 +35,12 @@ class WorkflowPinningTests(unittest.TestCase):
         """收集 (文件, 行号, 引用, 行尾注释)。"""
 
         entries: list[tuple[Path, int, str, str]] = []
-        for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        workflow_paths = sorted(
+            path
+            for pattern in ("*.yml", "*.yaml")
+            for path in WORKFLOWS_DIR.glob(pattern)
+        )
+        for path in workflow_paths:
             for lineno, line in enumerate(
                 path.read_text(encoding="utf-8").splitlines(), start=1
             ):
