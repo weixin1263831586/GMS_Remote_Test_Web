@@ -34,7 +34,7 @@ jobs:
           python-version: "3.10"
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@42c378ffbb438be29e3e1848d520fb0a8ee1c271 # v3.38.0
+        uses: github/codeql-action/init@faaca9a8f6edddba5725ffe5adefdab6669a2eca # v3.38.0
         with:
           languages: python, javascript
           # 查询套件：安全审计 + 质量告警里只取安全子集，
