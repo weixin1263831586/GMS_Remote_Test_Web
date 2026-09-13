@@ -531,6 +531,14 @@ class KkAgentAnalyzerTests(unittest.TestCase):
         self.assertIn("gms_rt_redmine_history_search", prompt)
         self.assertIn("Never invent an issue id", prompt)
 
+    def test_prompt_pins_chinese_output_contract(self):
+        """中文输出契约：首尾双 gate，防止模型整段英文回答。"""
+        prompt = KkAgentRedmineAnalyzer().build_prompt(ENTRY)
+        self.assertIn("OUTPUT LANGUAGE", prompt)
+        self.assertIn("简体中文", prompt)
+        self.assertIn("CONTRACT VIOLATION", prompt)
+        self.assertIn("FINAL CHECK", prompt)
+
     def test_prompt_requires_detailed_report(self):
         """深度报告：固定五个小节 + 不得编造事实。"""
         prompt = KkAgentRedmineAnalyzer().build_prompt(ENTRY)
@@ -543,7 +551,7 @@ class KkAgentAnalyzerTests(unittest.TestCase):
         self.assertIn("do NOT fabricate", prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v5")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v6")
 
 
 class PreflightGmsAuthTests(unittest.TestCase):
