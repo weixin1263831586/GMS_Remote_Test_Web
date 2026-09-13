@@ -92,7 +92,7 @@ function renderRedmineIssueLink(issueId, options) {
   if (!id) return '-';
   const opts = options || {};
   const label = opts.label || ('#' + id);
-  const stop = opts.stopPropagation === false ? '' : ' onclick="event.stopPropagation()"';
+  const stop = opts.stopPropagation === false ? '' : ' data-click="_actStopPropagation" data-r0="event"';
   return '<a class="redmine-issue-link" data-redmine-issue-id="' + esc(id) + '" href="' + redmineIssueUrl(id) + '" target="_blank" rel="noopener"' + stop + '>' + esc(label) + '</a>';
 }
 
@@ -428,12 +428,33 @@ function _renderMarkdownTable(rows) {
   return '<table class="md-table"><thead><tr>' + header.map(function(c){return '<th>' + esc(c) + '</th>';}).join('') + '</tr></thead><tbody>' + body + '</tbody></table>';
 }
 
+function sanitizeHref(raw) {
+  // URL scheme 白名单：Markdown 链接来自 Redmine issue/评论、AI 输出与
+  // 历史分析结果，禁止 javascript:/data:/vbscript:/file: 等点击触发型
+  // unsafe navigation / XSS 入口。相对路径仅允许站内 /... 形式。
+  var value = String(raw == null ? '' : raw).trim();
+  if (!value) return '#';
+  // 站内相对地址(以 / 开头且非 // 协议相对形式)。
+  if (value.charAt(0) === '/' && value.charAt(1) !== '/') return value;
+  // 必须是显式 http(s) 绝对地址;其余(含 ../、./、裸文本)一律拒绝。
+  if (!/^https?:[/][/]/i.test(value)) return '#';
+  try {
+    var u = new URL(value, window.location.origin);
+    return u.href;
+  } catch (e) {
+    return '#';
+  }
+}
+
 function _inlineMd(text) {
   // `code`, **bold**, [link](url)
   return String(text || '')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, label, url) {
+      // url 已经过外层 esc();sanitizeHref 再做 scheme 白名单。
+      return '<a href="' + esc(sanitizeHref(url)) + '" target="_blank" rel="noopener">' + label + '</a>';
+    })
     .replace(/(^|[^\w/])#(\d{5,})\b/g, function(_, prefix, id) {
       return prefix + renderRedmineIssueLink(id, {stopPropagation: false});
     });
@@ -454,7 +475,7 @@ function renderDiffBlock(code) {
     if (line.startsWith('-')) return '<span class="diff-remove">' + e + '</span>';
     return e;
   }).join(_NL);
-  return '<div class="code-block diff-block"><div class="code-block-lang">diff</div><pre><code>' + lines + '</code></pre><button class="copy-btn" onclick="copyCode(this)">复制</button></div>';
+  return '<div class="code-block diff-block"><div class="code-block-lang">diff</div><pre><code>' + lines + '</code></pre><button class="copy-btn" data-click="copyCode" data-r0="el">复制</button></div>';
 }
 function renderShellBlock(code) {
   var lines = code.split(_NL).map(function(line) {
@@ -462,11 +483,11 @@ function renderShellBlock(code) {
     if (/^\$\s/.test(line)) return '<span class="shell-cmd">' + e + '</span>';
     return e;
   }).join(_NL);
-  return '<div class="code-block shell-block"><div class="code-block-lang">shell</div><pre><code>' + lines + '</code></pre><button class="copy-btn" onclick="copyCode(this)">复制</button></div>';
+  return '<div class="code-block shell-block"><div class="code-block-lang">shell</div><pre><code>' + lines + '</code></pre><button class="copy-btn" data-click="copyCode" data-r0="el">复制</button></div>';
 }
 function renderGenericCodeBlock(code, lang) {
   var langLabel = lang || 'code';
-  return '<div class="code-block"><div class="code-block-lang">' + esc(langLabel) + '</div><pre><code>' + esc(code) + '</code></pre><button class="copy-btn" onclick="copyCode(this)">复制</button></div>';
+  return '<div class="code-block"><div class="code-block-lang">' + esc(langLabel) + '</div><pre><code>' + esc(code) + '</code></pre><button class="copy-btn" data-click="copyCode" data-r0="el">复制</button></div>';
 }
 function copyCode(btn) {
   var code = btn.previousElementSibling.querySelector('code');
@@ -676,7 +697,7 @@ function openRedmineReplyModal(issueId, replyText, meta) {
     <div class="modal-content redmine-reply-modal">
       <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
         <span class="modal-title">📝 Redmine回复</span>
-        <span class="modal-close" onclick="removeDynamicModal('${modalId}')">&times;</span>
+        <span class="modal-close" data-click="removeDynamicModal" data-a0="${modalId}">&times;</span>
       </div>
       <div class="modal-body">
         ${meta.summaryHtml ? `<div class="muted">${meta.summaryHtml}</div>` : (meta.summary ? `<div class="muted">${esc(meta.summary)}</div>` : '')}
@@ -690,13 +711,13 @@ function openRedmineReplyModal(issueId, replyText, meta) {
         </div>
         <div>
           <label>📎 附件</label>
-          <input type="file" id="${fileInputId}" data-redmine-files multiple style="display:none" onchange="updateRedmineReplyFileList('${fileInputId}', '${fileListId}')">
-          <div id="${fileInputId}-drop" class="redmine-reply-drop" onclick="document.getElementById('${fileInputId}').click()">拖拽文件到此处，或点击选择文件</div>
+          <input type="file" id="${fileInputId}" data-redmine-files multiple style="display:none" data-change="updateRedmineReplyFileList" data-a0="${fileInputId}" data-a1="${fileListId}">
+          <div id="${fileInputId}-drop" class="redmine-reply-drop" data-click="_actClickById" data-a0="${fileInputId}">拖拽文件到此处，或点击选择文件</div>
           <div id="${fileListId}" class="redmine-reply-file-list"></div>
         </div>
         <div class="modal-buttons">
-          <button class="secondary" onclick="removeDynamicModal('${modalId}')">取消</button>
-          <button onclick="confirmAndSendRedmineReply('${modalId}')">确认并发送</button>
+          <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">取消</button>
+          <button data-click="confirmAndSendRedmineReply" data-a0="${modalId}">确认并发送</button>
         </div>
       </div>
     </div>`;
@@ -729,7 +750,7 @@ function updateRedmineReplyFileList(fileInputId, fileListId) {
   const files = Array.from(input.files || []);
   if (!files.length) { box.innerHTML = ''; return; }
   box.innerHTML = files.map(function(file, idx) {
-    return `<div class="redmine-reply-file"><span>📎 ${esc(file.name)} <span class="muted">(${formatBytes(file.size) || '0 B'})</span></span><button type="button" onclick="removeRedmineReplyFile('${fileInputId}', '${fileListId}', ${idx})">移除</button></div>`;
+    return `<div class="redmine-reply-file"><span>📎 ${esc(file.name)} <span class="muted">(${formatBytes(file.size) || '0 B'})</span></span><button type="button" data-click="removeRedmineReplyFile" data-a0="${fileInputId}" data-a1="${fileListId}" data-a2="${idx}">移除</button></div>`;
   }).join('');
 }
 
@@ -1241,12 +1262,12 @@ function renderIssueCard(item) {
     </details>
 
     <div class="knowledge-actions">
-      <button class="ka-btn primary" onclick="agentReplyDraft(${item.issue_id}, this)" title="复用报告分析风格生成 Redmine 回复草稿、根因和补丁方向">✉️ Redmine回复</button>
-      <button class="ka-btn" onclick="refreshIssueMetadata(${item.issue_id})" title="只刷新Redmine历史回复和附件元数据，不下载附件">🔄 刷新附件元数据</button>
-      <button class="ka-btn" onclick="toggleIssueWorkbench(${item.issue_id})" title="展开相似工单、历史回复和附件解析摘要">🧩 展开依据</button>
-      <button class="ka-btn" onclick="saveIssueToWiki(${item.issue_id})" title="把该工单存入 Wiki「Redmine问题沉淀」分类，并建立外链">📥 存为Wiki</button>
-      <button class="ka-btn" onclick="navigateFromRedmineIssue('reports', ${item.issue_id})" title="保留工单上下文并打开测试报告">📊 关联报告</button>
-      <button class="ka-btn" onclick="navigateFromRedmineIssue('automation', ${item.issue_id})" title="保留工单上下文并打开 GMS ATS">⚙️ 关联 ATS</button>
+      <button class="ka-btn primary" data-click="agentReplyDraft" data-a0="${item.issue_id}" data-r1="el" title="复用报告分析风格生成 Redmine 回复草稿、根因和补丁方向">✉️ Redmine回复</button>
+      <button class="ka-btn" data-click="refreshIssueMetadata" data-a0="${item.issue_id}" title="只刷新Redmine历史回复和附件元数据，不下载附件">🔄 刷新附件元数据</button>
+      <button class="ka-btn" data-click="toggleIssueWorkbench" data-a0="${item.issue_id}" title="展开相似工单、历史回复和附件解析摘要">🧩 展开依据</button>
+      <button class="ka-btn" data-click="saveIssueToWiki" data-a0="${item.issue_id}" title="把该工单存入 Wiki「Redmine问题沉淀」分类，并建立外链">📥 存为Wiki</button>
+      <button class="ka-btn" data-click="navigateFromRedmineIssue" data-a0="reports" data-a1="${item.issue_id}" title="保留工单上下文并打开测试报告">📊 关联报告</button>
+      <button class="ka-btn" data-click="navigateFromRedmineIssue" data-a0="automation" data-a1="${item.issue_id}" title="保留工单上下文并打开 GMS ATS">⚙️ 关联 ATS</button>
     </div>
     <div id="issue-workbench-${item.issue_id}" class="issue-workbench" style="display:none"></div>
   </div>`;
@@ -1430,17 +1451,17 @@ function renderPagination(total, limit, offset) {
 
   const numBtn = (p, label) => {
     const active = p === current;
-    return `<button class="page-num${active ? ' active' : ''}"${active ? ' disabled' : ''} onclick="loadIssues(${p})">${label}</button>`;
+    return `<button class="page-num${active ? ' active' : ''}"${active ? ' disabled' : ''} data-click="loadIssues" data-a0="${p}">${label}</button>`;
   };
 
-  let html = `<button onclick="loadIssues(1)"${current === 1 ? ' disabled' : ''}>首页</button>`;
-  html += `<button onclick="loadIssues(${current-1})"${current === 1 ? ' disabled' : ''}>上一页</button>`;
+  let html = `<button data-click="loadIssues" data-a0="1"${current === 1 ? ' disabled' : ''}>首页</button>`;
+  html += `<button data-click="loadIssues" data-a0="${current-1}"${current === 1 ? ' disabled' : ''}>上一页</button>`;
   for (const p of pageWindow()) {
     if (p === '…') html += `<span class="muted" style="line-height:32px">…</span>`;
     else html += numBtn(p, p);
   }
-  html += `<button onclick="loadIssues(${current+1})"${current === pages ? ' disabled' : ''}>下一页</button>`;
-  html += `<button onclick="loadIssues(${pages})"${current === pages ? ' disabled' : ''}>末页</button>`;
+  html += `<button data-click="loadIssues" data-a0="${current+1}"${current === pages ? ' disabled' : ''}>下一页</button>`;
+  html += `<button data-click="loadIssues" data-a0="${pages}"${current === pages ? ' disabled' : ''}>末页</button>`;
   html += `<span class="muted" style="line-height:32px">第 ${current}/${pages} 页 (共${total}条)</span>`;
   box.innerHTML = html;
 }
@@ -1452,7 +1473,7 @@ async function loadRuns() {
     const items = data.items || [];
     const box = document.getElementById('runsList');
     box.innerHTML = items.map(run => `
-      <div class="run-item ${run.run_id === currentRunId ? 'active' : ''}" onclick="loadRun('${esc(run.run_id)}')">
+      <div class="run-item ${run.run_id === currentRunId ? 'active' : ''}" data-click="loadRun" data-a0="${esc(run.run_id)}">
         <div class="run-item-title">${esc(run.started_at || run.run_id)}</div>
         <div class="run-item-meta">${esc(run.status)} | mode=${esc(run.mode)} | issues ${run.issue_count || 0} | done ${run.processed_count || 0}</div>
       </div>`).join('') || '<div class="muted" style="padding:12px">暂无扫描记录</div>';
@@ -1576,7 +1597,7 @@ function renderTrend(title, items, keyName, chartKey, detailNames, detailProfile
     const pct = Math.max(5, Math.round((count / max) * 100));
     const namesArg = Array.isArray(detailNames) ? detailNames.join(',') : String(detailNames || '');
     const profileArg = String(detailProfileId || '');
-    const clickAttr = count > 0 ? ` style="cursor:pointer" onclick="showRedmineTrendDetail('${esc(keyName)}','${esc(String(label))}','${esc(namesArg)}','${esc(profileArg)}')" title="点击查看该时段解决的问题单"` : '';
+    const clickAttr = count > 0 ? ` style="cursor:pointer" data-click="showRedmineTrendDetail" data-a0="${esc(keyName)}" data-a1="${esc(String(label))}" data-a2="${esc(namesArg)}" data-a3="${esc(profileArg)}" title="点击查看该时段解决的问题单"` : '';
     return `<div class="bar-row"${clickAttr}>
       <div class="bar-label">${esc(label)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
@@ -1589,7 +1610,7 @@ function renderTrend(title, items, keyName, chartKey, detailNames, detailProfile
   return `<section class="trend-panel">
     <div class="trend-title-row">
       <h3>${esc(title)}</h3>
-      <button class="trend-start-btn" onclick="setTrendStartDate('${esc(chartKey)}','${esc(title)}')" title="${esc(tip)}">⚙</button>
+      <button class="trend-start-btn" data-click="setTrendStartDate" data-a0="${esc(chartKey)}" data-a1="${esc(title)}" title="${esc(tip)}">⚙</button>
     </div>
     <div class="trend-body">${rows || '<div class="muted">暂无已解决数据</div>'}</div>
   </section>`;
@@ -1604,7 +1625,7 @@ function renderMiniIssueList(title, items, emptyText, sectionId) {
     const note = item.last_external_reply || item.last_owner_reply || '';
     const time = item.last_external_reply_at || item.last_owner_reply_at || item.updated_on || item.created_on || '-';
     const replyBtn = hasReplyBtn && issueId
-      ? `<button class="ka-btn" onclick="event.stopPropagation();agentReplyDraft(${issueId}, this)" title="AI 生成回复草稿+补丁方向(联网拉取工单详情与历史回复)">✉️ 回复草稿</button>`
+      ? `<button class="ka-btn" data-click="agentReplyDraft" data-a0="${issueId}" data-r1="el" data-stop title="AI 生成回复草稿+补丁方向(联网拉取工单详情与历史回复)">✉️ 回复草稿</button>`
       : '';
     return `<div class="issue-mini">
       <div class="issue-mini-id">${renderRedmineIssueLink(issueId, {stopPropagation: false})}<div class="muted">${esc(item.status_name || '-')}</div></div>
@@ -1635,7 +1656,7 @@ function renderSummaryHeader(title, controlsHtml, metaHtml) {
 function renderStatsCards(cards) {
   return '<div class="stats-grid">' + (cards || []).map(function(card) {
     var cls = card.className ? ' ' + card.className : '';
-    var onclick = card.onclick ? ' onclick="' + card.onclick + '"' : '';
+    var onclick = card.onclick ? ' data-click="' + card.onclick + '"' : '';
     return '<div class="stat-card' + cls + '"' + onclick + '><div class="value">' + esc(card.value == null ? 0 : card.value) + '</div><div class="label">' + esc(card.label || '') + '</div></div>';
   }).join('') + '</div>';
 }
@@ -1765,7 +1786,7 @@ function renderRedmineNotConfigured() {
   return `<div class="muted" style="padding:20px;text-align:center">
     <strong>Redmine尚未配置</strong><br>
     请先在 Redmine 看板设置中保存 Redmine 地址和账号密码/API 密码。
-    <br><button class="secondary" style="margin-top:12px" onclick="showSettingsModal()">打开设置</button>
+    <br><button class="secondary" style="margin-top:12px" data-click="showSettingsModal">打开设置</button>
   </div>`;
 }
 
@@ -1784,10 +1805,10 @@ function renderDepartmentOverdue(data) {
     statsConfig.dashboard = Object.assign({}, statsConfig.dashboard || {}, {profiles: data.available_profiles});
   }
   const profileSelect = `<div class="select-with-add">
-    <select id="departmentProfileSelect" onchange="onDepartmentProfileChange()" style="min-width:160px">
+    <select id="departmentProfileSelect" data-change="onDepartmentProfileChange" style="min-width:160px">
       ${departmentOptionsHtml(departmentProfileId, true)}
     </select>
-    <button class="select-add-btn" type="button" onclick="showAddDepartmentModal('departmentProfileSelect')" title="添加部门">＋</button>
+    <button class="select-add-btn" type="button" data-click="showAddDepartmentModal" data-a0="departmentProfileSelect" title="添加部门">＋</button>
   </div>`;
   const cards = renderStatsCards([
     {value: summary.open_count || 0, label: '当前未关闭', className: 'warn'},
@@ -1816,7 +1837,7 @@ function renderDepartmentOverdue(data) {
     const subLine = names ? '<div class="muted">' + esc(names) + '</div>' : '';
     const ids = redmineIssueIds(user.overdue_issues || []);
     const copyDisabled = ids.length ? '' : ' disabled';
-    return `<tr style="cursor:pointer" onclick="scrollToSection('dept-user-${esc(user.id || '')}')">
+    return `<tr style="cursor:pointer" data-click="scrollToSection" data-a0="dept-user-${esc(user.id || '')}">
       <td class="col-person"><strong>${nameLine}</strong>${subLine}</td>
       <td>${user.total_owned || 0}</td>
       <td>${user.open_count || 0}</td>
@@ -1825,9 +1846,9 @@ function renderDepartmentOverdue(data) {
       <td><strong style="color:var(--bad)">${user.no_reply_3_days || 0}</strong></td>
       <td>${user.customer_no_reply_3_days || 0}</td>
       <td>${user.max_unreplied_days || 0}</td>
-      <td onclick="event.stopPropagation()">
-        <button class="secondary dept-action-btn"${copyDisabled} onclick="copyDepartmentIssues('${esc(user.id || '')}', this)">复制3天未回复工单</button>
-        <button class="secondary dept-action-btn"${copyDisabled} onclick="sendDepartmentReminder('${esc(user.id || '')}', this)">邮箱</button>
+      <td data-click="_actStopPropagation" data-r0="event">
+        <button class="secondary dept-action-btn"${copyDisabled} data-click="copyDepartmentIssues" data-a0="${esc(user.id || '')}" data-r1="el">复制3天未回复工单</button>
+        <button class="secondary dept-action-btn"${copyDisabled} data-click="sendDepartmentReminder" data-a0="${esc(user.id || '')}" data-r1="el">邮箱</button>
       </td>
     </tr>`;
   }).join('');
@@ -1935,10 +1956,10 @@ async function loadStatistics(force) {
     updateRedmineTrendNames(selectedName, meta);
 
     const userSelectHtml = '<div class="select-with-add">'
-      + '<select id="statsUserSelect" onchange="onStatsUserChange()" style="width:160px">'
+      + '<select id="statsUserSelect" data-change="onStatsUserChange" style="width:160px">'
       + '<option value="' + esc(selectedName || '加载中...') + '">' + esc(selectedName || '加载中...') + '</option>'
       + '</select>'
-      + '<button class="select-add-btn" onclick="showAddUserModal()" title="添加用户">＋</button>'
+      + '<button class="select-add-btn" data-click="showAddUserModal" title="添加用户">＋</button>'
       + '</div>';
 
     box.innerHTML = `
@@ -2005,10 +2026,10 @@ function renderProjectDashboard(data) {
   window._projectUsers = data.assignees || [];
   const generatedAt = String(data.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '');
   const profileSelect = `<div class="select-with-add">
-    <select id="projectProfileSelect" onchange="onProjectProfileChange()" style="min-width:220px">${projectOptionsHtml(projectProfileId)}</select>
-    <button class="select-add-btn" type="button" onclick="showAddProjectModal()" title="添加项目">＋</button>
+    <select id="projectProfileSelect" data-change="onProjectProfileChange" style="min-width:220px">${projectOptionsHtml(projectProfileId)}</select>
+    <button class="select-add-btn" type="button" data-click="showAddProjectModal" title="添加项目">＋</button>
   </div>`;
-  const openOnlyBtn = `<button class="secondary toggle-btn ${projectOpenOnly ? 'active' : ''}" onclick="toggleProjectOpenOnly()">${projectOpenOnly ? '显示全员' : '仅未关闭人员'}</button>`;
+  const openOnlyBtn = `<button class="secondary toggle-btn ${projectOpenOnly ? 'active' : ''}" data-click="toggleProjectOpenOnly">${projectOpenOnly ? '显示全员' : '仅未关闭人员'}</button>`;
   const assignees = (data.assignees || []).slice().filter(function(user) {
     return !projectOpenOnly || Number(user.open_count || 0) > 0;
   }).sort(function(a, b) {
@@ -2023,14 +2044,14 @@ function renderProjectDashboard(data) {
   const rows = assignees.map(function(user) {
     const ids = redmineIssueIds(user.issues || []);
     const actionDisabled = ids.length ? '' : ' disabled';
-    return `<tr style="cursor:pointer" onclick="scrollToSection('project-user-${esc(user.id || '')}')">
+    return `<tr style="cursor:pointer" data-click="scrollToSection" data-a0="project-user-${esc(user.id || '')}">
       <td class="col-person"><strong>${esc(user.name || '-')}</strong></td>
       <td>${user.total_owned || 0}</td>
       <td>${user.open_count || 0}</td>
       <td>${user.closed_count || 0}</td>
-      <td onclick="event.stopPropagation()">
-        <button class="secondary dept-action-btn"${actionDisabled} onclick="copyProjectIssues('${esc(user.id || '')}', this)">复制</button>
-        <button class="secondary dept-action-btn"${actionDisabled} onclick="sendProjectReminder('${esc(user.id || '')}', this)">邮箱</button>
+      <td data-click="_actStopPropagation" data-r0="event">
+        <button class="secondary dept-action-btn"${actionDisabled} data-click="copyProjectIssues" data-a0="${esc(user.id || '')}" data-r1="el">复制</button>
+        <button class="secondary dept-action-btn"${actionDisabled} data-click="sendProjectReminder" data-a0="${esc(user.id || '')}" data-r1="el">邮箱</button>
       </td>
       <td class="project-filter-cell"></td>
     </tr>`;
@@ -2069,7 +2090,7 @@ async function loadProjectDashboard(force) {
   try {
     await loadStatsConfig();
     if (!projectProfiles().length) {
-      box.innerHTML = '<div class="muted" style="padding:20px">暂无项目看板配置。<button style="margin-left:10px" onclick="showAddProjectModal()">＋ 添加项目</button></div>';
+      box.innerHTML = '<div class="muted" style="padding:20px">暂无项目看板配置。<button style="margin-left:10px" data-click="showAddProjectModal">＋ 添加项目</button></div>';
       box.dataset.loaded = 'true';
       return;
     }
@@ -2222,7 +2243,7 @@ function renderFactsList(items, total) {
     const sig = f.error_signature ? `<span class="case-sig">${esc(f.error_signature)}</span>` : '';
     const scope = [f.chip_platform, f.android_version, f.certification_type, f.module].filter(Boolean).map(esc).join(' / ');
     const conf = f.confidence ? `<span class="muted" style="float:right">置信度 ${f.confidence}</span>` : '';
-    return `<div class="case-card" onclick="showCaseFact(${f.issue_id})">
+    return `<div class="case-card" data-click="showCaseFact" data-a0="${f.issue_id}">
       <div class="case-head"><span class="case-status draft">${renderRedmineIssueLink(f.issue_id)}</span>${sig}${conf}</div>
       <div class="case-title">${esc(f.subject || '-')}</div>
       <div class="case-scope muted">${scope || '-'}</div>
@@ -2242,7 +2263,7 @@ function renderCasesList(items, total) {
     const badge = status === 'approved' ? '✅已审核' : status === 'draft' ? '📝草稿' : esc(status);
     const sig = c.canonical_error_signature ? `<span class="case-sig">${esc(c.canonical_error_signature)}</span>` : '';
     const scope = [c.chip_platform, c.android_version, c.certification_type, c.module].filter(Boolean).map(esc).join(' / ');
-    return `<div class="case-card" onclick="showCaseDetail(${c.case_id})">
+    return `<div class="case-card" data-click="showCaseDetail" data-a0="${c.case_id}">
       <div class="case-head"><span class="case-status ${status}">${badge}</span>${sig}</div>
       <div class="case-title">${esc(c.title || '-')}</div>
       <div class="case-scope muted">${scope || '-'}</div>
@@ -2269,9 +2290,9 @@ async function showCaseDetail(caseId) {
       ${rules.length?`<div class="field"><div class="field-label">经验规则</div><div class="field-content">${rules.map(r=>esc((r.title||'')+(r.content?': '+r.content:''))).join('<br>')}</div></div>`:''}
       <div class="field"><div class="field-label">来源工单</div><div class="field-content">${renderRedmineIssueLinks(sources)}</div></div>
       <div class="case-actions">
-        ${c.status!=='approved'?`<button onclick="approveCase(${caseId})">✅ 审核通过</button>`:''}
-        <button class="secondary" onclick="draftReply(${sources[0]||0}, ${caseId})">✉️ 生成回复</button>
-        <button class="secondary" onclick="startCreateInternalCase(${caseId})">📝 创建内部单</button>
+        ${c.status!=='approved'?`<button data-click="approveCase" data-a0="${caseId}">✅ 审核通过</button>`:''}
+        <button class="secondary" data-click="draftReply" data-a0="${sources[0]||0}" data-a1="${caseId}">✉️ 生成回复</button>
+        <button class="secondary" data-click="startCreateInternalCase" data-a0="${caseId}">📝 创建内部单</button>
       </div>`;
   } catch (e) { box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`; }
 }
@@ -2438,7 +2459,7 @@ async function draftReply(issueId, matureCaseId) {
     const data = await api(`/api/redmine-agent/issues/${issueId}/draft-reply`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(matureCaseId ? {mature_case_id: matureCaseId} : {})});
     const body = `<div class="muted" style="margin-bottom:6px">Redmine ${renderRedmineIssueLink(issueId, {stopPropagation: false})} · 来源: ${data.source==='mature_case'?'成熟案例 #'+(data.mature_case_id||''):'相似工单'} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
       <textarea id="replyDraftArea" rows="14" style="width:100%;font-family:monospace">${esc(data.reply_draft||'')}</textarea>
-      <div style="margin-top:8px"><button onclick="copyReplyDraft(this)">📋 复制</button></div>`;
+      <div style="margin-top:8px"><button data-click="copyReplyDraft" data-r0="el">📋 复制</button></div>`;
     setKnowledgeBody(body);
   } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
 }
@@ -2454,7 +2475,7 @@ async function draftAgentReply(issueId, matureCaseId) {
     const body = `<div class="muted" style="margin-bottom:6px">Redmine ${renderRedmineIssueLink(issueId, {stopPropagation: false})} · 来源: ${esc(data.source || '-')} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
       ${data.patch_direction ? `<div class="field"><div class="field-label">补丁方向</div>${renderFormattedContent(data.patch_direction, 'field-content')}</div>` : ''}
       <textarea id="replyDraftArea" rows="16" style="width:100%;font-family:monospace">${esc(data.reply_draft||'')}</textarea>
-      <div style="margin-top:8px"><button onclick="copyReplyDraft(this)">📋 复制</button></div>`;
+      <div style="margin-top:8px"><button data-click="copyReplyDraft" data-r0="el">📋 复制</button></div>`;
     setKnowledgeBody(body);
   } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
 }
@@ -2533,8 +2554,8 @@ async function showCaseFact(issueId) {
       <div class="field"><div class="field-label">根因</div><div class="field-content">${esc(f.root_cause||'-')}</div></div>
       <div class="field"><div class="field-label">解决方案</div><div class="field-content">${renderFormattedContent(f.solution||'-','field-content')}</div></div>
       <div class="case-actions">
-        <button onclick="buildMatureFromIssue(${issueId})">🏗️ 构建成熟案例</button>
-        <button class="secondary" onclick="draftReply(${issueId})">✉️ 生成回复</button>
+        <button data-click="buildMatureFromIssue" data-a0="${issueId}">🏗️ 构建成熟案例</button>
+        <button class="secondary" data-click="draftReply" data-a0="${issueId}">✉️ 生成回复</button>
       </div>`);
   } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
 }
@@ -2722,7 +2743,7 @@ function renderDailyBriefInner(data) {
   if (!data || !data.run) {
     return '<div style="padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
       + '<b>🤖 AI 晨报</b><span class="muted">暂无晨报</span>'
-      + '<button class="ka-btn" onclick="startDailyBriefRun()">立即生成</button>'
+      + '<button class="ka-btn" data-click="startDailyBriefRun">立即生成</button>'
       + '</div>';
   }
   var run = data.run || {};
@@ -2738,7 +2759,7 @@ function renderDailyBriefInner(data) {
     var liveLabel = ({ pending: '排队中…', snapshotting: '生成快照中…', analyzing: '分析中…' })[run.status] || '处理中…';
     actionBtn = '<span class="daily-brief-action"><button class="ka-btn" disabled>⏳ ' + esc(liveLabel) + '</button></span>';
   } else if (run.status === 'completed' || run.status === 'partial' || run.status === 'failed') {
-    actionBtn = '<span class="daily-brief-action"><button class="ka-btn" onclick="startDailyBriefRun()">'
+    actionBtn = '<span class="daily-brief-action"><button class="ka-btn" data-click="startDailyBriefRun">'
       + (run.status === 'failed' ? '重试全部分析' : '重新分析全部') + '</button></span>';
   } else {
     actionBtn = '';
@@ -2757,7 +2778,7 @@ function renderDailyBriefInner(data) {
     + '</div></div>';
   if (dailyBriefConfigCache && !dailyBriefConfigCache.agent_profile) {
     head += '<div class="daily-brief-warning"><span>⚠️ 未绑定取证 Agent Profile，AI 可能只能依据标题分析，无法读取 Redmine 日志与附件。</span>'
-      + '<button class="ka-btn" onclick="showSettingsModal()">立即设置</button></div>';
+      + '<button class="ka-btn" data-click="showSettingsModal">立即设置</button></div>';
   }
   if (!issues.length) return head;
   var issueStateHtml = function (issue) {
@@ -2788,8 +2809,8 @@ function renderDailyBriefInner(data) {
       + '<b>Defect #' + esc(issue.issue_id) + '</b>' + (subject ? ' ' + esc(subject) : '') + '</span>'
       + '</div>'
       + issueStateHtml(issue)
-      + '<div class="daily-brief-row-actions"><button class="ka-btn" onclick="showDailyBriefIssue(' + esc(issue.issue_id) + ')">查看分析</button>'
-      + '<button class="ka-btn" onclick="openRedmineIssue(' + esc(issue.issue_id) + ')">打开 Redmine</button></div>'
+      + '<div class="daily-brief-row-actions"><button class="ka-btn" data-click="showDailyBriefIssue" data-a0="' + esc(issue.issue_id) + '">查看分析</button>'
+      + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button></div>'
       + '</div>';
   }).join('');
   var more = issues.length > 10 ? '<div class="muted" style="padding:6px 16px">…共 ' + issues.length + ' 个 issue</div>' : '';
@@ -2844,7 +2865,7 @@ function showDailyBriefIssue(issueId) {
     <div class="modal-content daily-brief-modal">
       <div class="modal-header">
         <span class="modal-title daily-brief-modal-title"><span>🤖 AI 分析 · Defect #${esc(issueId)}</span>${subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : ''}</span>
-        <button type="button" class="modal-close" aria-label="关闭" onclick="removeDynamicModal('${modalId}')">&times;</button>
+        <button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="${modalId}">&times;</button>
       </div>
       <div class="modal-body daily-brief-modal-body">
         ${issue.status === 'failed' ? `<div style="color:var(--bad,#ef4444)"><b>分析失败${issue.error_type ? '（' + esc(issue.error_type) + '）' : ''}</b><div style="white-space:pre-wrap;margin-top:4px">${esc(issue.error || '未知错误')}</div></div>` : ''}
@@ -2862,10 +2883,10 @@ function showDailyBriefIssue(issueId) {
         ${section('✉️ 回复草稿（EN / 中文）', [r.suggested_reply_en, r.suggested_reply_zh].filter(Boolean).join('\n\n—— 中文 ——\n\n'), false)}
       </div>
       <div class="modal-buttons daily-brief-modal-footer">
-        <button class="secondary" onclick="removeDynamicModal('${modalId}')">关闭</button>
+        <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">关闭</button>
         <button class="secondary" data-daily-brief-reanalyze="${esc(issueId)}">重新分析此项</button>
-        <button class="secondary" onclick="copyDailyBriefReply(${esc(issueId)}, 'en')">复制英文回复</button>
-        <button onclick="copyDailyBriefReply(${esc(issueId)}, 'zh')">复制中文回复</button>
+        <button class="secondary" data-click="copyDailyBriefReply" data-a0="${esc(issueId)}" data-a1="en">复制英文回复</button>
+        <button data-click="copyDailyBriefReply" data-a0="${esc(issueId)}" data-a1="zh">复制中文回复</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -2975,3 +2996,8 @@ function pollDailyBriefRun(runId, attempt) {
     pollDailyBriefRun(runId, n + 1);
   }, 5000);
 }
+
+
+// act-bridge 委托目标（替代历史 inline handler）。
+function _actStopPropagation(event) { event.stopPropagation(); }
+function _actClickById(elementId) { document.getElementById(elementId).click(); }

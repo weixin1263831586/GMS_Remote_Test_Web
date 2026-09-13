@@ -65,7 +65,22 @@ class TestReport:
 
 
 # 复用容错 XML 解析器，跳过报告中的非法实体和控制字符。
-_LXML_PARSER = etree.XMLParser(remove_blank_text=True, huge_tree=True, recover=True) if USE_LXML else None
+# 报告 XML 产自设备与套件运行环境（不可信证据，见仓库安全边界约定）：
+# - resolve_entities=False / no_network=True：阻断 XXE 与外部实体拉取，
+#   实体引用原样保留而非展开求值；
+# - huge_tree=True：真实 test_result.xml 可达 1.5GB（周报解析路径依赖），
+#   实体既不展开，放大攻击面也就随之关闭。
+_LXML_PARSER = (
+    etree.XMLParser(
+        remove_blank_text=True,
+        huge_tree=True,
+        recover=True,
+        resolve_entities=False,
+        no_network=True,
+    )
+    if USE_LXML
+    else None
+)
 
 
 

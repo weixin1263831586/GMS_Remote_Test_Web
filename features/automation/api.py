@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from features.auth import (
     CurrentUser,
@@ -77,11 +77,19 @@ async def automation_page():
         '{{AUTOMATION_CSS}}',
         (ui_dir / 'page.css').read_text(encoding='utf-8'),
     )
-    html = html.replace(
-        '{{AUTOMATION_JS}}',
-        (ui_dir / 'page.js').read_text(encoding='utf-8'),
-    )
     return HTMLResponse(html, headers={'Cache-Control': 'no-store, no-cache, must-revalidate'})
+
+
+@page_router.get('/automation/page.js')
+def automation_page_js():
+    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
+    ui_dir = Path(__file__).with_name('ui')
+    js = ui_dir / 'page.js'
+    return Response(
+        js.read_text(encoding='utf-8'),
+        media_type='application/javascript',
+        headers={'Cache-Control': 'no-store, no-cache, must-revalidate'},
+    )
 
 
 @router.get('/profiles')

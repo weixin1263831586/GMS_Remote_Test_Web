@@ -417,7 +417,7 @@ function renderFirmwareShareBrowseError(host, message) {
     const list = document.getElementById('file-browser-list');
     if (!list) return;
     const routeBtn = host
-        ? `<button class="btn-xxs" style="margin-top: 4px;" onclick="checkRouting('${escapeHtml(host)}')">📡 检查路由</button>`
+        ? `<button class="btn-xxs" style="margin-top: 4px;" data-action="check-routing" data-host="${escapeHtml(host)}">📡 检查路由</button>`
         : '';
     list.innerHTML = `
         <div class="file-browser-item" style="cursor: default; flex-direction: column; align-items: flex-start; gap: 6px;">
@@ -427,6 +427,10 @@ function renderFirmwareShareBrowseError(host, message) {
             ${routeBtn}
         </div>
     `;
+    const routeButton = list.querySelector('[data-action="check-routing"]');
+    if (routeButton) {
+        routeButton.addEventListener('click', () => checkRouting(host));
+    }
 }
 
 function formatFileBrowserDate(timestamp) {

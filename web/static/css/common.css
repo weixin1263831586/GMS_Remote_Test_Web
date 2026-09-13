@@ -6845,3 +6845,58 @@ body.apk-resizing {
         min-width: 0;
     }
 }
+
+/* ==================== server-sync 声明式 hover (CSP 前置迁移) ==================== */
+/* 替代历史 inline onmouseover/onmouseout 样式脚本。 */
+.hover-dim:hover {
+    opacity: 0.85;
+}
+
+.tool-card.sync-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--card-accent, var(--border-color));
+}
+
+/* api-docs 复制交互（替代历史 inline hover 脚本） */
+.api-skill-copy {
+    color: var(--primary-color);
+}
+
+.api-skill-copy:hover {
+    color: var(--success-color);
+}
+
+.api-curl-pre {
+    color: var(--success-color);
+}
+
+.api-curl-pre:hover {
+    color: var(--primary-color);
+}
+
+/* shell.html 声明式 hover（替代历史 inline 样式脚本，CSP 前置迁移） */
+.copy-chip {
+    transition: background 0.2s;
+}
+
+.copy-chip:hover {
+    background: var(--border-light);
+}
+
+.emoji-opt {
+    background: transparent;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 3px;
+    border-radius: 3px;
+}
+
+.emoji-opt:hover {
+    background: var(--lighter-bg);
+}
+
+.ui-ctrl-el.hover-soft:hover {
+    background: var(--hover-bg, rgba(0, 0, 0, 0.04));
+}

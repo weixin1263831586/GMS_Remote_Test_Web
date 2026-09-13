@@ -2,6 +2,13 @@
 
 提供 ``POST /api/email/send``，供周报、报告分析等模块复用。SMTP 凭证复用
 ``redmine_dashboard.email`` 配置（与 Redmine 部门提醒共用一套设置）。
+
+权限与滥用防护：
+- 细分权限 ``email.send``（登录 ≠ 允许发邮件）；
+- 收件人数量上限（to + cc 合计）、主题/正文大小上限；
+- 每用户滑动窗口限流（内存实现，多 Worker 共享由 DB limiter 之前先用
+  进程内限流兜底——邮件不是凭据爆破面，进程内 + per-user 已足够）；
+- 发送结果写入审计日志（success/failure + 收件人数）。
 """
 
 from __future__ import annotations
@@ -9,8 +16,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import time
+from collections import defaultdict, deque
 from collections.abc import Callable
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -22,6 +32,46 @@ from foundation.responses import error_response, success_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# Abuse limits: "登录过"与"允许发送邮件"不是同一个权限。
+# ---------------------------------------------------------------------------
+
+MAX_RECIPIENTS = 30            # to + cc 合计
+MAX_SUBJECT_CHARS = 500
+MAX_BODY_CHARS = 2_000_000     # ~2MB 正文(HTML 报告)
+RATE_LIMIT_WINDOW_SECONDS = 60
+RATE_LIMIT_MAX_SENDS = 10      # 每用户每窗口
+
+_rate_events: dict[str, deque[float]] = defaultdict(deque)
+_rate_lock = Lock()
+
+
+def _rate_limited(username: str) -> bool:
+    """滑动窗口 per-user 限流;返回 True 表示超过限额。"""
+    now = time.monotonic()
+    with _rate_lock:
+        events = _rate_events[username]
+        while events and events[0] <= now - RATE_LIMIT_WINDOW_SECONDS:
+            events.popleft()
+        if len(events) >= RATE_LIMIT_MAX_SENDS:
+            return True
+        events.append(now)
+        return False
+
+
+def _normalize_recipients(value: Any) -> list[str] | None:
+    """to/cc 归一化为字符串列表;非法类型返回 None(调用方报 400)。"""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [item for item in (part.strip() for part in value.split(",")) if item]
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        return None
+    return [item.strip() for item in value]
+
 
 # SMTP 凭证存放在 redmine 配置树；组合根在启动时注入按请求解析 manager 的 provider。
 _manager_provider = None
@@ -56,9 +106,29 @@ def configure_attachment_resolver(
 @router.post("/api/email/send")
 async def send_email_endpoint(request: Request):
     """发送支持抄送、HTML 和附件的邮件。"""
-    require_authenticated_user(request)
+    user = require_authenticated_user(request)
+    # 细分权限:user/device_operator 角色默认授予 email.send(见
+    # features/auth/constants.py);登录但没有该权限的账号被拒绝。
+    if not user.has_permission("email.send"):
+        logger.warning(
+            "[EMAIL_SEND] denied: user %s lacks email.send", user.username
+        )
+        return error_response("没有发送邮件的权限 (email.send)", status_code=403)
+    if _rate_limited(user.username):
+        logger.warning(
+            "[EMAIL_SEND] rate limited: user %s exceeds %d/%ds",
+            user.username, RATE_LIMIT_MAX_SENDS, RATE_LIMIT_WINDOW_SECONDS,
+        )
+        return error_response(
+            f"发送过于频繁,请稍后再试(每 {RATE_LIMIT_WINDOW_SECONDS} 秒最多 "
+            f"{RATE_LIMIT_MAX_SENDS} 封)", status_code=429,
+        )
+
     body = await request.json()
-    to = body.get("to")
+    to = _normalize_recipients(body.get("to"))
+    cc = _normalize_recipients(body.get("cc"))
+    if to is None or cc is None:
+        return error_response("to/cc 必须是邮箱地址列表", status_code=400)
     subject = str(body.get("subject") or "").strip()
     content = body.get("body")
     if not to:
@@ -67,6 +137,18 @@ async def send_email_endpoint(request: Request):
         return error_response("subject is required", status_code=400)
     if content is None:
         return error_response("body is required", status_code=400)
+    if len(to) + len(cc) > MAX_RECIPIENTS:
+        return error_response(
+            f"收件人数量超限(to+cc 最多 {MAX_RECIPIENTS} 个)", status_code=400
+        )
+    if len(subject) > MAX_SUBJECT_CHARS:
+        return error_response(
+            f"主题过长(最多 {MAX_SUBJECT_CHARS} 字符)", status_code=400
+        )
+    if len(str(content)) > MAX_BODY_CHARS:
+        return error_response(
+            f"正文过大(最多 {MAX_BODY_CHARS} 字符)", status_code=413
+        )
 
     # 客户端路径型附件（attachment_paths）已下线——路径不能证明所有权。
     if body.get("attachment_paths"):
@@ -79,8 +161,8 @@ async def send_email_endpoint(request: Request):
         "is_html": bool(body.get("is_html", False)),
         "manager": _manager_provider(request) if _manager_provider is not None else None,
     }
-    if body.get("cc"):
-        kwargs["cc"] = body.get("cc")
+    if cc:
+        kwargs["cc"] = cc
     report_ids = body.get("attachment_report_ids") or []
     if report_ids:
         if _attachment_resolver is None:
@@ -117,6 +199,11 @@ async def send_email_endpoint(request: Request):
             shutil.rmtree(Path(path).parent, ignore_errors=True)
 
     if not result.get("sent"):
+        logger.warning(
+            "[EMAIL_SEND] failed: user=%s recipients=%d subject=%r error=%s",
+            user.username, len(to) + len(cc), subject[:80],
+            result.get("error", ""),
+        )
         return error_response(
             result.get("error", "邮件发送失败"),
             status_code=503,
@@ -124,4 +211,8 @@ async def send_email_endpoint(request: Request):
         )
 
     # result 已含 sent/mode/to/cc/recipients，补上 subject 即可
+    logger.info(
+        "[EMAIL_SEND] sent: user=%s recipients=%d subject=%r mode=%s",
+        user.username, len(to) + len(cc), subject[:80], result.get("mode", ""),
+    )
     return success_response(data={"subject": subject, **result}, message="邮件发送成功")

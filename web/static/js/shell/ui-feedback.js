@@ -119,8 +119,11 @@ window.showSnackbar = function showSnackbar(title, message, level = 'info', dura
             <div class="snackbar-title">${escapeHtml(title)}</div>
             <div class="snackbar-message">${escapeHtml(message || '')}</div>
         </div>
-        <button class="snackbar-close" onclick="this.parentElement.remove()">×</button>
+        <button class="snackbar-close" type="button" data-action="dismiss-snackbar">×</button>
     `;
+    snackbar
+        .querySelector('.snackbar-close')
+        .addEventListener('click', () => snackbar.remove());
 
     debugLog('[showSnackbar] 创建 snackbar 元素:', snackbar);
     container.appendChild(snackbar);

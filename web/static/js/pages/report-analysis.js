@@ -19,17 +19,17 @@ function selectReportSource() {
         <div class="modal-content modal-xs">
             <div class="modal-header">
                 <span class="modal-title">选择上传方式</span>
-                <span class="modal-close" onclick="closeReportSourceModal()">&times;</span>
+                <span class="modal-close" data-click="closeReportSourceModal">&times;</span>
             </div>
             <div class="modal-body" style="padding: 20px;">
                 <div style="display: flex; flex-direction: column; gap: 12px;">
-                    <button class="btn-md" onclick="selectReportFile()" style="width: 100%; justify-content: center;">
+                    <button class="btn-md" data-click="selectReportFile" style="width: 100%; justify-content: center;">
                         📄 上传文件
                     </button>
                     <div style="font-size: 10px; color: var(--text-secondary); text-align: center;">
                         支持 .xml, .zip, .rar, .tar.gz
                     </div>
-                    <button class="btn-md" onclick="selectReportFolder()" style="width: 100%; justify-content: center;">
+                    <button class="btn-md" data-click="selectReportFolder" style="width: 100%; justify-content: center;">
                         📁 上传文件夹
                     </button>
                     <div style="font-size: 10px; color: var(--text-secondary); text-align: center;">
@@ -450,11 +450,11 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
         <div class="modal-content modal-xs">
             <div class="modal-header">
                 <span class="modal-title">🔐 Redmine 认证</span>
-                <span class="modal-close" onclick="ModalManager.unregisterDynamic('redmine-auth-modal'); resetReportUploadProgress();">&times;</span>
+                <span class="modal-close" data-click="_actCloseRedmineAuthModal">&times;</span>
             </div>
             <div class="modal-body">
                 <p style="margin-bottom: 15px;">请输入 Redmine 账号密码以自动下载附件：</p>
-                <form onsubmit="event.preventDefault(); submitRedmineAuth('${escapedUrl}');" autocomplete="off">
+                <form data-submit="submitRedmineAuth" data-a0="${escapedUrl}" data-prevent autocomplete="off">
                 <div class="modal-form-row">
                     <label>用户名</label>
                     <input type="text" id="redmine-username" placeholder="输入 Redmine 用户名" autocomplete="username">
@@ -466,8 +466,8 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
                 </div>
                 </form>
                 <div class="modal-buttons">
-                    <button class="btn-xs" onclick="ModalManager.unregisterDynamic('redmine-auth-modal'); resetReportUploadProgress();">取消</button>
-                    <button class="btn-xs btn-primary" onclick="submitRedmineAuth('${escapedUrl}')">确定</button>
+                    <button class="btn-xs" data-click="_actCloseRedmineAuthModal">取消</button>
+                    <button class="btn-xs btn-primary" data-click="submitRedmineAuth" data-a0="${escapedUrl}">确定</button>
                 </div>
                 <p style="font-size: 11px; color: var(--text-secondary); margin-top: 15px; text-align: center;">
                     💾 凭证将被加密存储，下次无需重新输入
@@ -775,7 +775,7 @@ function ensureReportAnalysisResultStructure() {
             <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 10px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
-                    <button class="btn-xs" onclick="resetReportAnalysis()">清除</button>
+                    <button class="btn-xs" data-click="resetReportAnalysis">清除</button>
                 </div>
                 <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 20px;"></div>
                 <div id="report-details" style="font-size: 12px; color: var(--text-primary);"></div>
@@ -973,9 +973,9 @@ function displayReportAnalysis(data) {
                             <div>测试用例: <code>${escapeHtml(testCaseName)}</code></div>
                         </div>
                         <div class="report-failure-actions">
-                            ${issueIdFromReport ? `<button class="report-failure-action reply" onclick="openRedmineReplyModal('${escModuleName}', '${escTestCaseName}', '${idx}', '${issueIdFromReport}')" data-reason="${encodeURIComponent(reasonText)}">Redmine回复</button>` : ''}
-                            <button class="report-failure-action test" onclick="goToTestCase('${reportTestType}', '${escModuleName}', '${escTestCaseName}')">单测用例</button>
-                            <button class="report-failure-action diagnose" onclick="openReportDiagnosisModal(${idx})">报错诊断</button>
+                            ${issueIdFromReport ? `<button class="report-failure-action reply" data-click="openRedmineReplyModal" data-a0="${escModuleName}" data-a1="${escTestCaseName}" data-a2="${idx}" data-a3="${issueIdFromReport}" data-reason="${encodeURIComponent(reasonText)}">Redmine回复</button>` : ''}
+                            <button class="report-failure-action test" data-click="goToTestCase" data-a0="${reportTestType}" data-a1="${escModuleName}" data-a2="${escTestCaseName}">单测用例</button>
+                            <button class="report-failure-action diagnose" data-click="openReportDiagnosisModal" data-a0="${idx}">报错诊断</button>
                         </div>
                     </div>
                     <div>
@@ -1368,10 +1368,10 @@ function renderReportDiagnosis(data) {
         ? sourceResults.map(item => {
             const itemUrl = safeReportExternalUrl(item.url);
             return `
-            <div class="dx-list-item${itemUrl ? ' dx-clickable' : ''}" ${itemUrl ? `onclick="window.open('${escapeJsAttr(itemUrl)}', '_blank', 'noopener')"` : ''}>
+            <div class="dx-list-item${itemUrl ? ' dx-clickable' : ''}" ${itemUrl ? `data-click="_actOpenUrlBlank" data-a0="${escapeJsAttr(itemUrl)}"` : ''}>
                 <div class="dx-list-head">
                     <div class="dx-list-title">${escapeHtml(item.type || 'source')}</div>
-                    ${itemUrl ? `<a class="dx-link" href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">打开 OpenGrok</a>` : ''}
+                    ${itemUrl ? `<a class="dx-link" href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" data-click="_actStopPropagation">打开 OpenGrok</a>` : ''}
                 </div>
                 <div class="dx-list-path dx-list-path-inline">${escapeHtml(item.path || item.display_path || '')}${item.line ? `<span>:${escapeHtml(String(item.line))}</span>` : ''}</div>
             </div>
@@ -1392,7 +1392,7 @@ function renderReportDiagnosis(data) {
     const candidateCards = !hasExactArtifact && artifactCandidates.length > 0
         ? `<details class="dx-details"><summary>候选构件 (${artifactCandidates.length})</summary><div class="dx-list">${
             artifactCandidates.slice(0, 5).map((item, idx) => `
-                <button class="dx-candidate" onclick="openReportDiagnosisArtifactCandidate(${idx})">
+                <button class="dx-candidate" data-click="openReportDiagnosisArtifactCandidate" data-a0="${idx}">
                     <span>${escapeHtml(item.path || item.name || '未知构件')}</span>
                     <b>${escapeHtml(String(item.score || 0))}</b>
                 </button>
@@ -1438,14 +1438,14 @@ function renderReportDiagnosis(data) {
     const actionPanel = `
         <section class="dx-section dx-action-section">
             <div class="dx-section-title">下一步动作</div>
-            <button type="button" class="dx-action-card" onclick="openReportDiagnosisTestCase('${escapeJsAttr(reportTestType)}', '${escapeJsAttr(data.module || currentFailure.module || '')}', '${escapeJsAttr(data.test_name || currentFailure.name || '')}')">
+            <button type="button" class="dx-action-card" data-click="openReportDiagnosisTestCase" data-a0="${escapeJsAttr(reportTestType)}" data-a1="${escapeJsAttr(data.module || currentFailure.module || '')}" data-a2="${escapeJsAttr(data.test_name || currentFailure.name || '')}">
                 <b>执行单测复现</b>
                 <span>跳到测试页并填入模块/用例</span>
             </button>
-            ${suiteArtifact ? `<button type="button" class="dx-action-card" onclick="openReportDiagnosisSuiteBrowser()"><b>打开测试套件</b><span>${escapeHtml(suiteArtifact.path || '')}</span></button>` : ''}
-            ${issueIdFromReport ? `<button type="button" class="dx-action-card" onclick="openReportDiagnosisRedmineReply()"><b>Redmine 回复</b><span>基于诊断结论生成回复草稿</span></button>` : ''}
-            ${issueIdFromReport ? `<button type="button" class="dx-action-card" onclick="openReportAnalysisRedmineAgent('${escapeJsAttr(issueIdFromReport)}')"><b>Redmine 工作台</b><span>查看工单历史、附件证据和相似案例</span></button>` : ''}
-            <button type="button" class="dx-action-card" onclick="saveDiagnosisToWiki()"><b>📥 存为Wiki</b><span>把诊断结论沉淀到知识库</span></button>
+            ${suiteArtifact ? `<button type="button" class="dx-action-card" data-click="openReportDiagnosisSuiteBrowser"><b>打开测试套件</b><span>${escapeHtml(suiteArtifact.path || '')}</span></button>` : ''}
+            ${issueIdFromReport ? `<button type="button" class="dx-action-card" data-click="openReportDiagnosisRedmineReply"><b>Redmine 回复</b><span>基于诊断结论生成回复草稿</span></button>` : ''}
+            ${issueIdFromReport ? `<button type="button" class="dx-action-card" data-click="openReportAnalysisRedmineAgent" data-a0="${escapeJsAttr(issueIdFromReport)}"><b>Redmine 工作台</b><span>查看工单历史、附件证据和相似案例</span></button>` : ''}
+            <button type="button" class="dx-action-card" data-click="saveDiagnosisToWiki"><b>📥 存为Wiki</b><span>把诊断结论沉淀到知识库</span></button>
         </section>
     `;
 
@@ -1497,7 +1497,7 @@ function renderReportDiagnosis(data) {
                     <div class="dx-section dx-section-large">
                         <div class="dx-section-head">
                             <div class="dx-section-title">套件源码定位</div>
-                            ${suiteArtifact ? `<button class="btn-xxs btn-primary" onclick="openReportDiagnosisSourcePreview()">反编译并预览源码</button>` : ''}
+                            ${suiteArtifact ? `<button class="btn-xxs btn-primary" data-click="openReportDiagnosisSourcePreview">反编译并预览源码</button>` : ''}
                         </div>
                         <div class="dx-locator-list">
                             ${renderDxLocatorRow('测试套件', suiteArtifactPath || '未定位')}
@@ -1947,7 +1947,7 @@ async function analyzeFailureWithSource(testName, errorMessage) {
         <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
             <div class="modal-header">
                 <span class="modal-title">🔍 源码分析 - 正在定位失败位置...</span>
-                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
+                <span class="modal-close" data-click="_actCloseModal" data-a0="${modalId}">&times;</span>
             </div>
             <div class="modal-body">
                 <div style="text-align: center; padding: 40px;">
@@ -2096,7 +2096,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         <div class="modal-content" style="max-width: 800px; max-height: 85vh; overflow-y: auto;">
             <div class="modal-header">
                 <span class="modal-title">🤖 正在分析报错并搜索源码...</span>
-                <span class="modal-close" onclick="ModalManager.close('${modalId}')">&times;</span>
+                <span class="modal-close" data-click="_actCloseModal" data-a0="${modalId}">&times;</span>
             </div>
             <div class="modal-body">
                 <div style="text-align: center; padding: 40px;">
@@ -2215,7 +2215,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                 data.related_docs.forEach(doc => {
                     const docUrl = safeReportExternalUrl(doc.url);
                     if (docUrl) {
-                        content += `<a href="${escapeHtml(docUrl)}" target="_blank" rel="noopener" style="display: block; padding: 8px 12px; background: var(--info-color); color: white; text-decoration: none; border-radius: 4px; font-size: 12px; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">${escapeHtml(doc.title)} ↗</a>`;
+                        content += `<a href="${escapeHtml(docUrl)}" target="_blank" rel="noopener" style="display: block; padding: 8px 12px; background: var(--info-color); color: white; text-decoration: none; border-radius: 4px; font-size: 12px; transition: opacity 0.2s;" class="hover-dim">${escapeHtml(doc.title)} ↗</a>`;
                     }
                 });
                 content += '</div></div>';
@@ -2398,7 +2398,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
                     ${data.source_code_fetched ? '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
                     ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: white; padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
                     ${data.ai_model ? `<span style="font-size: 10px; background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${escapeHtml(data.ai_model)}</span>` : ''}
-                    <button onclick="closeAIAnalysisModal('${modalId}')" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+                    <button data-click="closeAIAnalysisModal" data-a0="${modalId}" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
                 </div>
             </div>
     `;
@@ -2482,8 +2482,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
     html += `
             <div style="display: flex; gap: 10px; margin-top: 20px;">
-                <button onclick="closeAIAnalysisModal('${modalId}')" class="btn-xs">关闭</button>
-                <button onclick="copyAIAnalysis('${modalId}')" class="btn-xs" style="background: var(--success-color);">📋 复制分析报告</button>
+                <button data-click="closeAIAnalysisModal" data-a0="${modalId}" class="btn-xs">关闭</button>
+                <button data-click="copyAIAnalysis" data-a0="${modalId}" class="btn-xs" style="background: var(--success-color);">📋 复制分析报告</button>
             </div>
         </div>
     `;
@@ -2537,3 +2537,18 @@ function copyAIAnalysis(modalId) {
         showToast('复制失败', 'error');
     });
 }
+
+
+// act-bridge 委托目标（替代历史 inline handler）。
+window._actCloseRedmineAuthModal = function () {
+    ModalManager.unregisterDynamic('redmine-auth-modal');
+    resetReportUploadProgress();
+};
+
+window._actOpenUrlBlank = function (url) {
+    window.open(url, '_blank', 'noopener');
+};
+
+window._actStopPropagation = function (event) {
+    event.stopPropagation();
+};

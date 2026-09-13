@@ -356,14 +356,23 @@ async function loadFirmwareShares() {
                     <td style="padding: 8px; text-align: right;">${formatBytes(record.size || 0, true) || '-'}</td>
                     <td style="padding: 8px; text-align: center;">${record.downloads || 0}</td>
                     <td style="padding: 8px; text-align: center; white-space: nowrap;" class="firmware-share-actions">
-                        <button class="btn-xxs" onclick="copyFirmwareShareLink('${id}')">分享</button>
-                        <button class="btn-xxs" onclick="downloadFirmwareShare('${id}')">下载</button>
-                        <button class="btn-xxs" onclick="deleteFirmwareShare('${id}')">删除</button>
+                        <button class="btn-xxs" type="button" data-action="copy-share-link" data-id="${id}">分享</button>
+                        <button class="btn-xxs" type="button" data-action="download-share" data-id="${id}">下载</button>
+                        <button class="btn-xxs" type="button" data-action="delete-share" data-id="${id}">删除</button>
                     </td>
                 </tr>
             `;
         }).join('');
         tbody.dataset.loaded = 'true';
+        tbody.querySelectorAll('[data-action="copy-share-link"]').forEach((btn) => {
+            btn.addEventListener('click', () => copyFirmwareShareLink(btn.dataset.id));
+        });
+        tbody.querySelectorAll('[data-action="download-share"]').forEach((btn) => {
+            btn.addEventListener('click', () => downloadFirmwareShare(btn.dataset.id));
+        });
+        tbody.querySelectorAll('[data-action="delete-share"]').forEach((btn) => {
+            btn.addEventListener('click', () => deleteFirmwareShare(btn.dataset.id));
+        });
     } catch (error) {
         if (hadRenderedShares) showToast(`共享固件列表刷新失败: ${error.message}`, 'error');
         else tbody.innerHTML = `<tr><td colspan="5" style="padding: 14px; color: var(--danger-color); text-align: center;">${escapeHtml(error.message)}</td></tr>`;

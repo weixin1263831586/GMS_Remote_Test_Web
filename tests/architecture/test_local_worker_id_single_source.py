@@ -33,6 +33,9 @@ _JS_ALLOWED = {
     "web/static/js/shell/workspace-devices.js",  # fallback at chain tail
     "features/automation/ui/page.js",  # fallback inside bootstrap chain
     "features/cluster/ui/page.js",  # fallback inside bootstrap chain
+    # 2026-09 CSP 前置迁移：shell.html 内联脚本拆出，default 视图沿用
+    # 既有 fallback（__GMS_BOOTSTRAP__ 注入后即被覆盖）。
+    "web/static/js/shell/shell-main.js",
 }
 
 

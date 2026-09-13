@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from features.auth import CurrentUser, require_authenticated_user_when_auth_required, require_role_when_auth_required
 from foundation.config import settings
@@ -236,3 +236,13 @@ async def mainline_known_issues_summary():
 async def mainline_known_issues_page():
     page_path = Path(__file__).with_name('ui') / 'page.html'
     return HTMLResponse(page_path.read_text(encoding='utf-8'))
+
+
+@router.get('/mainline-known-issues/page.js')
+def mainline_known_issues_page_js():
+    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
+    page_path = Path(__file__).with_name('ui') / 'page.html'
+    js = page_path.parent / 'page.js'
+    return Response(
+        js.read_text(encoding='utf-8'), media_type='application/javascript'
+    )

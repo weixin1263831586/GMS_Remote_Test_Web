@@ -112,6 +112,38 @@ _PUBLIC_AGENT_PACKAGE_VERSION = re.compile(
     r'^/api/agent/packages/gms-remote-test/\d+\.\d+\.\d+$'
 )
 
+# 严格 CSP 作用于全部自研页面（inline 事件处理器已全部迁移到 act-bridge
+# 事件委托，inline <script> 已外置或转为 application/json 数据标签）。
+# 例外：noVNC 上游静态页经 features/system/desktop.py 同源代理返回
+# （/novnc/... 与 /cluster/novnc/...），vnc.html 自带 inline <script>
+# 且内容随上游版本变化，无法用 hash 白名单，故单独使用放宽 script-src
+# 的 NOVNC_CSP。入口访问控制由 novnc_access grant 把守，代理路径不新增
+# 可注入面。
+_STRICT_CSP = (
+    "default-src 'self'; base-uri 'self'; object-src 'none'; "
+    "frame-ancestors 'self'; frame-src 'self'; form-action 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+    "font-src 'self' data:; connect-src 'self' https: ws: wss:; "
+    "media-src 'self' blob:; worker-src 'self' blob:"
+)
+_NOVNC_CSP = (
+    "default-src 'self'; base-uri 'self'; object-src 'none'; "
+    "frame-ancestors 'self'; frame-src 'self'; form-action 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+    "font-src 'self' data:; connect-src 'self' https: ws: wss:; "
+    "media-src 'self' blob:; worker-src 'self' blob:"
+)
+
+
+def _is_novnc_proxied_path(path: str) -> bool:
+    return (
+        path == '/novnc'
+        or path.startswith('/novnc/')
+        or path.startswith('/cluster/novnc/')
+    )
+
 
 def _is_service_authenticated_path(path: str, method: str) -> bool:
     normalized_method = method.upper()
@@ -384,13 +416,16 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         response.headers['Permissions-Policy'] = (
             'camera=(), microphone=(), geolocation=(), payment=(), usb=(self)'
         )
+        # script-src 已无 'unsafe-inline'：全部 inline 事件处理器迁移为
+        # act-bridge 事件委托（web/static/js/shell/act-bridge.js），全部
+        # inline <script> 外置或转为 application/json 数据标签
+        # （gms-runtime-config）。运行时 UI 诊断若需 eval 类断点，走
+        # Playwright bypass_csp 的隔离上下文（tests/test_runtime_ui_smoke.py）。
+        # noVNC 上游代理页是唯一例外，使用放宽 script-src 的 _NOVNC_CSP。
         response.headers['Content-Security-Policy'] = (
-            "default-src 'self'; base-uri 'self'; object-src 'none'; "
-            "frame-ancestors 'self'; frame-src 'self'; form-action 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
-            "font-src 'self' data:; connect-src 'self' https: ws: wss:; "
-            "media-src 'self' blob:; worker-src 'self' blob:"
+            _NOVNC_CSP
+            if _is_novnc_proxied_path(path)
+            else _STRICT_CSP
         )
         if request.url.scheme == 'https':
             response.headers['Strict-Transport-Security'] = (

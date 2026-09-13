@@ -1,3 +1,8 @@
+// 页面运行配置（由模板以 body data 属性注入；本文件为静态资源，
+// 不再经 Jinja 渲染）。
+window.GMS_CLUSTER_DEFAULT_MAX_JOBS =
+    document.body ? document.body.dataset.defaultMaxJobs || '' : '';
+
 const state={workers:[],devices:[],suites:[],jobs:[],tests:[],library:[],status:{local_worker_id:(window.__GMS_BOOTSTRAP__&&window.__GMS_BOOTSTRAP__.localWorkerId)||'ats-worker-controller'}};
 const dashCharts={gauges:null,pie:null,trend:null};
 let dashTrendWorker='';
@@ -182,7 +187,7 @@ function updateDashGauges(){
  workers.sort((a,b)=>(a.id===localId?-1:b.id===localId?1:0));
  const tabsEl=document.querySelector('#dash-gauges-host-tabs');
  if(tabsEl){
-  tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w.id===dashGaugesWorker?' active':''}" onclick="dashGaugesWorker='${esc(w.id)}';updateDashGauges()">${esc(w.name||w.id)}</button>`).join('');
+  tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w.id===dashGaugesWorker?' active':''}" data-click="selectDashGaugesWorker" data-a0="${esc(w.id)}">${esc(w.name||w.id)}</button>`).join('');
  }
  if(!dashGaugesWorker&&workers.length)dashGaugesWorker=workers[0].id;
  const worker=workers.find(w=>w.id===dashGaugesWorker)||workers[0];
@@ -295,7 +300,7 @@ async function updateDashTrend(force=false){
  const workers=[...new Set((dashMetricsHistory||[]).map(m=>m.worker_id))];
  workers.sort((a,b)=>(a===localId?-1:b===localId?1:String(a).localeCompare(String(b),undefined,{numeric:true})));
  if(!dashTrendWorker&&workers.length)dashTrendWorker=workers[0];
- if(tabsEl)tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w===dashTrendWorker?' active':''}" onclick="dashTrendWorker='${esc(w)}';updateDashTrend()">${esc(w)}</button>`).join('')||'<span class="dash-empty">无数据</span>';
+ if(tabsEl)tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w===dashTrendWorker?' active':''}" data-click="selectDashTrendWorker" data-a0="${esc(w)}">${esc(w)}</button>`).join('')||'<span class="dash-empty">无数据</span>';
  const byWorker={};
  (dashMetricsHistory||[]).forEach(m=>{(byWorker[m.worker_id]=byWorker[m.worker_id]||[]).push(m)});
  const data=byWorker[dashTrendWorker]||[];
@@ -661,7 +666,7 @@ async function openWorkerConfig(id){
  document.querySelector('#config-error').hidden=true;document.querySelector('#config-error').textContent='';
  const input=document.querySelector('#config-max-jobs');input.value='';input.disabled=true;input.placeholder='加载中…';
  modal.hidden=false;
- try{const d=await api(`/api/cluster/workers/${encodeURIComponent(id)}/config`);const cfg=d.config||{};input.value=cfg.max_jobs??'';input.disabled=false;input.placeholder='{{DEFAULT_MAX_JOBS}}'}
+ try{const d=await api(`/api/cluster/workers/${encodeURIComponent(id)}/config`);const cfg=d.config||{};input.value=cfg.max_jobs??'';input.disabled=false;input.placeholder=window.GMS_CLUSTER_DEFAULT_MAX_JOBS||''}
  catch(e){document.querySelector('#config-error').hidden=false;document.querySelector('#config-error').textContent=e.message}
 }
 async function saveWorkerConfig(){
@@ -673,7 +678,7 @@ async function saveWorkerConfig(){
  finally{btn.disabled=false;btn.textContent='保存配置'}
 }
 function normalizedWorkerId(value){return String(value||'').trim().toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')}
-function updateDeployCommand(){const id=normalizedWorkerId(document.querySelector('#new-worker-id').value)||'WORKER_ID',host=document.querySelector('#new-worker-host').value.trim()||'USER@HOST',address=host.includes('@')?host.split('@').slice(1).join('@'):'HOST',controller=document.querySelector('#controller-url').value.trim()||location.origin,root=document.querySelector('#suite-root').value.trim()||'~/GMS-Suite';document.querySelector('#deploy-command').textContent=`test -f tools/adbproxy-rs/dist/adbproxy-rs-linux-x86_64-musl.tar.gz || { echo '请先在 Controller 执行 scripts/build_adbproxy_rs.sh'; exit 1; }; test -f tools/gms-worker-native/dist/x86_64/SHA256SUMS || { echo '请先在 Controller 执行 scripts/build_gms_worker_native.sh'; exit 1; }; rsync -azR worker_agent foundation scripts/install_cluster_worker.sh scripts/install_gms_worker_native.sh scripts/install_adbproxy_rs.sh scripts/gms_worker_usbip.sh scripts/run_GSI_Burn.sh scripts/run_GMS_Test_Auto.sh tools/gms-worker-native/dist tools/adbproxy-rs/dist tools/upgrade_tool tools/misc.img tools/scrcpy-linux-x86_64-v3.3.4 tools/GMS-Host-Tools ${host}:~/gms-worker-setup/ && scp "$GMS_GTS_CREDENTIAL_FILE" ${host}:~/gms-worker-gts.json && ssh ${host} 'cd ~/gms-worker-setup && GMS_DEFAULT_MAX_JOBS={{DEFAULT_MAX_JOBS}} bash scripts/install_cluster_worker.sh ${id} ${controller} WORKER_TOKEN - ${root} ${address} ~/gms-worker-gts.json'`}
+function updateDeployCommand(){const id=normalizedWorkerId(document.querySelector('#new-worker-id').value)||'WORKER_ID',host=document.querySelector('#new-worker-host').value.trim()||'USER@HOST',address=host.includes('@')?host.split('@').slice(1).join('@'):'HOST',controller=document.querySelector('#controller-url').value.trim()||location.origin,root=document.querySelector('#suite-root').value.trim()||'~/GMS-Suite';document.querySelector('#deploy-command').textContent=`test -f tools/adbproxy-rs/dist/adbproxy-rs-linux-x86_64-musl.tar.gz || { echo '请先在 Controller 执行 scripts/build_adbproxy_rs.sh'; exit 1; }; test -f tools/gms-worker-native/dist/x86_64/SHA256SUMS || { echo '请先在 Controller 执行 scripts/build_gms_worker_native.sh'; exit 1; }; rsync -azR worker_agent foundation scripts/install_cluster_worker.sh scripts/install_gms_worker_native.sh scripts/install_adbproxy_rs.sh scripts/gms_worker_usbip.sh scripts/run_GSI_Burn.sh scripts/run_GMS_Test_Auto.sh tools/gms-worker-native/dist tools/adbproxy-rs/dist tools/upgrade_tool tools/misc.img tools/scrcpy-linux-x86_64-v3.3.4 tools/GMS-Host-Tools ${host}:~/gms-worker-setup/ && scp "$GMS_GTS_CREDENTIAL_FILE" ${host}:~/gms-worker-gts.json && ssh ${host} 'cd ~/gms-worker-setup && GMS_DEFAULT_MAX_JOBS=${window.GMS_CLUSTER_DEFAULT_MAX_JOBS||''} bash scripts/install_cluster_worker.sh ${id} ${controller} WORKER_TOKEN - ${root} ${address} ~/gms-worker-gts.json'`}
 async function autoDeployWorker(){
  const button=document.querySelector('#auto-deploy'),errorBox=document.querySelector('#deploy-error');
  const body={worker_id:normalizedWorkerId(document.querySelector('#new-worker-id').value),ssh_host:document.querySelector('#new-worker-host').value.trim(),controller_url:document.querySelector('#controller-url').value.trim(),suite_root:document.querySelector('#suite-root').value.trim(),token:document.querySelector('#worker-token').value,password:document.querySelector('#worker-password').value,save_password:Boolean(document.querySelector('#save-worker-password')?.checked)};
@@ -753,3 +758,12 @@ function syncClusterAutoRefresh(event){
 }
 window.addEventListener('gms:embedded-visibility',syncClusterAutoRefresh);
 syncClusterAutoRefresh();
+
+
+// act-bridge 委托目标（替代历史 inline handler）。
+function selectDashGaugesWorker(id){dashGaugesWorker=id;updateDashGauges();}
+function selectDashTrendWorker(id){dashTrendWorker=id;updateDashTrend();}
+function generateWorkerToken(){
+  const bytes=crypto.getRandomValues(new Uint8Array(32));
+  document.querySelector('#worker-token').value=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+}

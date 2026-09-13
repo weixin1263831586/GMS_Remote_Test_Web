@@ -31,8 +31,10 @@ def main() -> int:
     for index in range(max(1, args.iterations)):
         started = time.monotonic()
         try:
+            # soak 压测 harness：argv 为本地 CLI 入口与固定参数，
+            # 无 shell；环境继承自开发机自身。
             completed = subprocess.run(
-                argv,
+                argv,  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
                 input=json.dumps(request, separators=(",", ":")),
                 capture_output=True,
                 text=True,

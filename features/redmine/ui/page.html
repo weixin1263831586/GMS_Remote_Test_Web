@@ -12,18 +12,18 @@
 <body>
 <header>
   <div class="tabs">
-    <div class="tab" data-tab="department" onclick="switchTab('department')">🏢 部门看板</div>
-    <div class="tab active" data-tab="stats" onclick="switchTab('stats')">📈 个人看板</div>
-    <div class="tab" data-tab="daily-brief" onclick="switchTab('daily-brief')">🤖 AI 晨报</div>
-    <div class="tab" data-tab="project" onclick="switchTab('project')">🧩 项目看板</div>
-    <div class="tab" data-tab="issues" onclick="switchTab('issues')">📋 工单列表</div>
-    <div class="tab" data-tab="cases" onclick="switchTab('cases')">📚 成熟案例</div>
-    <div class="tab" data-tab="runs" onclick="switchTab('runs')">📊 扫描记录</div>
+    <div class="tab" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</div>
+    <div class="tab active" data-tab="stats" data-click="switchTab" data-a0="stats">📈 个人看板</div>
+    <div class="tab" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief">🤖 AI 晨报</div>
+    <div class="tab" data-tab="project" data-click="switchTab" data-a0="project">🧩 项目看板</div>
+    <div class="tab" data-tab="issues" data-click="switchTab" data-a0="issues">📋 工单列表</div>
+    <div class="tab" data-tab="cases" data-click="switchTab" data-a0="cases">📚 成熟案例</div>
+    <div class="tab" data-tab="runs" data-click="switchTab" data-a0="runs">📊 扫描记录</div>
   </div>
   <div class="header-toolbar">
     <div class="filter-bar">
-      <input type="text" id="searchInput" placeholder="搜索 / #工单号查 Redmine" title="输入关键词搜索本地工单，或输入 #工单号 直接查询 Redmine" onkeydown="if(event.key==='Enter')smartSearch()">
-      <select id="statusFilter" onchange="loadIssues()" aria-label="工单状态">
+      <input type="text" id="searchInput" placeholder="搜索 / #工单号查 Redmine" title="输入关键词搜索本地工单，或输入 #工单号 直接查询 Redmine" data-keydown="smartSearch" data-key="Enter">
+      <select id="statusFilter" data-change="loadIssues" aria-label="工单状态">
         <option value="">全部状态</option>
         <option value="新建">新建</option>
         <option value="进行中">进行中</option>
@@ -31,7 +31,7 @@
         <option value="已关闭">已关闭</option>
         <option value="反馈">反馈</option>
       </select>
-      <select id="priorityFilter" onchange="loadIssues()" aria-label="工单优先级">
+      <select id="priorityFilter" data-change="loadIssues" aria-label="工单优先级">
         <option value="">全部优先级</option>
         <option value="紧急">紧急</option>
         <option value="高">高</option>
@@ -41,11 +41,11 @@
       <input type="text" id="syncAssigneeInput" placeholder="同步负责人" title="姓名或登录名；留空则同步当前登录用户">
     </div>
     <div class="btn-group">
-      <button id="scanBtn" class="secondary" onclick="startScan()">🔍 扫描</button>
-      <button id="syncBtn" class="secondary" onclick="triggerSync()" title="全量同步指派工单并分析新工单，耗时较长">🔄 全量同步</button>
-      <button id="refreshBtn" class="secondary" onclick="refreshCurrentTab()" title="绕过缓存，重新从 Redmine 拉取当前页数据">🔃 刷新</button>
-      <button class="secondary" onclick="showResetModal()">🗑️ 重置</button>
-      <button class="secondary settings-btn" onclick="showSettingsModal()" title="设置" aria-label="设置">⚙️ 设置</button>
+      <button id="scanBtn" class="secondary" data-click="startScan">🔍 扫描</button>
+      <button id="syncBtn" class="secondary" data-click="triggerSync" title="全量同步指派工单并分析新工单，耗时较长">🔄 全量同步</button>
+      <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab" title="绕过缓存，重新从 Redmine 拉取当前页数据">🔃 刷新</button>
+      <button class="secondary" data-click="showResetModal">🗑️ 重置</button>
+      <button class="secondary settings-btn" data-click="showSettingsModal" title="设置" aria-label="设置">⚙️ 设置</button>
     </div>
   </div>
 </header>
@@ -55,7 +55,7 @@
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">重置 Redmine 数据</span>
-      <span class="modal-close" onclick="hideResetModal()">&times;</span>
+      <span class="modal-close" data-click="hideResetModal">&times;</span>
     </div>
     <div class="modal-body">
       <p class="warning" style="color:#c00">此操作将删除当前用户在本系统内的所有 Redmine 扫描数据、知识库、附件缓存和文档缓存，且不可恢复。确认继续？</p>
@@ -64,8 +64,8 @@
       </label>
     </div>
     <div class="modal-footer">
-      <button class="secondary" onclick="hideResetModal()">取消</button>
-      <button class="danger" onclick="confirmReset()">确认重置</button>
+      <button class="secondary" data-click="hideResetModal">取消</button>
+      <button class="danger" data-click="confirmReset">确认重置</button>
     </div>
   </div>
 </div>
@@ -79,15 +79,15 @@
   <div class="two-col">
     <section class="panel">
       <h2>📚 知识库
-        <button class="secondary" style="float:right" onclick="showBatchImportModal()">📥 批量导入工单</button>
+        <button class="secondary" style="float:right" data-click="showBatchImportModal">📥 批量导入工单</button>
       </h2>
       <div class="filter-bar" style="margin:6px 0 10px;display:flex;gap:8px;align-items:center">
         <div class="case-view-toggle">
-          <button id="viewBtnFacts" class="active" onclick="switchCaseView('facts')">📋 工单事实</button>
-          <button id="viewBtnCases" onclick="switchCaseView('cases')">🏗️ 成熟案例</button>
+          <button id="viewBtnFacts" class="active" data-click="switchCaseView" data-a0="facts">📋 工单事实</button>
+          <button id="viewBtnCases" data-click="switchCaseView" data-a0="cases">🏗️ 成熟案例</button>
         </div>
-        <input type="text" id="caseSearchInput" placeholder="搜索（模块/签名/关键词）..." onkeydown="if(event.key==='Enter')loadCases()" style="flex:1;min-width:120px">
-        <button onclick="loadCases()">搜索</button>
+        <input type="text" id="caseSearchInput" placeholder="搜索（模块/签名/关键词）..." data-keydown="loadCases" data-key="Enter" style="flex:1;min-width:120px">
+        <button data-click="loadCases">搜索</button>
       </div>
       <div id="casesList" class="scroll"><div class="muted">点击「批量导入工单」结构化历史工单，导入后在此查看结构化结果。</div></div>
     </section>
@@ -134,7 +134,7 @@
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">添加用户</span>
-      <span class="modal-close" onclick="hideAddUserModal()">&times;</span>
+      <span class="modal-close" data-click="hideAddUserModal">&times;</span>
     </div>
     <div class="modal-body">
       <div>
@@ -153,12 +153,12 @@
         <label>所属部门</label>
         <div class="select-with-add" style="width:100%">
           <select id="addUserDepartment" style="width:100%"></select>
-          <button class="select-add-btn" type="button" onclick="showAddDepartmentModal('addUserDepartment')" title="添加部门">＋</button>
+          <button class="select-add-btn" type="button" data-click="showAddDepartmentModal" data-a0="addUserDepartment" title="添加部门">＋</button>
         </div>
       </div>
       <div class="modal-buttons">
-        <button class="secondary" onclick="hideAddUserModal()">取消</button>
-        <button onclick="submitAddUser()">确定</button>
+        <button class="secondary" data-click="hideAddUserModal">取消</button>
+        <button data-click="submitAddUser">确定</button>
       </div>
     </div>
   </div>
@@ -169,7 +169,7 @@
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">添加部门</span>
-      <span class="modal-close" onclick="hideAddDepartmentModal()">&times;</span>
+      <span class="modal-close" data-click="hideAddDepartmentModal">&times;</span>
     </div>
     <div class="modal-body">
       <div>
@@ -182,8 +182,8 @@
         <div style="font-size:11px;color:var(--muted);margin-top:2px">留空时自动生成 dept-N</div>
       </div>
       <div class="modal-buttons">
-        <button class="secondary" onclick="hideAddDepartmentModal()">取消</button>
-        <button onclick="submitAddDepartment()">确定</button>
+        <button class="secondary" data-click="hideAddDepartmentModal">取消</button>
+        <button data-click="submitAddDepartment">确定</button>
       </div>
     </div>
   </div>
@@ -194,7 +194,7 @@
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">添加项目</span>
-      <span class="modal-close" onclick="hideAddProjectModal()">&times;</span>
+      <span class="modal-close" data-click="hideAddProjectModal">&times;</span>
     </div>
     <div class="modal-body">
       <div>
@@ -206,8 +206,8 @@
         <input type="text" id="addProjectId" placeholder="例如：config.json 中 Redmine 地址下的项目 URL">
       </div>
       <div class="modal-buttons">
-        <button class="secondary" onclick="hideAddProjectModal()">取消</button>
-        <button onclick="submitAddProject()">确定</button>
+        <button class="secondary" data-click="hideAddProjectModal">取消</button>
+        <button data-click="submitAddProject">确定</button>
       </div>
     </div>
   </div>
@@ -218,7 +218,7 @@
   <div class="modal-content" style="width:min(760px,96vw);max-width:min(760px,96vw);height:min(560px,72vh)">
     <div class="modal-header" style="background:linear-gradient(135deg,#667eea,#764ba2);padding:15px 20px">
       <span class="modal-title">⚙️ 统计设置</span>
-      <span class="modal-close" onclick="hideSettingsModal()">&times;</span>
+      <span class="modal-close" data-click="hideSettingsModal">&times;</span>
     </div>
     <div class="modal-body">
       <div>
@@ -304,8 +304,8 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="secondary" onclick="hideSettingsModal()">取消</button>
-      <button onclick="saveSettings()">保存并刷新</button>
+      <button class="secondary" data-click="hideSettingsModal">取消</button>
+      <button data-click="saveSettings">保存并刷新</button>
     </div>
   </div>
 </div>
@@ -315,7 +315,7 @@
   <div class="modal-content">
     <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
       <span class="modal-title" id="trendStartModalTitle">设置统计日期范围</span>
-      <span class="modal-close" onclick="hideTrendStartModal()">&times;</span>
+      <span class="modal-close" data-click="hideTrendStartModal">&times;</span>
     </div>
     <div class="modal-body">
       <div>
@@ -328,9 +328,9 @@
         <div style="font-size:11px;color:var(--muted);margin-top:2px">清空后表示不限；仅填一侧日期也可以</div>
       </div>
       <div class="modal-buttons">
-        <button class="secondary" onclick="clearTrendStartDate()">不限</button>
-        <button class="secondary" onclick="hideTrendStartModal()">取消</button>
-        <button onclick="saveTrendStartDate()">保存并刷新</button>
+        <button class="secondary" data-click="clearTrendStartDate">不限</button>
+        <button class="secondary" data-click="hideTrendStartModal">取消</button>
+        <button data-click="saveTrendStartDate">保存并刷新</button>
       </div>
     </div>
   </div>
@@ -339,23 +339,22 @@
   <div class="modal-content" style="max-width:900px">
     <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
       <span class="modal-title" id="trendDetailTitle">解决Redmine问题明细</span>
-      <span class="modal-close" onclick="hideModal('trendDetailModal')">&times;</span>
+      <span class="modal-close" data-click="hideModal" data-a0="trendDetailModal">&times;</span>
     </div>
     <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
   </div>
 </div>
 
+<script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
 <script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script>
-<script>
-{{REDMINE_JS}}
-</script>
+<script src="/redmine-agent/page.js"></script>
 
 <!-- Batch Import Modal -->
 <div id="batchImportModal" class="modal">
   <div class="modal-content">
     <div class="modal-header" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)">
       <span class="modal-title">📥 批量导入历史工单到知识库</span>
-      <span class="modal-close" onclick="hideModal('batchImportModal')">&times;</span>
+      <span class="modal-close" data-click="hideModal" data-a0="batchImportModal">&times;</span>
     </div>
     <div class="modal-body">
       <div class="muted" style="font-size:11px;margin-bottom:8px">粘贴工单号(每行一个,可带#号),或直接导入你名下最近的工单。</div>
@@ -365,9 +364,9 @@
       </div>
       <div id="batchImportResult" class="muted" style="margin-top:8px;font-size:12px"></div>
       <div class="modal-buttons">
-        <button class="secondary" onclick="hideModal('batchImportModal')">取消</button>
-        <button class="secondary" onclick="submitImportRecent(20)">📥 导入最近20个(我的指派)</button>
-        <button onclick="submitBatchImport()">按工单号导入</button>
+        <button class="secondary" data-click="hideModal" data-a0="batchImportModal">取消</button>
+        <button class="secondary" data-click="submitImportRecent" data-a0="20">📥 导入最近20个(我的指派)</button>
+        <button data-click="submitBatchImport">按工单号导入</button>
       </div>
     </div>
   </div>
@@ -378,11 +377,11 @@
   <div class="modal-content" style="max-width:880px">
     <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
       <span class="modal-title" id="knowledgeTitle">知识库</span>
-      <span class="modal-close" onclick="hideModal('knowledgeModal')">&times;</span>
+      <span class="modal-close" data-click="hideModal" data-a0="knowledgeModal">&times;</span>
     </div>
     <div class="modal-body" id="knowledgeBody"><div class="muted">加载中…</div></div>
     <div class="modal-buttons" id="knowledgeFooter" style="display:none">
-      <button class="secondary" onclick="hideModal('knowledgeModal')">关闭</button>
+      <button class="secondary" data-click="hideModal" data-a0="knowledgeModal">关闭</button>
     </div>
   </div>
 </div>
@@ -392,7 +391,7 @@
   <div class="modal-content">
     <div class="modal-header" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">
       <span class="modal-title">导入参考输出(仅评测,不进自动回复)</span>
-      <span class="modal-close" onclick="hideModal('referenceModal')">&times;</span>
+      <span class="modal-close" data-click="hideModal" data-a0="referenceModal">&times;</span>
     </div>
     <div class="modal-body">
       <div><label>来源</label>
@@ -400,7 +399,7 @@
       </div>
       <div><label>标题</label><input type="text" id="referenceTitle" placeholder="参考案例标题"></div>
       <div><label>Markdown 正文</label><textarea id="referenceMarkdown" rows="6" style="width:100%"></textarea></div>
-      <div class="modal-buttons"><button class="secondary" onclick="hideModal('referenceModal')">取消</button><button onclick="submitReference()">导入并评测</button></div>
+      <div class="modal-buttons"><button class="secondary" data-click="hideModal" data-a0="referenceModal">取消</button><button data-click="submitReference">导入并评测</button></div>
     </div>
   </div>
 </div>
@@ -410,7 +409,7 @@
   <div class="modal-content">
     <div class="modal-header" style="background:linear-gradient(135deg,#dc2626,#b91c1c)">
       <span class="modal-title">⚠️ 创建内部 Redmine 工单</span>
-      <span class="modal-close" onclick="hideModal('internalCreateModal')">&times;</span>
+      <span class="modal-close" data-click="hideModal" data-a0="internalCreateModal">&times;</span>
     </div>
     <div class="modal-body">
       <div class="muted" style="margin-bottom:8px">该操作会在 Redmine 上真实创建工单,请确认信息无误。</div>
@@ -420,7 +419,7 @@
         <div style="flex:1"><label>优先级 ID</label><input type="number" id="internalPriorityId" value="2"></div>
         <div style="flex:1"><label>指派人 ID</label><input type="number" id="internalAssignedId" placeholder="可选"></div>
       </div>
-      <div class="modal-buttons"><button class="secondary" onclick="hideModal('internalCreateModal')">取消</button><button id="internalConfirmBtn" onclick="confirmInternalCreate()">确认创建</button></div>
+      <div class="modal-buttons"><button class="secondary" data-click="hideModal" data-a0="internalCreateModal">取消</button><button id="internalConfirmBtn" data-click="confirmInternalCreate">确认创建</button></div>
     </div>
   </div>
 </div>

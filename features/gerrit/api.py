@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from features.gerrit.config import (
     add_gerrit_department_profile,
@@ -640,3 +640,13 @@ def _set_cache(cache_key: str, data: dict[str, Any]) -> None:
 async def gerrit_dashboard_page():
     page_path = Path(__file__).with_name("ui") / "page.html"
     return HTMLResponse(page_path.read_text(encoding="utf-8"))
+
+
+@page_router.get("/gerrit-dashboard/page.js")
+def gerrit_dashboard_page_js():
+    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
+    page_path = Path(__file__).with_name("ui") / "page.html"
+    js = page_path.parent / "page.js"
+    return Response(
+        js.read_text(encoding="utf-8"), media_type="application/javascript"
+    )

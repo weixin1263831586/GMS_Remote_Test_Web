@@ -9,8 +9,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOTS = Path(__file__).with_name('snapshots')
 
+# 页面 handler 名单：CSP 收紧后 inline onXXX 已全部迁移为 act-bridge
+# 的 data-* 声明（见 web/static/js/shell/act-bridge.js），名单改从
+# data-click/data-change/... 抽取，继续用于冻结契约与完整性校验。
 INLINE_HANDLER_RE = re.compile(
-    r'on(?:click|change|input|submit|keydown)=["\']([^"\']+)["\']'
+    r'data-(?:click|change|input|submit|keydown|keyup|dblclick|'
+    r'dragstart|dragend|dragover|drop|blur|focus|error)=["\']'
+    r'([^"\']+)["\']'
 )
 ID_RE = re.compile(r'\bid=["\']([^"\']+)["\']')
 
@@ -27,9 +32,18 @@ def read_json(name: str) -> Any:
     return json.loads((SNAPSHOTS / name).read_text(encoding='utf-8'))
 
 
+def flatten_app_routes(app) -> list[Any]:
+    """Deprecated alias; canonical implementation lives in
+    ``foundation/routing_introspection.py`` (importable by features and
+    product code, not just tests)."""
+    from foundation.routing_introspection import flatten_app_routes as _flatten
+
+    return _flatten(app)
+
+
 def normalized_routes(app) -> list[dict[str, Any]]:
     result = []
-    for route in app.routes:
+    for route in flatten_app_routes(app):
         methods = sorted(
             method
             for method in (getattr(route, 'methods', None) or [])
@@ -90,9 +104,18 @@ def ui_source_groups() -> dict[str, list[Path]]:
             *sorted((ROOT / 'web/static/js/shell').glob('*.js')),
         ],
         'redmine-agent': sorted(redmine_ui.glob('*.*')),
-        'gerrit-dashboard': [ROOT / 'features/gerrit/ui/page.html'],
-        'gms-update-monitor': [ROOT / 'features/system/update_monitor/ui/page.html'],
-        'mainline-known-issues': [ROOT / 'features/system/mainline_issues/ui/page.html'],
+        'gerrit-dashboard': [
+            ROOT / 'features/gerrit/ui/page.html',
+            ROOT / 'features/gerrit/ui/page.js',
+        ],
+        'gms-update-monitor': [
+            ROOT / 'features/system/update_monitor/ui/page.html',
+            ROOT / 'features/system/update_monitor/ui/page.js',
+        ],
+        'mainline-known-issues': [
+            ROOT / 'features/system/mainline_issues/ui/page.html',
+            ROOT / 'features/system/mainline_issues/ui/page.js',
+        ],
         'automation': (
             sorted(automation_ui.glob('*.*'))
             if automation_ui.exists()

@@ -3,6 +3,8 @@ name: CI
 # 门禁流程（并行 job 拆分：Agent Package gate 不再被无关 UI/单测失败连坐跳过）：
 #   secret-scan ─┐
 #   lint ────────┤
+#   dep-audit ───┤
+#   static-sast ─┤
 #   unit ────────┤
 #   security ────┼─→ release-ready（汇总）
 #   agent-pkg ───┤
@@ -13,23 +15,49 @@ on:
   pull_request:
     branches: [main]
 
+# 最小权限：本流程所有 job 只需读仓库内容。
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  dependency-audit:
+    name: dependency-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.10"
+      # pip-audit 扫描 requirements*.txt 的已知漏洞(OSV/PyPIADVISORY)。
+      # 精确 pin 的依赖使结果可复现;新漏洞进入门禁而不是潜伏到运行时。
+      # PYSEC-2026-2858(paramiko rsakey SHA-1)已随 paramiko 5.0.0 升级修复,
+      # 不再需要豁免;如新增豁免必须在注释中给出理由与退出条件。
+      - name: Audit runtime dependencies
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt --strict
+      - name: Audit dev dependencies
+        run: |
+          # requirements-dev.txt 内联 requirements.txt,同栈审计。
+          pip-audit -r requirements-dev.txt --strict
+
   secret-scan:
     name: secret-scan
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
         with:
           # Gitleaks 需要 parent^..HEAD 的完整历史；fetch-depth: 1 会导致
           # "fatal: ambiguous argument" 并连锁跳过后续步骤。
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -38,7 +66,7 @@ jobs:
         run: python scripts/check_source_secrets.py .
 
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -47,8 +75,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -60,6 +88,63 @@ jobs:
       - name: Ruff lint
         run: ruff check .
 
+  # Semgrep 静态安全扫描（SAST 门禁）：
+  # - ERROR 级发现直接阻断（shell 注入、taint 传播等高危模式）；审计过的
+  #   边界在源码以 `# nosemgrep: <rule>` 就地豁免并写明理由；
+  # - WARNING 级作为存量改进清单随 artifact 上传，不阻断；
+  # - 刻意排除的规则（纯 import 告警/与平台约定冲突的误报）逐条列出：
+  #   B404(仅 import subprocess)、B313..B410 组合族(与 use-defused-xml
+  #   同源：标准库 ET 不解析外部实体，lxml 已在 _LXML_PARSER 显式关闭)、
+  #   B101(assert 是测试与防御式检查的合法用法)。
+  static-sast:
+    name: static-sast
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.10"
+      - name: Semgrep scan
+        env:
+          SEMGREP_RULES: p/bandit p/owasp-top-ten p/python
+        run: |
+          python -m pip install --upgrade pip semgrep
+          mkdir -p artifacts
+          # 退出码不作为本步判定（存在 WARNING 时 semgrep 也返回 1），
+          # 门禁在下一步按 severity 精确判定。
+          semgrep scan --config p/bandit --config p/owasp-top-ten \
+              --config p/python . \
+              --exclude-rule gitlab.bandit.B404 \
+              --exclude-rule "gitlab.bandit.B313.B314.B315.B316.B318.B319.B320.B405.B406.B407.B408.B409.B410" \
+              --exclude-rule python.lang.security.use-defused-xml.use-defused-xml \
+              --exclude-rule gitlab.bandit.B101 \
+              --json --output artifacts/semgrep.json \
+              --metrics=off || true
+      - name: Gate on ERROR-severity findings
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          data = json.loads(pathlib.Path("artifacts/semgrep.json").read_text())
+          errors = [f for f in data.get("results", [])
+                    if f["extra"]["severity"] == "ERROR"]
+          for f in errors:
+              loc = f"{f['path']}:{f['start']['line']}"
+              print(f"::error file={f['path']},line={f['start']['line']}"
+                    f"::{f['check_id']} at {loc}")
+          print(f"semgrep: {len(data.get('results', []))} findings, "
+                f"{len(errors)} ERROR (gate)")
+          raise SystemExit(1 if errors else 0)
+          PY
+      - name: Upload semgrep report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: semgrep-report
+          path: artifacts/semgrep.json
+          if-no-files-found: error
+
+
   # 历史上这里是一个 `pytest tests features worker_agent/tests -q` 大 job：
   # 某个域卡住会把整组测试 cancel 掉，已经出现的 failure 连 failure
   # summary 都来不及打印。按域拆分后每组独立判定，失败时上传 JUnit 与
@@ -69,8 +154,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -88,7 +173,7 @@ jobs:
             -q --junitxml=artifacts/unit-foundation.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: junit-unit-foundation
           path: artifacts/
@@ -99,8 +184,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -115,7 +200,7 @@ jobs:
             -q --junitxml=artifacts/unit-auth-system.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: junit-unit-auth-system
           path: artifacts/
@@ -126,8 +211,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -142,7 +227,7 @@ jobs:
             -q --junitxml=artifacts/unit-devices-firmware.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: junit-unit-devices-firmware
           path: artifacts/
@@ -153,8 +238,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -169,7 +254,7 @@ jobs:
             -q --junitxml=artifacts/unit-execution.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: junit-unit-execution
           path: artifacts/
@@ -180,8 +265,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -197,7 +282,7 @@ jobs:
             -q --junitxml=artifacts/unit-assistant-reports.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: junit-unit-assistant-reports
           path: artifacts/
@@ -208,8 +293,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -226,7 +311,7 @@ jobs:
         run: pytest tests/soak -q
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: junit-worker-agent
           path: artifacts/
@@ -237,8 +322,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -263,8 +348,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -300,11 +385,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
         with:
           fetch-depth: 1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.10"
           cache: pip
@@ -324,7 +409,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [
-      secret-scan, lint,
+      secret-scan, lint, dependency-audit, static-sast,
       unit-foundation, unit-feature-auth-system, unit-feature-devices-firmware,
       unit-feature-test-execution, unit-feature-assistant-reports,
       worker-agent,

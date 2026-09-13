@@ -223,7 +223,8 @@ class AutomationApiTests(unittest.TestCase):
         self.assertIsInstance(orchestrator.executor, HttpAutomationExecutor)
 
     def test_router_is_registered(self):
-        paths = {route.path for route in create_app().routes}
+        from tests.contract.snapshot_tools import flatten_app_routes
+        paths = {route.path for route in flatten_app_routes(create_app())}
         self.assertIn('/api/automation/runs', paths)
         self.assertIn('/api/automation/runs/preflight', paths)
         self.assertIn('/automation', paths)
@@ -411,9 +412,13 @@ class AutomationApiTests(unittest.TestCase):
                 })
 
     def test_index_template_has_gms_ats_nav_entry(self):
-        template = Path('web/shell/shell.html').read_text(
-            encoding='utf-8'
-        )
+        # CSP 前置迁移后 shell 脚本外置，按"模板+外置 shell 脚本"组合读取。
+        template_parts = [Path('web/shell/shell.html').read_text(encoding='utf-8')]
+        template_parts += [
+            p.read_text(encoding='utf-8')
+            for p in sorted(Path('web/static/js/shell').glob('*.js'))
+        ]
+        template = '\n'.join(template_parts)
         self.assertIn('data-page="automation"', template)
         self.assertIn('id="page-automation"', template)
         self.assertIn('src="/automation"', template)
@@ -430,9 +435,13 @@ class AutomationApiTests(unittest.TestCase):
         self.assertIn('id="automation-flash-mode"', html)
         self.assertIn('id="automation-create-run"', html)
         self.assertIn('id="automation-runs"', html)
-        self.assertIn('/api/automation/runs', html)
-        self.assertIn('/api/automation/gerrit/poll', html)
-        self.assertIn('/api/automation/worker/tick', html)
+        # CSP 前置迁移后页面脚本外置为 /automation/page.js，API 引用在
+        # page.js 里；模板（<script src>）与脚本内容一起校验。
+        self.assertIn('/automation/page.js', html)
+        js = Path('features/automation/ui/page.js').read_text(encoding='utf-8')
+        self.assertIn('/api/automation/runs', js)
+        self.assertIn('/api/automation/gerrit/poll', js)
+        self.assertIn('/api/automation/worker/tick', js)
 
     def test_gerrit_webhook_creates_idempotent_runs(self):
         profiles = [

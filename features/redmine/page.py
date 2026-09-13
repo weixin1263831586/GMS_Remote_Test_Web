@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 
 page_router = APIRouter()
@@ -15,8 +15,13 @@ async def redmine_agent_page():
         "{{REDMINE_CSS}}",
         (ui_dir / "page.css").read_text(encoding="utf-8").rstrip(),
     )
-    html = html.replace(
-        "{{REDMINE_JS}}",
-        (ui_dir / "page.js").read_text(encoding="utf-8").rstrip(),
-    )
     return HTMLResponse(html)
+
+
+@page_router.get("/redmine-agent/page.js")
+def redmine_agent_page_js():
+    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
+    js = Path(__file__).with_name("ui") / "page.js"
+    return Response(
+        js.read_text(encoding="utf-8"), media_type="application/javascript"
+    )

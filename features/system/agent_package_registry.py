@@ -262,7 +262,10 @@ _INSTALL_SH_TEMPLATE = r'''#!/usr/bin/env bash
 # GMS Remote Test agent runtime — one-line installer.
 #
 # Usage:
-#   curl -kfsSL __SERVER_URL__/api/agent/install.sh | bash -s -- [CODE] [options...]
+#   curl -fsSL __SERVER_URL__/api/agent/install.sh | bash -s -- [CODE] [options...]
+#
+#   自签名部署先导出: export GMS_INSTALL_CA_CERT=/path/controller-ca.crt
+#   (受控实验环境可用 GMS_INSTALL_ALLOW_INSECURE=1 显式降级,生产端点拒绝)。
 #
 #   CODE  (optional) one-shot enrollment code from the Controller web UI;
 #         when given, install exchanges it for a 0600 Agent Service Token
@@ -277,7 +280,6 @@ set -euo pipefail
 
 SERVER='__SERVER_URL__'
 
-CODE_ARGS=()
 PASS_ARGS=()
 CODE=""
 while (( $# )); do
@@ -314,8 +316,12 @@ while (( $# )); do
       ;;
   esac
 done
+# 配对码只经环境变量传给 gms-agent(不进 argv/ps/shell history)。
+# gms-agent 端 GMS_AGENT_ENROLL_CODE 优先于 --enroll-code。
+unset GMS_AGENT_ENROLL_CODE
 if [[ -n "$CODE" ]]; then
-  CODE_ARGS=(--enroll-code "$CODE")
+  export GMS_AGENT_ENROLL_CODE="$CODE"
+  CODE=""
 fi
 
 DOWNLOADER=""
@@ -328,30 +334,41 @@ else
   exit 3
 fi
 
-# 传输层策略: 配置了 GMS_INSTALL_CA_CERT 时严格校验; 否则(典型为自签名
-# 内网部署)降级为不校验传输层并提示。内容完整性由 gms-agent 的清单
-# SHA-256 + Ed25519 签名校验兜底; 有主动中间人风险的强信任环境应通过
-# GMS_INSTALL_CA_CERT 下发 CA。
+# 传输层策略 —— TLS 校验 fail-closed:
+#   1) GMS_INSTALL_CA_CERT 指向可读证书 → 显式信任私有 CA 严格校验(推荐);
+#   2) GMS_INSTALL_ALLOW_INSECURE=1 且服务端允许(非生产) → 显式降级跳过
+#      校验,仅限受控实验环境,并传导给 python 阶段;
+#   3) 其余情况 → 使用系统信任链默认校验(自签名证书会失败,这是预期)。
+# 服务端在 production 环境渲染 ALLOW_INSECURE=0,insecure 引导被直接拒绝。
+ALLOW_INSECURE='__ALLOW_INSECURE__'
+if [[ "${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1" && "$ALLOW_INSECURE" != "1" ]]; then
+  echo "Error: GMS_INSTALL_ALLOW_INSECURE=1 被生产环境 Controller 拒绝;请通过 GMS_INSTALL_CA_CERT 信任 Controller CA" >&2
+  exit 4
+fi
 FETCH_TLS=()
 case "$DOWNLOADER" in
   curl)
     if [[ -n "${GMS_INSTALL_CA_CERT:-}" && -r "${GMS_INSTALL_CA_CERT}" ]]; then
       FETCH_TLS=(-fsSL --cacert "$GMS_INSTALL_CA_CERT")
-    else
+    elif [[ "${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1" ]]; then
       FETCH_TLS=(-kfsSL)
       # python 阶段(bootstrap 拉 manifest/包)继承同一 TLS 策略。
       export GMS_INSTALL_INSECURE=1
-      echo "Warning: 未配置 GMS_INSTALL_CA_CERT,跳过 TLS 证书校验(自签名部署)" >&2
+      echo "Warning: GMS_INSTALL_ALLOW_INSECURE=1,跳过 TLS 证书校验(仅限受控实验环境)" >&2
+    else
+      FETCH_TLS=(-fsSL)
     fi
     ;;
   wget)
     if [[ -n "${GMS_INSTALL_CA_CERT:-}" && -r "${GMS_INSTALL_CA_CERT}" ]]; then
       FETCH_TLS=(--ca-certificate="$GMS_INSTALL_CA_CERT" -qO)
-    else
+    elif [[ "${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1" ]]; then
       FETCH_TLS=(--no-check-certificate -qO)
       # python 阶段(bootstrap 拉 manifest/包)继承同一 TLS 策略。
       export GMS_INSTALL_INSECURE=1
-      echo "Warning: 未配置 GMS_INSTALL_CA_CERT,跳过 TLS 证书校验(自签名部署)" >&2
+      echo "Warning: GMS_INSTALL_ALLOW_INSECURE=1,跳过 TLS 证书校验(仅限受控实验环境)" >&2
+    else
+      FETCH_TLS=(-qO)
     fi
     ;;
 esac
@@ -366,7 +383,6 @@ case "$DOWNLOADER" in
 esac
 
 python3 "$WORK_DIR/gms-agent" install --server "$SERVER" \
-  "${CODE_ARGS[@]+"${CODE_ARGS[@]}"}" \
   "${PASS_ARGS[@]+"${PASS_ARGS[@]}"}"
 '''
 
@@ -379,9 +395,17 @@ async def agent_install_sh(request: Request):
     positional enrollment code (when given) is forwarded as --enroll-code so
     install + token exchange happen in a single command:
 
-        curl -kfsSL https://CONTROLLER:5001/api/agent/install.sh | bash -s -- <CODE>
+        curl -fsSL https://CONTROLLER:5001/api/agent/install.sh | bash -s -- <CODE>
+
+    TLS is fail-closed: the rendered script verifies certificates by default
+    (system trust store, or GMS_INSTALL_CA_CERT). Insecure bootstrap via
+    GMS_INSTALL_ALLOW_INSECURE=1 only works while the Controller runs in a
+    non-production environment; production renders ALLOW_INSECURE=0 and the
+    script rejects the downgrade outright.
     """
     from urllib.parse import urlsplit
+
+    from foundation.runtime_settings import is_production_environment
 
     server_url = str(request.base_url).rstrip("/")
     parsed = urlsplit(server_url)
@@ -398,7 +422,11 @@ async def agent_install_sh(request: Request):
     ):
         logger.warning("[AGENT_INSTALL_SH] rejected suspicious base_url: %r", server_url)
         return error_response("无法从当前请求确定有效的服务地址", status_code=400)
-    content = _INSTALL_SH_TEMPLATE.replace("__SERVER_URL__", server_url)
+    allow_insecure = "0" if is_production_environment() else "1"
+    content = (
+        _INSTALL_SH_TEMPLATE.replace("__SERVER_URL__", server_url)
+        .replace("__ALLOW_INSECURE__", allow_insecure)
+    )
     return Response(
         content=content,
         media_type="text/x-shellscript",

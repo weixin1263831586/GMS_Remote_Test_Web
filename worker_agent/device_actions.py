@@ -389,7 +389,9 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
             env["DISPLAY"] = display
             x_offset = start_x + index * (window_width + gap)
             process = subprocess.Popen(
-                [executable, "-s", serial, "--window-title", f"GMS {serial}",
+                # argv 列表启动 Worker 本机解析出的 scrcpy 可执行文件，
+                # 无 shell；serial 来自主机侧已登记设备清单。
+                [executable, "-s", serial, "--window-title", f"GMS {serial}",  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
                  "--window-x", str(x_offset), "--window-y", str(start_y),
                  "--window-width", str(window_width), "--window-height", str(window_height),
                  "--max-size", "800", "--no-audio"],
@@ -639,7 +641,9 @@ def flash_firmware(config: WorkerConfig, firmware: Path, device_ids: list[str],
     if reboot.returncode != 0:
         raise RuntimeError((reboot.stderr or reboot.stdout or "failed to enter loader").strip())
     time.sleep(8)
-    listed = subprocess.run([str(tool), "ld"], capture_output=True, text=True, timeout=20, check=False)
+    # 固定 argv 调用 Worker 本机 rkdeveloptool，无 shell；tool 为服务端
+    # 解析的本地工具路径，非用户自由输入。
+    listed = subprocess.run([str(tool), "ld"], capture_output=True, text=True, timeout=20, check=False)  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
     match = re.search(r"List of rockusb connected\((\d+)\)", listed.stdout or "")
     if listed.returncode != 0 or not match or int(match.group(1)) != 1:
         raise RuntimeError("expected exactly one RockUSB loader device on Worker")

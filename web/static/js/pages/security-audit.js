@@ -129,10 +129,13 @@ function updateSecurityAuditLoadMoreButton() {
     if (!wrapper) return;
     if (securityAuditState.hasMore) {
         wrapper.innerHTML = `
-            <button class="btn-xs" id="audit-load-more-btn" onclick="loadMoreSecurityAudit()">
+            <button class="btn-xs" id="audit-load-more-btn" type="button">
                 加载更多
             </button>
         `;
+        wrapper
+            .querySelector('#audit-load-more-btn')
+            .addEventListener('click', loadMoreSecurityAudit);
     } else {
         wrapper.innerHTML = '';
     }
@@ -291,7 +294,7 @@ function ensureSecurityAuditDetailModal() {
         <div class="modal-content" style="width: min(980px, 92vw); max-width: min(980px, 92vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
             <div class="modal-header">
                 <span class="modal-title">安全审计详情</span>
-                <span class="modal-close" onclick="closeSecurityAuditDetailModal()">&times;</span>
+                <span class="modal-close" data-action="close-security-audit-detail">&times;</span>
             </div>
             <div class="modal-body" id="security-audit-detail-body" style="overflow: auto; padding-right: 4px;">
                 加载中...
@@ -302,6 +305,9 @@ function ensureSecurityAuditDetailModal() {
     modal.addEventListener('click', (event) => {
         if (event.target === modal) closeSecurityAuditDetailModal();
     });
+    modal
+        .querySelector('[data-action="close-security-audit-detail"]')
+        .addEventListener('click', closeSecurityAuditDetailModal);
     return modal;
 }
 

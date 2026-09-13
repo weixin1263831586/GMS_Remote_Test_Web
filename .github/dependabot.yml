@@ -1,0 +1,30 @@
+# Dependabot: 依赖漏洞/更新进入 PR 队列而不是潜伏在锁定版本里。
+# GitHub Actions 同步更新(workflow 使用 tag 引用;团队评审时决定是否
+# 升级到 full commit SHA pinning)。
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    # requirements*.txt 全部 exact-pin:每次只允许小幅推进并跑完整 CI。
+    versioning-strategy: lockfile-only
+    groups:
+      dev-dependencies:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci

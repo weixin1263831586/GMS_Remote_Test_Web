@@ -38,6 +38,27 @@ from .support import (
 )
 from .usbip import detach_ubuntu_usbip_ports, find_device_host_password, usbip_manager
 from .usbip_access import enforce_usbip_host_access, usbip_request_user
+from .usbip_assignments import (
+    load_usbip_assignments as _usbip_assignments,
+)
+from .usbip_assignments import (
+    mark_usbip_detach_unknown as _mark_usbip_detach_unknown,
+)
+from .usbip_assignments import (
+    next_transport_generation as _next_transport_generation,
+)
+from .usbip_assignments import (
+    prune_stale_unknown_usbip_assignments as _prune_stale_unknown_usbip_assignments,
+)
+from .usbip_assignments import (
+    reconcile_usbip_assignment_serials as _reconcile_usbip_assignment_serials,
+)
+from .usbip_assignments import (
+    save_usbip_assignments as _save_usbip_assignments,
+)
+from .usbip_assignments import (
+    usbip_assignment_key as _usbip_assignment_key,
+)
 from .usbip_install_api import install_usbipd
 from .usbip_install_api import router as usbip_install_router
 from .usbip_linux_source import stop_ubuntu_usbip_server
@@ -166,14 +187,6 @@ def _rollback_local_usbip_attach(
         "errors": errors,
     }
 
-def _usbip_assignments() -> dict[str, dict]:
-    getter = getattr(runtime.config_manager, "get_runtime_config", None)
-    runtime_config = getter() if callable(getter) else {}
-    runtime_config = runtime_config or {}
-    assignments = runtime_config.get("usbip_cluster_assignments") or {}
-    return dict(assignments) if isinstance(assignments, dict) else {}
-
-
 def _verify_local_usbip_transport(
     assignments: dict[str, dict],
 ) -> dict[str, dict[str, object]]:
@@ -252,83 +265,10 @@ def _verify_local_usbip_transport(
         }
     return result
 
-def _save_usbip_assignments(assignments: dict[str, dict]) -> bool:
-    updater = getattr(runtime.config_manager, "update_runtime_config", None)
-    if callable(updater):
-        saved = updater({"usbip_cluster_assignments": assignments})
-    else:
-        getter = getattr(runtime.config_manager, "get_runtime_config", None)
-        runtime_config = getter() if callable(getter) else {}
-        runtime_config = runtime_config or {}
-        runtime_config["usbip_cluster_assignments"] = assignments
-        saved = runtime.config_manager.save_runtime_config(runtime_config)
-    if not saved:
-        raise RuntimeError("无法保存USB/IP集群分配状态")
-    # 成功路径必须显式返回 True，调用方以真值判断保存是否成功。
-    return True
-
-def _prune_stale_unknown_usbip_assignments(
-    device_host: str,
-    current_busids: set[str],
-) -> list[str]:
-    """Remove degraded assignments whose Windows BUSID no longer exists."""
-    with _usbip_assignment_lock:
-        assignments = _usbip_assignments()
-        stale_keys = [
-            key
-            for key, item in assignments.items()
-            if str(item.get("device_host") or "") == device_host
-            and str(item.get("status") or "") == "unknown"
-            and str(item.get("busid") or "") not in current_busids
-        ]
-        if stale_keys:
-            for key in stale_keys:
-                assignments.pop(key, None)
-            _save_usbip_assignments(assignments)
-    return stale_keys
-
 def _local_worker_id() -> str:
     from foundation.cluster_port import get_local_worker_id
 
     return get_local_worker_id()
-
-def _reconcile_usbip_assignment_serials(
-    device_host: str,
-    source_devices: list[dict],
-    source_os: str = "",
-) -> bool:
-    """Backfill assignment serials from the authoritative source busid list."""
-    serial_by_busid = {
-        str(item.get("busid") or ""): str(item.get("serial") or "").strip()
-        for item in source_devices
-        if str(item.get("busid") or "") and str(item.get("serial") or "").strip()
-    }
-    if not serial_by_busid:
-        return False
-
-    resolved_os = str(source_os or "").strip()
-    local_serials: list[str] = []
-    changed = False
-    with _usbip_assignment_lock:
-        assignments = _usbip_assignments()
-        for key, assignment in assignments.items():
-            if str(assignment.get("device_host") or "") != device_host:
-                continue
-            serial = serial_by_busid.get(str(assignment.get("busid") or ""))
-            if not serial:
-                continue
-            updated = {**assignment, "device_serials": [serial]}
-            if resolved_os and not str(assignment.get("source_os") or "").strip():
-                updated["source_os"] = resolved_os
-            if updated != assignment:
-                assignments[key] = updated
-                changed = True
-            if str(assignment.get("worker_id") or "") == _local_worker_id():
-                local_serials.append(serial)
-        if changed:
-            _save_usbip_assignments(assignments)
-    _persist_local_usbip_sources(device_host, local_serials, source_os=resolved_os)
-    return changed
 
 def _adb_proxy_target_assignments(worker_id: str) -> list[dict]:
     """Return persisted ADB Proxy routes that currently target a Worker."""
@@ -536,18 +476,6 @@ def reconcile_cluster_usbip_command(command: dict, repository) -> None:
                 changed = True
         if changed:
             _save_usbip_assignments(assignments)
-
-def _usbip_assignment_key(device_host: str, busid: str) -> str:
-    return f"{device_host}|{busid}"
-
-def _next_transport_generation(assignments: dict[str, dict]) -> int:
-    return max(
-        int(time.time() * 1000),
-        max(
-            (int(item.get("generation") or 0) for item in assignments.values()),
-            default=0,
-        ) + 1,
-    )
 
 def _is_usbip_recoverable_attach_error(exc: Exception) -> bool:
     detail = str(getattr(exc, "detail", "") or exc).lower()
@@ -2107,25 +2035,6 @@ def _mark_usbip_source_disconnected(
             "reconnecting": False,
             "protocol_status": {},
         }
-
-def _mark_usbip_detach_unknown(
-    device_host: str,
-    busids: list[str],
-    worker_id: str,
-    generation: int,
-) -> None:
-    with _usbip_assignment_lock:
-        assignments = _usbip_assignments()
-        for busid in busids:
-            key = _usbip_assignment_key(device_host, busid)
-            current = assignments.get(key) or {}
-            if (
-                current.get("worker_id") == worker_id
-                and int(current.get("generation") or 0) == generation
-            ):
-                current.update({"status": "unknown", "timestamp": time.time()})
-                assignments[key] = current
-        _save_usbip_assignments(assignments)
 
 # ==================== USB/IP Disconnect ====================
 

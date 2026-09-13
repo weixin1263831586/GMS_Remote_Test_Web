@@ -30,15 +30,30 @@ def dashboard():
 
         def respond(route):
             url = urlsplit(route.request.url)
+            # CSP 前置迁移后页面脚本外置为 /gerrit-dashboard/page.js。
             assets = {
-                "/gerrit-dashboard": ROOT / "features/gerrit/ui/page.html",
-                "/static/js/utils.js": ROOT / "web/static/js/utils.js",
-                "/static/js/embedded-workspace.js": ROOT / "web/static/js/embedded-workspace.js",
+                "/gerrit-dashboard": (
+                    ROOT / "features/gerrit/ui/page.html", "text/html",
+                ),
+                "/gerrit-dashboard/page.js": (
+                    ROOT / "features/gerrit/ui/page.js", "text/javascript",
+                ),
+                "/static/js/utils.js": (
+                    ROOT / "web/static/js/utils.js", "text/javascript",
+                ),
+                "/static/js/embedded-workspace.js": (
+                    ROOT / "web/static/js/embedded-workspace.js",
+                    "text/javascript",
+                ),
+                "/static/js/shell/act-bridge.js": (
+                    ROOT / "web/static/js/shell/act-bridge.js",
+                    "text/javascript",
+                ),
             }
             if url.path in assets:
+                path, content_type = assets[url.path]
                 route.fulfill(
-                    content_type="text/html" if url.path == "/gerrit-dashboard" else "text/javascript",
-                    body=assets[url.path].read_text(),
+                    content_type=content_type, body=path.read_text()
                 )
                 return
             state["requests"].append(url)

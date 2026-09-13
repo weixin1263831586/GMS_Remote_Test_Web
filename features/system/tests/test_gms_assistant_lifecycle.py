@@ -133,8 +133,10 @@ class GmsAssistantBootShellTests(_IsolatedEnvTestCase):
         self.assertTrue(response.json()["boot_error"])
 
     def test_dev_proxy_routes_absent_by_default(self):
+        from foundation.routing_introspection import flatten_app_routes
+
         app = _load_app()
-        paths = {route.path for route in app.routes}
+        paths = {route.path for route in flatten_app_routes(app)}
         for dev_path in (
             "/@vite/{path:path}",
             "/@react-refresh",

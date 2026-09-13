@@ -44,6 +44,28 @@ def discover_repositories(data_root: Path | None = None) -> list[DailyBriefRepos
     ]
 
 
+class OwnerFairnessCursor:
+    """跨 owner 的 round-robin 游标(P2 fairness)。
+
+    旧模型每轮都从字母序第一个 owner 目录开始 claim:owner A 长期有
+    大量耗时 AI 任务时,owner B/C 会被明显饿死。游标记住上一轮服务的
+    owner 起始偏移,让每个 owner 轮流成为扫描起点。
+
+    单 Worker 进程内有效;多 Worker 部署下各自独立轮转(仍然公平:
+    任意 Worker 都不再固定偏向字母序靠前的 owner)。
+    """
+
+    def __init__(self) -> None:
+        self._offset = 0
+
+    def rotate(self, items: list[DailyBriefRepository]) -> list[DailyBriefRepository]:
+        if not items:
+            return items
+        offset = self._offset % len(items)
+        self._offset = (self._offset + 1) % len(items)
+        return items[offset:] + items[:offset]
+
+
 async def _execute_job(
     repository: DailyBriefRepository,
     job: dict[str, Any],
@@ -74,12 +96,13 @@ async def _heartbeat(
     repository: DailyBriefRepository,
     job_id: str,
     worker_id: str,
+    lease_token: str,
     lease_seconds: int,
 ) -> None:
     interval = max(2.0, lease_seconds / 3)
     while True:
         await asyncio.sleep(interval)
-        if not repository.renew_job(job_id, worker_id, lease_seconds):
+        if not repository.renew_job(job_id, worker_id, lease_token, lease_seconds):
             raise RuntimeError(f"lost lease for daily brief job {job_id}")
 
 
@@ -92,61 +115,108 @@ async def run_claimed_job(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     service_factory: Callable[[str], DailyBriefService] = _service_for_owner,
 ) -> bool:
-    """Run one claimed job. Return False when shutdown should stop the loop."""
+    """Run one claimed job. Return False when shutdown should stop the loop.
+
+    所有归属操作（renew/requeue/finish）都携带 claim 时拿到的
+    lease_token 做 CAS：租约被其他 Worker 接管后，本 Worker 的迟到
+    写入会被安全拒绝，而不是覆盖新状态。
+
+    状态收敛兜底（finally）：无论 work/heartbeat 哪条路径异常退出，只要
+    job 仍处于本租约的 running 状态，就必然落到 finish(failed)——而不是
+    等待下一次 lease expiration 才恢复。
+    """
     job_id = str(job["job_id"])
-    work = asyncio.create_task(_execute_job(repository, job, service_factory))
-    heartbeat = asyncio.create_task(
-        _heartbeat(repository, job_id, worker_id, lease_seconds)
-    )
-    stopping = asyncio.create_task(stop_event.wait())
-    done, _ = await asyncio.wait(
-        {work, heartbeat, stopping}, return_when=asyncio.FIRST_COMPLETED
-    )
-    if stopping in done and stop_event.is_set() and not work.done():
-        work.cancel()
-        with suppress(asyncio.CancelledError):
-            await work
-        repository.requeue_job(
-            job_id, worker_id, reason="analysis worker stopped; queued for retry"
+    lease_token = str(job.get("lease_token") or "")
+    outcome: str | None = None  # None=未决, "done"=已 finish, "requeued"
+    try:
+        work = asyncio.create_task(_execute_job(repository, job, service_factory))
+        heartbeat = asyncio.create_task(
+            _heartbeat(repository, job_id, worker_id, lease_token, lease_seconds)
         )
+        stopping = asyncio.create_task(stop_event.wait())
+        done, _ = await asyncio.wait(
+            {work, heartbeat, stopping}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if stopping in done and stop_event.is_set() and not work.done():
+            work.cancel()
+            with suppress(asyncio.CancelledError):
+                await work
+            repository.requeue_job(
+                job_id, worker_id, lease_token,
+                reason="analysis worker stopped; queued for retry",
+            )
+            outcome = "requeued"
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
+            return False
+
+        if heartbeat in done and not work.done():
+            # 心跳先退出（lease 丢失或心跳自身异常）：取消 work,但不做
+            # 任何归属写入——lease_token CAS 会拒绝迟到写入,任务由
+            # claim_next_job() 的过期恢复路径重新排队。
+            work.cancel()
+            with suppress(asyncio.CancelledError):
+                await work
+            try:
+                await heartbeat
+            except Exception as exc:
+                logger.error("daily brief job %s stopped after lease loss: %s", job_id, exc)
+            else:
+                # 心跳正常返回(不应发生)也按租约丢失处理。
+                logger.error("daily brief job %s heartbeat exited early", job_id)
+            outcome = "lease-lost"
+            stopping.cancel()
+            with suppress(asyncio.CancelledError):
+                await stopping
+            return True
+
+        stopping.cancel()
         heartbeat.cancel()
         with suppress(asyncio.CancelledError):
-            await heartbeat
-        return False
-
-    if heartbeat in done and not work.done():
-        work.cancel()
-        with suppress(asyncio.CancelledError):
-            await work
-        try:
-            await heartbeat
-        except Exception as exc:
-            logger.error("daily brief job %s stopped after lease loss: %s", job_id, exc)
-        stopping.cancel()
-        with suppress(asyncio.CancelledError):
             await stopping
+        with suppress(asyncio.CancelledError):
+            await heartbeat
+        try:
+            await work
+        except Exception as exc:
+            logger.exception("daily brief job %s failed", job_id)
+            repository.finish_job(job_id, worker_id, lease_token, error=str(exc))
+            outcome = "done"
+            run = repository.get_run(str(job["run_id"]))
+            if run is not None and run.status not in TERMINAL_RUN_STATUSES:
+                run.status = "failed"
+                run.error = str(exc)[:1000]
+                run.finished_at = _now()
+                repository.update_run(run)
+        else:
+            repository.finish_job(job_id, worker_id, lease_token)
+            outcome = "done"
         return True
-
-    stopping.cancel()
-    heartbeat.cancel()
-    with suppress(asyncio.CancelledError):
-        await stopping
-    with suppress(asyncio.CancelledError):
-        await heartbeat
-    try:
-        await work
-    except Exception as exc:
-        logger.exception("daily brief job %s failed", job_id)
-        repository.finish_job(job_id, worker_id, error=str(exc))
-        run = repository.get_run(str(job["run_id"]))
-        if run is not None and run.status not in TERMINAL_RUN_STATUSES:
-            run.status = "failed"
-            run.error = str(exc)[:1000]
-            run.finished_at = _now()
-            repository.update_run(run)
-    else:
-        repository.finish_job(job_id, worker_id)
-    return True
+    finally:
+        if outcome is None:
+            # 异常逃逸(如 asyncio.wait 本身出错):确保租约归属收敛。
+            # lease_token CAS 保证:若租约已被接管,这条写入自然失败;
+            # 若仍归属本 Worker,任务立即标 failed 供重试,而不是
+            # 等 lease_expires_at 超时。
+            try:
+                if repository.finish_job(
+                    job_id, worker_id, lease_token,
+                    error="worker unexpected exit; queued for retry via requeue",
+                ):
+                    logger.error(
+                        "daily brief job %s converged to failed after unexpected exit",
+                        job_id,
+                    )
+                    run = repository.get_run(str(job["run_id"]))
+                    if run is not None and run.status not in TERMINAL_RUN_STATUSES:
+                        run.status = "pending"
+                        run.error = "worker unexpected exit; queued for retry"
+                        repository.update_run(run)
+            except Exception:
+                logger.exception(
+                    "daily brief job %s failed to converge after unexpected exit", job_id
+                )
 
 
 async def worker_loop(
@@ -159,9 +229,10 @@ async def worker_loop(
 ) -> None:
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
     logger.info("daily brief worker started as %s", worker_id)
+    fairness = OwnerFairnessCursor()
     while not stop_event.is_set():
         claimed: tuple[DailyBriefRepository, dict[str, Any]] | None = None
-        for repository in discover_repositories(data_root):
+        for repository in fairness.rotate(discover_repositories(data_root)):
             job = repository.claim_next_job(worker_id, lease_seconds)
             if job is not None:
                 claimed = repository, job

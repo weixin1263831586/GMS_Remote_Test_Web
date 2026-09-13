@@ -271,7 +271,8 @@ function initTerminal() {
             .then(() => initTerminal())
             .catch((error) => {
                 console.error('xterm scripts load failed:', error);
-                document.getElementById('terminal').innerHTML = `
+                const terminalEl = document.getElementById('terminal');
+                terminalEl.innerHTML = `
                     <div style="color:white;padding:40px;text-align:center;">
                         <div style="font-size:48px;margin-bottom:20px;">❌</div>
                         <div style="font-size:18px;margin-bottom:10px;">xterm.js 库加载失败</div>
@@ -281,11 +282,14 @@ function initTerminal() {
                             2. 静态资源加载失败<br>
                             3. 防火墙阻止
                         </div>
-                        <button onclick="location.reload()" style="padding:10px 20px;font-size:14px;cursor:pointer;background:var(--success-color);color:white;border:none;border-radius:4px;">
+                        <button type="button" data-action="reload-page" style="padding:10px 20px;font-size:14px;cursor:pointer;background:var(--success-color);color:white;border:none;border-radius:4px;">
                             🔄 刷新页面重试
                         </button>
                     </div>
                 `;
+                terminalEl
+                    .querySelector('[data-action="reload-page"]')
+                    .addEventListener('click', () => location.reload());
             });
         return;
     }

@@ -45,7 +45,7 @@ function renderNotificationList() {
     list.innerHTML = state.notifications.map(item => `
         <div class="notification-item ${escapeHtml(item.level)} ${item.read ? '' : 'unread'}"
              data-notification-id="${escapeHtml(item.id)}"
-             onclick="markNotificationRead('${escapeHtml(item.id)}')">
+             data-click="markNotificationRead" data-a0="${escapeHtml(item.id)}">
             <div class="notification-level-dot"></div>
             <div>
                 <div class="notification-title">${escapeHtml(item.title)}</div>

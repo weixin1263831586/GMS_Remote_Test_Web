@@ -55,6 +55,101 @@ class EmailApiTests(unittest.TestCase):
         self.assertTrue(response.json()["success"])
         send_email_mock.assert_called_once()
 
+    @patch("features.email.api.send_email")
+    def test_recipient_count_is_capped(self, send_email_mock):
+        self._login()
+        many = [f"user{i}@example.com" for i in range(31)]
+
+        response = self.client.post(
+            "/api/email/send",
+            json={"to": many, "subject": "s", "body": "b"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("收件人数量超限", response.json()["error"])
+        send_email_mock.assert_not_called()
+
+    @patch("features.email.api.send_email")
+    def test_body_size_is_capped(self, send_email_mock):
+        self._login()
+
+        response = self.client.post(
+            "/api/email/send",
+            json={
+                "to": "dev@example.com",
+                "subject": "s",
+                "body": "x" * (2_000_001),
+            },
+        )
+
+        self.assertEqual(response.status_code, 413)
+        send_email_mock.assert_not_called()
+
+    @patch("features.email.api.send_email")
+    def test_per_user_rate_limit_kicks_in(self, send_email_mock):
+        from features.email import api as email_api
+
+        # 重置限流窗口,隔离其他测试的影响。
+        email_api._rate_events.clear()
+        self._login()
+        send_email_mock.return_value = {
+            "sent": True,
+            "mode": "smtp",
+            "to": ["dev@example.com"],
+            "cc": [],
+            "recipients": ["dev@example.com"],
+        }
+        statuses = []
+        for _ in range(email_api.RATE_LIMIT_MAX_SENDS + 2):
+            response = self.client.post(
+                "/api/email/send",
+                json={"to": "dev@example.com", "subject": "s", "body": "b"},
+            )
+            statuses.append(response.status_code)
+        # 前RATE_LIMIT_MAX_SENDS封成功,之后被 429 拒绝。
+        self.assertEqual(
+            statuses[: email_api.RATE_LIMIT_MAX_SENDS],
+            [200] * email_api.RATE_LIMIT_MAX_SENDS,
+        )
+        self.assertEqual(statuses[-1], 429)
+        self.assertIn("发送过于频繁", response.json()["error"])
+        email_api._rate_events.clear()
+
+    def test_send_requires_email_send_permission(self):
+        """无 email.send 权限的登录用户被拒(权限细分)。"""
+        import features.email.api as email_api
+        from features.auth import CurrentUser  # public surface
+
+        self._login()
+
+        def deny(request):
+            return CurrentUser(
+                id="u-viewer",
+                username="viewer",
+                display_name="Viewer",
+                role="user",
+                # user 角色默认有 email.send;extra_permissions 为空且
+                # 用一个没有任何权限的角色模拟细分权限被回收的账号。
+            )
+
+        # 临时构造 role 权限不含 email.send 的 principal:用 worker_service
+        # 角色(只有 worker.*,没有 email.send)。
+        def deny_worker(request):
+            return CurrentUser(
+                id="u-svc",
+                username="svc",
+                display_name="Service",
+                role="worker_service",
+            )
+
+        with patch.object(email_api, "require_authenticated_user", deny_worker):
+            response = self.client.post(
+                "/api/email/send",
+                json={"to": "dev@example.com", "subject": "s", "body": "b"},
+            )
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("email.send", response.json()["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -60,7 +60,7 @@ human user in their own shell.
 | Config and files | `gms-rt-config-read`, `gms-rt-config-update`, `gms-rt-files-progress` |
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-selfcheck`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
 | Code search | `gms-rt-opengrok-search` |
-| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
+| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-redmine-history-search`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
 | SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |
 
 Related commands intentionally have different contracts:
@@ -136,6 +136,11 @@ gms-rt-apk-source-read TASK com/example/Test.java --offset 0 --limit 400 --json 
 gms-rt-sdk-sources --json --non-interactive
 gms-rt-sdk-search --source SRC --revision REV --query SYMBOL --json --non-interactive
 gms-rt-sdk-read --result-id RID --source SRC --path P --commit SHA --json --non-interactive
+
+# 9. Search ALL historical issues (local archive + Redmine site search) for
+#    same/similar problems and reusable fixes before writing a new analysis
+gms-rt-redmine-history-search 'camera bind failure' --limit 20 --json --non-interactive
+gms-rt-redmine-history-search 'mediaserver crash' --exclude-issue-id 648526 --resolved-only --json --non-interactive
 ```
 
 Citation format for analysis output:
