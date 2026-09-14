@@ -174,8 +174,11 @@ class SimilarIssuesValidationTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(kept[0]["similarity"], "related")  # 非法级别回落
 
-    def test_history_checked_coerced_to_bool(self):
-        result = self._valid()
-        result["history_checked"] = "yes"
-        validate_issue_result(result)
-        self.assertIs(result["history_checked"], True)
+    def test_history_checked_must_be_strict_bool(self):
+        """审核意见 P1：history_checked 不得静默真值化。"""
+        for bogus in ("yes", "false", "no", 1, 0):
+            result = self._valid()
+            result["history_checked"] = bogus
+            errors = validate_issue_result(result)
+            self.assertTrue(any("history_checked" in e for e in errors),
+                            f"bogus={bogus!r} should fail")

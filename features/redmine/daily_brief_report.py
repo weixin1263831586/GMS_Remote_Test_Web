@@ -50,6 +50,10 @@ def summarize_daily_brief(
         "top_priorities": top,
         "snapshot_hash": run.snapshot_hash,
         "source_sync_status": run.source_sync_status,
+        # 数据质量与执行状态是两个维度：execution status（本 run 的
+        # status 字段）描述 AI 分析；data_quality 描述输入数据可信度。
+        "data_quality": run.data_quality,
+        "last_sync_at": run.last_sync_at,
         "analysis_backend": run.analysis_backend,
         "model": run.model_name,
     }
@@ -87,6 +91,11 @@ def render_daily_brief_markdown(
         lines.append(
             f"> 注意：快照源同步状态为 {run.source_sync_status}，"
             "本报告基于本地镜像（数据可能落后于 Redmine）。"
+        )
+    elif run.data_quality == "stale":
+        lines.append(
+            "> 注意：本地数据已超过 24 小时未更新（data_quality=stale），"
+            "结论可能基于过期信息。"
         )
     lines.append("")
     for issue in completed:

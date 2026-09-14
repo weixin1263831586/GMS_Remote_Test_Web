@@ -20,6 +20,14 @@ class AuthPreflightTests(unittest.TestCase):
         self._tmp = TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.service = make_service(Path(self._tmp.name))
+        # 默认放行 preflight（编排路径聚焦 token 吊销场景）；各测试方法内
+        # 可用 _patch_preflight 覆盖为拦截语义。
+        default_ok = patch(
+            "features.redmine.daily_brief_service.preflight_gms_auth",
+            AsyncMock(return_value=(True, "")),
+        )
+        default_ok.start()
+        self.addCleanup(default_ok.stop)
 
     @staticmethod
     def _patch_preflight(ok: bool, reason: str):

@@ -1,11 +1,15 @@
-"""DailyBriefService 编排测试（不启动真实 kkagent/Redmine）。"""
+"""DailyBriefService 编排测试（不启动真实 kkagent/Redmine）。
+
+preflight fail-closed 语义（2026-09 收紧）由 kkagent/auth_preflight 的
+专项单测覆盖；本文件的编排路径统一把 preflight patch 为通过。
+"""
 
 from __future__ import annotations
 
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from features.redmine.config import RedmineConfig
 from features.redmine.daily_brief_repository import DailyBriefRepository
@@ -15,6 +19,15 @@ from features.redmine.daily_brief_service import (
     normalize_daily_brief_config,
 )
 from features.redmine.kkagent_analyzer import KkAgentAnalysisResult
+
+
+PASS_PREFLIGHT_TARGET = "features.redmine.daily_brief_service.preflight_gms_auth"
+
+
+def patch_preflight_ok():
+    return patch(
+        PASS_PREFLIGHT_TARGET, AsyncMock(return_value=(True, ""))
+    )
 
 
 VALID = {
@@ -121,6 +134,9 @@ class RunLifecycleTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.service = make_service(self.root)
+        preflight = patch_preflight_ok()
+        preflight.start()
+        self.addCleanup(preflight.stop)
 
     def _patch_snapshot(self):
         from unittest.mock import AsyncMock
@@ -432,6 +448,9 @@ class FrozenSnapshotTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.service = make_service(self.root)
+        preflight = patch_preflight_ok()
+        preflight.start()
+        self.addCleanup(preflight.stop)
 
     def _execute_failed_run(self, service) -> str:
         from unittest.mock import AsyncMock

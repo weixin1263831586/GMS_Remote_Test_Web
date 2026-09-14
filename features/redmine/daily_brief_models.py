@@ -7,6 +7,7 @@ Schema 常量与 dataclass 供 repository / service / analyzer / UI 共享；
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 
@@ -15,6 +16,37 @@ RUN_STATUSES = (
     "pending", "snapshotting", "analyzing", "completed", "partial", "failed", "cancelled",
 )
 ISSUE_STATUSES = ("pending", "running", "completed", "failed", "stale")
+# 数据新鲜度与执行状态是两个独立维度（审核意见 P2）：
+# execution_status（completed/partial/failed/cancelled）描述 AI 分析本身；
+# data_quality 描述输入数据可信程度——"晨报完成"不等于"数据是新的"。
+DATA_QUALITY_STATUSES = ("fresh", "stale", "sync_failed", "unknown")
+# 快照年龄超过该值（秒）即使 sync 成功也标记 stale。
+DATA_FRESH_LIMIT_SECONDS = 24 * 3600
+
+
+def derive_data_quality(
+    source_sync_status: str, snapshot_at: str, now: datetime | None = None
+) -> str:
+    """从同步状态 + 快照时间推导数据新鲜度。
+
+    - sync_failed → sync_failed（本地镜像兜底，数据可能落后）；
+    - skipped / 未知 → unknown；
+    - synced → 快照生成时间距今 <= 24h 为 fresh，否则 stale。
+    """
+    status = str(source_sync_status or "").strip().lower()
+    if status == "sync_failed":
+        return "sync_failed"
+    if status != "synced":
+        return "unknown"
+    if not str(snapshot_at or "").strip():
+        return "unknown"
+    try:
+        generated = datetime.fromisoformat(str(snapshot_at))
+    except ValueError:
+        return "unknown"
+    now = now or datetime.now()
+    age = (now - generated).total_seconds()
+    return "fresh" if 0 <= age <= DATA_FRESH_LIMIT_SECONDS else "stale"
 
 # 优先级由规则生成 base score，AI 只做有限调整；排序必须 deterministic。
 PRIORITY_SCORE_BASE = {
@@ -83,6 +115,11 @@ class DailyBriefRun:
     snapshot_at: str = ""
     snapshot_hash: str = ""
     source_sync_status: str = ""
+    # 数据新鲜度（独立于 execution status）：fresh/stale/sync_failed/unknown。
+    data_quality: str = ""
+    # 最近一次成功同步 Redmine 的时刻（快照生成时间即同步时刻；失败时留空，
+    # 由 snapshot_at 表达本地镜像的时间点）。
+    last_sync_at: str = ""
     issue_count: int = 0
     waiting_my_reply_count: int = 0
     no_reply_3_days_count: int = 0
@@ -106,6 +143,8 @@ class DailyBriefRun:
             "snapshot_at": self.snapshot_at,
             "snapshot_hash": self.snapshot_hash,
             "source_sync_status": self.source_sync_status,
+            "data_quality": self.data_quality,
+            "last_sync_at": self.last_sync_at,
             "issue_count": self.issue_count,
             "waiting_my_reply_count": self.waiting_my_reply_count,
             "no_reply_3_days_count": self.no_reply_3_days_count,
@@ -230,7 +269,14 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
             item["similarity"] = similarity
             kept.append(item)
         result["similar_issues"] = kept
-    result["history_checked"] = bool(result.get("history_checked"))
+    # history_checked 只接受真正的布尔值：bool("false")/bool("yes") 一类
+    # 的静默真值化会把模型没查历史也放行（审核意见 P1）。运行时还会用
+    # 真实 tool trace 覆写该字段（见 kkagent/evidence_gate.py），这里是
+    # schema 层的第一道门。
+    if not isinstance(result.get("history_checked"), bool):
+        errors.append(
+            f"history_checked must be a boolean, got {result.get('history_checked')!r}"
+        )
     if confidence_below_review_threshold(result):
         result["needs_human_review"] = True
     return errors

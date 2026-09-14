@@ -2913,7 +2913,12 @@ async function reanalyzeDailyBriefIssue(issueId, button) {
   button.disabled = true;
   button.textContent = '⏳ 分析中…';
   try {
-    var queued = await api('/api/redmine-agent/daily-brief/' + encodeURIComponent(run.brief_date) + '/issues/' + encodeURIComponent(issueId) + '/reanalyze', {method: 'POST'}) || {};
+    var runId = run.run_id || '';
+    var base = '/api/redmine-agent/daily-brief';
+    var url = runId
+      ? base + '/runs/' + encodeURIComponent(runId) + '/issues/' + encodeURIComponent(issueId) + '/reanalyze'
+      : base + '/' + encodeURIComponent(run.brief_date) + '/issues/' + encodeURIComponent(issueId) + '/reanalyze';
+    var queued = await api(url, {method: 'POST'}) || {};
     if (dailyBriefCache && dailyBriefCache.run) dailyBriefCache.run.status = queued.status || 'pending';
     var issue = dailyBriefCache && (dailyBriefCache.issues || []).find(function (item) { return String(item.issue_id) === String(issueId); });
     if (issue) issue.status = 'pending';
@@ -2948,11 +2953,14 @@ function copyDailyBriefReply(issueId, lang) {
 
 async function stopDailyBriefRun() {
   var run = dailyBriefCache && dailyBriefCache.run;
-  if (!run || !run.brief_date) return;
+  if (!run || (!run.run_id && !run.brief_date)) return;
   try {
-    var data = await api('/api/redmine-agent/daily-brief/' + encodeURIComponent(run.brief_date) + '/cancel', {
-      method: 'POST'
-    }) || {};
+    // 优先按 run_id 精确停止（同一天可能存在 nightly/manual/delta 多个
+    // run，按日期停"最新一次"可能停错目标）。
+    var url = run.run_id
+      ? '/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(run.run_id) + '/cancel'
+      : '/api/redmine-agent/daily-brief/' + encodeURIComponent(run.brief_date) + '/cancel';
+    var data = await api(url, {method: 'POST'}) || {};
     if (data.already_terminal) {
       notifyUser('无需停止', '该晨报已结束，无进行中的分析', 'info');
     } else {

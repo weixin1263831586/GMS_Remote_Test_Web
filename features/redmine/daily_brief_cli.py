@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import fcntl
 import logging
 import os
@@ -61,6 +60,18 @@ def _enabled_owner_ids() -> list[str]:
 
 
 def _run_mode(mode: str, owner_ids: list[str]) -> int:
+    """enqueue-only：nightly/delta 定时触发只入队，不再直接执行 AI。
+
+    审核意见 P1（统一执行域）：旧 CLI 在 systemd 进程里直接
+    execute_run()，与 Durable Worker 形成两个并发执行域——nightly 与
+    manual 可能同时各起一个 kkagent session，破坏
+    max_parallel_issues=1 的全局语义，也无法统一取消/lease/重试。
+    现在所有触发来源（Web manual / nightly / delta / reanalyze）统一：
+    SQLite Queue → 唯一 Worker → kkagent。
+
+    exit code 语义：入队成功=0；任何 owner 入队失败=1（执行结果由
+    Worker 收敛进 runs 表，CLI 不等待）。
+    """
     owners = owner_ids or _enabled_owner_ids()
     if not owners:
         logger.warning("no enabled daily-brief owners; nothing to do")
@@ -77,13 +88,17 @@ def _run_mode(mode: str, owner_ids: list[str]) -> int:
             if started.get("already_running"):
                 logger.info("[%s] %s run in progress: %s", owner_id, mode, started["run_id"])
                 continue
-            run = asyncio.run(service.execute_run(started["run_id"]))
-            status = run.status if run is not None else "unknown"
-            logger.info("[%s] %s run %s -> %s", owner_id, mode, started["run_id"], status)
-            if status not in ("completed", "partial"):
+            if "run_id" not in started:
+                logger.error("[%s] %s enqueue failed: %s", owner_id, mode,
+                             started.get("error", "unknown"))
                 failures += 1
+                continue
+            logger.info(
+                "[%s] %s run queued: %s (job=%s)", owner_id, mode,
+                started["run_id"], started.get("job_id", "-"),
+            )
         except Exception:
-            logger.exception("[%s] %s run failed", owner_id, mode)
+            logger.exception("[%s] %s enqueue failed", owner_id, mode)
             failures += 1
     return 1 if failures else 0
 

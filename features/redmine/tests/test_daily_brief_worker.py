@@ -16,6 +16,13 @@ from features.redmine.daily_brief_worker import run_claimed_job
 from features.redmine.kkagent_analyzer import KkAgentAnalysisResult
 
 
+def patch_preflight_ok():
+    return patch(
+        "features.redmine.daily_brief_service.preflight_gms_auth",
+        AsyncMock(return_value=(True, "")),
+    )
+
+
 VALID = {
     "problem_summary": "summary",
     "customer_request": "request",
@@ -66,7 +73,13 @@ class DailyBriefWorkerTests(unittest.TestCase):
         self.assertEqual(claimed["job_id"], job["job_id"])
         return claimed
 
+    def _patch_preflight(self):
+        preflight = patch_preflight_ok()
+        preflight.start()
+        self.addCleanup(preflight.stop)
+
     def test_claimed_run_executes_and_completes_job(self):
+        self._patch_preflight()
         self.repository.create_run(DailyBriefRun(
             owner_id="u1", brief_date="2026-09-13", mode="manual", run_id="db_test"
         ))
@@ -125,6 +138,7 @@ class DailyBriefWorkerTests(unittest.TestCase):
         self.assertEqual(self.repository.get_run("db_test").status, "pending")
 
     def test_issue_job_uses_single_issue_reanalysis_path(self):
+        self._patch_preflight()
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-13", mode="manual",
             run_id="db_test", status="completed"
