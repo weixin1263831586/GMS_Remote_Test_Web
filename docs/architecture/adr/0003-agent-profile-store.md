@@ -24,6 +24,12 @@ Agent Runtime 部署在编译服务器等共享主机上时，同一台 Agent �
    - 多于 1 个 profile → 返回 `None`，调用方必须显式指定（`GMS_RT_PROFILE` / `GMS_AGENT_PROFILE` / `--profile`）。
    - **绝不 `sorted()` 取第一个**——那是静默把 Agent 路由到错误 Controller 的行为。
 5. Profile 列举（`list_profiles()` / 按 client 前缀列举）只做展示与校验，不做隐式选择。
+6. **Direct CLI 等价折叠**：Codex/Kimi/kkagent 由同一次安装和 enrollment
+   产生的 profiles，若 Controller URL、CA/insecure 策略以及 token 内容完全
+   相同，裸 `gms-rt-*` 可将它们折叠为 profile-neutral 的 `direct` 上下文。
+   这不代表按顺序选择某个 profile；任一 Controller、TLS 策略或 token 不同
+   都必须 fail closed。`GMS_RT_HUMAN_SESSION=1` 可在唯一 Controller/TLS
+   上显式改用独立的人类 cookie 会话。
 
 ## 理由
 
@@ -33,6 +39,8 @@ Agent Runtime 部署在编译服务器等共享主机上时，同一台 Agent �
 
 ## 后果
 
-- 多 profile 主机上，未显式指定 profile 的调用会失败并提示可用的 profile 列表；自动化脚本需要通过 `GMS_RT_PROFILE` / `GMS_AGENT_PROFILE` / `--profile` 明确路由。
+- 多 profile 主机上，Agent launcher 与自动化脚本仍须通过
+  `GMS_RT_PROFILE` / `GMS_AGENT_PROFILE` / `--profile` 明确路由。仅直接
+  shell CLI 可使用上述等价折叠；存在任何身份或 Controller 歧义时会失败。
 - 部署与升级工具（`gms-agent` enroll / update / rollback）必须经由 profile_store 写入，不能绕过它直接写文件。
 - Service Token 与 profile 一一对应（`<profile>.token`），吊销 / 轮换按 profile 粒度进行。

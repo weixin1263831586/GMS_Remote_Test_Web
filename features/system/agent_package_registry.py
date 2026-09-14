@@ -407,9 +407,7 @@ else
     wget) wget --no-check-certificate -qO "$WORK_DIR/controller-ca.pem" "$SERVER/api/agent/ca.crt" ;;
   esac
   if [[ ! -s "$WORK_DIR/controller-ca.pem" ]] || ! grep -q "BEGIN CERTIFICATE" "$WORK_DIR/controller-ca.pem"; then
-    echo "Error: 无法获取 Controller CA。请任选其一:" >&2
-    echo "  1) export GMS_INSTALL_CA_CERT=/path/to/controller-ca.pem 后重试" >&2
-    echo "  2) 受控实验环境: export GMS_INSTALL_ALLOW_INSECURE=1 后重试(仅非生产 Controller)" >&2
+    echo "Error: 无法获取 Controller CA。请人工核对证书，并设置 GMS_INSTALL_CA_CERT=/path/to/controller-ca.pem 后重试。" >&2
     exit 5
   fi
   # 先落盘到持久路径再导出: profile 会记录这个 ca_cert 路径,

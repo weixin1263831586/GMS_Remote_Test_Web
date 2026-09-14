@@ -53,7 +53,7 @@ Restart kkagent afterwards so the new MCP server process is spawned.
 - `GMS_REMOTE_TEST_SERVER` — Controller base URL, e.g. `https://CONTROLLER:5001`
   (required)
 - `GMS_CURL_CA_CERT` — trusted CA bundle for the Controller's TLS certificate;
-  use `GMS_CURL_INSECURE=1` only in controlled self-signed deployments
+  use `GMS_CURL_INSECURE=1` only in throwaway test environments
   (optional)
 
 No credentials are stored in the plugin. Agents authenticate with an Agent

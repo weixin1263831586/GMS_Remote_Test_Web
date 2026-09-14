@@ -13,11 +13,17 @@ gms-rt-system-selfcheck --json
 一次返回:凭据模式、认证身份与 scopes、server 健康、设备清单、本地可见套件路径、
 可行动 hints。任何一项失败都带修复提示,优先按 hints 走。
 
-自签名 TLS 部署需要:
+自签名 TLS 部署优先选择安装器生成的 profile（其中已记录 Controller CA）:
 
 ```bash
-export GMS_CURL_INSECURE=1        # 或 GMS_CURL_CA_CERT=/path/to/ca.crt
+gms-agent profile list
+export GMS_RT_PROFILE=<PROFILE>
+# 带外分发 CA 时也可直接配置:
+export GMS_CURL_CA_CERT=/path/to/controller-ca.pem
 ```
+
+`GMS_CURL_INSECURE=1` 仅用于无法分发 CA 的一次性受控实验环境，不作为
+证书错误的常规修复方式。
 
 ## 2. 凭据与会话
 
@@ -37,8 +43,8 @@ export GMS_CURL_INSECURE=1        # 或 GMS_CURL_CA_CERT=/path/to/ca.crt
 2. 替换 `agent/gms-remote-test/` 下的源文件(这是唯一手改源树)
 3. 同步生成树:`python3 tools/sync_agent_package.py`(生成 `plugins/gms-remote-test/`)
 4. 重新注册 MCP 配置(如 launcher 变更):检查 `~/.kkagent/config.toml` 的
-   `[mcp_servers.gms]` 是否仍指向 `runtime/mcp_server.py`,env 中是否带
-   `GMS_AUTH_TOKEN_FILE` 与 `GMS_CURL_INSECURE=1`
+   `[mcp_servers.gms]` 是否仍指向 `runtime/mcp_launcher.py`,env 中是否带
+   正确的 `GMS_RT_PROFILE`；Controller CA 应由该 profile 加载
 5. 验证:`gms-rt-system-version` + `gms-rt-system-selfcheck --json`
 
 **坑**:只改 `agent/` 不同步 `plugins/` 会导致升级后行为漂移;sync 之后

@@ -41,9 +41,9 @@
 - profile 里记录的是 `[controller] ca_cert`；`gms-agent doctor --json` 的
   `clients[].profile.ca_configured` 为 true 时 `ca_present` 必须为 true，
   否则 `actions` 会提示恢复 CA 文件。
-- 运行期用 `GMS_CURL_CA_CERT` 指向 CA；仅在受控自签名环境使用
-  `GMS_CURL_INSECURE=1`（profile `insecure = true` 会映射它）——不要在
-  公网或不可信网络关闭校验。
+- 运行期优先由 profile 加载 CA，或用 `GMS_CURL_CA_CERT` 指向 CA。
+  `GMS_CURL_INSECURE=1` 仅用于无法保留的临时实验环境，不作为自签名证书
+  的常规处理方式。
 - 自签名环境安装时可使用 installer 的显式降级开关
   （`GMS_INSTALL_ALLOW_INSECURE=1`，bootstrap 阶段等价于
   `GMS_INSTALL_INSECURE=1`）；生产环境 Controller 渲染的 install.sh
@@ -70,6 +70,11 @@ profile，fail-closed 选择契约拒绝猜测（绝不按文件名排序取第�
 
 **注意**：若提示某个 profile “belongs to <X>, not <Y>”，是 client 不匹配
 ——具名 profile 的 `client =` 字段与请求的 client 不符，应指向正确的 profile。
+
+若 Codex/Kimi/kkagent profiles 的 Controller、TLS 和 token 内容完全一致，
+手工裸执行 `gms-rt-devices-list` 会自动使用等价的 `direct` 上下文，无需
+export。不同 Controller 或不同 token 不会自动选择；人工 cookie 会话可用
+`GMS_RT_HUMAN_SESSION=1` 明确启用。
 
 ## MCP 未注册
 

@@ -101,7 +101,7 @@ context.
 6. Require explicit user authorization before commands marked `mutating`.
 7. Do not launch commands marked `interactive` in an unattended workflow.
 8. Use a trusted CA through `GMS_CURL_CA_CERT`; reserve
-   `GMS_CURL_INSECURE=1` for controlled self-signed deployments.
+   `GMS_CURL_INSECURE=1` for throwaway test environments.
 9. After `gms-rt-test-start`, read `data.data.cluster_job_id` from the JSON
    envelope and use `gms-rt-jobs-wait`; do not scrape progress text.
 
