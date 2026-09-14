@@ -50,6 +50,12 @@ profile 名必须匹配 `^[A-Za-z0-9_.-]+$`（单一路径段）。`gms-agent in
 检视与绑定的入口；多 Controller 主机上未显式指定的调用会失败并提示可用
 profile 列表——这是有意为之的失败（fail-closed），把歧义交给人决策。
 
+直接在 shell 中运行 `gms-rt-*` 时有一个受限例外：若多个 client profile
+的 Controller、TLS 策略和 token 内容完全相同，它们只是同一 enrollment
+身份的客户端别名，CLI 会折叠为 `direct` 上下文，因此无需每次 export。
+任何字段或 token 不同仍立即失败。需要使用人类登录/提权 cookie 时设置
+`GMS_RT_HUMAN_SESSION=1`；MCP launcher 不使用此折叠规则。
+
 ### 生命周期命令的 Controller 解析（fail-closed）
 
 `gms-agent enroll / update / rollback` 用同一条规则确定目标 Controller

@@ -205,7 +205,7 @@ All commands accept these global options after the command name:
 | `--timeout SECONDS` | Override the API timeout |
 | `--server URL` | Use another Controller for one invocation |
 | `--ca-cert PATH` | Verify the Controller with a trusted CA file |
-| `--insecure` | Explicitly allow a controlled self-signed Controller |
+| `--insecure` | Skip TLS verification in a throwaway test environment |
 
 The JSON envelope always includes `ok`, `command`, and `exit_code`. It includes
 `data` when the command produced a JSON response, otherwise `output`; stderr is

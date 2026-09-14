@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.9"
+GMS_RT_VERSION="0.22.11"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -27,48 +27,52 @@ GMS_RT_EXIT_PARTIAL=7
 # Can be overridden by environment variable
 GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-${HOME}/GMS_Remote_Test/web_app}"
 
-# Default configuration
-# Use environment variable GMS_REMOTE_TEST_SERVER or default to localhost:${GMS_PORT:-5001}
-# If running on the server machine itself, use localhost to avoid firewall issues
+# Default configuration. Profile parsing and equivalence checks stay in the
+# canonical Python profile_store (ADR 0003); this shell only consumes its
+# resolved fields. Multiple client profiles may be collapsed for direct CLI
+# use only when Controller, TLS policy, and token contents are identical.
 GMS_PORT="${GMS_PORT:-5001}"
-if [ -n "${GMS_REMOTE_TEST_SERVER:-}" ]; then
-    SERVER_URL="$GMS_REMOTE_TEST_SERVER"
+SERVER_URL="${GMS_REMOTE_TEST_SERVER:-}"
+_gms_runtime_dir=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+if [ -r "$_gms_runtime_dir/gms_agent/profile_store.py" ]; then
+    mapfile -d '' -t _gms_profile_context < <(
+        PYTHONPATH="$_gms_runtime_dir${PYTHONPATH:+:$PYTHONPATH}" python3 - \
+            "${GMS_RT_PROFILE:-}" "$SERVER_URL" <<'PY'
+import os
+import sys
+from gms_agent.profile_store import resolve_direct_cli_context
+
+context = resolve_direct_cli_context(sys.argv[1], sys.argv[2])
+for key in ("mode", "profile", "server", "ca_cert", "token_file", "insecure", "error"):
+    sys.stdout.write(context[key])
+    sys.stdout.write("\0")
+PY
+    )
 else
-    # gms-agent installs record the Controller URL (and the TLS policy for
-    # self-signed deployments) in the profile TOML
-    # (~/.config/gms-agent/profiles/<profile>.toml — the single authoritative
-    # source). The historical "first *.env wins" glob was removed —
-    # with codex-A → Controller A / codex-B → Controller B, a filesystem-glob
-    # first-match is not an Agent routing policy and silently picked the
-    # wrong Controller. Use `gms-agent profile` / GMS_RT_PROFILE to select.
-    _gms_profile_toml=""
-    if [ -n "${GMS_RT_PROFILE:-}" ] && [ -n "${HOME:-}" ]; then
-        _gms_profile_toml="${XDG_CONFIG_HOME:-${HOME}/.config}/gms-agent/profiles/${GMS_RT_PROFILE}.toml"
+    # A standalone copied helper has no profile store. This compatibility
+    # path is valid only when no named profile was requested.
+    if [ -n "${GMS_RT_PROFILE:-}" ]; then
+        echo "Error: 当前 gms-rt 副本缺少 Agent profile runtime。" >&2
+        exit 2
     fi
-    if [ -n "$_gms_profile_toml" ] && [ -r "$_gms_profile_toml" ]; then
-        # Extract controller.url from the [controller] section (flat parser,
-        # same mapping as mcp_launcher._read_toml_flat).
-        SERVER_URL=$(awk -F'=' '
-            /^\[/ { in_controller = ($0 ~ /^\[controller\]/); next }
-            in_controller && $1 ~ /^[ \t]*url[ \t]*$/ {
-                gsub(/^[ \t]+|[ \t]+$/, "", $2)
-                gsub(/^"|"$/, "", $2)
-                print $2; exit
-            }' "$_gms_profile_toml")
-        # 同一 profile 的 ca_cert 一并生效: 手动裸调 gms-rt-* 与 MCP 路径
-        # 共享同一 TLS 策略(严格校验优先, 环境变量显式设置时不覆盖)。
-        _gms_profile_ca=$(awk -F'=' '
-            /^\[/ { in_controller = ($0 ~ /^\[controller\]/); next }
-            in_controller && $1 ~ /^[ \t]*ca_cert[ \t]*$/ {
-                gsub(/^[ \t]+|[ \t]+$/, "", $2)
-                gsub(/^"|"$/, "", $2)
-                print $2; exit
-            }' "$_gms_profile_toml")
-        if [ -n "$_gms_profile_ca" ] && [ -z "${GMS_CURL_CA_CERT:-}" ]; then
-            export GMS_CURL_CA_CERT="$_gms_profile_ca"
-        fi
+    _gms_profile_context=(none "" "" "" "" "" "")
+fi
+_gms_profile_mode="${_gms_profile_context[0]:-error}"
+if [ "$_gms_profile_mode" = "error" ]; then
+    echo "Error: ${_gms_profile_context[6]:-无法解析 Agent profile。}" >&2
+    echo "  运行 gms-agent profile list 查看可用 profile。" >&2
+    exit 2
+fi
+if [ "$_gms_profile_mode" != "none" ]; then
+    GMS_RT_PROFILE="${_gms_profile_context[1]}"
+    SERVER_URL="${_gms_profile_context[2]}"
+    [ -n "${GMS_CURL_CA_CERT:-}" ] || GMS_CURL_CA_CERT="${_gms_profile_context[3]}"
+    [ -n "${GMS_AUTH_TOKEN_FILE:-}" ] || GMS_AUTH_TOKEN_FILE="${_gms_profile_context[4]}"
+    if [ -z "${GMS_CURL_CA_CERT:-}" ] \
+        && [ "${_gms_profile_context[5]}" = "true" ]; then
+        GMS_CURL_INSECURE=1
     fi
-    SERVER_URL="${SERVER_URL:-${GMS_REMOTE_TEST_SERVER:-}}"
+    export GMS_RT_PROFILE GMS_CURL_CA_CERT GMS_AUTH_TOKEN_FILE GMS_CURL_INSECURE
 fi
 
 if [ -z "$SERVER_URL" ]; then
@@ -238,8 +242,8 @@ _gms_with_cookie_lock() {
 }
 
 # Local deployments commonly use a self-signed HTTPS certificate. Fail
-# closed by default; provide GMS_CURL_CA_CERT for a real CA bundle or set
-# GMS_CURL_INSECURE=1 only for a controlled self-signed deployment.
+# closed by default; provide GMS_CURL_CA_CERT for a trusted CA bundle.
+# GMS_CURL_INSECURE=1 is reserved for throwaway environments.
 # Recomputed before every curl call: when this script is sourced (function
 # mode), GMS_CURL_* may be exported after the source line, and a value
 # frozen at source time would silently drop --cacert/-k.
@@ -454,7 +458,8 @@ api_call() {
             show_connection_error
         elif [ "$curl_exit_code" -eq "$CURL_EXIT_SSL_CERT" ]; then
             error "HTTPS证书校验失败: $SERVER_URL" >&2
-            error "本地自签名证书可执行: export GMS_CURL_INSECURE=1；或配置: export GMS_CURL_CA_CERT=/path/to/ca.crt" >&2
+            error "请执行 gms-agent profile list，并 export GMS_RT_PROFILE=<PROFILE> 以加载该 Controller 的 CA" >&2
+            error "或显式配置可信 CA: export GMS_CURL_CA_CERT=/path/to/controller-ca.pem" >&2
         else
             error "Failed to get response from server (curl exit code: $curl_exit_code)" >&2
         fi
@@ -6031,7 +6036,7 @@ gms-rt-system-selfcheck() {
     health_json=$(api_call "/system/health" 2>/dev/null)
     _gms_rt_selfcheck_is_json "$health_json" || { health_ok=false; health_json='{}'; }
     if [ "$health_ok" != true ]; then
-        hints+=("server ${SERVER_URL} unreachable or unhealthy: verify the web app is running and GMS_REMOTE_TEST_SERVER is correct; for a self-signed TLS deployment export GMS_CURL_INSECURE=1 or GMS_CURL_CA_CERT=/path/to/ca.crt")
+        hints+=("server ${SERVER_URL} unreachable or unhealthy: verify the web app is running and select its installed profile with GMS_RT_PROFILE=<PROFILE>; otherwise configure GMS_CURL_CA_CERT=/path/to/controller-ca.pem")
     fi
 
     # --- device inventory (optional scope) --------------------------------------
@@ -6303,7 +6308,7 @@ Global options:
   --timeout SECONDS      Override the API timeout for this invocation
   --server URL           Use another Controller for this invocation
   --ca-cert PATH         Verify HTTPS with a trusted CA certificate
-  --insecure             Allow a controlled self-signed HTTPS Controller
+  --insecure             Skip TLS verification (throwaway environments only)
 
 Exit codes: 0 success, 2 usage, 3 authentication, 4 permission/elevation,
             5 conflict/busy, 6 network/timeout, 7 operation failure
