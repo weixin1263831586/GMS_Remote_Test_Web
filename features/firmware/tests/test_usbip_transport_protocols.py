@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,6 +9,8 @@ from features.firmware import runtime as firmware_runtime
 from features.firmware.usbip_transport import (
     device_flash_protocols,
     partition_devices_by_flash_state,
+    wait_for_rockusb_loader_exit,
+    wait_for_single_rockusb_loader,
 )
 from foundation.command_result import CommandResult
 
@@ -64,6 +67,47 @@ class FlashProtocolTests(unittest.TestCase):
             )
         self.assertEqual(ready, ["ADB-DEV", "FB-DEV"])
         self.assertEqual(offline, ["RK3562GMS7"])
+
+    def test_wait_for_single_loader_rejects_ambiguous_selection(self):
+        probes = iter([
+            "351a\tRK3562GMS7\tUSB download gadget\n"
+            "351a\tOTHER\tUSB download gadget\n",
+            "351a\tRK3562GMS7\tUSB download gadget\n",
+        ])
+
+        def execute_command(_ssh, cmd, timeout=None):
+            if cmd.startswith("adb devices"):
+                return CommandResult(stdout="List of devices attached\n", code=0)
+            return CommandResult(stdout=next(probes), code=0)
+
+        ssh_manager = SimpleNamespace(execute_command=execute_command)
+        with patch.object(firmware_runtime, "ssh_manager", ssh_manager):
+            ready, _detail = asyncio.run(
+                wait_for_single_rockusb_loader(
+                    object(), "RK3562GMS7", timeout=1, interval=0,
+                )
+            )
+        self.assertTrue(ready)
+
+    def test_wait_for_loader_exit_does_not_require_adb(self):
+        probes = iter([
+            "351a\tRK3562GMS7\tUSB download gadget\n",
+            "",
+        ])
+
+        def execute_command(_ssh, cmd, timeout=None):
+            if cmd.startswith("adb devices"):
+                return CommandResult(stdout="List of devices attached\n", code=0)
+            return CommandResult(stdout=next(probes), code=0)
+
+        ssh_manager = SimpleNamespace(execute_command=execute_command)
+        with patch.object(firmware_runtime, "ssh_manager", ssh_manager):
+            exited, _detail = asyncio.run(
+                wait_for_rockusb_loader_exit(
+                    object(), "RK3562GMS7", timeout=1, interval=0,
+                )
+            )
+        self.assertTrue(exited)
 
 
 if __name__ == "__main__":

@@ -112,7 +112,14 @@ async def _dispatch_usb_events(app) -> None:
         try:
             event = await app.state.usb_event_queue.get()
             with global_state.websocket_connections_lock:
-                clients = list(global_state.websocket_connections.values())
+                clients = []
+                for connection in global_state.websocket_connections.values():
+                    # New state stores a set per client; accept the legacy
+                    # single-WebSocket value while deployments roll forward.
+                    if isinstance(connection, (set, list, tuple)):
+                        clients.extend(connection)
+                    elif connection is not None:
+                        clients.append(connection)
             await asyncio.gather(
                 *(
                     websocket.send_json(event)

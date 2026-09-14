@@ -62,6 +62,76 @@ async def wait_for_rockusb_loaders(
         await asyncio.sleep(max(0.1, interval))
 
 
+async def wait_for_single_rockusb_loader(
+    ssh, target_serial: str, *, timeout: float = 120, interval: float = 2,
+) -> tuple[bool, str]:
+    """Wait until exactly ``target_serial`` is the only RockUSB loader.
+
+    ``upgrade_tool uf`` has no serial argument and always operates on its
+    selected loader.  Requiring one, and only one, loader before invoking it
+    prevents a multi-device request from silently flashing the wrong board.
+    Callers therefore enter Loader one device at a time on a shared Worker.
+    """
+    deadline, last_detail = time.monotonic() + max(1, timeout), ""
+    while True:
+        probe = await asyncio.to_thread(
+            runtime.ssh_manager.execute_command,
+            ssh,
+            ROCKUSB_SYSFS_PROBE_COMMAND,
+            timeout=8,
+        )
+        last_detail = (probe.stdout or probe.stderr or "").strip()
+        adb_result = await asyncio.to_thread(
+            runtime.ssh_manager.execute_command, ssh, "adb devices", timeout=8
+        )
+        adb_states = parse_adb_device_states(adb_result.stdout)
+        loaders = rockusb_loader_serials(
+            last_detail,
+            exclude_serials=set(adb_states),
+        )
+        if loaders == [target_serial] or (
+            len(loaders) == 1 and target_serial in loaders
+        ):
+            return True, last_detail
+        if time.monotonic() >= deadline:
+            return False, last_detail
+        await asyncio.sleep(max(0.1, interval))
+
+
+async def wait_for_rockusb_loader_exit(
+    ssh, target_serial: str, *, timeout: float = 180, interval: float = 2,
+) -> tuple[bool, str]:
+    """Wait until a flashed device is no longer in RockUSB Loader.
+
+    A freshly flashed user build may have USB debugging disabled and therefore
+    never return to ``adb devices`` until the setup wizard is completed.  USB
+    Loader disappearance is the transport-level success signal that works for
+    both user and eng builds; ADB availability remains informational only.
+    """
+    deadline, last_detail = time.monotonic() + max(1, timeout), ""
+    while True:
+        probe = await asyncio.to_thread(
+            runtime.ssh_manager.execute_command,
+            ssh,
+            ROCKUSB_SYSFS_PROBE_COMMAND,
+            timeout=8,
+        )
+        last_detail = (probe.stdout or probe.stderr or "").strip()
+        adb_result = await asyncio.to_thread(
+            runtime.ssh_manager.execute_command, ssh, "adb devices", timeout=8
+        )
+        adb_states = parse_adb_device_states(adb_result.stdout)
+        loaders = rockusb_loader_serials(
+            last_detail,
+            exclude_serials=set(adb_states),
+        )
+        if target_serial not in loaders:
+            return True, last_detail
+        if time.monotonic() >= deadline:
+            return False, last_detail
+        await asyncio.sleep(max(0.1, interval))
+
+
 async def wait_for_adb_devices(
     ssh, expected_devices: list[str], *,
     timeout: float = 120, interval: float = 2,

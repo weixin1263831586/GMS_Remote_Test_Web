@@ -108,8 +108,8 @@ Controller 一个 profile），enroll / update 支持用 `--profile` 消歧。
 
 | 环境 | 完整烧写 | 说明 |
 |---|---|---|
-| Local USB（Ubuntu 执行主机 / Worker） | ✅ | 在设备所属执行主机上经 SSH 使用 `upgrade_tool uf` 烧写 update.img / GSI（Controller / Worker / 执行主机可分离部署） |
-| Windows USB/IP | ✅ | USB 所有权交还 Source 后由 Source Agent + RKDevTool 源端烧写，完成后重建 USB/IP |
+| Local USB（Ubuntu 执行主机 / Worker） | ✅ | 支持一次选择多台设备；因 `upgrade_tool uf` 没有序列号选择参数，同一 Worker 上逐台进入 Loader、烧写并校验设备退出 Loader，ADB 可选 |
+| Windows USB/IP | ✅ | USB 所有权交还 Source 后由 Source Agent + RKDevTool 源端烧写；不同 Source Host 可并行，完成后重建 USB/IP |
 | Linux USB/IP full | ❌ | 暂未支持，fail closed |
 
 烧写流程、Loader → MaskROM 状态迁移、所有权状态机与故障恢复详见 [docs/usbip/firmware-flashing.md](docs/usbip/firmware-flashing.md)。
