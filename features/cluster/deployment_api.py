@@ -19,6 +19,23 @@ import uuid
 from pathlib import Path
 
 import paramiko
+
+
+def _controller_cert_for_bundle(project_root: Path) -> Path:
+    """Worker bundle 信任锚: 优先正规 CA, 叶子证书只作兜底。
+
+    worker 用包里的 controller-ca.crt 当 controller_ca 校验控制器 TLS。
+    控制器现役证书由 CA (gms-local-ca.crt) 签发, 拿叶子证书 (gms-local.crt)
+    当 CA 会重新触发 leaf-as-CA 验证失败; GMS_CERT_CRT 仍可显式覆盖。
+    """
+    env_path = os.getenv("GMS_CERT_CRT", "")
+    if env_path:
+        return Path(env_path)
+    cert_dir = certificates_path(project_root)
+    ca_file = cert_dir / "gms-local-ca.crt"
+    if ca_file.is_file():
+        return ca_file
+    return cert_dir / "gms-local.crt"
 from fastapi import APIRouter, Depends, HTTPException
 
 from features.auth import (
@@ -422,12 +439,7 @@ async def deploy_adb_proxy_source(
                     arcname="scripts/install_adbproxy_rs.sh",
                 )
                 _add_adbproxy_package(bundle, project_root)
-                controller_certificate = Path(
-                    os.getenv(
-                        "GMS_CERT_CRT",
-                        str(certificates_path(project_root) / "gms-local.crt"),
-                    )
-                )
+                controller_certificate = _controller_cert_for_bundle(project_root)
                 if controller_certificate.is_file():
                     bundle.add(
                         controller_certificate,
@@ -672,12 +684,7 @@ async def deploy_worker(
                     jdk_root,
                     arcname="tools/GMS-Host-Tools/jdk-11",
                 )
-                controller_certificate = Path(
-                    os.getenv(
-                        "GMS_CERT_CRT",
-                        str(certificates_path(project_root) / "gms-local.crt"),
-                    )
-                )
+                controller_certificate = _controller_cert_for_bundle(project_root)
                 if controller_certificate.is_file():
                     bundle.add(
                         controller_certificate,

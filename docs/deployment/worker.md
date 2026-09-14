@@ -107,7 +107,7 @@ export GMS_CONTROLLER_URL=https://controller.example.com:5001
 export GMS_WORKER_TOKEN='...'
 export GMS_WORKER_ADDRESS=192.0.2.20
 export GMS_WORKER_SSH_USER=operator
-export GMS_CONTROLLER_CA=/path/to/controller-ca.crt
+export GMS_CONTROLLER_CA=/path/to/controller-ca.crt   # 自签名部署从 GET /api/agent/ca.crt 获取(推荐 gms-local-ca.crt,旧叶子证书不作数)
 ```
 
 ### Worker Token 的 0600 要求
