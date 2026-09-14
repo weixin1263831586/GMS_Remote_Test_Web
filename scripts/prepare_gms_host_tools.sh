@@ -13,6 +13,9 @@ PLATFORM_ARCHIVE="${HOST_TOOLS}/platform-tools-gms-linux.zip"
 GOOGLE_PLATFORM_TOOLS_VERSION="37.0.1"
 GOOGLE_PLATFORM_TOOLS_URL="https://dl.google.com/android/repository/platform-tools_r${GOOGLE_PLATFORM_TOOLS_VERSION}-linux.zip"
 GOOGLE_PLATFORM_TOOLS_SHA256="d230f13842f60f782a8645f9c813f8f845bf36089ea7289f28c48f17979313f1"
+TEMURIN_JDK_VERSION="11.0.32.1+1"
+TEMURIN_JDK_URL="https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.32.1%2B1/OpenJDK11U-jdk_x64_linux_hotspot_11.0.32.1_1.tar.gz"
+TEMURIN_JDK_SHA256="5c3f68887c325d36d852ba534303e1f5f1f5cae7d6cc1e951d73e0d8e98a058d"
 
 valid_sha256() {
     [[ "$1" =~ ^[0-9a-fA-F]{64}$ ]]
@@ -85,12 +88,31 @@ mkdir -p "${HOST_TOOLS}"
 WORK_DIR="$(mktemp -d "${HOST_TOOLS}/.prepare.XXXXXX")"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
+# 与 platform-tools 相同的解析策略：manifest/脚本内置 Temurin 11 固定版本
+# 默认值；环境变量仅作 override，且 URL 与 SHA256 必须成对提供。
+if [[ -n "${GMS_HOST_TOOLS_JDK_URL:-}" || \
+        -n "${GMS_HOST_TOOLS_JDK_SHA256:-}" ]]; then
+    jdk_url="${GMS_HOST_TOOLS_JDK_URL:-}"
+    jdk_sha256="${GMS_HOST_TOOLS_JDK_SHA256:-}"
+    [[ -n "${jdk_url}" ]] || {
+        echo "JDK 11 override requires both URL and SHA256" >&2
+        exit 1
+    }
+else
+    jdk_url="${TEMURIN_JDK_URL}"
+    jdk_sha256="${TEMURIN_JDK_SHA256}"
+fi
+valid_sha256 "${jdk_sha256}" || {
+    echo "JDK 11 artifact requires an exact 64-character SHA256" >&2
+    exit 1
+}
+
 if [[ ! -x "${JDK_ROOT}/bin/java" ]]; then
     JDK_ARCHIVE="${WORK_DIR}/jdk.tar.gz"
     download_verified \
         "JDK 11 artifact" \
-        "${GMS_HOST_TOOLS_JDK_URL:-}" \
-        "${GMS_HOST_TOOLS_JDK_SHA256:-}" \
+        "${jdk_url}" \
+        "${jdk_sha256}" \
         "${JDK_ARCHIVE}"
     mkdir -p "${WORK_DIR}/jdk-extract"
     tar --extract --gzip --file "${JDK_ARCHIVE}" \
@@ -107,6 +129,16 @@ if [[ ! -x "${JDK_ROOT}/bin/java" ]]; then
     }
     mkdir -p "${JDK_ROOT}"
     rsync -a --delete "${extracted_jdk}/" "${JDK_ROOT}/"
+    java_version_output="$("${JDK_ROOT}/bin/java" -version 2>&1)" || {
+        echo "Installed JDK 11 runtime failed to execute; verify the artifact matches this host architecture" >&2
+        exit 1
+    }
+    java_major="$(printf '%s\n' "${java_version_output}" \
+        | sed -n 's/[^"]*"\([0-9][0-9]*\).*/\1/p' | head -n1)"
+    [[ "${java_major}" == "11" ]] || {
+        echo "Installed JDK 11 runtime reports Java major '${java_major:-unknown}', expected 11 (Temurin ${TEMURIN_JDK_VERSION})" >&2
+        exit 1
+    }
 fi
 
 if [[ -n "${GMS_HOST_TOOLS_PLATFORM_URL:-}" || \

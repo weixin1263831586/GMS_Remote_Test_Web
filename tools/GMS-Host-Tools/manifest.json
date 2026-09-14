@@ -1,5 +1,5 @@
 {
-  "_comment": "Deployment-only artifact manifest (never tracked binaries). Provision with scripts/prepare_gms_host_tools.sh; URLs/SHA256 are supplied per-deployment via configs/runtime.json. See README.md in this directory.",
+  "_comment": "Deployment-only artifact manifest (never tracked binaries). Pinned defaults live in this file and scripts/prepare_gms_host_tools.sh; configs/runtime.json or environment variables override per deployment (e.g. an access-controlled mirror). See README.md in this directory.",
   "artifacts": {
     "jdk-11": {
       "role": "fallback Java runtime for older CTS/GTS tools (jadx wrapper)",
@@ -7,9 +7,12 @@
       "install_path": "tools/GMS-Host-Tools/jdk-11",
       "provision": {
         "script": "scripts/prepare_gms_host_tools.sh",
+        "version": "11.0.32.1+1",
+        "default_source": "https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.32.1%2B1/OpenJDK11U-jdk_x64_linux_hotspot_11.0.32.1_1.tar.gz",
+        "sha256": "5c3f68887c325d36d852ba534303e1f5f1f5cae7d6cc1e951d73e0d8e98a058d",
         "url_env": "GMS_HOST_TOOLS_JDK_URL",
         "sha256_env": "GMS_HOST_TOOLS_JDK_SHA256",
-        "verification": "mandatory SHA-256; tarball must contain exactly one bin/java plus release/legal metadata"
+        "verification": "mandatory SHA-256; tarball must contain exactly one bin/java plus release/legal metadata; installed runtime must report Java major 11"
       }
     },
     "platform-tools-gms-linux.zip": {
