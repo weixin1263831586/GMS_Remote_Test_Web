@@ -31,7 +31,11 @@
 
 **排查**：
 
-- 生产部署应显式信任 Controller CA：
+- 一行安装器内置 TOFU 自动恢复：系统校验失败时自动从
+  `/api/agent/ca.crt` 获取 Controller CA，落盘到
+  `~/.local/state/gms-remote-test/controller-ca.pem` 后严格重试——自签名
+  部署直接重跑一键命令（拉脚本本身用 `curl -k`）即可。需全程严格
+  （无 TOFU）时显式信任 Controller CA：
   `export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt`，安装器与
   bootstrap 均使用它。
 - profile 里记录的是 `[controller] ca_cert`；`gms-agent doctor --json` 的

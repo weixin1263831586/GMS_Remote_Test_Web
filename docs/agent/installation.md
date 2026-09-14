@@ -45,23 +45,40 @@ GET /api/agent/install.sh
 ```
 
 它渲染一份绑定当前 Controller 地址的 bash 脚本，将 install + 配对码 enroll
-一步完成。生产环境推荐显式信任 Controller CA：
+一步完成。自签名部署无需预置 CA（安装器自动 TOFU 引导）：
+
+```bash
+curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | \
+  bash -s -- --paircode <ENROLLMENT_CODE> --client auto
+```
+
+`-k` 只用于获取脚本这一次（信任尚未建立的第一接触，限可信局域网）：
+脚本随后从 `GET /api/agent/ca.crt` 获取 Controller CA，落盘到
+`~/.local/state/gms-remote-test/controller-ca.pem` 并传导为
+`GMS_INSTALL_CA_CERT`；之后的 bootstrap / manifest / 包下载全部为严格
+TLS 校验，包完整性另由 SHA-256 + Ed25519 签名锚定。
+
+带外分发过 CA 时可用全程严格校验的路径（第一个字节起无 TOFU；CA 可从
+`/api/agent/ca.crt` 下载，或取 Controller 侧
+`configs/secrets/certs/gms-local-ca.crt`）：
 
 ```bash
 export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt
-curl -fsSL --cacert "$GMS_INSTALL_CA_CERT" \
-  https://CONTROLLER:5001/api/agent/install.sh | bash -s -- <ENROLLMENT_CODE>
+curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
+  https://CONTROLLER:5001/api/agent/install.sh | bash -s -- --paircode <ENROLLMENT_CODE>
 ```
 
-配对码由 install.sh 经 `GMS_AGENT_ENROLL_CODE` 环境变量传给
-`gms-agent install`（不会出现在 `ps`、shell history 或审计命令行中）；
-`gms-agent install --enroll-code` 仍兼容，但环境变量优先。
+配对码推荐用显式的 `--paircode`（`--pairing-code` / `--enroll-code`
+等价；旧的位置参数写法仍兼容）。它由 install.sh 经
+`GMS_AGENT_ENROLL_CODE` 环境变量传给 `gms-agent install`（不会出现在
+`ps`、shell history 或审计命令行中）；`gms-agent install --enroll-code`
+仍兼容，但环境变量优先。
 
 说明：
 
-- install.sh 与前端复制的安装命令默认严格校验 TLS（`curl -fsSL`，系统
-  信任链）。自签名部署必须在目标主机先导出
-  `GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt`。
+- install.sh 与前端复制的安装命令默认严格校验 TLS（系统信任链）；
+  自签名部署由安装器自动 TOFU 获取 CA（见上），也可用
+  `GMS_INSTALL_CA_CERT` 走全程严格路径。
 - 受控实验环境若使用自签名证书且无法下发 CA，可按部署策略使用 installer
   的显式降级开关（`GMS_INSTALL_ALLOW_INSECURE=1`，bootstrap 阶段传导为
   `GMS_INSTALL_INSECURE=1`）；生产环境 Controller 渲染的 install.sh 会

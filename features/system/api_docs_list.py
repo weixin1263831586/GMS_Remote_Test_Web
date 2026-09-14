@@ -651,7 +651,8 @@ API_DOCS_LIST = [
         "category": "system",
         "skill": "gms-rt-system-skills"
     },
-    dict(method="GET", path="/api/agent/install.sh", description="一行安装器：渲染绑定当前 Controller 地址的 bash 脚本，install + 配对码 enroll 一步完成（curl .../api/agent/install.sh | bash -s -- [配对码]）", params=[], category="system"),
+    dict(method="GET", path="/api/agent/install.sh", description="一行安装器：渲染绑定当前 Controller 地址的 bash 脚本，install + 配对码 enroll 一步完成（curl -k -fsSL .../api/agent/install.sh | bash -s -- --paircode <配对码>）；自签名部署无需预置 CA——系统校验失败时自动从 /api/agent/ca.crt TOFU 获取并严格重试", params=[], category="system"),
+dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA 证书（公开物，不含私钥）；install.sh 的 TOFU 信任源，也可手动用作 GMS_INSTALL_CA_CERT / GMS_CURL_CA_CERT", params=[], category="system"),
 
     # ==================== API文档 ====================
     {

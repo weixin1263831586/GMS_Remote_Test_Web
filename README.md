@@ -73,11 +73,15 @@ GMS_ENV=development python app.py   # 默认端口 5001
 先在 Web 端生成一次性 Enrollment Code，然后在 Agent 主机（编译服务器）：
 
 ```bash
-export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt
-curl -fsSL --cacert "$GMS_INSTALL_CA_CERT" \
-  https://CONTROLLER:5001/api/agent/install.sh | bash -s -- <ENROLLMENT_CODE>
+curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | \
+  bash -s -- --paircode <ENROLLMENT_CODE> --client auto
 gms-rt-system-selfcheck --json   # 验收：auth / health / devices / suites
 ```
+
+`-k` 只用于获取安装脚本这一次（自签名部署的 TOFU 第一接触，限可信局域网）；
+安装器随后自动从 `/api/agent/ca.crt` 获取 Controller CA 并严格校验后续全部
+下载（包完整性由 SHA-256 + Ed25519 签名锚定）。已带外分发 CA 时改用
+`export GMS_INSTALL_CA_CERT=...` + `curl --cacert` 的全程严格路径。
 
 Agent Package 自包含 `gms-rt` CLI、MCP Server、SDK、Skill 与各 Client Manifest，无需 clone 本仓库；Service Token 落盘为 `0600` 文件，Agent 不接触 Web 登录密码。
 

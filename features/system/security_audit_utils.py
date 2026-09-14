@@ -38,6 +38,7 @@ AUDIT_WEB_READONLY_NOISE_PATHS = {
     '/api/system/help',
     '/api/system/skills',
     '/api/agent/install.sh',
+    '/api/agent/ca.crt',
     '/api/test/logs/get',
     '/api/test/logs/list',
     '/api/test/status',

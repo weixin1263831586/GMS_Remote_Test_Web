@@ -3143,6 +3143,22 @@
         "summary": "Stop Adb Forward"
       }
     },
+    "/api/agent/ca.crt": {
+      "get": {
+        "description": "Controller CA 证书分发(install.sh 在系统校验失败时的 TOFU 信任源)",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Agent Ca Cert Endpoint"
+      }
+    },
     "/api/agent/capabilities": {
       "get": {
         "description": "List supported Agent capabilities with full tool catalog.",
@@ -15289,6 +15305,89 @@
         "summary": "Run Daily Brief"
       }
     },
+    "/api/redmine-agent/daily-brief/runs/{run_id}/cancel": {
+      "post": {
+        "description": "按 run_id 精确请求停止一次晨报 run（协作式取消）。\n\n审核意见 P2：同一天可有 nightly/manual/delta 多个 run，按日期取消\n\"最新一次\"会停错目标；UI 从当前卡片携带 run_id 精确取消。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Daily Brief Run"
+      }
+    },
+    "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/reanalyze": {
+      "post": {
+        "description": "按 run_id 精确重新分析单个 issue（优先入口；date 回落见下方兼容路由）。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reanalyze Issue In Run"
+      }
+    },
     "/api/redmine-agent/daily-brief/triage": {
       "get": {
         "description": "当天待处理 issue（waiting_my_reply / no_reply_3_days 去重）。\n\n``refresh=true``（默认）先从 Redmine 同步该 owner 的最新 issue 快照，\n再基于本地库构建 triage；``refresh=false`` 只读本地镜像（可用于离线\n检视，结果可能落后于 Redmine）。",
@@ -15389,7 +15488,7 @@
     },
     "/api/redmine-agent/daily-brief/{brief_date}/cancel": {
       "post": {
-        "description": "请求停止该日期最新一次晨报 run（协作式取消）。\n\n独立 Worker 执行靠 DB 标志位在 issue 边界生效；同进程执行额外\ntask.cancel()。已终态的 run 幂等返回 already_terminal。",
+        "description": "请求停止该日期最新一次晨报 run（兼容入口；优先用 runs/{run_id}/cancel）。\n\n独立 Worker 执行靠 DB 标志位在 issue 边界生效；同进程执行额外\ntask.cancel()。已终态的 run 幂等返回 already_terminal。",
         "parameters": [
           {
             "in": "path",

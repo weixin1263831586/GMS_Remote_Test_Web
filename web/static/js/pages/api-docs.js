@@ -1026,11 +1026,11 @@ function closeUsageExamplesModal() {
 
 /**
  * 生成与当前 Controller 地址绑定的一键安装命令。
- * TLS 默认严格校验(-fsSL);自签名部署在目标主机导出
- * GMS_INSTALL_CA_CERT 后再执行,不再输出 -k。
+ * 自签名部署: -k 仅用于获取安装脚本这一次(TOFU 第一接触);安装器随后
+ * 从 /api/agent/ca.crt 自动获取 CA 并严格校验后续全部下载。
  */
 function buildSkillInstallCommand() {
-    return `curl -fsSL "${window.location.origin}/api/agent/install.sh" | bash`;
+    return `curl -k -fsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode <配对码>`;
 }
 
 /**
