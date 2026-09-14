@@ -109,21 +109,32 @@ context.
 
 Install from the Controller while logged in to the build server:
 
+Self-signed deployment (TOFU) — one command for install + enrollment:
+
 ```bash
-curl --cacert /etc/gms/controller-ca.pem -fsSL \
-  "https://CONTROLLER:5001/api/agent/install" -o /tmp/gms-agent
-python3 /tmp/gms-agent install --client auto
+curl -k -fsSL "https://CONTROLLER:5001/api/agent/install.sh" | \
+  bash -s -- --paircode <CODE> --client auto
 export PATH="$HOME/.local/bin:$PATH"
 gms-rt-system-health --json --non-interactive
 gms-rt-auth-status --json --non-interactive
 ```
 
-After installation, `gms-agent enroll <CODE>` exchanges a one-shot enrollment
-code from the Web UI for a 0600 Agent Service Token. Never use `curl -k` for
-the bootstrap: a TLS man-in-the-middle could replace both the downloaded
-bootstrap and the signing key embedded in it. Self-signed deployments must
-distribute the Controller CA and pass it with `--cacert` (and later through
-`GMS_INSTALL_CA_CERT`).
+Strict CA path (CA distributed out-of-band; strict from the first byte):
+
+```bash
+export GMS_INSTALL_CA_CERT=/etc/gms/controller-ca.pem
+curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
+  "https://CONTROLLER:5001/api/agent/install.sh" | bash -s -- --paircode <CODE> --client auto
+```
+
+`--paircode` exchanges the Web-UI one-shot enrollment code for a 0600 Agent
+Service Token in the same run (`gms-agent enroll <CODE>` still works
+afterwards). `-k` is acceptable only for fetching the installer script
+itself — trust-on-first-use on a trusted LAN: the installer immediately
+re-establishes strict TLS via `GET /api/agent/ca.crt`, and the package is
+integrity-pinned by SHA-256 + Ed25519 manifest signature. Never use `-k`
+for anything beyond this first fetch; against an active first-contact MITM,
+use the strict CA path instead.
 
 `--client auto` additionally installs the self-contained Skill+MCP plugin
 for every detected agent (Codex/Kimi/kkagent), reconciles each client's MCP

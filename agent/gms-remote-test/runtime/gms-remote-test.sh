@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.2"
+GMS_RT_VERSION="0.22.6"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -55,6 +55,18 @@ else
                 gsub(/^"|"$/, "", $2)
                 print $2; exit
             }' "$_gms_profile_toml")
+        # 同一 profile 的 ca_cert 一并生效: 手动裸调 gms-rt-* 与 MCP 路径
+        # 共享同一 TLS 策略(严格校验优先, 环境变量显式设置时不覆盖)。
+        _gms_profile_ca=$(awk -F'=' '
+            /^\[/ { in_controller = ($0 ~ /^\[controller\]/); next }
+            in_controller && $1 ~ /^[ \t]*ca_cert[ \t]*$/ {
+                gsub(/^[ \t]+|[ \t]+$/, "", $2)
+                gsub(/^"|"$/, "", $2)
+                print $2; exit
+            }' "$_gms_profile_toml")
+        if [ -n "$_gms_profile_ca" ] && [ -z "${GMS_CURL_CA_CERT:-}" ]; then
+            export GMS_CURL_CA_CERT="$_gms_profile_ca"
+        fi
     fi
     SERVER_URL="${SERVER_URL:-${GMS_REMOTE_TEST_SERVER:-}}"
 fi
@@ -85,6 +97,16 @@ if [ -z "$SERVER_URL" ]; then
     done
 
     SERVER_HOST="${UBUNTU_HOST:-${CONFIG_SERVER_HOST:-$DETECTED_LOCAL_IP}}"
+    # 本地启发式只允许用于 Controller 本机: 端口确实在本机监听。纯构建
+    # 服务器上 hostname -I 的首地址不是 Controller, 静默指过去只会得到
+    # 误导性的 Connection refused — 快速失败并给出明确配置指引。
+    if ! timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/${GMS_PORT}" 2>/dev/null; then
+        echo "Error: 未配置 Controller 且本机端口 ${GMS_PORT} 无服务监听。" >&2
+        echo "  请任选其一:" >&2
+        echo "    export GMS_REMOTE_TEST_SERVER=https://CONTROLLER:${GMS_PORT}" >&2
+        echo "    gms-agent profile use <PROFILE>   # 使用已安装的控制器绑定" >&2
+        exit 2
+    fi
     SERVER_URL="https://${SERVER_HOST}:${GMS_PORT}"
 fi
 API_BASE="${SERVER_URL}/api"

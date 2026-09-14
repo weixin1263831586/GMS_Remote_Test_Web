@@ -34,13 +34,24 @@ only as the read-only escape hatch. CLI automation must use `--json
 
 ## Install and diagnose
 
-Use a trusted Controller CA; never pipe a `curl -k` bootstrap into a shell:
+One-line installer — self-signed deployments bootstrap trust via TOFU:
+`-k` is only for fetching the script itself; the installer immediately
+fetches `GET /api/agent/ca.crt`, persists it, and every later download is
+strictly TLS-verified plus SHA-256/Ed25519 signature-pinned:
 
 ```bash
-curl --cacert /etc/gms/controller-ca.pem -fsSL \
-  "https://CONTROLLER:5001/api/agent/install" -o gms-agent
-python3 gms-agent install --client auto
+curl -k -fsSL "https://CONTROLLER:5001/api/agent/install.sh" | \
+  bash -s -- --paircode <CODE> --client auto
 gms-agent doctor --client codex --json
+```
+
+If the threat model includes an active first-contact MITM, distribute the
+Controller CA out-of-band and stay strict from the first byte instead:
+
+```bash
+export GMS_INSTALL_CA_CERT=/etc/gms/controller-ca.pem
+curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
+  "https://CONTROLLER:5001/api/agent/install.sh" | bash -s -- --paircode <CODE>
 ```
 
 The package verifies registry SHA-256 and any pinned Ed25519 signature,

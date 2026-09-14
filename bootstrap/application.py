@@ -241,6 +241,10 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             # 公开发布物（绑定了本请求 base URL 的薄包装），无凭据泄露面。
             or path == '/api/agent/install.sh'
             or path == '/api/agent/packages/gms-remote-test/manifest'
+            # Controller CA 证书：一行安装器系统校验失败时的 TOFU 信任源，
+            # 编译服务器预装 CA 之前没有可用凭据，必须匿名可用。只分发
+            # 证书（公开物），绝不涉及私钥。
+            or path == '/api/agent/ca.crt'
             or _PUBLIC_AGENT_PACKAGE_VERSION.fullmatch(path)
         ):
             return True

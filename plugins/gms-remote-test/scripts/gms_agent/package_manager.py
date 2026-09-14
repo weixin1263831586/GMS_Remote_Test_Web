@@ -680,6 +680,25 @@ def _profile_insecure(name: str) -> bool:
     return os.environ.get("GMS_INSTALL_INSECURE", "") == "1"
 
 
+def _existing_profile_for(client: str, server: str) -> str:
+    """已有 profile 中与 client+Controller 完全一致的名字, 没有则返回 ""。
+
+    复用规则防止升级重装时为一个 client+Controller 铸出第二个
+    <client>-<host>-<hash> profile(两个 profile 指向同一控制器会让所有
+    选择器 fail-closed: mcp_launcher 拒绝启动, gms-agent status 报
+    AMBIGUOUS)。显式 --profile 传入时不参与。
+    """
+    normalized = server.rstrip("/")
+    for existing in sorted(profile_store.list_profiles()):
+        try:
+            flat = profile_store.load_profile(existing)
+        except OSError:
+            continue
+        if flat.get("client") == client and flat.get("url", "").rstrip("/") == normalized:
+            return existing
+    return ""
+
+
 def write_profile(client: str, server: str, ca_cert: str, profile: str = "") -> str:
     """Write the client profile (TOML only).
 
@@ -697,7 +716,11 @@ def write_profile(client: str, server: str, ca_cert: str, profile: str = "") -> 
     See docs/architecture/adr/0003-agent-profile-store.md.
     """
 
-    name = profile or profile_store.default_profile_name(client, server)
+    name = (
+        profile
+        or _existing_profile_for(client, server)
+        or profile_store.default_profile_name(client, server)
+    )
     if not profile_store.validate_profile_name(name):
         raise ValueError(f"非法 profile 名: {name!r}")
     insecure = _profile_insecure(name)

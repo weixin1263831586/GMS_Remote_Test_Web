@@ -33,6 +33,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/agent/ca.crt"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/agent/capabilities"
   },
   {
@@ -1845,6 +1851,18 @@
       "POST"
     ],
     "path": "/api/redmine-agent/daily-brief/run"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/daily-brief/runs/{run_id}/cancel"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/reanalyze"
   },
   {
     "methods": [

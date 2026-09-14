@@ -4549,7 +4549,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
 
             expected = (
-                f'curl -fsSL "{self.base_url}/api/agent/install.sh" | bash'
+                f'curl -k -fsSL "{self.base_url}/api/agent/install.sh" | '
+                "bash -s -- --paircode <配对码>"
             )
             self.assertEqual(result["install"], expected)
             self.assertEqual(result["installApi"]["full"], expected)

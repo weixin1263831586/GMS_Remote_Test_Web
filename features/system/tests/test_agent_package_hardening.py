@@ -216,10 +216,23 @@ class InstallerTlsPolicyTests(unittest.TestCase):
         # 降级分支必须由 GMS_INSTALL_ALLOW_INSECURE 显式守护,且仅出现一次
         # (curl/wget 各自的分支内),不允许出现无条件 -k 降级。
         self.assertIn('${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1', template)
-        self.assertLessEqual(template.count("--no-check-certificate"), 1)
-        self.assertLessEqual(template.count("-kfsSL"), 1)
         # 生产拒绝分支存在。
         self.assertIn('"$ALLOW_INSECURE" != "1"', template)
+        # 每个下载器的跳过校验调用最多两处: 显式 ALLOW_INSECURE 分支 +
+        # TOFU 回退(仅当系统信任链校验失败且无显式 CA 时,用于拉取
+        # /api/agent/ca.crt 后严格重试; 包完整性另由 SHA-256+Ed25519 保证)。
+        for flag in ("-kfsSL", "--no-check-certificate"):
+            count = template.count(flag)
+            self.assertGreaterEqual(count, 1, flag)
+            self.assertLessEqual(count, 2, flag)
+        # TOFU 抓取必须排在"系统校验失败"(elif fetch_bootstrap "")之后,
+        # 且显式 GMS_INSTALL_CA_CERT 校验失败时直接报错,不得静默降级。
+        self.assertIn("elif fetch_bootstrap \"\"", template)
+        self.assertIn("/api/agent/ca.crt", template)
+        self.assertIn("无法用 GMS_INSTALL_CA_CERT", template)
+        guard_index = template.index('elif fetch_bootstrap ""')
+        tofu_index = template.index("/api/agent/ca.crt", guard_index)
+        self.assertLess(guard_index, tofu_index)
 
     def test_template_passes_enroll_code_via_env_not_argv(self):
         """配对码不得进 argv/ps/shell history(评审 P2/P3)。
@@ -230,6 +243,8 @@ class InstallerTlsPolicyTests(unittest.TestCase):
         template = self._template()
         self.assertIn('export GMS_AGENT_ENROLL_CODE="$CODE"', template)
         self.assertNotIn("--enroll-code \"$CODE\"", template)
+        # 配对码必须支持显式命名形式（--paircode, 及等价别名）。
+        self.assertIn("--enroll-code|--paircode|--pairing-code", template)
         # 消费后脚本内不再保留明文。
         self.assertIn('CODE=""', template)
         # gms-agent 端:环境变量优先。

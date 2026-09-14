@@ -262,9 +262,19 @@ _INSTALL_SH_TEMPLATE = r'''#!/usr/bin/env bash
 # GMS Remote Test agent runtime — one-line installer.
 #
 # Usage:
-#   curl -fsSL __SERVER_URL__/api/agent/install.sh | bash -s -- [CODE] [options...]
+#   curl -k -fsSL __SERVER_URL__/api/agent/install.sh | bash -s -- --paircode <配对码> [options...]
 #
-#   自签名部署先导出: export GMS_INSTALL_CA_CERT=/path/controller-ca.crt
+#   --paircode <配对码>   Controller Web UI 铸的一次性配对码（推荐写法;
+#                         --pairing-code / --enroll-code 等价; 兼容旧的
+#                         第一个位置参数写法,但命名形式更明确）。
+#
+#   自签名部署的"第一接触": 拉取本脚本这一次无法做服务器校验(还没有 CA),
+#   用 -k 获取脚本本身(可先人工核对脚本内容); 脚本随后从
+#   /api/agent/ca.crt TOFU 获取 Controller CA 并落盘到
+#   ~/.local/state/gms-remote-test/controller-ca.pem, 之后的 bootstrap/
+#   manifest/包下载全部走严格 TLS + SHA-256 + Ed25519 签名校验。
+#   更严格的替代: 带外分发 CA 后 export GMS_INSTALL_CA_CERT=/path/ca.pem,
+#   并用 curl --cacert 拉取本脚本(全程严格校验,无 TOFU)。
 #   (受控实验环境可用 GMS_INSTALL_ALLOW_INSECURE=1 显式降级,生产端点拒绝)。
 #
 #   CODE  (optional) one-shot enrollment code from the Controller web UI;
@@ -293,9 +303,10 @@ while (( $# )); do
       PASS_ARGS+=("$1" "$2")
       shift 2
       ;;
-    --enroll-code)
+    # 配对码的显式命名形式（推荐）；--enroll-code 为既有别名。
+    --enroll-code|--paircode|--pairing-code)
       if (( $# < 2 )); then
-        echo "Error: --enroll-code 需要一个参数" >&2
+        echo "Error: $1 需要一个参数" >&2
         exit 2
       fi
       CODE="$2"
@@ -345,42 +356,78 @@ if [[ "${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1" && "$ALLOW_INSECURE" != "1" ]]; 
   echo "Error: GMS_INSTALL_ALLOW_INSECURE=1 被生产环境 Controller 拒绝;请通过 GMS_INSTALL_CA_CERT 信任 Controller CA" >&2
   exit 4
 fi
-FETCH_TLS=()
-case "$DOWNLOADER" in
-  curl)
-    if [[ -n "${GMS_INSTALL_CA_CERT:-}" && -r "${GMS_INSTALL_CA_CERT}" ]]; then
-      FETCH_TLS=(-fsSL --cacert "$GMS_INSTALL_CA_CERT")
-    elif [[ "${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1" ]]; then
-      FETCH_TLS=(-kfsSL)
-      # python 阶段(bootstrap 拉 manifest/包)继承同一 TLS 策略。
-      export GMS_INSTALL_INSECURE=1
-      echo "Warning: GMS_INSTALL_ALLOW_INSECURE=1,跳过 TLS 证书校验(仅限受控实验环境)" >&2
-    else
-      FETCH_TLS=(-fsSL)
-    fi
-    ;;
-  wget)
-    if [[ -n "${GMS_INSTALL_CA_CERT:-}" && -r "${GMS_INSTALL_CA_CERT}" ]]; then
-      FETCH_TLS=(--ca-certificate="$GMS_INSTALL_CA_CERT" -qO)
-    elif [[ "${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1" ]]; then
-      FETCH_TLS=(--no-check-certificate -qO)
-      # python 阶段(bootstrap 拉 manifest/包)继承同一 TLS 策略。
-      export GMS_INSTALL_INSECURE=1
-      echo "Warning: GMS_INSTALL_ALLOW_INSECURE=1,跳过 TLS 证书校验(仅限受控实验环境)" >&2
-    else
-      FETCH_TLS=(-qO)
-    fi
-    ;;
-esac
+# python 阶段(bootstrap 拉 manifest/包)继承同一 TLS 策略: 显式/TOFU CA 传导
+# GMS_INSTALL_CA_CERT; insecure 降级传导 GMS_INSTALL_INSECURE=1。
 
+CA_STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test"
 WORK_DIR="$(mktemp -d /tmp/gms-agent-install.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+fetch_bootstrap() {  # $1 = CA 路径("" = 系统信任链)
+  case "$DOWNLOADER" in
+    curl)
+      if [[ -n "$1" ]]; then
+        curl -fsSL --cacert "$1" "$SERVER/api/agent/install" -o "$WORK_DIR/gms-agent"
+      else
+        curl -fsSL "$SERVER/api/agent/install" -o "$WORK_DIR/gms-agent"
+      fi
+      ;;
+    wget)
+      if [[ -n "$1" ]]; then
+        wget --ca-certificate="$1" -qO "$WORK_DIR/gms-agent" "$SERVER/api/agent/install"
+      else
+        wget -qO "$WORK_DIR/gms-agent" "$SERVER/api/agent/install"
+      fi
+      ;;
+  esac
+}
+
 echo "Fetching gms-agent bootstrap from $SERVER ..."
-case "$DOWNLOADER" in
-  curl) curl "${FETCH_TLS[@]}" "$SERVER/api/agent/install" -o "$WORK_DIR/gms-agent" ;;
-  wget) wget "${FETCH_TLS[@]}" "$SERVER/api/agent/install" -O "$WORK_DIR/gms-agent" ;;
-esac
+if [[ "${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1" ]]; then
+  # 显式降级(仅非生产 Controller 渲染允许):跳过校验并传导给 python 阶段。
+  export GMS_INSTALL_INSECURE=1
+  echo "Warning: GMS_INSTALL_ALLOW_INSECURE=1,跳过 TLS 证书校验(仅限受控实验环境)" >&2
+  case "$DOWNLOADER" in
+    curl) curl -kfsSL "$SERVER/api/agent/install" -o "$WORK_DIR/gms-agent" ;;
+    wget) wget --no-check-certificate -qO "$WORK_DIR/gms-agent" "$SERVER/api/agent/install" ;;
+  esac
+elif fetch_bootstrap ""; then
+  : # 系统信任链严格校验成功
+elif [[ -n "${GMS_INSTALL_CA_CERT:-}" ]]; then
+  echo "Error: 无法用 GMS_INSTALL_CA_CERT=$GMS_INSTALL_CA_CERT 完成下载(TLS 校验失败或网络不通);请确认该文件是当前 Controller 的 CA" >&2
+  exit 5
+else
+  # 自签名部署的预期路径: TOFU 从 Controller 拉 CA 后严格重试。
+  # 内容完整性不依赖此信任: manifest 另有 SHA-256 + Ed25519 签名校验。
+  echo "系统信任链无法校验 Controller 证书,尝试 TOFU: $SERVER/api/agent/ca.crt ..." >&2
+  case "$DOWNLOADER" in
+    curl) curl -kfsSL "$SERVER/api/agent/ca.crt" -o "$WORK_DIR/controller-ca.pem" ;;
+    wget) wget --no-check-certificate -qO "$WORK_DIR/controller-ca.pem" "$SERVER/api/agent/ca.crt" ;;
+  esac
+  if [[ ! -s "$WORK_DIR/controller-ca.pem" ]] || ! grep -q "BEGIN CERTIFICATE" "$WORK_DIR/controller-ca.pem"; then
+    echo "Error: 无法获取 Controller CA。请任选其一:" >&2
+    echo "  1) export GMS_INSTALL_CA_CERT=/path/to/controller-ca.pem 后重试" >&2
+    echo "  2) 受控实验环境: export GMS_INSTALL_ALLOW_INSECURE=1 后重试(仅非生产 Controller)" >&2
+    exit 5
+  fi
+  # 先落盘到持久路径再导出: profile 会记录这个 ca_cert 路径,
+  # 指向 WORK_DIR 会被 EXIT trap 清掉变成悬空引用。
+  PERSISTENT_CA="$CA_STATE_DIR/controller-ca.pem"
+  if mkdir -p "$CA_STATE_DIR" 2>/dev/null && cp "$WORK_DIR/controller-ca.pem" "$PERSISTENT_CA" 2>/dev/null; then
+    chmod 700 "$CA_STATE_DIR" 2>/dev/null || true
+    chmod 644 "$PERSISTENT_CA" 2>/dev/null || true
+    echo "Controller CA 已保存: $PERSISTENT_CA (可用作 GMS_INSTALL_CA_CERT / GMS_CURL_CA_CERT)" >&2
+  else
+    PERSISTENT_CA="$WORK_DIR/controller-ca.pem"
+    echo "Warning: CA 无法落盘到 $CA_STATE_DIR, 仅本次安装生效" >&2
+  fi
+  export GMS_INSTALL_CA_CERT="$PERSISTENT_CA"
+  if ! fetch_bootstrap "$PERSISTENT_CA"; then
+    echo "Error: 使用 TOFU CA 仍无法完成下载;请人工核对 Controller 证书后重试" >&2
+    exit 5
+  fi
+  echo "TLS: 已用 TOFU 获取的 Controller CA 完成严格校验。" >&2
+fi
 
 python3 "$WORK_DIR/gms-agent" install --server "$SERVER" \
   "${PASS_ARGS[@]+"${PASS_ARGS[@]}"}"
@@ -392,16 +439,22 @@ async def agent_install_sh(request: Request):
 
     Renders a thin bash wrapper bound to this request's base URL: it fetches
     the gms-agent bootstrap (GET /api/agent/install) and runs `install`; a
-    positional enrollment code (when given) is forwarded as --enroll-code so
-    install + token exchange happen in a single command:
+    enrollment code (when given) is exchanged in the same run, so install +
+    token provisioning happen in a single command:
 
-        curl -fsSL https://CONTROLLER:5001/api/agent/install.sh | bash -s -- <CODE>
+        curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | bash -s -- --paircode <CODE>
+
+    (--paircode / --pairing-code / --enroll-code are equivalent; a bare
+    first positional argument is still accepted for compatibility.)
 
     TLS is fail-closed: the rendered script verifies certificates by default
-    (system trust store, or GMS_INSTALL_CA_CERT). Insecure bootstrap via
-    GMS_INSTALL_ALLOW_INSECURE=1 only works while the Controller runs in a
-    non-production environment; production renders ALLOW_INSECURE=0 and the
-    script rejects the downgrade outright.
+    (system trust store, or GMS_INSTALL_CA_CERT). On a fresh host without a
+    provisioned CA — the self-signed deployment case — it falls back to
+    TOFU: it fetches GET /api/agent/ca.crt once, stores it under
+    ~/.local/state/gms-remote-test/ and retries with strict verification.
+    Insecure bootstrap via GMS_INSTALL_ALLOW_INSECURE=1 only works while the
+    Controller runs in a non-production environment; production renders
+    ALLOW_INSECURE=0 and the script rejects the downgrade outright.
     """
     from urllib.parse import urlsplit
 
@@ -435,3 +488,38 @@ async def agent_install_sh(request: Request):
             "Cache-Control": "no-store",
         },
     )
+
+
+async def agent_ca_cert(request: Request):
+    """GET /api/agent/ca.crt — Controller CA 证书分发(TOFU 信任源)。
+
+    one-line installer 在系统信任链校验失败时从这里拉取 CA,再以严格校验
+    完成 install.sh 的自动回退。仅分发证书(公开物),绝不涉及私钥。
+    解析顺序: GMS_CONTROLLER_CA_FILE > secrets/certs/gms-local-ca.crt
+    (正规 CA 部署) > secrets/certs/gms-local.crt(旧叶子自签部署)。
+    """
+    import os
+
+    from foundation.config_paths import certificates_path
+
+    candidates: list[Path] = []
+    env_file = os.environ.get("GMS_CONTROLLER_CA_FILE", "")
+    if env_file:
+        candidates.append(Path(env_file))
+    cert_dir = Path(certificates_path(str(PROJECT_ROOT)))
+    candidates.append(cert_dir / "gms-local-ca.crt")
+    candidates.append(cert_dir / "gms-local.crt")
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return Response(
+                    content=candidate.read_bytes(),
+                    media_type="application/x-pem-file",
+                    headers={
+                        "Content-Disposition": 'inline; filename="controller-ca.pem"',
+                        "Cache-Control": "no-store",
+                    },
+                )
+        except OSError:
+            continue
+    return error_response("Controller CA 证书不可用", status_code=404)

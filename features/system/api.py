@@ -250,6 +250,7 @@ async def download_jq_binary(request: Request):
 # budget). Endpoints:
 #   GET /api/agent/install                                 bootstrap installer
 #   GET /api/agent/install.sh                              one-line curl|bash installer
+#   GET /api/agent/ca.crt                                  Controller CA (install.sh TOFU source)
 #   GET /api/agent/packages/gms-remote-test/manifest      latest version + SHA-256
 #   GET /api/agent/packages/gms-remote-test/{version}     distribution zip
 
@@ -263,6 +264,12 @@ async def agent_install_bootstrap(request: Request):
 async def agent_install_sh_endpoint(request: Request):
     """一行安装器: curl -fsSL .../api/agent/install.sh | bash -s -- [配对码]"""
     return await agent_package_registry.agent_install_sh(request)
+
+
+@router.get("/api/agent/ca.crt")
+async def agent_ca_cert_endpoint(request: Request):
+    """Controller CA 证书分发(install.sh 在系统校验失败时的 TOFU 信任源)"""
+    return await agent_package_registry.agent_ca_cert(request)
 
 
 @router.get("/api/agent/packages/gms-remote-test/manifest")
