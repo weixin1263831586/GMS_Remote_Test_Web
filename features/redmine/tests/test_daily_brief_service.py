@@ -97,6 +97,9 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(DEFAULT_BRIEF_CONFIG["enabled"])
         self.assertFalse(normalize_daily_brief_config({})["enabled"])
         self.assertTrue(normalize_daily_brief_config({"enabled": True})["enabled"])
+        self.assertFalse(normalize_daily_brief_config({"enabled": "false"})["enabled"])
+        self.assertTrue(normalize_daily_brief_config({"enabled": " yes "})["enabled"])
+        self.assertFalse(normalize_daily_brief_config({"enabled": "invalid"})["enabled"])
 
     def test_backend_direct_is_rejected(self):
         """direct 从未实现，不得作为可配置枚举残留。"""
@@ -331,7 +334,27 @@ class RunLifecycleTests(unittest.TestCase):
         run_id = started["run_id"]
 
         async def fake_analyze(entry):
-            return KkAgentAnalysisResult(ok=True, result=dict(VALID), raw_output="SECRET-RAW")
+            return KkAgentAnalysisResult(
+                ok=True,
+                result=dict(VALID),
+                raw_output="SECRET-RAW",
+                trace={
+                    "session_id": "sess-1",
+                    "status": "completed",
+                    "tool_call_count": 2,
+                    "history_search_count": 2,
+                    "distinct_history_search_count": 2,
+                    "repair_attempts": 1,
+                    "tools": [
+                        {
+                            "tool_name": "gms_rt_redmine_issue_fetch",
+                            "status": "succeeded",
+                            "output_sha256": "abc",
+                            "output_preview": "PRIVATE",
+                        }
+                    ],
+                },
+            )
 
         import asyncio
         with self._patch_snapshot(), patch.object(self.service, "_build_analyzer") as builder:
@@ -340,6 +363,10 @@ class RunLifecycleTests(unittest.TestCase):
         payload = self.service.run_payload(self.service.repository.get_run(run_id))
         for issue in payload["issues"]:
             self.assertNotIn("raw_response", issue)
+            self.assertEqual(issue["ai_execution"]["session_id"], "sess-1")
+            self.assertTrue(issue["ai_execution"]["issue_fetched"])
+            self.assertNotIn("tools", issue["ai_execution"])
+            self.assertNotIn("PRIVATE", str(issue["ai_execution"]))
 
     def test_reanalyze_refreshes_run_summary_and_uses_persisted_subject(self):
         started = self.service.start_run("manual")

@@ -42,7 +42,6 @@ Return ONLY a JSON object with exactly these fields:
   "recommended_actions": [{{"step": 1, "action": "...", "reason": "..."}}],
   "suggested_solution": "...",
   "similar_issues": [{{"issue_id": 12345, "subject": "...", "similarity": "same|similar|related", "reusable_fix": "...", "reference_fact": "..."}}],
-  "history_checked": true,
   "missing_information": ["..."],
   "suggested_reply_en": "...",
   "suggested_reply_zh": "...",
@@ -60,8 +59,8 @@ HISTORY SEARCH (mandatory step before recommendations):
 - Call gms_rt_redmine_history_search with 2-4 distinct keyword queries derived
   from this issue (combine: SoC model e.g. RK3562/RK3576, Android version e.g.
   Android16, and the functional domain e.g. SSI/merge/GMS/radio). Use
-  exclude_issue_id={issue_id}. Set history_checked=true once done (or true with
-  similar_issues=[] when nothing relevant is found).
+  exclude_issue_id={issue_id}. history_checked is derived from the runtime tool
+  trace; do not add it to the model JSON.
 - For each promising hit that looks like the SAME or a very similar problem,
   optionally fetch it (gms_rt_redmine_issue_fetch with no_refresh=true) and
   read its closing journals to learn how it was actually resolved.

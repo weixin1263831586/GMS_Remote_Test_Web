@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
+from .daily_brief_execution_view import issue_payload
 from .daily_brief_models import (
     DailyBriefIssue,
     DailyBriefRun,
@@ -106,16 +107,16 @@ class DailyBriefService:
 
     def run_payload(self, run: DailyBriefRun) -> dict[str, Any]:
         issues = self.repository.list_issues(run.run_id)
+        executions = self.repository.latest_ai_executions_by_issue(run.run_id)
         return {
             "run": run.to_row(),
-            "issues": [self._issue_payload(issue) for issue in issues],
+            "issues": [
+                issue_payload(issue, executions.get(issue.issue_id))
+                for issue in issues
+            ],
         }
 
-    @staticmethod
-    def _issue_payload(issue: DailyBriefIssue) -> dict[str, Any]:
-        payload = issue.to_row()
-        payload.pop("raw_response", None)  # 原始输出仅供排障，不进 UI payload
-        return payload
+    _issue_payload = staticmethod(issue_payload)
 
     # ------------------------------------------------------------------ triage
 
@@ -520,6 +521,9 @@ class DailyBriefService:
                     "attempt_no": record.attempt_count,
                     **(outcome.trace or {}),
                     "final_ok": bool(outcome.ok),
+                    "failure_stage": outcome.error_type,
+                    "failure_message": outcome.error,
+                    "wall_duration_ms": record.duration_ms,
                 },
             )
         except Exception:

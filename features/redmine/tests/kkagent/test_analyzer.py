@@ -141,6 +141,34 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertEqual(outcome.error_type, "schema_mismatch")
         self.assertIn("missing field", outcome.error)
 
+    def test_schema_failure_is_repaired_via_exact_resume(self):
+        """审核意见：schema 失败与 gate 失败一样走精确 resume 修复。"""
+        analyzer = self._analyzer("schema-then-ok", timeout_seconds=30)
+        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual(outcome.session_id, "sess-bad-schema")
+        self.assertTrue(outcome.trace["resumed"])
+        self.assertTrue(outcome.result["history_checked"])
+        self.assertEqual(outcome.result["confidence"], 0.72)
+        # 修复轮与首轮共用一个 session（初跑 + 修复轮工具轨迹合并）。
+        self.assertEqual(outcome.trace["tool_call_count"], 10)
+        self.assertEqual(outcome.trace["repair_attempts"], 1)
+
+    def test_schema_failure_survives_failed_repair(self):
+        analyzer = self._analyzer("schema-always-bad", timeout_seconds=30)
+        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.error_type, "schema_mismatch")
+        self.assertIn("missing field", outcome.error)
+        self.assertNotIn("history_checked", outcome.error)
+
+    def test_runtime_history_field_does_not_require_schema_repair(self):
+        analyzer = self._analyzer("history-omitted", timeout_seconds=30)
+        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertTrue(outcome.result["history_checked"])
+        self.assertEqual(outcome.trace["repair_attempts"], 0)
+
     def test_timeout_kills_process(self):
         analyzer = self._analyzer("hang", timeout_seconds=1)
         outcome = asyncio.run(analyzer.analyze(ENTRY))
@@ -169,7 +197,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v7")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v8")
 
     def test_cancellation_cleans_up_process_tree(self):
         class _HangingStream:

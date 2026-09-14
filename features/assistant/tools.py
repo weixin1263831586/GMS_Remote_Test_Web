@@ -226,6 +226,7 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/terminal/push": "features.system.terminal_api:upload_file",
     "/api/system/skills": "features.system.api:download_skills_zip",
     "/api/agent/install.sh": "features.system.agent_package_registry:agent_install_sh",
+    "/api/agent/ca.crt": "features.system.api:agent_ca_cert_endpoint",
     "/api/system/docs": "features.system.api:get_api_docs",
     "/api/system/help": "features.system.api:get_api_help",
     # --- 补充：报告 ---

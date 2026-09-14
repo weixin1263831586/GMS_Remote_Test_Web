@@ -42,6 +42,7 @@ class TraceConsumeTests(unittest.TestCase):
         self.assertEqual(len(trace.tool_calls), 1)
         call = trace.tool_calls[0]
         self.assertEqual(call.tool_name, "gms_rt_redmine_issue_fetch")
+        self.assertEqual(call.status, "succeeded")
         self.assertEqual(call.output_sha256, hashlib.sha256(b"issue body").hexdigest())
         self.assertEqual(call.output_bytes, len(b"issue body"))
         self.assertEqual(call.output_preview, "issue body")
@@ -56,6 +57,38 @@ class TraceConsumeTests(unittest.TestCase):
             {"type": "tool_result", "tool_call_id": "c2", "is_error": False, "output": "y"},
         ])
         self.assertEqual(trace.history_search_count, 1)
+
+    def test_pending_tool_call_is_not_successful(self):
+        trace = _trace_with_events([
+            {"type": "tool_call", "tool_call_id": "c1",
+             "tool_name": "gms_rt_redmine_issue_fetch", "input": {"issue_id": 1}},
+        ])
+        self.assertEqual(trace.tool_calls[0].status, "pending")
+        self.assertEqual(trace.successful_tool_names(), [])
+
+    def test_history_queries_are_normalized_and_deduplicated(self):
+        trace = _trace_with_events([
+            {"type": "tool_call", "tool_call_id": "c1",
+             "tool_name": "gms_rt_redmine_history_search", "input": {"q": " VTS  LTP "}},
+            {"type": "tool_result", "tool_call_id": "c1", "is_error": False, "output": "{}"},
+            {"type": "tool_call", "tool_call_id": "c2",
+             "tool_name": "gms_rt_redmine_history_search", "input": {"query": "vts ltp"}},
+            {"type": "tool_result", "tool_call_id": "c2", "is_error": False, "output": "{}"},
+            {"type": "tool_call", "tool_call_id": "c3",
+             "tool_name": "gms_rt_redmine_history_search", "input": {"q": "Android16 LTP"}},
+            {"type": "tool_result", "tool_call_id": "c3", "is_error": False, "output": "{}"},
+        ])
+        self.assertEqual(trace.history_search_count, 3)
+        self.assertEqual(trace.distinct_history_search_count, 2)
+
+    def test_structured_history_result_records_issue_ids(self):
+        output = json.dumps({"items": [{"issue_id": 646504}, {"issue_id": "646505"}]})
+        trace = _trace_with_events([
+            {"type": "tool_call", "tool_call_id": "c1",
+             "tool_name": "gms_rt_redmine_history_search", "input": {"q": "widevine"}},
+            {"type": "tool_result", "tool_call_id": "c1", "is_error": False, "output": output},
+        ])
+        self.assertEqual(trace.evidenced_issue_ids(), {646504, 646505})
 
     def test_result_usage_overrides_summed_events(self):
         trace = _trace_with_events([

@@ -3237,7 +3237,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 一键安装Skill和CLI（可在任意Linux主机执行）</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl -fsSL "{{ request.url.scheme }}://{{ request.url.netloc }}/api/agent/install.sh" | bash</code>
+                            <code id="cmd-1" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">curl -k -fsSL "{{ request.url.scheme }}://{{ request.url.netloc }}/api/agent/install.sh" | bash -s -- --paircode &lt;配对码&gt;</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" class="copy-chip" data-click="copyCommand" data-a0="cmd-1">📋 复制</span>
                         </div>
                     </div>
@@ -3247,7 +3247,7 @@
                             <code id="cmd-1-5" style="color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block;">gms-rt-auth-login USERNAME &amp;&amp; gms-rt-devices-list</code>
                             <span style="position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); transition: background 0.2s;" class="copy-chip" data-click="copyCommand" data-a0="cmd-1-5">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 无需解压或source；重复执行安装命令即可更新，也可运行 gms-rt-system-update</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 -k 仅用于自签名 Controller 的首次取脚本；安装器随后固定 CA 并严格校验下载。无需解压或 source；后续运行 gms-agent update 更新。</div>
                     </div>
 
                     <!-- Step 2: 系统健康检查 -->

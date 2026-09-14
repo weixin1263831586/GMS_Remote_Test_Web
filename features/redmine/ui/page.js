@@ -2863,6 +2863,34 @@ function showDailyBriefIssue(issueId) {
     : (issue.status !== 'completed' ? '' : (r.history_checked === false
       ? '<div class="muted" style="padding:4px 0 8px">未执行历史工单检索</div>'
       : '<div class="muted" style="padding:4px 0 8px">历史检索未发现同题/类似工单</div>'));
+  var execution = issue.ai_execution || {};
+  var gate = r.evidence_gate || {};
+  var mark = function (value) {
+    return value === true ? '✓' : (value === false ? '✗' : '—');
+  };
+  var schemaText = ({ passed: '✓ 通过', failed: '✗ 失败', unknown: '— 未完成' })[execution.schema_status] || '— 未记录';
+  var durationText = execution.duration_ms ? (Math.round(Number(execution.duration_ms) / 100) / 10) + ' s' : '—';
+  var tokenTotal = Number(execution.input_tokens || 0) + Number(execution.output_tokens || 0);
+  var historyDistinct = Number(gate.distinct_history_search_count != null
+    ? gate.distinct_history_search_count : execution.distinct_history_search_count || 0);
+  var historyTotal = Number(gate.history_search_count != null
+    ? gate.history_search_count : execution.history_search_count || 0);
+  var auditRows = [
+    ['最终格式', schemaText],
+    ['Redmine Issue', mark(gate.issue_fetched != null ? gate.issue_fetched : execution.issue_fetched)],
+    ['Journals', mark(gate.journals_checked != null ? gate.journals_checked : execution.journals_checked)],
+    ['附件列表调用', mark(gate.attachments_checked != null ? gate.attachments_checked : execution.attachments_checked)],
+    ['历史检索', historyDistinct + ' 个不同查询' + (historyTotal !== historyDistinct ? ' / ' + historyTotal + ' 次调用' : '')],
+    ['工具调用', execution.tool_call_count != null ? String(execution.tool_call_count) + ' 次' : '—'],
+    ['自动修复', execution.repair_attempts ? String(execution.repair_attempts) + ' 次' : '未触发'],
+    ['Session', execution.session_id || gate.session_id || '—'],
+    ['耗时', durationText],
+    ['Tokens', tokenTotal ? String(tokenTotal) : '—']
+  ];
+  if (execution.failure_stage) auditRows.splice(1, 0, ['失败阶段', execution.failure_stage]);
+  var auditBody = auditRows.map(function (item) {
+    return item[0] + '：' + item[1];
+  }).join('\n');
   var subject = String(issue.subject || '').trim();
   var chips = '<span style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
     + (r.confidence != null ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(59,130,246,.15))">置信度 ' + esc(r.confidence) + '</span>' : '')
@@ -2884,6 +2912,7 @@ function showDailyBriefIssue(issueId) {
         ${issue.status === 'failed' ? `<div style="color:var(--bad,#ef4444)"><b>分析失败${issue.error_type ? '（' + esc(issue.error_type) + '）' : ''}</b><div style="white-space:pre-wrap;margin-top:4px">${esc(issue.error || '未知错误')}</div></div>` : ''}
         ${r.problem_summary ? '<div style="line-height:1.7;margin-bottom:4px">' + esc(r.problem_summary) + '</div>' : ''}
         ${chips}
+        ${(Object.keys(execution).length || Object.keys(gate).length) ? section('🧾 执行与取证审计', auditBody) : ''}
         ${mdSection('📋 详细分析报告', r.detailed_report)}
         ${section('🧩 根因分析', r.root_cause)}
         ${section('💬 客户诉求', r.customer_request)}

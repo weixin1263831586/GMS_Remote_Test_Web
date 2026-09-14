@@ -209,7 +209,6 @@ ISSUE_RESULT_REQUIRED_FIELDS = (
     "detailed_report",
     "evidence",
     "similar_issues",
-    "history_checked",
     "confidence",
 )
 ROOT_CAUSE_TYPES = ("confirmed", "likely", "possible", "unknown")
@@ -235,12 +234,13 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
     risk = str(result.get("risk") or "")
     if risk and risk not in RISK_LEVELS:
         errors.append(f"invalid risk: {risk}")
-    try:
-        confidence = float(result.get("confidence"))
-        if not 0.0 <= confidence <= 1.0:
-            errors.append(f"confidence out of range: {confidence}")
-    except (TypeError, ValueError):
-        errors.append(f"invalid confidence: {result.get('confidence')!r}")
+    if "confidence" in result and result.get("confidence") not in (None, ""):
+        try:
+            confidence = float(result["confidence"])
+            if not 0.0 <= confidence <= 1.0:
+                errors.append(f"confidence out of range: {confidence}")
+        except (TypeError, ValueError):
+            errors.append(f"invalid confidence: {result.get('confidence')!r}")
     if not isinstance(result.get("evidence") or [], list):
         errors.append("evidence must be a list")
     if not isinstance(result.get("recommended_actions") or [], list):
@@ -269,14 +269,8 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
             item["similarity"] = similarity
             kept.append(item)
         result["similar_issues"] = kept
-    # history_checked 只接受真正的布尔值：bool("false")/bool("yes") 一类
-    # 的静默真值化会把模型没查历史也放行（审核意见 P1）。运行时还会用
-    # 真实 tool trace 覆写该字段（见 kkagent/evidence_gate.py），这里是
-    # schema 层的第一道门。
-    if not isinstance(result.get("history_checked"), bool):
-        errors.append(
-            f"history_checked must be a boolean, got {result.get('history_checked')!r}"
-        )
+    # history_checked 是 runtime evidence fact，不属于模型输出 schema。
+    # 即使旧模型输出了该字段也不采信，evidence_gate 会统一覆写。
     if confidence_below_review_threshold(result):
         result["needs_human_review"] = True
     return errors

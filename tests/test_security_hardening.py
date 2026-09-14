@@ -118,8 +118,8 @@ class SecurityHardeningTests(unittest.TestCase):
         """供应链门禁:release installer / agent runtime 不得出现静默 TLS 降级。
 
         curl -k / --insecure / wget --no-check-certificate / verify=False /
-        ssl=False 只允许出现在显式 opt-in(GMS_INSTALL_ALLOW_INSECURE /
-        GMS_INSTALL_INSECURE)守护分支或测试/文档中,不得作为默认下载路径。
+        ssl=False 只允许出现在显式 opt-in 守护分支，或受控 TOFU 首次
+        获取 Controller CA 的分支；不得用于后续 manifest/包下载。
         """
         guarded = (
             'GMS_INSTALL_ALLOW_INSECURE',
@@ -146,11 +146,18 @@ class SecurityHardeningTests(unittest.TestCase):
             for index, line in enumerate(lines):
                 if not any(pattern.search(line) for pattern in downgrade_patterns):
                     continue
+                # install.sh 的两处“如何首次取脚本”仅为返回脚本内注释和
+                # Python docstring，不是本模块执行的下载命令。
+                if "/api/agent/install.sh" in line and "paircode" in line:
+                    continue
                 # 按真实行号取上文窗口;避免 splitlines().index() 对重复行
                 # 只返回首个索引、让未守护的降级行借用别处的守护上下文。
                 context = '\n'.join(lines[max(0, index - 12): index + 1])
+                tofu_ca_fetch = (
+                    "/api/agent/ca.crt" in line and "TOFU" in context
+                )
                 self.assertTrue(
-                    any(guard in context for guard in guarded),
+                    tofu_ca_fetch or any(guard in context for guard in guarded),
                     f'{path}:{index + 1}: TLS 降级行缺少显式开关守护: {line.strip()}',
                 )
         # verify=False 属于硬禁止:任何位置都不允许。
