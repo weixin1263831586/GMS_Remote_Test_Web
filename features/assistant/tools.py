@@ -357,8 +357,6 @@ class ToolRegistry:
             requires_confirm = path in _CONFIRM_PATHS
             response_type = _RESPONSE_TYPE_MAP.get(path, "detail")
 
-            # executor_ref: 目前大部分通过通用查询函数处理
-            # category 到模块名的映射（有些 category 与模块名不一致）
             module_name = _CATEGORY_MODULE_MAP.get(category, category)
             executor_ref = _EXECUTOR_REF_OVERRIDES.get(path, "")
             if path not in _AGENT_UNSUPPORTED_DIRECT_PATHS and not executor_ref:

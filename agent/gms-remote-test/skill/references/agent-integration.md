@@ -136,6 +136,14 @@ integrity-pinned by SHA-256 + Ed25519 manifest signature. Never use `-k`
 for anything beyond this first fetch; against an active first-contact MITM,
 use the strict CA path instead.
 
+When no supported client is installed, `--client auto --paircode ...` fails
+before changing the runtime so the pairing code is not silently ignored.
+Specify the intended owner with `--client codex`, `--client kimi`, or
+`--client kkagent`; omit the paircode only for a CLI-only installation.
+After a multi-client install, direct CLI calls must select one of the printed
+profiles with `GMS_RT_PROFILE=<PROFILE>`. This explicit selection is required
+even when every profile currently points to the same Controller.
+
 `--client auto` additionally installs the self-contained Skill+MCP plugin
 for every detected agent (Codex/Kimi/kkagent), reconciles each client's MCP
 registration (update-in-place; corrupt client configs fail with a backup

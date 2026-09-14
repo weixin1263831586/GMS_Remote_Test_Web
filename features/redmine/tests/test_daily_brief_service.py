@@ -2,6 +2,7 @@
 
 preflight fail-closed 语义（2026-09 收紧）由 kkagent/auth_preflight 的
 专项单测覆盖；本文件的编排路径统一把 preflight patch 为通过。
+run_payload 执行视图/脱敏契约见 test_daily_brief_execution_view.py。
 """
 
 from __future__ import annotations
@@ -328,45 +329,6 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertEqual(run.waiting_my_reply_count, 2)
         self.assertEqual(run.no_reply_3_days_count, 1)
         self.assertEqual(run.status, "completed")
-
-    def test_run_payload_hides_raw_response(self):
-        started = self.service.start_run("manual")
-        run_id = started["run_id"]
-
-        async def fake_analyze(entry):
-            return KkAgentAnalysisResult(
-                ok=True,
-                result=dict(VALID),
-                raw_output="SECRET-RAW",
-                trace={
-                    "session_id": "sess-1",
-                    "status": "completed",
-                    "tool_call_count": 2,
-                    "history_search_count": 2,
-                    "distinct_history_search_count": 2,
-                    "repair_attempts": 1,
-                    "tools": [
-                        {
-                            "tool_name": "gms_rt_redmine_issue_fetch",
-                            "status": "succeeded",
-                            "output_sha256": "abc",
-                            "output_preview": "PRIVATE",
-                        }
-                    ],
-                },
-            )
-
-        import asyncio
-        with self._patch_snapshot(), patch.object(self.service, "_build_analyzer") as builder:
-            builder.return_value.analyze = fake_analyze
-            asyncio.run(self.service.execute_run(run_id))
-        payload = self.service.run_payload(self.service.repository.get_run(run_id))
-        for issue in payload["issues"]:
-            self.assertNotIn("raw_response", issue)
-            self.assertEqual(issue["ai_execution"]["session_id"], "sess-1")
-            self.assertTrue(issue["ai_execution"]["issue_fetched"])
-            self.assertNotIn("tools", issue["ai_execution"])
-            self.assertNotIn("PRIVATE", str(issue["ai_execution"]))
 
     def test_reanalyze_refreshes_run_summary_and_uses_persisted_subject(self):
         started = self.service.start_run("manual")

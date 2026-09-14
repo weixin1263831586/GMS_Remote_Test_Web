@@ -1168,23 +1168,6 @@ window.copySkillCommand = function(element) {
     });
 };
 
-/**
- * 复制文本到剪贴板（通用方法，用于 skill 命令等）
- * @param {string} text - 要复制的文本
- * @param {HTMLElement} element - 触发复制的元素
- */
-window.copyToClipboard = function(text, element) {
-    if (!text || text === '-') {
-        showToast('✗ 无内容可复制', 'error');
-        return;
-    }
-    copyText(text, {
-        successMsg: '✓ 已复制：' + text,
-        element: element
-    });
-};
-
-
 // act-bridge 委托目标（替代历史 inline handler）。
 window.updateRedmineFileList = updateRedmineFileList;
 window.removeRedmineFile = removeRedmineFile;

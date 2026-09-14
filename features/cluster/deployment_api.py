@@ -55,6 +55,7 @@ from .config import ClusterConfig
 from .deployment_bundle import add_worker_runtime
 from .repository import utc_now
 from .worker_auth import persist_worker_token, restore_worker_token
+from .worker_token_transfer import remove_remote_files_quietly, write_remote_token_file
 
 
 router = APIRouter()
@@ -448,15 +449,9 @@ async def deploy_adb_proxy_source(
             sftp = ssh.open_sftp()
             try:
                 sftp.put(str(archive_path), remote_archive)
-                with sftp.open(remote_token, "w") as token_file:
-                    sftp.chmod(remote_token, 0o600)
-                    token_file.write((token + "\n").encode("utf-8"))
+                write_remote_token_file(sftp, remote_token, token)
             except Exception:
-                for remote_path in (remote_archive, remote_token):
-                    try:
-                        sftp.remove(remote_path)
-                    except OSError:
-                        pass
+                remove_remote_files_quietly(sftp, remote_archive, remote_token)
                 raise
             finally:
                 sftp.close()
@@ -693,16 +688,12 @@ async def deploy_worker(
             sftp = ssh.open_sftp()
             remote_archive = "/tmp/gms-worker-setup.tar.gz"
             remote_credential = f"/tmp/gms-worker-gts-{worker_id}.json"
-            # The worker token is uploaded as a 0600 file and
-            # passed to the installer BY PATH — the token string must not
-            # appear in the remote command argv (visible via ps to any
-            # same-host user for the whole 900s install).
+            # Token 上传为 0600 文件并按路径传给安装器，绝不进入远程命令
+            # argv（ps 对同主机任意用户可见，整个安装窗口内可读）。
             remote_token = f"/tmp/gms-worker-token-{worker_id}"
             try:
                 sftp.put(str(archive_path), remote_archive)
-                with sftp.open(remote_token, "w") as token_file:
-                    sftp.chmod(remote_token, 0o600)
-                    token_file.write((token + "\n").encode("utf-8"))
+                write_remote_token_file(sftp, remote_token, token)
                 sftp.put(str(gts_credential), remote_credential)
                 sftp.chmod(remote_credential, 0o600)
             finally:

@@ -512,6 +512,30 @@ class TestLocalRuntimeOnlyInstall(EnvSandbox):
         self.assertTrue((self.root / "bin" / "gms-rt-devices-console").is_symlink())
         self.assertFalse(pm.profile_store.PROFILE_ROOT.exists())
 
+    def test_auto_with_paircode_and_no_detected_client_fails_before_install(self):
+        args = self._args("auto", "https://ctrl.example:5001")
+        with mock.patch.object(pm, "detect_clients", return_value=[]), mock.patch.dict(
+            os.environ, {"GMS_AGENT_ENROLL_CODE": "ONE-SHOT"}
+        ):
+            self.assertEqual(pm._cmd_install_locked(args), 2)
+        self.assertFalse(pm.CURRENT_LINK.exists())
+        self.assertFalse(pm.profile_store.PROFILE_ROOT.exists())
+
+    def test_enrolled_install_prints_each_explicit_cli_profile(self):
+        args = self._args("codex", "https://ctrl.example:5001")
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {"GMS_AGENT_ENROLL_CODE": "ONE-SHOT"}), \
+                mock.patch.object(pm, "install_runtime", return_value=self.root / "current"), \
+                mock.patch.object(pm, "install_cli_dispatcher", return_value=[self.root / "gms-rt"]), \
+                mock.patch.object(pm, "activate_clients", return_value=["codex-prod"]), \
+                mock.patch.object(pm, "cmd_enroll", return_value=0), \
+                mock.patch("sys.stdout", output):
+            self.assertEqual(pm._cmd_install_locked(args), 0)
+        self.assertIn(
+            "GMS_RT_PROFILE=codex-prod gms-rt-system-selfcheck --json",
+            output.getvalue(),
+        )
+
     def test_client_install_rejects_invalid_controller_before_changes(self):
         self.assertEqual(
             pm._cmd_install_locked(self._args("codex", "https://$(unsafe)/host")),

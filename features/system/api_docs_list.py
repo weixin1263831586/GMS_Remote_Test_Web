@@ -9,11 +9,7 @@ API_DOCS_LIST - API文档列表定义
 与前端 static/js/api-constants.js 中的 API_DETAILS_MAP 保持对应关系。
 """
 
-# ==================== 常量定义 ====================
-
 SKILL_COMMAND_PREFIX = "gms-rt-"
-
-# ==================== API文档列表 ====================
 
 API_DOCS_LIST = [
     # ==================== 基础接口 ====================
