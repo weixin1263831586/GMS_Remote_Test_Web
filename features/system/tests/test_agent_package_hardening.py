@@ -225,13 +225,16 @@ class InstallerTlsPolicyTests(unittest.TestCase):
             count = template.count(flag)
             self.assertGreaterEqual(count, 1, flag)
             self.assertLessEqual(count, 2, flag)
-        # TOFU 抓取必须排在"系统校验失败"(elif fetch_bootstrap "")之后,
-        # 且显式 GMS_INSTALL_CA_CERT 校验失败时直接报错,不得静默降级。
+        # 显式 CA 必须实际参与 bootstrap 下载并优先于系统信任链；失败时
+        # 直接报错，不得静默降级到 TOFU。
         self.assertIn("elif fetch_bootstrap \"\"", template)
+        self.assertIn('fetch_bootstrap "$GMS_INSTALL_CA_CERT"', template)
         self.assertIn("/api/agent/ca.crt", template)
         self.assertIn("无法用 GMS_INSTALL_CA_CERT", template)
+        explicit_ca_index = template.index('elif [[ -n "${GMS_INSTALL_CA_CERT:-}" ]]')
         guard_index = template.index('elif fetch_bootstrap ""')
         tofu_index = template.index("/api/agent/ca.crt", guard_index)
+        self.assertLess(explicit_ca_index, guard_index)
         self.assertLess(guard_index, tofu_index)
 
     def test_template_passes_enroll_code_via_env_not_argv(self):

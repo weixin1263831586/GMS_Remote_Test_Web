@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.7"
+GMS_RT_VERSION="0.22.9"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -104,7 +104,8 @@ if [ -z "$SERVER_URL" ]; then
         echo "Error: 未配置 Controller 且本机端口 ${GMS_PORT} 无服务监听。" >&2
         echo "  请任选其一:" >&2
         echo "    export GMS_REMOTE_TEST_SERVER=https://CONTROLLER:${GMS_PORT}" >&2
-        echo "    gms-agent profile use <PROFILE>   # 使用已安装的控制器绑定" >&2
+        echo "    gms-agent profile list" >&2
+        echo "    export GMS_RT_PROFILE=<PROFILE>   # 显式选择已安装的控制器绑定" >&2
         exit 2
     fi
     SERVER_URL="https://${SERVER_HOST}:${GMS_PORT}"

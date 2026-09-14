@@ -391,11 +391,13 @@ if [[ "${GMS_INSTALL_ALLOW_INSECURE:-0}" == "1" ]]; then
     curl) curl -kfsSL "$SERVER/api/agent/install" -o "$WORK_DIR/gms-agent" ;;
     wget) wget --no-check-certificate -qO "$WORK_DIR/gms-agent" "$SERVER/api/agent/install" ;;
   esac
+elif [[ -n "${GMS_INSTALL_CA_CERT:-}" ]]; then
+  if [[ ! -r "$GMS_INSTALL_CA_CERT" ]] || ! fetch_bootstrap "$GMS_INSTALL_CA_CERT"; then
+    echo "Error: 无法用 GMS_INSTALL_CA_CERT=$GMS_INSTALL_CA_CERT 完成下载(TLS 校验失败或网络不通);请确认该文件是当前 Controller 的 CA" >&2
+    exit 5
+  fi
 elif fetch_bootstrap ""; then
   : # 系统信任链严格校验成功
-elif [[ -n "${GMS_INSTALL_CA_CERT:-}" ]]; then
-  echo "Error: 无法用 GMS_INSTALL_CA_CERT=$GMS_INSTALL_CA_CERT 完成下载(TLS 校验失败或网络不通);请确认该文件是当前 Controller 的 CA" >&2
-  exit 5
 else
   # 自签名部署的预期路径: TOFU 从 Controller 拉 CA 后严格重试。
   # 内容完整性不依赖此信任: manifest 另有 SHA-256 + Ed25519 签名校验。

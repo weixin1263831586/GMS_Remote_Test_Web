@@ -1328,6 +1328,17 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
         if args.client == "none"
         else (detect_clients() if args.client == "auto" else [args.client])
     )
+    enroll_code = (getattr(args, "enroll_code", "") or "").strip()
+    env_code = os.environ.get("GMS_AGENT_ENROLL_CODE", "").strip()
+    if env_code:
+        enroll_code = env_code
+    if not clients and enroll_code:
+        print(
+            "Error: 提供了配对码，但 --client auto 未检测到 codex/kimi/kkagent；"
+            "请显式指定 --client codex、kimi 或 kkagent。仅安装 CLI 时请省略配对码。",
+            file=sys.stderr,
+        )
+        return 2
     if profile and len(clients) > 1:
         print(
             "Error: --profile 只能绑定一个客户端；请用 --client 指定 "
@@ -1416,10 +1427,6 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
 
     # One-shot enrollment code: environment variable wins over argv so the
     # secret never shows up in `ps`/shell history/audit command lines.
-    enroll_code = (getattr(args, "enroll_code", "") or "").strip()
-    env_code = os.environ.get("GMS_AGENT_ENROLL_CODE", "").strip()
-    if env_code:
-        enroll_code = env_code
     if not enroll_code:
         print("Next: create an enrollment code in the Controller web UI, then run:")
         if len(written_profiles) == 1:
@@ -1431,7 +1438,12 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
     args.code = enroll_code
     # argv 中不得残留配对码:消费后立即清空原参数,防 subprocess 派生泄漏。
     args.enroll_code = ""
-    return cmd_enroll(args)
+    result = cmd_enroll(args)
+    if result == 0:
+        print("\nDirect CLI requires an explicit profile when several are installed:")
+        for name in written_profiles:
+            print(f"  GMS_RT_PROFILE={name} gms-rt-system-selfcheck --json")
+    return result
 
 
 # ---------------------------------------------------------------------------

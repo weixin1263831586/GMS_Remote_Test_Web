@@ -45,6 +45,13 @@ curl -k -fsSL "https://CONTROLLER:5001/api/agent/install.sh" | \
 gms-agent doctor --client codex --json
 ```
 
+`--client auto` requires at least one detected Codex, Kimi, or kkagent when
+`--paircode` is supplied. On a CLI-only host, either name the client that will
+own the profile explicitly or omit the paircode to install only the runtime.
+When multiple clients are configured, direct `gms-rt-*` calls must set the
+exact profile, for example `GMS_RT_PROFILE=codex-host-uid
+gms-rt-system-selfcheck --json`; the installer prints every valid choice.
+
 If the threat model includes an active first-contact MITM, distribute the
 Controller CA out-of-band and stay strict from the first byte instead:
 
