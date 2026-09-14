@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -21,6 +20,7 @@ from typing import Any
 from .daily_brief_models import (
     DailyBriefIssue,
     DailyBriefRun,
+    derive_data_quality,
 )
 from .daily_brief_report import summarize_daily_brief
 from .daily_brief_repository import (
@@ -51,68 +51,14 @@ class _RunCancelledError(Exception):
     """协作式取消：执行循环在 issue 边界读到取消标志后抛出。"""
 
 
-def _analyzer_env_extra(profile: Any) -> dict[str, str]:
-    """kkagent 子进程的 MCP 身份环境；未绑定 profile 时返回空（fail-closed）。"""
-    name = str(profile or "").strip()
-    if not name:
-        return {}
-    return {
-        "GMS_RT_PROFILE": name,
-        "GMS_AGENT_CLIENT": "kkagent",
-        "GMS_AGENT_AUTH_MODE": "service-token",
-    }
-
-
-DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
-    # opt-in：晨报会消耗 kkagent 分析资源，默认关闭，owner 在设置里显式
-    # 开启后才进入 nightly 调度（不得默认启用）。
-    "enabled": False,
-    # 当前唯一实现的分析后端。历史上允许 "direct" 但从未实现，已从枚举
-    # 移除；旧配置里的 "direct" 会被规范化回 "kkagent"。
-    "analysis_backend": "kkagent",
-    "model": "",
-    # 绑定到该 owner 的本机 kkagent agent profile 名（~/.config/gms-agent/
-    # profiles/<name>.toml）。为空则不注入任何 MCP 身份——分析仍可运行，
-    # 但 MCP 取证工具会以未配置身份失败（fail-closed，不回退他人凭据）。
-    "agent_profile": "",
-    # 健全经验值：完整跑一轮 fetch+journals+history_search+综合，12 步常在
-    # 证据链较长时不够（issue #646220 实测烧满后以 max_turns 中断）；
-    # 20 步覆盖典型分析，仍可按 owner 在设置里调 1-50。
-    "max_turns": 20,
-    "issue_timeout_seconds": 600,
-    "max_parallel_issues": 1,
-    "max_issues": 50,
-    "stale_days": DEFAULT_STALE_DAYS,
-    "list_limit": DEFAULT_LIST_LIMIT,
-}
-RUNTIME_CONFIG_KEY = "redmine_daily_brief"
-
-
-def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, Any]:
-    """规范化配置；非法值回落默认，未知键由 API 层拒绝。"""
-    payload = payload or {}
-    config = dict(DEFAULT_BRIEF_CONFIG)
-
-    def _int(key: str, lo: int, hi: int) -> None:
-        try:
-            config[key] = max(lo, min(hi, int(payload.get(key, config[key]))))
-        except (TypeError, ValueError):
-            pass
-
-    config["enabled"] = bool(payload.get("enabled", config["enabled"]))
-    backend = str(payload.get("analysis_backend") or config["analysis_backend"]).strip()
-    config["analysis_backend"] = backend if backend in ("kkagent",) else "kkagent"
-    config["model"] = str(payload.get("model") or "").strip()
-    # profile 名只允许安全字符，避免注入 env / 路径。
-    profile = str(payload.get("agent_profile") or "").strip()
-    config["agent_profile"] = profile if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", profile) else ""
-    _int("max_turns", 1, 50)
-    _int("issue_timeout_seconds", 60, 3600)
-    _int("max_parallel_issues", 1, 4)
-    _int("max_issues", 1, 200)
-    _int("stale_days", 1, 30)
-    _int("list_limit", 1, 100)
-    return config
+# 配置契约 / 分析器构建已拆分至 daily_brief_config（service 保持编排职责）。
+from .daily_brief_config import (  # noqa: E402
+    DEFAULT_BRIEF_CONFIG,
+    RUNTIME_CONFIG_KEY,
+    analyzer_env_extra,
+    build_brief_analyzer,
+    normalize_daily_brief_config,
+)
 
 
 class DailyBriefService:
@@ -207,17 +153,26 @@ class DailyBriefService:
         self.repository.clear_cancel(run.run_id)
         self.repository.update_run(run)
 
-    def request_cancel(self, brief_date: str | None = None) -> dict[str, Any]:
-        """请求停止该日期最新的一次 run（协作式取消）。
+    def request_cancel(self, brief_date: str | None = None, run_id: str | None = None) -> dict[str, Any]:
+        """请求停止一次 run（协作式取消）。
+
+        审核意见 P2：同一天可能同时存在 nightly/manual/delta 多个 run，
+        "取消该日期最新一次"会停错目标。优先使用显式 run_id 精确取消；
+        未提供 run_id 时才回落到日期最新 run（旧 API 兼容）。
 
         独立 Worker 执行时靠 DB 标志位：执行循环在 issue 边界轮询并收敛
         为 cancelled 终态；同进程执行（Web 侧复用路径）额外对执行任务
         task.cancel()，让正在跑的单个 issue 也尽快停止。
         """
-        date = brief_date or brief_date_today()
-        run = self.repository.latest_run(self.owner_id, date)
-        if run is None:
-            return {"error": f"no daily brief run for {date}"}
+        if run_id:
+            run = self.repository.get_run(run_id)
+            if run is None or run.owner_id != self.owner_id:
+                return {"error": f"daily brief run not found: {run_id}"}
+        else:
+            date = brief_date or brief_date_today()
+            run = self.repository.latest_run(self.owner_id, date)
+            if run is None:
+                return {"error": f"no daily brief run for {date}"}
         if run.status in TERMINAL_RUN_STATUSES:
             return {
                 "run_id": run.run_id,
@@ -235,7 +190,14 @@ class DailyBriefService:
         }
 
     def start_run(self, mode: str = "manual", *, force: bool = False) -> dict[str, Any]:
-        """创建（或复用）当天 run。幂等规则见 repository.create_run。"""
+        """创建（或复用）当天 run，并在**同一事务**里入队 durable job。
+
+        审核意见 P1（孤儿 run 窗口）：run 与 job 原先分两步提交，进程在
+        两步之间崩溃会留下永不被执行的 pending run。现走
+        repository.create_run_and_enqueue_job 的单一 BEGIN IMMEDIATE 事务；
+        already_running 分支还做 has_active_job 兜底——万一存在历史孤儿
+        （旧版本产物）也当场补队。
+        """
         self._recover_interrupted_runs(self.get_config())
         brief_date = brief_date_today()
         existing = self.repository.find_run(self.owner_id, brief_date, mode)
@@ -244,31 +206,38 @@ class DailyBriefService:
                 return {"run_id": existing.run_id, "status": existing.status,
                         "reused": True}
             if existing.status in ("pending", "snapshotting", "analyzing"):
+                if not self.repository.has_active_job(existing.run_id, kind="run"):
+                    # 孤儿修复：run 活跃但没有 job（旧版本崩溃残留）——补队。
+                    self.repository.enqueue_job(existing.run_id, kind="run")
+                    return {"run_id": existing.run_id, "status": "pending",
+                            "queued": True}
                 return {"run_id": existing.run_id, "status": existing.status,
                         "already_running": True}
             # failed/cancelled（保留冻结快照重试）或人工 force（重新冻结）→ 复用 run。
             self._reset_run_for_retry(
                 existing, refreeze=bool(force or existing.status in ("completed", "partial"))
             )
-            return {"run_id": existing.run_id, "status": "pending"}
+            self.repository.enqueue_job(existing.run_id, kind="run")
+            return {"run_id": existing.run_id, "status": "pending", "queued": True}
 
         run = DailyBriefRun(
             owner_id=self.owner_id,
             brief_date=brief_date,
             mode=mode,
             run_id=new_run_id(),
-            status="snapshotting",
+            status="pending",
             started_at=_now(),
             prompt_version=PROMPT_VERSION,
         )
-        created = self.repository.create_run(run)
-        if created is not None and created.run_id != run.run_id:
-            return {"run_id": created.run_id, "status": created.status,
+        run_created, _job, _job_created = self.repository.create_run_and_enqueue_job(run)
+        if not run_created:
+            # 跨进程并发：另一进程刚建了同 owner+date+mode 的 run。
+            return {"run_id": run.run_id, "status": run.status,
                     "already_running": True}
-        return {"run_id": run.run_id, "status": "snapshotting"}
+        return {"run_id": run.run_id, "status": "pending", "queued": True}
 
     def start_refresh(self, brief_date: str) -> dict[str, Any]:
-        """delta 模式：基于当天 nightly 快照做增量重分析。"""
+        """delta 模式：基于当天 nightly 快照做增量重分析（入队 durable job）。"""
         self._recover_interrupted_runs(self.get_config())
         nightly = self.repository.find_run(self.owner_id, brief_date, "nightly")
         if nightly is None:
@@ -276,6 +245,10 @@ class DailyBriefService:
         existing = self.repository.find_run(self.owner_id, brief_date, "delta")
         if existing is not None:
             if existing.status in ("pending", "snapshotting", "analyzing"):
+                if not self.repository.has_active_job(existing.run_id, kind="run"):
+                    self.repository.enqueue_job(existing.run_id, kind="run")
+                    return {"run_id": existing.run_id, "status": "pending",
+                            "queued": True}
                 return {"run_id": existing.run_id, "status": existing.status,
                         "already_running": True}
             # failed → 保留冻结快照重试；completed/partial → 新一轮增量，
@@ -283,21 +256,22 @@ class DailyBriefService:
             self._reset_run_for_retry(
                 existing, refreeze=existing.status in ("completed", "partial")
             )
-            return {"run_id": existing.run_id, "status": "pending"}
+            self.repository.enqueue_job(existing.run_id, kind="run")
+            return {"run_id": existing.run_id, "status": "pending", "queued": True}
         run = DailyBriefRun(
             owner_id=self.owner_id,
             brief_date=brief_date,
             mode="delta",
             run_id=new_run_id(),
-            status="snapshotting",
+            status="pending",
             started_at=_now(),
             prompt_version=PROMPT_VERSION,
         )
-        created = self.repository.create_run(run)
-        if created is not None and created.run_id != run.run_id:
-            return {"run_id": created.run_id, "status": created.status,
+        run_created, _job, _job_created = self.repository.create_run_and_enqueue_job(run)
+        if not run_created:
+            return {"run_id": run.run_id, "status": run.status,
                     "already_running": True}
-        return {"run_id": run.run_id, "status": "snapshotting"}
+        return {"run_id": run.run_id, "status": "pending", "queued": True}
 
     async def execute_run(self, run_id: str) -> DailyBriefRun | None:
         """执行 run 全流程：快照 → 分析 → 汇总。异常只落到 run.error。
@@ -332,7 +306,7 @@ class DailyBriefService:
             # 401 上，不如整 run 快速失败并给出重注册指引（fail-closed；
             # 预检自身故障则放行，不阻塞分析）。
             auth_ok, auth_reason = await preflight_gms_auth(
-                _analyzer_env_extra(config.get("agent_profile"))
+                analyzer_env_extra(config.get("agent_profile"))
             )
             if not auth_ok:
                 run.status = "failed"
@@ -427,6 +401,14 @@ class DailyBriefService:
         run.snapshot_at = str(frozen.get("generated_at") or "")
         run.snapshot_hash = str(frozen.get("snapshot_hash") or "")
         run.source_sync_status = str(frozen.get("source_sync_status") or "")
+        # 数据新鲜度（审核意见 P2）：execution status 与 data quality 拆开。
+        # 同步成功的快照生成时间即 last_sync_at；失败/跳过时留空，由
+        # data_quality=sync_failed/unknown 表达"这不是最新数据"。
+        if run.source_sync_status == "synced":
+            run.last_sync_at = run.snapshot_at
+        run.data_quality = derive_data_quality(
+            run.source_sync_status, run.snapshot_at
+        )
         run.issue_count = len(issues)
         run.waiting_my_reply_count = int(counts.get("waiting_my_reply") or 0)
         run.no_reply_3_days_count = int(counts.get("no_reply_3_days") or 0)
@@ -479,13 +461,9 @@ class DailyBriefService:
         await asyncio.gather(*[_one(issue_id) for issue_id in pending_ids])
 
     def _build_analyzer(self, config: dict[str, Any]) -> KkAgentRedmineAnalyzer:
-        env_extra = _analyzer_env_extra(config.get("agent_profile"))
-        return KkAgentRedmineAnalyzer(
-            max_turns=int(config.get("max_turns") or DEFAULT_BRIEF_CONFIG["max_turns"]),
-            timeout_seconds=int(config.get("issue_timeout_seconds") or 600),
-            model=str(config.get("model") or ""),
-            env_extra=env_extra,
-        )
+        # 构建细节统一在 daily_brief_config.build_brief_analyzer（含
+        # evidence-only MCP toolset 注入）。
+        return build_brief_analyzer(config)
 
     def _recover_interrupted_runs(self, config: dict[str, Any]) -> int:
         """启动前把前次进程中断遗留的 run 标记为 failed（可重试）。
@@ -533,6 +511,19 @@ class DailyBriefService:
         record.finished_at = _now()
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.raw_response = outcome.raw_output
+        # 每次 AI attempt 的可审计轨迹（session/tool/usage）独立落库：
+        # Evidence Provenance 的查询起点；不塞进 issue 单条记录。
+        try:
+            self.repository.record_ai_execution(
+                run.run_id, issue_id,
+                {
+                    "attempt_no": record.attempt_count,
+                    **(outcome.trace or {}),
+                    "final_ok": bool(outcome.ok),
+                },
+            )
+        except Exception:
+            logger.exception("failed to persist ai execution trace")
         if outcome.ok and outcome.result:
             record.status = "completed"
             record.error = ""
@@ -570,7 +561,7 @@ class DailyBriefService:
         # 认证预检：token 失效时直接拒绝单条重分析（HTTP 404 携带原因），
         # 不再让该 issue 烧满 turn 预算后以 max_turns 失败。
         auth_ok, auth_reason = await preflight_gms_auth(
-            _analyzer_env_extra(config.get("agent_profile"))
+            analyzer_env_extra(config.get("agent_profile"))
         )
         if not auth_ok:
             return {"error": auth_reason}

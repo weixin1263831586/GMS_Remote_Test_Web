@@ -189,6 +189,20 @@ async def refresh_daily_brief(request: Request, brief_date: str):
     return {"success": True, "data": result}
 
 
+@router.post("/daily-brief/runs/{run_id}/issues/{issue_id}/reanalyze")
+async def reanalyze_issue_in_run(request: Request, run_id: str, issue_id: int):
+    """按 run_id 精确重新分析单个 issue（优先入口；date 回落见下方兼容路由）。"""
+    _require_human(request)
+    service = _service_for_request(request)
+    result = enqueue_reanalysis(service, "", issue_id, run_id=run_id)
+    if "run_id" in result:
+        return {"success": True, "data": result}
+    return JSONResponse(
+        content={"success": False, "error": result.get("error", "reanalyze failed")},
+        status_code=404,
+    )
+
+
 @router.post("/daily-brief/{brief_date}/issues/{issue_id}/reanalyze")
 async def reanalyze_issue(request: Request, brief_date: str, issue_id: int):
     _require_human(request)
@@ -202,9 +216,27 @@ async def reanalyze_issue(request: Request, brief_date: str, issue_id: int):
     )
 
 
+@router.post("/daily-brief/runs/{run_id}/cancel")
+async def cancel_daily_brief_run(request: Request, run_id: str):
+    """按 run_id 精确请求停止一次晨报 run（协作式取消）。
+
+    审核意见 P2：同一天可有 nightly/manual/delta 多个 run，按日期取消
+    "最新一次"会停错目标；UI 从当前卡片携带 run_id 精确取消。
+    """
+    _require_human(request)
+    service = _service_for_request(request)
+    result = service.request_cancel(run_id=run_id)
+    if result.get("error"):
+        return JSONResponse(
+            content={"success": False, "error": result["error"]},
+            status_code=404,
+        )
+    return {"success": True, "data": result}
+
+
 @router.post("/daily-brief/{brief_date}/cancel")
 async def cancel_daily_brief(request: Request, brief_date: str):
-    """请求停止该日期最新一次晨报 run（协作式取消）。
+    """请求停止该日期最新一次晨报 run（兼容入口；优先用 runs/{run_id}/cancel）。
 
     独立 Worker 执行靠 DB 标志位在 issue 边界生效；同进程执行额外
     task.cancel()。已终态的 run 幂等返回 already_terminal。
