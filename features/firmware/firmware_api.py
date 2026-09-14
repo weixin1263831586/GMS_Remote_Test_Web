@@ -35,6 +35,7 @@ from .firmware_validation import (
     validate_local_update_image,
     validate_remote_update_image,
 )
+from .local_flash import run_local_firmware_batch as _run_local_firmware_batch
 from .source_flash import (
     SourceFlashError,
     run_source_flash,
@@ -57,9 +58,6 @@ from .usbip_transport import (
 )
 from .usbip_transport import (
     wait_for_adb_devices as _wait_for_adb_devices,
-)
-from .usbip_transport import (
-    wait_for_rockusb_loaders as _wait_for_rockusb_loaders,
 )
 
 
@@ -668,52 +666,66 @@ async def burn_firmware(
                         "USB/IP device released to source host; "
                         "waiting for Source Agent..."
                     )
-                    results = []
-                    try:
-                        for device in devices:
-                            route = route_map.get(device) or {}
-                            device_host = str(
-                                route.get("device_host") or ""
-                            ).strip()
-                            if not device_host:
-                                raise SourceFlashError(
-                                    f"设备 {device} 缺少 Windows 源主机路由",
-                                    status_code=409, stage="DISPATCH",
-                                )
-                            report = await run_source_flash(
-                                device=device,
-                                device_host=device_host,
-                                firmware_path=remote_firmware,
-                                on_log=_source_log,
-                                keepalive=(
-                                    lambda: chunk_uploads.refresh_burn_lock(
-                                        burn_lock_path
-                                    )
-                                ),
+                    async def _run_source_device(device: str):
+                        route = route_map.get(device) or {}
+                        device_host = str(route.get("device_host") or "").strip()
+                        if not device_host:
+                            raise SourceFlashError(
+                                f"设备 {device} 缺少 Windows 源主机路由",
+                                status_code=409, stage="DISPATCH",
                             )
-                            results.append({
-                                "device": report.device,
-                                "success": report.success,
-                                "stage": report.stage,
-                                "status": report.status,
-                                "elapsed_seconds": round(
-                                    report.elapsed_seconds, 1,
-                                ),
-                            })
-                    except SourceFlashError as exc:
-                        runtime.store_notification(
-                            client_id,
-                            "Source-side firmware burn failed",
-                            str(exc)[:300],
-                            "error",
-                            "firmware",
-                            {"devices": devices, "firmware": firmware_name},
+                        return await run_source_flash(
+                            device=device,
+                            device_host=device_host,
+                            firmware_path=remote_firmware,
+                            on_log=_source_log,
+                            keepalive=lambda: chunk_uploads.refresh_burn_lock(
+                                burn_lock_path
+                            ),
                         )
-                        # 烧写失败：调度 USB/IP 重连，让设备回到平台管理。
+
+                    # Dispatch independent physical source hosts concurrently;
+                    # each Source Agent still serializes tasks for its own GUI.
+                    outcomes = await asyncio.gather(
+                        *(_run_source_device(device) for device in devices),
+                        return_exceptions=True,
+                    )
+                    results = []
+                    failures = []
+                    for device, outcome in zip(devices, outcomes):
+                        if isinstance(outcome, BaseException):
+                            failures.append((device, outcome))
+                            results.append({
+                                "device": device, "success": False,
+                                "stage": getattr(outcome, "stage", "DISPATCH"),
+                                "error": str(outcome),
+                            })
+                            continue
+                        results.append({
+                            "device": outcome.device,
+                            "success": outcome.success,
+                            "stage": outcome.stage,
+                            "status": outcome.status,
+                            "elapsed_seconds": round(outcome.elapsed_seconds, 1),
+                        })
+                        if not outcome.success:
+                            failures.append((device, SourceFlashError(
+                                outcome.error or outcome.status or "烧写失败",
+                                stage=outcome.stage,
+                            )))
+                    if failures:
+                        first_device, first_error = failures[0]
+                        detail = f"设备 {first_device}: {first_error}"
+                        runtime.store_notification(
+                            client_id, "Source-side firmware burn failed",
+                            detail[:300], "error", "firmware",
+                            {"devices": devices, "firmware": firmware_name,
+                             "results": results},
+                        )
                         usbip_reconnect_after_finish = True
                         return error_response(
-                            f"源端烧写失败（{exc.stage}）: {exc}",
-                            status_code=exc.status_code,
+                            f"源端烧写失败（{getattr(first_error, 'stage', 'FLASHING')}）: {detail}",
+                            status_code=getattr(first_error, "status_code", 422),
                         )
 
                     runtime.store_notification(
@@ -740,7 +752,10 @@ async def burn_firmware(
                     # 成功后按原物理路由重新导出 USB/IP。
                     usbip_reconnect_after_finish = True
                     return success_response(
-                        data={"results": results},
+                        data={
+                            "results": results,
+                            "execution_mode": "parallel-by-source-host",
+                        },
                         message="Source-side firmware burn completed successfully",
                     )
 
@@ -776,143 +791,76 @@ async def burn_firmware(
                             status_code=409,
                         )
 
-                # Enter Loader mode (local devices: plain adb reboot loader).
-                for device in devices:
-                    if protocols.get(device) == "rockusb-loader":
-                        continue
-                    cmd = f"adb -s {shlex.quote(device)} reboot loader"
-                    await asyncio.to_thread(
-                        runtime.ssh_manager.execute_command,
-                        ssh,
-                        cmd,
-                        timeout=5,
-                    )
-
-                # Check Loader devices
-                quoted_suite_dir = shlex.quote(gms_suite_dir)
-                quoted_remote_tool = shlex.quote(remote_tool)
-                check_cmd = f"cd {quoted_suite_dir} && {quoted_remote_tool} ld"
-                loader_ready, output = await _wait_for_rockusb_loaders(
-                    ssh,
-                    check_cmd,
-                    len(devices),
-                )
-                if not loader_ready:
-                    return error_response(
-                        f"No Loader devices detected. Output:\n{output}",
-                        status_code=409,
-                    )
-
-                # Burn firmware
-                burn_cmd = (
-                    f"cd {quoted_suite_dir} && {quoted_remote_tool} uf "
-                    f"{shlex.quote(remote_firmware)}"
-                )
-
-                if client_id in runtime.global_state.websocket_connections:
+                # ``upgrade_tool uf`` cannot select a serial.  Run a verified
+                # per-device batch so a multi-device request never reports
+                # success for a board that was not actually flashed.
+                if len(devices) > 1 and client_id in runtime.global_state.websocket_connections:
                     with contextlib.suppress(Exception):
-                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Starting firmware burn...", "log_type": "info"})
-
-                # 统一执行层：改走 SSHExecutor.run_stream ——
-                # stdout/stderr 双流并发 drain（get_pty=True 时 stderr 并入
-                # stdout），逐行回调推送 WebSocket，退出后由执行器取状态码。
-                # 历史实现手工轮询单条 channel 会重新引入双流互锁风险。
-                firmware_burn_start = False
-                current_progress = 0
-                last_progress_time = asyncio.get_event_loop().time()
-                output_buffer: list[str] = []
-
-                async def _burn_log_callback(line: str, log_type: str) -> None:
-                    nonlocal firmware_burn_start, current_progress, last_progress_time
-                    # get_pty=True 时 upgrade_tool 输出带 ANSI 控制序列；
-                    # 与迁移前行为一致，逐行剥离后再做关键词判定与推送。
-                    clean_line = strip_ansi_codes(line).strip()
-                    if not clean_line:
-                        return
-                    if "Download Firmware Start" in clean_line and not firmware_burn_start:
-                        firmware_burn_start = True
-                        current_progress = 0
-                        last_progress_time = asyncio.get_event_loop().time()
-                    output_buffer.append(clean_line)
-                    if client_id not in runtime.global_state.websocket_connections:
-                        return
-                    with contextlib.suppress(Exception):
-                        await runtime.safe_websocket_send(
-                            client_id,
-                            {"type": "log_update", "log": clean_line, "log_type": log_type},
-                        )
-
-                async def _burn_progress_tick() -> None:
-                    # 烧写期间按配置间隔推模拟进度（真实进度 RKDevTool/
-                    # upgrade_tool 不输出百分比，沿用既有近似策略）。
-                    nonlocal current_progress, last_progress_time
-                    while True:
-                        await asyncio.sleep(0.1)
-                        if _burn_task.done() or _burn_task.cancelled():
-                            return
-                        current_time = asyncio.get_event_loop().time()
-                        if firmware_burn_start and (
-                            current_time - last_progress_time
-                            > runtime.gsi_progress_poll_interval
-                        ):
-                            current_progress = min(
-                                current_progress + runtime.gsi_progress_increment,
-                                runtime.gsi_progress_max,
-                            )
-                            last_progress_time = current_time
-                            if client_id in runtime.global_state.websocket_connections:
-                                with contextlib.suppress(Exception):
-                                    await runtime.safe_websocket_send(
-                                        client_id,
-                                        {
-                                            "type": "firmware_progress",
-                                            "percentage": current_progress,
-                                        },
-                                    )
-
-                from foundation.ssh_executor import ssh_executor as _executor
-
-                _burn_task = asyncio.ensure_future(
-                    _executor.run_stream(
-                        ssh,
-                        burn_cmd,
-                        _burn_log_callback,
-                        timeout=300,
-                        get_pty=True,
-                    )
+                        await runtime.safe_websocket_send(client_id, {
+                            "type": "log_update",
+                            "log": "多设备固件任务将按设备安全执行并逐台校验（upgrade_tool 不支持并发选择）",
+                            "log_type": "info",
+                        })
+                results, batch_error = await _run_local_firmware_batch(
+                    ssh=ssh,
+                    devices=devices,
+                    protocols=protocols,
+                    suite_dir=gms_suite_dir,
+                    remote_tool=remote_tool,
+                    remote_firmware=remote_firmware,
+                    client_id=client_id,
                 )
-                _progress_task = asyncio.ensure_future(_burn_progress_tick())
-                burn_result = await _burn_task
-                _progress_task.cancel()
-                final_output = "".join(output_buffer)
-                exit_status = burn_result.code
-                if exit_status == 0:
+                if batch_error is None:
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
-                            await runtime.safe_websocket_send(client_id, {"type": "firmware_progress", "percentage": 100})
-                            await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": "Firmware burn complete!", "log_type": "success"})
-                    runtime.store_notification(client_id, "Firmware burn complete", f"Devices: {', '.join(devices)}", "success", "firmware", {"devices": devices, "firmware": firmware_name})
-                    if client_id in runtime.global_state.websocket_connections:
-                        with contextlib.suppress(Exception):
-                            await runtime.safe_websocket_send(client_id, {"type": "firmware_burn_complete", "devices": devices, "success": True})
+                            await runtime.safe_websocket_send(client_id, {
+                                "type": "firmware_progress", "percentage": 100,
+                            })
+                            await runtime.safe_websocket_send(client_id, {
+                                "type": "log_update",
+                                "log": "Firmware burn complete!",
+                                "log_type": "success",
+                            })
+                            await runtime.safe_websocket_send(client_id, {
+                                "type": "firmware_burn_complete",
+                                "devices": devices, "success": True,
+                                "results": results,
+                            })
+                    runtime.store_notification(
+                        client_id, "Firmware burn complete",
+                        f"Devices: {', '.join(devices)}", "success", "firmware",
+                        {"devices": devices, "firmware": firmware_name,
+                         "results": results, "backend": "local-upgrade-tool"},
+                    )
                     burn_succeeded = True
-                    return success_response(message="Firmware burn completed successfully")
+                    return success_response(
+                        data={
+                            "results": results,
+                            "execution_mode": "serial-per-device",
+                        },
+                        message="Firmware burn completed successfully",
+                    )
 
-                stderr_output = burn_result.stderr or ""
-                error_output = "\n".join(
-                    part for part in (final_output, stderr_output) if part
-                )
-                clean_output = strip_ansi_codes(error_output).strip()
+                detail = batch_error or "Firmware burn failed"
                 if client_id in runtime.global_state.websocket_connections:
                     with contextlib.suppress(Exception):
-                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Firmware burn failed (exit code: {exit_status})", "log_type": "error"})
-                        if error_output and len(error_output) < 500:
-                            await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Error: {error_output[:200]}", "log_type": "error"})
-                runtime.store_notification(client_id, "Firmware burn failed", (error_output or "Burn failed")[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name, "exit_status": exit_status})
-                burn_error_msg = f"Firmware burn failed (exit code: {exit_status})"
-                if clean_output:
-                    burn_error_msg += f": {clean_output[:300]}"
-                return error_response(burn_error_msg, status_code=422)
+                        await runtime.safe_websocket_send(client_id, {
+                            "type": "log_update", "log": detail,
+                            "log_type": "error",
+                        })
+                        await runtime.safe_websocket_send(client_id, {
+                            "type": "firmware_burn_complete",
+                            "devices": devices, "success": False,
+                            "results": results,
+                        })
+                runtime.store_notification(
+                    client_id, "Firmware burn failed", detail[:300], "error",
+                    "firmware", {"devices": devices, "firmware": firmware_name,
+                                 "results": results},
+                )
+                return error_response(
+                    f"Firmware burn failed: {detail}", status_code=422,
+                )
 
             except Exception as e:
                 runtime.store_notification(client_id, "Firmware burn error", str(e)[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name if 'firmware_name' in dir() else ""})
@@ -959,4 +907,3 @@ async def burn_firmware(
         if locked_devices and client_id:
             with contextlib.suppress(Exception):
                 await runtime.release_firmware_devices(client_id, locked_devices)
-

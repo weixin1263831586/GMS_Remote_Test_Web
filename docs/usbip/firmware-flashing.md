@@ -31,6 +31,15 @@ Loader、MaskROM 等 USB 重枚举属于 Source 端烧写 backend 的内部细�
 GSI 直刷只支持从 ADB/Fastboot 起步；RockUSB Loader 仅属于 `update.img`
 固件烧写链路。
 
+一次请求可以包含多台 Local USB 设备。由于 Rockchip `upgrade_tool uf`
+不提供序列号选择参数，平台不会在同一 Worker 上并发启动多个 `uf` 进程，
+而是逐台执行并在每台完成后等待对应序列号退出 Loader；ADB 恢复只作为
+可选信息，不要求用户完成开机向导或打开 USB debugging。响应的 `results` 会
+分别记录 `SUCCEEDED`、失败阶段和被跳过的设备。这样可以避免多个 Loader
+同时存在时工具选错设备。Windows USB/IP 设备则按物理 Source Host 并发
+派发；同一 Source Agent 仍由其桌面队列串行化，避免多个任务争用同一个
+RKDevTool 窗口。
+
 ## Windows USB/IP flow
 
 USB/IP 设备的完整固件烧写流程：
