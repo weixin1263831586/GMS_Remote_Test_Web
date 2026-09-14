@@ -12,9 +12,9 @@ Tracked contents:
 Deployment-only artifacts (never tracked in Git; fetched on demand with
 mandatory SHA256 checks):
 
-- `jdk-11/`: fallback Java runtime for older CTS/GTS tools. Its large
-  `lib/modules` image is stored as `modules.part.*` chunks and is restored
-  automatically by the Worker installer.
+- `jdk-11/`: fallback Java runtime for older CTS/GTS tools, pinned to
+  Eclipse Temurin `11.0.32.1+1` (x64 Linux tarball, SHA256 verified against
+  the Adoptium-published checksum and validated to report Java major 11).
 - `platform-tools-gms-linux.zip`: the unmodified Google Android SDK
   Platform-Tools Linux archive (adb, fastboot and bundled runtime files).
 
@@ -24,7 +24,9 @@ it to `${SOFTWARE_ROOT}/gts-rockchip.json` with mode 0600 and `env.sh` exposes
 it as `APE_API_KEY`. Python remains a target-host system dependency.
 
 Configure the controller through `configs/runtime.json` or its service
-environment before deploying/reconfiguring a Worker:
+environment before deploying/reconfiguring a Worker. The example values are
+optional overrides for an access-controlled mirror; leave them empty to use
+the pinned defaults:
 
 ```json
 {
@@ -35,12 +37,19 @@ environment before deploying/reconfiguring a Worker:
 }
 ```
 
+Pinned defaults (see `manifest.json` in this directory), applied when the
+matching URL/SHA256 pair is not configured:
+
+- JDK 11:
+  `https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.32.1%2B1/OpenJDK11U-jdk_x64_linux_hotspot_11.0.32.1_1.tar.gz`
+  (`sha256 5c3f68887c325d36d852ba534303e1f5f1f5cae7d6cc1e951d73e0d8e98a058d`)
+- Platform-Tools:
+  `https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip`
+
 When the Platform-Tools URL is not configured, `prepare_gms_host_tools.sh`
-automatically downloads the pinned Google package from
-`https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip`
-and verifies SHA-256 before installing it. URL/checksum overrides remain
-available for an access-controlled mirror, and both values must be supplied
-together.
+automatically downloads the pinned Google package and verifies SHA-256 before
+installing it. URL/checksum overrides remain available for an access-controlled
+mirror, and each override must supply URL and SHA256 together.
 
 `aapt` and `aapt2` are Android Build-Tools commands and are deliberately not
 added to the Platform-Tools ZIP. Install Build-Tools separately; set
@@ -55,22 +64,12 @@ Only publish artifact URLs for binaries your organization is licensed to
 redistribute. Deployments that must avoid direct Internet access can mirror the
 same original Google ZIP and configure its HTTPS URL plus exact SHA-256.
 
-Manual installation (after fetching the two artifacts into this directory):
+Manual installation (after fetching the two artifacts into this directory;
+`prepare_gms_host_tools.sh` performs the same steps automatically):
 
 ```bash
 mkdir -p "$HOME/Software"
 rsync -a jdk-11/ "$HOME/Software/jdk-11/"
-python3 - "$HOME/Software/jdk-11/lib" <<'PY'
-import sys
-from pathlib import Path
-root = Path(sys.argv[1])
-parts = sorted(root.glob("modules.part.*"))
-with (root / "modules").open("wb") as output:
-    for part in parts:
-        output.write(part.read_bytes())
-for part in parts:
-    part.unlink()
-PY
 python3 /path/to/extract_zip_preserve_mode.py platform-tools-gms-linux.zip "$HOME/Software"
 mkdir -p "$HOME/Software/GMS-Host-Tools"
 cp env.sh verify.sh "$HOME/Software/GMS-Host-Tools/"

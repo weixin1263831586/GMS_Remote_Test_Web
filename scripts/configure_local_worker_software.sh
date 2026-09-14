@@ -18,7 +18,7 @@ SOFTWARE_ROOT="${RUN_HOME}/Software"
     exit 2
 }
 [[ -x "${HOST_TOOLS}/jdk-11/bin/java" ]] || {
-    echo "jdk-11 not provisioned; set GMS_HOST_TOOLS_JDK_URL and GMS_HOST_TOOLS_JDK_SHA256" >&2
+    echo "jdk-11 not provisioned; run scripts/prepare_gms_host_tools.sh (pinned Temurin 11 download, see tools/GMS-Host-Tools/manifest.json)" >&2
     exit 1
 }
 [[ -f "${HOST_TOOLS}/platform-tools-gms-linux.zip" ]] || {

@@ -98,17 +98,17 @@ mkdir -p "${INSTALL_ROOT}" "${CONFIG_ROOT}" "${UNIT_ROOT}" \
     "${HOME}/.cache/gms-worker/pycache" "${HOME}/gms-worker-data" \
     "${SOFTWARE_ROOT}/GMS-Host-Tools"
 
-# JDK 11 与 platform-tools 不再进 Git（ADR 仓库卫生策略）：缺失时经
-# scripts/prepare_gms_host_tools.sh 从配置的制品 URL 下载并强校验 SHA-256
-# （GMS_HOST_TOOLS_JDK_URL / GMS_HOST_TOOLS_JDK_SHA256，见
-# tools/GMS-Host-Tools/manifest.json）。
+# JDK 11 与 platform-tools 不进 Git：缺失时经 scripts/prepare_gms_host_tools.sh
+# 下载固定版本并强校验 SHA-256（JDK 默认使用 manifest.json 中固定的 Temurin
+# 11.0.32.1+1，GMS_HOST_TOOLS_JDK_URL / GMS_HOST_TOOLS_JDK_SHA256 仅作镜像
+# override，见 tools/GMS-Host-Tools/manifest.json）。
 if [[ ! -x "${HOST_TOOLS_SOURCE}/jdk-11/bin/java" ]] || \
         [[ ! -f "${HOST_TOOLS_SOURCE}/platform-tools-gms-linux.zip" ]]; then
     echo "Provisioning host tools (jdk-11 / platform-tools) from artifact URLs..." >&2
     "${PROJECT_ROOT}/scripts/prepare_gms_host_tools.sh" "${PROJECT_ROOT}"
 fi
 if [[ ! -x "${HOST_TOOLS_SOURCE}/jdk-11/bin/java" ]]; then
-    echo "jdk-11 provisioning failed; set GMS_HOST_TOOLS_JDK_URL and GMS_HOST_TOOLS_JDK_SHA256" >&2
+    echo "jdk-11 provisioning failed; check network access to the pinned Temurin 11 URL, or override GMS_HOST_TOOLS_JDK_URL and GMS_HOST_TOOLS_JDK_SHA256 (see tools/GMS-Host-Tools/manifest.json)" >&2
     exit 1
 fi
 if [[ ! -f "${HOST_TOOLS_SOURCE}/platform-tools-gms-linux.zip" ]]; then

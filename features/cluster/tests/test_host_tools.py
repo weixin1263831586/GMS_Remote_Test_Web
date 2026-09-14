@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -21,6 +22,69 @@ PREPARE_SCRIPT = PROJECT_ROOT / "scripts/prepare_gms_host_tools.sh"
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+TEMURIN_JDK_URL = (
+    "https://github.com/adoptium/temurin11-binaries/releases/download/"
+    "jdk-11.0.32.1%2B1/OpenJDK11U-jdk_x64_linux_hotspot_11.0.32.1_1.tar.gz"
+)
+TEMURIN_JDK_SHA256 = (
+    "5c3f68887c325d36d852ba534303e1f5f1f5cae7d6cc1e951d73e0d8e98a058d"
+)
+
+
+def _base_env() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GMS_HOST_TOOLS_")
+    }
+
+
+def test_prepare_script_and_manifest_pin_the_same_temurin_jdk():
+    script = PREPARE_SCRIPT.read_text(encoding="utf-8")
+    manifest = json.loads(
+        (HOST_TOOLS / "manifest.json").read_text(encoding="utf-8")
+    )
+    provision = manifest["artifacts"]["jdk-11"]["provision"]
+
+    assert provision["version"] == "11.0.32.1+1"
+    assert provision["default_source"] == TEMURIN_JDK_URL
+    assert provision["sha256"] == TEMURIN_JDK_SHA256
+    assert provision["url_env"] == "GMS_HOST_TOOLS_JDK_URL"
+    assert provision["sha256_env"] == "GMS_HOST_TOOLS_JDK_SHA256"
+    # 脚本内置同一组固定值，env 缺省时无需任何配置即可下载。
+    assert f'TEMURIN_JDK_URL="{TEMURIN_JDK_URL}"' in script
+    assert f'TEMURIN_JDK_SHA256="{TEMURIN_JDK_SHA256}"' in script
+
+
+def test_prepare_script_rejects_jdk_override_without_sha256(tmp_path):
+    project = tmp_path / "project"
+    (project / "tools/GMS-Host-Tools").mkdir(parents=True)
+    url_only = subprocess.run(
+        [PREPARE_SCRIPT, project],
+        env={
+            **_base_env(),
+            "GMS_HOST_TOOLS_JDK_URL": "https://mirror.example/jdk.tar.gz",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert url_only.returncode != 0
+    assert "requires an exact 64-character SHA256" in url_only.stderr
+    sha_only = subprocess.run(
+        [PREPARE_SCRIPT, project],
+        env={
+            **_base_env(),
+            "GMS_HOST_TOOLS_JDK_SHA256": "a" * 64,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert sha_only.returncode != 0
+    assert "requires both URL and SHA256" in sha_only.stderr
 
 
 def test_only_non_sensitive_host_tool_helpers_are_tracked():
@@ -45,7 +109,11 @@ def test_prepare_host_tools_fetches_verified_artifacts(tmp_path):
     jdk_tree = source / "jdk-11"
     (jdk_tree / "bin").mkdir(parents=True)
     (jdk_tree / "legal").mkdir()
-    (jdk_tree / "bin/java").write_text("#!/bin/sh\n", encoding="utf-8")
+    (jdk_tree / "bin/java").write_text(
+        '#!/bin/sh\necho \'openjdk version "11.0.28" 2025-10-21\'\n'
+        'echo \'OpenJDK Runtime Environment Temurin-11.0.28+6\'\n',
+        encoding="utf-8",
+    )
     (jdk_tree / "bin/java").chmod(0o755)
     (jdk_tree / "release").write_text('JAVA_VERSION="11"\n', encoding="utf-8")
     (jdk_tree / "legal/LICENSE").write_text("GPLv2", encoding="utf-8")
