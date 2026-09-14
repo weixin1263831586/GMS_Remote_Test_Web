@@ -72,6 +72,20 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.delete_issues(run.run_id), 2)
         self.assertEqual(self.repo.list_issues(run.run_id), [])
 
+    def test_latest_ai_execution_is_grouped_per_issue(self):
+        run = make_run()
+        self.repo.create_run(run)
+        self.repo.record_ai_execution(run.run_id, 1, {"attempt_no": 1, "status": "failed"})
+        self.repo.record_ai_execution(run.run_id, 2, {"attempt_no": 1, "status": "completed"})
+        self.repo.record_ai_execution(run.run_id, 1, {"attempt_no": 2, "status": "completed"})
+
+        latest = self.repo.latest_ai_executions_by_issue(run.run_id)
+
+        self.assertEqual(latest[1]["attempt_no"], 2)
+        self.assertEqual(latest[1]["status"], "completed")
+        self.assertEqual(latest[2]["attempt_no"], 1)
+        self.assertIn("recorded_at", latest[1])
+
     def test_reset_stale_running_marks_interrupted_runs(self):
         run = make_run(status="analyzing", started_at="2026-09-13T00:00:00")
         self.repo.create_run(run)

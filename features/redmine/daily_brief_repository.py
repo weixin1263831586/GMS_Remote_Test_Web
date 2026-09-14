@@ -510,6 +510,27 @@ class DailyBriefRepository:
                     executions.append(payload)
             return executions
 
+    def latest_ai_executions_by_issue(self, run_id: str) -> dict[int, dict[str, Any]]:
+        """一次查询返回 run 内每个 issue 最新的脱敏执行 payload。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT issue_id, payload_json, created_at "
+                "FROM redmine_daily_brief_ai_executions "
+                "WHERE run_id=? ORDER BY rowid",
+                (run_id,),
+            ).fetchall()
+        latest: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            payload["recorded_at"] = row["created_at"]
+            latest[int(row["issue_id"])] = payload
+        return latest
+
     # ------------------------------------------------------------------ snapshots
 
     def save_snapshot(self, run_id: str, snapshot: dict[str, Any]) -> None:

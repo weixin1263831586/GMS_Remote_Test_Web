@@ -1,6 +1,6 @@
 # Redmine Daily Triage（AI 晨报分析规范）
 
-版本：`redmine_daily_triage_v1`
+版本：`redmine_daily_triage_v8`
 
 用途：对当天个人看板待处理 Redmine issue（`waiting_my_reply` /
 `no_reply_3_days`）做只读取证与结构化分析，输出可直接进入 Daily Brief
@@ -14,12 +14,15 @@
 2. 对每个 issue：`gms_rt_redmine_issue_fetch` 取完整证据快照（journal
    不截断、附件带 SHA-256）。
 3. 判断客户最后一次实际诉求（journal 最新外部回复）。
-4. `gms_rt_redmine_attachments` 查看附件清单，按类型决定是否读内容。
+4. `gms_rt_redmine_attachments` 查看附件清单；每个状态为 ready/partial
+   的 text/log 附件必须至少调用一次 `gms_rt_redmine_artifact_read`。
 5. 日志/XML/PDF：优先用已有解析结果；大日志必须
    `gms_rt_redmine_artifact_search` 先搜、`gms_rt_redmine_artifact_read`
    按窗口读，禁止整文件入 prompt。
 6. 截图：`gms_rt_redmine_image`（OCR/元数据已由平台完成）。
-7. 需要历史参照时检索 knowledge / 相似 issue（只读工具）。
+7. 必须调用 `gms_rt_redmine_history_search` 做 2–4 个不同关键词查询；
+   重复大小写或空白变化仍视为同一查询。相似 issue 只有在成功的历史检索
+   或后续 issue fetch 结果中真实出现过，才可写入结果。
 8. 输出下方 JSON Schema；证据不足就降置信度，不编造根因。
 
 ## 证据读取优先级
@@ -29,30 +32,45 @@ issue → journals → attachment metadata → parsed summary
      → artifact search → artifact window read →（必要时才读更多）
 ```
 
-## 输出 Schema（每个 issue，字段固定，不得增删）
+## AI 输出 Schema
 
 ```json
 {
-  "issue_id": 0,
-  "buckets": ["waiting_my_reply"],
-  "priority": "P1",
   "customer_request": "",
-  "current_status": "",
   "problem_summary": "",
   "current_blocker": "",
   "root_cause": "",
   "root_cause_type": "confirmed|likely|possible|unknown",
-  "evidence": [{"source": "journal|attachment|knowledge|issue", "reference": "", "fact": ""}],
+  "evidence": [{"source": "journal|attachment|knowledge|issue|history", "reference": "", "fact": ""}],
   "recommended_actions": [{"step": 1, "action": "", "reason": ""}],
   "suggested_solution": "",
+  "similar_issues": [{"issue_id": 0, "subject": "", "similarity": "same|similar|related", "reusable_fix": "", "reference_fact": ""}],
   "missing_information": [],
   "suggested_reply_en": "",
   "suggested_reply_zh": "",
   "risk": "high|medium|low",
-  "confidence": 0.0,
-  "needs_human_review": false
+  "detailed_report": "## 一、问题概况\n...",
+  "confidence": 0.0
 }
 ```
+
+`history_checked` 不由模型填写。Controller 从 kkagent stream-json 的
+`tool_call` + 成功 `tool_result` 派生并覆盖运行时字段，同时记录：
+
+```json
+{
+  "history_checked": true,
+  "history_search_count": 3,
+  "distinct_history_search_count": 2,
+  "tool_call_count": 11,
+  "session_id": "...",
+  "duration_ms": 21342
+}
+```
+
+模型 JSON 的 schema 或运行时 Evidence Gate 未通过时，Controller 只用
+`kkagent --resume <该 issue 的精确 session_id>` 请求返回完整修正版，并
+重新校验。自动流程禁止使用 `--continue`。
 
 ## confidence 规则
 

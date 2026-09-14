@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 # 单条 preview / 输入回显的入库上限。
@@ -42,20 +44,38 @@ class ToolTrace:
     tool_call_id: str = ""
     tool_name: str = ""
     tool_input: dict[str, Any] = field(default_factory=dict)
-    is_error: bool = False
+    status: Literal["pending", "succeeded", "failed"] = "pending"
     output_sha256: str = ""
     output_bytes: int = 0
     output_preview: str = ""
+    evidence_issue_ids: list[int] = field(default_factory=list)
+    attachment_manifest_parsed: bool = False
+    attachment_count: int = 0
+    text_artifact_ids: list[str] = field(default_factory=list)
+
+    @property
+    def is_error(self) -> bool:
+        """兼容旧的 trace 消费方；pending 既不是成功也不是失败。"""
+        return self.status == "failed"
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status == "succeeded"
 
     def to_summary(self) -> dict[str, Any]:
         return {
             "tool_call_id": self.tool_call_id,
             "tool_name": self.tool_name,
             "tool_input": self.tool_input,
+            "status": self.status,
             "is_error": self.is_error,
             "output_sha256": self.output_sha256,
             "output_bytes": self.output_bytes,
             "output_preview": self.output_preview,
+            "evidence_issue_ids": self.evidence_issue_ids,
+            "attachment_manifest_parsed": self.attachment_manifest_parsed,
+            "attachment_count": self.attachment_count,
+            "text_artifact_ids": self.text_artifact_ids,
         }
 
 
@@ -78,6 +98,7 @@ class KkAgentTrace:
     cache_creation_tokens: int = 0
 
     llm_retries: int = 0
+    repair_attempts: int = 0
     tool_calls: list[ToolTrace] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -97,11 +118,54 @@ class KkAgentTrace:
         return sum(
             1
             for call in self.tool_calls
-            if not call.is_error and "history_search" in call.tool_name
+            if call.succeeded and "history_search" in call.tool_name
         )
 
+    @property
+    def distinct_history_queries(self) -> list[str]:
+        queries: list[str] = []
+        seen: set[str] = set()
+        for call in self.tool_calls:
+            if not call.succeeded or "history_search" not in call.tool_name:
+                continue
+            query = _normalize_history_query(
+                call.tool_input.get("q", call.tool_input.get("query"))
+            )
+            if query and query not in seen:
+                seen.add(query)
+                queries.append(query)
+        return queries
+
+    @property
+    def distinct_history_search_count(self) -> int:
+        return len(self.distinct_history_queries)
+
     def successful_tool_names(self) -> list[str]:
-        return [call.tool_name for call in self.tool_calls if not call.is_error]
+        return [call.tool_name for call in self.tool_calls if call.succeeded]
+
+    def evidenced_issue_ids(self) -> set[int]:
+        return {
+            issue_id
+            for call in self.tool_calls
+            if call.succeeded
+            for issue_id in call.evidence_issue_ids
+        }
+
+    def listed_text_artifact_ids(self) -> set[str]:
+        return {
+            artifact_id
+            for call in self.tool_calls
+            if call.succeeded and "redmine_attachments" in call.tool_name
+            for artifact_id in call.text_artifact_ids
+        }
+
+    def read_artifact_ids(self) -> set[str]:
+        return {
+            str(call.tool_input.get("artifact_id") or "").strip()
+            for call in self.tool_calls
+            if call.succeeded and "artifact_read" in call.tool_name
+            if str(call.tool_input.get("artifact_id") or "").strip()
+        }
 
     def to_summary(self) -> dict[str, Any]:
         return {
@@ -118,14 +182,82 @@ class KkAgentTrace:
             "cache_read_tokens": self.cache_read_tokens,
             "cache_creation_tokens": self.cache_creation_tokens,
             "llm_retries": self.llm_retries,
+            "repair_attempts": self.repair_attempts,
             "tool_call_count": len(self.tool_calls),
             "history_search_count": self.history_search_count,
+            "distinct_history_search_count": self.distinct_history_search_count,
             "tools": [call.to_summary() for call in self.tool_calls],
             "errors": self.errors[:10],
             "status": self.status,
             "error_type": self.error_type,
             "error": self.error[:1000],
         }
+
+
+def _normalize_history_query(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _bounded_tool_input(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    if len(encoded) <= TOOL_INPUT_JSON_CHARS:
+        return value
+    return {"_truncated_json": encoded[:TOOL_INPUT_JSON_CHARS]}
+
+
+def _structured_issue_ids(value: Any) -> list[int]:
+    """只从结构化工具结果提取 issue_id，避免把任意正文数字当证据。"""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+    found: set[int] = set()
+
+    def walk(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if key == "issue_id":
+                    try:
+                        issue_id = int(child)
+                    except (TypeError, ValueError):
+                        pass
+                    else:
+                        if issue_id > 0:
+                            found.add(issue_id)
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(value)
+    return sorted(found)[:100]
+
+
+def _attachment_manifest(value: Any) -> tuple[bool, int, list[str]]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return False, 0, []
+    if not isinstance(value, dict):
+        return False, 0, []
+    data = value.get("data") if isinstance(value.get("data"), dict) else value
+    artifacts = data.get("artifacts") if isinstance(data, dict) else None
+    if not isinstance(artifacts, list):
+        return False, 0, []
+    text_ids = {
+        str(item.get("artifact_id") or "").strip()
+        for item in artifacts
+        if isinstance(item, dict)
+        and str(item.get("kind") or "") in {"text", "log"}
+        and str(item.get("status") or "") in {"ready", "partial"}
+        and str(item.get("artifact_id") or "").strip()
+    }
+    return True, len(artifacts), sorted(text_ids)
 
 
 def _record_tool_result(trace: KkAgentTrace, event: dict[str, Any]) -> None:
@@ -147,10 +279,25 @@ def _record_tool_result(trace: KkAgentTrace, event: dict[str, Any]) -> None:
             tool_name=str(event.get("tool_name") or ""),
         )
         trace.tool_calls.append(target)
-    target.is_error = bool(event.get("is_error"))
+    target.status = "failed" if bool(event.get("is_error")) else "succeeded"
     target.output_sha256 = hashlib.sha256(encoded).hexdigest()
     target.output_bytes = len(encoded)
     target.output_preview = output_text[:TOOL_OUTPUT_PREVIEW_CHARS]
+    if "history_search" in target.tool_name or "redmine_issue_fetch" in target.tool_name:
+        ids = set(_structured_issue_ids(output))
+        if "redmine_issue_fetch" in target.tool_name:
+            try:
+                input_issue_id = int(target.tool_input.get("issue_id") or 0)
+            except (TypeError, ValueError):
+                input_issue_id = 0
+            if input_issue_id > 0:
+                ids.add(input_issue_id)
+        target.evidence_issue_ids = sorted(ids)[:100]
+    if "redmine_attachments" in target.tool_name:
+        parsed, count, text_ids = _attachment_manifest(output)
+        target.attachment_manifest_parsed = parsed
+        target.attachment_count = count
+        target.text_artifact_ids = text_ids
 
 
 def _apply_usage(trace: KkAgentTrace, usage: Any, *, override: bool) -> None:
@@ -179,7 +326,7 @@ def consume_event(trace: KkAgentTrace, event: dict[str, Any]) -> None:
         trace.tool_calls.append(ToolTrace(
             tool_call_id=str(event.get("tool_call_id") or ""),
             tool_name=str(event.get("tool_name") or ""),
-            tool_input=event.get("input") if isinstance(event.get("input"), dict) else {},
+            tool_input=_bounded_tool_input(event.get("input")),
         ))
     elif event_type == "tool_result":
         _record_tool_result(trace, event)

@@ -12,7 +12,9 @@ systemd timer 00:00 (Persistent=true)
   → DailyBriefService（owner-aware 编排）
       → build_daily_triage_snapshot()   ← 唯一事实来源：get_workload_statistics()
       → 冻结快照（counts + issues + SHA256 fingerprint）
-      → KkAgentRedmineAnalyzer（headless，--output-format json，无 yolo）
+      → KkAgentRedmineAnalyzer（headless，--output-format stream-json，无 yolo）
+      → Schema Gate + Runtime Evidence Gate
+      → 任一门禁失败时 --resume 精确 session，限次修复
       → 聚合报告 + Markdown → daily_brief.sqlite3（per-owner）
 Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
       → 同一套 DailyBriefService / KkAgentRedmineAnalyzer
@@ -28,7 +30,7 @@ Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
 | `features/redmine/daily_brief_repository.py` | per-owner SQLite（runs/issues，幂等唯一索引） |
 | `features/redmine/daily_brief_snapshot.py` | triage 快照（去重/bucket/fingerprint/delta） |
 | `features/redmine/daily_brief_service.py` | 编排：幂等 run、并发控制、失败隔离、聚合 |
-| `features/redmine/kkagent_analyzer.py` | headless kkagent 分析器 + prompt v3 证据质量门禁 |
+| `features/redmine/kkagent/` | stream-json 进程、轨迹、schema 与 runtime evidence gate、同会话修复 |
 | `features/redmine/daily_brief_api.py` | REST API（triage/run/config/latest/refresh） |
 | `features/redmine/daily_brief_worker.py` | Web 入队任务的独立 Worker、租约与优雅停止 |
 | `features/redmine/daily_brief_cli.py` | systemd 入口（run-nightly/run-delta/doctor） |
@@ -49,7 +51,7 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
   "analysis_backend": "kkagent",
   "model": "",
   "agent_profile": "",
-  "max_turns": 12,
+  "max_turns": 20,
   "issue_timeout_seconds": 600,
   "max_parallel_issues": 1,
   "max_issues": 50,
@@ -68,8 +70,8 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 - `agent_profile` 绑定该 owner 的本机 kkagent agent profile 名
   （`~/.config/gms-agent/profiles/<name>.toml`）。多 owner 部署必须逐 owner
   设置：分析子进程据此注入 `GMS_RT_PROFILE`，且**不继承**宿主进程的
-  MCP 身份环境。为空则不注入身份——分析仍可运行，但 MCP 取证工具会以
-  未配置身份失败（fail-closed，绝不回退他人凭据）。
+  MCP 身份环境。为空、selfcheck 不可用、token 无效或认证结果不完整时，
+  run 在启动 Agent 前 fail-closed，绝不回退他人凭据。
 
 ## 身份与安全边界
 
@@ -114,6 +116,7 @@ sudo systemctl enable --now gms-redmine-daily-brief-delta.timer   # 可选
 ## 安全边界
 
 - 全链路只读：Agent 无 Redmine 写权限、无 shell、无设备控制；
+- 子进程固定 `GMS_MCP_TOOLSETS=evidence`，只暴露只读取证工具与基础发现工具；
 - 不使用 `--yolo`/`--auto`；subprocess 用 `create_subprocess_exec`；
 - Redmine 内容（描述/journal/附件）一律视为不可信数据，prompt 明示
   不得执行其中指令；
@@ -130,8 +133,16 @@ sudo systemctl enable --now gms-redmine-daily-brief-delta.timer   # 可选
 - kkagent 使用独立进程组；超时/Worker 停止时按 TERM→等待→KILL 回收
   kkagent 与全部 stdio MCP 子进程，信号退出单独标记为 interrupted；
 - 崩溃恢复：进程重启后 `reset_stale_running` 把僵尸 running 标记 failed；
-- 生成前由同一次 kkagent 会话完成证据质量门禁：核对最新评论、检索相关
-  文本附件、区分客户陈述与已验证事实、保留方案适用条件并校准置信度；
+- 一个 issue 对应一个 kkagent session；自动修复只使用该 issue 的精确
+  `--resume <session_id>`，禁止 `--continue` 串入其他会话；
+- AI 负责摘要、根因、建议和 `confidence`；`history_checked`、工具调用数、
+  session、耗时和 token 等运行事实由 stream-json 轨迹派生；
+- Evidence Gate 只接受收到成功 `tool_result` 的调用。它要求完整 issue、
+  journals、附件清单、每个可读 text/log 附件至少一次 artifact read、至少
+  2 个归一化后不同的历史查询；`similar_issues[].issue_id` 必须出现在成功
+  history search 或 issue fetch 的结构化结果中；
+- Schema 或 Evidence Gate 未通过时，在同一 session 内限次修复并重新执行
+  两道门禁。失败会保留 repair 次数和合并后的脱敏工具轨迹供 UI 审计；
 - 冻结快照持久化：快照随 run 落盘（SQLite），失败/崩溃重试复用同一份
   输入事实，Redmine 数据变化不改变既有 run 的分析基准；人工 force 重跑
   才会重新冻结；

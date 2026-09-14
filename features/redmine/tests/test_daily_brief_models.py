@@ -60,6 +60,12 @@ class ValidIssueResultTests(unittest.TestCase):
         self.assertTrue(any("root_cause_type" in e for e in errors))
         self.assertTrue(any("risk" in e for e in errors))
 
+    def test_missing_confidence_reports_one_error(self):
+        result = self._valid()
+        result.pop("confidence")
+        errors = [error for error in validate_issue_result(result) if "confidence" in error]
+        self.assertEqual(errors, ["missing field: confidence"])
+
     def test_low_confidence_forces_human_review(self):
         result = self._valid()
         result["confidence"] = 0.4
@@ -138,7 +144,7 @@ if __name__ == "__main__":
 
 
 class SimilarIssuesValidationTests(unittest.TestCase):
-    """v4 schema：similar_issues / history_checked 校验。"""
+    """similar_issues schema 与 runtime-owned history_checked 边界。"""
 
     def _valid(self) -> dict:
         base = ValidIssueResultTests._valid(self)
@@ -157,10 +163,6 @@ class SimilarIssuesValidationTests(unittest.TestCase):
         result.pop("similar_issues")
         errors = validate_issue_result(result)
         self.assertTrue(any("similar_issues" in e for e in errors))
-        result2 = ValidIssueResultTests._valid(self)
-        result2.pop("history_checked")
-        errors2 = validate_issue_result(result2)
-        self.assertTrue(any("history_checked" in e for e in errors2))
 
     def test_invalid_similar_entry_cleaned_and_flagged(self):
         result = self._valid()
@@ -174,11 +176,13 @@ class SimilarIssuesValidationTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(kept[0]["similarity"], "related")  # 非法级别回落
 
-    def test_history_checked_must_be_strict_bool(self):
-        """审核意见 P1：history_checked 不得静默真值化。"""
+    def test_history_checked_is_ignored_by_model_schema(self):
+        """该字段由 runtime tool trace 覆写，模型缺失或乱填都不采信。"""
         for bogus in ("yes", "false", "no", 1, 0):
             result = self._valid()
             result["history_checked"] = bogus
             errors = validate_issue_result(result)
-            self.assertTrue(any("history_checked" in e for e in errors),
-                            f"bogus={bogus!r} should fail")
+            self.assertFalse(any("history_checked" in e for e in errors))
+        result = self._valid()
+        result.pop("history_checked")
+        self.assertEqual(validate_issue_result(result), [])

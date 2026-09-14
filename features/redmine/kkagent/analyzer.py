@@ -41,13 +41,13 @@ DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 
 logger = logging.getLogger(__name__)
 
-# Prompt 版本随 evidence-gate/resume-repair 语义升级（v6 → v7）。
-PROMPT_VERSION = "redmine_daily_triage_v7"
+# Prompt 版本随 runtime-owned evidence/schema repair 语义升级。
+PROMPT_VERSION = "redmine_daily_triage_v8"
 
 REPAIR_MAX_TURNS = 8
 REPAIR_RESUME_RETRIES = 1
 
-REPAIR_PROMPT_TEMPLATE = """The previous analysis did not satisfy the runtime gates.
+REPAIR_PROMPT_TEMPLATE = """The previous analysis output did not pass validation.
 
 Validation findings:
 {findings}
@@ -55,6 +55,8 @@ Validation findings:
 Continue the existing analysis. Fix exactly these findings:
 - Do NOT repeat evidence gathering that has already succeeded.
 - Complete any missing evidence checks with the read-only GMS MCP tools.
+- Schema findings (missing/invalid fields) are fixed by returning the
+  corrected JSON only; do not invent new facts for missing evidence.
 - Then return the full corrected Daily Brief JSON object only
   (same schema as before, no prose, no markdown fences).
 """
@@ -242,9 +244,16 @@ class KkAgentRedmineAnalyzer:
 
         result, errors = parse_issue_result(trace=trace, raw=raw.text())
         if result is None:
+            # schema 失败（缺字段/类型不符）与 gate 失败一样是"可精确
+            # 修复"的：findings 明确，--resume 同一 session 让模型补齐
+            # JSON 即可。无法 resume 或修复轮仍失败时保持失败分类。
+            schema_failed = bool(errors) and errors[0].startswith("schema")
+            if schema_failed:
+                repaired, trace = await self._repair(entry, trace, errors)
+                if repaired is not None:
+                    return repaired
             trace.error_type = (
-                "schema_mismatch" if errors and errors[0].startswith("schema")
-                else "invalid_ai_output"
+                "schema_mismatch" if schema_failed else "invalid_ai_output"
             )
             trace.error = errors[0] if errors else "invalid output"
             return self._failure(trace, raw)
@@ -255,9 +264,10 @@ class KkAgentRedmineAnalyzer:
             return self._success(result, trace, raw)
 
         # Runtime gate 未过：在**同一 session** 上精确 resume 修复一次。
-        repaired = await self._repair(entry, trace, gate_errors_list)
+        repaired, trace = await self._repair(entry, trace, gate_errors_list)
         if repaired is not None:
             return repaired
+        gate, gate_errors_list = gate_and_errors(trace, entry, result)
         trace.status = "evidence_gate_failed"
         trace.error_type = "evidence_gate_failed"
         trace.error = "; ".join(gate_errors_list)
@@ -269,33 +279,58 @@ class KkAgentRedmineAnalyzer:
         entry: dict[str, Any],
         trace: KkAgentTrace,
         gate_errors_list: list[str],
-    ) -> KkAgentAnalysisResult | None:
-        """--resume <session_id> 补证据/修 JSON；无法 resume 时返回 None。"""
+    ) -> tuple[KkAgentAnalysisResult | None, KkAgentTrace]:
+        """--resume <session_id> 补证据/修 schema，并保留全部修复轨迹。
+
+        ``gate_errors_list`` 同时承载两类 findings：evidence gate 错误与
+        schema 校验错误（"schema validation failed: ..."）。修复轮重新
+        parse + 重新 gate，任何一类仍有残余即视为修复失败。
+        """
         session_id = trace.session_id
         if not session_id:
             # 启动失败/认证失败/session 未创建：没有可 resume 的对象。
-            return None
-        repair_prompt = REPAIR_PROMPT_TEMPLATE.format(
-            findings="\n".join(f"- {item}" for item in gate_errors_list)
-        )
-        repair_trace, raw, timed_out = await self._run_stream(
-            self.build_repair_command(repair_prompt, session_id)
-        )
-        if timed_out or repair_trace.exit_code not in (0, None):
-            repair_trace.error_type = repair_trace.error_type or "repair_failed"
-            return None
-        result, _errors = parse_issue_result(trace=repair_trace, raw=raw.text())
-        if result is None:
-            return None
-        # 修复轮的证据只增不减：以两段轨迹的并集重新评估 gate。
-        merged = _merge_traces(trace, repair_trace)
-        _gate, remaining = gate_and_errors(merged, entry, result)
-        if remaining:
-            return None
-        repair_trace.status = "completed"
-        repair_trace.session_id = merged.session_id
-        merged.status = "completed"
-        return self._success(result, merged, raw)
+            return None, trace
+
+        findings = list(gate_errors_list)
+        merged = trace
+        for _attempt in range(REPAIR_RESUME_RETRIES):
+            repair_prompt = REPAIR_PROMPT_TEMPLATE.format(
+                findings="\n".join(f"- {item}" for item in findings)
+            )
+            repair_trace, raw, timed_out = await self._run_stream(
+                self.build_repair_command(repair_prompt, session_id)
+            )
+            repair_trace.repair_attempts = 1
+            if repair_trace.session_id and repair_trace.session_id != session_id:
+                repair_trace.status = "repair_failed"
+                repair_trace.error_type = "repair_failed"
+                repair_trace.error = "kkagent repair resumed a different session"
+                repair_trace.session_id = session_id
+            elif timed_out:
+                repair_trace.error = repair_trace.error or "repair timed out"
+            elif repair_trace.exit_code not in (0, None):
+                self._classify_nonzero_exit(
+                    repair_trace, raw.text(), raw.stderr_tail()
+                )
+            merged = _merge_traces(merged, repair_trace)
+            if repair_trace.error_type:
+                findings = [repair_trace.error or repair_trace.error_type]
+                continue
+
+            result, errors = parse_issue_result(trace=repair_trace, raw=raw.text())
+            if result is None:
+                findings = errors or ["repair output is invalid"]
+                merged.errors.extend(findings[:10])
+                continue
+            _gate, findings = gate_and_errors(merged, entry, result)
+            if findings:
+                merged.errors.extend(findings[:10])
+                continue
+            merged.status = "completed"
+            merged.error_type = ""
+            merged.error = ""
+            return self._success(result, merged, raw), merged
+        return None, merged
 
     # ------------------------------------------------------------ helpers
 
@@ -345,6 +380,9 @@ def _merge_traces(first: KkAgentTrace, second: KkAgentTrace) -> KkAgentTrace:
         subtype=second.subtype or first.subtype,
         exit_code=second.exit_code,
         resumed=True,
+        duration_ms=first.duration_ms + second.duration_ms,
+        rounds=first.rounds + second.rounds,
+        turns=first.turns + second.turns,
         input_tokens=first.input_tokens + second.input_tokens,
         output_tokens=first.output_tokens + second.output_tokens,
         cache_read_tokens=first.cache_read_tokens + second.cache_read_tokens,
@@ -352,8 +390,12 @@ def _merge_traces(first: KkAgentTrace, second: KkAgentTrace) -> KkAgentTrace:
             first.cache_creation_tokens + second.cache_creation_tokens
         ),
         llm_retries=first.llm_retries + second.llm_retries,
+        repair_attempts=first.repair_attempts + second.repair_attempts,
         errors=[*first.errors, *second.errors],
         final_event=second.final_event or first.final_event,
+        status=second.status or first.status,
+        error_type=second.error_type,
+        error=second.error,
     )
     seen_ids = {call.tool_call_id for call in first.tool_calls if call.tool_call_id}
     merged.tool_calls = list(first.tool_calls)

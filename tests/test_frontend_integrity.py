@@ -466,19 +466,19 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("📦 离线包", shell)
         self.assertIn("function buildSkillInstallCommand()", navigation)
         self.assertIn("function copySkillInstallCommand()", navigation)
-        # TLS fail-closed:复制的安装命令永远不再包含 -k 降级。
+        # 自签名部署采用受控 TOFU：-k 只取首次脚本，脚本随后获取并固定
+        # Controller CA；三处用户入口必须展示同一条 paircode 命令。
         self.assertIn(
-            'return `curl -fsSL "${window.location.origin}/api/agent/install.sh" | bash`',
+            'return `curl -k -fsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode <配对码>`',
             navigation,
         )
-        self.assertNotIn("-kfsSL", navigation)
         self.assertIn(
-            'curl -fsSL "https://server:5001/api/agent/install.sh" | bash',
+            'curl -k -fsSL "https://server:5001/api/agent/install.sh" | bash -s -- --paircode <配对码>',
             api_constants,
         )
-        self.assertNotIn("-kfsSL", api_constants)
-        self.assertIn('curl -fsSL "{{ request.url.scheme }}://', shell)
-        self.assertNotIn("-kfsSL", shell)
+        self.assertIn('curl -k -fsSL "{{ request.url.scheme }}://', shell)
+        self.assertIn('bash -s -- --paircode &lt;配对码&gt;', shell)
+        self.assertIn('安装器随后固定 CA 并严格校验下载', shell)
         self.assertIn("apiPath === '/api/agent/install.sh'", navigation)
         self.assertIn("apiPath === '/api/system/skills'", navigation)
         self.assertIn("全部独立gms-rt-*命令", api_constants)

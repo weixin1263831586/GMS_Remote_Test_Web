@@ -87,6 +87,17 @@ def test_plugin_payload_matches_skill_source():
         assert plugin_file.read_bytes() == source_file.read_bytes(), plugin_rel
 
 
+def test_daily_triage_reference_matches_runtime_evidence_contract():
+    reference = (
+        SKILL_DIR / "references" / "redmine-daily-triage.md"
+    ).read_text(encoding="utf-8")
+    assert "redmine_daily_triage_v8" in reference
+    assert "distinct_history_search_count" in reference
+    assert "history_checked` 不由模型填写" in reference
+    assert "--resume <该 issue 的精确 session_id>" in reference
+    assert "禁止使用 `--continue`" in reference
+
+
 def test_sync_package_idempotent():
     result = subprocess.run(
         [sys.executable, str(SYNC_SCRIPT), str(REPO_ROOT)],

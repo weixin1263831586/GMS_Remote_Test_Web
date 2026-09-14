@@ -57,7 +57,15 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
         except (TypeError, ValueError):
             pass
 
-    config["enabled"] = bool(payload.get("enabled", config["enabled"]))
+    enabled = payload.get("enabled", config["enabled"])
+    if isinstance(enabled, bool):
+        config["enabled"] = enabled
+    elif isinstance(enabled, str):
+        normalized = enabled.strip().lower()
+        if normalized in ("1", "true", "yes", "on"):
+            config["enabled"] = True
+        elif normalized in ("0", "false", "no", "off"):
+            config["enabled"] = False
     backend = str(payload.get("analysis_backend") or config["analysis_backend"]).strip()
     config["analysis_backend"] = backend if backend in ("kkagent",) else "kkagent"
     config["model"] = str(payload.get("model") or "").strip()
