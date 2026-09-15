@@ -15,7 +15,12 @@ Mapping (source → generated):
     manifests/kimi.plugin.json → plugins/gms-remote-test/kimi.plugin.json
     manifests/codex.plugin.json→ plugins/gms-remote-test/.codex-plugin/plugin.json
     tests/*                  → plugins/gms-remote-test/tests/*
-    docs/README.md, docs/AGENTS.md → plugins/gms-remote-test/{README.md,AGENTS.md}
+    templates/README.md → plugins/gms-remote-test/README.md
+    (the payload README is a distribution template, never an AGENTS.md under
+    the canonical docs/ tree)
+    templates/PLUGIN_AGENTS.md → plugins/gms-remote-test/AGENTS.md
+    (never a docs/AGENTS.md: an AGENTS.md under the canonical tree would
+    override root instructions for Codex/Kimi agents working there)
     (writes)                 → plugins/gms-remote-test/GENERATED.md
 
 `scripts/install_local.sh` is a dev utility operating ON the generated tree
@@ -318,9 +323,18 @@ def main() -> int:
         if not source.is_file() or "__pycache__" in source.parts:
             continue
         sync_one(source, plugin_dir / rel_plugin("tests", source.relative_to(tests).as_posix()))
-    # docs → plugin root
-    sync_one(docs / "README.md", plugin_dir / rel_plugin("README.md"))
-    sync_one(docs / "AGENTS.md", plugin_dir / rel_plugin("AGENTS.md"))
+    # docs → plugin root. Both payload docs are sourced from templates/ so
+    # the canonical tree never carries files that look like generated-plugin
+    # instructions (they would override the root AGENTS.md for Codex/Kimi
+    # sessions working under agent/).
+    sync_one(
+        agent_dir / "templates" / "README.md",
+        plugin_dir / rel_plugin("README.md"),
+    )
+    sync_one(
+        agent_dir / "templates" / "PLUGIN_AGENTS.md",
+        plugin_dir / rel_plugin("AGENTS.md"),
+    )
     # The agent playbook is part of the published payload —
     # without this line the playbook only ever exists in the source tree
     # and agents downloading from the registry never see it.

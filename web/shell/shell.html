@@ -31,7 +31,7 @@
     }</script>
     <script src="/static/js/shell/shell-config.js"></script>
     <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
-    <script src="/static/js/shell/logging.js?v=20260826-shell-split" defer></script>
+    <script src="/static/js/shell/logging.js?v=20260914-clear-visible" defer></script>
     <script src="/static/js/shell/status-polling.js?v=20260826-shell-split" defer></script>
     <script src="/static/js/shell/ui-feedback.js?v=20260826-shell-split" defer></script>
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
@@ -404,7 +404,7 @@
                         <summary>如何获取初始化令牌</summary>
                         在 Controller 服务器上，以服务运行用户或管理员身份进入实际安装目录，执行：
                         <code style="display: block; overflow-wrap: anywhere; margin: 6px 0;">python3 -c 'import json; print(json.load(open("configs/secrets/environment.json"))["GMS_BOOTSTRAP_TOKEN"])'</code>
-                        将输出粘贴到上方。默认安装目录为 <code>/opt/gms-remote-test/web_app</code>。手动部署请使用为 Controller 配置的同名环境变量；旧部署也可能保存在 <code>configs/runtime.json</code> 中。
+                        将输出粘贴到上方。默认安装目录为 <code>/opt/gms-remote-test/web_app</code>。手动部署请使用为 Controller 配置的同名环境变量；旧部署可能保存在 <code>configs/runtime.json</code>（现应迁移到 <code>configs/local/environment.json</code>）中。
                     </details>
                 </div>
             </div>
@@ -860,7 +860,7 @@
                                 </div>
                                 <div class="form-row">
                                     <label>设备主机:</label>
-                                    <input type="text" id="device-host" class="entry-field" value="" placeholder="自动检测中..." readonly title="设备主机地址在 configs/config.json 中配置，页面内不可修改" />
+                                    <input type="text" id="device-host" class="entry-field" value="" placeholder="自动检测中..." readonly title="设备主机地址在 configs/local/config.json 中配置，页面内不可修改" />
                                 </div>
                                 <div class="form-row">
                                     <label>本地主机:</label>
@@ -1063,23 +1063,6 @@
                     </button>
                 </div>
 
-                <div class="users-list-toolbar">
-                    <div class="users-filter-group">
-                        <input id="users-search-input" class="combo-box" type="search" placeholder="搜索用户、IP 或设备" aria-label="搜索用户" data-input="filterUsersList">
-                        <select id="users-status-filter" class="combo-box" aria-label="按状态筛选用户" data-change="filterUsersList">
-                            <option value="">全部状态</option>
-                            <option value="online">在线</option>
-                            <option value="testing">测试中</option>
-                            <option value="offline">离线</option>
-                        </select>
-                    </div>
-                    <div class="users-list-meta">
-                        <span id="users-visible-count">—</span>
-                        <span id="users-last-updated">尚未刷新</span>
-                        <button id="users-refresh-button" class="btn-xs" type="button" data-click="refreshUsersList" data-r0="el">↻ 刷新</button>
-                    </div>
-                </div>
-
                 <!-- 用户列表 -->
                 <div class="users-table-wrap">
                     <table class="users-table">
@@ -1200,7 +1183,8 @@
                     <table class="agent-access-table">
                         <thead>
                             <tr>
-                                <th class="agent-token-col-identity">Agent / Token ID</th>
+                                <th class="agent-token-col-name">Agent</th>
+                                <th class="agent-token-col-id">Token ID</th>
                                 <th class="agent-token-col-status">状态</th>
                                 <th class="agent-token-col-scopes">授权范围</th>
                                 <th class="agent-token-col-worker">Worker</th>
@@ -1212,7 +1196,7 @@
                             </tr>
                         </thead>
                         <tbody id="agent-access-tokens">
-                            <tr><td colspan="9" class="agent-access-empty">加载中...</td></tr>
+                            <tr><td colspan="10" class="agent-access-empty">加载中...</td></tr>
                         </tbody>
                     </table>
                 </div>

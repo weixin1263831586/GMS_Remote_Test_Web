@@ -166,10 +166,29 @@ def _write_fake_kkagent(directory: Path, behavior: str) -> Path:
             "else:\n"
             f"    _emit_bad(sys.stdout, json.loads({result_literal!r}))\n"
         ),
+        # 首轮和第一次修复都缺字段，第二次同 session 修复才返回合法 JSON。
+        "schema-twice-then-ok": (
+            "import json, os, pathlib, sys\n"
+            "counter = pathlib.Path(os.environ['FAKE_RESULT_PATH']).with_name('repair-count')\n"
+            "count = int(counter.read_text() if counter.exists() else '0')\n"
+            "counter.write_text(str(count + 1))\n"
+            "if '--resume' in sys.argv and count >= 2:\n"
+            f"    _emit(sys.stdout, json.loads({result_literal!r}), 'sess-bad-schema')\n"
+            "else:\n"
+            f"    _emit_bad(sys.stdout, json.loads({result_literal!r}))\n"
+        ),
         # 首轮与修复轮都缺字段：schema 修复失败，保持 schema_mismatch。
         "schema-always-bad": (
             "import json, sys\n"
             f"_emit_bad(sys.stdout, json.loads({result_literal!r}))\n"
+        ),
+        # 模型在完整结果里漏掉 confidence，但根因置信枚举仍在：Controller
+        # 可作受控确定性映射，无需重跑取证或消耗 resume 预算。
+        "missing-confidence-with-root-type": (
+            "import json, sys\n"
+            f"result = json.loads({result_literal!r})\n"
+            "result.pop('confidence', None)\n"
+            "_emit(sys.stdout, result, 'sess-missing-confidence')\n"
         ),
         "history-omitted": (
             "import json, sys\n"
@@ -220,7 +239,7 @@ def _write_fake_kkagent(directory: Path, behavior: str) -> Path:
         "    emit_result(stream, result, 'env-session')\n"
         "def _emit_bad(stream, result):\n"
         "    result.pop('history_checked', None)\n"
-        "    result.pop('confidence', None)\n"
+        "    result.pop('suggested_solution', None)\n"
         "    _emit(stream, result, 'sess-bad-schema', 'b')\n"
     )
     script.write_text(

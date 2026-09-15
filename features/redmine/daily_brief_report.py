@@ -78,7 +78,7 @@ def render_daily_brief_markdown(
     failed: list[DailyBriefIssue],
 ) -> str:
     """Render the persisted human-readable Daily Brief report."""
-    lines = [f"# Redmine AI 晨报 {run.brief_date}", ""]
+    lines = [f"# Redmine 每日晨报 {run.brief_date}", ""]
     counts = run.report_json.get("counts", {})
     lines.append(
         f"共 {counts.get('total', 0)} 个待处理（待回复 "

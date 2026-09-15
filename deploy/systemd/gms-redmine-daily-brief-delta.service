@@ -1,5 +1,5 @@
 [Unit]
-Description=GMS Redmine AI Daily Brief (morning delta refresh)
+Description=GMS Redmine Daily Brief (morning delta refresh)
 Documentation=file:///opt/gms-remote-test/docs/redmine-daily-brief.md
 After=network-online.target
 Wants=network-online.target

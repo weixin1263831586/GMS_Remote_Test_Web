@@ -16,7 +16,7 @@ RUN_STATUSES = (
     "pending", "snapshotting", "analyzing", "completed", "partial", "failed", "cancelled",
 )
 ISSUE_STATUSES = ("pending", "running", "completed", "failed", "stale")
-# 数据新鲜度与执行状态是两个独立维度（审核意见 P2）：
+# Data freshness and execution status are independent dimensions:
 # execution_status（completed/partial/failed/cancelled）描述 AI 分析本身；
 # data_quality 描述输入数据可信程度——"晨报完成"不等于"数据是新的"。
 DATA_QUALITY_STATUSES = ("fresh", "stale", "sync_failed", "unknown")
@@ -225,6 +225,13 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if not isinstance(result, dict):
         return ["result is not an object"]
+    # 模型偶尔在修复轮只漏掉 confidence，却保留了已声明的根因置信枚举。
+    # 该映射与 confidence 字段误填枚举词的处理共用同一受控表，不凭空提高
+    # 置信度；只有明确且合法的 root_cause_type 才允许补齐。
+    if result.get("confidence") in (None, ""):
+        root_cause_type = str(result.get("root_cause_type") or "")
+        if root_cause_type in ROOT_CAUSE_TYPES:
+            result["confidence"] = CONFIDENCE_WORD_MAP[root_cause_type]
     for key in ISSUE_RESULT_REQUIRED_FIELDS:
         if key not in result or result[key] in (None, ""):
             errors.append(f"missing field: {key}")
@@ -235,12 +242,15 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
     if risk and risk not in RISK_LEVELS:
         errors.append(f"invalid risk: {risk}")
     if "confidence" in result and result.get("confidence") not in (None, ""):
-        try:
-            confidence = float(result["confidence"])
-            if not 0.0 <= confidence <= 1.0:
-                errors.append(f"confidence out of range: {confidence}")
-        except (TypeError, ValueError):
+        normalized = normalize_confidence(result["confidence"])
+        if normalized is None:
             errors.append(f"invalid confidence: {result.get('confidence')!r}")
+        else:
+            # 受控规范化（LLM 字段错位复原）：模型偶尔把 root_cause_type
+            # 的枚举词写进 confidence（生产实证：confidence:"likely"）。
+            # 确定性映射到 prompt Confidence rules 对应的数值区间，不属
+            # 于猜测修复——映射后仍受 0.0-1.0 与人工复核阈值约束。
+            result["confidence"] = normalized
     if not isinstance(result.get("evidence") or [], list):
         errors.append("evidence must be a list")
     if not isinstance(result.get("recommended_actions") or [], list):
@@ -277,6 +287,49 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
 
 
 CONFIDENCE_HUMAN_REVIEW_THRESHOLD = 0.6
+
+
+# 枚举词 → 数值映射，对齐 prompt 的 Confidence rules：
+# 0.90+ 显式证据；0.70-0.89 充分证据+推断；0.50-0.69 部分证据；<0.50 不得断言根因。
+CONFIDENCE_WORD_MAP = {
+    "confirmed": 0.9,
+    "certain": 0.9,
+    "very_high": 0.9,
+    "high": 0.85,
+    "likely": 0.75,
+    "probable": 0.7,
+    "medium": 0.65,
+    "moderate": 0.6,
+    "possible": 0.55,
+    "uncertain": 0.45,
+    "low": 0.4,
+    "unknown": 0.3,
+}
+
+
+def normalize_confidence(value: Any) -> float | None:
+    """把 confidence 值规范为 [0.0, 1.0] 数值；无法解释时返回 None。
+
+    接受数字、数字字符串，以及模型从 root_cause_type 错位复制的
+    确定性枚举词。其它类型（列表/字典等）一律拒绝。
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        confidence = float(value)
+    elif isinstance(value, str):
+        text = value.strip().lower()
+        if text in CONFIDENCE_WORD_MAP:
+            return CONFIDENCE_WORD_MAP[text]
+        try:
+            confidence = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if not 0.0 <= confidence <= 1.0:
+        return None
+    return confidence
 
 
 def confidence_below_review_threshold(result: dict[str, Any]) -> bool:

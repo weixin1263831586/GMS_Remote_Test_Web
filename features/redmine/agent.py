@@ -499,14 +499,13 @@ class RedmineAgent(
             merged.append(item)
         return merged
 
-    # Client factory
-
     def _make_client(self) -> RedmineClient:
         redmine_config = self.config_manager.get_redmine_config()
-        creds = self.config_manager.load_redmine_credentials()
-        if not creds or not creds.get("username") or not creds.get("password"):
+        creds = self.config_manager.load_redmine_credentials() or {}
+        api_key = self.config_manager.load_redmine_api_key()
+        if not (api_key or (creds.get("username") and creds.get("password"))):
             raise RuntimeError("Redmine credentials not configured")
-        return RedmineClient(redmine_config["base_url"], creds.get("username", ""), creds.get("password", ""))
+        return RedmineClient(redmine_config["base_url"], creds.get("username", ""), creds.get("password", ""), api_key=api_key)
 
     @staticmethod
     def _get_user_name(user: Any) -> str:

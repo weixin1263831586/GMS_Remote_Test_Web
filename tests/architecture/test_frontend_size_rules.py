@@ -28,7 +28,7 @@ MIGRATION_BYTE_LIMITS = {
     'web/static/js/pages/api-docs.js': 50304,              # +165: act-bridge 委托 helper
     'web/static/js/shell/weekly-report.js': 83553,         # +244: XSS 转义一致性; target: < 50 KB
     # 原 shell.html 内联主脚本外置(仅搬运,CSP 前置迁移);随 partials 拆分继续收缩。
-    'web/static/js/shell/shell-main.js': 281265,           # target: < 100 KB after decomposition
+    'web/static/js/shell/shell-main.js': 281563,           # +lazy activation 早退(set-username); target: < 100 KB after decomposition
 }
 
 # Default budgets for anything not listed above.

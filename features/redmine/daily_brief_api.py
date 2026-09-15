@@ -23,6 +23,10 @@ from features.auth import require_agent_scope, require_human_principal_when_auth
 from features.users import owner_id_from_request
 
 from .api import get_redmine_config_for_request
+from .daily_brief_config import (
+    list_daily_brief_agent_profiles,
+    list_daily_brief_model_options,
+)
 from .daily_brief_dispatch import enqueue_reanalysis, enqueue_refresh, enqueue_run
 from .daily_brief_models import BRIEF_MODES
 from .daily_brief_service import (
@@ -99,6 +103,20 @@ async def get_daily_brief_config(request: Request):
     manager = get_redmine_config_for_request(request)
     service = _service_for_request(request)
     return {"success": True, "data": service.get_config(manager)}
+
+
+@router.get("/daily-brief/model-options")
+async def get_daily_brief_model_options(request: Request):
+    """Expose enabled system model names for the Daily Brief settings UI."""
+    _require_read(request)
+    return {"success": True, "data": list_daily_brief_model_options()}
+
+
+@router.get("/daily-brief/agent-profiles")
+async def get_daily_brief_agent_profiles(request: Request):
+    """Expose only local kkagent profile names for explicit human selection."""
+    _require_read(request)
+    return {"success": True, "data": list_daily_brief_agent_profiles()}
 
 
 @router.put("/daily-brief/config")
@@ -220,7 +238,7 @@ async def reanalyze_issue(request: Request, brief_date: str, issue_id: int):
 async def cancel_daily_brief_run(request: Request, run_id: str):
     """按 run_id 精确请求停止一次晨报 run（协作式取消）。
 
-    审核意见 P2：同一天可有 nightly/manual/delta 多个 run，按日期取消
+    同一天可有 nightly/manual/delta 多个 run，按日期取消
     "最新一次"会停错目标；UI 从当前卡片携带 run_id 精确取消。
     """
     _require_human(request)

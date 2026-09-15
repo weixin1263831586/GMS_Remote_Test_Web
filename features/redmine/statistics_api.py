@@ -4,7 +4,6 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
@@ -73,14 +72,9 @@ def _missing_credentials_payload(message: str | None = None) -> dict[str, Any]:
 def _has_redmine_credentials(request: Request | None) -> bool:
     try:
         manager = _config_for_request(request)
-        base_url = manager.get_redmine_base_url()
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            return False
-        creds = manager.load_redmine_credentials() or {}
+        return bool(manager.redmine_credentials_status().get("configured"))
     except Exception:
         return False
-    return bool(str(creds.get("username") or "").strip() and str(creds.get("password") or "").strip())
 
 
 def _user_map_for_request(request: Request | None) -> list[dict[str, Any]]:

@@ -17,6 +17,16 @@ from scripts.sanitize_release_config import sanitize_file
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_repository_has_root_gitignore():
+    """Guards the fresh-clone contract: the root .gitignore must exist.
+
+    The ignore policy below is only meaningful if the file is actually
+    tracked; a missing root .gitignore silently exposes runtime config,
+    secrets and data on fresh clones (review finding P0-1).
+    """
+    assert (PROJECT_ROOT / ".gitignore").is_file()
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_template_fallback_and_local_write_target(tmp_path, legacy):
     configs = tmp_path / "configs"

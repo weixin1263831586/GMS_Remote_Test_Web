@@ -101,6 +101,17 @@ def inline_handler_calls(text: str) -> list[tuple[str, str]]:
 
 
 class FrontendIntegrityTests(unittest.TestCase):
+    def test_daily_brief_analysis_button_has_a_global_modal_handler(self):
+        page = (
+            read_text("features/redmine/ui/page.html")
+            + "\n"
+            + read_text("features/redmine/ui/page.js")
+        )
+
+        self.assertIn('data-click="showDailyBriefIssue"', page)
+        self.assertIn("window.showDailyBriefIssue = showDailyBriefIssue;", page)
+        self.assertIn("showModal(modalId);", page)
+
     def test_admin_elevation_survives_page_and_tab_initialization_until_ttl(self):
         api = read_text("web/static/js/api.js")
 
@@ -925,6 +936,14 @@ class WorkspaceIdentityRegressions(unittest.TestCase):
             text,
             "startTest 归属校验必须走 state.devices inventory，不得按冒号切分",
         )
+
+    def test_clear_logs_removes_visible_unscoped_and_pending_entries(self):
+        text = read_text("web/static/js/shell/logging.js")
+        self.assertIn("const queuedWorker = String(_logQueue[index].workerId || '')", text)
+        self.assertIn("_logQueue.splice(index, 1)", text)
+        self.assertIn("const nodeWorker = String(node.dataset.workerId || '')", text)
+        self.assertIn("!scope || !nodeWorker || nodeWorker === scope", text)
+        self.assertIn("isLocalWorkspaceWorker(scope)", text)
 
     def test_modal_visibility_is_owned_exclusively_by_modal_manager(self):
         """ModalManager 是 .modal 对话框可见性的唯一真源。

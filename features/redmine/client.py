@@ -49,13 +49,12 @@ class RedmineClient(RedmineAttachmentMixin):
     is lightweight).
     """
 
-    def __init__(self, base_url: str, username: str = "", password: str = ""):
+    def __init__(self, base_url: str, username: str = "", password: str = "", api_key: str = ""):
         self.base_url = (base_url or "").rstrip("/")
         self.username = username or ""
         self.password = password or ""
-        kwargs = {}
-        if self.username and self.password:
-            kwargs.update({"username": self.username, "password": self.password})
+        self.api_key = api_key or ""
+        kwargs = {"key": self.api_key} if self.api_key else ({"username": self.username, "password": self.password} if self.username and self.password else {})
         self._redmine = Redmine(self.base_url, **kwargs)
         self._session: aiohttp.ClientSession | None = None
 

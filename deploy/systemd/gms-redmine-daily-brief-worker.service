@@ -1,5 +1,5 @@
 [Unit]
-Description=GMS Redmine AI Daily Brief durable worker
+Description=GMS Redmine Daily Brief durable worker
 Documentation=file:///opt/gms-remote-test/docs/redmine-daily-brief.md
 After=network-online.target gms-remote-test.service
 Wants=network-online.target

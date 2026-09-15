@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
+from . import daily_brief_cancellation as cancellation
 from .daily_brief_execution_view import issue_payload
 from .daily_brief_models import (
     DailyBriefIssue,
@@ -46,10 +47,6 @@ from .users import _now
 
 
 logger = logging.getLogger(__name__)
-
-
-class _RunCancelledError(Exception):
-    """协作式取消：执行循环在 issue 边界读到取消标志后抛出。"""
 
 
 # 配置契约 / 分析器构建已拆分至 daily_brief_config（service 保持编排职责）。
@@ -157,7 +154,7 @@ class DailyBriefService:
     def request_cancel(self, brief_date: str | None = None, run_id: str | None = None) -> dict[str, Any]:
         """请求停止一次 run（协作式取消）。
 
-        审核意见 P2：同一天可能同时存在 nightly/manual/delta 多个 run，
+        同一天可能同时存在 nightly/manual/delta 多个 run，
         "取消该日期最新一次"会停错目标。优先使用显式 run_id 精确取消；
         未提供 run_id 时才回落到日期最新 run（旧 API 兼容）。
 
@@ -193,7 +190,7 @@ class DailyBriefService:
     def start_run(self, mode: str = "manual", *, force: bool = False) -> dict[str, Any]:
         """创建（或复用）当天 run，并在**同一事务**里入队 durable job。
 
-        审核意见 P1（孤儿 run 窗口）：run 与 job 原先分两步提交，进程在
+        run 与 job 原先分两步提交，进程在
         两步之间崩溃会留下永不被执行的 pending run。现走
         repository.create_run_and_enqueue_job 的单一 BEGIN IMMEDIATE 事务；
         already_running 分支还做 has_active_job 兜底——万一存在历史孤儿
@@ -302,7 +299,7 @@ class DailyBriefService:
             self._RUN_EXECUTIONS[run_id] = task
         try:
             if self.repository.is_cancel_requested(run_id):
-                raise _RunCancelledError()
+                raise cancellation.RunCancelledError()
             # 认证预检：token 被吊销时逐条分析只会把 turn 预算烧在 MCP
             # 401 上，不如整 run 快速失败并给出重注册指引（fail-closed；
             # 预检自身故障则放行，不阻塞分析）。
@@ -318,7 +315,7 @@ class DailyBriefService:
             run = await self._snapshot_phase(run, config)
             await self._analyze_phase(run, config)
             run = self._summarize_phase(run)
-        except _RunCancelledError:
+        except cancellation.RunCancelledError:
             # 用户请求停止：收敛为明确的终态 cancelled（非错误），
             # 已完成的 issue 结果保留，未开始的保持 pending 可续跑。
             run.status = "cancelled"
@@ -402,7 +399,7 @@ class DailyBriefService:
         run.snapshot_at = str(frozen.get("generated_at") or "")
         run.snapshot_hash = str(frozen.get("snapshot_hash") or "")
         run.source_sync_status = str(frozen.get("source_sync_status") or "")
-        # 数据新鲜度（审核意见 P2）：execution status 与 data quality 拆开。
+        # Keep execution status separate from data quality.
         # 同步成功的快照生成时间即 last_sync_at；失败/跳过时留空，由
         # data_quality=sync_failed/unknown 表达"这不是最新数据"。
         if run.source_sync_status == "synced":
@@ -459,7 +456,9 @@ class DailyBriefService:
             async with semaphore:
                 await self._analyze_one(run, issue_id, entries.get(issue_id, {}), analyzer, config)
 
-        await asyncio.gather(*[_one(issue_id) for issue_id in pending_ids])
+        await cancellation.gather_cancel_on_error(
+            [_one(issue_id) for issue_id in pending_ids]
+        )
 
     def _build_analyzer(self, config: dict[str, Any]) -> KkAgentRedmineAnalyzer:
         # 构建细节统一在 daily_brief_config.build_brief_analyzer（含
@@ -501,14 +500,21 @@ class DailyBriefService:
         # 用户点「停止分析」后，正在跑的 issue 由 task.cancel()/gather 兜底，
         # 未开始的 issue 从这里直接终止整个 phase。
         if self.repository.is_cancel_requested(run.run_id):
-            raise _RunCancelledError()
+            raise cancellation.RunCancelledError()
         record.status = "running"
         record.started_at = _now()
         record.attempt_count += 1
         self.repository.upsert_issue(record)
 
         started = time.monotonic()
-        outcome = await analyzer.analyze(entry if entry else {"issue_id": issue_id})
+        try:
+            outcome = await cancellation.analyze_with_persisted_cancel(
+                self.repository, run.run_id, analyzer,
+                entry if entry else {"issue_id": issue_id},
+            )
+        except (cancellation.RunCancelledError, asyncio.CancelledError):
+            cancellation.reset_cancelled_issue(self.repository, record)
+            raise
         record.finished_at = _now()
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.raw_response = outcome.raw_output
@@ -579,12 +585,16 @@ class DailyBriefService:
             "priority_name": record.priority,
         }
         analyzer = self._build_analyzer(config)
-        await self._analyze_one(run, issue_id, entry, analyzer, config)
+        try:
+            await self._analyze_one(run, issue_id, entry, analyzer, config)
+        except cancellation.RunCancelledError:
+            return cancellation.mark_reanalysis_cancelled(
+                self.repository, run, issue_id
+            )
         # 单条状态变化必须同步刷新整份汇总，否则页头的成功/失败/人工确认
         # 数量、Markdown 与 run.status 会互相矛盾。
         self._summarize_phase(run)
         refreshed = self.repository.get_issue(run.run_id, issue_id)
         return {"run_id": run.run_id, "issue_id": issue_id, "status": refreshed.status}
-
 
 __all__ = ["DEFAULT_BRIEF_CONFIG", "DailyBriefService", "normalize_daily_brief_config"]

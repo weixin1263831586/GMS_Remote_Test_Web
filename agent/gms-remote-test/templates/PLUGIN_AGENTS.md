@@ -1,5 +1,12 @@
 # gms-remote-test plugin — agent maintenance contract
 
+> Template source: this file lives at
+> `agent/gms-remote-test/templates/PLUGIN_AGENTS.md` and is synced to
+> `plugins/gms-remote-test/AGENTS.md` by `tools/sync_agent_package.py`.
+> It is NOT the instruction file for the canonical `agent/` tree —
+> the root `AGENTS.md` governs that tree. The "generated payload"
+> statements below describe the destination plugin tree, not this file.
+
 This directory is a GENERATED release payload: everything except
 `scripts/install_local.sh` is produced from the single source root
 `agent/gms-remote-test/`. Read this file before changing anything —

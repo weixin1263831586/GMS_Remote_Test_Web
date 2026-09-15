@@ -41,14 +41,16 @@ function agentAccessPanelIsOpen() {
     return getComputedStyle(panel).display !== 'none';
 }
 
-function agentAccessToggle(show) {
+async function agentAccessToggle(show) {
     const panel = document.getElementById('agent-access-panel');
     const mainView = document.getElementById('users-main-view');
     if (!panel || !mainView) return;
     const visible = show !== undefined ? Boolean(show) : !agentAccessPanelIsOpen();
-    if (visible && !agentAccessIsAdmin()) {
-        showToast('仅管理员可管理 Agent 接入', 'warning');
-        return;
+    if (visible && !agentAccessIsAdmin() && !state.elevated) {
+        const granted = window.requestElevatedAccess
+            ? await window.requestElevatedAccess('管理 Agent 接入')
+            : false;
+        if (!granted) return;
     }
 
     panel.style.display = visible ? 'flex' : 'none';
@@ -79,10 +81,10 @@ function agentAccessIsAdmin() {
 
 function agentAccessEnsureVisibleForRole() {
     if (!state.authReady) return;
-    const enabled = agentAccessIsAdmin();
     const tabs = document.getElementById('users-view-tabs');
-    if (tabs) tabs.style.display = enabled ? 'flex' : 'none';
-    if (!enabled && agentAccessPanelIsOpen()) agentAccessToggle(false);
+    // 入口对所有已登录用户可见；打开管理面板前仍要求管理员身份或
+    // 当前会话已完成管理员验证，不能仅靠前端可见性放宽权限。
+    if (tabs) tabs.style.display = 'flex';
 }
 
 async function agentAccessReload(button) {
@@ -95,7 +97,7 @@ async function agentAccessReload(button) {
         refreshButton.textContent = '刷新中…';
     }
     if (!agentAccessLoaded) {
-        container.innerHTML = '<tr><td colspan="9" class="agent-access-empty">正在加载 Agent Token…</td></tr>';
+        container.innerHTML = '<tr><td colspan="10" class="agent-access-empty">正在加载 Agent Token…</td></tr>';
     }
     try {
         const [tokensResp, scopesResp] = await Promise.all([
@@ -114,7 +116,7 @@ async function agentAccessReload(button) {
     } catch (error) {
         debugLog('[AgentAccess] load failed:', error);
         if (!agentAccessLoaded) {
-            container.innerHTML = `<tr><td colspan="9" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要管理员会话')}</td></tr>`;
+            container.innerHTML = `<tr><td colspan="10" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要管理员会话')}</td></tr>`;
         } else {
             showToast(`Agent Token 刷新失败：${error.message}`, 'error');
         }
@@ -321,7 +323,7 @@ function agentAccessRenderTokens(tokens) {
             document.getElementById('agent-access-search')?.value
             || document.getElementById('agent-access-status-filter')?.value
         );
-        container.innerHTML = `<tr><td colspan="9" class="agent-access-empty">${filtersActive ? '没有匹配的 Agent Token' : '尚无 Agent Service Token'}</td></tr>`;
+        container.innerHTML = `<tr><td colspan="10" class="agent-access-empty">${filtersActive ? '没有匹配的 Agent Token' : '尚无 Agent Service Token'}</td></tr>`;
         return;
     }
     const statusLabels = {active: '有效', expired: '已过期', revoked: '已吊销'};
@@ -336,9 +338,11 @@ function agentAccessRenderTokens(tokens) {
             : '—';
         return `
             <tr>
-                <td class="agent-token-cell-identity" title="${agentAccessEscape(`${token.name || ''} · ${token.id || ''}`)}">
-                    <strong title="${agentAccessEscape(token.name || '')}">${agentAccessEscape(token.name || '未命名 Agent')}</strong>
-                    <code title="${agentAccessEscape(token.id || '')}">${agentAccessEscape(token.id || '—')}</code>
+                <td class="agent-token-cell-name" title="${agentAccessEscape(token.name || '')}">
+                    <strong>${agentAccessEscape(token.name || '未命名 Agent')}</strong>
+                </td>
+                <td class="agent-token-cell-id" title="${agentAccessEscape(token.id || '')}">
+                    <code>${agentAccessEscape(token.id || '—')}</code>
                 </td>
                 <td><span class="agent-token-status ${status}">${statusLabels[status]}</span></td>
                 <td class="agent-token-cell-scopes mono" title="${agentAccessEscape(scopesText)}">${agentAccessEscape(scopesText)}</td>

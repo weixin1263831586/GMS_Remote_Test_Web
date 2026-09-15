@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh GMS Redmine AI Daily Brief at 08:40 (delta)
+Description=Refresh GMS Redmine Daily Brief at 08:40 (delta)
 
 [Timer]
 OnCalendar=*-*-* 08:40:00

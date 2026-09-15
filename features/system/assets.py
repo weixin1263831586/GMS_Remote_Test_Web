@@ -27,6 +27,7 @@ from foundation.errors import handle_api_errors
 from foundation.private_config import write_private_json
 from foundation.responses import error_response, success_response
 
+from .assets_ssh import ssh_connection_failed_response
 from .utility_tools_api import (
     browse_utility_tools as browse_utility_tools,
 )
@@ -45,13 +46,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 router.include_router(utility_tools_router)
-
-
-def ssh_connection_failed_response():
-    return JSONResponse(
-        content={'success': False, 'error': 'SSH connection failed'},
-        status_code=500,
-    )
 
 
 def _remote_list_command(path: str) -> str:
@@ -139,7 +133,10 @@ async def list_files(
             return ssh_connection_failed_response()
 
         if not command_result.ok:
-            return error_response('Failed to list directory', status_code=500)
+            # Preserve remote context while exposing the dependency failure as 502.
+            detail = (command_result.stderr or command_result.stdout or '').strip()
+            return error_response('Failed to list directory on remote host',
+                                  status_code=502, detail=detail[:300] or None)
 
         files = []
         for line in command_result.stdout.split('\n'):

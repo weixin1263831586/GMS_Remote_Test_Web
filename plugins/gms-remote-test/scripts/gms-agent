@@ -168,8 +168,24 @@ if not (SCRIPT_DIR / "gms_agent" / "package_manager.py").is_file():
                 )
             else:
                 opener = urllib.request.build_opener(_NoRedirects())
-            with opener.open(request, timeout=timeout) as response:
-                return response.read()
+            try:
+                with opener.open(request, timeout=timeout) as response:
+                    return response.read()
+            except urllib.error.HTTPError as error:
+                # Surface the Controller's error body (e.g. version-drift
+                # hints from the registry) instead of the bare
+                # "HTTP Error 500: Internal Server Error" line, which gives
+                # the operator nothing actionable.
+                detail = ""
+                try:
+                    detail = error.read().decode("utf-8", "replace").strip()
+                except OSError:
+                    pass
+                if len(detail) > 500:
+                    detail = detail[:500] + "…"
+                raise RuntimeError(
+                    f"下载失败 {url} -> HTTP {error.code}: {detail or error.reason}"
+                ) from error
 
         # The inner gms-agent ends with raise SystemExit(main()); runpy
         # re-raises it here. The extract dir is therefore released in a

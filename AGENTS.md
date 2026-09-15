@@ -54,6 +54,30 @@
 - Docs policy: source comments must not reference review-round or audit
   numbers that do not exist as documents; cite real ADRs under
   `docs/architecture/adr/`. Architecture decisions land in that directory.
+- Canonical configuration paths: runtime config lives in
+  `configs/local/` and secrets in `configs/secrets/`. Flat root paths
+  (`configs/cluster.json`, `configs/config.json`, `configs/runtime.json`,
+  `configs/worker_tokens.json`, …) are legacy compatibility only — they
+  may appear in migration/backup/restore code and compatibility docs,
+  never in new UI strings, error messages, or normal-path docs.
+- SQLite schema migration must be process-safe: hold a `BEGIN IMMEDIATE`
+  write lock (or use a versioned `PRAGMA user_version` scheme) before
+  reading schema and running `ALTER TABLE`; migrations must stay
+  idempotent across Web/Worker/CLI processes.
+- Frontend module initialization must not perform mutating network
+  requests: page load / migration / default-value paths persist locally
+  only (`saveCategories({ sync: false })` pattern); server writes happen
+  only on real user mutations. Enforced by a runtime UI smoke test.
+- Map infrastructure failures to 4xx/5xx semantic codes (502 remote
+  Worker/SSH failure, 503 dependency unavailable, 504 timeout); 500 is
+  reserved for unexpected programming errors — agents use the status to
+  decide retry vs fix vs escalate. New routes raise
+  `foundation.error_model.ApiError` (the single error-code table) or
+  return its envelope; do not hand-roll status codes. Failure payloads
+  carry `code` and, where actionable, `next_actions`.
+- `gms-agent doctor --json` (+ `gms-rt-system-selfcheck --json`) is the
+  single acceptance path for agent deployment; do not document or script
+  ad-hoc command chains for environment verification.
 - Do not edit: `plugins/gms-remote-test/**` (generated),
   `tests/contract/snapshots/**` (regenerate deliberately),
   `tests/architecture/test_file_size_rules.py` budgets except to shrink

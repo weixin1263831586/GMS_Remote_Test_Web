@@ -14,14 +14,14 @@
   <div class="tabs">
     <div class="tab" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</div>
     <div class="tab active" data-tab="stats" data-click="switchTab" data-a0="stats">📈 个人看板</div>
-    <div class="tab" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief">🤖 AI 晨报</div>
     <div class="tab" data-tab="project" data-click="switchTab" data-a0="project">🧩 项目看板</div>
+    <div class="tab" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief">🤖 每日晨报</div>
     <div class="tab" data-tab="issues" data-click="switchTab" data-a0="issues">📋 工单列表</div>
     <div class="tab" data-tab="cases" data-click="switchTab" data-a0="cases">📚 成熟案例</div>
     <div class="tab" data-tab="runs" data-click="switchTab" data-a0="runs">📊 扫描记录</div>
   </div>
   <div class="header-toolbar">
-    <div class="filter-bar">
+    <div id="issuesToolbarFilters" class="filter-bar">
       <input type="text" id="searchInput" placeholder="搜索 / #工单号查 Redmine" title="输入关键词搜索本地工单，或输入 #工单号 直接查询 Redmine" data-keydown="smartSearch" data-key="Enter">
       <select id="statusFilter" data-change="loadIssues" aria-label="工单状态">
         <option value="">全部状态</option>
@@ -38,11 +38,9 @@
         <option value="正常">正常</option>
         <option value="低">低</option>
       </select>
-      <input type="text" id="syncAssigneeInput" placeholder="同步负责人" title="姓名或登录名；留空则同步当前登录用户">
     </div>
     <div class="btn-group">
-      <button id="scanBtn" class="secondary" data-click="startScan">🔍 扫描</button>
-      <button id="syncBtn" class="secondary" data-click="triggerSync" title="全量同步指派工单并分析新工单，耗时较长">🔄 全量同步</button>
+      <button id="scanBtn" class="secondary" data-click="runRedmineContextAction" hidden>🔍 扫描</button>
       <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab" title="绕过缓存，重新从 Redmine 拉取当前页数据">🔃 刷新</button>
       <button class="secondary" data-click="showResetModal">🗑️ 重置</button>
       <button class="secondary settings-btn" data-click="showSettingsModal" title="设置" aria-label="设置">⚙️ 设置</button>
@@ -71,6 +69,14 @@
 </div>
 
 <div id="tab-issues" class="tab-content">
+  <details class="redmine-advanced-sync">
+    <summary>⚙️ 高级同步</summary>
+    <div class="redmine-advanced-sync-body">
+      <input type="text" id="syncAssigneeInput" placeholder="同步负责人" title="姓名或登录名；留空则同步当前登录用户">
+      <button id="syncBtn" class="secondary" data-click="triggerSync" title="全量同步指派工单并分析新工单，耗时较长">🔄 全量同步</button>
+      <span class="muted">首次初始化、数据修复或切换负责人时使用</span>
+    </div>
+  </details>
   <div id="issuesList"></div>
   <div id="issuesPagination" class="pagination"></div>
 </div>
@@ -78,9 +84,7 @@
 <div id="tab-cases" class="tab-content">
   <div class="two-col">
     <section class="panel">
-      <h2>📚 知识库
-        <button class="secondary" style="float:right" data-click="showBatchImportModal">📥 批量导入工单</button>
-      </h2>
+      <h2>📚 知识库</h2>
       <div class="filter-bar" style="margin:6px 0 10px;display:flex;gap:8px;align-items:center">
         <div class="case-view-toggle">
           <button id="viewBtnFacts" class="active" data-click="switchCaseView" data-a0="facts">📋 工单事实</button>
@@ -89,7 +93,7 @@
         <input type="text" id="caseSearchInput" placeholder="搜索（模块/签名/关键词）..." data-keydown="loadCases" data-key="Enter" style="flex:1;min-width:120px">
         <button data-click="loadCases">搜索</button>
       </div>
-      <div id="casesList" class="scroll"><div class="muted">点击「批量导入工单」结构化历史工单，导入后在此查看结构化结果。</div></div>
+      <div id="casesList" class="scroll"><div class="muted">点击顶部「📚 导入」结构化历史工单，导入后在此查看结构化结果。</div></div>
     </section>
     <section class="panel">
       <h2 id="caseDetailTitle">详情</h2>
@@ -117,7 +121,7 @@
 
 <div id="tab-daily-brief" class="tab-content">
   <section class="stats-section" id="sec-daily-brief">
-    <div class="card daily-brief-card" id="dailyBriefCard"><div class="muted" style="padding:16px">🤖 AI 晨报加载中…</div></div>
+    <div class="card daily-brief-card" id="dailyBriefCard"><div class="muted" style="padding:16px">🤖 每日晨报加载中…</div></div>
   </section>
 </div>
 
@@ -250,27 +254,37 @@
       <div>
         <label>Redmine 账号</label>
         <input type="text" id="settingRedmineUser" placeholder="Redmine 登录用户名">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">看板为组织共享视图，凭据全局保存；部门统计实时拉取需要它</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">凭据按当前登录账号隔离保存；每日晨报和该账号绑定的 Agent 读取同一份凭据</div>
       </div>
       <div>
         <label>Redmine 密码</label>
         <input type="password" id="settingRedminePass" placeholder="留空则不修改">
       </div>
+      <div>
+        <label>Redmine API Key（可选）</label>
+        <input type="password" id="settingRedmineApiKey" placeholder="可替代账号密码；留空则不修改">
+        <div class="setting-help" id="settingRedmineCredentialStatus">正在检查当前账号的 Redmine 凭据状态…</div>
+      </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
-      <div class="settings-subsection-title">AI 晨报</div>
+      <div class="settings-subsection-title">每日晨报</div>
       <label class="setting-checkbox-row">
         <input type="checkbox" data-daily-brief-setting="enabled">
         <span>启用每日晨报</span>
       </label>
       <div>
         <label>取证 Agent Profile</label>
-        <input type="text" data-daily-brief-setting="agent_profile" placeholder="例如：kkagent-host-1a2b3c4d">
-        <div class="setting-help">必须是已完成服务令牌注册的本机 profile；留空时 AI 无法读取 Redmine 日志和附件。</div>
+        <select data-daily-brief-setting="agent_profile" aria-describedby="dailyBriefProfileHelp">
+          <option value="">正在读取本机 kkagent Profile…</option>
+        </select>
+        <div class="setting-help" id="dailyBriefProfileHelp">仅列出 gms-agent profile list 中的 kkagent Profile；多个 Profile 必须明确选择。</div>
       </div>
       <div class="setting-inline-grid">
         <div>
           <label>分析模型</label>
-          <input type="text" data-daily-brief-setting="model" placeholder="留空使用 kkagent 默认模型">
+          <select data-daily-brief-setting="model" aria-describedby="dailyBriefModelHelp">
+            <option value="">正在读取系统模型…</option>
+          </select>
+          <div class="setting-help" id="dailyBriefModelHelp">从系统已启用的本地模型中选择；保存后每日晨报会将所选模型传给 kkagent。</div>
         </div>
         <div>
           <label>并发分析数</label>

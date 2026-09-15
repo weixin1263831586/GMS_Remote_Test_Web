@@ -24,15 +24,13 @@ router = APIRouter(prefix="/api/redmine-agent")
 async def get_credentials_status(request: Request):
     """报告登录用户的 Redmine 凭据是否已配置（不回传明文）。
 
-    凭据统一落盘到 configs/config_runtime.json，与统计端点读取的配置一致。
+    凭据落盘到当前登录账号的运行时配置，与统计和晨报端点读取的配置一致。
     API Key 只报告是否存在，绝不回传内容。
     """
     manager = get_redmine_config_for_request(request)
     creds = manager.load_redmine_credentials() or {}
-    has_api_key = bool(getattr(manager, "load_redmine_api_key", lambda: "")())
-    return {"success": True, "data": {"configured": bool(creds.get("password")) or has_api_key,
-                                       "username": creds.get("username", ""),
-                                       "api_key_configured": has_api_key}}
+    status = manager.redmine_credentials_status()
+    return {"success": True, "data": {**status, "username": creds.get("username", "")}}
 
 
 @router.post("/config/credentials")
@@ -80,10 +78,10 @@ async def save_credentials(request: Request):
     manager = get_redmine_config_for_request(request)
     if username and password and not manager.save_redmine_credentials(username, password):
         return JSONResponse(status_code=500, content={"success": False, "error": "保存凭据失败"})
-    if api_key or "api_key" in body:
-        if not getattr(manager, "save_redmine_api_key", lambda _k: False)(api_key):
-            if api_key:
-                return JSONResponse(status_code=500, content={"success": False, "error": "保存 API Key 失败"})
+    # An omitted or empty value leaves the saved API Key unchanged.
+    # Deletion needs a dedicated explicit operation, not an empty form field.
+    if api_key and not getattr(manager, "save_redmine_api_key", lambda _k: False)(api_key):
+        return JSONResponse(status_code=500, content={"success": False, "error": "保存 API Key 失败"})
     redmine_api._clear_stats_caches()
     _audit_credentials_write(request, user)
     return {"success": True}

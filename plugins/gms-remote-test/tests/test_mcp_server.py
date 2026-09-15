@@ -8,6 +8,8 @@ is driven through the real subprocess entry point.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -39,6 +41,25 @@ def _reset_catalog_cache() -> None:
 
 
 class BuildArgvTests(unittest.TestCase):
+    def test_dynamic_module_load_finds_sibling_schema_module(self):
+        """Contract tooling loads mcp_server.py without adding runtime to sys.path."""
+        code = (
+            "import importlib.util\n"
+            f"path = {str(RUNTIME_DIR / 'mcp_server.py')!r}\n"
+            "spec = importlib.util.spec_from_file_location('dynamic_mcp', path)\n"
+            "module = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(module)\n"
+            "assert module.mcp_tool_schemas.ALL_TOOLS\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tempfile.gettempdir(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_normalize_command_accepts_prefix_variants(self):
         self.assertEqual(
             mcp_server.normalize_command("gms-rt-devices-list"),
@@ -751,6 +772,59 @@ class JsonRpcLoopTests(unittest.TestCase):
             names = {tool["name"] for tool in mcp_server.tools()}
             self.assertIn("gms_rt_context", names)
             self.assertIn("gms_rt_devices", names)
+            self.assertNotIn("gms_rt_test_start", names)
+
+    def test_decorate_tool_derives_hints_from_command_catalog(self):
+        """CommandSpec 单一来源：绑定 CLI 命令的 MCP 工具的
+        安全注解必须跟随 gms-rt-system-commands 目录，而不是第二份静态表。
+        """
+        catalog_descriptor = {
+            "name": "gms-rt-devices-reboot",
+            "mode": "mutating",
+            "requires_explicit_authorization": True,
+            "requires_elevation": False,
+            "external_side_effects": True,
+            "resource_intensive": False,
+        }
+        tool = {"name": "gms_rt_devices_reboot", "description": "x"}
+        with patch.object(
+            mcp_server, "_command_safety", return_value=catalog_descriptor
+        ):
+            decorated = mcp_server._decorate_tool(tool)
+        annotations = decorated["annotations"]
+        self.assertFalse(annotations["readOnlyHint"])
+
+        # destructive 需要同时 external_side_effects + resource_intensive
+        # （catalog 语义）；只 mutating 时 readOnlyHint=false 即可。
+        destructive_descriptor = dict(catalog_descriptor, resource_intensive=True)
+        with patch.object(
+            mcp_server, "_command_safety", return_value=destructive_descriptor
+        ):
+            decorated = mcp_server._decorate_tool(tool)
+        self.assertFalse(decorated["annotations"]["readOnlyHint"])
+        self.assertTrue(decorated["annotations"]["destructiveHint"])
+
+        # 只读 CLI 命令 → readOnlyHint 保持 true。
+        read_descriptor = dict(catalog_descriptor, mode="read_only",
+                               requires_explicit_authorization=False,
+                               external_side_effects=False)
+        with patch.object(
+            mcp_server, "_command_safety", return_value=read_descriptor
+        ):
+            decorated = mcp_server._decorate_tool(tool)
+        self.assertTrue(decorated["annotations"]["readOnlyHint"])
+
+        # catalog 不可用（None）时回退到静态集合，不抛异常。
+        with patch.object(mcp_server, "_command_safety", return_value=None):
+            decorated = mcp_server._decorate_tool(
+                {"name": "gms_rt_jobs_cancel", "description": "x"}
+            )
+        self.assertFalse(decorated["annotations"]["readOnlyHint"])
+
+    def test_toolset_filter_rejects_non_allowlisted_call(self):
+        with patch.dict(os.environ, {"GMS_MCP_TOOLSETS": "core"}):
+            names = {tool["name"] for tool in mcp_server.tools()}
+            self.assertIn("gms_rt_context", names)
             self.assertNotIn("gms_rt_test_start", names)
             self.assertNotIn("gms_rt_jobs_cancel", names)
             replies = []
@@ -1632,6 +1706,115 @@ class RedmineEvidenceToolTests(unittest.TestCase):
     def test_image_tool_requires_artifact(self):
         result = mcp_server.redmine_image_tool({})
         self.assertTrue(result.is_error)
+
+    @staticmethod
+    def _fake_image_envelope():
+        return json.dumps({
+            "ok": True,
+            "data": {
+                "artifact_id": "ART",
+                "mime_type": "image/png",
+                "base64": base64.b64encode(b"\x89PNG-fixture").decode(),
+                "sha256": "ff" * 32,
+                "size_bytes": 12,
+                "scaled": False,
+            },
+        }), False
+
+    def test_image_tool_as_file_returns_path_without_image_content(self):
+        original = mcp_server.run_cli
+        mcp_server.run_cli = lambda *a, **k: self._fake_image_envelope()
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        result = mcp_server.redmine_image_tool({"artifact_id": "ART", "as_file": True})
+        self.assertFalse(result.is_error)
+        # Exactly one text item — no inline image content is delivered.
+        self.assertEqual([item["type"] for item in result.items], ["text"])
+        payload = json.loads(result.items[0]["text"].splitlines()[0])
+        self.addCleanup(os.unlink, payload["path"])
+        self.assertEqual(payload["artifact_id"], "ART")
+        self.assertEqual(payload["mime_type"], "image/png")
+        self.assertEqual(payload["size_bytes"], len(b"\x89PNG-fixture"))
+        self.assertEqual(
+            payload["file_sha256"],
+            hashlib.sha256(b"\x89PNG-fixture").hexdigest(),
+        )
+        # The artifact's own hash from the envelope must survive untouched.
+        self.assertEqual(payload["sha256"], "ff" * 32)
+        path = Path(payload["path"])
+        self.assertTrue(path.is_file())
+        self.assertEqual(path.suffix, ".png")
+        self.assertEqual(oct(path.stat().st_mode & 0o777), "0o600")
+        self.assertEqual(path.read_bytes(), b"\x89PNG-fixture")
+        self.assertIn("as_file", result.items[0]["text"])
+
+    def test_image_tool_as_file_rejects_corrupt_base64(self):
+        original = mcp_server.run_cli
+
+        def fake_run(*_a, **_k):
+            return json.dumps({
+                "ok": True,
+                "data": {"artifact_id": "ART", "mime_type": "image/png",
+                         "base64": "!!!not-base64!!!"},
+            }), False
+
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        result = mcp_server.redmine_image_tool({"artifact_id": "ART", "as_file": True})
+        self.assertTrue(result.is_error)
+        self.assertIn("base64", result.items[0]["text"])
+
+    def test_screencap_tool_as_file_returns_path_without_image_content(self):
+        original = mcp_server.run_cli
+
+        def fake_run(*_a, **_k):
+            return json.dumps({
+                "ok": True,
+                "data": {
+                    "device_id": "RK3562GMS7",
+                    "mime_type": "image/png",
+                    "base64": base64.b64encode(b"\x89PNG-screen").decode(),
+                },
+            }), False
+
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        result = mcp_server.devices_screencap_tool({
+            "device": "RK3562GMS7", "as_file": True,
+        })
+        payload = json.loads(result.items[0]["text"].splitlines()[0])
+        self.addCleanup(os.unlink, payload["path"])
+        self.assertFalse(result.is_error)
+        self.assertEqual([item["type"] for item in result.items], ["text"])
+        payload = json.loads(result.items[0]["text"].splitlines()[0])
+        self.assertEqual(payload["device_id"], "RK3562GMS7")
+        self.assertTrue(Path(payload["path"]).is_file())
+
+    def test_screencap_tool_default_still_returns_inline_image(self):
+        original = mcp_server.run_cli
+
+        def fake_run(*_a, **_k):
+            return json.dumps({
+                "ok": True,
+                "data": {
+                    "device_id": "RK3562GMS7",
+                    "mime_type": "image/png",
+                    "base64": "aVZCUg==",
+                },
+            }), False
+
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        result = mcp_server.devices_screencap_tool({"device": "RK3562GMS7"})
+        self.assertEqual(
+            [item["type"] for item in result.items], ["text", "image"]
+        )
+
+    def test_image_tools_declare_as_file_in_schema(self):
+        by_name = {tool["name"]: tool for tool in mcp_server.tools()}
+        for name in ("gms_rt_devices_screencap", "gms_rt_redmine_image"):
+            schema = by_name[name]["inputSchema"]
+            self.assertIn("as_file", schema["properties"])
+            self.assertEqual(schema["properties"]["as_file"]["type"], "boolean")
 
     def test_sdk_read_requires_result_id_only(self):
         # read 只接受自包含 opaque result_id。

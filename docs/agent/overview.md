@@ -3,7 +3,7 @@
 > 本文档面向 GMS Remote Test 平台的管理员、部署者与仓库维护者，说明 Agent Runtime
 > 的定位、源码到分发产物的生成链，以及多 Controller 接入的整体结构。
 > 安装后如何**使用** Agent（日常命令、MCP 工具、运维手册），见
-> [../../agent/gms-remote-test/docs/README.md](../../agent/gms-remote-test/docs/README.md)
+> [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md)
 > 与 [../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md](../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md)。
 
 ## 定位
@@ -71,7 +71,7 @@ dist 分发包（由 features/system/agent_package_builder.py 与该工具产出
 - [docs/agent/security-model.md](security-model.md) — Service Token、scope、审批令牌
 - [docs/agent/profiles.md](profiles.md) — profile 存储与 fail-closed 选择
 - [docs/agent/troubleshooting.md](troubleshooting.md) — 常见问题
-- [../../agent/gms-remote-test/docs/README.md](../../agent/gms-remote-test/docs/README.md) — 安装后使用文档
+- [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md) — 安装后使用文档
 - [../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md](../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md) — Agent 运维手册
 - [docs/architecture/adr/0003-agent-profile-store.md](../architecture/adr/0003-agent-profile-store.md) — Profile Store 决策记录
 - 根 README「Agent Runtime 与 MCP」「包完整性与更新链」两节

@@ -509,6 +509,7 @@ function copyText(text, btn) {
 function switchTab(tab) {
   var target = document.getElementById('tab-' + tab) ? tab : 'stats';
   currentTab = target;
+  updateRedmineToolbar();
   try { window.sessionStorage.setItem('redmineLastTab', target); } catch(_) {}
   var url = new URL(window.location.href);
   if (target === 'stats') url.searchParams.delete('tab');
@@ -524,6 +525,44 @@ function switchTab(tab) {
   if (target === 'daily-brief') return loadDailyBrief();
   if (target === 'stats') return loadStatistics();
   return Promise.resolve();
+}
+
+function updateRedmineToolbar() {
+  var filters = document.getElementById('issuesToolbarFilters');
+  var action = document.getElementById('scanBtn');
+  var refresh = document.getElementById('refreshBtn');
+  var isIssues = currentTab === 'issues';
+  var isAnalysisTab = ['issues', 'cases', 'runs'].includes(currentTab);
+
+  if (filters) {
+    filters.hidden = !isIssues;
+    filters.setAttribute('aria-hidden', String(!isIssues));
+  }
+  if (action) {
+    action.hidden = !isAnalysisTab;
+    action.setAttribute('aria-hidden', String(!isAnalysisTab));
+    action.disabled = false;
+    action.title = '';
+    if (currentTab === 'cases') {
+      action.textContent = '📚 导入';
+      action.title = '批量导入工单并进行结构化分析';
+    } else {
+      action.textContent = '🔍 扫描';
+      action.title = currentTab === 'runs'
+        ? '扫描最近 48 小时工单并生成扫描记录'
+        : '扫描最近 48 小时工单并更新工单分析';
+    }
+  }
+  if (refresh) {
+    refresh.title = currentTab === 'daily-brief'
+      ? '只刷新每日晨报展示，不启动新的 AI 分析'
+      : '绕过缓存，重新加载当前页面数据';
+  }
+}
+
+async function runRedmineContextAction() {
+  if (currentTab === 'cases') return showBatchImportModal();
+  return startScan();
 }
 
 async function refreshCurrentTab() {
@@ -984,13 +1023,15 @@ function showSettingsModal() {
       try {
         var creds = await api('/api/redmine-agent/config/credentials');
         document.getElementById('settingRedmineUser').value = (creds && creds.username) || '';
-      } catch (_) {}
+        renderRedmineCredentialStatus(creds);
+      } catch (_) { renderRedmineCredentialStatus(null); }
       document.getElementById('settingRedminePass').value = '';
+      document.getElementById('settingRedmineApiKey').value = '';
       try {
         dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config') || {};
         dailyBriefSetting('enabled').checked = dailyBriefConfigCache.enabled === true;
-        dailyBriefSetting('agent_profile').value = dailyBriefConfigCache.agent_profile || '';
-        dailyBriefSetting('model').value = dailyBriefConfigCache.model || '';
+        await loadDailyBriefAgentProfiles(dailyBriefConfigCache.agent_profile || '');
+        await loadDailyBriefModelOptions(dailyBriefConfigCache.model || '');
         dailyBriefSetting('max_parallel_issues').value = dailyBriefConfigCache.max_parallel_issues || 1;
         dailyBriefSetting('max_turns').value = dailyBriefConfigCache.max_turns || 20;
       } catch (_) {}
@@ -998,6 +1039,26 @@ function showSettingsModal() {
   })();
 }
 function hideSettingsModal() { hideModal('settingsModal'); }
+
+function renderRedmineCredentialStatus(status) {
+  var el = document.getElementById('settingRedmineCredentialStatus');
+  if (!el) return;
+  if (!status) {
+    el.textContent = '无法读取当前账号的 Redmine 凭据状态。';
+    return;
+  }
+  if (status.configured) {
+    el.textContent = status.api_key_configured
+      ? '当前账号：Redmine 地址与 API Key 已配置。'
+      : '当前账号：Redmine 地址与账号密码已配置。';
+    return;
+  }
+  var missing = [];
+  if (!status.base_url_configured) missing.push('地址');
+  if (!status.password_configured && !status.api_key_configured) missing.push('账号密码或 API Key');
+  el.textContent = '当前账号尚未配置：' + (missing.join('、') || 'Redmine 凭据') + '。';
+}
+
 async function saveSettings() {
   var stale = parseInt(document.getElementById('settingStaleDays').value) || 20;
   var window_ = parseInt(document.getElementById('settingWindowDays').value) || 60;
@@ -1026,6 +1087,7 @@ async function saveSettings() {
     // Redmine 凭据（仅当填写了密码才保存，避免误清空）
     var redmineUser = document.getElementById('settingRedmineUser').value.trim();
     var redminePass = document.getElementById('settingRedminePass').value;
+    var redmineApiKey = document.getElementById('settingRedmineApiKey').value;
     if (redminePass) {
       await api('/api/redmine-agent/config/credentials', {
         method: 'POST',
@@ -1033,6 +1095,14 @@ async function saveSettings() {
         body: JSON.stringify({username: redmineUser, password: redminePass})
       });
     }
+    if (redmineApiKey) {
+      await api('/api/redmine-agent/config/credentials', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({api_key: redmineApiKey})
+      });
+    }
+    try { renderRedmineCredentialStatus(await api('/api/redmine-agent/config/credentials')); } catch (_) {}
     var briefConfig = Object.assign({}, dailyBriefConfigCache || {});
     briefConfig.enabled = dailyBriefSetting('enabled').checked;
     briefConfig.agent_profile = dailyBriefSetting('agent_profile').value.trim();
@@ -1120,7 +1190,7 @@ async function loadIssues(page) {
 function renderIssuesList(issues) {
   const box = document.getElementById('issuesList');
   if (!issues.length) {
-    box.innerHTML = '<div class="muted" style="padding:20px">暂无工单数据。点击"全量同步"按钮拉取所有指派给你的 Redmine 工单。</div>';
+    box.innerHTML = '<div class="muted" style="padding:20px">暂无工单数据。请展开上方「高级同步」，使用「全量同步」拉取所有指派给你的 Redmine 工单。</div>';
     return;
   }
   box.innerHTML = issues.map(renderIssueCard).join('');
@@ -2238,7 +2308,7 @@ async function loadCases() {
 function renderFactsList(items, total) {
   const box = document.getElementById('casesList');
   if (!items.length) {
-    box.innerHTML = '<div class="muted" style="padding:14px">暂无已导入的工单。点击右上「📥 批量导入工单」粘贴工单号,或「导入最近20个我的指派」。</div>';
+    box.innerHTML = '<div class="muted" style="padding:14px">暂无已导入的工单。点击顶部「📚 导入」粘贴工单号,或导入最近20个我的指派。</div>';
     return;
   }
   box.innerHTML = items.map(f => {
@@ -2257,7 +2327,7 @@ function renderFactsList(items, total) {
 function renderCasesList(items, total) {
   const box = document.getElementById('casesList');
   if (!items.length) {
-    box.innerHTML = '<div class="muted" style="padding:14px">暂无成熟案例。请先「批量导入工单」结构化历史单,再选中若干案例用「📚分析案例」→ 构建成熟案例。</div>';
+    box.innerHTML = '<div class="muted" style="padding:14px">暂无成熟案例。请先点击顶部「📚 导入」结构化历史工单,再选中若干案例构建成熟案例。</div>';
     return;
   }
   box.innerHTML = items.map(c => {
@@ -2675,7 +2745,8 @@ function refreshRedmineAgentStatus() {
       document.title = '⏳ RedmineAgent (运行中...)';
     } else {
       document.title = '🔧 RedmineAgent';
-      if (btn && btn.disabled) { btn.disabled = false; btn.textContent = '🔍 扫描'; }
+      if (btn && btn.disabled) btn.disabled = false;
+      updateRedmineToolbar();
     }
    } catch (_) {}
   })().finally(function() { redmineStatusRefreshPromise = null; });
@@ -2699,7 +2770,7 @@ function syncRedmineStatusRefresh(event) {
 window.addEventListener('gms:embedded-visibility', syncRedmineStatusRefresh);
 syncRedmineStatusRefresh();
 
-// ==================== AI 晨报（Redmine Daily Brief） ====================
+// ==================== 每日晨报（Redmine Daily Brief） ====================
 // 数据源：GET /api/redmine-agent/daily-brief/latest（只读展示；生成/重分析走 POST）。
 
 var dailyBriefCache = null;
@@ -2707,6 +2778,73 @@ var dailyBriefConfigCache = null;
 
 function dailyBriefSetting(name) {
   return document.querySelector('[data-daily-brief-setting="' + name + '"]');
+}
+
+function appendDailyBriefModelOption(select, value, label) {
+  var option = document.createElement('option');
+  option.value = String(value || '');
+  option.textContent = String(label || value || '');
+  select.appendChild(option);
+}
+
+async function loadDailyBriefAgentProfiles(selectedProfile) {
+  var select = dailyBriefSetting('agent_profile');
+  if (!select) return;
+  var selected = String(selectedProfile || '').trim();
+  select.replaceChildren();
+  try {
+    var payload = await api('/api/redmine-agent/daily-brief/agent-profiles') || {};
+    var profiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+    var known = {};
+    if (profiles.length > 1 && !selected) {
+      appendDailyBriefModelOption(select, '', '请选择 kkagent Profile');
+    }
+    profiles.forEach(function(item) {
+      var profile = String(item || '').trim();
+      if (!profile || known[profile]) return;
+      known[profile] = true;
+      appendDailyBriefModelOption(select, profile, profile);
+    });
+    if (!profiles.length) {
+      appendDailyBriefModelOption(select, '', '未发现本机 kkagent Profile');
+    } else if (selected && !known[selected]) {
+      appendDailyBriefModelOption(select, selected, '当前保存的 Profile：' + selected);
+    }
+    select.value = selected || String(payload.default_profile || '').trim();
+  } catch (_) {
+    appendDailyBriefModelOption(select, selected, selected || 'Profile 列表读取失败');
+    select.value = selected;
+  }
+}
+
+async function loadDailyBriefModelOptions(selectedModel) {
+  var select = dailyBriefSetting('model');
+  if (!select) return;
+  var selected = String(selectedModel || '').trim();
+  select.replaceChildren();
+  try {
+    var payload = await api('/api/redmine-agent/daily-brief/model-options') || {};
+    var models = Array.isArray(payload.models) ? payload.models : [];
+    var known = {};
+    models.forEach(function(item) {
+      var model = String((item || {}).model || '').trim();
+      if (!model || known[model]) return;
+      known[model] = true;
+      var display = String((item || {}).display_name || model).trim() || model;
+      var provider = String((item || {}).provider || '').trim();
+      appendDailyBriefModelOption(select, model, provider ? display + '（' + provider + '）' : display);
+    });
+    if (!models.length) {
+      appendDailyBriefModelOption(select, '', '未发现已启用的系统模型（使用 kkagent 默认模型）');
+    } else if (selected && !known[selected]) {
+      appendDailyBriefModelOption(select, selected, '当前保存的模型：' + selected);
+    }
+    select.value = selected || String(payload.default_model || '').trim();
+    if (!select.value && select.options.length) select.selectedIndex = 0;
+  } catch (_) {
+    appendDailyBriefModelOption(select, selected, selected || '模型列表读取失败（使用 kkagent 默认模型）');
+    select.value = selected;
+  }
 }
 
 async function loadDailyBrief() {
@@ -2719,15 +2857,18 @@ async function loadDailyBrief() {
     }
     dailyBriefCache = (data && data.success !== false) ? data : null;
     card.innerHTML = renderDailyBriefInner(dailyBriefCache);
+    updateRedmineToolbar();
     scheduleDailyBriefAutoRefresh(dailyBriefCache);
   } catch (e) {
     card.innerHTML = renderDailyBriefInner(null);
+    updateRedmineToolbar();
   }
 }
 
-// 晨报 run 进行中时自动轮询 latest，完成后停；手动触发已有 pollDailyBriefRun，此处兜底刷新。
+// 每日晨报 run 进行中时自动轮询 latest，完成后停；手动触发已有 pollDailyBriefRun，此处兜底刷新。
 var dailyBriefAutoPollTimer = null;
 var dailyBriefRunStarting = false;   // 点击「重新分析」后到 POST 返回前的过渡态
+var dailyBriefStoppingRunId = '';    // 取消请求已提交，等待 Worker 终止 KkAgent
 var dailyBriefManualPoll = false;    // 手动触发后的轮询进行中标记
 function scheduleDailyBriefAutoRefresh(data) {
   var run = (data && data.run) || {};
@@ -2736,7 +2877,7 @@ function scheduleDailyBriefAutoRefresh(data) {
   if (dailyBriefAutoPollTimer) return; // 已有轮询在跑
   dailyBriefAutoPollTimer = setTimeout(async function () {
     dailyBriefAutoPollTimer = null;
-    if (currentTab !== 'daily-brief') return; // 离开晨报页后不再刷
+    if (currentTab !== 'daily-brief') return; // 离开每日晨报页后不再刷
     await loadDailyBrief();
   }, 10000);
 }
@@ -2744,23 +2885,33 @@ function scheduleDailyBriefAutoRefresh(data) {
 function renderDailyBriefInner(data) {
   if (!data || !data.run) {
     return '<div style="padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-      + '<b>🤖 AI 晨报</b><span class="muted">暂无晨报</span>'
-      + '<button class="ka-btn" data-click="startDailyBriefRun">立即生成</button>'
+      + '<b>🤖 每日晨报</b><span class="muted">暂无每日晨报</span>'
+      + '<button class="ka-btn" data-click="startDailyBriefRun">▶ 生成每日晨报</button>'
       + '</div>';
   }
   var run = data.run || {};
   var issues = data.issues || [];
   var counts = (run.report_json && run.report_json.counts) || {};
+  var profileMissing = Boolean(dailyBriefConfigCache && !dailyBriefConfigCache.agent_profile);
+  var profileRequiredError = profileMissing
+    && /(?:未绑定.*agent[ _]profile|agent_profile)/i.test(String(run.error || ''));
   var statusText = ({ completed: '完成', partial: '部分完成', failed: '失败', cancelled: '已停止', analyzing: '分析中…', pending: '排队中', snapshotting: '生成快照中…' })[run.status] || run.status;
   var statusBadge = '<span class="daily-brief-status ' + esc(run.status) + '">' + esc(statusText) + '</span>';
   var inflight = (run.status === 'pending' || run.status === 'snapshotting' || run.status === 'analyzing');
+  var stopping = inflight && dailyBriefStoppingRunId === String(run.run_id || run.brief_date || '');
+  if (!inflight && dailyBriefStoppingRunId === String(run.run_id || run.brief_date || '')) {
+    dailyBriefStoppingRunId = '';
+  }
   var actionBtn;
   if (dailyBriefRunStarting) {
     actionBtn = '<span class="daily-brief-action"><button class="ka-btn" disabled>⏳ 启动中…</button></span>';
   } else if (inflight) {
     var liveLabel = ({ pending: '排队中…', snapshotting: '生成快照中…', analyzing: '分析中…' })[run.status] || '处理中…';
     actionBtn = '<span class="daily-brief-action"><button class="ka-btn" disabled>⏳ ' + esc(liveLabel) + '</button>'
-      + '<button class="ka-btn" data-click="stopDailyBriefRun">■ 停止分析</button></span>';
+      + (stopping
+        ? '<button class="ka-btn" disabled>⏳ 停止中…</button>'
+        : '<button class="ka-btn" data-click="stopDailyBriefRun">■ 停止分析</button>')
+      + '</span>';
   } else if (run.status === 'completed' || run.status === 'partial' || run.status === 'failed' || run.status === 'cancelled') {
     actionBtn = '<span class="daily-brief-action"><button class="ka-btn" data-click="startDailyBriefRun">'
       + (run.status === 'failed' || run.status === 'cancelled' ? '重试全部分析' : '重新分析全部') + '</button></span>';
@@ -2769,7 +2920,7 @@ function renderDailyBriefInner(data) {
   }
   var head = '<div class="daily-brief-head">'
     + '<div class="daily-brief-titlebar">'
-    + '<span class="daily-brief-title">🤖 AI 晨报</span>' + statusBadge
+    + '<span class="daily-brief-title">🤖 每日晨报</span>' + statusBadge
     + '<span class="muted">' + esc(run.brief_date || '') + (run.finished_at ? ' · 生成于 ' + esc(String(run.finished_at).replace('T', ' ').slice(0, 16)) : '') + '</span>'
     + actionBtn
     + '</div>'
@@ -2780,10 +2931,12 @@ function renderDailyBriefInner(data) {
     + '<div class="daily-brief-metric"><span>需人工确认</span><b>' + esc(counts.needs_human_review || 0) + '</b></div>'
     + '</div></div>';
   if (run.status === 'failed' && run.error) {
-    head += '<div class="daily-brief-warning daily-brief-error"><span>❌ ' + esc(run.error) + '</span></div>';
+    head += '<div class="daily-brief-warning daily-brief-error"><span>❌ ' + esc(run.error) + '</span>'
+      + (profileRequiredError ? '<button class="ka-btn" data-click="showSettingsModal">立即设置</button>' : '')
+      + '</div>';
   }
-  if (dailyBriefConfigCache && !dailyBriefConfigCache.agent_profile) {
-    head += '<div class="daily-brief-warning"><span>⚠️ 未绑定取证 Agent Profile，AI 可能只能依据标题分析，无法读取 Redmine 日志与附件。</span>'
+  if (profileMissing && !profileRequiredError) {
+    head += '<div class="daily-brief-warning"><span>⚠️ 每日晨报必须先绑定取证 Agent Profile，才能完成 Redmine 只读取证与分析。</span>'
       + '<button class="ka-btn" data-click="showSettingsModal">立即设置</button></div>';
   }
   if (!issues.length) return head;
@@ -2815,7 +2968,7 @@ function renderDailyBriefInner(data) {
       + '<b>Defect #' + esc(issue.issue_id) + '</b>' + (subject ? ' ' + esc(subject) : '') + '</span>'
       + '</div>'
       + issueStateHtml(issue)
-      + '<div class="daily-brief-row-actions"><button class="ka-btn" data-click="showDailyBriefIssue" data-a0="' + esc(issue.issue_id) + '">查看分析</button>'
+      + '<div class="daily-brief-row-actions"><button type="button" class="ka-btn" data-click="showDailyBriefIssue" data-a0="' + esc(issue.issue_id) + '" data-prevent data-stop>查看分析</button>'
       + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button></div>'
       + '</div>';
   }).join('');
@@ -2824,7 +2977,7 @@ function renderDailyBriefInner(data) {
 }
 
 async function openRedmineIssue(issueId) {
-  // 晨报卡片在首页即可见，用户可能从未进入统计/设置页加载过
+  // 每日晨报卡片在首页即可见，用户可能从未进入统计/设置页加载过
   // statsConfig；此处显式拉取（60s 缓存兜底），否则永远误报「未配置」。
   await loadStatsConfig();
   var base = redmineBaseUrl();  // 已有 helper：statsConfig.redmine.base_url 去尾部斜杠
@@ -2832,9 +2985,21 @@ async function openRedmineIssue(issueId) {
   window.open(base + '/issues/' + issueId, '_blank');
 }
 
+function findDailyBriefIssue(issueId) {
+  var issues = (dailyBriefCache && dailyBriefCache.issues) || [];
+  for (var index = 0; index < issues.length; index += 1) {
+    if (String(issues[index].issue_id) === String(issueId)) return issues[index];
+  }
+  return null;
+}
+
 function showDailyBriefIssue(issueId) {
-  var issue = (dailyBriefCache && (dailyBriefCache.issues || []).find(function (i) { return String(i.issue_id) === String(issueId); }));
-  if (!issue) return;
+  var issue = findDailyBriefIssue(issueId);
+  if (!issue) {
+    notifyUser('每日晨报数据已更新', '未找到 Defect #' + issueId + '，正在刷新后重试。', 'warning');
+    loadDailyBrief();
+    return;
+  }
   var r = issue.result || {};
   var section = function (title, body, open) {
     if (!body) return '';
@@ -2911,6 +3076,7 @@ function showDailyBriefIssue(issueId) {
       <div class="modal-body daily-brief-modal-body">
         ${issue.status === 'failed' ? `<div style="color:var(--bad,#ef4444)"><b>分析失败${issue.error_type ? '（' + esc(issue.error_type) + '）' : ''}</b><div style="white-space:pre-wrap;margin-top:4px">${esc(issue.error || '未知错误')}</div></div>` : ''}
         ${r.problem_summary ? '<div style="line-height:1.7;margin-bottom:4px">' + esc(r.problem_summary) + '</div>' : ''}
+        ${!r.problem_summary && issue.status !== 'failed' && !Object.keys(execution).length && !Object.keys(gate).length ? '<div class="muted" style="line-height:1.7">该项分析尚未生成可展示的结果，请稍后刷新每日晨报。</div>' : ''}
         ${chips}
         ${(Object.keys(execution).length || Object.keys(gate).length) ? section('🧾 执行与取证审计', auditBody) : ''}
         ${mdSection('📋 详细分析报告', r.detailed_report)}
@@ -2934,6 +3100,9 @@ function showDailyBriefIssue(issueId) {
   document.body.appendChild(modal);
   showModal(modalId);
 }
+// act-bridge 按 window 查找委托目标；显式导出避免页面脚本加载方式变化后
+// 「查看分析」成为静默无响应的按钮。
+window.showDailyBriefIssue = showDailyBriefIssue;
 
 async function reanalyzeDailyBriefIssue(issueId, button) {
   var run = dailyBriefCache && dailyBriefCache.run;
@@ -2983,6 +3152,10 @@ function copyDailyBriefReply(issueId, lang) {
 async function stopDailyBriefRun() {
   var run = dailyBriefCache && dailyBriefCache.run;
   if (!run || (!run.run_id && !run.brief_date)) return;
+  var runKey = String(run.run_id || run.brief_date || '');
+  dailyBriefStoppingRunId = runKey;
+  var card = document.getElementById('dailyBriefCard');
+  if (card && dailyBriefCache) card.innerHTML = renderDailyBriefInner(dailyBriefCache);
   try {
     // 优先按 run_id 精确停止（同一天可能存在 nightly/manual/delta 多个
     // run，按日期停"最新一次"可能停错目标）。
@@ -2991,13 +3164,16 @@ async function stopDailyBriefRun() {
       : '/api/redmine-agent/daily-brief/' + encodeURIComponent(run.brief_date) + '/cancel';
     var data = await api(url, {method: 'POST'}) || {};
     if (data.already_terminal) {
-      notifyUser('无需停止', '该晨报已结束，无进行中的分析', 'info');
+      dailyBriefStoppingRunId = '';
+      notifyUser('无需停止', '该每日晨报已结束，无进行中的分析', 'info');
     } else {
-      notifyUser('停止请求已发送', '当前 issue 完成边界后即停止；已完成的分析结果会保留，未开始的保持排队可续跑', 'success');
+      notifyUser('正在停止分析', 'Worker 正在终止当前 KkAgent；已完成结果会保留，未开始项可稍后重试', 'success');
     }
     // 立即刷新一次;收敛为 cancelled 后轮询会自然停。
     loadDailyBrief();
   } catch (e) {
+    dailyBriefStoppingRunId = '';
+    if (card && dailyBriefCache) card.innerHTML = renderDailyBriefInner(dailyBriefCache);
     notifyUser('停止失败', String(e), 'error');
   }
 }
@@ -3005,9 +3181,10 @@ async function stopDailyBriefRun() {
 async function startDailyBriefRun() {
   var card = document.getElementById('dailyBriefCard');
   var currentStatus = dailyBriefCache && dailyBriefCache.run && dailyBriefCache.run.status;
-  var force = currentStatus === 'completed' || currentStatus === 'partial' || currentStatus === 'failed';
+  var force = currentStatus === 'completed' || currentStatus === 'partial' || currentStatus === 'failed' || currentStatus === 'cancelled';
   var rerender = function () {
     if (card && dailyBriefCache) card.innerHTML = renderDailyBriefInner(dailyBriefCache);
+    updateRedmineToolbar();
   };
   dailyBriefRunStarting = true;
   rerender(); // 立即反馈：按钮变「⏳ 启动中…」
@@ -3020,9 +3197,9 @@ async function startDailyBriefRun() {
     }) || {};
     dailyBriefRunStarting = false;
     if (data.configured === false) { rerender(); notifyUser('未配置凭据', data.message || '请先在设置页保存 Redmine 凭据', 'warning'); return; }
-    if (data.reused) { rerender(); notifyUser('晨报已存在', '当天晨报已完成，未重复生成', 'info'); loadDailyBrief(); return; }
+    if (data.reused) { rerender(); notifyUser('每日晨报已存在', '当天每日晨报已完成，未重复生成', 'info'); loadDailyBrief(); return; }
     if (data.run_id) {
-      if (data.already_running) { notifyUser('正在生成', '当天晨报已在执行中，已接入实时刷新', 'info'); }
+      if (data.already_running) { notifyUser('正在生成', '当天每日晨报已在执行中，已接入实时刷新', 'info'); }
       else { notifyUser('已开始生成', 'AI 正在分析，下方进度实时更新（run ' + data.run_id.slice(0, 10) + '…）', 'success'); }
       // 立即把本地缓存标为进行中，按钮切到「排队中/分析中…」状态
       if (dailyBriefCache && dailyBriefCache.run) {
@@ -3054,7 +3231,7 @@ function pollDailyBriefRun(runId, attempt) {
       if (run && run.run_id === runId && (run.status === 'completed' || run.status === 'partial' || run.status === 'failed' || run.status === 'cancelled')) {
         dailyBriefManualPoll = false;
         notifyUser(
-          run.status === 'cancelled' ? '晨报已停止' : '晨报已更新',
+          run.status === 'cancelled' ? '每日晨报已停止' : '每日晨报已更新',
           '状态：' + run.status,
           run.status === 'failed' || run.status === 'cancelled' ? 'warning' : 'success'
         );

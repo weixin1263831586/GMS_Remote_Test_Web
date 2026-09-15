@@ -51,6 +51,11 @@ def new_run_id() -> str:
 class DailyBriefRepository:
     """一个 owner 一个实例；线程安全由 RLock + SQLite 自身保证。"""
 
+    # 当前 schema 版本（PRAGMA user_version）。每次改 _init_db 的表结构
+    # 都必须 +1，让旧库在下一次启动时重放迁移；版本历史见
+    # docs/redmine-daily-brief.md 的 schema migration 契约一节。
+    _SCHEMA_VERSION = 1
+
     def __init__(self, owner_root: Path):
         self.owner_root = Path(owner_root)
         self.db_path = self.owner_root / "daily_brief.sqlite3"
@@ -69,6 +74,21 @@ class DailyBriefRepository:
     def _init_db(self) -> None:
         with self._lock, self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
+            # 跨进程 schema 迁移必须持有 SQLite 写锁：Web 进程、daily_brief
+            # worker、systemd、CLI 可能并发初始化同一库，进程内 _lock 覆盖
+            # 不了 TOCTOU——两进程同时 PRAGMA table_info 判列缺失、同时
+            # ALTER TABLE ADD COLUMN 会以 "duplicate column name" 失败。
+            # 先 BEGIN IMMEDIATE 拿写锁，再读 schema、再迁移，迁移天然幂等。
+            #
+            # Schema versioning uses PRAGMA user_version.
+            # 已是当前版本的库直接跳过全部 DDL（快路径）；旧库按迁移步骤
+            # 逐版升级，每步自身幂等（列存在检查在写锁内进行，无竞态），
+            # 即使 user_version 意外回退/丢失也能安全重放。
+            conn.execute("BEGIN IMMEDIATE")
+            current_version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if current_version == self._SCHEMA_VERSION:
+                conn.commit()
+                return
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS redmine_daily_brief_runs (
@@ -231,6 +251,10 @@ class DailyBriefRepository:
                 ON redmine_daily_brief_ai_executions(run_id, issue_id)
                 """
             )
+            # 全部迁移完成后盖章：后续启动走快路径，不再重复 DDL。
+            # user_version 在同一写事务内设置，崩溃回滚后自然重放迁移。
+            conn.execute(f"PRAGMA user_version = {self._SCHEMA_VERSION}")
+            conn.commit()
 
     # ------------------------------------------------------------------ runs
 
@@ -421,7 +445,7 @@ class DailyBriefRepository:
     def create_run_and_enqueue_job(self, run: DailyBriefRun) -> tuple[bool, dict[str, Any], bool]:
         """run 创建 + job 入队 = **同一个** BEGIN IMMEDIATE 事务。
 
-        审核意见 P1：旧的两步路径（create_run 提交后再 enqueue_job）在
+        旧的两步路径（create_run 提交后再 enqueue_job）在
         进程崩溃时会留下「run=pending / 无 job」的孤儿——下一次触发看到
         already_running 直接复用，却永远没有 Worker 会执行它。
 

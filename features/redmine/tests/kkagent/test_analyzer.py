@@ -85,6 +85,22 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn("sess-42", command)
         self.assertNotIn("--continue", command)
 
+    def test_schema_repair_prompt_reuses_evidence_and_requires_confidence(self):
+        prompt = KkAgentRedmineAnalyzer.build_repair_prompt([
+            "schema validation failed: missing field: confidence"
+        ])
+        self.assertIn("Do not call tools", prompt)
+        self.assertIn("`confidence` is mandatory", prompt)
+        self.assertIn("JSON number from 0.0 to 1.0", prompt)
+        self.assertIn("Do not output `history_checked`", prompt)
+
+    def test_evidence_repair_prompt_may_complete_missing_checks(self):
+        prompt = KkAgentRedmineAnalyzer.build_repair_prompt([
+            "history search only used 1 distinct query"
+        ])
+        self.assertIn("Complete any missing evidence checks", prompt)
+        self.assertNotIn("Do not call tools", prompt)
+
     def test_env_identity_dump_preserves_explicit_owner(self):
         analyzer = self._analyzer(
             "env-dump", timeout_seconds=30, env_extra={"GMS_RT_PROFILE": "owner-a"}
@@ -142,7 +158,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn("missing field", outcome.error)
 
     def test_schema_failure_is_repaired_via_exact_resume(self):
-        """审核意见：schema 失败与 gate 失败一样走精确 resume 修复。"""
+        """Schema failures and gate failures both use precise resume repair."""
         analyzer = self._analyzer("schema-then-ok", timeout_seconds=30)
         outcome = asyncio.run(analyzer.analyze(ENTRY))
         self.assertTrue(outcome.ok, outcome.error)
@@ -161,6 +177,26 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertEqual(outcome.error_type, "schema_mismatch")
         self.assertIn("missing field", outcome.error)
         self.assertNotIn("history_checked", outcome.error)
+        self.assertEqual(outcome.trace["repair_attempts"], 2)
+
+    def test_missing_confidence_uses_declared_root_cause_type(self):
+        """线上 #646220：修复轮遗漏 confidence 也不应使整单失败。"""
+        analyzer = self._analyzer("missing-confidence-with-root-type", timeout_seconds=30)
+        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual(outcome.session_id, "sess-missing-confidence")
+        self.assertEqual(outcome.result["confidence"], 0.75)
+        self.assertTrue(outcome.result["history_checked"])
+        self.assertEqual(outcome.trace["repair_attempts"], 0)
+
+    def test_second_schema_repair_can_succeed_in_exact_session(self):
+        analyzer = self._analyzer("schema-twice-then-ok", timeout_seconds=30)
+        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual(outcome.session_id, "sess-bad-schema")
+        self.assertEqual(outcome.result["confidence"], 0.72)
+        self.assertTrue(outcome.result["history_checked"])
+        self.assertEqual(outcome.trace["repair_attempts"], 2)
 
     def test_runtime_history_field_does_not_require_schema_repair(self):
         analyzer = self._analyzer("history-omitted", timeout_seconds=30)
@@ -197,7 +233,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v8")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v9")
 
     def test_cancellation_cleans_up_process_tree(self):
         class _HangingStream:

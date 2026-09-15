@@ -168,6 +168,49 @@ class DailyBriefWorkerTests(unittest.TestCase):
         self.assertEqual(self.repository.get_issue("db_test", 101).status, "completed")
         self.assertEqual(self.repository.get_job(job["job_id"])["status"], "completed")
 
+    def test_issue_job_persisted_cancel_stops_active_analysis(self):
+        self._patch_preflight()
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-13", mode="manual",
+            run_id="db_test", status="completed",
+        )
+        self.repository.create_run(run)
+        self.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=101, buckets=[], status="completed"
+        ))
+        job = self._claim(kind="issue", issue_id=101)
+        entered = asyncio.Event()
+        analyzer_cancelled = asyncio.Event()
+
+        async def analyze(_entry):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                analyzer_cancelled.set()
+                raise
+
+        async def scenario():
+            with patch.object(self.service, "_build_analyzer") as build:
+                build.return_value.analyze = analyze
+                task = asyncio.create_task(run_claimed_job(
+                    self.repository,
+                    job,
+                    self.worker_id,
+                    asyncio.Event(),
+                    lease_seconds=30,
+                    service_factory=lambda _owner: self.service,
+                ))
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                self.assertTrue(self.repository.request_cancel(run.run_id))
+                return await asyncio.wait_for(task, timeout=2)
+
+        self.assertTrue(asyncio.run(scenario()))
+        self.assertTrue(analyzer_cancelled.is_set())
+        self.assertEqual(self.repository.get_run(run.run_id).status, "cancelled")
+        self.assertEqual(self.repository.get_issue(run.run_id, 101).status, "pending")
+        self.assertEqual(self.repository.get_job(job["job_id"])["status"], "completed")
+
     def test_stale_worker_failure_does_not_overwrite_new_lease_run_state(self):
         """租约被接管后，旧 Worker 的失败不得覆盖新 Worker 的 run。"""
         self.repository.create_run(DailyBriefRun(

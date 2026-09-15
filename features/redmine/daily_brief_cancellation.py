@@ -1,0 +1,90 @@
+"""Cross-process cancellation helpers for Daily Brief KkAgent work."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextlib import suppress
+from typing import Any
+
+from .users import _now
+
+
+CANCEL_POLL_SECONDS = 0.25
+logger = logging.getLogger("daily_brief_worker")
+
+
+class RunCancelledError(Exception):
+    """A persisted run cancellation was observed by an executing Worker."""
+
+
+async def analyze_with_persisted_cancel(
+    repository: Any,
+    run_id: str,
+    analyzer: Any,
+    entry: dict[str, Any],
+) -> Any:
+    """Run one analysis while polling the cross-process cancellation flag."""
+    analysis_task = asyncio.create_task(analyzer.analyze(entry))
+    try:
+        while True:
+            done, _pending = await asyncio.wait(
+                {analysis_task}, timeout=CANCEL_POLL_SECONDS
+            )
+            if analysis_task in done:
+                return await analysis_task
+            if repository.is_cancel_requested(run_id):
+                logger.info("cancelling active KkAgent for daily brief run %s", run_id)
+                analysis_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await analysis_task
+                raise RunCancelledError()
+    except asyncio.CancelledError:
+        if not analysis_task.done():
+            analysis_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await analysis_task
+        raise
+
+
+async def gather_cancel_on_error(coroutines: list[Any]) -> None:
+    """Gather issue work and clean up every sibling when one task aborts."""
+    tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
+def reset_cancelled_issue(repository: Any, record: Any) -> None:
+    """Return an interrupted issue to a clean, explicitly retryable state."""
+    record.status = "pending"
+    record.started_at = ""
+    record.finished_at = ""
+    record.duration_ms = 0
+    record.error = ""
+    record.error_type = ""
+    repository.upsert_issue(record)
+
+
+def mark_reanalysis_cancelled(repository: Any, run: Any, issue_id: int) -> dict[str, Any]:
+    """Converge a cancelled single-issue job without classifying it as failure."""
+    run.status = "cancelled"
+    run.error = ""
+    run.finished_at = _now()
+    repository.update_run(run)
+    return {"run_id": run.run_id, "issue_id": issue_id, "status": "cancelled"}
+
+
+__all__ = [
+    "RunCancelledError",
+    "analyze_with_persisted_cancel",
+    "gather_cancel_on_error",
+    "mark_reanalysis_cancelled",
+    "reset_cancelled_issue",
+]

@@ -38,6 +38,7 @@ from features.system.security_audit_utils import (
     summarize_audit_response,
 )
 from features.users import get_client_id_from_request, get_client_ip, parse_client_id
+from foundation.error_model import register_api_error_handler
 from foundation.product import (
     APPLICATION_DESCRIPTION,
     APPLICATION_TITLE,
@@ -165,6 +166,8 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         default_response_class=UTF8JSONResponse,
     )
     app.state.services = services
+    # Convert every ApiError into the standard code/next_actions envelope.
+    register_api_error_handler(app)
     auth_required = authentication_required()
     app.state.authentication_required = auth_required
 

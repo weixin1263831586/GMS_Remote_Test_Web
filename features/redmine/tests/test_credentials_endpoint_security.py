@@ -150,6 +150,49 @@ class CredentialsEndpointSecurityTests(unittest.TestCase):
         self.assertIn("configured", data)
         self.assertFalse(data["configured"])
 
+    def test_human_api_key_is_accepted_by_current_owner_status(self):
+        config_patch, cache_patch, _env_patch = self._patched()
+        with config_patch, cache_patch, _env_patch:
+            base = self.client.post(
+                "/api/redmine-agent/config/stats",
+                json={"base_url": "https://redmine.example"},
+                headers={"x-test-owner": "owner-a"},
+            )
+            self.assertEqual(base.status_code, 200)
+            saved = self.client.post(
+                "/api/redmine-agent/config/credentials",
+                json={"api_key": "api-key"},
+                headers={"x-test-owner": "owner-a"},
+            )
+            self.assertEqual(saved.status_code, 200)
+            status = self.client.get(
+                "/api/redmine-agent/config/credentials",
+                headers={"x-test-owner": "owner-a"},
+            )
+        data = status.json()["data"]
+        self.assertTrue(data["configured"])
+        self.assertTrue(data["api_key_configured"])
+        self.assertTrue(data["base_url_configured"])
+
+    def test_empty_api_key_does_not_clear_an_existing_key(self):
+        config_patch, cache_patch, _env_patch = self._patched()
+        headers = {"x-test-owner": "owner-a"}
+        with config_patch, cache_patch, _env_patch:
+            self.assertEqual(self.client.post(
+                "/api/redmine-agent/config/credentials",
+                json={"api_key": "existing-key"}, headers=headers,
+            ).status_code, 200)
+            response = self.client.post(
+                "/api/redmine-agent/config/credentials",
+                json={"username": "human", "password": "password", "api_key": ""},
+                headers=headers,
+            )
+            self.assertEqual(response.status_code, 200)
+            status = self.client.get(
+                "/api/redmine-agent/config/credentials", headers=headers,
+            )
+        self.assertTrue(status.json()["data"]["api_key_configured"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -112,7 +112,8 @@ Install from the Controller while logged in to the build server:
 Self-signed deployment (TOFU) — one command for install + enrollment:
 
 ```bash
-curl -k -fsSL "https://CONTROLLER:5001/api/agent/install.sh" | \
+# <CONTROLLER_HOST> 换成 Controller 的真实 IP/主机名（不要照抄占位符）。
+curl -k -fsSL "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | \
   bash -s -- --paircode <CODE> --client auto
 export PATH="$HOME/.local/bin:$PATH"
 gms-rt-system-health --json --non-interactive
@@ -124,7 +125,7 @@ Strict CA path (CA distributed out-of-band; strict from the first byte):
 ```bash
 export GMS_INSTALL_CA_CERT=/etc/gms/controller-ca.pem
 curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
-  "https://CONTROLLER:5001/api/agent/install.sh" | bash -s -- --paircode <CODE> --client auto
+  "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | bash -s -- --paircode <CODE> --client auto
 ```
 
 `--paircode` exchanges the Web-UI one-shot enrollment code for a 0600 Agent
