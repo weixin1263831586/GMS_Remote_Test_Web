@@ -51,7 +51,7 @@ bash scripts/install_cluster_worker.sh \
 - `WORKER_ID`：Worker 唯一标识。
 - `CONTROLLER_URL`：Controller HTTPS 地址。
 - `TOKEN`：Worker Token。推荐传入 0600 Token 文件的路径而不是 Token 字符串本身（脚本会对小于 4096 字节的可读文件按路径读取），避免 Token 出现在远端进程 argv 中被同机用户通过 `ps` 看到。
-- `CONTROLLER_CERT`：Controller CA 证书路径；传 `-` 表示不部署 CA 证书。
+- `CONTROLLER_CERT`：Controller CA 证书路径；传 `-` 表示不部署 CA 证书（仅限公钥已知的安全网络）。控制器打包部署 Bundle 时必须存在 CA 证书 `gms-local-ca.crt`（缺失即报错，不会回退到叶子证书 `gms-local.crt`——叶子证书不是 CA 信任锚）。
 - `SUITE_ROOT`：GMS Suite 根目录，默认 `~/GMS-Suite`。
 - `WORKER_ADDRESS`：Worker 地址，同时决定 noVNC 监听地址；`0.0.0.0` / `::` 会被拒绝，只允许私有、回环或 CGNAT 地址。
 - `GTS_CREDENTIAL_FILE`：GTS service account 凭证文件（必填），安装时以 0600 权限安装到 `~/Software/gts-rockchip.json`。

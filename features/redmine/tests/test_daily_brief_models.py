@@ -60,11 +60,56 @@ class ValidIssueResultTests(unittest.TestCase):
         self.assertTrue(any("root_cause_type" in e for e in errors))
         self.assertTrue(any("risk" in e for e in errors))
 
-    def test_missing_confidence_reports_one_error(self):
+    def test_missing_confidence_is_derived_from_root_cause_type(self):
         result = self._valid()
         result.pop("confidence")
         errors = [error for error in validate_issue_result(result) if "confidence" in error]
+        self.assertEqual(errors, [])
+        self.assertEqual(result["confidence"], 0.75)
+
+    def test_missing_confidence_without_root_cause_type_still_fails(self):
+        result = self._valid()
+        result.pop("confidence")
+        result.pop("root_cause_type")
+        errors = [error for error in validate_issue_result(result) if "confidence" in error]
         self.assertEqual(errors, ["missing field: confidence"])
+
+    def test_enum_word_confidence_is_normalized_not_rejected(self):
+        """生产实证（issue 646220）：模型把 root_cause_type 的枚举词
+        复制进 confidence（"confidence":"likely"），修复轮仍可能再错。
+        枚举词是确定性可映射的，受控规范化后入库而不是烧尽修复预算。
+        """
+        result = self._valid()
+        result["confidence"] = "likely"
+        errors = validate_issue_result(result)
+        self.assertEqual(errors, [])
+        self.assertEqual(result["confidence"], 0.75)
+        self.assertFalse(result.get("needs_human_review"))
+
+    def test_confidence_word_map_boundaries(self):
+        result = self._valid()
+        for word, expected in (
+            ("confirmed", 0.9), ("HIGH", 0.85), ("0.8", 0.8),
+            ("possible", 0.55), ("unknown", 0.3),
+        ):
+            result["confidence"] = word
+            self.assertEqual(validate_issue_result(result), [], word)
+            self.assertEqual(result["confidence"], expected, word)
+
+    def test_low_enum_confidence_triggers_human_review(self):
+        result = self._valid()
+        result["confidence"] = "unknown"  # 0.3 < 0.6 阈值
+        self.assertEqual(validate_issue_result(result), [])
+        self.assertTrue(result.get("needs_human_review"))
+
+    def test_uninterpretable_confidence_still_rejected(self):
+        result = self._valid()
+        for bogus in ("very likely", ["likely"], {"v": 1}, True, 1.7, "-0.2"):
+            result["confidence"] = bogus
+            errors = validate_issue_result(dict(result))
+            self.assertTrue(
+                any("confidence" in e for e in errors), f"bogus={bogus!r}"
+            )
 
     def test_low_confidence_forces_human_review(self):
         result = self._valid()

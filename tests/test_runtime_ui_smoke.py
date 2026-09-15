@@ -646,8 +646,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
     def test_agent_access_panel_renders_real_scopes_after_delayed_auth(self):
         """真实浏览器验收。
 
-        - 匿名加载：Agent 接入管理入口隐藏；
-        - 登录态经 gms:auth-ready 事件补发（慢登录/重登路径）：入口立即显示；
+        - 非管理员登录态经 gms:auth-ready 事件补发（慢登录/重登路径）：入口立即显示；
+        - 非管理员点击入口时弹出管理员验证，验证成功后才进入管理面板；
         - 真实登录 + 真实 /api/auth/agent-scopes 契约（{scope: 描述} 对象）：
           权限复选框按对象键渲染并保留默认勾选集。
         """
@@ -660,25 +660,27 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         page_errors = []
         page.on("pageerror", lambda error: page_errors.append(error))
         try:
-            # 匿名打开（不预登录）：入口必须保持隐藏。
+            # 非管理员登录态恢复时也保留入口；点击后必须先走管理员验证。
             page.goto(self.base_url, wait_until="domcontentloaded")
             expect(page.locator("#auth-gate")).to_be_visible()
             entry = page.locator("#agent-access-entry")
-            expect(entry).to_be_hidden()
-
-            # 慢登录恢复路径：不整页刷新，登录态晚于 800ms 就绪检查到达。
             page.evaluate(
                 """
                 () => {
-                  state.currentUser = {role: 'admin', is_admin: true};
+                  state.currentUser = {role: 'user', is_admin: false};
                   state.authReady = true;
+                  state.elevated = false;
                   window.dispatchEvent(new CustomEvent('gms:auth-ready'));
+                  switchPage('users', null);
                 }
                 """
             )
-            # 入口位于 page-users 右上角（Agent 接入管理已从对话Agent页迁移）。
-            page.evaluate("() => switchPage('users', null)")
             expect(entry).to_be_visible()
+            # 这里模拟的是认证已恢复、但 auth-gate 的 DOM 尚待上一轮
+            # 登录流程收起的时序；直接触发入口以断言其提权分支。
+            page.click("#agent-access-entry button", force=True)
+            expect(page.locator("#elevate-modal")).to_have_class(re.compile(r"show"))
+            page.evaluate("() => cancelElevate()")
 
             # 真实登录（cookie 落到同一浏览器上下文）后重载，走真实 API。
             # 该页面跳过了 new_page() 的预登录，这里按同一约定先确保
@@ -709,6 +711,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.wait_for_function(
                 "document.querySelectorAll("
                 "'#agent-access-scopes .agent-access-scope').length > 0"
+            )
+            self.assertEqual(
+                page.locator("#agent-access-panel thead th").all_text_contents()[:2],
+                ["Agent", "Token ID"],
             )
             scopes = page.evaluate(
                 "() => Array.from(document.querySelectorAll("
@@ -858,6 +864,85 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 page.evaluate('(name) => window.switchPage(name, null)', page_name)
                 expect(page.locator(f"#page-{page_name}")).to_have_class(re.compile(r"active"))
             self.assertEqual(page_errors, [])
+        finally:
+            page.close()
+
+    def test_shell_boot_does_not_touch_inactive_page_endpoints(self):
+        """Lazy activation: 未激活页面的端点在启动期必须零请求。
+
+        '文件拆开了'不等于'运行生命周期
+        拆开了'。shell 启动落在非 websites 页面时，websites 的 load/save
+        端点都不应被触碰；set-username 在已有本地缓存时也不再重复登记。
+        """
+        page = self.new_page()
+        blocked_paths = []
+        page.on(
+            "request",
+            lambda request: blocked_paths.append(request.url)
+            if any(
+                marker in request.url
+                for marker in (
+                    "/api/websites/",
+                    "/api/reports/weekly-report/",
+                    "/api/opengrok/",
+                )
+            )
+            else None,
+        )
+        try:
+            page.add_init_script(
+                """
+                localStorage.setItem('gms_username_127.0.0.1', 'smoke-user');
+                localStorage.setItem('gms_current_page', 'test');
+                """
+            )
+            self.goto_shell(page)
+            page.wait_for_timeout(800)
+            self.assertEqual(
+                [p for p in blocked_paths if "/api/websites/" in p],
+                [],
+                "inactive websites page was contacted during shell boot",
+            )
+        finally:
+            page.close()
+
+    def test_websites_init_and_migration_never_post_to_server(self):
+        """Page init must not perform mutating network requests.
+
+        Defaults/migration used to call saveCategories() unguarded, which
+        POSTed /api/websites/save on every fresh page load and produced
+        'Failed to fetch' console errors across ten unrelated E2E pages
+        (review finding: Load / Migrate / Persist are local phases; only
+        a real user mutation may Sync).
+        """
+        page = self.new_page()
+        save_requests = []
+        page.on(
+            "request",
+            lambda request: save_requests.append(request.url)
+            if request.method == "POST" and request.url.endswith("/api/websites/save")
+            else None,
+        )
+        try:
+            # Seed the legacy flat storage so the init path exercises the
+            # migrateToCategories + saveCategories branch, then load the
+            # shell with an empty categorized store.
+            page.add_init_script(
+                """
+                localStorage.setItem('gms_tools_categories', JSON.stringify({
+                    '其他': [{ icon: '🧪', title: 'Legacy Tool', url: 'https://legacy.example' }]
+                }));
+                """
+            )
+            self.goto_shell(page)
+            page.evaluate("(name) => window.switchPage(name, null)", "websites")
+            expect(page.locator("#page-websites")).to_have_class(re.compile(r"active"))
+            page.wait_for_timeout(500)
+            self.assertEqual(
+                save_requests,
+                [],
+                "websites page init performed a server write request",
+            )
         finally:
             page.close()
 
@@ -1367,6 +1452,44 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 "artifacts",
             )
             self.assertIn("tab=artifacts", page.url)
+        finally:
+            page.close()
+
+    def test_redmine_daily_brief_analysis_button_opens_modal(self):
+        page = self.new_page()
+
+        def fulfill_redmine(route):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"data":{}}',
+            )
+
+        page.route("**/api/redmine-agent/**", fulfill_redmine)
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.wait_for_function("typeof renderDailyBriefInner === 'function'")
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate(
+                """() => {
+                    dailyBriefCache = {
+                        run: {brief_date: '2026-09-15', status: 'completed', report_json: {}},
+                        issues: [{issue_id: 101, status: 'completed', subject: 'Daily brief modal', result: {problem_summary: '分析摘要'}}]
+                    };
+                    document.getElementById('dailyBriefCard').innerHTML = renderDailyBriefInner(dailyBriefCache);
+                }"""
+            )
+            page.locator('#dailyBriefCard [data-click="showDailyBriefIssue"]').click()
+            expect(page.locator('[id^="dailyBriefIssueModal-"]')).to_have_class(
+                re.compile(r"show")
+            )
+            page.keyboard.press("Escape")
+            expect(page.locator('[id^="dailyBriefIssueModal-"]')).not_to_have_class(
+                re.compile(r"show")
+            )
+            self.assert_no_page_errors(page_errors)
         finally:
             page.close()
 

@@ -240,7 +240,7 @@ async function toggleClusterMode() {
         const infrastructureEnabled = Boolean(state.clusterStatus?.enabled);
         const wasEnabled = infrastructureEnabled && window.GmsWorkspace?.get?.().scope_mode === 'cluster';
         if (!wasEnabled && !infrastructureEnabled) {
-            throw new Error('集群基础设施未启用，请先在服务端 configs/cluster.json 启用集群能力');
+            throw new Error('集群基础设施未启用，请先在服务端 configs/local/cluster.json 启用集群能力');
         }
         const context = window.GmsWorkspace?.update({
             scope_mode: wasEnabled ? 'single' : 'cluster',

@@ -237,6 +237,11 @@ async def list_users(
         }
 
     for client_id, state in state_items:
+        # Agent Service Token 的内部主体（agent:<token_id>）会为自身请求
+        # 刷新状态，但它不是可管理的人类客户端；Token 生命周期由 Agent
+        # 接入页负责展示，不能泄漏到用户列表。
+        if str(client_id or "").startswith("agent:"):
+            continue
         # 检查会话是否活跃（最近24小时内有活动）
         is_online = False
         if 'last_seen' in state:

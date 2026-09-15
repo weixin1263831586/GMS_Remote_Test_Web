@@ -64,6 +64,11 @@
 
                 updateClientDisplay();
 
+                // 已有本地缓存即已登记过: module load ≠ user mutation, 不再写服务器。
+                if (savedUser && savedUser !== 'guest' && savedUser !== 'unknown') {
+                    return;
+                }
+
                 // 记录到服务器（使用 /api/users/set-username 接口）
                 const recordResp = await fetch('/api/users/set-username', {
                     method: 'POST',
@@ -1295,8 +1300,6 @@
                 usersAccessDenied = false;
                 if (data.users) {
                     displayUsersList(data.users);
-                    const updated = document.getElementById('users-last-updated');
-                    if (updated) updated.textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit', second: '2-digit'})}`;
                 }
             } catch (e) {
                 console.error('[Users] Error loading users:', e);
@@ -1311,25 +1314,6 @@
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
             tbody.innerHTML = `<tr><td colspan="9" class="users-empty-message">${escapeHtml(message)}</td></tr>`;
-            const visible = document.getElementById('users-visible-count');
-            if (visible) visible.textContent = '列表不可用';
-        }
-
-        async function refreshUsersList(button) {
-            const refreshButton = button || document.getElementById('users-refresh-button');
-            if (refreshButton?.disabled) return;
-            if (refreshButton) {
-                refreshButton.disabled = true;
-                refreshButton.textContent = '刷新中…';
-            }
-            try {
-                await loadUsersList();
-            } finally {
-                if (refreshButton) {
-                    refreshButton.disabled = false;
-                    refreshButton.textContent = '↻ 刷新';
-                }
-            }
         }
 
         // 移除配置型用户（从 config_runtime.client_hosts 删除）。二次确认后调 DELETE。
@@ -1415,8 +1399,6 @@
             document.querySelectorAll('[data-user-status-card]').forEach(card => {
                 card.classList.toggle('active', card.dataset.userStatusCard === status);
             });
-            const visible = document.getElementById('users-visible-count');
-            if (visible) visible.textContent = `显示 ${filtered.length} / ${usersListCache.length}`;
             renderUsersList(filtered);
         }
 

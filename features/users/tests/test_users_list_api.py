@@ -117,6 +117,54 @@ class UsersListApiTests(unittest.TestCase):
         self.assertEqual(body["users"][0]["status"], "online")
         self.assertTrue(body["users"][0]["removable"])
 
+    def test_agent_service_state_is_not_a_user_row(self):
+        """Agent token 的内部状态不应污染人类用户管理列表。"""
+        import features.users.users_api as users_api
+
+        old_config_manager = users_api.runtime.config_manager
+        old_global_state = users_api.runtime.global_state
+        now = datetime.now().isoformat()
+        users_api.runtime.config_manager = SimpleNamespace(
+            load_config=lambda: {"client_hosts": {}, "vpn_gateways": []}
+        )
+        users_api.runtime.global_state = SimpleNamespace(
+            user_states={
+                "agent:agt_8642a1e1e838168e": {
+                    "running": False,
+                    "devices": [],
+                    "last_seen": now,
+                    "created_at": now,
+                },
+                "tester@172.16.14.66": {
+                    "client_username": "tester",
+                    "client_ip": "172.16.14.66",
+                    "display_client_id": "tester@172.16.14.66",
+                    "running": False,
+                    "devices": [],
+                    "last_seen": now,
+                    "created_at": now,
+                },
+            },
+            user_states_lock=threading.Lock(),
+        )
+        try:
+            with patch(
+                "features.users.cluster_access.get_cluster_service",
+                side_effect=RuntimeError("cluster not configured in unit test"),
+            ), patch.object(
+                users_api,
+                "host_local_device_inventory",
+                return_value={"devices": [], "available": True, "error": ""},
+            ):
+                resp = asyncio.run(users_api.list_users())
+        finally:
+            users_api.runtime.config_manager = old_config_manager
+            users_api.runtime.global_state = old_global_state
+
+        body = json.loads(resp.body.decode("utf-8"))
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["users"][0]["client_id"], "tester@172.16.14.66")
+
     def test_configured_user_without_recent_session_is_offline(self):
         import features.users.users_api as users_api
 

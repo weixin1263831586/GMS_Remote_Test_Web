@@ -137,11 +137,12 @@ doctor 输出一份**不含任何凭据内容**的本地一致性报告，逐项
 
 整体结论看顶层 `ok`；任何失败项都会在 `actions` 数组给出对应修复动作
 （如 re-enroll、修复 token 权限、reconcile MCP 注册、安装 Skill）。
-Connectivity（Controller 连通性）建议用 Agent 侧自检验证：
 
-```bash
-gms-rt-system-selfcheck --json    # 凭据、认证身份与 scopes、server 健康、设备清单
-```
+**doctor 是部署验收的唯一入口**：验收 Agent 环境只跑
+`gms-agent doctor --json` + 连通性自检 `gms-rt-system-selfcheck --json`
+（凭据、认证身份与 scopes、server 健康、设备清单）两条命令，
+不要拼接 6~10 条零散命令判断环境——零散判断路径不受契约测试保护，
+会随版本演进漂移。
 
 ## 常用维护入口
 
@@ -157,5 +158,5 @@ gms-agent rollback <version>
 - [docs/agent/security-model.md](security-model.md) — token 落盘与权限模型
 - [docs/agent/profiles.md](profiles.md) — profile 布局
 - [docs/agent/troubleshooting.md](troubleshooting.md) — enrollment/TLS/profile 常见故障
-- [../../agent/gms-remote-test/docs/README.md](../../agent/gms-remote-test/docs/README.md) — 安装后使用
+- [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md) — 安装后使用
 - 根 README「一键安装与 Enrollment」「包完整性与更新链」两节

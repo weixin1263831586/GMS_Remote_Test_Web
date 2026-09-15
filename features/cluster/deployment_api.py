@@ -19,23 +19,6 @@ import uuid
 from pathlib import Path
 
 import paramiko
-
-
-def _controller_cert_for_bundle(project_root: Path) -> Path:
-    """Worker bundle 信任锚: 优先正规 CA, 叶子证书只作兜底。
-
-    worker 用包里的 controller-ca.crt 当 controller_ca 校验控制器 TLS。
-    控制器现役证书由 CA (gms-local-ca.crt) 签发, 拿叶子证书 (gms-local.crt)
-    当 CA 会重新触发 leaf-as-CA 验证失败; GMS_CERT_CRT 仍可显式覆盖。
-    """
-    env_path = os.getenv("GMS_CERT_CRT", "")
-    if env_path:
-        return Path(env_path)
-    cert_dir = certificates_path(project_root)
-    ca_file = cert_dir / "gms-local-ca.crt"
-    if ca_file.is_file():
-        return ca_file
-    return cert_dir / "gms-local.crt"
 from fastapi import APIRouter, Depends, HTTPException
 
 from features.auth import (
@@ -56,6 +39,25 @@ from .deployment_bundle import add_worker_runtime
 from .repository import utc_now
 from .worker_auth import persist_worker_token, restore_worker_token
 from .worker_token_transfer import remove_remote_files_quietly, write_remote_token_file
+
+
+def _controller_cert_for_bundle(project_root: Path) -> Path:
+    """Worker bundle 信任锚: 必须是正规 CA, fail-closed（绝不回退叶子证书）。
+
+    叶子证书当 CA 会重新触发 leaf-as-CA 验证失败; GMS_CERT_CRT 覆盖路径必须存在。
+    """
+    env_path = os.getenv("GMS_CERT_CRT", "").strip()
+    if env_path:
+        override = Path(env_path).expanduser()
+        if not override.is_file():
+            raise RuntimeError(f"GMS_CERT_CRT points to a missing certificate: {override}")
+        return override
+    ca_file = certificates_path(project_root) / "gms-local-ca.crt"
+    if not ca_file.is_file():
+        raise RuntimeError(
+            "Controller CA certificate is missing; do not use gms-local.crt as a CA trust anchor"
+        )
+    return ca_file
 
 
 router = APIRouter()

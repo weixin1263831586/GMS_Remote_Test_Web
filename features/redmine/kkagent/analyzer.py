@@ -42,10 +42,12 @@ DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 logger = logging.getLogger(__name__)
 
 # Prompt 版本随 runtime-owned evidence/schema repair 语义升级。
-PROMPT_VERSION = "redmine_daily_triage_v8"
+PROMPT_VERSION = "redmine_daily_triage_v9"
 
 REPAIR_MAX_TURNS = 8
-REPAIR_RESUME_RETRIES = 1
+# 首次修复仍可能被模型原样重放（线上曾出现完整取证后连续漏掉
+# confidence）。允许在同一 session 内再纠正一次；不重开会话、不重做取证。
+REPAIR_RESUME_RETRIES = 2
 
 REPAIR_PROMPT_TEMPLATE = """The previous analysis output did not pass validation.
 
@@ -57,8 +59,30 @@ Continue the existing analysis. Fix exactly these findings:
 - Complete any missing evidence checks with the read-only GMS MCP tools.
 - Schema findings (missing/invalid fields) are fixed by returning the
   corrected JSON only; do not invent new facts for missing evidence.
+- "confidence" MUST be a JSON number between 0.0 and 1.0 (for example
+  0.75). Never put an enum word like "likely" there — enum words belong
+  to "root_cause_type" only.
 - Then return the full corrected Daily Brief JSON object only
   (same schema as before, no prose, no markdown fences).
+"""
+
+SCHEMA_REPAIR_PROMPT_TEMPLATE = """The previous JSON output failed schema validation.
+
+Remaining schema findings:
+{findings}
+
+Correct the existing answer in this exact session and return the FULL corrected
+JSON object only. Do not call tools: the evidence gathering in this session is
+already complete. Preserve all supported analysis and evidence from the previous
+answer, changing only what is required to satisfy the schema.
+
+Hard requirements:
+- Include every field from the original Daily Brief JSON schema.
+- `confidence` is mandatory and must be a JSON number from 0.0 to 1.0. Derive it
+  from the evidence already gathered; do not use null and do not omit the field.
+- Do not output `history_checked`; it is owned and injected by the runtime from
+  successful history-search tool traces.
+- Output raw JSON only: no prose and no markdown fences.
 """
 
 
@@ -136,6 +160,14 @@ class KkAgentRedmineAnalyzer:
             "--resume", session_id,
             "-p", prompt,
         ]
+
+    @staticmethod
+    def build_repair_prompt(findings: list[str]) -> str:
+        """按失败类型生成修复指令，schema-only 修复禁止重复取证。"""
+        rendered = "\n".join(f"- {item}" for item in findings)
+        if findings and all(item.startswith("schema") for item in findings):
+            return SCHEMA_REPAIR_PROMPT_TEMPLATE.format(findings=rendered)
+        return REPAIR_PROMPT_TEMPLATE.format(findings=rendered)
 
     # -------------------------------------------------------------- entry
 
@@ -294,9 +326,7 @@ class KkAgentRedmineAnalyzer:
         findings = list(gate_errors_list)
         merged = trace
         for _attempt in range(REPAIR_RESUME_RETRIES):
-            repair_prompt = REPAIR_PROMPT_TEMPLATE.format(
-                findings="\n".join(f"- {item}" for item in findings)
-            )
+            repair_prompt = self.build_repair_prompt(findings)
             repair_trace, raw, timed_out = await self._run_stream(
                 self.build_repair_command(repair_prompt, session_id)
             )

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 from typing import Any
+
+from foundation.config import config_manager
 
 from .daily_brief_snapshot import DEFAULT_LIST_LIMIT, DEFAULT_STALE_DAYS
 from .kkagent import KkAgentRedmineAnalyzer
@@ -32,6 +36,80 @@ DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     "list_limit": DEFAULT_LIST_LIMIT,
 }
 RUNTIME_CONFIG_KEY = "redmine_daily_brief"
+_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_KKAGENT_CLIENT_RE = re.compile(r'^\s*client\s*=\s*["\']kkagent["\']\s*$', re.MULTILINE)
+
+
+def list_daily_brief_model_options(
+    ai_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """List enabled system models without exposing provider credentials or URLs."""
+    config = ai_config if ai_config is not None else config_manager.get_ai_config()
+    if not isinstance(config, dict) or not config.get("enabled", False):
+        return {"models": [], "default_model": ""}
+    providers = config.get("providers")
+    if not isinstance(providers, dict):
+        return {"models": [], "default_model": ""}
+
+    primary_provider = str(config.get("primary_provider") or "").strip()
+    provider_names = list(providers)
+    if primary_provider in providers:
+        provider_names.remove(primary_provider)
+        provider_names.insert(0, primary_provider)
+
+    models: list[dict[str, str]] = []
+    seen_models: set[str] = set()
+    default_model = ""
+    for provider_name in provider_names:
+        provider = providers.get(provider_name)
+        if not isinstance(provider, dict) or not provider.get("enabled", False):
+            continue
+        model = str(provider.get("model") or "").strip()
+        if not model:
+            continue
+        if provider_name == primary_provider:
+            default_model = model
+        if model in seen_models:
+            continue
+        seen_models.add(model)
+        display_name = str(provider.get("display_name") or model).strip() or model
+        models.append({
+            "model": model,
+            "display_name": display_name,
+            "provider": str(provider_name),
+        })
+    if not default_model and models:
+        default_model = models[0]["model"]
+    return {"models": models, "default_model": default_model}
+
+
+def list_daily_brief_agent_profiles(
+    profiles_root: Path | None = None,
+) -> dict[str, Any]:
+    """List local kkagent profile names without reading token material into memory."""
+    root = profiles_root or (
+        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        / "gms-agent" / "profiles"
+    )
+    if not root.is_dir():
+        return {"profiles": [], "default_profile": ""}
+    profiles: list[str] = []
+    for path in sorted(root.glob("*.toml")):
+        name = path.stem
+        if not _PROFILE_NAME_RE.fullmatch(name) or not path.is_file():
+            continue
+        try:
+            # The profile's client declaration is enough for this selector.
+            # Never parse or return controller, CA, or token-file fields.
+            contents = path.read_text(encoding="utf-8", errors="replace")[:8192]
+        except OSError:
+            continue
+        if _KKAGENT_CLIENT_RE.search(contents):
+            profiles.append(name)
+    return {
+        "profiles": profiles,
+        "default_profile": profiles[0] if len(profiles) == 1 else "",
+    }
 
 
 def analyzer_env_extra(profile: Any) -> dict[str, str]:
@@ -96,5 +174,7 @@ __all__ = [
     "RUNTIME_CONFIG_KEY",
     "analyzer_env_extra",
     "build_brief_analyzer",
+    "list_daily_brief_agent_profiles",
+    "list_daily_brief_model_options",
     "normalize_daily_brief_config",
 ]

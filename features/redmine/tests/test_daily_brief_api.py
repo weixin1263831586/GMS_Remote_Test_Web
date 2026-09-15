@@ -234,6 +234,27 @@ class DailyBriefApiTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
+    def test_model_options_expose_only_safe_model_metadata(self):
+        safe_options = {
+            "default_model": "glm-5.3-flash",
+            "models": [{
+                "model": "glm-5.3-flash",
+                "display_name": "GLM Local",
+                "provider": "glm_local",
+            }],
+        }
+        with patch.object(daily_brief_api, "list_daily_brief_model_options", return_value=safe_options):
+            response = self.client.get("/api/redmine-agent/daily-brief/model-options")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"], safe_options)
+
+    def test_agent_profiles_expose_names_only(self):
+        profiles = {"profiles": ["kkagent-local"], "default_profile": "kkagent-local"}
+        with patch.object(daily_brief_api, "list_daily_brief_agent_profiles", return_value=profiles):
+            response = self.client.get("/api/redmine-agent/daily-brief/agent-profiles")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"], profiles)
+
     # ------------------------------------------------------------------ owner
 
     def test_runs_are_owner_isolated(self):

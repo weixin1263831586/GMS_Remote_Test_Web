@@ -5,7 +5,7 @@
 > 与 `AGENT_PLAYBOOK.md`）。命令的完整参数以 `gms-rt-system-command-describe
 > <name>` 与 [command-reference.md](command-reference.md) 为准。
 > 注意 MCP 场景应优先使用 `gms_rt_*` typed tools（见
-> [../../agent/gms-remote-test/docs/README.md](../../agent/gms-remote-test/docs/README.md)），
+> [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md)），
 > 本文聚焦 shell CLI 路径。
 
 约定：示例均假设已通过 Service Token 认证（`GMS_AUTH_TOKEN_FILE`）；多

@@ -52,7 +52,9 @@ function continueLoadingLocalData() {
                     localTools[COMPANY_CATEGORY] = localTools['其他'];
                 }
                 delete localTools['其他'];
-                saveCategories();
+                // 页面初始化期间的迁移只落本地：module load ≠ user mutation，
+                // 不得对服务器发起写请求（否则刷新即触发 Failed to fetch）。
+                saveCategories({ sync: false });
             }
 
             categorizedTools = localTools;
@@ -69,7 +71,7 @@ function continueLoadingLocalData() {
         try {
             const oldTools = JSON.parse(stored);
             categorizedTools = migrateToCategories(oldTools);
-            saveCategories();
+            saveCategories({ sync: false });
             renderToolsGrid();
             return;
         } catch (e) {
@@ -94,7 +96,7 @@ function continueLoadingLocalData() {
         ]
     };
 
-    saveCategories();
+    saveCategories({ sync: false });
     renderToolsGrid();
 }
 
@@ -143,10 +145,13 @@ function guessCategory(tool) {
     return COMPANY_CATEGORY;
 }
 
-function saveCategories() {
-    // 保存到本地 localStorage
+function saveCategories({ sync = true } = {}) {
+    // 四阶段：Persist local 总是执行；Sync server 只在真正的用户变更
+    // （编辑/拖拽/删除）时触发。初始化、迁移、默认值路径必须传
+    // { sync: false } —— 页面加载绝不产生服务器写请求。
     localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categorizedTools));
 
-    // 同步到服务器
-    syncToolsToServer();
+    if (sync) {
+        void syncToolsToServer();
+    }
 }

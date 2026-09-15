@@ -566,8 +566,8 @@ class DeviceSSHConnection:
 # ==================== 标准错误响应 ====================
 
 def ssh_connection_failed_response():
-    """SSH连接失败的标准错误响应"""
+    """SSH连接失败的标准错误响应（502：远端依赖不可达，而非控制器缺陷）"""
     return JSONResponse(
         content={'success': False, 'error': 'SSH connection failed'},
-        status_code=500
+        status_code=502
     )

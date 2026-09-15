@@ -3,7 +3,7 @@
 > 本文档面向平台管理员、部署者与仓库维护者，说明 Agent Service Token、
 > scope/elevation、设备 ACL、审批令牌与 MCP 安全门的设计。Agent 安装后的
 > 使用层面安全纪律见
-> [../../agent/gms-remote-test/docs/README.md](../../agent/gms-remote-test/docs/README.md)
+> [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md)
 > 的「Security boundary」一节。
 
 ## 核心原则
@@ -84,10 +84,28 @@ Agent token 携带 `allowed_workers` 与 `allowed_devices` 两个字段：
 平台侧永不向 Agent 暴露 Web 登录密码；文档与工具链也不应为 Agent 语境
 提供、建议或重实现密码登录。
 
+## TLS 信任的两种部署模式（TOFU 边界）
+
+首次接触信任（TOFU）与预分发 CA 是两条**安全性不同**的路径，部署者必须
+明确选择，不得混同表述：
+
+| 模式 | 流程 | 抵抗能力 |
+| --- | --- | --- |
+| Convenience TOFU | `curl -k` 取安装器这一次不校验；安装器随即从
+`/api/agent/ca.crt` 取 CA 落盘，此后全部严格 TLS + 包签名 | 抵抗"第一接触
+之后"的中间人；第一接触本身只能靠可信局域网/带外确认保障 |
+| Strict pre-distributed CA | 先经带外渠道拿到 Controller CA
+（`GMS_INSTALL_CA_CERT` / `--cacert`），第一个字节起严格校验 | 全程抗
+中间人，生产/跨网段部署的唯一推荐 |
+
+TOFU **不等于**抵抗首次接触 MITM：攻击者在第一接触窗口替换 CA 即可持久
+劫持。信任建立在带外核对的 CA 指纹（`sha256` 比对）上, 而不是"下载成功"
+这个事实本身。
+
 ## 相关文档
 
 - [docs/agent/installation.md](installation.md) — enrollment 与 token 落盘流程
 - [docs/agent/profiles.md](profiles.md) — profile 与 token 的一一对应
-- [../../agent/gms-remote-test/docs/README.md](../../agent/gms-remote-test/docs/README.md) — MCP 层安全门与工具清单
+- [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md) — MCP 层安全门与工具清单
 - [../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md](../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md) — 凭据与会话处置
 - [docs/architecture/adr/0003-agent-profile-store.md](../architecture/adr/0003-agent-profile-store.md) — profile/token 存储决策

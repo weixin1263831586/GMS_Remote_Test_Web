@@ -367,7 +367,6 @@ class RunLifecycleTests(unittest.TestCase):
         subjects = {item["subject"] for item in refreshed.report_json["top_priorities"]}
         self.assertEqual(subjects, {"A", "B"})
 
-
 class AnalyzerBindingTests(unittest.TestCase):
     """kkagent 分析器必须绑定 owner 的 profile，且不继承他人身份。"""
 

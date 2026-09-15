@@ -73,7 +73,8 @@ GMS_ENV=development python app.py   # 默认端口 5001
 先在 Web 端生成一次性 Enrollment Code，然后在 Agent 主机（编译服务器）：
 
 ```bash
-curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | \
+# <CONTROLLER_HOST> 换成 Controller 的真实 IP/主机名（不要照抄占位符）。
+curl -k -fsSL https://<CONTROLLER_HOST>:5001/api/agent/install.sh | \
   bash -s -- --paircode <ENROLLMENT_CODE> --client auto
 gms-rt-system-selfcheck --json   # 验收：auth / health / devices / suites
 ```

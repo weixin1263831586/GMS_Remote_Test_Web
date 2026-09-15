@@ -40,7 +40,8 @@ fetches `GET /api/agent/ca.crt`, persists it, and every later download is
 strictly TLS-verified plus SHA-256/Ed25519 signature-pinned:
 
 ```bash
-curl -k -fsSL "https://CONTROLLER:5001/api/agent/install.sh" | \
+# <CONTROLLER_HOST> 换成 Controller 的真实 IP/主机名（不要照抄占位符）。
+curl -k -fsSL "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | \
   bash -s -- --paircode <CODE> --client auto
 gms-agent doctor --client codex --json
 ```
@@ -58,7 +59,7 @@ Controller CA out-of-band and stay strict from the first byte instead:
 ```bash
 export GMS_INSTALL_CA_CERT=/etc/gms/controller-ca.pem
 curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
-  "https://CONTROLLER:5001/api/agent/install.sh" | bash -s -- --paircode <CODE>
+  "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | bash -s -- --paircode <CODE>
 ```
 
 The package verifies registry SHA-256 and any pinned Ed25519 signature,

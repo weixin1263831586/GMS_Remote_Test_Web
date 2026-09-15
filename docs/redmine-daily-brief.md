@@ -1,8 +1,8 @@
-# Redmine AI Daily Brief（凌晨 AI 晨报）
+# Redmine Daily Brief（凌晨每日晨报）
 
 每天 00:00 自动读取当前用户个人看板中的「待回复」「RK 3 天未回复客户」
 两类 issue，去重后冻结快照，用 kkagent headless 调本地大模型做逐 issue
-深度分析，09:00 上班在个人看板直接查看 AI 晨报。
+深度分析，09:00 上班在个人看板直接查看每日晨报。
 
 ## 架构
 
@@ -19,7 +19,7 @@ systemd timer 00:00 (Persistent=true)
 Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
       → 同一套 DailyBriefService / KkAgentRedmineAnalyzer
 08:40 timer → run-delta：fingerprint 未变的 issue 跳过，只重分析变化项
-09:00 → 个人看板顶部「AI 晨报」卡片
+09:00 → 个人看板顶部「每日晨报」卡片
 ```
 
 关键文件：
@@ -60,7 +60,7 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 }
 ```
 
-- `enabled` 默认 `false`（opt-in）：晨报会消耗 kkagent 分析资源，owner
+- `enabled` 默认 `false`（opt-in）：每日晨报会消耗 kkagent 分析资源，owner
   在设置里显式开启后才进入 nightly 调度。
 - `model` 为空时使用 kkagent 当前默认模型；
 - `analysis_backend` 仅支持 `kkagent`；历史上可配置 `direct` 但从未实现，
@@ -75,7 +75,7 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 
 ## 身份与安全边界
 
-- 晨报严格**单人视角**：owner 经 `resolve_daily_brief_owner_identity` 解析为
+- 每日晨报严格**单人视角**：owner 经 `resolve_daily_brief_owner_identity` 解析为
   单个 Redmine 用户（配置用户名命中 user map → 该映射；否则 Redmine 当前
   登录用户）。绝不把 user map 的部门全员当 owner，也不在缺身份时回退
   `None`（那会展开为全部 assignee）。
@@ -87,8 +87,8 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/redmine-agent/daily-brief/triage` | 当天待处理清单（CLI/MCP 同源） |
-| GET | `/api/redmine-agent/daily-brief/latest` | 最新晨报 |
-| GET | `/api/redmine-agent/daily-brief/{date}` | 指定日期晨报 |
+| GET | `/api/redmine-agent/daily-brief/latest` | 最新每日晨报 |
+| GET | `/api/redmine-agent/daily-brief/{date}` | 指定日期每日晨报 |
 | POST | `/api/redmine-agent/daily-brief/run` | 手动触发（持久化入队，返回 run_id/job_id；请求体 `{"force": true}` 强制重跑当天结果） |
 | POST | `/api/redmine-agent/daily-brief/{date}/refresh` | delta 刷新 |
 | POST | `/api/redmine-agent/daily-brief/{date}/issues/{id}/reanalyze` | 单 issue 重分析 |
@@ -152,7 +152,25 @@ sudo systemctl enable --now gms-redmine-daily-brief-delta.timer   # 可选
   不并发写同一 run；
 - `Persistent=true`：00:00 停机则开机补跑；flock 防同机并发。
 
+### SQLite 多进程 schema 迁移契约
+
+Web 进程、daily_brief Worker、systemd、CLI 可能同时初始化同一 owner 库。
+schema 迁移（建表、补列）必须满足：
+
+- 迁移整体持有 `BEGIN IMMEDIATE` 写锁后再读 schema、再执行 `ALTER TABLE`，
+  避免两进程同时 `PRAGMA table_info` 判列缺失、同时 `ADD COLUMN` 触发
+  `duplicate column name`（TOCTOU，生产事故已发生过一次）；
+- schema 版本记录在 `PRAGMA user_version`（`DailyBriefRepository._SCHEMA_VERSION`）：
+  已是当前版本的库走快路径跳过全部 DDL；旧库在写锁内逐版升级。每次改表
+  结构必须把 `_SCHEMA_VERSION` +1；
+- 迁移天然幂等：先判存在再补列，重复初始化（migration twice）、
+  user_version 意外回退重放均安全；
+- 回归测试：`features/redmine/tests/test_daily_brief_repository.py` 的
+  `CrossProcessConsistencyTests`（含 8 进程并发初始化用例）与
+  `test_migration_stamps_user_version_and_fast_paths` /
+  `test_user_version_rollback_is_safe_on_reopen`。
+
 ## 已知限制（第一阶段）
 
-- 08:40 delta、历史晨报趋势、persistent issue 连续天数统计已具备数据
+- 08:40 delta、历史每日晨报趋势、persistent issue 连续天数统计已具备数据
   基础，UI 聚合视图后续迭代。

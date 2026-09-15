@@ -166,6 +166,67 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(loaded.status, "completed")
         self.assertEqual(loaded.source_sync_status, "")
 
+    def test_migration_stamps_user_version_and_fast_paths(self):
+        """迁移完成后盖章 PRAGMA user_version；再次打开走快路径不重放 DDL。"""
+        import sqlite3
+
+        conn = sqlite3.connect(self.repo.db_path)
+        try:
+            stamped = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(stamped, DailyBriefRepository._SCHEMA_VERSION)
+
+        # 旧库升级：伪造历史版本 + 缺列，重开实例后应补齐并重新盖章。
+        legacy = Path(self._tmp.name) / "legacy_v0"
+        legacy.mkdir()
+        db = legacy / "daily_brief.sqlite3"
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "CREATE TABLE redmine_daily_brief_runs ("
+            "run_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, brief_date TEXT NOT NULL, "
+            "mode TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending')"
+        )
+        conn.execute("PRAGMA user_version = 0")
+        conn.commit()
+        conn.close()
+
+        DailyBriefRepository(legacy)
+        conn = sqlite3.connect(db)
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            cols = {row[1] for row in conn.execute(
+                "PRAGMA table_info(redmine_daily_brief_runs)"
+            )}
+        finally:
+            conn.close()
+        self.assertEqual(version, DailyBriefRepository._SCHEMA_VERSION)
+        for column in ("source_sync_status", "data_quality", "last_sync_at"):
+            self.assertIn(column, cols)
+
+    def test_user_version_rollback_is_safe_on_reopen(self):
+        """user_version 意外回退（如旧工具降级）时重放迁移必须幂等无错。"""
+        import sqlite3
+
+        conn = sqlite3.connect(self.repo.db_path)
+        conn.execute("PRAGMA user_version = 0")
+        conn.commit()
+        conn.close()
+
+        DailyBriefRepository(self.repo.db_path.parent)  # should not raise
+        conn = sqlite3.connect(self.repo.db_path)
+        try:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(version, DailyBriefRepository._SCHEMA_VERSION)
+        # 表可查询、版本已盖章（get_run 对不存在的 id 正常返回 None）。
+        conn = sqlite3.connect(self.repo.db_path)
+        try:
+            conn.execute("SELECT 1 FROM redmine_daily_brief_runs LIMIT 1").fetchall()
+        finally:
+            conn.close()
+
     def test_jobs_are_idempotent_claimed_and_completed(self):
         run = make_run(status="snapshotting")
         self.repo.create_run(run)
@@ -288,6 +349,21 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.get_run(run.run_id).status, "pending")
 
 
+def _concurrent_init_worker(tmp: str, barrier_port: int) -> None:
+    """子进程:与多个进程同时初始化同一 SQLite 库的 repository。"""
+    import socket
+
+    # 廉价同步:所有进程到齐 barrier 后同时开始,放大迁移竞态窗口。
+    sock = socket.socket()
+    try:
+        sock.connect(("127.0.0.1", barrier_port))
+    except OSError:
+        pass
+    finally:
+        sock.close()
+    DailyBriefRepository(Path(tmp))
+
+
 def _concurrent_create_run_worker(tmp: str, mode: str, barrier_port: int) -> None:
     """子进程:与另一进程同时为同一 owner+date+mode 创建 run。"""
     import socket
@@ -363,6 +439,58 @@ class CrossProcessConsistencyTests(unittest.TestCase):
             (self.db_root / "result-nightly.txt").read_text(encoding="utf-8")
         }
         self.assertEqual(ids, {rows[0][0]})
+
+    def test_concurrent_repository_initialization_is_process_safe(self):
+        """8 进程同时初始化同一库:schema 迁移必须持 BEGIN IMMEDIATE 写锁。
+
+        Web 进程、daily_brief worker、systemd、CLI 并发启动时,若迁移
+        先 PRAGMA table_info 后 ALTER 而无写锁,会出现
+        "duplicate column name" TOCTOU 崩溃(生产事故)。
+        """
+        import multiprocessing
+        import socket
+
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(16)
+        barrier_port = listener.getsockname()[1]
+
+        procs = [
+            multiprocessing.Process(
+                target=_concurrent_init_worker,
+                args=(str(self.db_root), barrier_port),
+            )
+            for _ in range(8)
+        ]
+        for proc in procs:
+            proc.start()
+        accepted = 0
+        listener.settimeout(30)
+        while accepted < len(procs):
+            conn, _ = listener.accept()
+            conn.close()
+            accepted += 1
+        listener.close()
+        for proc in procs:
+            proc.join(timeout=60)
+            self.assertEqual(proc.exitcode, 0, "concurrent init failed")
+
+        # 迁移收敛:全部目标列恰好存在一次。
+        import sqlite3
+
+        db_path = DailyBriefRepository(self.db_root).db_path
+        with sqlite3.connect(db_path) as conn:
+            cols = [
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(redmine_daily_brief_runs)"
+                )
+            ]
+        for column in ("data_quality", "last_sync_at", "source_sync_status"):
+            self.assertEqual(
+                cols.count(column), 1,
+                f"column {column} must exist exactly once",
+            )
 
     def test_concurrent_enqueue_same_issue_coalesces_to_one_job(self):
         import multiprocessing

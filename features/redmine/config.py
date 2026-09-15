@@ -126,6 +126,24 @@ class RedmineConfig:
         except Exception:
             return ""
 
+    def redmine_credentials_status(self) -> dict[str, bool]:
+        """Return current-owner credential readiness without returning secrets."""
+        base_url = self.get_redmine_base_url()
+        parsed = urlparse(base_url)
+        base_url_configured = parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+        creds = self.load_redmine_credentials() or {}
+        password_configured = bool(
+            str(creds.get("username") or "").strip()
+            and str(creds.get("password") or "").strip()
+        )
+        api_key_configured = bool(self.load_redmine_api_key())
+        return {
+            "configured": bool(base_url_configured and (password_configured or api_key_configured)),
+            "base_url_configured": bool(base_url_configured),
+            "password_configured": password_configured,
+            "api_key_configured": api_key_configured,
+        }
+
     def save_redmine_api_key(self, api_key: str) -> bool:
         """加密保存 Redmine API Key；文件权限 0600，与密码凭据共存。"""
         api_key = str(api_key or "").strip()

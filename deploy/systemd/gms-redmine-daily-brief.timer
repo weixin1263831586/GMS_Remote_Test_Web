@@ -1,5 +1,5 @@
 [Unit]
-Description=Run GMS Redmine AI Daily Brief at 00:00 daily
+Description=Run GMS Redmine Daily Brief at 00:00 daily
 
 [Timer]
 OnCalendar=*-*-* 00:00:00

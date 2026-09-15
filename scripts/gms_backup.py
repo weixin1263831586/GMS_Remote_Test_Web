@@ -210,7 +210,12 @@ def _stage_sources(project_root: Path, run_home: Path | None, stage: Path) -> No
         raise BackupError(f'runtime data directory does not exist: {data_root}')
     _copy_tree(data_root, payload / 'project' / 'data')
 
-    for relative in (
+    # Canonical (current) configuration lives under configs/local/ and
+    # configs/secrets/ — both are archived wholesale below. The flat root
+    # files are the pre-0.20 layout; they are kept ONLY as
+    # legacy-compatibility sources for older deployments whose restore
+    # must keep working. Do not add new configuration here.
+    legacy_config_paths = (
         Path('configs/config.json'),
         Path('configs/runtime.json'),
         Path('configs/config_runtime.json'),
@@ -220,7 +225,8 @@ def _stage_sources(project_root: Path, run_home: Path | None, stage: Path) -> No
         Path('configs/automation_profiles.json'),
         Path('configs/user_tools_data.json'),
         Path('configs/redmine_user_map.json'),
-    ):
+    )
+    for relative in legacy_config_paths:
         source = project_root / relative
         if relative == Path('configs/config.json') and source.is_symlink():
             if source.resolve() != (project_root / 'configs/local/deployment.json').resolve():

@@ -1,9 +1,9 @@
     :root { color-scheme: dark; --bg:#0b0d12; --panel:#131720; --panel2:#191f2b; --border:#2b3342; --text:#e8edf7; --muted:#96a1b5; --primary:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --high:#ef4444; --medium:#f59e0b; --low:#6b7280; }
     * { box-sizing: border-box; }
     html { scrollbar-gutter: stable; overflow-y: scroll; overflow-x: hidden; scroll-padding-top:56px; }
-    body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+    body { min-height:100vh; margin:0; display:flex; flex-direction:column; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
     /* Tabs 与工具栏同一行：Tabs 靠左，搜索/筛选/按钮靠右；窄屏时回退为两行。 */
-    header { position:sticky; top:0; z-index:1000; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:14px; padding:6px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
+    header { position:sticky; top:0; z-index:1000; flex:0 0 auto; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:14px; padding:6px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     .header-right { display:flex; align-items:center; gap:12px; flex-shrink:0; flex-wrap:wrap; }
     .muted { color:var(--muted); font-size:13px; line-height:1.6; }
@@ -23,7 +23,6 @@
     header .filter-bar input:focus, header .filter-bar select:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(59,130,246,.18); }
     header .filter-bar input#searchInput { width:clamp(140px, 12vw, 200px); min-width:140px; }
     header .filter-bar select { width:86px; min-width:86px; }
-    header .filter-bar input#syncAssigneeInput { width:132px; min-width:132px; }
     header .btn-group > button { width:72px; min-width:72px; padding:0; text-align:center; }
     header .btn-group > .settings-btn { width:72px; min-width:72px; }
 
@@ -77,12 +76,20 @@
     /* Panels */
     .tab-content { display:none; padding:16px; }
     .tab-content.active { display:block; }
+    #tab-cases.tab-content.active, #tab-runs.tab-content.active { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; }
+    #tab-cases .two-col, #tab-runs .two-col { flex:1 1 auto; min-height:0; }
 
     /* Filter bar */
     .filter-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .filter-bar input, .filter-bar select { height:28px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px; font-size:13px; }
     .filter-bar input { width:240px; }
     .filter-bar select { width:100px; }
+    .redmine-advanced-sync { margin:0 0 12px; border:1px solid var(--border); border-radius:7px; background:var(--panel); }
+    .redmine-advanced-sync summary { padding:8px 10px; color:var(--muted); cursor:pointer; font-size:12px; font-weight:650; }
+    .redmine-advanced-sync summary:hover { color:var(--text); }
+    .redmine-advanced-sync-body { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:0 10px 10px; }
+    .redmine-advanced-sync-body input { height:28px; width:180px; min-width:150px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px; font-size:12px; }
+    .redmine-advanced-sync-body button { height:28px; font-size:12px; }
     .select-with-add { position:relative; display:inline-flex; align-items:center; }
     .select-with-add select { padding-right:26px; }
     .select-add-btn { position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:0; color:var(--muted); font-size:14px; padding:0 5px; line-height:1; cursor:pointer; height:24px; min-width:20px; }
@@ -241,7 +248,7 @@
     .dept-user-title h2 { margin:0; font-size:15px; }
 
     /* Layout */
-    .two-col { display:grid; grid-template-columns:340px minmax(0,1fr); gap:12px; min-height:calc(100vh - 160px); }
+    .two-col { display:grid; grid-template-columns:340px minmax(0,1fr); gap:12px; min-height:calc(100vh - 88px); }
     .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
     .panel h2 { margin:0; padding:10px 12px; font-size:14px; background:var(--panel2); border-bottom:1px solid var(--border); }
     .panel .scroll { overflow:auto; max-height:calc(100vh - 220px); }
@@ -259,7 +266,6 @@
         header .filter-bar, header .btn-group { flex-wrap:nowrap; }
         header .btn-group { border-left:0; padding-left:0; margin-left:0; }
         header .filter-bar input#searchInput { width:150px; min-width:150px; }
-        header .filter-bar input#syncAssigneeInput { width:110px; min-width:110px; }
         .two-col { grid-template-columns:1fr; }
         .issue-mini { grid-template-columns:1fr; gap:6px; align-items:start; }
         .issue-mini-right { justify-content:flex-start; flex-wrap:wrap; }
@@ -277,7 +283,7 @@
     .setting-checkbox-row input { width:auto !important; }
     .setting-inline-grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(120px,1fr); gap:10px; }
 
-    /* AI 晨报：信息分层清楚，长标题和窄屏不挤压状态与操作。 */
+    /* 每日晨报：信息分层清楚，长标题和窄屏不挤压状态与操作。 */
     .daily-brief-card { overflow:hidden; }
     .daily-brief-head { padding:16px; background:linear-gradient(135deg,rgba(59,130,246,.10),rgba(124,58,237,.08)); }
     .daily-brief-titlebar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }

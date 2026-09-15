@@ -1,4 +1,4 @@
-# Redmine Daily Triage（AI 晨报分析规范）
+# Redmine Daily Triage（每日晨报分析规范）
 
 版本：`redmine_daily_triage_v8`
 

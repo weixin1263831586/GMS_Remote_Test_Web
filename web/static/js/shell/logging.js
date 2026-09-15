@@ -1,4 +1,4 @@
-// Shell 模块：系统/测试日志面板（从 navigation.js 第二轮拆分，2026-08 审核）。
+// Shell 模块：系统/测试日志面板。
 // 依赖 state.js 的 state/debugLog；函数保持全局作用域，供 shell 内联与 pages 使用。
 
 // ==================== Logging ====================
@@ -172,25 +172,39 @@ function flushLogQueue() {
     }
 }
 
-// 清空指定 Worker scope 的日志条目。
-// 日志面板是跨主机共用的（隐藏而非删除），开始测试/清除日志只能清当前
-// Worker 的条目；无 scope 的全局条目（如登录/平台事件）也一并保留，
-// 避免其他 Worker 的隐藏历史被误删。
+// 清空当前 Worker 可见的日志条目。
+// 日志面板是跨主机共用的（隐藏而非删除）：其他 Worker 的隐藏历史保留；
+// 没有 worker scope 的 Controller/本机操作日志在所有主机下都可见，因此
+// 也必须清掉，否则按钮会提示成功但烧写/上传日志仍原样留在页面。
 function clearWorkerLogs(workerId = '') {
     const scope = String(workerId || (window.workspaceWorkerId ? window.workspaceWorkerId() : ''));
+
+    // requestAnimationFrame 尚未 flush 的旧日志也要同步丢弃，否则清空后
+    // 下一帧又会被补回，看起来像“清除日志无效”。
+    for (let index = _logQueue.length - 1; index >= 0; index--) {
+        const queuedWorker = String(_logQueue[index].workerId || '');
+        if (!scope || !queuedWorker || queuedWorker === scope) {
+            _logQueue.splice(index, 1);
+        }
+    }
+
     for (const src of ['system', 'module']) {
         const logOutput = getLogContainer(src);
         if (!logOutput) continue;
         for (const node of Array.from(logOutput.children)) {
             if (node.nodeType !== Node.ELEMENT_NODE) continue;
-            // 只删除属于当前 Worker scope 的条目；无 scope（全局/Controller/
-            // 登录信息等）的条目保留——"清当前 Worker 日志"不应误删平台日志。
-            if (node.dataset.workerId === scope) {
+            const nodeWorker = String(node.dataset.workerId || '');
+            if (!scope || !nodeWorker || nodeWorker === scope) {
                 node.remove();
             }
         }
     }
-    state.lastLogCount = 0;
+
+    // 本机 clean API 已同步清空服务端 user_state 日志，游标从 0 重建；
+    // 远端 Worker 没有调用该接口，保留游标以免状态轮询重放旧日志。
+    if (!scope || !window.isLocalWorkspaceWorker || isLocalWorkspaceWorker(scope)) {
+        state.lastLogCount = 0;
+    }
     state.wsLogStallTicks = 0;
 }
 

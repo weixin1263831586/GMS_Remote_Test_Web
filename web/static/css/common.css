@@ -6088,40 +6088,11 @@ body.apk-resizing {
     font-size: 11px;
 }
 
-.users-list-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 8px;
-}
-
-.users-filter-group,
-.users-list-meta,
 .agent-access-list-actions {
     display: flex;
     align-items: center;
     gap: 7px;
     min-width: 0;
-}
-
-#users-search-input {
-    width: min(320px, 36vw);
-}
-
-#users-status-filter {
-    width: 112px;
-}
-
-.users-list-meta {
-    color: var(--text-secondary);
-    font-size: 11px;
-    white-space: nowrap;
-}
-
-#users-visible-count::after {
-    content: '\00b7';
-    margin-left: 7px;
 }
 
 .users-table-wrap {
@@ -6270,6 +6241,13 @@ body.apk-resizing {
     flex: 0 0 auto;
 }
 
+#agent-access-refresh {
+    box-sizing: border-box;
+    flex: 0 0 76px;
+    inline-size: 76px;
+    text-align: center;
+}
+
 .agent-access-stat {
     appearance: none;
 }
@@ -6290,6 +6268,12 @@ body.apk-resizing {
 
 .agent-access-card-heading {
     margin-bottom: 12px;
+}
+
+#agent-access-create-submit {
+    box-sizing: border-box;
+    inline-size: 90px;
+    text-align: center;
 }
 
 .agent-access-card-heading strong,
@@ -6492,7 +6476,7 @@ body.apk-resizing {
 
 .agent-access-table {
     width: 100%;
-    min-width: 1180px;
+    min-width: 1300px;
     border-collapse: separate;
     border-spacing: 0;
     table-layout: fixed;
@@ -6532,7 +6516,8 @@ body.apk-resizing {
     background: color-mix(in srgb, var(--primary-color) 5%, transparent);
 }
 
-.agent-token-cell-identity,
+.agent-token-cell-name,
+.agent-token-cell-id,
 .agent-token-cell-scopes,
 .agent-token-cell-acl {
     overflow: hidden;
@@ -6540,16 +6525,16 @@ body.apk-resizing {
     white-space: nowrap;
 }
 
-.agent-token-cell-identity {
+.agent-token-cell-name {
     text-align: left !important;
+    padding-left: 60px !important;
 }
 
-.agent-token-cell-identity strong {
+.agent-token-cell-name strong {
     font-size: 12px;
 }
 
-.agent-token-cell-identity code {
-    margin-left: 5px;
+.agent-token-cell-id code {
     color: var(--text-secondary);
     font-size: 11px;
 }
@@ -6579,7 +6564,8 @@ body.apk-resizing {
 }
 
 .agent-access-table .btn-danger {
-    min-width: 52px;
+    box-sizing: border-box;
+    inline-size: 62px;
     min-height: 24px;
     padding: 2px 8px;
 }
@@ -6590,7 +6576,8 @@ body.apk-resizing {
     text-align: center !important;
 }
 
-.agent-token-col-identity { width: 200px; }
+.agent-token-col-name { width: 140px; }
+.agent-token-col-id { width: 150px; }
 .agent-token-col-status { width: 72px; }
 .agent-token-col-scopes { width: 235px; }
 .agent-token-col-worker { width: 130px; }
@@ -6598,7 +6585,7 @@ body.apk-resizing {
 .agent-token-col-owner { width: 82px; }
 .agent-token-col-validity { width: 150px; }
 .agent-token-col-used { width: 105px; }
-.agent-token-col-action { width: 62px; }
+.agent-token-col-action { width: 76px; }
 
 @media (max-width: 980px) {
     #page-agent > div:nth-child(2) {
@@ -6676,7 +6663,6 @@ body.apk-resizing {
         padding: 8px;
     }
 
-    .users-list-toolbar,
     .agent-access-toolbar,
     .agent-access-code-card {
         align-items: stretch;
@@ -6688,13 +6674,10 @@ body.apk-resizing {
         grid-template-columns: 1fr !important;
     }
 
-    .users-filter-group,
-    .users-list-meta,
     .agent-access-list-actions {
         flex-wrap: wrap;
     }
 
-    #users-search-input,
     #agent-access-search {
         width: 100%;
         flex: 1 1 100%;
