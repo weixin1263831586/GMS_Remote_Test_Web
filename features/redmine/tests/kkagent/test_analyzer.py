@@ -18,7 +18,7 @@ from features.redmine.tests.kkagent.test_process import (
 
 
 ENTRY = {
-    "issue_id": 648526,
+    "issue_id": 1,
     "subject": "Widevine L1 fail",
     "status_name": "New",
     "priority_name": "High",
@@ -231,7 +231,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v11")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v13")
 
     def test_prompt_requires_source_evidence_for_test_failures(self):
         prompt = KkAgentRedmineAnalyzer().build_prompt(ENTRY)

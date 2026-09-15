@@ -58,8 +58,19 @@ RISK_LEVELS = tuple(ISSUE_RESULT_SCHEMA["properties"]["risk"]["enum"])
 SIMILARITY_LEVELS = tuple(ISSUE_RESULT_SCHEMA["$defs"]["SimilarIssue"]["properties"]["similarity"]["enum"])
 
 
+RESULT_SCHEMA_VERSION = 2
+
+
 def validate_issue_result(result: dict[str, Any]) -> list[str]:
-    """Validate new output without inventing omitted facts or confidence."""
+    """Validate new output and canonicalize it in place.
+
+    审核意见（P2）：``extra="ignore"`` 会让未知字段被 Pydantic 丢弃，但原始
+    dict 仍可能继续带着 legacy/hallucinated 字段进入持久层。这里在验证成功后
+    用 ``model_dump()`` 覆盖原 dict，只保留 schema 内字段（并写入
+    ``result_schema_version``），保证持久化表示 canonical。运行时附加字段
+    （history_checked / evidence_gate / needs_human_review）在验证后由调用方
+    写回，不受影响。
+    """
     try:
         parsed = IssueResult.model_validate(result)
     except ValidationError as exc:
@@ -69,7 +80,10 @@ def validate_issue_result(result: dict[str, Any]) -> list[str]:
             + ("" if error["type"] == "missing" else f": {error['msg']}")
             for error in exc.errors(include_input=False)
         ]
-    result["confidence"] = parsed.confidence
+    canonical = parsed.model_dump(mode="json")
+    canonical["result_schema_version"] = RESULT_SCHEMA_VERSION
+    result.clear()
+    result.update(canonical)
     if confidence_below_review_threshold(result):
         result["needs_human_review"] = True
     return []

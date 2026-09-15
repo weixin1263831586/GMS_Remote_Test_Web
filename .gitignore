@@ -1,0 +1,24 @@
+# 本机部署配置与秘密：整个 configs/ 默认忽略，只放行白名单模板与说明文档。
+# 策略见 docs/deployment/configuration.md 与 configs/README.md。
+/configs/*
+!/configs/examples/
+/configs/examples/*
+!/configs/examples/config.example.json
+!/configs/examples/runtime.example.json
+!/configs/examples/build_servers.example.json
+!/configs/examples/automation_profiles.example.json
+!/configs/examples/cluster.example.json
+!/configs/README.md
+!/configs/AGENTS.md
+
+# 运行数据全部忽略（可再生数据与含敏感数据的迁移备份）
+/data/
+
+# 构建与前端产物（仅根级；tools/ 下已跟踪的 dist 产物不受影响）
+/dist/
+
+# Python 运行产物（fresh-clone 契约：test_config_examples.py 依赖本规则
+# 遮蔽运行时本地文件）
+__pycache__/
+*.pyc
+.pytest_cache/

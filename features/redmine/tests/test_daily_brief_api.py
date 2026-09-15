@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -76,6 +77,7 @@ class DailyBriefApiTests(unittest.TestCase):
         self.addCleanup(creds_patch.stop)
 
         triage_mock = AsyncMock(return_value=dict(TRIAGE))
+        self.triage_mock = triage_mock
         triage_patch = patch.object(
             daily_brief_api.DailyBriefService, "build_triage", triage_mock
         )
@@ -119,6 +121,42 @@ class DailyBriefApiTests(unittest.TestCase):
         self.addCleanup(self.client.close)
 
     # ------------------------------------------------------------------ triage
+
+    def test_single_issue_queues_only_requested_id_without_workload_scan(self):
+        response = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338})
+        self.assertEqual(response.status_code, 200)
+        queued = response.json()['data']
+        repo = brief_repo.owner_daily_brief_repository('owner-a')
+        self.assertEqual([row.issue_id for row in repo.list_issues(queued['run_id'])], [647338])
+        job = repo.get_job(queued['job_id'])
+        self.assertEqual(job['kind'], 'issue')
+        self.assertEqual(job['issue_id'], 647338)
+        self.triage_mock.assert_not_awaited()
+        self.assertIsNone(repo.latest_run('owner-a'))
+        again = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338}).json()['data']
+        self.assertEqual(again['job_id'], queued['job_id'])
+        self.assertTrue(again['already_running'])
+
+    def test_single_issue_validation_and_owner_isolation(self):
+        for invalid in (0, -1, True, '647338', 1.5):
+            response = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': invalid})
+            self.assertEqual(response.status_code, 422)
+        queued = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338}).json()['data']
+        url = '/api/redmine-agent/daily-brief/runs/' + queued['run_id']
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(self.client.get(url, headers={'x-test-owner': 'owner-b'}).status_code, 404)
+
+    def test_single_issue_worker_analyzes_without_snapshot_scan(self):
+        from features.redmine.daily_brief_worker import _execute_job
+
+        queued = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338}).json()['data']
+        repo = brief_repo.owner_daily_brief_repository('owner-a')
+        with patch('features.redmine.daily_brief_service.preflight_gms_auth', AsyncMock(return_value=(True, ''))):
+            asyncio.run(_execute_job(repo, repo.get_job(queued['job_id']), lambda owner: daily_brief_api.DailyBriefService(owner)))
+        self.triage_mock.assert_not_awaited()
+        self.assertEqual(repo.get_issue(queued['run_id'], 647338).status, 'completed')
+        self.assertEqual(len(repo.list_issues(queued['run_id'])), 1)
+
 
     def test_triage_returns_snapshot(self):
         resp = self.client.get("/api/redmine-agent/daily-brief/triage")
@@ -379,6 +417,8 @@ class DailyBriefApiAuthzTests(unittest.TestCase):
     def test_agent_token_cannot_trigger_run_even_with_read_scope(self):
         headers = {**AGENT_HEADERS, "x-test-scopes": "redmine.read"}
         resp = self.client.post("/api/redmine-agent/daily-brief/run", headers=headers)
+        self.assertEqual(resp.status_code, 403)
+        resp = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', headers=headers, json={'issue_id': 647338})
         self.assertEqual(resp.status_code, 403)
         resp = self.client.put(
             "/api/redmine-agent/daily-brief/config",

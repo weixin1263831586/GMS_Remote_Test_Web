@@ -51,8 +51,8 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
   "analysis_backend": "kkagent",
   "model": "",
   "agent_profile": "",
-  "max_turns": 20,
-  "issue_timeout_seconds": 600,
+  "max_turns": 0,
+  "issue_timeout_seconds": 0,
   "max_parallel_issues": 1,
   "max_issues": 50,
   "stale_days": 3,
@@ -63,6 +63,10 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 - `enabled` 默认 `false`（opt-in）：每日晨报会消耗 kkagent 分析资源，owner
   在设置里显式开启后才进入 nightly 调度。
 - `model` 为空时使用 kkagent 当前默认模型；
+- 分析和同会话修复不设步数、耗时或 Token 预算，以证据充分、结论可用为
+  目标。旧 `max_turns` / `issue_timeout_seconds` 配置仍兼容读取，但统一
+  规范化为 `0`（无限制）。可随时在晨报页面手动停止；外部模型/工具的
+  连接故障仍按执行异常记录。
 - `analysis_backend` 仅支持 `kkagent`；历史上可配置 `direct` 但从未实现，
   已从枚举移除（旧配置值会被规范化回 `kkagent`）。
 - `max_parallel_issues` 默认 1：同机多个 headless kkagent 会话可能互相中断；
@@ -74,6 +78,16 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
   run 在启动 Agent 前 fail-closed，绝不回退他人凭据。
 
 ## 身份与安全边界
+
+在「每日晨报」顶部的「单号分析」输入 Redmine 单号，点击「分析此单号」
+或按 Enter。该入口仅排队诊断输入的工单，不扫描待处理列表，也不要求
+工单先出现在晨报里。结果直接展示 kkagent 的原始 Markdown 总结，
+「停止此项」仅取消对应任务。单号任务与 nightly/delta 晨报分别保存。
+
+API：`POST /api/redmine-agent/daily-brief/analyze-issue`，JSON 为
+`{"issue_id":647338}`；返回 `run_id` / `job_id`。通过
+`GET /api/redmine-agent/daily-brief/runs/{run_id}` 查看状态与结果。
+触发需要人工会话，取证仍使用该 owner 绑定的 Agent Profile。
 
 - 每日晨报严格**单人视角**：owner 经 `resolve_daily_brief_owner_identity` 解析为
   单个 Redmine 用户（配置用户名命中 user map → 该映射；否则 Redmine 当前

@@ -29,11 +29,9 @@ DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     # device_evidence toolset（snapshot/logcat/只读 shell），prompt 会
     # 告知模型该设备可用于运行时佐证。空 = 不做设备实证。
     "device_serial": "",
-    # 健全经验值：完整跑一轮 fetch+journals+history_search+综合，12 步常在
-    # 证据链较长时不够（issue #646220 实测烧满后以 max_turns 中断）；
-    # 20 步覆盖典型分析，仍可按 owner 在设置里调 1-50。
-    "max_turns": 20,
-    "issue_timeout_seconds": 600,
+    # Legacy configuration keys remain readable; analysis has no hard budget.
+    "max_turns": 0,
+    "issue_timeout_seconds": 0,
     "max_parallel_issues": 1,
     "max_issues": 50,
     "stale_days": DEFAULT_STALE_DAYS,
@@ -43,9 +41,8 @@ RUNTIME_CONFIG_KEY = "redmine_daily_brief"
 _PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _KKAGENT_CLIENT_RE = re.compile(r'^\s*client\s*=\s*["\']kkagent["\']\s*$', re.MULTILINE)
 _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9:._-]{2,64}$")
-# 测试类失败（CTS/VTS/LTP…）按 prompt v10 还要做 1-4 次源码级取证 +
-# 双向假设权衡，基础 20 步会更紧；命中时在 base 之上追加的分析步数。
-TEST_FAILURE_EXTRA_TURNS = 6
+# Compatibility export; unbudgeted analysis does not need additional rounds.
+TEST_FAILURE_EXTRA_TURNS = 0
 
 
 def list_daily_brief_model_options(
@@ -170,8 +167,6 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
     # 设备 serial 出现在 prompt 与 MCP 调用参数里，只允许安全字符。
     serial = str(payload.get("device_serial") or "").strip()
     config["device_serial"] = serial if _DEVICE_SERIAL_RE.fullmatch(serial) else ""
-    _int("max_turns", 1, 50)
-    _int("issue_timeout_seconds", 60, 3600)
     _int("max_parallel_issues", 1, 4)
     _int("max_issues", 1, 200)
     _int("stale_days", 1, 30)
@@ -182,15 +177,10 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
 def build_brief_analyzer(
     config: dict[str, Any], *, extra_turns: int = 0
 ) -> KkAgentRedmineAnalyzer:
-    """按 owner 配置构建分析器（MCP toolset 在 analyzer env 注入）。
-
-    ``extra_turns`` 由调用方按 entry 特征追加（如测试类失败的源码取证
-    步数），仍受 normalize 的 1-50 上限约束。
-    """
-    base_turns = int(config.get("max_turns") or DEFAULT_BRIEF_CONFIG["max_turns"])
+    """Build unbudgeted analysis; legacy budgets cannot truncate evidence gathering."""
     return KkAgentRedmineAnalyzer(
-        max_turns=max(1, min(50, base_turns + max(0, int(extra_turns)))),
-        timeout_seconds=int(config.get("issue_timeout_seconds") or 600),
+        max_turns=0,
+        timeout_seconds=0,
         model=str(config.get("model") or ""),
         env_extra=analyzer_env_extra(
             config.get("agent_profile"), config.get("device_serial")

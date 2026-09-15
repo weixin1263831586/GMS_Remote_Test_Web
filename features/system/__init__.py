@@ -12,7 +12,11 @@ from .models import VNCStartRequest, VPNConnectRequest
 from .network import check_local_vpn_connected
 from .notifications import queue_notification
 from .security_audit import security_audit_logger
-from .source_provider import sdk_sources_available
+from .source_provider import (
+    initialize_source_runtime,
+    registry_state,
+    sdk_sources_available,
+)
 from .ssh import ssh_manager
 from .vnc import novnc_url
 
@@ -24,9 +28,11 @@ __all__ = [
     "check_local_vpn_connected",
     "health_check",
     "init_mainline_issues_db",
+    "initialize_source_runtime",
     "novnc_url",
     "query_mainline_exemption_match",
     "queue_notification",
+    "registry_state",
     "sdk_sources_available",
     "security_audit_logger",
     "ssh_manager",

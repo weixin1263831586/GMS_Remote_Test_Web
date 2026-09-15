@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
 from typing import Any
 
 from . import daily_brief_cancellation as cancellation
@@ -375,15 +374,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         async def _one(issue_id: int) -> None:
             async with semaphore:
                 entry = {**entries.get(issue_id, {}), "analysis_mode": "triage"}
-                # 测试类失败的源码取证步数按 entry 特征追加，其余 issue
-                # 复用共享 analyzer 实例（无状态）。
-                extra = self._extra_turns_for_entry(entry)
-                issue_analyzer = (
-                    self._build_analyzer(config, extra_turns=extra)
-                    if extra
-                    else analyzer
-                )
-                await self._analyze_one(run, issue_id, entry, issue_analyzer, config)
+                await self._analyze_one(run, issue_id, entry, analyzer, config)
 
         await cancellation.gather_cancel_on_error(
             [_one(issue_id) for issue_id in pending_ids]
@@ -404,18 +395,9 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         return TEST_FAILURE_EXTRA_TURNS if entry.get("analysis_mode") != "triage" and is_test_failure_subject(entry) else 0
 
     def _recover_interrupted_runs(self, config: dict[str, Any]) -> int:
-        """启动前把前次进程中断遗留的 run 标记为 failed（可重试）。
-
-        阈值取该 owner 配置的最坏分析时长再加 1 小时缓冲——正常进行中的
-        长 run 不会被误标。
-        """
+        """Recover orphan runs without judging live jobs by their elapsed time."""
         try:
-            timeout = max(1, int(config.get("issue_timeout_seconds") or 600))
-            max_issues = max(1, int(config.get("max_issues") or 50))
-            parallel = max(1, int(config.get("max_parallel_issues") or 1))
-            worst_seconds = timeout * ((max_issues + parallel - 1) // parallel)
-            cutoff = datetime.now() - timedelta(seconds=worst_seconds + 3600)
-            marked = self.repository.reset_stale_running(cutoff.isoformat(timespec="seconds"))
+            marked = self.repository.reset_stale_running(_now())
             if marked:
                 logger.info("marked %d interrupted daily-brief run(s) as failed", marked)
             return marked
@@ -447,6 +429,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         started = time.monotonic()
         try:
             analyze_entry = dict(entry) if entry else {"issue_id": issue_id}
+            analyze_entry.setdefault("analysis_mode", "diagnostic")
             # 部署事实 hint：SDK 源可用性决定源码取证门禁是否强制
             #（evidence_gate 降级依据），只进本次调用，不回写快照。
             analyze_entry["sdk_sources_available"] = _sdk_sources_available()

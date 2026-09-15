@@ -14,7 +14,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=/opt/gms-remote-test/data
-TimeoutStartSec=1h
+TimeoutStartSec=infinity
 
 [Install]
 WantedBy=multi-user.target

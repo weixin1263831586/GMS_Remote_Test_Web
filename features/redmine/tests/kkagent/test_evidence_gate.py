@@ -22,21 +22,24 @@ def _trace(*events: dict) -> KkAgentTrace:
     return trace
 
 
-def _full_trace(history_searches: int = 2, with_attachments: bool = True) -> KkAgentTrace:
+def _full_trace(history_searches: int = 2, with_attachments: bool = True, issue_id: int = 1) -> KkAgentTrace:
+    """构建一次针对 *issue_id* 的取证轨迹（带 snapshot 归属，贴近真实调用）。"""
     events: list[dict] = [
         {"type": "session", "session_id": "s1"},
         {"type": "tool_call", "tool_call_id": "c1",
-         "tool_name": "gms_rt_redmine_issue_fetch", "input": {}},
-        {"type": "tool_result", "tool_call_id": "c1", "is_error": False, "output": "i"},
+         "tool_name": "gms_rt_redmine_issue_fetch", "input": {"issue": issue_id}},
+        {"type": "tool_result", "tool_call_id": "c1", "is_error": False,
+         "output": json.dumps({"issue_id": issue_id, "snapshot_id": f"snap-{issue_id}"})},
         {"type": "tool_call", "tool_call_id": "c2",
-         "tool_name": "gms_rt_redmine_journals", "input": {}},
+         "tool_name": "gms_rt_redmine_journals", "input": {"snapshot_id": f"snap-{issue_id}"}},
         {"type": "tool_result", "tool_call_id": "c2", "is_error": False, "output": "j"},
     ]
     call_id = 10
     if with_attachments:
         events += [
             {"type": "tool_call", "tool_call_id": "c3",
-             "tool_name": "gms_rt_redmine_attachments", "input": {}},
+             "tool_name": "gms_rt_redmine_attachments",
+             "input": {"snapshot_id": f"snap-{issue_id}"}},
             {"type": "tool_result", "tool_call_id": "c3", "is_error": False,
              "output": json.dumps({"data": {"artifacts": [
                  {"artifact_id": "a1", "kind": "image", "status": "ready"},
@@ -145,7 +148,7 @@ class TestFailureSourceEvidenceGateTests(unittest.TestCase):
     @staticmethod
     def _entry() -> dict:
         return {
-            "issue_id": 646220,
+            "issue_id": 1,
             "subject": "3572S-A16-normal版VTS的vts_ltp_test_arm_64",
             "attachment_count": 0,
         }
@@ -231,5 +234,119 @@ class TestFailureSourceEvidenceGateTests(unittest.TestCase):
         self.assertFalse(gate["source_evidence_checked"])
 
 
+class TargetIssueScopeTests(unittest.TestCase):
+    """审核意见 P1：当前 issue 与相似 issue 的证据必须严格分开。"""
+
+    def test_current_issue_evidence_passes(self):
+        trace = _full_trace(issue_id=123, history_searches=0)
+        gate = evaluate_evidence_gate(
+            trace, {"issue_id": 123, "attachment_count": 0}
+        )
+        self.assertTrue(gate["issue_fetched"])
+        self.assertTrue(gate["journals_checked"])
+
+    def test_issue_123_cannot_use_issue_999_journals(self):
+        # 只 fetch 了 #123 自己（相似单 #999 的 journals/attachments 不算数）。
+        fetch_only = [
+            {"type": "session", "session_id": "s1"},
+            {"type": "tool_call", "tool_call_id": "f1",
+             "tool_name": "gms_rt_redmine_issue_fetch", "input": {"issue": 123}},
+            {"type": "tool_result", "tool_call_id": "f1", "is_error": False,
+             "output": json.dumps({"issue_id": 123, "snapshot_id": "snap-123"})},
+        ]
+        trace = _trace(*fetch_only)
+        gate = evaluate_evidence_gate(
+            trace, {"issue_id": 123, "attachment_count": 0}
+        )
+        self.assertTrue(gate["issue_fetched"])
+        self.assertFalse(gate["journals_checked"])
+        errors = gate_errors(gate)
+        self.assertTrue(any("journals" in e for e in errors))
+
+    def test_issue_123_cannot_use_issue_999_attachments(self):
+        events = [
+            {"type": "session", "session_id": "s1"},
+            {"type": "tool_call", "tool_call_id": "f1",
+             "tool_name": "gms_rt_redmine_issue_fetch", "input": {"issue": 123}},
+            {"type": "tool_result", "tool_call_id": "f1", "is_error": False,
+             "output": json.dumps({"issue_id": 123, "snapshot_id": "snap-123"})},
+            {"type": "tool_call", "tool_call_id": "a1",
+             "tool_name": "gms_rt_redmine_attachments",
+             "input": {"snapshot_id": "snap-999"}},
+            {"type": "tool_result", "tool_call_id": "a1", "is_error": False,
+             "output": json.dumps({"data": {"artifacts": [
+                 {"artifact_id": "x1", "kind": "image", "status": "ready"},
+             ]}})},
+        ]
+        trace = _trace(*events)
+        gate = evaluate_evidence_gate(
+            trace, {"issue_id": 123, "attachment_count": 2}
+        )
+        self.assertFalse(gate["attachments_listed"])
+        self.assertFalse(gate["attachments_checked"])
+        self.assertTrue(any("attachments" in e for e in gate_errors(gate)))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReproducibleSourceEvidenceTests(unittest.TestCase):
+    """审核意见 P2：动态索引（reproducible=false）证据不能单独 confirm 根因。"""
+
+    @staticmethod
+    def _entry() -> dict:
+        return {
+            "issue_id": 1,
+            "subject": "VTS vts_ltp_test_arm_64 fail",
+            "attachment_count": 0,
+            "sdk_sources_available": True,
+        }
+
+    def _gate_with_source_output(self, payload: str) -> list[str]:
+        trace = _full_trace()
+        trace.tool_calls.append(ToolTrace(
+            tool_call_id="sdk1",
+            tool_name="gms_rt_sdk_search",
+            status="succeeded",
+        ))
+        # 模拟 _record_tool_result 对 provider 信封的 reproducible 提取。
+        from features.redmine.kkagent.trace import _source_reproducible_flag
+
+        trace.tool_calls[-1].source_reproducible = _source_reproducible_flag(payload)
+        result: dict = {"root_cause_type": "confirmed"}
+        _gate, errors = gate_and_errors(trace, self._entry(), result)
+        return [e for e in errors if "reproducible" in e]
+
+    def test_dynamic_index_evidence_cannot_confirm_root_cause(self):
+        errors = self._gate_with_source_output(
+            json.dumps({"success": True, "data": {
+                "source_id": "opengrok", "reproducible": False,
+                "matches": [],
+            }})
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("cannot alone confirm", errors[0])
+
+    def test_local_git_evidence_can_confirm_root_cause(self):
+        errors = self._gate_with_source_output(
+            json.dumps({"success": True, "data": {
+                "source_id": "git", "commit": "abc", "reproducible": True,
+            }})
+        )
+        self.assertEqual(errors, [])
+
+    def test_missing_flag_counts_as_not_reproducible(self):
+        errors = self._gate_with_source_output(
+            json.dumps({"success": True, "data": {"matches": []}})
+        )
+        self.assertEqual(len(errors), 1)
+
+    def test_likely_root_cause_not_blocked(self):
+        trace = _full_trace()
+        trace.tool_calls.append(ToolTrace(
+            tool_call_id="sdk1", tool_name="gms_rt_sdk_search", status="succeeded",
+        ))
+        result: dict = {"root_cause_type": "likely"}
+        _gate, errors = gate_and_errors(trace, self._entry(), result)
+        self.assertFalse(any("reproducible" in e for e in errors))

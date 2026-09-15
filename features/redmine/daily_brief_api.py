@@ -18,6 +18,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from features.auth import require_agent_scope, require_human_principal_when_auth_required
 from features.users import owner_id_from_request
@@ -59,6 +60,28 @@ def _service_for_request(request: Request | None) -> DailyBriefService:
         owner_id=owner_id_from_request(request),
         config_manager=get_redmine_config_for_request(request),
     )
+
+
+class SingleIssueAnalysisRequest(BaseModel):
+    issue_id: int = Field(strict=True, gt=0, le=9223372036854775807)
+
+
+@router.post("/daily-brief/analyze-issue")
+async def analyze_single_issue(request: Request, payload: SingleIssueAnalysisRequest):
+    _require_human(request)
+    if not _has_redmine_credentials(request):
+        return ApiError.dependency_unavailable("请先配置 Redmine 取证凭据。").to_response()
+    return {"success": True, "data": _service_for_request(request).start_issue_analysis(payload.issue_id)}
+
+
+@router.get("/daily-brief/runs/{run_id}")
+async def get_brief_run(request: Request, run_id: str):
+    _require_read(request)
+    service = _service_for_request(request)
+    run = service.repository.get_run(run_id)
+    if run is None or run.owner_id != service.owner_id:
+        return ApiError.not_found("分析任务不存在。").to_response()
+    return {"success": True, "data": service.run_payload(run)}
 
 
 @router.get("/daily-brief/triage")

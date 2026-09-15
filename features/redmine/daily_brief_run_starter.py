@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from .daily_brief_models import DailyBriefRun
+from .daily_brief_models import DailyBriefIssue, DailyBriefRun
 from .daily_brief_repository import new_run_id
 from .daily_brief_snapshot import brief_date_today
 from .kkagent_analyzer import PROMPT_VERSION
@@ -10,6 +10,22 @@ from .users import _now
 
 
 class DailyBriefRunStarterMixin:
+    def start_issue_analysis(self, issue_id: int) -> dict[str, Any]:
+        """Queue only the requested issue, independently of workload scans and nightly runs."""
+        run = DailyBriefRun(
+            owner_id=self.owner_id, brief_date=brief_date_today(),
+            mode=f"issue:{issue_id}", run_id=new_run_id(),
+            started_at=_now(), prompt_version=PROMPT_VERSION, issue_count=1,
+        )
+        issue = DailyBriefIssue(run_id=run.run_id, issue_id=issue_id, buckets=[], subject=f"#{issue_id}")
+        _created, job, queued = self.repository.create_run_and_enqueue_job(run, issue=issue)
+        persisted = self.repository.get_run(job["run_id"])
+        return {
+            "run_id": job["run_id"], "job_id": job["job_id"],
+            "issue_id": issue_id, "status": persisted.status, "queued": queued,
+            "already_running": not queued,
+        }
+
     def start_run(self, mode: str = "manual", *, force: bool = False) -> dict[str, Any]:
         """创建（或复用）当天 run，并在**同一事务**里入队 durable job。
 

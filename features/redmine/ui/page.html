@@ -121,7 +121,22 @@
 
 <div id="tab-daily-brief" class="tab-content">
   <section class="stats-section" id="sec-daily-brief">
-    <div class="card daily-brief-card" id="dailyBriefCard"><div class="muted" style="padding:16px">🤖 每日晨报加载中…</div></div>
+    <div class="card daily-brief-card">
+      <div class="daily-brief-toolbar">
+        <span class="daily-brief-title">🤖 每日晨报 · 待回复事项</span>
+        <div class="daily-brief-toolbar-right">
+          <form id="singleIssueAnalysisForm" class="daily-brief-single-form">
+            <label for="singleIssueAnalysisId" class="sr-only">Redmine 单号</label>
+            <input id="singleIssueAnalysisId" type="text" inputmode="numeric" pattern="[0-9]+" required placeholder="Redmine 单号，如 647338" style="width:200px;max-width:100%">
+            <button id="singleIssueAnalysisStart" type="submit" class="ka-btn primary">分析此单号</button>
+            <button id="singleIssueAnalysisStop" type="button" class="ka-btn" data-click="stopSingleIssueAnalysis" hidden>停止此项</button>
+          </form>
+          <div id="dailyBriefRunControls" class="daily-brief-run-controls"></div>
+        </div>
+      </div>
+      <div id="singleIssueAnalysisResult" aria-live="polite" style="margin:12px 16px"></div>
+      <div id="dailyBriefCard"><div class="muted" style="padding:16px">🤖 每日晨报加载中…</div></div>
+    </div>
   </section>
 </div>
 
@@ -292,9 +307,7 @@
         </div>
       </div>
       <div>
-        <label>单条分析步数上限</label>
-        <input type="number" min="1" max="50" data-daily-brief-setting="max_turns" value="20">
-        <div class="setting-help">单条工单允许 AI 执行的最大步数；证据链较长时失败提示「步数预算耗尽」可调大后重试。</div>
+        <div class="setting-help">分析不设步数、耗时或 Token 预算；按证据需要持续调查，返回完整总结。可在晨报页面手动停止。</div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div>

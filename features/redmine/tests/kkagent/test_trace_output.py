@@ -90,6 +90,21 @@ class TraceConsumeTests(unittest.TestCase):
         ])
         self.assertEqual(trace.evidenced_issue_ids(), {646504, 646505})
 
+    def test_truncated_tool_input_keeps_identity_keys(self):
+        # 审核意见 P2：截断不允许吞掉 issue_id/artifact_id 等身份字段。
+        big_payload = {"description": "x" * 4000, "issue_id": 123,
+                       "artifact_id": "att-9", "path": "frameworks/base"}
+        trace = _trace_with_events([
+            {"type": "tool_call", "tool_call_id": "c1",
+             "tool_name": "gms_rt_redmine_artifact_read", "input": big_payload},
+        ])
+        tool_input = trace.tool_calls[0].tool_input
+        self.assertTrue(tool_input["_truncated"])
+        self.assertEqual(tool_input["issue_id"], 123)
+        self.assertEqual(tool_input["artifact_id"], "att-9")
+        self.assertEqual(tool_input["path"], "frameworks/base")
+        self.assertLessEqual(len(tool_input["_truncated_json"]), 500)
+
     def test_result_usage_overrides_summed_events(self):
         trace = _trace_with_events([
             {"type": "usage", "usage": {"input_tokens": 100, "output_tokens": 10}},

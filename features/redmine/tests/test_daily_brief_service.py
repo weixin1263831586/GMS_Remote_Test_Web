@@ -389,13 +389,12 @@ class AnalyzerBindingTests(unittest.TestCase):
         config = normalize_daily_brief_config({"agent_profile": "bad name;rm -rf"})
         self.assertEqual(config["agent_profile"], "")
 
-    def test_default_max_turns_is_20(self):
-        """默认步数预算覆盖典型证据链（issue #646220 用 12 步不够）。"""
-        self.assertEqual(DEFAULT_BRIEF_CONFIG["max_turns"], 20)
+    def test_analysis_ignores_legacy_step_budgets(self):
+        self.assertEqual(DEFAULT_BRIEF_CONFIG["max_turns"], 0)
         analyzer = self.service._build_analyzer({})
         self.assertEqual(analyzer.max_turns, DEFAULT_BRIEF_CONFIG["max_turns"])
         analyzer = self.service._build_analyzer({"max_turns": 30})
-        self.assertEqual(analyzer.max_turns, 30)
+        self.assertEqual(analyzer.max_turns, 0)
 
 
 class CrashRecoveryTests(unittest.TestCase):
@@ -426,6 +425,17 @@ class CrashRecoveryTests(unittest.TestCase):
         recovered = self.service.repository.get_run("db_stale")
         self.assertEqual(recovered.status, "failed")
         self.assertEqual(recovered.error, "interrupted by process restart")
+
+
+    def test_old_running_job_is_not_interrupted_by_age(self):
+        from features.redmine.daily_brief_models import DailyBriefRun
+
+        run = DailyBriefRun(owner_id='u1', brief_date='2020-01-01', mode='manual',
+                            run_id='old-live', status='analyzing', started_at='2020-01-01T00:00:00')
+        self.service.repository.create_run_and_enqueue_job(run)
+        self.service.repository.update_run(run)
+        self.service._recover_interrupted_runs({})
+        self.assertEqual(self.service.repository.get_run('old-live').status, 'analyzing')
 
 
 class FrozenSnapshotTests(unittest.TestCase):

@@ -81,6 +81,13 @@ class LifecycleTests(unittest.TestCase):
         self.home = Path(self._tmp.name)
         self.runtime_root = self.home / ".local" / "share" / "gms-remote-test"
         self.addCleanup(self._tmp.cleanup)
+        # 沙箱自洽：bin 目录与 runtime 同处临时根。默认 ~/.local/bin 是持久
+        # 路径，而 runtime 在 /tmp 下临时——install_cli_dispatcher 的
+        # 「持久 bin + 临时 runtime」二次防线（16:29:51 死链事故）会据此
+        # 拒绝（SystemExit），且沙箱会意外向真实 ~/.local/bin 写链接。
+        self._previous_bin_dir = os.environ.get("GMS_BIN_DIR")
+        os.environ["GMS_BIN_DIR"] = str(self.home / ".local" / "bin")
+        self.addCleanup(self._restore_bin_dir)
         self.agent = load_gms_agent_module()
         # 拆分后,生命周期函数住在 gms_agent.package_manager;
         # 沙箱化 = 同时替换薄壳与真模块的全局(函数体读的是后者)。
@@ -104,6 +111,12 @@ class LifecycleTests(unittest.TestCase):
             setattr, profile_store, "PROFILE_ROOT", original_profile_root
         )
         self.profile_store = profile_store
+
+    def _restore_bin_dir(self):
+        if self._previous_bin_dir is None:
+            os.environ.pop("GMS_BIN_DIR", None)
+        else:
+            os.environ["GMS_BIN_DIR"] = self._previous_bin_dir
 
     # --- 1. version comes from the PACKAGE, not the running script ------
     def test_install_uses_package_version_not_running_version(self):

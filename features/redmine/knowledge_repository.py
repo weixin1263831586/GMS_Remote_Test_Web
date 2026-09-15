@@ -19,12 +19,21 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
 
     # case_facts
 
-    def upsert_case_fact(self, payload: dict[str, Any]) -> None:
+    def upsert_case_fact(self, payload: dict[str, Any], *, merge_missing: bool = False) -> None:
+        """Insert or update one case fact.
+
+        ``merge_missing=True``（non-destructive merge）：已有记录中的非空
+        字段优先——本次 payload 中为空的字段保留原值，而不是被整行
+        INSERT OR REPLACE 清空。用于晨报 AI 结果落库：AI 结论覆盖结论性
+        字段（根因/方案/验证），但不降级已有 Redmine 事实与历史方案。
+        """
         issue_id = int(payload.get("issue_id") or 0)
         if not issue_id:
             raise ValueError("case_fact requires issue_id")
         now = _now()
         existing = self.get_case_fact(issue_id)
+        if merge_missing and existing:
+            payload = self._merge_case_fact_payload(payload, existing)
         created_at = (existing or {}).get("created_at") or now
         fields = {
             "issue_id": issue_id,
@@ -62,6 +71,65 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
                 tuple(fields.values()),
             )
             self._replace_fts(conn, fields)
+
+    # merge 时允许"保留已有非空值"的列（Redmine 事实 + 结论性文本）。
+    _MERGE_TEXT_COLUMNS = (
+        "subject", "status_name", "assigned_to_name", "project_name",
+        "category", "chip_platform", "android_version", "certification_type",
+        "module", "product_form", "region", "error_signature",
+        "problem_summary", "root_cause", "solution", "verification",
+        "reply_template", "doc_excerpt",
+    )
+
+    @classmethod
+    def _merge_case_fact_payload(
+        cls, payload: dict[str, Any], existing: dict[str, Any]
+    ) -> dict[str, Any]:
+        """本次为空的文本字段保留已有值；已有症状/关键词/证据一并保留。
+
+        existing 来自 ``_decode_row``：JSON 列已解码，键名带 ``_json``
+        后缀（``keywords_json`` / ``evidence_json`` / ``symptoms_json``），
+        不是 ``keywords`` / ``evidence``（回归：旧写法读不到已有集合，
+        导致 merge 后三列被清空）。
+        """
+        merged = dict(payload)
+        for key in cls._MERGE_TEXT_COLUMNS:
+            if not str(merged.get(key) or "").strip():
+                merged[key] = existing.get(key) or ""
+        for payload_key, existing_key in (
+            ("keywords", "keywords_json"),
+            ("evidence", "evidence_json"),
+            ("symptoms", "symptoms_json"),
+        ):
+            if not merged.get(payload_key) and existing.get(existing_key):
+                merged[payload_key] = existing.get(existing_key)
+        # 质量分与结论绑定：根因（或方案）被新 AI 结论替换时，置信度必须
+        # 跟着替换值走，不能继承旧结论的高置信度（回归：verified 根因被
+        # AI 猜测覆盖后 confidence 仍是 1.0）。
+        try:
+            old_conf = float(existing.get("confidence") or 0)
+        except (TypeError, ValueError):
+            old_conf = 0.0
+        try:
+            new_conf = float(merged.get("confidence") or 0)
+        except (TypeError, ValueError):
+            new_conf = 0.0
+        if cls._conclusion_replaced(payload, existing):
+            merged["confidence"] = new_conf
+        else:
+            merged["confidence"] = max(old_conf, new_conf)
+        return merged
+
+    @staticmethod
+    def _conclusion_replaced(
+        payload: dict[str, Any], existing: dict[str, Any]
+    ) -> bool:
+        """新 payload 是否携带非空结论字段并替换了已有结论。"""
+        for key in ("root_cause", "solution"):
+            incoming = str(payload.get(key) or "").strip()
+            if incoming and incoming != str(existing.get(key) or "").strip():
+                return True
+        return False
 
     def _replace_fts(self, conn: sqlite3.Connection, fields: dict[str, Any]) -> None:
         try:

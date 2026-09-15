@@ -43,6 +43,17 @@ class ValidIssueResultTests(unittest.TestCase):
     def test_valid_result_passes(self):
         self.assertEqual(validate_issue_result(self._valid()), [])
 
+    def test_unknown_fields_are_canonicalized_away(self):
+        """审核意见 P2：extra=ignore 后未知字段不得进入持久层。"""
+        result = self._valid()
+        result["legacy_old_field"] = "x"
+        result["hallucinated_field"] = {"deep": True}
+        self.assertEqual(validate_issue_result(result), [])
+        self.assertNotIn("legacy_old_field", result)
+        self.assertNotIn("hallucinated_field", result)
+        self.assertNotIn("history_checked", result)  # 运行时字段由 gate 写回
+        self.assertEqual(result["result_schema_version"], 2)
+
     def test_missing_required_field_fails(self):
         result = self._valid()
         result.pop("suggested_solution")

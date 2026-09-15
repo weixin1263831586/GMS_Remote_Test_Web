@@ -13,6 +13,19 @@ from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
 from features.redmine.daily_brief_repository import DailyBriefRepository
 
 
+# 诊断结果：带 gate（diagnostic 模式）+ 根因结论。
+DIAGNOSTIC_RESULT = {
+    "problem_summary": "RK3588 CtsCarrierApiTestCases fail",
+    "root_cause": "modem 未实现 UICC ARA 逻辑通道",
+    "root_cause_type": "likely",
+    "suggested_solution": "① 厂商 RIL 支持 ARA",
+    "confidence": 0.85,
+    "evidence_gate": {"analysis_mode": "diagnostic"},
+}
+
+# triage 结果：根因为空/占位、root_cause_type=unknown（无 gate 的旧数据）。
+
+
 @pytest.fixture
 def case_client(tmp_path, monkeypatch):
     repository = DailyBriefRepository(tmp_path)
@@ -31,8 +44,11 @@ def case_client(tmp_path, monkeypatch):
     for run_id, mode, owner in (("old", "manual", "owner"), ("new", "delta", "owner"), ("foreign", "manual", "other")):
         run = DailyBriefRun(owner_id=owner, brief_date="2026-09-15", mode=mode, run_id=run_id, status="completed")
         repository.create_run(run)
+        result = DIAGNOSTIC_RESULT if run_id == "old" else {"problem_summary": run_id}
+        if run_id == "new":
+            result = dict(result, evidence_gate={"analysis_mode": "triage"}, root_cause="", root_cause_type="unknown")
         repository.upsert_issue(DailyBriefIssue(
-            run_id=run_id, issue_id=101, buckets=[], status="completed", result={"problem_summary": run_id},
+            run_id=run_id, issue_id=101, buckets=[], status="completed", result=result,
         ))
     with TestClient(app) as client:
         yield client, sink
@@ -42,7 +58,21 @@ def test_save_case_uses_explicit_daily_brief_run(case_client):
     client, sink = case_client
     response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=old")
     assert response.status_code == 200
-    assert sink.upsert_case_fact.call_args.args[0]["problem_summary"] == "old"
+    fact = sink.upsert_case_fact.call_args.args[0]
+    assert fact["problem_summary"] == "RK3588 CtsCarrierApiTestCases fail"
+    # diagnostic 结果的执行状态（completed）不进入 status_name。
+    assert fact["status_name"] == ""
+    # merge_missing 落库语义：AI 结论不整行覆盖已有事实。
+    assert sink.upsert_case_fact.call_args.kwargs.get("merge_missing") is True
+
+
+def test_save_case_rejects_triage_result(case_client):
+    """审核意见 P1：triage 待办摘要禁止沉淀为知识库案例。"""
+    client, sink = case_client
+    response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=new")
+    assert response.status_code == 409
+    assert response.json()["code"] == "STATE_CONFLICT"
+    sink.upsert_case_fact.assert_not_called()
 
 
 def test_save_case_does_not_read_another_owner_run(case_client):

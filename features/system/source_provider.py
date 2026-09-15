@@ -79,6 +79,7 @@ class LocalGitProvider:
             "commit": commit,
             "commit_subject": subject[:200],
             "commit_date": date,
+            "reproducible": True,
         }
 
     # -------------------------------------------------------------- search
@@ -140,6 +141,7 @@ class LocalGitProvider:
         return {
             "source_id": self.config.source_id,
             "commit": commit,
+            "reproducible": True,
             "total": len(matches),
             "scanned_files": scanned,
             "limited": bool(limited),
@@ -204,6 +206,7 @@ class LocalGitProvider:
         return {
             "source_id": self.config.source_id,
             "commit": commit,
+            "reproducible": True,
             "path": safe_path,
             "blob_sha256": blob_hash,
             "total_lines": len(lines),
@@ -271,6 +274,44 @@ class SourceRegistry:
 _REGISTRY: SourceRegistry | None = None
 
 
+def registry_state() -> str:
+    """注册表状态：UNINITIALIZED / AVAILABLE / UNAVAILABLE。
+
+    审核意见（P1）：进程内未初始化 ≠ 部署确认无 source。独立 Worker /
+    CLI 必须先调用 :func:`initialize_source_runtime`；否则
+    ``sdk_sources_available()`` 不能当作"部署没有 SDK 源"的证据。
+    """
+    if _REGISTRY is None:
+        return "UNINITIALIZED"
+    return "AVAILABLE" if _REGISTRY.list_sources() else "UNAVAILABLE"
+
+
+def initialize_source_runtime(config: dict[str, Any] | None = None) -> str:
+    """进程无关的 SDK source 运行时初始化（FastAPI / Worker / CLI 共用）。
+
+    之前只有 Web bootstrap 调 configure_source_registry，导致独立
+    daily-brief Worker 的 ``sdk_sources_available()`` 恒为 False，evidence
+    gate 对测试类失败降级放行（与 Web 进程行为不一致）。返回 registry
+    状态字符串。
+
+    配置读取 / 密钥派生失败时**显式抛错**，绝不吞异常后用空配置兜底：
+    registry 保持 UNINITIALIZED（``sdk_sources_available()`` → None），
+    evidence gate 按 fail-safe 强制取证，而不是把初始化失败误标成
+    UNAVAILABLE（部署明明配置了 source 却被降级）。
+    """
+    if config is None:
+        # 与 Web bootstrap 相同的配置来源；features → foundation 是合法
+        # 依赖方向（注意实际模块是 foundation.config）。
+        from foundation.config import config_manager
+
+        config = config_manager.load_config()
+    from foundation.secrets import derive_application_key
+
+    secret = derive_application_key("gms-sdk-source-v1:")
+    configure_source_registry(load_provider_configs(config or {}), secret)
+    return registry_state()
+
+
 def configure_source_registry(configs: list[ProviderConfig], secret: bytes) -> None:
     global _REGISTRY
     _REGISTRY = SourceRegistry(configs, secret)
@@ -290,16 +331,22 @@ __all__ = [
     "SourceProviderError",
     "SourceRegistry",
     "configure_source_registry",
+    "initialize_source_runtime",
     "load_provider_configs",
+    "registry_state",
     "source_registry",
 ]
 
 
-def sdk_sources_available() -> bool:
+def sdk_sources_available() -> bool | None:
     """Whether any SDK source provider is configured in this process.
 
     Public surface for other features (e.g. the daily brief's evidence gate):
-    an empty registry means source-level verification tools have nothing to
-    query, so the gate degrades instead of dead-locking test-failure issues.
+    an empty *initialized* registry means source-level verification tools
+    have nothing to query, so the gate degrades instead of dead-locking
+    test-failure issues. ``None`` = 进程未初始化（fail-safe：调用方不得
+    由此降级，evidence gate 按强制处理）。
     """
+    if registry_state() == "UNINITIALIZED":
+        return None
     return bool(source_registry().list_sources())

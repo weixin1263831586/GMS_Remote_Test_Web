@@ -16,8 +16,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=/opt/gms-remote-test/data
-# 凌晨分析可能较长；单 issue 超时由配置控制，这里只兜底
-TimeoutStartSec=4h
+# Evidence gathering completes without an elapsed-time budget.
+TimeoutStartSec=infinity
 
 [Install]
 WantedBy=multi-user.target

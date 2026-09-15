@@ -208,16 +208,10 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
         configure_client_ssh_authenticator(client_manager.detect_username)
         # SDK 源码 provider：provider 列表只来自部署
         # 配置；result_id 签名密钥从 master secret 派生，重启后仍可验证。
-        from features.system.source_provider import (
-            configure_source_registry,
-            load_provider_configs,
-        )
-        from foundation.secrets import derive_application_key
+        # 初始化收敛到 initialize_source_runtime（Worker/CLI 同源）。
+        from features.system.source_provider import initialize_source_runtime
 
-        configure_source_registry(
-            load_provider_configs(config_manager.load_config()),
-            derive_application_key("gms-sdk-source-v1:"),
-        )
+        initialize_source_runtime(config_manager.load_config())
         configure_firmware_dependencies(
             config_manager=config_manager,
             ssh_manager=ssh_manager,

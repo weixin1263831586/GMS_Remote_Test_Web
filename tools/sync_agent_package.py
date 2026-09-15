@@ -157,7 +157,23 @@ def r16_guard(root: Path, source: Path, version: str, pattern: str, label: str) 
         )
 
 
-def r16_tree_guard(root: Path, source_dir: Path, version: str, label: str) -> None:
+def _head_package_version(root: Path, package_yaml: Path) -> str:
+    """HEAD 提交里的 canonical package 版本（读不到返回空）。"""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "show",
+             f"HEAD:{package_yaml.relative_to(root).as_posix()}"],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError:
+        return ""
+    match = re.search(r"^version: (\S+)$", result.stdout, re.M)
+    return match.group(1) if match else ""
+
+
+def r16_tree_guard(
+    root: Path, source_dir: Path, version: str, label: str, package_yaml: Path
+) -> None:
     """Whole-tree same-version content guard.
 
     ``r16_guard`` above only compares two anchor files; a same-version
@@ -169,6 +185,12 @@ def r16_tree_guard(root: Path, source_dir: Path, version: str, label: str) -> No
     compares against HEAD. Only text files enter the anchor comparison, so
     we hash bytes here (rb) — binary-identical to the release builder's
     view of the tree.
+
+    升版本放行以 HEAD 的 canonical package version（package.yaml）为准：
+    正常发布必然 bump 版本并同步修改 manifests/SKILL 等 payload 文件，
+    此时树内容相对 HEAD 必然漂移，属于预期；只有「HEAD 版本 == 当前
+    版本」时的内容变化才禁止（回归：旧的 no-anchor 分支只比较树哈希，
+    未核对 HEAD 版本，导致任何升版本后的首次 sync 都被误拦）。
     """
     digests: list[str] = []
     for path in sorted(source_dir.rglob("*")):
@@ -197,25 +219,16 @@ def r16_tree_guard(root: Path, source_dir: Path, version: str, label: str) -> No
         )
         previous_digests.append(f"{rel}:{hashlib.sha256(show.stdout).hexdigest()}")
     previous_hash = hashlib.sha256("\n".join(previous_digests).encode()).hexdigest()
+    if tree_hash == previous_hash:
+        return
 
-    # Anchors carried a different version on HEAD → drift is expected.
-    anchor = source_dir / "gms-remote-test.sh"
-    try:
-        head_anchor = subprocess.run(
-            ["git", "-C", str(root), "show",
-             f"HEAD:{anchor.relative_to(root).as_posix()}"],
-            capture_output=True, text=True, check=True,
-        )
-    except subprocess.CalledProcessError:
+    # HEAD 是旧版本 → 内容漂移是本次发布的预期结果。
+    if _head_package_version(root, package_yaml) != version:
         return
-    match = re.search(r'^GMS_RT_VERSION="([^"]+)"$', head_anchor.stdout, re.M)
-    if not match or match.group(1) != version:
-        return
-    if tree_hash != previous_hash:
-        fail(
-            f"{label} tree content changed at the same version ({version}). "
-            "Bump the version with tools/release_agent.py, then re-run sync."
-        )
+    fail(
+        f"{label} tree content changed at the same version ({version}). "
+        "Bump the version with tools/release_agent.py, then re-run sync."
+    )
 
 
 GENERATED_MD = """# GENERATED — DO NOT EDIT THIS DIRECTORY DIRECTLY
@@ -288,11 +301,18 @@ def main() -> int:
                   r'^GMS_RT_VERSION="([^"]+)"$', "gms-remote-test.sh")
         r16_guard(root, runtime / "mcp_server.py", mcp_version,
                   r'^SERVER_VERSION = "([^"]+)"$', "mcp_server.py")
-        # The anchor checks above only cover two files; this
-        # whole-tree guard closes the same-version drift hole for every
-        # other payload file (package_manager.py, mcp_launcher.py, skill,
-        # manifests, docs …).
-        r16_tree_guard(root, runtime, cli_version, "runtime/")
+        # The anchor checks above only cover two files; the tree guards
+        # below close the same-version drift hole for the WHOLE
+        # distributable payload (审核意见：release identity 不能只覆盖
+        # runtime/ — SKILL/manifests/templates 同版本变更同样会造成
+        # "version 未变但内容变了" 的安装漂移)。runtime、skill、
+        # manifests 与 templates（README/PLUGIN_AGENTS，随包发布）都在
+        # 守护范围内；docs/tests 不参与发布身份，仅 runtime 侧已覆盖。
+        # 升版本放行统一按 HEAD 的 package.yaml canonical 版本判定。
+        r16_tree_guard(root, runtime, cli_version, "runtime/", package_yaml)
+        r16_tree_guard(root, skill, cli_version, "skill/", package_yaml)
+        r16_tree_guard(root, manifests, cli_version, "manifests/", package_yaml)
+        r16_tree_guard(root, agent_dir / "templates", cli_version, "templates/", package_yaml)
 
     # --- generate --------------------------------------------------------
     expected: set[str] = set()

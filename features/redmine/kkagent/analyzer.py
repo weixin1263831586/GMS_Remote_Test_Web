@@ -8,9 +8,9 @@ evidence_gate 模块。
 调用约束（docs/architecture/adr/0008-daily-brief-triage-and-diagnosis.md）：
 - ``asyncio.create_subprocess_exec``，禁止 shell=True；
 - 禁止 --yolo/--auto/--disable-sandbox；
-- 超时由调用方配置（默认 600s）；
-- 输出必须是指定 schema 的 JSON，非法 JSON 一律 invalid_ai_output，
-  不做 regex 猜测修复；
+- 晨报不设分析步数或耗时硬预算，保留人工取消；
+- 批量 triage 使用 schema JSON；单项诊断保留最终 Markdown 总结
+  （docs/architecture/adr/0009-native-diagnostic-summary.md）；
 - prompt 明确 Redmine 内容为不可信数据，不得作为指令执行。
 """
 
@@ -25,6 +25,7 @@ from typing import Any
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
 from .errors import classify_failure
 from .evidence_gate import gate_and_errors
+from .native_summary import native_summary_result
 from .output import parse_issue_result
 from .process import (
     STREAM_LINE_LIMIT_BYTES,
@@ -42,9 +43,9 @@ DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 logger = logging.getLogger(__name__)
 
 # Prompt 版本随 runtime-owned evidence/schema repair 语义升级。
-PROMPT_VERSION = "redmine_daily_triage_v11"
+PROMPT_VERSION = "redmine_daily_triage_v13"
 
-REPAIR_MAX_TURNS = 8
+REPAIR_MAX_TURNS = 0
 # 首次修复仍可能被模型原样重放（线上曾出现完整取证后连续漏掉
 # confidence）。允许在同一 session 内再纠正一次；不重开会话、不重做取证。
 REPAIR_RESUME_RETRIES = 2
@@ -107,8 +108,8 @@ class KkAgentRedmineAnalyzer:
         self,
         *,
         binary: str = KKAGENT_BINARY,
-        max_turns: int = 12,
-        timeout_seconds: int = 600,
+        max_turns: int = 0,
+        timeout_seconds: int = 0,
         model: str = "",
         cwd: str | None = None,
         env_extra: dict[str, str] | None = None,
@@ -147,7 +148,7 @@ class KkAgentRedmineAnalyzer:
                 f"gms_rt_devices_snapshot / gms_rt_logcat (dump mode) / "
                 f"gms_rt_shell (read-only allowlist) on THIS serial only to "
                 f"verify runtime facts (build fingerprint, kernel behavior, "
-                f"logs). Fill detailed_report section 四 from what you "
+                f"logs). Describe the device observations in your final report from what you "
                 f"actually observed; write 未检查本地设备 only if every "
                 f"call failed. Never attempt to modify the device."
             )
@@ -161,16 +162,16 @@ class KkAgentRedmineAnalyzer:
         return [
             self.binary,
             "--output-format", "stream-json",
-            "--max-turns", str(self.max_turns),
+            *(["--max-turns", str(self.max_turns)] if self.max_turns > 0 else []),
             "-p", prompt,
         ]
 
-    def build_repair_command(self, prompt: str, session_id: str) -> list[str]:
+    def build_repair_command(self, prompt: str, session_id: str, *, max_turns: int = REPAIR_MAX_TURNS) -> list[str]:
         """在**同一个** session 上继续：只补证据/修 JSON，不重开分析。"""
         return [
             self.binary,
             "--output-format", "stream-json",
-            "--max-turns", str(REPAIR_MAX_TURNS),
+            *(["--max-turns", str(max_turns)] if max_turns > 0 else []),
             "--resume", session_id,
             "-p", prompt,
         ]
@@ -242,7 +243,7 @@ class KkAgentRedmineAnalyzer:
             assert process.stdout is not None
             while True:
                 line = await asyncio.wait_for(
-                    process.stdout.readline(), timeout=self.timeout_seconds
+                    process.stdout.readline(), timeout=self.timeout_seconds or None
                 )
                 if not line:
                     break
@@ -286,6 +287,15 @@ class KkAgentRedmineAnalyzer:
         if trace.exit_code not in (0, None):
             stderr_tail = raw.stderr_tail()
             self._classify_nonzero_exit(trace, raw.text(), stderr_tail)
+            return self._failure(trace, raw)
+
+        if entry.get("analysis_mode") == "diagnostic":
+            result = native_summary_result(trace, entry)
+            if result is not None:
+                trace.status = "completed"
+                return self._success(result, trace, raw)
+            trace.status = trace.error_type = "invalid_ai_output"
+            trace.error = "kkagent 未返回最终分析总结。"
             return self._failure(trace, raw)
 
         result, errors = parse_issue_result(trace=trace, raw=raw.text())
