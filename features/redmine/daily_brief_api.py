@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 
 from features.auth import require_agent_scope, require_human_principal_when_auth_required
 from features.users import owner_id_from_request
+from foundation.error_model import ApiError
 
 from .api import get_redmine_config_for_request
 from .daily_brief_config import (
@@ -215,10 +216,7 @@ async def reanalyze_issue_in_run(request: Request, run_id: str, issue_id: int):
     result = enqueue_reanalysis(service, "", issue_id, run_id=run_id)
     if "run_id" in result:
         return {"success": True, "data": result}
-    return JSONResponse(
-        content={"success": False, "error": result.get("error", "reanalyze failed")},
-        status_code=404,
-    )
+    return ApiError(code=result.get("code", "NOT_FOUND"), message=result.get("error", "reanalyze failed")).to_response()
 
 
 @router.post("/daily-brief/{brief_date}/issues/{issue_id}/reanalyze")
@@ -228,10 +226,7 @@ async def reanalyze_issue(request: Request, brief_date: str, issue_id: int):
     result = enqueue_reanalysis(service, brief_date, issue_id)
     if "run_id" in result:
         return {"success": True, "data": result}
-    return JSONResponse(
-        content={"success": False, "error": result.get("error", "reanalyze failed")},
-        status_code=404,
-    )
+    return ApiError(code=result.get("code", "NOT_FOUND"), message=result.get("error", "reanalyze failed")).to_response()
 
 
 @router.post("/daily-brief/runs/{run_id}/cancel")

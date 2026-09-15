@@ -17,7 +17,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .daily_brief_jobs import JOB_KINDS, DailyBriefJobStore
+from .daily_brief_jobs import JOB_KINDS as JOB_KINDS
+from .daily_brief_jobs import DailyBriefJobStore
 from .daily_brief_models import (
     DailyBriefIssue,
     DailyBriefRun,
@@ -40,7 +41,6 @@ ISSUE_COLUMNS = (
     "duration_ms", "attempt_count", "error", "error_type", "raw_response",
     "result",
 )
-JOB_KINDS = frozenset({"run", "issue"})  # noqa: F811 - re-exported legacy name
 TERMINAL_RUN_STATUSES = frozenset({"completed", "partial", "failed", "cancelled"})
 
 

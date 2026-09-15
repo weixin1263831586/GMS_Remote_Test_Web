@@ -45,7 +45,7 @@ def enqueue_reanalysis(
     if record is None:
         return {"error": f"issue {issue_id} not in run {run.run_id}"}
     if run.status not in ("completed", "partial", "failed", "cancelled"):
-        return {"error": f"run {run.run_id} is still executing; retry after it finishes"}
+        return {"error": f"run {run.run_id} is still executing; retry after it finishes", "code": "STATE_CONFLICT"}
     job, created = service.repository.enqueue_job(
         run.run_id, kind="issue", issue_id=issue_id
     )

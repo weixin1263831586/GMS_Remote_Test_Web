@@ -15112,7 +15112,7 @@
     },
     "/api/redmine-agent/config/credentials": {
       "get": {
-        "description": "报告登录用户的 Redmine 凭据是否已配置（不回传明文）。\n\n凭据统一落盘到 configs/config_runtime.json，与统计端点读取的配置一致。\nAPI Key 只报告是否存在，绝不回传内容。",
+        "description": "报告登录用户的 Redmine 凭据是否已配置（不回传明文）。\n\n凭据落盘到当前登录账号的运行时配置，与统计和晨报端点读取的配置一致。\nAPI Key 只报告是否存在，绝不回传内容。",
         "responses": {
           "200": {
             "content": {
@@ -15186,6 +15186,22 @@
         "summary": "Update Stats Config"
       }
     },
+    "/api/redmine-agent/daily-brief/agent-profiles": {
+      "get": {
+        "description": "Expose only local kkagent profile names for explicit human selection.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Daily Brief Agent Profiles"
+      }
+    },
     "/api/redmine-agent/daily-brief/config": {
       "get": {
         "responses": {
@@ -15251,6 +15267,22 @@
         "summary": "Get Latest Brief"
       }
     },
+    "/api/redmine-agent/daily-brief/model-options": {
+      "get": {
+        "description": "Expose enabled system model names for the Daily Brief settings UI.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Daily Brief Model Options"
+      }
+    },
     "/api/redmine-agent/daily-brief/run": {
       "post": {
         "parameters": [
@@ -15308,7 +15340,7 @@
     },
     "/api/redmine-agent/daily-brief/runs/{run_id}/cancel": {
       "post": {
-        "description": "按 run_id 精确请求停止一次晨报 run（协作式取消）。\n\n审核意见 P2：同一天可有 nightly/manual/delta 多个 run，按日期取消\n\"最新一次\"会停错目标；UI 从当前卡片携带 run_id 精确取消。",
+        "description": "按 run_id 精确请求停止一次晨报 run（协作式取消）。\n\n同一天可有 nightly/manual/delta 多个 run，按日期取消\n\"最新一次\"会停错目标；UI 从当前卡片携带 run_id 精确取消。",
         "parameters": [
           {
             "in": "path",
@@ -15567,6 +15599,62 @@
           }
         },
         "summary": "Reanalyze Issue"
+      }
+    },
+    "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/save-case": {
+      "post": {
+        "description": "把一次晨报 AI 分析结果沉淀为本地 case_fact（FTS 可检索）。\n\n只写本地知识库，不做任何 Redmine 写操作；重复保存按 issue_id 覆盖\n（upsert，保留 created_at）。run_id 指定用户当前查看的晨报。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_date",
+            "required": true,
+            "schema": {
+              "title": "Brief Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Daily Brief Case"
       }
     },
     "/api/redmine-agent/daily-brief/{brief_date}/refresh": {

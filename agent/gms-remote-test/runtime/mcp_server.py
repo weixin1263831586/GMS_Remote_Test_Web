@@ -102,7 +102,7 @@ mcp_tool_schemas = _load_tool_schemas()
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.14"
+SERVER_VERSION = "0.22.17"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2113,6 +2113,23 @@ _TOOLSETS = {
             "gms_rt_sdk_sources",
             "gms_rt_sdk_search",
             "gms_rt_sdk_read",
+        )
+    },
+    # 只读设备实证工具集：晨报分析器绑定 device_serial 时与 evidence 一并
+    # 放行（daily_brief_config.analyzer_env_extra）。全部是只读诊断：
+    # 截图/UI 树/快照/logcat dump/只读 shell 白名单/设备信息与等待。
+    # gms_rt_shell_exec（需用户 approval token）与 gms_rt_device_console
+    # （交互串口）不放入本集合。
+    **{
+        name: {"device_evidence"}
+        for name in (
+            "gms_rt_devices_screencap",
+            "gms_rt_devices_snapshot",
+            "gms_rt_devices_ui_dump",
+            "gms_rt_shell",
+            "gms_rt_device_info",
+            "gms_rt_device_wait",
+            "gms_rt_logcat",
         )
     },
 }

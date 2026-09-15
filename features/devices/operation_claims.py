@@ -15,10 +15,11 @@ from .locks import device_lock_manager
 def _owned_local_device_keys(owner_id: str, device_keys: list[str]) -> dict[str, dict]:
     """Return the caller's active claims for the requested devices.
 
-    Used for the devices.use_leased semantics: a plain user without
-    devices.lease may only act on devices they already hold via a claim,
-    reservation or running job — matching the cluster device-actions API.
-    See docs/architecture/adr/0001-controller-worker-boundary.md.
+    Used for claim-borrow semantics: a device the same owner already holds
+    through a claim, reservation or running job is reused (its fencing
+    token carries the holder's generation) instead of being re-acquired
+    under a new source_id — which would 409 against the owner's own
+    long-lived claim.
     """
     owned: dict[str, dict] = {}
     try:
@@ -50,9 +51,9 @@ def _borrowable(claim: dict) -> bool:
     return source_id.startswith(("reservation:", "job:"))
 
 
-def _has_devices_lease_permission(user) -> bool:
+def _has_permission(user, permission: str) -> bool:
     try:
-        return user.has_permission("devices.lease")
+        return user.has_permission(permission)
     except Exception:
         return False
 
@@ -81,32 +82,21 @@ def acquire_device_operation_claim(
     if not devices:
         return "", [], None
     device_keys = [device_lock_manager._device(item)["device_key"] for item in devices]
-    # devices.use_leased semantics — same contract as the cluster
-    # device-actions API: a plain user (no devices.lease permission) may
-    # only act on devices they ALREADY hold through a claim, reservation
-    # or running job; free devices require a device operator. Previously
-    # this local guard acquired fresh claims for any idle device.
-    from features.auth import authentication_required
-
+    # Agent Service Token（ADR 0006）在任何设备操作上都需要显式的
+    # devices.use_leased scope。人类普通用户不做“先租后用”限制：常规
+    # 操作（wifi/reboot/remount/scrcpy 等）可直接作用于空闲设备，设备
+    # 归属冲突由下方 409 fencing 兜底；高危操作（bootloader/verity/
+    # override）已在路由层挂 require_elevated_admin_when_auth_required，
+    # 普通用户到不了那一步。
     owned = _owned_local_device_keys(user.id, device_keys)
-    if authentication_required() and not _has_devices_lease_permission(user):
-        missing_permission = [
-            item for item, key in zip(devices, device_keys)
-            if key not in owned
-        ]
-        if missing_permission:
-            return "", [], JSONResponse(
-                content={
-                    "success": False,
-                    "error": (
-                        "devices.use_leased only permits actions on devices "
-                        "you already lease or reserve; ask a device operator "
-                        "for access"
-                    ),
-                    "devices": missing_permission,
-                },
-                status_code=403,
-            )
+    if user.role == "agent_service" and not _has_permission(user, "devices.use_leased"):
+        return "", [], JSONResponse(
+            content={
+                "success": False,
+                "error": "Agent token lacks devices.use_leased scope",
+            },
+            status_code=403,
+        )
     # Borrow semantics: a device held by THIS owner through a
     # reservation or running job is reused (its fencing token carries the
     # holder's generation); a device held by another in-flight OPERATION

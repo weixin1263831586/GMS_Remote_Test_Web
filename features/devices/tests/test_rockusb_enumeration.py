@@ -85,6 +85,18 @@ class RockusbProbeParsingTests(unittest.TestCase):
             ["LOADER-DEV"],
         )
 
+    def test_rk3576_loader_pid_is_recognized(self):
+        # 现场案例（2026-09-15）：RK3576GMS1 烧写时进入 Loader 枚举为
+        # 2207:350e / "USB download gadget"；默认 PID 清单此前只有
+        # RK3572 的 351a，导致 wait_for_single_rockusb_loader 超时误报
+        # "未能确认目标设备是唯一 Loader"。
+        probe = "350e\tRK3576GMS1\tUSB download gadget\n"
+        self.assertEqual(
+            rockusb_loader_serials(probe),
+            ["RK3576GMS1"],
+        )
+        self.assertIn("350e", rockusb_loader_vid_pids({}))
+
     def test_explicit_loader_pids_override_default(self):
         probe = "320a\tMASKROM-DEV\tMaskROM\n351a\tLOADER-DEV\tUSB download gadget\n"
         self.assertEqual(

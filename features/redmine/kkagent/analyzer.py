@@ -5,7 +5,7 @@
 解析、预检分别位于本包的 process/errors/trace/output/auth_preflight/
 evidence_gate 模块。
 
-调用约束（docs/plans/redmine-ai-daily-brief.md）：
+调用约束（docs/architecture/adr/0008-daily-brief-triage-and-diagnosis.md）：
 - ``asyncio.create_subprocess_exec``，禁止 shell=True；
 - 禁止 --yolo/--auto/--disable-sandbox；
 - 超时由调用方配置（默认 600s）；
@@ -22,7 +22,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..daily_brief_prompt import PROMPT_TEMPLATE
+from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
 from .errors import classify_failure
 from .evidence_gate import gate_and_errors
 from .output import parse_issue_result
@@ -42,7 +42,7 @@ DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 logger = logging.getLogger(__name__)
 
 # Prompt 版本随 runtime-owned evidence/schema repair 语义升级。
-PROMPT_VERSION = "redmine_daily_triage_v9"
+PROMPT_VERSION = "redmine_daily_triage_v11"
 
 REPAIR_MAX_TURNS = 8
 # 首次修复仍可能被模型原样重放（线上曾出现完整取证后连续漏掉
@@ -128,7 +128,8 @@ class KkAgentRedmineAnalyzer:
     # ------------------------------------------------------------- command
 
     def build_prompt(self, entry: dict[str, Any]) -> str:
-        return PROMPT_TEMPLATE.format(
+        prompt = prompt_template_for(entry).format(
+            result_schema=issue_result_schema_json(),
             issue_id=entry.get("issue_id"),
             subject=str(entry.get("subject") or ""),
             status=str(entry.get("status_name") or ""),
@@ -138,6 +139,19 @@ class KkAgentRedmineAnalyzer:
             unreplied_days=entry.get("unreplied_days", 0),
             attachment_count=entry.get("attachment_count", 0),
         )
+        serial = str(entry.get("device_serial") or "").strip()
+        if serial and entry.get("analysis_mode") != "triage":
+            prompt += (
+                f"\n\nLOCAL DEVICE (read-only diagnosis allowed): serial "
+                f"`{serial}` is available to this analysis. You MAY use "
+                f"gms_rt_devices_snapshot / gms_rt_logcat (dump mode) / "
+                f"gms_rt_shell (read-only allowlist) on THIS serial only to "
+                f"verify runtime facts (build fingerprint, kernel behavior, "
+                f"logs). Fill detailed_report section 四 from what you "
+                f"actually observed; write 未检查本地设备 only if every "
+                f"call failed. Never attempt to modify the device."
+            )
+        return prompt
 
     def build_command(self, prompt: str) -> list[str]:
         # 注意：kkagent 0.4.x 的 CLI 没有 --model 参数（传了会 exit 2）。

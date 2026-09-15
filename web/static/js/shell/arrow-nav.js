@@ -59,10 +59,14 @@ function updateCategorySelect() {
         categories.push(...Object.keys(DEFAULT_CATEGORIES));
     }
 
-    select.innerHTML = categories.map(category => {
+    select.replaceChildren();
+    categories.forEach(category => {
         const categoryInfo = DEFAULT_CATEGORIES[category] || { icon: '📁', color: '#8e8e93' };
-        return `<option value="${category}">${categoryInfo.icon} ${category}</option>`;
-    }).join('');
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = `${categoryInfo.icon} ${category}`;
+        select.appendChild(option);
+    });
 
     // 添加当前选中的分类（如果不在列表中）
     if (currentCategory !== 'all' && !categories.includes(currentCategory)) {

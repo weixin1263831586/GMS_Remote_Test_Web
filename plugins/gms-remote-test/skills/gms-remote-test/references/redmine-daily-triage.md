@@ -1,13 +1,28 @@
 # Redmine Daily Triage（每日晨报分析规范）
 
-版本：`redmine_daily_triage_v8`
+版本：`redmine_daily_triage_v11`
 
 用途：对当天个人看板待处理 Redmine issue（`waiting_my_reply` /
 `no_reply_3_days`）做只读取证与结构化分析，输出可直接进入 Daily Brief
 的 JSON。业务筛选（谁需要回复、几天算 stale）由 Controller 的 workload
 统计唯一决定，本流程不重新实现任何筛选规则。
 
-## 工作流（每个 issue 依次执行）
+## 批量晨报：待办分析
+
+批量运行使用 `analysis_mode=triage`，只回答最新变化、当前行动方、阻塞和
+下一步。读取 issue、journals 和相关附件后，不强制历史检索、源码、设备
+诊断，也不猜测根因。`root_cause_type=unknown`、`similar_issues=[]`；
+`detailed_report` 最多 300 字。只有确实需要我回复时才填写双语草稿，
+否则回复字段保留空字符串。
+
+首页显示摘要和下一步，完整结果在工单详情中查看。数据源仍是待回复和
+超时未回复事项，不代表全量新增、关闭或等待外部的工作清单。
+
+## 单条深度分析工作流
+
+用户点击“深度分析此项”时，按指定 run_id 的冻结快照执行下列诊断。
+批量晨报不执行第 7–8 步；历史检索是否完成仍由实际成功调用决定，
+无需检索不会被标成“检索成功”。
 
 1. `gms_rt_redmine_triage` 取当天待处理清单（去重后，含 buckets /
    priority / fingerprint）。
@@ -23,7 +38,16 @@
 7. 必须调用 `gms_rt_redmine_history_search` 做 2–4 个不同关键词查询；
    重复大小写或空白变化仍视为同一查询。相似 issue 只有在成功的历史检索
    或后续 issue fetch 结果中真实出现过，才可写入结果。
-8. 输出下方 JSON Schema；证据不足就降置信度，不编造根因。
+8. 测试类失败（subject 含 CTS/VTS/GTS/STS/LTP/ITS）：必须至少成功调用
+   一次源码级取证工具（`gms_rt_sdk_search` / `gms_rt_sdk_read`，或
+   `gms_rt_apk_resolve` → `gms_rt_apk_analyze` → `gms_rt_apk_search` /
+   `gms_rt_apk_source_search`），先核实失败断言的源码级含义，再在
+   "内核/组件缺补丁" 与 "上游行为变更 + 套件内测试二进制期望过时" 两个
+   方向之间做区分。运行时 Evidence Gate 按成功调用的
+   `source_evidence_tool_count` 强制校验；未取证时 root_cause_type 不得
+   高于 possible。GKI 内核行为问题不得建议厂商内核补丁，出路是核对
+   套件/审批策略。
+9. 输出下方 JSON Schema；证据不足就降置信度，不编造根因。
 
 ## 证据读取优先级
 
@@ -32,7 +56,12 @@ issue → journals → attachment metadata → parsed summary
      → artifact search → artifact window read →（必要时才读更多）
 ```
 
-## AI 输出 Schema
+## AI 输出契约
+
+Controller 的 `features/redmine/daily_brief_result.py::IssueResult` 是唯一
+Schema 定义。Prompt 使用其生成的 JSON Schema，运行时由同一模型严格
+校验，包括嵌套 evidence/action/similar issue。以下仅为字段示意，
+不是可直接提交的示例（枚举须选一个值，相似工单 ID 必须为真实正整数）。
 
 ```json
 {
@@ -62,6 +91,8 @@ issue → journals → attachment metadata → parsed summary
   "history_checked": true,
   "history_search_count": 3,
   "distinct_history_search_count": 2,
+  "test_failure_subject": true,
+  "source_evidence_tool_count": 2,
   "tool_call_count": 11,
   "session_id": "...",
   "duration_ms": 21342
@@ -72,12 +103,16 @@ issue → journals → attachment metadata → parsed summary
 `kkagent --resume <该 issue 的精确 session_id>` 请求返回完整修正版，并
 重新校验。自动流程禁止使用 `--continue`。
 
-## confidence 规则
+## confidence 规则（模型自评）
+
+必须是显式的 0–1 数值；缺失时走 Schema 修复，不按 `confirmed/likely`
+推导分数，也不接受这些枚举代替数值。该值不是程序验证过的证据置信度，
+不能独立证明根因。UI 的取证完成状态来自持久化 Evidence Gate。
 
 - 0.90–1.00：有明确日志/代码/测试证据支持
 - 0.70–0.89：证据较充分，部分结论仍为推断
 - 0.50–0.69：只有部分证据，存在明显不确定性
-- < 0.50：不得给出确定性根因，`needs_human_review` 必须为 true
+- < 0.60：`needs_human_review` 必须为 true；< 0.50 不得给出确定性根因
 
 ## 回复草稿规则
 

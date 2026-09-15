@@ -70,7 +70,6 @@
 | `gms-rt-jobs-list` | List durable test jobs visible to the current session | gms-rt-jobs-list [limit:1..500] |
 | `gms-rt-jobs-status` | Get authoritative durable test job state | gms-rt-jobs-status <job_id> |
 | `gms-rt-jobs-wait` | Wait for a durable test job to reach a terminal state | gms-rt-jobs-wait <job_id> [--interval SECONDS] [--max-wait SECONDS] |
-| `gms-rt-opengrok-search` | Search the configured OpenGrok index | gms-rt-opengrok-search <query> [true\|false] |
 | `gms-rt-redmine-artifact-image` | Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling) | gms-rt-redmine-artifact-image <artifact_id> |
 | `gms-rt-redmine-attachment-download` | Stream one evidence artifact original to a client path (reports saved path/bytes/sha256) | gms-rt-redmine-attachment-download <artifact_id> [output_path] |
 | `gms-rt-redmine-attachments` | List evidence artifacts with kind, size, sha256, and per-attachment status | gms-rt-redmine-attachments <snapshot_id> |

@@ -15,6 +15,7 @@ from features.devices import (
     parse_adb_device_states,
     resolve_usbip_flash_routes,
     rockusb_loader_serials,
+    rockusb_loader_vid_pids,
 )
 from features.devices import reconnect as usbip_reconnect
 
@@ -25,6 +26,23 @@ logger = logging.getLogger(__name__)
 ROCKUSB_LOADER_COUNT_RE = re.compile(
     r"List\s+of\s+rockusb\s+connected\(\s*(\d+)\s*\)", re.IGNORECASE
 )
+
+
+def _configured_loader_pids() -> set[str] | None:
+    """Return the platform-configured Loader PID set.
+
+    ``usbip_vid_pids`` in ``configs/local/config.json`` is the operations
+    lever for NEW SoC Loader PIDs (they change per SoC — see
+    docs/architecture/adr/0005). The firmware gates must honor it the same
+    way ``manager.get_rockusb_loader_devices`` does; otherwise a config-only
+    addition silently has no effect on flashing. Falls back to the built-in
+    defaults when the config is unreadable.
+    """
+    try:
+        config = runtime.config_manager.load_config()
+    except Exception:
+        return None
+    return rockusb_loader_vid_pids(config)
 
 
 def schedule_usbip_mode_reconnect(device: str, target_protocol: str) -> bool:
@@ -88,6 +106,7 @@ async def wait_for_single_rockusb_loader(
         loaders = rockusb_loader_serials(
             last_detail,
             exclude_serials=set(adb_states),
+            loader_pids=_configured_loader_pids(),
         )
         if loaders == [target_serial] or (
             len(loaders) == 1 and target_serial in loaders
@@ -124,6 +143,7 @@ async def wait_for_rockusb_loader_exit(
         loaders = rockusb_loader_serials(
             last_detail,
             exclude_serials=set(adb_states),
+            loader_pids=_configured_loader_pids(),
         )
         if target_serial not in loaders:
             return True, last_detail
@@ -305,6 +325,7 @@ def device_flash_protocols(ssh, devices: list[str]) -> dict[str, str]:
             rockusb_loader_serials(
                 loader_probe.stdout or "",
                 exclude_serials=set(adb_states) | fastboot_devices,
+                loader_pids=_configured_loader_pids(),
             )
         )
     except Exception:

@@ -179,15 +179,13 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertNotIn("history_checked", outcome.error)
         self.assertEqual(outcome.trace["repair_attempts"], 2)
 
-    def test_missing_confidence_uses_declared_root_cause_type(self):
-        """线上 #646220：修复轮遗漏 confidence 也不应使整单失败。"""
+    def test_missing_confidence_requires_schema_repair(self):
         analyzer = self._analyzer("missing-confidence-with-root-type", timeout_seconds=30)
         outcome = asyncio.run(analyzer.analyze(ENTRY))
-        self.assertTrue(outcome.ok, outcome.error)
+        self.assertFalse(outcome.ok)
         self.assertEqual(outcome.session_id, "sess-missing-confidence")
-        self.assertEqual(outcome.result["confidence"], 0.75)
-        self.assertTrue(outcome.result["history_checked"])
-        self.assertEqual(outcome.trace["repair_attempts"], 0)
+        self.assertEqual(outcome.error_type, "schema_mismatch")
+        self.assertGreater(outcome.trace["repair_attempts"], 0)
 
     def test_second_schema_repair_can_succeed_in_exact_session(self):
         analyzer = self._analyzer("schema-twice-then-ok", timeout_seconds=30)
@@ -233,7 +231,13 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v9")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v11")
+
+    def test_prompt_requires_source_evidence_for_test_failures(self):
+        prompt = KkAgentRedmineAnalyzer().build_prompt(ENTRY)
+        self.assertIn("gms_rt_sdk_search", prompt)
+        self.assertIn("BOTH directions", prompt)
+        self.assertIn("GKI constraint", prompt)
 
     def test_cancellation_cleans_up_process_tree(self):
         class _HangingStream:

@@ -10,8 +10,9 @@ from features.redmine.kkagent.evidence_gate import (
     evaluate_evidence_gate,
     gate_and_errors,
     gate_errors,
+    is_test_failure_subject,
 )
-from features.redmine.kkagent.trace import KkAgentTrace, consume_line
+from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace, consume_line
 
 
 def _trace(*events: dict) -> KkAgentTrace:
@@ -136,6 +137,98 @@ class EvidenceGateTests(unittest.TestCase):
             trace, {"issue_id": 1, "attachment_count": 0}, unsupported
         )
         self.assertTrue(any("999999" in error for error in errors))
+
+
+class TestFailureSourceEvidenceGateTests(unittest.TestCase):
+    """测试类失败必须做源码级取证（区分缺补丁 vs 上游行为变更）。"""
+
+    @staticmethod
+    def _entry() -> dict:
+        return {
+            "issue_id": 646220,
+            "subject": "3572S-A16-normal版VTS的vts_ltp_test_arm_64",
+            "attachment_count": 0,
+        }
+
+    def test_ltp_subject_is_detected_as_test_failure(self):
+        self.assertTrue(is_test_failure_subject(self._entry()))
+        self.assertFalse(is_test_failure_subject(
+            {"subject": "RK3576 自动亮度失效"}
+        ))
+        self.assertFalse(is_test_failure_subject({}))
+
+    def test_test_failure_without_source_evidence_fails_gate(self):
+        trace = _full_trace()
+        gate = evaluate_evidence_gate(trace, self._entry())
+        self.assertTrue(gate["test_failure_subject"])
+        self.assertEqual(gate["source_evidence_tool_count"], 0)
+        self.assertFalse(gate["source_evidence_checked"])
+        errors = gate_errors(gate)
+        self.assertTrue(any("source-level evidence" in e for e in errors))
+
+    def test_sdk_search_call_satisfies_source_gate(self):
+        trace = _full_trace()
+        trace.tool_calls.append(ToolTrace(
+            tool_call_id="sdk1",
+            tool_name="gms_rt_sdk_search",
+            status="succeeded",
+        ))
+        gate = evaluate_evidence_gate(trace, self._entry())
+        self.assertEqual(gate["source_evidence_tool_count"], 1)
+        self.assertTrue(gate["source_evidence_checked"])
+        self.assertFalse(any("source-level" in e for e in gate_errors(gate)))
+
+    def test_failed_source_call_does_not_count(self):
+        trace = _full_trace()
+        trace.tool_calls.append(ToolTrace(
+            tool_call_id="sdk1",
+            tool_name="gms_rt_sdk_search",
+            status="failed",
+        ))
+        gate = evaluate_evidence_gate(trace, self._entry())
+        self.assertEqual(gate["source_evidence_tool_count"], 0)
+        self.assertTrue(any("source-level" in e for e in gate_errors(gate)))
+
+    def test_non_test_subject_ignores_source_gate(self):
+        trace = _full_trace()
+        gate = evaluate_evidence_gate(
+            trace, {"issue_id": 1, "subject": "RK3576 亮度", "attachment_count": 0}
+        )
+        self.assertFalse(gate["test_failure_subject"])
+        self.assertTrue(gate["source_evidence_checked"])
+        self.assertFalse(any("source-level" in e for e in gate_errors(gate)))
+
+    def test_gate_records_source_count_for_ui(self):
+        trace = _full_trace()
+        result: dict = {}
+        gate, _errors = gate_and_errors(trace, self._entry(), result)
+        self.assertEqual(gate["source_evidence_tool_count"], 0)
+        self.assertIn("source_evidence_tool_count", result["evidence_gate"])
+
+    def test_gate_degrades_when_no_sdk_sources(self):
+        """部署无 SDK 源时降级放行，但保留观测字段。"""
+        trace = _full_trace()
+        entry = dict(self._entry(), sdk_sources_available=False)
+        gate = evaluate_evidence_gate(trace, entry)
+        self.assertTrue(gate["test_failure_subject"])
+        self.assertFalse(gate["source_evidence_required"])
+        self.assertTrue(gate["source_evidence_checked"])
+        self.assertEqual(gate_errors(gate), [])
+
+    def test_gate_stays_strict_when_sdk_sources_available(self):
+        trace = _full_trace()
+        entry = dict(self._entry(), sdk_sources_available=True)
+        gate = evaluate_evidence_gate(trace, entry)
+        self.assertTrue(gate["source_evidence_required"])
+        self.assertFalse(gate["source_evidence_checked"])
+        self.assertTrue(any("source-level" in e for e in gate_errors(gate)))
+
+    def test_missing_hint_defaults_to_strict(self):
+        """entry 缺 hint 时按强制处理（fail-safe，不静默放水）。"""
+        trace = _full_trace()
+        gate = evaluate_evidence_gate(trace, self._entry())
+        self.assertTrue(gate["source_evidence_required"])
+        self.assertFalse(gate["source_evidence_checked"])
 
 
 if __name__ == "__main__":

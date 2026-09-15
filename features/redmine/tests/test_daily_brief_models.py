@@ -24,6 +24,11 @@ class ValidIssueResultTests(unittest.TestCase):
         return {
             "problem_summary": "CTS security 失败",
             "customer_request": "客户要求定位失败原因",
+            "current_blocker": "待确认",
+            "root_cause": "未确认",
+            "missing_information": [],
+            "suggested_reply_en": "",
+            "suggested_reply_zh": "",
             "recommended_actions": [{"step": 1, "action": "复查 logcat"}],
             "suggested_solution": "升级安全补丁后重跑",
             "detailed_report": "## 一、问题概况\n\n| 项目 | 内容 |\n|---|---|\n| Issue | #1 |",
@@ -44,6 +49,12 @@ class ValidIssueResultTests(unittest.TestCase):
         errors = validate_issue_result(result)
         self.assertTrue(any("suggested_solution" in e for e in errors))
 
+    def test_missing_risk_is_required_field(self):
+        result = self._valid()
+        result.pop("risk")
+        errors = validate_issue_result(result)
+        self.assertTrue(any("risk" in e for e in errors))
+
     def test_detailed_report_type_is_checked(self):
         result = self._valid()
         result["detailed_report"] = {"not": "a string"}
@@ -60,47 +71,17 @@ class ValidIssueResultTests(unittest.TestCase):
         self.assertTrue(any("root_cause_type" in e for e in errors))
         self.assertTrue(any("risk" in e for e in errors))
 
-    def test_missing_confidence_is_derived_from_root_cause_type(self):
+    def test_missing_confidence_is_not_inferred_from_root_cause(self):
         result = self._valid()
         result.pop("confidence")
-        errors = [error for error in validate_issue_result(result) if "confidence" in error]
-        self.assertEqual(errors, [])
-        self.assertEqual(result["confidence"], 0.75)
+        assert "missing field: confidence" in validate_issue_result(result)
+        assert "confidence" not in result
 
-    def test_missing_confidence_without_root_cause_type_still_fails(self):
-        result = self._valid()
-        result.pop("confidence")
-        result.pop("root_cause_type")
-        errors = [error for error in validate_issue_result(result) if "confidence" in error]
-        self.assertEqual(errors, ["missing field: confidence"])
-
-    def test_enum_word_confidence_is_normalized_not_rejected(self):
-        """生产实证（issue 646220）：模型把 root_cause_type 的枚举词
-        复制进 confidence（"confidence":"likely"），修复轮仍可能再错。
-        枚举词是确定性可映射的，受控规范化后入库而不是烧尽修复预算。
-        """
-        result = self._valid()
-        result["confidence"] = "likely"
-        errors = validate_issue_result(result)
-        self.assertEqual(errors, [])
-        self.assertEqual(result["confidence"], 0.75)
-        self.assertFalse(result.get("needs_human_review"))
-
-    def test_confidence_word_map_boundaries(self):
-        result = self._valid()
-        for word, expected in (
-            ("confirmed", 0.9), ("HIGH", 0.85), ("0.8", 0.8),
-            ("possible", 0.55), ("unknown", 0.3),
-        ):
+    def test_confidence_requires_explicit_number(self):
+        for word in ("confirmed", "likely", "HIGH", "0.8", "unknown"):
+            result = self._valid()
             result["confidence"] = word
-            self.assertEqual(validate_issue_result(result), [], word)
-            self.assertEqual(result["confidence"], expected, word)
-
-    def test_low_enum_confidence_triggers_human_review(self):
-        result = self._valid()
-        result["confidence"] = "unknown"  # 0.3 < 0.6 阈值
-        self.assertEqual(validate_issue_result(result), [])
-        self.assertTrue(result.get("needs_human_review"))
+            assert any("confidence" in error for error in validate_issue_result(result))
 
     def test_uninterpretable_confidence_still_rejected(self):
         result = self._valid()
@@ -209,7 +190,7 @@ class SimilarIssuesValidationTests(unittest.TestCase):
         errors = validate_issue_result(result)
         self.assertTrue(any("similar_issues" in e for e in errors))
 
-    def test_invalid_similar_entry_cleaned_and_flagged(self):
+    def test_invalid_similar_entry_rejected_without_guessing(self):
         result = self._valid()
         result["similar_issues"] = [
             {"issue_id": "not-a-number", "similarity": "same"},
@@ -217,9 +198,8 @@ class SimilarIssuesValidationTests(unittest.TestCase):
         ]
         errors = validate_issue_result(result)
         self.assertTrue(any("issue_id" in e for e in errors))
-        kept = result["similar_issues"]
-        self.assertEqual(len(kept), 1)
-        self.assertEqual(kept[0]["similarity"], "related")  # 非法级别回落
+        self.assertTrue(any("similarity" in e for e in errors))
+        self.assertEqual(result["similar_issues"][1]["similarity"], "bogus")
 
     def test_history_checked_is_ignored_by_model_schema(self):
         """该字段由 runtime tool trace 覆写，模型缺失或乱填都不采信。"""

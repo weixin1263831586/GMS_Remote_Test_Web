@@ -4,8 +4,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from features.redmine.daily_brief_config import (
+    analyzer_env_extra,
+    build_brief_analyzer,
     list_daily_brief_agent_profiles,
     list_daily_brief_model_options,
+    normalize_daily_brief_config,
 )
 
 
@@ -50,3 +53,28 @@ def test_system_model_options_are_enabled_and_secret_free():
             {"model": "remote-model", "display_name": "Remote Model", "provider": "remote"},
         ],
     }
+
+
+def test_device_serial_normalized_and_env_sets_toolsets():
+    config = normalize_daily_brief_config({
+        "agent_profile": "kk",
+        "device_serial": "RK3572GMS7",
+    })
+    assert config["device_serial"] == "RK3572GMS7"
+    env = analyzer_env_extra("kk", config["device_serial"])
+    assert env["GMS_MCP_TOOLSETS"] == "evidence,device_evidence"
+    # 无 serial 时保持 evidence-only
+    assert "GMS_MCP_TOOLSETS" not in analyzer_env_extra("kk")
+    # 非法 serial（注入字符）被拒绝
+    assert normalize_daily_brief_config({"device_serial": "a; rm -rf"})["device_serial"] == ""
+    assert normalize_daily_brief_config({"device_serial": ""})["device_serial"] == ""
+
+
+def test_build_brief_analyzer_respects_extra_turns_and_cap():
+    config = normalize_daily_brief_config({"max_turns": 20})
+    assert build_brief_analyzer(config).max_turns == 20
+    assert build_brief_analyzer(config, extra_turns=6).max_turns == 26
+    # 上限 50 不被突破
+    assert build_brief_analyzer(
+        normalize_daily_brief_config({"max_turns": 50}), extra_turns=6
+    ).max_turns == 50

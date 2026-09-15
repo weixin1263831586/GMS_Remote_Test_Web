@@ -1476,7 +1476,18 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 """() => {
                     dailyBriefCache = {
                         run: {brief_date: '2026-09-15', status: 'completed', report_json: {}},
-                        issues: [{issue_id: 101, status: 'completed', subject: 'Daily brief modal', result: {problem_summary: '分析摘要'}}]
+                        issues: [{
+                            issue_id: 101,
+                            status: 'completed',
+                            subject: 'Legacy daily brief modal',
+                            result: {
+                                problem_summary: '分析摘要',
+                                evidence: '旧版取证文本',
+                                recommended_actions: {action: '复查日志'},
+                                similar_issues: {issue_id: 100},
+                                missing_information: '完整日志'
+                            }
+                        }]
                     };
                     document.getElementById('dailyBriefCard').innerHTML = renderDailyBriefInner(dailyBriefCache);
                 }"""

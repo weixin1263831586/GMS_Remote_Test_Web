@@ -584,7 +584,7 @@ API_DOCS_LIST = [
             {"name": "limit", "type": "integer", "required": False, "desc": "最大结果数，范围 1-100，默认 30"}
         ],
         "category": "file",
-        "skill": "gms-rt-opengrok-search"
+        "skill": "gms-rt-sdk-search"
     },
 
     # ==================== 主机终端 ====================

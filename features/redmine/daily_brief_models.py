@@ -1,7 +1,7 @@
 """Daily Brief 数据模型（纯数据契约，无 I/O）。
 
 Schema 常量与 dataclass 供 repository / service / analyzer / UI 共享；
-对应 docs/plans/redmine-ai-daily-brief.md 的 Phase 1/2/14。
+分析契约见 docs/architecture/adr/0008-daily-brief-triage-and-diagnosis.md。
 """
 
 from __future__ import annotations
@@ -9,6 +9,34 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+from .daily_brief_result import (
+    CONFIDENCE_HUMAN_REVIEW_THRESHOLD as CONFIDENCE_HUMAN_REVIEW_THRESHOLD,
+)
+from .daily_brief_result import (
+    ISSUE_RESULT_REQUIRED_FIELDS as ISSUE_RESULT_REQUIRED_FIELDS,
+)
+from .daily_brief_result import (
+    ISSUE_RESULT_SCHEMA as ISSUE_RESULT_SCHEMA,
+)
+from .daily_brief_result import (
+    MAX_SIMILAR_ISSUES as MAX_SIMILAR_ISSUES,
+)
+from .daily_brief_result import (
+    RISK_LEVELS as RISK_LEVELS,
+)
+from .daily_brief_result import (
+    ROOT_CAUSE_TYPES as ROOT_CAUSE_TYPES,
+)
+from .daily_brief_result import (
+    SIMILARITY_LEVELS as SIMILARITY_LEVELS,
+)
+from .daily_brief_result import (
+    confidence_below_review_threshold as confidence_below_review_threshold,
+)
+from .daily_brief_result import (
+    validate_issue_result as validate_issue_result,
+)
 
 
 BRIEF_MODES = ("nightly", "delta", "manual")
@@ -50,14 +78,11 @@ def derive_data_quality(
 
 # 优先级由规则生成 base score，AI 只做有限调整；排序必须 deterministic。
 PRIORITY_SCORE_BASE = {
-    "no_reply_3_days": 50,
-    "waiting_my_reply": 20,
+    "no_reply_3_days": 10,
+    "waiting_my_reply": 30,
 }
 PRIORITY_SCORE_URGENT = 50
 PRIORITY_SCORE_HIGH = 30
-PRIORITY_SCORE_PER_STALE_DAY = 5
-PRIORITY_SCORE_MISSING_LOG = -5
-PRIORITY_SCORE_BLOCKER = 10
 
 PRIORITY_LABELS = ("P1", "P2", "P3")
 
@@ -89,12 +114,12 @@ def base_priority_score(entry: dict[str, Any]) -> int:
     elif priority == "high":
         score += PRIORITY_SCORE_HIGH
     try:
-        score += max(0.0, float(entry.get("unreplied_days") or 0.0)) * PRIORITY_SCORE_PER_STALE_DAY
+        days = float(entry.get("unreplied_days") or 0.0)
+        if days >= 7:
+            score += 5
     except (TypeError, ValueError):
         pass
-    if not (entry.get("attachment_count") or 0):
-        score += PRIORITY_SCORE_MISSING_LOG
-    return int(score)
+    return min(100, max(0, int(score)))
 
 
 @dataclass
@@ -198,142 +223,3 @@ class DailyBriefIssue:
             "raw_response": self.raw_response,
             "result": self.result,
         }
-
-
-# AI 单 issue 输出的必填字段（analyzer 校验 + UI 渲染依赖）。
-ISSUE_RESULT_REQUIRED_FIELDS = (
-    "problem_summary",
-    "customer_request",
-    "recommended_actions",
-    "suggested_solution",
-    "detailed_report",
-    "evidence",
-    "similar_issues",
-    "confidence",
-)
-ROOT_CAUSE_TYPES = ("confirmed", "likely", "possible", "unknown")
-RISK_LEVELS = ("high", "medium", "low")
-SIMILARITY_LEVELS = ("same", "similar", "related")
-MAX_SIMILAR_ISSUES = 4
-
-
-def validate_issue_result(result: dict[str, Any]) -> list[str]:
-    """校验 AI 输出 schema，返回错误列表（空列表 = 合法）。
-
-    缺字段/类型不符一律判 invalid_ai_output，不做 regex 猜测修复。
-    """
-    errors: list[str] = []
-    if not isinstance(result, dict):
-        return ["result is not an object"]
-    # 模型偶尔在修复轮只漏掉 confidence，却保留了已声明的根因置信枚举。
-    # 该映射与 confidence 字段误填枚举词的处理共用同一受控表，不凭空提高
-    # 置信度；只有明确且合法的 root_cause_type 才允许补齐。
-    if result.get("confidence") in (None, ""):
-        root_cause_type = str(result.get("root_cause_type") or "")
-        if root_cause_type in ROOT_CAUSE_TYPES:
-            result["confidence"] = CONFIDENCE_WORD_MAP[root_cause_type]
-    for key in ISSUE_RESULT_REQUIRED_FIELDS:
-        if key not in result or result[key] in (None, ""):
-            errors.append(f"missing field: {key}")
-    root_cause_type = str(result.get("root_cause_type") or "unknown")
-    if root_cause_type not in ROOT_CAUSE_TYPES:
-        errors.append(f"invalid root_cause_type: {root_cause_type}")
-    risk = str(result.get("risk") or "")
-    if risk and risk not in RISK_LEVELS:
-        errors.append(f"invalid risk: {risk}")
-    if "confidence" in result and result.get("confidence") not in (None, ""):
-        normalized = normalize_confidence(result["confidence"])
-        if normalized is None:
-            errors.append(f"invalid confidence: {result.get('confidence')!r}")
-        else:
-            # 受控规范化（LLM 字段错位复原）：模型偶尔把 root_cause_type
-            # 的枚举词写进 confidence（生产实证：confidence:"likely"）。
-            # 确定性映射到 prompt Confidence rules 对应的数值区间，不属
-            # 于猜测修复——映射后仍受 0.0-1.0 与人工复核阈值约束。
-            result["confidence"] = normalized
-    if not isinstance(result.get("evidence") or [], list):
-        errors.append("evidence must be a list")
-    if not isinstance(result.get("recommended_actions") or [], list):
-        errors.append("recommended_actions must be a list")
-    detailed = result.get("detailed_report")
-    if detailed not in (None, "") and not isinstance(detailed, str):
-        errors.append("detailed_report must be a string")
-    similar = result.get("similar_issues")
-    if not isinstance(similar, list):
-        errors.append("similar_issues must be a list")
-    else:
-        kept: list[dict[str, Any]] = []
-        for item in similar[:MAX_SIMILAR_ISSUES]:
-            if not isinstance(item, dict):
-                errors.append("similar_issues entries must be objects")
-                kept = []  # 任意一条非法即整体不合规，避免半可信列表入库
-                break
-            try:
-                item["issue_id"] = int(item.get("issue_id"))
-            except (TypeError, ValueError):
-                errors.append(f"similar_issues entry has invalid issue_id: {item.get('issue_id')!r}")
-                continue
-            similarity = str(item.get("similarity") or "related")
-            if similarity not in SIMILARITY_LEVELS:
-                similarity = "related"
-            item["similarity"] = similarity
-            kept.append(item)
-        result["similar_issues"] = kept
-    # history_checked 是 runtime evidence fact，不属于模型输出 schema。
-    # 即使旧模型输出了该字段也不采信，evidence_gate 会统一覆写。
-    if confidence_below_review_threshold(result):
-        result["needs_human_review"] = True
-    return errors
-
-
-CONFIDENCE_HUMAN_REVIEW_THRESHOLD = 0.6
-
-
-# 枚举词 → 数值映射，对齐 prompt 的 Confidence rules：
-# 0.90+ 显式证据；0.70-0.89 充分证据+推断；0.50-0.69 部分证据；<0.50 不得断言根因。
-CONFIDENCE_WORD_MAP = {
-    "confirmed": 0.9,
-    "certain": 0.9,
-    "very_high": 0.9,
-    "high": 0.85,
-    "likely": 0.75,
-    "probable": 0.7,
-    "medium": 0.65,
-    "moderate": 0.6,
-    "possible": 0.55,
-    "uncertain": 0.45,
-    "low": 0.4,
-    "unknown": 0.3,
-}
-
-
-def normalize_confidence(value: Any) -> float | None:
-    """把 confidence 值规范为 [0.0, 1.0] 数值；无法解释时返回 None。
-
-    接受数字、数字字符串，以及模型从 root_cause_type 错位复制的
-    确定性枚举词。其它类型（列表/字典等）一律拒绝。
-    """
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        confidence = float(value)
-    elif isinstance(value, str):
-        text = value.strip().lower()
-        if text in CONFIDENCE_WORD_MAP:
-            return CONFIDENCE_WORD_MAP[text]
-        try:
-            confidence = float(text)
-        except ValueError:
-            return None
-    else:
-        return None
-    if not 0.0 <= confidence <= 1.0:
-        return None
-    return confidence
-
-
-def confidence_below_review_threshold(result: dict[str, Any]) -> bool:
-    try:
-        return float(result.get("confidence")) < CONFIDENCE_HUMAN_REVIEW_THRESHOLD
-    except (TypeError, ValueError):
-        return True

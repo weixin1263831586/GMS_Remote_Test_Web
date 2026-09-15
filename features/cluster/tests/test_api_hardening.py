@@ -2,78 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-
 from features.auth import CurrentUser
 from features.cluster import api as cluster_api
-from features.cluster.repository import ClusterRepository
-from features.cluster.service import ClusterService
+
+from .api_hardening_fixture import ClusterApiHardeningFixture
 
 
-class ClusterApiHardeningTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.repo = ClusterRepository(Path(self.temp.name) / "cluster.sqlite3")
-        self.repo.register_worker({
-            "worker_id": "worker-246",
-            "name": "remote",
-            "hostname": "ats-246",
-            "address": "172.16.14.246",
-            "agent_version": "1",
-            "max_jobs": 1,
-            "capabilities": {"adb": True},
-        })
-        self.repo.heartbeat("worker-246", {
-            "agent_version": "1",
-            "running_jobs": [],
-            "devices": [{"serial": "ABC", "state": "available"}],
-            "suites": [],
-        })
-        self.previous_service = cluster_api.cluster_service
-        cluster_api.cluster_service = ClusterService(self.repo)
-        app = FastAPI()
-
-        @app.middleware("http")
-        async def admin_identity(request: Request, call_next):
-            username = request.headers.get("X-Test-User", "admin")
-            request.state.current_user = CurrentUser(
-                id=f"{username}-id",
-                username=username,
-                role=request.headers.get("X-Test-Role", "admin"),
-            )
-            if request.headers.get("X-Test-Elevated"):
-                request.state.is_elevated = True
-            return await call_next(request)
-
-        app.include_router(cluster_api.router)
-        self.client = TestClient(app)
-        self.tokens_path = Path(self.temp.name) / "cluster.json"
-        self.tokens_path.write_text(
-            json.dumps({"worker_tokens": {"worker-246": "token"}}),
-            encoding="utf-8",
-        )
-        self.env = patch.dict(
-            "os.environ", {"GMS_WORKER_TOKENS_FILE": str(self.tokens_path)}
-        )
-        self.env.start()
-
-    def tearDown(self):
-        self.env.stop()
-        self.client.close()
-        cluster_api.cluster_service = self.previous_service
-        self.temp.cleanup()
-
-    def worker_headers(self):
-        return {
-            "Authorization": "Bearer token",
-            "X-GMS-Worker-ID": "worker-246",
-        }
+class ClusterApiHardeningTests(ClusterApiHardeningFixture, unittest.TestCase):
 
     def test_oversized_artifact_is_rejected_without_partial_file(self):
         job = self.repo.create_job_with_leases({
@@ -429,6 +368,26 @@ class ClusterApiHardeningTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertIn("already claimed", response.json()["detail"])
+
+    def test_plain_user_can_act_on_free_worker_device(self):
+        """普通用户对空闲设备的常规操作放行，不再有 use_leased 403 门。
+
+        权限门通过后走 worker 命令通道（异步 accepted 返回）；测试环境
+        无 Worker 应答，命令保持 pending 直到同步等待窗口关闭。
+        """
+        response = self.client.post(
+            "/api/cluster/devices/actions",
+            json={
+                "worker_id": "worker-246",
+                "devices": ["ABC"],
+                "action": "reboot",
+            },
+            headers={"X-Test-User": "alice", "X-Test-Role": "user"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["accepted"])
+        self.assertNotIn("devices.use_leased", response.text)
 
     def test_adb_proxy_device_rejects_fastboot_and_flashing_actions(self):
         self.repo.heartbeat("worker-246", {

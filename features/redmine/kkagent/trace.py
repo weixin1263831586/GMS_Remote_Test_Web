@@ -167,6 +167,20 @@ class KkAgentTrace:
             if str(call.tool_input.get("artifact_id") or "").strip()
         }
 
+    @property
+    def source_evidence_tool_count(self) -> int:
+        """成功过的源码级取证调用数（SDK 源码检索/读取 + 反编译 APK 取证）。"""
+        return sum(
+            1
+            for call in self.tool_calls
+            if call.succeeded
+            and (
+                call.tool_name.startswith(("gms_rt_sdk_", "gms_rt_apk_"))
+                or "_sdk_" in call.tool_name
+                or "_apk_" in call.tool_name
+            )
+        )
+
     def to_summary(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,

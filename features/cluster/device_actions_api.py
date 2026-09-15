@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
 from features.auth import (
-    authentication_required,
     require_authenticated_user,
     require_elevated_admin_when_auth_required,
 )
@@ -23,6 +21,7 @@ from .device_action_spec import (
     read_only_device_actions,
 )
 from .models import ClusterDeviceAction
+from .operation_claims import device_action_claim_payload
 
 
 router = APIRouter()
@@ -80,10 +79,10 @@ async def device_action(body: ClusterDeviceAction, request: Request):
 
     user = require_authenticated_user(request)
     owner_id = user.id
-    # Agent Service Token enforcement (ADR 0006): an agent
-    # principal must hold devices.use_leased for any action and may only
-    # touch devices in its allowed_devices ACL, on workers in its
-    # allowed_workers ACL. Human sessions are unaffected.
+    # Agent Service Token（ADR 0006）：额外要求 devices.use_leased scope
+    # 与 allowed_devices/allowed_workers ACL。人类普通用户不做“先租后用”
+    # 限制：常规操作可直接作用于空闲设备，冲突由下方 claim/fencing 的
+    # 409 兜底；高危操作已在入口挂 require_elevated_admin_when_auth_required。
     if user.role == "agent_service":
         from features.auth import ensure_agent_device_allowed, ensure_agent_worker_allowed
 
@@ -95,82 +94,17 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             )
         for item in body.devices:
             ensure_agent_device_allowed(request, item)
-    # devices.use_leased 语义落地：普通 user（无 devices.lease 权限）对
-    # 非只读操作只能作用于自己已通过 claim/reservation 占有的设备；
-    # device_operator/admin 才可抢占任意空闲设备。否则权限名的安全承诺
-    # 与实际行为不一致。
-    if (
-        not is_read_only
-        and authentication_required()
-        and not user.has_permission("devices.lease")
-    ):
-        owned = {
-            str(claim.get("device_key") or "")
-            for claim in repository.claims.list_active(owner_id=owner_id)
-        }
-        owned |= repository.owned_reservation_device_ids(owner_id)
-        foreign = [item for item in requested if item not in owned]
-        if foreign:
-            raise HTTPException(
-                403,
-                "devices.use_leased only permits actions on devices you "
-                "already lease or reserve; ask a device operator for access",
-            )
     operation_id = f"device-action-{uuid.uuid4().hex}"
     claim_source = f"operation:{operation_id}"
-    # 只读操作（Device Info/UI 操控等）不申请独占 claim：测试占用的设备
-    # 仍可查看信息。写操作保持独占 lease + fencing token 不变。
-    # borrowed: 设备已被同一 user 的 reservation/job claim 占有时，直接
-    # 复用该 claim 的 fencing token，不再二次 acquire——否则
-    # acquire 会因 source_id 不同而与用户自己的 reservation 冲突，
-    # 形成"没 claim 403、有 claim 409"的悖论。
-    borrowed_claims: list[dict[str, Any]] = []
     if not is_read_only:
-        if not user.has_permission("devices.lease"):
-            existing_by_key = {
-                str(claim.get("device_key") or ""): claim
-                for claim in repository.claims.list_active(owner_id=owner_id)
-            }
-            borrowed_claims = [
-                existing_by_key[item]
-                for item in requested
-                if item in existing_by_key
-            ]
-        if borrowed_claims:
-            action_payload.update({
-                "owner_id": owner_id,
-                "lease_tokens": repository.claim_fencing_tokens(
-                    borrowed_claims, operation_id),
-                # 借用：终态绝不 release——claim 生命周期归 reservation/job。
-                "release_claim_on_terminal": False,
-            })
-            request.state.device_lease_tokens = [
-                {**token, "owner_id": owner_id}
-                for token in action_payload["lease_tokens"]
-            ]
-        else:
-            try:
-                records = repository.acquire_device_operation_claim(
-                    body.worker_id,
-                    requested,
-                    owner_id=owner_id,
-                    source_type="cluster-device-action",
-                    source_id=claim_source,
-                    ttl_seconds=3600,
-                    username=user.username,
-                )
-            except ValueError as exc:
-                raise HTTPException(409, str(exc)) from exc
-            action_payload.update({
-                "owner_id": owner_id,
-                "claim_source_id": claim_source,
-                "release_claim_on_terminal": True,
-                "lease_tokens": repository.claim_fencing_tokens(records, operation_id),
-            })
-            request.state.device_lease_tokens = [
-                {**token, "owner_id": owner_id}
-                for token in action_payload["lease_tokens"]
-            ]
+        action_payload.update(device_action_claim_payload(
+            repository, body.worker_id, requested, operation_id,
+            owner_id, username=user.username,
+        ))
+        request.state.device_lease_tokens = [
+            {**token, "owner_id": owner_id}
+            for token in action_payload["lease_tokens"]
+        ]
     else:
         action_payload.update({"owner_id": owner_id, "read_only": True})
 
@@ -188,7 +122,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         finally:
             # 借用 claim（reservation/job 所有）不在此 release——
             # release(claim_source) 对借用的 source_id 也无匹配行。
-            if not is_read_only and not borrowed_claims:
+            if action_payload.get("release_claim_on_terminal"):
                 repository.claims.release(claim_source)
     try:
         command = repository.create_command({
@@ -198,7 +132,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             "payload": {**action_payload, "devices": requested},
         })
     except Exception:
-        if not is_read_only and not borrowed_claims:
+        if action_payload.get("release_claim_on_terminal"):
             repository.claims.release(claim_source, status="failed")
         raise
 

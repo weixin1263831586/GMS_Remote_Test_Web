@@ -124,8 +124,9 @@ Linux Worker (vhci_hcd → 本地 USB 设备)
 
 ## USB/IP 身份识别与重枚举
 
-Rockchip Loader 的 PID 会随 SoC 改变，VID 固定为 `2207`。例如当前 RK3572
-Loader 枚举为 `2207:351a / Rockusb Device`。部署可在 `configs/local/config.json`
+Rockchip Loader 的 PID 会随 SoC 改变，VID 固定为 `2207`。例如 RK3572
+Loader 枚举为 `2207:351a / Rockusb Device`，RK3576 为
+`2207:350e / USB download gadget`。部署可在 `configs/local/config.json`
 配置需要显式识别的身份：
 
 ```json
@@ -133,7 +134,8 @@ Loader 枚举为 `2207:351a / Rockusb Device`。部署可在 `configs/local/conf
   "usbip_vid_pids": [
     "2207:0006",
     "18d1:4d00",
-    "2207:351a"
+    "2207:351a",
+    "2207:350e"
   ]
 }
 ```

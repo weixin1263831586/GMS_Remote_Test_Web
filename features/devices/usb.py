@@ -7,13 +7,18 @@ from typing import Any
 
 # Rockchip devices re-enumerate with different USB identities while crossing
 # ADB, bootloader Fastboot and Loader modes. Each mode has its own VID:PID:
+# Loader PID varies per SoC (see docs/architecture/adr/0005), so the default
+# list carries every known Loader PID — RK3576 enumerates as 2207:350e
+# ("USB download gadget"), RK3572 as 2207:351a.
 DEFAULT_ANDROID_USBIP_VID_PID_ADB = '2207:0006'        # ADB mode
 DEFAULT_ANDROID_USBIP_VID_PID_FASTBOOT = '18d1:4d00'   # Fastboot / download mode
 DEFAULT_ANDROID_USBIP_VID_PID_LOADER = '2207:351a'     # RockUSB Loader mode (RK3572)
+DEFAULT_ANDROID_USBIP_VID_PID_LOADER_RK3576 = '2207:350e'  # RockUSB Loader mode (RK3576)
 DEFAULT_ANDROID_USBIP_VID_PIDS = (
     DEFAULT_ANDROID_USBIP_VID_PID_ADB,
     DEFAULT_ANDROID_USBIP_VID_PID_FASTBOOT,
     DEFAULT_ANDROID_USBIP_VID_PID_LOADER,
+    DEFAULT_ANDROID_USBIP_VID_PID_LOADER_RK3576,
 )
 ANDROID_USBIP_MARKERS = (
     'android',

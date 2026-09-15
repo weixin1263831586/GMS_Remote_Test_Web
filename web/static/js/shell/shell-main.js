@@ -1238,6 +1238,7 @@
         let usersRefreshInterval = null;
         let usersHasLoaded = false;
         let usersListCache = [];
+        let usersStatusFilter = '';
         let usersLocalDevicesReloadTimer = null;
         // 用户取消提权后置位：自动刷新不再每 10 秒重复探测/弹框；
         // 提权成功或列表加载成功时清除。
@@ -1377,25 +1378,13 @@
         }
 
         function setUsersStatusFilter(status) {
-            const select = document.getElementById('users-status-filter');
-            if (select) select.value = status || '';
+            usersStatusFilter = ['online', 'testing', 'offline'].includes(status) ? status : '';
             filterUsersList();
         }
 
         function filterUsersList() {
-            const search = (document.getElementById('users-search-input')?.value || '').trim().toLowerCase();
-            const status = document.getElementById('users-status-filter')?.value || '';
-            const filtered = usersListCache.filter(user => {
-                if (status && getUserDisplayStatus(user) !== status) return false;
-                if (!search) return true;
-                const localDevices = user.local_devices?.devices || [];
-                const clusterWorkers = (user.cluster_jobs || []).map(job => job.worker_id || '');
-                const searchable = [
-                    user.client_id, user.username, user.ip, user.source_label,
-                    ...(user.devices || []), ...localDevices, ...clusterWorkers,
-                ].join(' ').toLowerCase();
-                return searchable.includes(search);
-            });
+            const status = usersStatusFilter;
+            const filtered = usersListCache.filter(user => !status || getUserDisplayStatus(user) === status);
             document.querySelectorAll('[data-user-status-card]').forEach(card => {
                 card.classList.toggle('active', card.dataset.userStatusCard === status);
             });
@@ -1435,10 +1424,7 @@
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
             if (users.length === 0) {
-                const filtersActive = Boolean(
-                    document.getElementById('users-search-input')?.value
-                    || document.getElementById('users-status-filter')?.value
-                );
+                const filtersActive = Boolean(usersStatusFilter);
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="9" class="users-empty-message">

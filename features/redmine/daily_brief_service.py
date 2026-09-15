@@ -1,4 +1,4 @@
-"""RedmineDailyBriefService：晨报编排（Phase 9/23/27/33）。
+"""RedmineDailyBriefService：晨报编排（ADR 0008）。
 
 职责：
 - 快照冻结（build_daily_triage_snapshot 的唯一编排入口）；
@@ -28,9 +28,9 @@ from .daily_brief_report import summarize_daily_brief
 from .daily_brief_repository import (
     TERMINAL_RUN_STATUSES,
     DailyBriefRepository,
-    new_run_id,
     owner_daily_brief_repository,
 )
+from .daily_brief_run_starter import DailyBriefRunStarterMixin
 from .daily_brief_snapshot import (
     DEFAULT_LIST_LIMIT,
     DEFAULT_STALE_DAYS,
@@ -50,16 +50,19 @@ logger = logging.getLogger(__name__)
 
 
 # 配置契约 / 分析器构建已拆分至 daily_brief_config（service 保持编排职责）。
+from features.system import sdk_sources_available as _sdk_sources_available  # noqa: E402
+
 from .daily_brief_config import (  # noqa: E402
     DEFAULT_BRIEF_CONFIG,
     RUNTIME_CONFIG_KEY,
+    TEST_FAILURE_EXTRA_TURNS,
     analyzer_env_extra,
     build_brief_analyzer,
     normalize_daily_brief_config,
 )
 
 
-class DailyBriefService:
+class DailyBriefService(DailyBriefRunStarterMixin):
     """一个 owner 一个实例（内部持有该 owner 的 repository）。"""
 
     # 同 run_id 的执行协调器（跨实例/跨请求共享）：防止 force 重试、
@@ -187,89 +190,6 @@ class DailyBriefService:
             "cancel_requested": bool(requested),
         }
 
-    def start_run(self, mode: str = "manual", *, force: bool = False) -> dict[str, Any]:
-        """创建（或复用）当天 run，并在**同一事务**里入队 durable job。
-
-        run 与 job 原先分两步提交，进程在
-        两步之间崩溃会留下永不被执行的 pending run。现走
-        repository.create_run_and_enqueue_job 的单一 BEGIN IMMEDIATE 事务；
-        already_running 分支还做 has_active_job 兜底——万一存在历史孤儿
-        （旧版本产物）也当场补队。
-        """
-        self._recover_interrupted_runs(self.get_config())
-        brief_date = brief_date_today()
-        existing = self.repository.find_run(self.owner_id, brief_date, mode)
-        if existing is not None:
-            if existing.status in ("completed", "partial") and not force:
-                return {"run_id": existing.run_id, "status": existing.status,
-                        "reused": True}
-            if existing.status in ("pending", "snapshotting", "analyzing"):
-                if not self.repository.has_active_job(existing.run_id, kind="run"):
-                    # 孤儿修复：run 活跃但没有 job（旧版本崩溃残留）——补队。
-                    self.repository.enqueue_job(existing.run_id, kind="run")
-                    return {"run_id": existing.run_id, "status": "pending",
-                            "queued": True}
-                return {"run_id": existing.run_id, "status": existing.status,
-                        "already_running": True}
-            # failed/cancelled（保留冻结快照重试）或人工 force（重新冻结）→ 复用 run。
-            self._reset_run_for_retry(
-                existing, refreeze=bool(force or existing.status in ("completed", "partial"))
-            )
-            self.repository.enqueue_job(existing.run_id, kind="run")
-            return {"run_id": existing.run_id, "status": "pending", "queued": True}
-
-        run = DailyBriefRun(
-            owner_id=self.owner_id,
-            brief_date=brief_date,
-            mode=mode,
-            run_id=new_run_id(),
-            status="pending",
-            started_at=_now(),
-            prompt_version=PROMPT_VERSION,
-        )
-        run_created, _job, _job_created = self.repository.create_run_and_enqueue_job(run)
-        if not run_created:
-            # 跨进程并发：另一进程刚建了同 owner+date+mode 的 run。
-            return {"run_id": run.run_id, "status": run.status,
-                    "already_running": True}
-        return {"run_id": run.run_id, "status": "pending", "queued": True}
-
-    def start_refresh(self, brief_date: str) -> dict[str, Any]:
-        """delta 模式：基于当天 nightly 快照做增量重分析（入队 durable job）。"""
-        self._recover_interrupted_runs(self.get_config())
-        nightly = self.repository.find_run(self.owner_id, brief_date, "nightly")
-        if nightly is None:
-            return {"error": f"no nightly run for {brief_date}; run nightly first"}
-        existing = self.repository.find_run(self.owner_id, brief_date, "delta")
-        if existing is not None:
-            if existing.status in ("pending", "snapshotting", "analyzing"):
-                if not self.repository.has_active_job(existing.run_id, kind="run"):
-                    self.repository.enqueue_job(existing.run_id, kind="run")
-                    return {"run_id": existing.run_id, "status": "pending",
-                            "queued": True}
-                return {"run_id": existing.run_id, "status": existing.status,
-                        "already_running": True}
-            # failed → 保留冻结快照重试；completed/partial → 新一轮增量，
-            # 重新冻结（重新计算相对 nightly 的 delta）。
-            self._reset_run_for_retry(
-                existing, refreeze=existing.status in ("completed", "partial")
-            )
-            self.repository.enqueue_job(existing.run_id, kind="run")
-            return {"run_id": existing.run_id, "status": "pending", "queued": True}
-        run = DailyBriefRun(
-            owner_id=self.owner_id,
-            brief_date=brief_date,
-            mode="delta",
-            run_id=new_run_id(),
-            status="pending",
-            started_at=_now(),
-            prompt_version=PROMPT_VERSION,
-        )
-        run_created, _job, _job_created = self.repository.create_run_and_enqueue_job(run)
-        if not run_created:
-            return {"run_id": run.run_id, "status": run.status,
-                    "already_running": True}
-        return {"run_id": run.run_id, "status": "pending", "queued": True}
 
     async def execute_run(self, run_id: str) -> DailyBriefRun | None:
         """执行 run 全流程：快照 → 分析 → 汇总。异常只落到 run.error。
@@ -454,16 +374,34 @@ class DailyBriefService:
 
         async def _one(issue_id: int) -> None:
             async with semaphore:
-                await self._analyze_one(run, issue_id, entries.get(issue_id, {}), analyzer, config)
+                entry = {**entries.get(issue_id, {}), "analysis_mode": "triage"}
+                # 测试类失败的源码取证步数按 entry 特征追加，其余 issue
+                # 复用共享 analyzer 实例（无状态）。
+                extra = self._extra_turns_for_entry(entry)
+                issue_analyzer = (
+                    self._build_analyzer(config, extra_turns=extra)
+                    if extra
+                    else analyzer
+                )
+                await self._analyze_one(run, issue_id, entry, issue_analyzer, config)
 
         await cancellation.gather_cancel_on_error(
             [_one(issue_id) for issue_id in pending_ids]
         )
 
-    def _build_analyzer(self, config: dict[str, Any]) -> KkAgentRedmineAnalyzer:
-        # 构建细节统一在 daily_brief_config.build_brief_analyzer（含
-        # evidence-only MCP toolset 注入）。
-        return build_brief_analyzer(config)
+    def _build_analyzer(
+        self, config: dict[str, Any], *, extra_turns: int = 0
+    ) -> KkAgentRedmineAnalyzer:
+        # 构建细节统一在 daily_brief_config.build_brief_analyzer（含 MCP
+        # toolset / 设备绑定 env 注入）；轮次放宽按 entry 特征逐 issue 加。
+        return build_brief_analyzer(config, extra_turns=extra_turns)
+
+    @staticmethod
+    def _extra_turns_for_entry(entry: dict[str, Any]) -> int:
+        """仅单条深度诊断追加源码取证步数。"""
+        from .kkagent.evidence_gate import is_test_failure_subject
+
+        return TEST_FAILURE_EXTRA_TURNS if entry.get("analysis_mode") != "triage" and is_test_failure_subject(entry) else 0
 
     def _recover_interrupted_runs(self, config: dict[str, Any]) -> int:
         """启动前把前次进程中断遗留的 run 标记为 failed（可重试）。
@@ -508,9 +446,13 @@ class DailyBriefService:
 
         started = time.monotonic()
         try:
+            analyze_entry = dict(entry) if entry else {"issue_id": issue_id}
+            # 部署事实 hint：SDK 源可用性决定源码取证门禁是否强制
+            #（evidence_gate 降级依据），只进本次调用，不回写快照。
+            analyze_entry["sdk_sources_available"] = _sdk_sources_available()
             outcome = await cancellation.analyze_with_persisted_cancel(
                 self.repository, run.run_id, analyzer,
-                entry if entry else {"issue_id": issue_id},
+                analyze_entry,
             )
         except (cancellation.RunCancelledError, asyncio.CancelledError):
             cancellation.reset_cancelled_issue(self.repository, record)
@@ -557,10 +499,10 @@ class DailyBriefService:
 
     # ------------------------------------------------------------------ single
 
-    async def reanalyze_issue(self, brief_date: str, issue_id: int) -> dict[str, Any]:
+    async def reanalyze_issue(self, brief_date: str, issue_id: int, *, run_id: str = "") -> dict[str, Any]:
         """单 issue 重新分析（写入当天最新 run，不新建 run）。"""
-        run = self.repository.latest_run(self.owner_id, brief_date)
-        if run is None:
+        run = self.repository.get_run(run_id) if run_id else self.repository.latest_run(self.owner_id, brief_date)
+        if run is None or run.owner_id != self.owner_id:
             return {"error": f"no daily brief run for {brief_date}"}
         record = self.repository.get_issue(run.run_id, issue_id)
         if record is None:
@@ -568,7 +510,7 @@ class DailyBriefService:
         if self.run_is_executing(run.run_id):
             return {"error": f"run {run.run_id} is still executing; retry after it finishes"}
         config = self.get_config()
-        # 认证预检：token 失效时直接拒绝单条重分析（HTTP 404 携带原因），
+        # 认证预检：token 失效时直接拒绝单条重分析，
         # 不再让该 issue 烧满 turn 预算后以 max_turns 失败。
         auth_ok, auth_reason = await preflight_gms_auth(
             analyzer_env_extra(config.get("agent_profile"))
