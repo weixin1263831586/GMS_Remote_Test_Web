@@ -2920,7 +2920,7 @@ function renderDailyBriefInner(data) {
   }
   var head = '<div class="daily-brief-head">'
     + '<div class="daily-brief-titlebar">'
-    + '<span class="daily-brief-title">🤖 每日晨报</span>' + statusBadge
+    + '<span class="daily-brief-title">🤖 每日晨报 · 待回复事项</span>' + statusBadge
     + '<span class="muted">' + esc(run.brief_date || '') + (run.finished_at ? ' · 生成于 ' + esc(String(run.finished_at).replace('T', ' ').slice(0, 16)) : '') + '</span>'
     + actionBtn
     + '</div>'
@@ -2951,12 +2951,14 @@ function renderDailyBriefInner(data) {
       return '<span class="daily-brief-state failed" title="' + esc(err) + '">❌ 分析失败'
         + (errorLabel ? ' · ' + esc(errorLabel) : '') + '</span>';
     }
-    // completed / stale：单行只展示置信度等标签，摘要放弹窗。
-    var conf = r.confidence != null ? '置信度 ' + esc(r.confidence) : '';
+    // 模型自评与实际取证完成情况分别展示。
+    var conf = r.confidence != null ? '模型自评 ' + esc(r.confidence) : '';
     var flag = r.needs_human_review ? ' · 需人工确认' : '';
     return '<span class="daily-brief-state">' + conf + flag + '</span>';
   };
-  var rows = issues.slice(0, 10).map(function (issue) {
+  var rows = issues.slice().sort(function (a, b) {
+    return (Number(b.priority_score) || 0) - (Number(a.priority_score) || 0) || Number(a.issue_id) - Number(b.issue_id);
+  }).map(function (issue) {
     var r = issue.result || {};
     var prio = issue.priority === 'P1' ? '🔴' : (issue.priority === 'P2' ? '🟡' : '⚪');
     var subject = String(issue.subject || '').trim();
@@ -2965,15 +2967,16 @@ function renderDailyBriefInner(data) {
     return '<div class="daily-brief-row">'
       + '<div class="daily-brief-main"><span class="daily-brief-priority">' + prio + '</span>'
       + '<span class="daily-brief-issue-title" title="' + esc(hover) + '">'
-      + '<b>Defect #' + esc(issue.issue_id) + '</b>' + (subject ? ' ' + esc(subject) : '') + '</span>'
+      + '<b>Defect #' + esc(issue.issue_id) + '</b>' + (subject ? ' ' + esc(subject) : '')
+      + (r.problem_summary ? '<span style="display:block;white-space:normal">' + esc(r.problem_summary) + '</span>' : '')
+      + (r.suggested_solution ? '<span class="muted" style="display:block;white-space:normal">下一步：' + esc(r.suggested_solution) + '</span>' : '') + '</span>'
       + '</div>'
       + issueStateHtml(issue)
       + '<div class="daily-brief-row-actions"><button type="button" class="ka-btn" data-click="showDailyBriefIssue" data-a0="' + esc(issue.issue_id) + '" data-prevent data-stop>查看分析</button>'
       + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button></div>'
       + '</div>';
   }).join('');
-  var more = issues.length > 10 ? '<div class="muted" style="padding:6px 16px">…共 ' + issues.length + ' 个 issue</div>' : '';
-  return head + rows + more;
+  return head + rows;
 }
 
 async function openRedmineIssue(issueId) {
@@ -2994,13 +2997,47 @@ function findDailyBriefIssue(issueId) {
 }
 
 function showDailyBriefIssue(issueId) {
+  try {
+    showDailyBriefIssueModal(issueId);
+  } catch (error) {
+    console.error('Failed to render daily brief analysis', error);
+    showDailyBriefIssueFallback(issueId);
+    notifyUser('分析内容格式不兼容', '已打开简化视图；可重新分析此项以生成完整结果。', 'warning');
+  }
+}
+
+function dailyBriefList(value) {
+  if (Array.isArray(value)) return value;
+  return value == null || value === '' ? [] : [value];
+}
+
+function dailyBriefObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function showDailyBriefIssueFallback(issueId) {
+  var modalId = 'dailyBriefIssueModal-' + Date.now();
+  var modal = document.createElement('div');
+  modal.id = modalId;
+  modal.className = 'modal';
+  modal.innerHTML = '<div class="modal-content daily-brief-modal">'
+    + '<div class="modal-header"><span class="modal-title">每日晨报 · Defect #' + esc(issueId) + '</span>'
+    + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
+    + '<div class="modal-body daily-brief-modal-body"><div class="muted">该历史分析结果包含旧格式字段，暂无法完整呈现。重新分析此项后会生成兼容的完整结果。</div></div>'
+    + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button>'
+    + '<button data-daily-brief-reanalyze="' + esc(issueId) + '">深度分析此项</button></div></div>';
+  document.body.appendChild(modal);
+  showModal(modalId);
+}
+
+function showDailyBriefIssueModal(issueId) {
   var issue = findDailyBriefIssue(issueId);
   if (!issue) {
     notifyUser('每日晨报数据已更新', '未找到 Defect #' + issueId + '，正在刷新后重试。', 'warning');
     loadDailyBrief();
     return;
   }
-  var r = issue.result || {};
+  var r = dailyBriefObject(issue.result);
   var section = function (title, body, open) {
     if (!body) return '';
     return '<details' + (open !== false ? ' open' : '') + ' class="daily-brief-section">'
@@ -3014,10 +3051,20 @@ function showDailyBriefIssue(issueId) {
       + '<summary>' + title + '</summary>'
       + '<div class="daily-brief-section-body">' + renderMarkdownDoc(String(body)) + '</div></details>';
   };
-  var ev = (r.evidence || []).map(function (e) { return '· [' + esc(e.source || '') + '] ' + esc(e.reference || '') + '：' + esc(e.fact || ''); }).join('\n');
-  var actions = (r.recommended_actions || []).map(function (a) { return (a.step || '·') + '. ' + esc(a.action || '') + (a.reason ? '（' + esc(a.reason) + '）' : ''); }).join('\n');
-  var missing = (r.missing_information || []).map(esc).join('、');
-  var similar = (r.similar_issues || []).map(function (s) {
+  var ev = dailyBriefList(r.evidence).map(function (entry) {
+    if (typeof entry === 'string') return '· ' + esc(entry);
+    var e = dailyBriefObject(entry);
+    return '· [' + esc(e.source || '') + '] ' + esc(e.reference || '') + '：' + esc(e.fact || '');
+  }).join('\n');
+  var actions = dailyBriefList(r.recommended_actions).map(function (entry) {
+    if (typeof entry === 'string') return '· ' + esc(entry);
+    var a = dailyBriefObject(entry);
+    return (a.step || '·') + '. ' + esc(a.action || '') + (a.reason ? '（' + esc(a.reason) + '）' : '');
+  }).join('\n');
+  var missing = dailyBriefList(r.missing_information).map(esc).join('、');
+  var similar = dailyBriefList(r.similar_issues).map(function (entry) {
+    if (typeof entry === 'string') return '· ' + esc(entry);
+    var s = dailyBriefObject(entry);
     return '· #' + esc(s.issue_id) + '（' + esc(s.similarity || 'related') + '）' + (s.subject ? ' ' + esc(s.subject) : '')
       + (s.reusable_fix ? '\n  ↳ 可参考：' + esc(s.reusable_fix) : '');
   }).join('\n');
@@ -3028,8 +3075,8 @@ function showDailyBriefIssue(issueId) {
     : (issue.status !== 'completed' ? '' : (r.history_checked === false
       ? '<div class="muted" style="padding:4px 0 8px">未执行历史工单检索</div>'
       : '<div class="muted" style="padding:4px 0 8px">历史检索未发现同题/类似工单</div>'));
-  var execution = issue.ai_execution || {};
-  var gate = r.evidence_gate || {};
+  var execution = dailyBriefObject(issue.ai_execution);
+  var gate = dailyBriefObject(r.evidence_gate);
   var mark = function (value) {
     return value === true ? '✓' : (value === false ? '✗' : '—');
   };
@@ -3040,12 +3087,21 @@ function showDailyBriefIssue(issueId) {
     ? gate.distinct_history_search_count : execution.distinct_history_search_count || 0);
   var historyTotal = Number(gate.history_search_count != null
     ? gate.history_search_count : execution.history_search_count || 0);
+  var sourceCount = Number(gate.source_evidence_tool_count != null
+    ? gate.source_evidence_tool_count : execution.source_evidence_tool_count || 0);
+  var sourceRequired = gate.source_evidence_required;
+  var sourceText = sourceCount
+    ? sourceCount + ' 次源码级取证调用'
+    : (sourceRequired === false
+      ? (gate.analysis_mode === 'triage' ? '待办分析无需源码取证' : '未要求（无 SDK 源配置）')
+      : (gate.test_failure_subject === true ? '0 次（测试类失败要求 ≥1）' : '—'));
   var auditRows = [
     ['最终格式', schemaText],
     ['Redmine Issue', mark(gate.issue_fetched != null ? gate.issue_fetched : execution.issue_fetched)],
     ['Journals', mark(gate.journals_checked != null ? gate.journals_checked : execution.journals_checked)],
-    ['附件列表调用', mark(gate.attachments_checked != null ? gate.attachments_checked : execution.attachments_checked)],
+    ['附件内容检查', mark(gate.attachments_checked != null ? gate.attachments_checked : execution.attachments_checked)],
     ['历史检索', historyDistinct + ' 个不同查询' + (historyTotal !== historyDistinct ? ' / ' + historyTotal + ' 次调用' : '')],
+    ['源码取证', sourceText],
     ['工具调用', execution.tool_call_count != null ? String(execution.tool_call_count) + ' 次' : '—'],
     ['自动修复', execution.repair_attempts ? String(execution.repair_attempts) + ' 次' : '未触发'],
     ['Session', execution.session_id || gate.session_id || '—'],
@@ -3058,7 +3114,7 @@ function showDailyBriefIssue(issueId) {
   }).join('\n');
   var subject = String(issue.subject || '').trim();
   var chips = '<span style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
-    + (r.confidence != null ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(59,130,246,.15))">置信度 ' + esc(r.confidence) + '</span>' : '')
+    + (r.confidence != null ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(59,130,246,.15))">模型自评 ' + esc(r.confidence) + '</span>' : '')
     + (r.root_cause_type && r.root_cause_type !== 'unknown' ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(59,130,246,.15))">根因：' + esc(r.root_cause_type) + '</span>' : '')
     + (r.risk && r.risk !== 'low' ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(239,68,68,.15))">风险：' + esc(r.risk) + '</span>' : '')
     + (r.needs_human_review ? '<span style="padding:1px 8px;border-radius:10px;background:rgba(234,179,8,.2)">需人工确认</span>' : '')
@@ -3078,23 +3134,24 @@ function showDailyBriefIssue(issueId) {
         ${r.problem_summary ? '<div style="line-height:1.7;margin-bottom:4px">' + esc(r.problem_summary) + '</div>' : ''}
         ${!r.problem_summary && issue.status !== 'failed' && !Object.keys(execution).length && !Object.keys(gate).length ? '<div class="muted" style="line-height:1.7">该项分析尚未生成可展示的结果，请稍后刷新每日晨报。</div>' : ''}
         ${chips}
-        ${(Object.keys(execution).length || Object.keys(gate).length) ? section('🧾 执行与取证审计', auditBody) : ''}
-        ${mdSection('📋 详细分析报告', r.detailed_report)}
-        ${section('🧩 根因分析', r.root_cause)}
+        ${(Object.keys(execution).length || Object.keys(gate).length) ? section('🧾 执行与取证审计', auditBody, false) : ''}
+        ${mdSection(gate.analysis_mode === 'triage' ? '📋 今日待办' : '📋 详细分析报告', r.detailed_report)}
+        ${gate.analysis_mode === 'triage' ? '' : section('🧩 根因分析', r.root_cause)}
         ${section('💬 客户诉求', r.customer_request)}
         ${section('📌 当前状态', r.current_status || r.current_blocker)}
         ${section('🔍 关键证据', ev)}
         ${section('🛠️ 建议动作', actions)}
         ${section('💡 建议方案', r.suggested_solution)}
-        ${similarSection}
+        ${gate.analysis_mode === 'triage' ? '' : similarSection}
         ${section('❓ 缺失资料', missing)}
         ${section('✉️ 回复草稿（EN / 中文）', [r.suggested_reply_en, r.suggested_reply_zh].filter(Boolean).join('\n\n—— 中文 ——\n\n'), false)}
       </div>
       <div class="modal-buttons daily-brief-modal-footer">
         <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">关闭</button>
-        <button class="secondary" data-daily-brief-reanalyze="${esc(issueId)}">重新分析此项</button>
-        <button class="secondary" data-click="copyDailyBriefReply" data-a0="${esc(issueId)}" data-a1="en">复制英文回复</button>
-        <button data-click="copyDailyBriefReply" data-a0="${esc(issueId)}" data-a1="zh">复制中文回复</button>
+        <button class="secondary" data-daily-brief-reanalyze="${esc(issueId)}">深度分析此项</button>
+        ${issue.status === 'completed' ? '<button class="secondary" data-daily-brief-save-case="' + esc(issueId) + '">存为案例</button>' : ''}
+        ${r.suggested_reply_en ? '<button class="secondary" data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="en">复制英文回复</button>' : ''}
+        ${r.suggested_reply_zh ? '<button data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="zh">复制中文回复</button>' : ''}
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -3136,6 +3193,33 @@ document.addEventListener('click', function (event) {
   var button = event.target.closest('[data-daily-brief-reanalyze]');
   if (!button) return;
   reanalyzeDailyBriefIssue(button.dataset.dailyBriefReanalyze, button);
+});
+
+async function saveDailyBriefCase(issueId, button) {
+  var run = dailyBriefCache && dailyBriefCache.run;
+  if (!run || !run.brief_date) return;
+  var original = button.textContent;
+  button.disabled = true;
+  button.textContent = '⏳ 保存中…';
+  try {
+    var base = '/api/redmine-agent/daily-brief/' + encodeURIComponent(run.brief_date)
+      + '/issues/' + encodeURIComponent(issueId) + '/save-case';
+    if (run.run_id) base += '?run_id=' + encodeURIComponent(run.run_id);
+    var response = await api(base, {method: 'POST'}) || {};
+    if (response && response.success === false) throw new Error(response.error || '保存被拒绝');
+    button.textContent = '✓ 已存为案例';
+    notifyUser('已存为案例', 'Defect #' + issueId + ' 的分析结论已沉淀到知识库，后续历史检索可命中', 'success');
+  } catch (e) {
+    button.disabled = false;
+    button.textContent = original;
+    notifyUser('存为案例失败', e.message, 'error');
+  }
+}
+
+document.addEventListener('click', function (event) {
+  var button = event.target.closest('[data-daily-brief-save-case]');
+  if (!button) return;
+  saveDailyBriefCase(button.dataset.dailyBriefSaveCase, button);
 });
 
 function copyDailyBriefReply(issueId, lang) {

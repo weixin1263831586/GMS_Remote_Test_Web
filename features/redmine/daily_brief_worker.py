@@ -86,7 +86,7 @@ async def _execute_job(
     run.finished_at = ""
     service.repository.update_run(run)
     result = await service.reanalyze_issue(
-        run.brief_date, int(job.get("issue_id") or 0)
+        run.brief_date, int(job.get("issue_id") or 0), run_id=run.run_id
     )
     if result.get("error"):
         raise RuntimeError(str(result["error"]))

@@ -147,6 +147,15 @@ class DailyBriefWorkerTests(unittest.TestCase):
         self.repository.upsert_issue(DailyBriefIssue(
             run_id=run.run_id, issue_id=101, buckets=[], status="completed"
         ))
+        newer = DailyBriefRun(
+            owner_id="u1", brief_date=run.brief_date, mode="delta",
+            run_id="db_newer", status="completed", started_at="2099-01-01T00:00:00",
+        )
+        self.repository.create_run(newer)
+        self.repository.upsert_issue(DailyBriefIssue(
+            run_id=newer.run_id, issue_id=101, buckets=[], status="completed",
+            result={"problem_summary": "keep newer run untouched"},
+        ))
         job = self._claim(kind="issue", issue_id=101)
 
         async def analyze(_entry):
@@ -166,6 +175,8 @@ class DailyBriefWorkerTests(unittest.TestCase):
 
         self.assertTrue(asyncio.run(scenario()))
         self.assertEqual(self.repository.get_issue("db_test", 101).status, "completed")
+        self.assertEqual(self.repository.get_issue("db_newer", 101).result,
+                         {"problem_summary": "keep newer run untouched"})
         self.assertEqual(self.repository.get_job(job["job_id"])["status"], "completed")
 
     def test_issue_job_persisted_cancel_stops_active_analysis(self):

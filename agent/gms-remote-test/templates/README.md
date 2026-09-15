@@ -190,9 +190,12 @@ registered when the MCP server runs in service-token mode
 MCP tool identifiers intentionally use underscores (`gms_rt_devices`), while
 Shell CLI commands use hyphens and an explicit action
 (`gms-rt-devices-list`). A bare `gms-rt-devices` command is therefore not
-part of the CLI contract. Optional `GMS_MCP_TOOLSETS=core,test,evidence,admin`
+part of the CLI contract. Optional
+`GMS_MCP_TOOLSETS=core,test,evidence,device_evidence,admin`
 filtering can reduce the advertised schema set; filtered tools are also
-rejected at call time.
+rejected at call time. `device_evidence` is the read-only device diagnosis
+subset (screencap/snapshot/ui-dump/logcat dump/allowlisted shell/device
+info+wait); `gms_rt_shell_exec` (user-approval one-shot) stays in `admin`.
 
 ## Maintaining the bundled payload
 

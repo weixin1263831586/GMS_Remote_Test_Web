@@ -47,9 +47,10 @@ tools/gms_agent_dev.py doctor --client codex --json`. The shipped
 the client or open a new session after changing its MCP registration.
 
 Set `GMS_MCP_TOOLSETS` in a registration env block to a comma-separated
-subset of `core,test,evidence,admin` when a client should receive a smaller
-schema catalog. Discovery/context/auth status stay visible; calls to omitted
-tools are rejected, not merely hidden.
+subset of `core,test,evidence,device_evidence,admin` when a client should
+receive a smaller schema catalog. Discovery/context/auth status stay visible;
+calls to omitted tools are rejected, not merely hidden. `device_evidence`
+exposes only read-only device diagnosis tools.
 
 ## Recommended bootstrap (raw CLI)
 

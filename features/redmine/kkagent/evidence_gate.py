@@ -22,7 +22,20 @@ from .trace import KkAgentTrace
 # Prompt 要求 2-4 次独立历史检索；运行时下限 2 次。
 MIN_HISTORY_SEARCHES = 2
 
+# 测试类失败（CTS/VTS/GTS/STS/LTP/ITS）subject 的关键词：命中即要求至少
+# 一次成功的源码级取证调用（gms_rt_sdk_* / gms_rt_apk_*），否则"内核缺
+# 补丁"式根因方向无法与"上游行为变更 + 测试期望过时"区分开。
+TEST_FAILURE_SUBJECT_KEYWORDS = (
+    "CTS", "VTS", "GTS", "STS", "LTP", "ITS", "MTBF",
+)
+
 EVIDENCE_GATE_JSON_KEY = "evidence_gate"
+
+
+def is_test_failure_subject(entry: dict[str, Any]) -> bool:
+    """快照 subject 是否命中测试套件类失败（决定源码取证门禁是否生效）。"""
+    subject = str(entry.get("subject") or "").upper()
+    return any(keyword in subject for keyword in TEST_FAILURE_SUBJECT_KEYWORDS)
 
 
 def evaluate_evidence_gate(
@@ -57,12 +70,30 @@ def evaluate_evidence_gate(
         and listed_attachment_count >= attachment_count
         and not unread_text_artifact_ids
     )
+    test_failure_subject = is_test_failure_subject(entry)
+    source_evidence_tool_count = trace.source_evidence_tool_count
+    # 部署未配置任何 SDK 源时降级放行：模型会尝试 sdk/apk 取证并收到
+    # "source 未配置"的失败，此时强制 gate 只会系统性烧光轮次。降级依据
+    # 是部署事实（entry 注入的 runtime hint），不是模型自报。hint 缺失
+    # 按 fail-safe 处理（视为要求取证）；只有显式 False 才降级。
+    triage = entry.get("analysis_mode") == "triage"
+    source_evidence_required = not triage and test_failure_subject and (
+        entry.get("sdk_sources_available") is not False
+    )
     return {
+        "analysis_mode": "triage" if triage else "diagnostic",
+        "history_search_required": not triage,
         "issue_fetched": any(
             "redmine_issue_fetch" in name or "redmine_issue" in name
             for name in successful
         ),
         "journals_checked": any("redmine_journals" in name for name in successful),
+        "test_failure_subject": test_failure_subject,
+        "source_evidence_required": source_evidence_required,
+        "source_evidence_tool_count": source_evidence_tool_count,
+        "source_evidence_checked": (
+            not source_evidence_required or source_evidence_tool_count >= 1
+        ),
         "attachments_listed": bool(attachment_calls),
         "attachment_manifest_parsed": attachment_manifest_parsed,
         "listed_attachment_count": listed_attachment_count,
@@ -113,12 +144,26 @@ def gate_errors(
         else:
             errors.append("attachment manifest contained fewer items than the issue snapshot")
     count = int(gate.get("distinct_history_search_count") or 0)
-    if count < MIN_HISTORY_SEARCHES:
+    if gate.get("history_search_required", True) and count < MIN_HISTORY_SEARCHES:
         errors.append(
             f"history search only used {count} distinct successful query/queries; "
             f"at least {MIN_HISTORY_SEARCHES} distinct history searches are required"
         )
+    if gate.get("source_evidence_required") and not gate.get("source_evidence_checked"):
+        errors.append(
+            "test-suite failure: no successful source-level evidence call was made "
+            "(gms_rt_sdk_* or gms_rt_apk_*); the kernel-missing-patch vs "
+            "upstream-behavior-change directions must be distinguished with source "
+            "evidence before claiming a root cause"
+        )
     if isinstance(result, dict):
+        if gate.get("analysis_mode") == "triage":
+            if result.get("root_cause_type") != "unknown":
+                errors.append("daily triage must leave root_cause_type unknown; request separate diagnosis")
+            if result.get("similar_issues"):
+                errors.append("daily triage must not include historical case diagnoses")
+            if len(str(result.get("detailed_report") or "")) > 300:
+                errors.append("daily triage detailed_report must be at most 300 characters")
         allowed = {
             _positive_int(value)
             for value in gate.get("allowed_similar_issue_ids") or []
@@ -155,8 +200,10 @@ def gate_and_errors(
 __all__ = [
     "EVIDENCE_GATE_JSON_KEY",
     "MIN_HISTORY_SEARCHES",
+    "TEST_FAILURE_SUBJECT_KEYWORDS",
     "apply_gate",
     "evaluate_evidence_gate",
     "gate_and_errors",
     "gate_errors",
+    "is_test_failure_subject",
 ]

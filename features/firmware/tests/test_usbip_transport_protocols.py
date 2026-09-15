@@ -109,6 +109,35 @@ class FlashProtocolTests(unittest.TestCase):
             )
         self.assertTrue(exited)
 
+    def test_config_only_loader_pid_is_honored_by_flash_gate(self):
+        """新增 SoC 的 Loader PID 只需写进 configs usbip_vid_pids。
+
+        回归背景（2026-09-15）：RK3576（2207:350e）烧写时烧写门只认内置
+        默认 PID（351a），配置里的新 PID 不生效，导致"未能确认目标设备
+        是唯一 Loader"。烧写门必须与 manager 一样读运行时配置。
+        """
+        probes = iter([
+            "350a\tNEW-SOC-DEV\tUSB download gadget\n",
+        ])
+
+        def execute_command(_ssh, cmd, timeout=None):
+            if cmd.startswith("adb devices"):
+                return CommandResult(stdout="List of devices attached\n", code=0)
+            return CommandResult(stdout=next(probes), code=0)
+
+        ssh_manager = SimpleNamespace(execute_command=execute_command)
+        config_manager = SimpleNamespace(load_config=lambda: {
+            "usbip_vid_pids": ["2207:0006", "18d1:4d00", "2207:350a"],
+        })
+        with patch.object(firmware_runtime, "ssh_manager", ssh_manager), \
+                patch.object(firmware_runtime, "config_manager", config_manager):
+            ready, _detail = asyncio.run(
+                wait_for_single_rockusb_loader(
+                    object(), "NEW-SOC-DEV", timeout=1, interval=0,
+                )
+            )
+        self.assertTrue(ready)
+
 
 if __name__ == "__main__":
     unittest.main()

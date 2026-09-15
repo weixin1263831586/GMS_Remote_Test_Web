@@ -59,7 +59,6 @@ human user in their own shell.
 | Durable jobs | `gms-rt-jobs-list`, `gms-rt-jobs-status`, `gms-rt-jobs-events`, `gms-rt-jobs-follow`, `gms-rt-jobs-wait`, `gms-rt-jobs-cancel` |
 | Config and files | `gms-rt-config-read`, `gms-rt-config-update`, `gms-rt-files-progress` |
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-selfcheck`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
-| Code search | `gms-rt-opengrok-search` |
 | Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-redmine-history-search`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
 | SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |
 
@@ -133,6 +132,9 @@ gms-rt-apk-search TASK 'testMethod' --mode content --json --non-interactive
 gms-rt-apk-source-read TASK com/example/Test.java --offset 0 --limit 400 --json --non-interactive
 
 # 8. Bind SDK conclusions to an exact commit (admin-configured sources)
+#    provider=local_git: revision 解析为 commit，result_id 绑定 commit+path
+#    provider=codesearch: OpenGrok /api/v1 动态索引（AOSP 等大项目树），
+#    revision 仅作请求标签，read 直接按项目路径取文件内容
 gms-rt-sdk-sources --json --non-interactive
 gms-rt-sdk-search --source SRC --revision REV --query SYMBOL --json --non-interactive
 gms-rt-sdk-read --result-id RID --source SRC --path P --commit SHA --json --non-interactive

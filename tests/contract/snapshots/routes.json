@@ -1832,6 +1832,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/redmine-agent/daily-brief/agent-profiles"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/redmine-agent/daily-brief/config"
   },
   {
@@ -1845,6 +1851,12 @@
       "GET"
     ],
     "path": "/api/redmine-agent/daily-brief/latest"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/model-options"
   },
   {
     "methods": [
@@ -1887,6 +1899,12 @@
       "POST"
     ],
     "path": "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/reanalyze"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/save-case"
   },
   {
     "methods": [

@@ -107,3 +107,16 @@ ownership and package test routing.
 4. Validate with `gms-rt-system-selfcheck --json` (MCP: `gms_rt_context`),
    then follow the runbook in
    `agent/gms-remote-test/docs/AGENT_PLAYBOOK.md`.
+
+## Context-efficiency policy
+
+- Prefer `git diff`, `git status`, `rg`, and targeted file reads over full-repository rescans.
+- For follow-up reviews, inspect only changed files plus direct callers/callees unless explicitly asked for a fresh full audit.
+- `agent/gms-remote-test/` is the canonical source.
+- Do not independently inspect `plugins/gms-remote-test/` unless validating generated-source parity.
+- Do not scan generated/cache/runtime directories unless relevant:
+  dist/, artifacts/, reports/, .git/, __pycache__/, .pytest_cache/, node_modules/, .venv/
+- Never dump entire large files when a targeted range or symbol search is sufficient.
+- Run the narrowest relevant tests first.
+- Do not repeatedly run the full pytest/Playwright suite after each small edit.
+- Report findings concisely: severity, file:line, cause, fix.

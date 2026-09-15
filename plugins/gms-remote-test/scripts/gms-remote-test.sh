@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.14"
+GMS_RT_VERSION="0.22.17"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -2900,24 +2900,6 @@ gms-rt-files-progress() {
     api_call "$endpoint" | jq '.'
 }
 
-# OpenGrok search
-gms-rt-opengrok-search() {
-    local query="$1"
-    local full="${2:-false}"
-    [ -z "$query" ] && { error "Query required. Usage: gms-rt-opengrok-search <query> [full]"; return 1; }
-    check_jq
-    echo "🔍 Searching OpenGrok for: $query..."
-    case "$full" in
-        true|false) ;;
-        *) error "full must be true or false"; return "$GMS_RT_EXIT_USAGE" ;;
-    esac
-    local data
-    data=$(jq -cn --arg query "$query" --argjson full "$full" \
-        '{query: $query, full: $full}')
-    local response=$(api_call "/opengrok/search" "POST" "$data")
-    echo "$response" | jq '.'
-}
-
 # ==============================================================================
 # Redmine Evidence Commands (read-only evidence chain)
 # ==============================================================================
@@ -5642,7 +5624,6 @@ _gms_rt_command_usage() {
         gms-rt-devices-snapshot) printf '%s' 'gms-rt-devices-snapshot <device_id>' ;;
         gms-rt-devices-wifi) printf '%s' 'gms-rt-devices-wifi <devices> <ssid> [password]' ;;
         gms-rt-files-progress) printf '%s' 'gms-rt-files-progress [upload_id]' ;;
-        gms-rt-opengrok-search) printf '%s' 'gms-rt-opengrok-search <query> [true|false]' ;;
         gms-rt-jobs-follow) printf '%s' 'gms-rt-jobs-follow <job_id> [--after SEQUENCE] [--limit N]' ;;
         gms-rt-devices-logcat) printf '%s' 'gms-rt-devices-logcat <device_id> [-c] [logcat args]' ;;
         gms-rt-devices-push) printf '%s' 'gms-rt-devices-push <device_id> <local_file> <remote_path>' ;;
@@ -5758,7 +5739,6 @@ _gms_rt_command_summary() {
         gms-rt-devices-ui-dump) printf '%s' 'Read one device UI hierarchy as structured elements' ;;
         gms-rt-devices-snapshot) printf '%s' 'Collect a fixed read-only device diagnostic snapshot (build, activity, lock and owners)' ;;
         gms-rt-files-progress) printf '%s' 'Read upload progress, optionally for one upload id' ;;
-        gms-rt-opengrok-search) printf '%s' 'Search the configured OpenGrok index' ;;
         gms-rt-reports-list) printf '%s' 'List test reports visible to the current principal' ;;
         gms-rt-reports-analyze) printf '%s' 'Analyze a local report file or a uniquely resolved saved report' ;;
         gms-rt-reports-download) printf '%s' 'Download a saved report tree into a local output directory' ;;
@@ -6200,9 +6180,6 @@ ${YELLOW}System:${NC}
   gms-rt-system-skills           - Download skills directory as ZIP
   gms-rt-system-update           - Update the Skill and all CLI command links
   gms-rt-system-version          - Print CLI version
-
-${YELLOW}Code search:${NC}
-  gms-rt-opengrok-search         - Search the configured OpenGrok service
 
 ${YELLOW}APK Analysis:${NC}
   gms-rt-apk-resolve             - Resolve a suite module to its APK/JAR artifact

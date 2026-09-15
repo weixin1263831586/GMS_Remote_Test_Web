@@ -80,17 +80,15 @@ def sync_one(source: Path, target: Path) -> bool:
     if not source.is_file():
         fail(f"source missing: {source}")
     if target.is_file() and target.read_bytes() == source.read_bytes():
-        want_exec = _is_executable_source(source)
-        is_exec = bool(target.stat().st_mode & 0o111)
-        if want_exec and not is_exec:
-            target.chmod(0o755)
-            print(f"Fixed exec bit: {target.name}")
+        want_mode = 0o755 if _is_executable_source(source) else 0o644
+        if target.stat().st_mode & 0o777 != want_mode:
+            target.chmod(want_mode)
+            print(f"Fixed file mode: {target.name}")
             return True
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(source.read_bytes())
-    if _is_executable_source(source):
-        target.chmod(0o755)
+    target.chmod(0o755 if _is_executable_source(source) else 0o644)
     print(f"Synced {target.name}")
     return True
 

@@ -209,6 +209,21 @@ class DailyBriefApiTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ date
 
+    def test_reanalysis_of_running_issue_is_conflict(self):
+        queued = self.client.post("/api/redmine-agent/daily-brief/run").json()["data"]
+        repo = brief_repo.owner_daily_brief_repository("owner-a")
+        run = repo.get_run(queued["run_id"])
+        repo.upsert_issue(brief_repo.DailyBriefIssue(
+            run_id=run.run_id, issue_id=101, buckets=[], status="pending",
+        ))
+        for path in (
+            f"runs/{run.run_id}/issues/101/reanalyze",
+            f"{run.brief_date}/issues/101/reanalyze",
+        ):
+            response = self.client.post(f"/api/redmine-agent/daily-brief/{path}")
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["code"], "STATE_CONFLICT")
+
     def test_get_brief_for_date_validates_and_404(self):
         bad = self.client.get("/api/redmine-agent/daily-brief/not-a-date")
         self.assertEqual(bad.status_code, 400)

@@ -9,7 +9,12 @@ from features.devices import operation_claims, support
 from features.devices.locks import DeviceLockManager
 
 
-def authenticated_request(user_id: str, username: str) -> Request:
+def authenticated_request(
+    user_id: str,
+    username: str,
+    role: str = "device_operator",
+    extra_permissions: frozenset[str] = frozenset(),
+) -> Request:
     request = Request({
         "type": "http",
         "method": "POST",
@@ -20,7 +25,8 @@ def authenticated_request(user_id: str, username: str) -> Request:
     request.state.current_user = CurrentUser(
         id=user_id,
         username=username,
-        role="device_operator",
+        role=role,
+        extra_permissions=extra_permissions,
     )
     return request
 
@@ -82,6 +88,74 @@ def test_operation_claim_rejects_untrusted_device_ids():
     assert source_id == ""
     assert records == []
     assert conflict.status_code == 400
+
+
+def test_plain_user_can_operate_free_device():
+    """普通用户（无 devices.lease）可直接操作空闲设备。
+
+    常规设备运维（wifi/reboot/remount 等）不再要求"先租后用"；设备
+    归属冲突仍由 claim 409 fencing 兜底，高危操作另有管理员提权门。
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        alice = authenticated_request("user-alice", "alice", role="user")
+        with patch.object(operation_claims, "device_lock_manager", manager):
+            source_id, records, conflict = support.acquire_device_operation_claim(
+                alice,
+                ["SERIAL-9"],
+                "wifi",
+            )
+            assert conflict is None
+            assert source_id.startswith("operation:wifi:")
+            assert records[0]["owner_id"] == "user-alice"
+            assert support.release_device_operation_claim(source_id) == 1
+
+
+def test_agent_token_without_use_leased_scope_is_rejected():
+    """Agent Service Token 没有 devices.use_leased scope 时 403。"""
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        agent = authenticated_request("agent-1", "agent:agt_x", role="agent_service")
+        with patch.object(operation_claims, "device_lock_manager", manager):
+            source_id, records, conflict = support.acquire_device_operation_claim(
+                agent,
+                ["SERIAL-1"],
+                "wifi",
+            )
+            assert source_id == ""
+            assert records == []
+            assert conflict.status_code == 403
+            assert b"devices.use_leased" in conflict.body
+
+
+def test_agent_token_with_use_leased_scope_can_operate():
+    """显式授予 devices.use_leased scope 的 agent token 可正常操作。"""
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        agent = authenticated_request(
+            "agent-1",
+            "agent:agt_x",
+            role="agent_service",
+            extra_permissions=frozenset({"devices.use_leased"}),
+        )
+        with patch.object(operation_claims, "device_lock_manager", manager):
+            source_id, records, conflict = support.acquire_device_operation_claim(
+                agent,
+                ["SERIAL-1"],
+                "wifi",
+            )
+            assert conflict is None
+            assert records[0]["owner_id"] == "agent-1"
+            assert support.release_device_operation_claim(source_id) == 1
 
 
 def test_lock_status_resolves_internal_owner_to_user_management_identity():

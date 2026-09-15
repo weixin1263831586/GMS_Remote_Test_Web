@@ -1110,7 +1110,7 @@ function renderReportDiagnosisLoading(failure, classNames, errorMessage) {
             <div class="dx-loading-grid">
                 <div class="dx-loading-card"><span>1</span>提取失败堆栈</div>
                 <div class="dx-loading-card"><span>2</span>定位套件构件</div>
-                <div class="dx-loading-card"><span>3</span>OpenGrok 源码搜索</div>
+                <div class="dx-loading-card"><span>3</span>源码检索</div>
                 <div class="dx-loading-card"><span>4</span>AI 诊断和建议</div>
             </div>
         `;
@@ -1371,13 +1371,13 @@ function renderReportDiagnosis(data) {
             <div class="dx-list-item${itemUrl ? ' dx-clickable' : ''}" ${itemUrl ? `data-click="_actOpenUrlBlank" data-a0="${escapeJsAttr(itemUrl)}"` : ''}>
                 <div class="dx-list-head">
                     <div class="dx-list-title">${escapeHtml(item.type || 'source')}</div>
-                    ${itemUrl ? `<a class="dx-link" href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" data-click="_actStopPropagation">打开 OpenGrok</a>` : ''}
+                    ${itemUrl ? `<a class="dx-link" href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" data-click="_actStopPropagation">打开源码</a>` : ''}
                 </div>
                 <div class="dx-list-path dx-list-path-inline">${escapeHtml(item.path || item.display_path || '')}${item.line ? `<span>:${escapeHtml(String(item.line))}</span>` : ''}</div>
             </div>
         `;
         }).join('')
-        : renderDxEmpty('未检索到 OpenGrok 源码结果');
+        : renderDxEmpty('未检索到源码结果');
 
     const kbCards = kbResults.length > 0
         ? kbResults.map(item => `
@@ -1489,7 +1489,7 @@ function renderReportDiagnosis(data) {
                 <div class="dx-step-label">
                     <span>2</span>
                     <div>
-                        <b>OpenGrok 源码或测试套件反编译</b>
+                        <b>源码或测试套件反编译</b>
                         <em>把定位依据、候选构件和源码搜索放在一起</em>
                     </div>
                 </div>
@@ -1506,7 +1506,7 @@ function renderReportDiagnosis(data) {
                         ${candidateCards}
                     </div>
                     <div class="dx-section">
-                        <div class="dx-section-title">OpenGrok 源码搜索 <span>${sourceResults.length} 结果</span></div>
+                        <div class="dx-section-title">源码检索 <span>${sourceResults.length} 结果</span></div>
                         <div class="dx-list">${sourceCards}</div>
                     </div>
                 </div>
@@ -2049,7 +2049,7 @@ async function analyzeFailureWithSource(testName, errorMessage) {
 
                     const linkHtml = itemUrl ?
                         `<a href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
-                            在 OpenGrok 中查看 →
+                            打开源码 →
                         </a>` :
                         '<span style="font-size: 10px; color: #999;">无链接</span>';
 
@@ -2224,7 +2224,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
             // OpenGrok源码搜索结果
             if (data.opengrok_results && data.opengrok_results.length > 0) {
                 content += '<div style="margin-top: 16px; padding: 12px; background: var(--darker-bg); border-radius: 6px; border-left: 3px solid #9c27b0;">';
-                content += '<div style="font-weight: 600; margin-bottom: 8px; color: #9c27b0;">🔍 相关源码 (OpenGrok)</div>';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: #9c27b0;">🔍 相关源码</div>';
                 content += '<div style="max-height: 300px; overflow-y: auto;">';
 
                 data.opengrok_results.forEach(item => {
@@ -2261,7 +2261,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
             // OpenGrok源码搜索结果
             if (data.source_search_results && data.source_search_results.length > 0) {
                 content += '<div style="margin-top: 16px; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; border-left: 3px solid #9c27b0;">';
-                content += '<div style="font-weight: 600; margin-bottom: 8px; color: white;">🔍 OpenGrok源码搜索</div>';
+                content += '<div style="font-weight: 600; margin-bottom: 8px; color: white;">🔍 源码检索</div>';
                 content += '<div style="max-height: 400px; overflow-y: auto;">';
 
                 data.source_search_results.forEach(item => {
@@ -2288,7 +2288,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
                                     ${escapeHtml(item.type)}
                                 </div>
                                 ${itemUrl ? `<a href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" style="font-size: 11px; color: #667eea; text-decoration: none; white-space: nowrap; font-weight: 600;">
-                                    在 OpenGrok 中查看 →
+                                    打开源码 →
                                 </a>` : '<span style="font-size: 10px; color: #999;">无链接</span>'}
                             </div>
                             <div style="font-family: monospace; font-size: 11px; color: #616161; margin-bottom: 4px;">

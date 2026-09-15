@@ -12,9 +12,12 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import require_authenticated_user
+from features.auth import require_authenticated_user, require_human_principal_when_auth_required
+from features.users import owner_id_from_request
+from foundation.error_model import ApiError
 
 from .api import get_redmine_service_for_request
+from .daily_brief_repository import owner_daily_brief_repository
 
 
 router = APIRouter()
@@ -211,6 +214,31 @@ async def evaluate_case(issue_id: int, request: Request):
 async def latest_evaluation(issue_id: int, request: Request):
     evaluation = _knowledge(request).latest_evaluation(issue_id)
     return {"success": True, "data": evaluation}
+
+
+# Daily-brief result -> case fact (local KB sink, no Redmine write)
+
+@router.post("/daily-brief/{brief_date}/issues/{issue_id}/save-case")
+async def save_daily_brief_case(brief_date: str, issue_id: int, request: Request, run_id: str = Query("")):
+    """把一次晨报 AI 分析结果沉淀为本地 case_fact（FTS 可检索）。
+
+    只写本地知识库，不做任何 Redmine 写操作；重复保存按 issue_id 覆盖
+    （upsert，保留 created_at）。run_id 指定用户当前查看的晨报。
+    """
+    from .daily_brief_case_fact import build_case_fact_from_brief
+
+    require_human_principal_when_auth_required(request)
+    owner_id = owner_id_from_request(request)
+    repository = owner_daily_brief_repository(owner_id)
+    run = repository.get_run(run_id) if run_id else repository.latest_run(owner_id, brief_date)
+    if run is None or run.owner_id != owner_id or run.brief_date != brief_date:
+        return ApiError.not_found(f"no daily brief run for {brief_date}").to_response()
+    record = repository.get_issue(run.run_id, issue_id)
+    if record is None or record.status != "completed" or not record.result:
+        return ApiError.not_found(f"issue {issue_id} has no completed analysis in {run.run_id}").to_response()
+    fact = build_case_fact_from_brief(issue_id, record, run)
+    _knowledge(request).knowledge_db.upsert_case_fact(fact)
+    return {"success": True, "data": {"issue_id": issue_id, "saved": True}}
 
 
 # Internal issue creation (confirmed, configurable)

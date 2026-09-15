@@ -55,8 +55,8 @@ sudo -n usbip detach -p <port>  # 平台使用的 detach 形式
 背景与排查：
 
 - 设备重枚举后 USB 身份可能变化：Rockchip Loader 的 VID 固定为 `2207`，
-  PID 随 SoC 变化（如 `2207:351a`）。平台同时识别 `Rockusb Device` 标记
-  并优先重挂载原 BUSID。若新增 SoC/PID 导致重连失败，在
+  PID 随 SoC 变化（如 `2207:351a`、RK3576 的 `2207:350e`）。平台同时识别
+  `Rockusb Device` 标记并优先重挂载原 BUSID。若新增 SoC/PID 导致重连失败，在
   `configs/local/config.json` 的 `usbip_vid_pids` 中补充该身份。
 - 设备在 ADB/Fastboot/Fastbootd/Loader 之间切换时，平台按来源主机和
   BUSID 自动重新 bind/attach；重枚举后的短暂不可见是预期行为，watchdog

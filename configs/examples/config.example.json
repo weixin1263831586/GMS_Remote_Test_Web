@@ -19,7 +19,8 @@
   "usbip_vid_pids": [
     "2207:0006",
     "18d1:4d00",
-    "2207:351a"
+    "2207:351a",
+    "2207:350e"
   ],
   "wifi": {
     "ssid": "AndroidWifi",
@@ -51,6 +52,13 @@
         "provider": "local_git",
         "repo_root": "/srv/git/android-example",
         "default_revision": "main"
+      },
+      {
+        "source_id": "rk-aosp17",
+        "provider": "codesearch",
+        "base_url": "https://codeindex.example.com/source",
+        "project": "Android17",
+        "token_env": "RK_CODESEARCH_TOKEN"
       }
     ]
   },

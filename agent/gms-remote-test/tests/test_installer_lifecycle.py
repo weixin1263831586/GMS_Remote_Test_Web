@@ -179,6 +179,80 @@ class TestCliDispatcherLinks(EnvSandbox):
         self.assertTrue(user_managed.is_file())
 
 
+class TestSandboxHomeGuard(EnvSandbox):
+    """安装期沙箱 HOME 拦截 + dispatcher 运行时路径解析。
+
+    线上事故：AI 客户端沙箱把 HOME 重定向到 /tmp/tmpXXXX，装出来的
+    gms-rt/gms-agent 链接与 dispatcher 全部写死临时绝对路径，/tmp 清理后
+    全部死链（"gms-rt 补全只剩 4 个"）。这里锁定三层防线。
+    """
+
+    def test_sandbox_home_reason_detects_tmp_home(self):
+        with mock.patch.object(pm.Path, "home", return_value=Path("/tmp/tmpABC123")):
+            reason = pm.sandbox_home_reason()
+        self.assertIn("/tmp/tmpABC123", reason)
+        self.assertIn("ephemeral", reason)
+        # 真实 HOME（/home/xxx）不命中
+        with mock.patch.object(pm.Path, "home", return_value=Path("/home/hcq")):
+            self.assertEqual(pm.sandbox_home_reason(), "")
+
+    def test_install_refuses_sandbox_home_unless_overridden(self):
+        self.make_installed_runtime()
+        with mock.patch.object(pm.Path, "home", return_value=Path("/tmp/tmpDEAD")):
+            with self.assertRaises(SystemExit):
+                pm.install_cli_dispatcher()
+            # 显式 override 后放行
+            with mock.patch.dict(
+                os.environ, {"GMS_INSTALL_ALLOW_SANDBOX_HOME": "1"}
+            ):
+                created = pm.install_cli_dispatcher()
+        self.assertTrue(created)
+
+    def test_dispatcher_resolves_runtime_at_invocation_time(self):
+        """dispatcher 脚本不得内嵌安装期绝对路径（否则换 HOME 即死）。"""
+        self.make_installed_runtime()
+        with mock.patch.dict(os.environ, {"GMS_BIN_DIR": str(self.root / "bin")}):
+            pm.install_cli_dispatcher()
+        dispatcher = self.root / "bin" / "gms-rt"
+        text = dispatcher.read_text(encoding="utf-8")
+        self.assertNotIn(str(pm.CURRENT_LINK), text)
+        self.assertNotIn(str(Path.home()), text)
+        self.assertIn('runtime_root="${GMS_AGENT_RUNTIME_ROOT:-', text)
+        self.assertIn("current/scripts/gms-remote-test.sh", text)
+
+    def test_broken_stale_links_are_removed(self):
+        """指向已消失 runtime 的悬空链接一律摘除，不留假命令补全。"""
+        self.make_installed_runtime()
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        gone_target = self.root / "gone-runtime" / "gms-rt"
+        dangling = bin_dir / "gms-rt-dead-command"
+        dangling.symlink_to(gone_target)
+        with mock.patch.dict(os.environ, {"GMS_BIN_DIR": str(bin_dir)}):
+            pm.install_cli_dispatcher()
+        self.assertFalse(dangling.exists())
+
+    def test_refuses_to_link_when_runtime_itself_is_ephemeral(self):
+        """插件更新器在沙箱里装 runtime 但把 bin 指向真实目录的场景：
+        runtime 落在 /tmp 而 bin 持久时拒绝写用户 bin 链接。
+
+        bin 路径用测试沙箱内的「模拟持久目录」（sandbox-root/persistent-bin），
+        由 _is_ephemeral_path 的 mock 声明其持久性——绝不用真实
+        ~/.local/bin，防线逻辑一旦失效也不会污染用户环境。
+        """
+        self.make_installed_runtime()
+        fake_runtime = Path("/tmp/tmpHIJACK/.local/share/gms-remote-test")
+        persistent_bin = self.root / "persistent-bin"
+        with mock.patch.object(pm, "CURRENT_LINK", fake_runtime / "current"), \
+             mock.patch.object(pm, "_is_ephemeral_path",
+                               lambda p: Path(p) != persistent_bin), \
+             mock.patch.dict(os.environ, {"GMS_BIN_DIR": str(persistent_bin)}), self.assertRaises(SystemExit) as ctx:
+            pm.install_cli_dispatcher()
+        self.assertIn("ephemeral", str(ctx.exception))
+        # 防线必须在写任何链接之前触发
+        self.assertFalse(persistent_bin.exists())
+
+
 class TestMultiControllerFailClosed(EnvSandbox):
     """多 Controller 主机的写路径与 Controller 解析必须 fail closed。
 

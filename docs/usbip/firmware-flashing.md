@@ -64,9 +64,12 @@ Rockchip 整包固件烧写（`upgrade_tool uf`）期间，设备会经历
 每次重枚举设备的 USB 身份（VID:PID、Windows 设备标签）都可能改变：
 
 - Rockchip Loader 的 VID 固定为 `2207`，PID 随 SoC 变化（如 RK3572 Loader
-  枚举为 `2207:351a / Rockusb Device`）。部署可在 `configs/local/config.json`
+  枚举为 `2207:351a / Rockusb Device`，RK3576 为 `2207:350e / USB download
+  gadget`）。部署可在 `configs/local/config.json`
   的 `usbip_vid_pids` 中补充需要显式识别的身份；平台同时识别
-  `Rockusb Device` 标记，并优先重挂载原 BUSID。
+  `Rockusb Device` 标记，并优先重挂载原 BUSID。烧写门（Loader 唯一性
+  判定、协议识别）同样读取该配置：新增 SoC 只需在这里补充 PID 并刷新
+  配置，无需改代码。
 - 每次重枚举都要在 USB/IP 链路上重新 bind/attach。实机验证表明：
   **USB/IP 链路无法维持跨越多次 USB 重枚举的会话**，在 Worker 端直接
   跨重枚举烧写的方案均不可靠，已全部删除（见 [ADR-0005](../architecture/adr/0005-usbip-firmware-ownership.md)）。

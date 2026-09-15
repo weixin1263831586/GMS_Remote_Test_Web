@@ -33,6 +33,7 @@ def issue_payload(
         return payload
 
     tools = execution.get("tools") or []
+    gate = (issue.result or {}).get("evidence_gate") or {}
     failure_stage = str(
         execution.get("failure_stage") or execution.get("error_type") or ""
     )
@@ -52,7 +53,15 @@ def issue_payload(
         "schema_status": schema_status,
         "issue_fetched": _tool_succeeded(tools, "redmine_issue_fetch"),
         "journals_checked": _tool_succeeded(tools, "redmine_journals"),
-        "attachments_checked": _tool_succeeded(tools, "redmine_attachments"),
+        "attachments_checked": gate.get("attachments_checked") is True,
+        "source_evidence_checked": bool(
+            execution.get("source_evidence_checked")
+        ) or _tool_succeeded(tools, "gms_rt_sdk_") or _tool_succeeded(
+            tools, "gms_rt_apk_"
+        ),
+        "source_evidence_tool_count": int(
+            execution.get("source_evidence_tool_count") or 0
+        ),
         "history_search_count": int(execution.get("history_search_count") or 0),
         "distinct_history_search_count": int(
             execution.get("distinct_history_search_count") or 0

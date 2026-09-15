@@ -83,7 +83,7 @@ def render_daily_brief_markdown(
     lines.append(
         f"共 {counts.get('total', 0)} 个待处理（待回复 "
         f"{counts.get('waiting_my_reply', 0)} / 超 "
-        f"{run.no_reply_3_days_count and ''}3 天未回复 "
+        f"3 天未回复 "
         f"{counts.get('no_reply_3_days', 0)}），成功分析 "
         f"{counts.get('completed', 0)}，失败 {counts.get('failed', 0)}。"
     )
@@ -98,21 +98,18 @@ def render_daily_brief_markdown(
             "结论可能基于过期信息。"
         )
     lines.append("")
-    for issue in completed:
+    for issue in sorted(completed, key=lambda item: (-item.priority_score, item.issue_id)):
         result = issue.result or {}
         lines.append(
             f"## {issue.priority} #{issue.issue_id} "
             f"{result.get('problem_summary', '')}"
         )
         lines.append(f"- 客户诉求：{result.get('customer_request', '')}")
-        lines.append(
-            f"- 根因（{result.get('root_cause_type', 'unknown')}）："
-            f"{result.get('root_cause', '')}"
-        )
+        lines.append(f"- 当前阻塞：{result.get('current_blocker') or '未确认'}")
         lines.append(f"- 建议：{result.get('suggested_solution', '')}")
         detailed = str(result.get("detailed_report") or "").strip()
         if detailed:
-            lines.extend(["", "### 详细分析报告", detailed, ""])
+            lines.append("- 详细分析：请在工单详情中查看。")
         similar = result.get("similar_issues") or []
         if similar:
             refs = "；".join(

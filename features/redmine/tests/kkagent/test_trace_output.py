@@ -124,6 +124,9 @@ class OutputParserTests(unittest.TestCase):
             "recommended_actions": [], "suggested_solution": "s",
             "detailed_report": "## 一、问题概况", "evidence": [],
             "similar_issues": [], "history_checked": True, "confidence": 0.8,
+            "risk": "medium",
+            "current_blocker": "", "root_cause": "", "root_cause_type": "unknown",
+            "missing_information": [], "suggested_reply_en": "", "suggested_reply_zh": "",
         }
 
     def test_extract_json_last_line(self):
