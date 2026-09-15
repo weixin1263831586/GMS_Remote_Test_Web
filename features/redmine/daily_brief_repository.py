@@ -298,17 +298,17 @@ class DailyBriefRepository:
             return self._row_to_run(row) if row else None
 
     def latest_run(self, owner_id: str, brief_date: str | None = None) -> DailyBriefRun | None:
-        """最新一次任意模式的 run（brief_date 缺省为最新日期）。"""
+        """Latest morning brief; independent issue diagnostics do not replace it."""
         with self._connect() as conn:
             if brief_date:
                 row = conn.execute(
-                    "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND brief_date=? "
+                    "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND brief_date=? AND mode NOT LIKE 'issue:%' "
                     "ORDER BY brief_date DESC, started_at DESC, rowid DESC LIMIT 1",
                     (owner_id, brief_date),
                 ).fetchone()
             else:
                 row = conn.execute(
-                    "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
+                    "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND mode NOT LIKE 'issue:%' "
                     "ORDER BY brief_date DESC, started_at DESC, rowid DESC LIMIT 1",
                     (owner_id,),
                 ).fetchone()
@@ -394,12 +394,15 @@ class DailyBriefRepository:
             return cursor.rowcount
 
     def reset_stale_running(self, older_than_iso: str) -> int:
-        """进程崩溃恢复：把长时间 running/pending 的 run 标记为 failed。"""
+        """Recover orphan runs only; live jobs remain active regardless of age."""
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
                 "UPDATE redmine_daily_brief_runs SET status='failed', "
                 "error='interrupted by process restart', updated_at=? "
-                "WHERE status IN ('pending','snapshotting','analyzing') AND started_at < ?",
+                "WHERE status IN ('pending','snapshotting','analyzing') AND started_at < ? "
+                "AND NOT EXISTS (SELECT 1 FROM redmine_daily_brief_jobs AS job "
+                "WHERE job.run_id=redmine_daily_brief_runs.run_id "
+                "AND job.status IN ('queued','running'))",
                 (_now(), older_than_iso),
             )
             return cursor.rowcount
@@ -442,17 +445,8 @@ class DailyBriefRepository:
     def reconcile_orphan_runs(self, started_after_iso: str) -> int:
         return self.jobs.reconcile_orphan_runs(started_after_iso)
 
-    def create_run_and_enqueue_job(self, run: DailyBriefRun) -> tuple[bool, dict[str, Any], bool]:
-        """run 创建 + job 入队 = **同一个** BEGIN IMMEDIATE 事务。
-
-        旧的两步路径（create_run 提交后再 enqueue_job）在
-        进程崩溃时会留下「run=pending / 无 job」的孤儿——下一次触发看到
-        already_running 直接复用，却永远没有 Worker 会执行它。
-
-        返回 (run_created, job, job_created)。run 已存在（同 owner+date+mode）
-        时复用既有 run：仍确保它有活动 job（幂等补队），调用方据
-        run_created/job_created 区分新建与合流。
-        """
+    def create_run_and_enqueue_job(self, run: DailyBriefRun, *, issue: DailyBriefIssue | None = None) -> tuple[bool, dict[str, Any], bool]:
+        """Create/reuse a run, optional single issue and job in one write transaction."""
         now = _now()
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -474,8 +468,14 @@ class DailyBriefRepository:
                 run_id = str(row["run_id"])
             else:
                 run_id = run.run_id
-            job, job_created = self.jobs.insert_job(conn, run_id, kind="run", issue_id=0)
+            job, job_created = self.jobs.insert_job(conn, run_id, kind="issue" if issue else "run", issue_id=issue.issue_id if issue else 0)
             if job_created:
+                if issue:
+                    issue.run_id = run_id
+                    conn.execute(
+                        f"INSERT OR REPLACE INTO redmine_daily_brief_issues ({', '.join(ISSUE_COLUMNS)}) VALUES ({', '.join('?' * len(ISSUE_COLUMNS))})",
+                        self._issue_params(issue),
+                    )
                 if not run_created:
                     self.jobs._reset_run_for_enqueue(conn, run_id)
                 else:

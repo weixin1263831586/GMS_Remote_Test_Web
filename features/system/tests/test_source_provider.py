@@ -420,3 +420,74 @@ class LoadProviderConfigsTests(unittest.TestCase):
             {"source_id": "u", "provider": "unknown", "repo_root": "/x"},
         ]}})
         self.assertEqual([item.source_id for item in loaded], ["g"])
+
+
+class RegistryStateTests(unittest.TestCase):
+    """审核意见 P1：未初始化 ≠ 确认无 source（三态）。"""
+
+    def setUp(self):
+        from features.system import source_provider
+
+        self.sp = source_provider
+        self._saved = source_provider._REGISTRY
+        source_provider._REGISTRY = None
+
+    def tearDown(self):
+        self.sp._REGISTRY = self._saved
+
+    def test_uninitialized_is_distinct_from_unavailable(self):
+        self.assertEqual(self.sp.registry_state(), "UNINITIALIZED")
+        # 未初始化时 availability 返回 None（fail-safe，不得据此降级）。
+        self.assertIsNone(self.sp.sdk_sources_available())
+        # 初始化空配置 → 明确 UNAVAILABLE。
+        self.sp.configure_source_registry([], b"")
+        self.assertEqual(self.sp.registry_state(), "UNAVAILABLE")
+        self.assertIs(self.sp.sdk_sources_available(), False)
+
+    def test_available_when_configured(self):
+        self.sp.configure_source_registry(
+            [self.sp.ProviderConfig(source_id="s", provider="local_git", repo_root="/x")],
+            b"k",
+        )
+        self.assertEqual(self.sp.registry_state(), "AVAILABLE")
+        self.assertIs(self.sp.sdk_sources_available(), True)
+
+    def test_initialize_source_runtime_marks_registry(self):
+        state = self.sp.initialize_source_runtime({})
+        self.assertIn(state, {"AVAILABLE", "UNAVAILABLE"})
+        self.assertNotEqual(self.sp.registry_state(), "UNINITIALIZED")
+
+    def test_initialize_source_runtime_reads_real_config(self):
+        """回归：默认配置曾导入不存在的 foundation.config_manager，
+        异常被吞后空配置把部署真实配置的 source 误标成 UNAVAILABLE。"""
+        from foundation import config as foundation_config
+
+        original = foundation_config.config_manager.load_config
+        foundation_config.config_manager.load_config = lambda: {
+            "sdk_sources": {"providers": [
+                {"source_id": "boot", "provider": "local_git", "repo_root": "/x"},
+            ]},
+        }
+        try:
+            state = self.sp.initialize_source_runtime()
+        finally:
+            foundation_config.config_manager.load_config = original
+        self.assertEqual(state, "AVAILABLE")
+        self.assertIs(self.sp.sdk_sources_available(), True)
+
+    def test_initialize_source_runtime_failure_propagates(self):
+        """初始化失败必须显式抛错，registry 保持 UNINITIALIZED（不是 UNAVAILABLE）。"""
+        from foundation import config as foundation_config
+
+        def _boom():
+            raise RuntimeError("config backend down")
+
+        original = foundation_config.config_manager.load_config
+        foundation_config.config_manager.load_config = _boom
+        try:
+            with self.assertRaises(RuntimeError):
+                self.sp.initialize_source_runtime()
+        finally:
+            foundation_config.config_manager.load_config = original
+        self.assertEqual(self.sp.registry_state(), "UNINITIALIZED")
+        self.assertIsNone(self.sp.sdk_sources_available())

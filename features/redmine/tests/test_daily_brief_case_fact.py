@@ -63,6 +63,40 @@ class BuildCaseFactTests(unittest.TestCase):
         self.assertEqual(fact["keywords"], [])
         self.assertEqual(fact["confidence"], 0.3)
 
+    def test_execution_status_never_becomes_redmine_status(self):
+        """AI 执行状态（completed）不得写进知识库 status_name。"""
+        fact = build_case_fact_from_brief(
+            1, _record({"confidence": 0.8, "problem_summary": "x"}), _run())
+        self.assertEqual(fact["status_name"], "")
+        self.assertNotEqual(fact["status_name"], "completed")
+
+    def test_redmine_facts_come_from_extractor(self):
+        """提供扫描库工单行时，Redmine 富字段来自 RedmineCaseExtractor。"""
+        issue = {
+            "issue_id": 646220,
+            "subject": "RK3576 Android16 GTS fail",
+            "status_name": "Feedback",
+            "project_name": "Android TV",
+            "assigned_to_name": "alice",
+            "category": "GMS",
+            "description": "RK3576 Android16 GTS failure",
+        }
+        result = {
+            "problem_summary": "GTS 用例失败",
+            "root_cause": "缺补丁",
+            "suggested_solution": "打补丁",
+            "confidence": 0.8,
+        }
+        fact = build_case_fact_from_brief(
+            646220, _record(result), _run(), issue=issue)
+        self.assertEqual(fact["status_name"], "Feedback")
+        self.assertEqual(fact["project_name"], "Android TV")
+        self.assertEqual(fact["assigned_to_name"], "alice")
+        self.assertEqual(fact["chip_platform"], "RK3576")
+        self.assertEqual(fact["android_version"], "Android16")
+        # AI 结论覆盖结论性字段。
+        self.assertEqual(fact["root_cause"], "缺补丁")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,24 @@ TEST_FAILURE_SUBJECT_KEYWORDS = (
 EVIDENCE_GATE_JSON_KEY = "evidence_gate"
 
 
+def result_analysis_mode(result: Any) -> str:
+    """历史结果 → "triage" / "diagnostic"。
+
+    优先读取持久化的 evidence_gate.analysis_mode；无 gate 的历史结果按
+    triage 的特征标记（root_cause 为空/占位且 root_cause_type 为 unknown）
+    判定，其余视为 diagnostic。
+    """
+    if not isinstance(result, dict):
+        return "triage"
+    gate = result.get(EVIDENCE_GATE_JSON_KEY)
+    if isinstance(gate, dict) and gate.get("analysis_mode"):
+        return "triage" if gate.get("analysis_mode") == "triage" else "diagnostic"
+    root_cause = str(result.get("root_cause") or "").strip()
+    if root_cause in {"", "未进行深度诊断"} and result.get("root_cause_type", "unknown") == "unknown":
+        return "triage"
+    return "diagnostic"
+
+
 def is_test_failure_subject(entry: dict[str, Any]) -> bool:
     """快照 subject 是否命中测试套件类失败（决定源码取证门禁是否生效）。"""
     subject = str(entry.get("subject") or "").upper()
@@ -41,7 +59,14 @@ def is_test_failure_subject(entry: dict[str, Any]) -> bool:
 def evaluate_evidence_gate(
     trace: KkAgentTrace, entry: dict[str, Any]
 ) -> dict[str, Any]:
-    """从轨迹推导取证事实；绝不读取模型自报的 history_checked。"""
+    """从轨迹推导取证事实；绝不读取模型自报的 history_checked。
+
+    审核意见（P1）：所有取证判定都按 ``target_issue_id`` 归属——分析
+    #100 时，对相似工单 #200 的 journals/attachments 调用不能当作 #100
+    自己已取证。归属依据为调用输入的 issue_id/snapshot_id 与返回结构里
+    的 snapshot_id/artifact_id 关联（见 ``_targets_current``）。
+    """
+    target_issue_id = _positive_int(entry.get("issue_id"))
     successful = trace.successful_tool_names()
     history_count = trace.history_search_count
     distinct_history_count = trace.distinct_history_search_count
@@ -50,10 +75,48 @@ def evaluate_evidence_gate(
         attachment_count = int(entry.get("attachment_count") or 0)
     except (TypeError, ValueError):
         attachment_count = 0
+
+    def _targets_current(call: Any) -> bool:
+        """单次调用是否针对当前 issue（逐条判断，不做全局归属兜底）。
+
+        归属依据（按优先级）：
+        1. 输入显式带 issue_id；
+        2. 输入/输出携带当前 issue 的 snapshot_id（issue_fetch 返回过）；
+        3. artifact_read 的 artifact_id 由针对当前 issue 的 attachments
+           调用列出过。
+        """
+        if not target_issue_id:
+            return True  # 无目标 issue 时保持旧行为
+        for raw in (call.tool_input.get("issue_id"), call.tool_input.get("issue")):
+            if _positive_int(raw) == target_issue_id:
+                return True
+        snapshots = _snapshot_issue_ids(trace, target_issue_id)
+        if snapshots:
+            if str(call.tool_input.get("snapshot_id") or "") in snapshots:
+                return True
+            if any(sid in snapshots for sid in call.snapshot_ids):
+                return True
+        artifact_id = str(call.tool_input.get("artifact_id") or "").strip()
+        if artifact_id and artifact_id in current_artifact_ids:
+            return True
+        return False
+
+    current_artifact_ids: set[str] = set()
+    if target_issue_id:
+        snapshots = _snapshot_issue_ids(trace, target_issue_id)
+        for call in trace.tool_calls:
+            if not (call.succeeded and "redmine_attachments" in call.tool_name):
+                continue
+            if str(call.tool_input.get("snapshot_id") or "") in snapshots or any(
+                _positive_int(call.tool_input.get(key)) == target_issue_id
+                for key in ("issue_id", "issue")
+            ):
+                current_artifact_ids.update(call.all_artifact_ids)
     attachment_calls = [
         call
         for call in trace.tool_calls
         if call.succeeded and "redmine_attachments" in call.tool_name
+        and _targets_current(call)
     ]
     attachment_manifest_parsed = any(
         call.attachment_manifest_parsed for call in attachment_calls
@@ -62,7 +125,8 @@ def evaluate_evidence_gate(
         [call.attachment_count for call in attachment_calls] + [0]
     )
     unread_text_artifact_ids = sorted(
-        trace.listed_text_artifact_ids() - trace.read_artifact_ids()
+        trace.listed_text_artifact_ids(attachment_calls)
+        - trace.read_artifact_ids()
     )
     attachments_checked = attachment_count == 0 or (
         bool(attachment_calls)
@@ -72,6 +136,7 @@ def evaluate_evidence_gate(
     )
     test_failure_subject = is_test_failure_subject(entry)
     source_evidence_tool_count = trace.source_evidence_tool_count
+    reproducible_source_evidence_count = trace.reproducible_source_evidence_count
     # 部署未配置任何 SDK 源时降级放行：模型会尝试 sdk/apk 取证并收到
     # "source 未配置"的失败，此时强制 gate 只会系统性烧光轮次。降级依据
     # 是部署事实（entry 注入的 runtime hint），不是模型自报。hint 缺失
@@ -84,13 +149,40 @@ def evaluate_evidence_gate(
         "analysis_mode": "triage" if triage else "diagnostic",
         "history_search_required": not triage,
         "issue_fetched": any(
-            "redmine_issue_fetch" in name or "redmine_issue" in name
+            ("redmine_issue_fetch" in name or "redmine_issue" in name)
             for name in successful
+        ) and (
+            not target_issue_id
+            # issue_fetch 必须针对当前 issue（相似单的 fetch 不算数）：
+            # 命中输入 issue_id，或返回结构里出现当前 issue_id。
+            or any(
+                call.succeeded
+                and "redmine_issue_fetch" in call.tool_name
+                and (
+                    any(
+                        _positive_int(call.tool_input.get(key)) == target_issue_id
+                        for key in ("issue_id", "issue")
+                    )
+                    or target_issue_id in set(call.evidence_issue_ids)
+                )
+                for call in trace.tool_calls
+            )
         ),
-        "journals_checked": any("redmine_journals" in name for name in successful),
+        "journals_checked": any(
+            "redmine_journals" in name for name in successful
+        ) and (
+            not target_issue_id
+            or any(
+                call.succeeded
+                and "redmine_journals" in call.tool_name
+                and _targets_current(call)
+                for call in trace.tool_calls
+            )
+        ),
         "test_failure_subject": test_failure_subject,
         "source_evidence_required": source_evidence_required,
         "source_evidence_tool_count": source_evidence_tool_count,
+        "reproducible_source_evidence_count": reproducible_source_evidence_count,
         "source_evidence_checked": (
             not source_evidence_required or source_evidence_tool_count >= 1
         ),
@@ -118,6 +210,23 @@ def _positive_int(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return parsed if parsed > 0 else 0
+
+
+def _snapshot_issue_ids(trace: KkAgentTrace, target_issue_id: int) -> set[str]:
+    """当前 issue 的 issue_fetch 调用返回过的 snapshot_id 集合。"""
+    target = _positive_int(target_issue_id)
+    if not target:
+        return set()
+    ids: set[str] = set()
+    for call in trace.tool_calls:
+        if not (call.succeeded and "redmine_issue_fetch" in call.tool_name):
+            continue
+        if any(
+            _positive_int(call.tool_input.get(key)) == target
+            for key in ("issue_id", "issue")
+        ):
+            ids.update(call.snapshot_ids)
+    return ids
 
 
 def gate_errors(
@@ -156,6 +265,18 @@ def gate_errors(
             "upstream-behavior-change directions must be distinguished with source "
             "evidence before claiming a root cause"
         )
+    if isinstance(result, dict):
+        if (
+            result.get("root_cause_type") == "confirmed"
+            and not gate.get("reproducible_source_evidence_count")
+        ):
+            errors.append(
+                "root_cause_type=confirmed requires at least one reproducible "
+                "source-level evidence call (local-git provider, "
+                "reproducible=true); dynamic code-search index evidence "
+                "(reproducible=false) cannot alone confirm a root cause — "
+                "downgrade to 'likely' or obtain pinned-commit evidence"
+            )
     if isinstance(result, dict):
         if gate.get("analysis_mode") == "triage":
             if result.get("root_cause_type") != "unknown":
@@ -206,4 +327,5 @@ __all__ = [
     "gate_and_errors",
     "gate_errors",
     "is_test_failure_subject",
+    "result_analysis_mode",
 ]

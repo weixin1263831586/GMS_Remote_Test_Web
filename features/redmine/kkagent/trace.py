@@ -23,6 +23,13 @@ from typing import Any, Literal
 TOOL_OUTPUT_PREVIEW_CHARS = 200
 TOOL_INPUT_JSON_CHARS = 500
 
+# 截断 tool input 时必须保留的身份字段（审核意见 P2：Evidence Gate 需要
+# 按 issue/snapshot/artifact 归属核对证据，这些 key 不允许被截断吞掉）。
+_IDENTITY_INPUT_KEYS = (
+    "issue_id", "issue", "snapshot_id", "artifact_id",
+    "source", "revision", "path", "query", "q", "mode",
+)
+
 _KNOWN_EVENT_TYPES = frozenset({
     "system", "session", "turn_start", "message", "tool_call", "tool_result",
     "usage", "llm_retry", "approval_requested", "question_asked", "turn_end",
@@ -52,6 +59,13 @@ class ToolTrace:
     attachment_manifest_parsed: bool = False
     attachment_count: int = 0
     text_artifact_ids: list[str] = field(default_factory=list)
+    # 该调用返回/引用的全部 artifact id（供 artifact→issue 归属推导）。
+    all_artifact_ids: list[str] = field(default_factory=list)
+    # 该调用返回的 snapshot id（供 snapshot→issue 归属推导）。
+    snapshot_ids: list[str] = field(default_factory=list)
+    # 源码级取证调用是否可复现（provider 返回的 reproducible 标志；
+    # None = 输出里没有该标志，无法判定）。
+    source_reproducible: bool | None = None
 
     @property
     def is_error(self) -> bool:
@@ -76,7 +90,46 @@ class ToolTrace:
             "attachment_manifest_parsed": self.attachment_manifest_parsed,
             "attachment_count": self.attachment_count,
             "text_artifact_ids": self.text_artifact_ids,
+            "source_reproducible": self.source_reproducible,
         }
+
+
+def _is_source_evidence_tool(tool_name: str) -> bool:
+    """是否为源码级取证调用（SDK 源码检索/读取 + 反编译 APK 取证）。"""
+    return (
+        tool_name.startswith(("gms_rt_sdk_", "gms_rt_apk_"))
+        or "_sdk_" in tool_name
+        or "_apk_" in tool_name
+    )
+
+
+def _source_reproducible_flag(value: Any) -> bool | None:
+    """从源码取证工具结果提取 reproducible 标志。
+
+    CLI/MCP 输出是 ``{"success": true, "data": {..., "reproducible": ...}}``
+    形态的信封；遍历嵌套取值。同一输出出现多个标志时，任一 True 即视为
+    存在可复现证据；完全没有标志时返回 None（无法判定，按不可复现处理
+    由 evidence gate 决定，trace 只忠实记录）。
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    found: list[bool] = []
+
+    def walk(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if key == "reproducible" and isinstance(child, bool):
+                    found.append(child)
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(value)
+    return any(found) if found else None
 
 
 @dataclass
@@ -151,10 +204,11 @@ class KkAgentTrace:
             for issue_id in call.evidence_issue_ids
         }
 
-    def listed_text_artifact_ids(self) -> set[str]:
+    def listed_text_artifact_ids(self, calls: list[ToolTrace] | None = None) -> set[str]:
+        selected = self.tool_calls if calls is None else calls
         return {
             artifact_id
-            for call in self.tool_calls
+            for call in selected
             if call.succeeded and "redmine_attachments" in call.tool_name
             for artifact_id in call.text_artifact_ids
         }
@@ -167,18 +221,32 @@ class KkAgentTrace:
             if str(call.tool_input.get("artifact_id") or "").strip()
         }
 
+    # ---------------------------------------------------- 归属（target-scoped）
+
     @property
     def source_evidence_tool_count(self) -> int:
         """成功过的源码级取证调用数（SDK 源码检索/读取 + 反编译 APK 取证）。"""
         return sum(
             1
             for call in self.tool_calls
+            if call.succeeded and _is_source_evidence_tool(call.tool_name)
+        )
+
+    @property
+    def reproducible_source_evidence_count(self) -> int:
+        """结果里带 ``reproducible: true`` 的成功源码取证调用数。
+
+        OpenGrok/code-search 等动态索引返回 ``reproducible: false``（只
+        保证"当前索引里有"，不保证指定 commit）；local git 才返回 true。
+        Evidence Gate 据此约束 root_cause_type=confirmed（审核意见 P2：
+        不可复现的源码证据不能单独确认根因）。
+        """
+        return sum(
+            1
+            for call in self.tool_calls
             if call.succeeded
-            and (
-                call.tool_name.startswith(("gms_rt_sdk_", "gms_rt_apk_"))
-                or "_sdk_" in call.tool_name
-                or "_apk_" in call.tool_name
-            )
+            and _is_source_evidence_tool(call.tool_name)
+            and call.source_reproducible is True
         )
 
     def to_summary(self) -> dict[str, Any]:
@@ -219,7 +287,12 @@ def _bounded_tool_input(value: Any) -> dict[str, Any]:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
     if len(encoded) <= TOOL_INPUT_JSON_CHARS:
         return value
-    return {"_truncated_json": encoded[:TOOL_INPUT_JSON_CHARS]}
+    # 身份字段永远保留（供 Evidence Gate 按目标 issue 归属核对），
+    # 其余内容截断为原始 JSON 前缀。
+    kept = {key: value[key] for key in _IDENTITY_INPUT_KEYS if key in value}
+    kept["_truncated_json"] = encoded[:TOOL_INPUT_JSON_CHARS]
+    kept["_truncated"] = True
+    return kept
 
 
 def _structured_issue_ids(value: Any) -> list[int]:
@@ -251,27 +324,61 @@ def _structured_issue_ids(value: Any) -> list[int]:
     return sorted(found)[:100]
 
 
-def _attachment_manifest(value: Any) -> tuple[bool, int, list[str]]:
+def _attachment_manifest(value: Any) -> tuple[bool, int, list[str], list[str]]:
+    """解析附件清单 → (parsed, count, text_ids, all_ids)。"""
     if isinstance(value, str):
         try:
             value = json.loads(value)
         except (TypeError, ValueError):
-            return False, 0, []
+            return False, 0, [], []
     if not isinstance(value, dict):
-        return False, 0, []
+        return False, 0, [], []
     data = value.get("data") if isinstance(value.get("data"), dict) else value
     artifacts = data.get("artifacts") if isinstance(data, dict) else None
     if not isinstance(artifacts, list):
-        return False, 0, []
+        return False, 0, [], []
+    rows = [item for item in artifacts if isinstance(item, dict)]
+    all_ids = sorted({
+        str(item.get("artifact_id") or "").strip()
+        for item in rows
+        if str(item.get("artifact_id") or "").strip()
+    })
     text_ids = {
         str(item.get("artifact_id") or "").strip()
-        for item in artifacts
-        if isinstance(item, dict)
-        and str(item.get("kind") or "") in {"text", "log"}
+        for item in rows
+        and [item for item in rows if isinstance(item, dict)]
+        if str(item.get("kind") or "") in {"text", "log"}
         and str(item.get("status") or "") in {"ready", "partial"}
         and str(item.get("artifact_id") or "").strip()
     }
-    return True, len(artifacts), sorted(text_ids)
+    return True, len(artifacts), sorted(text_ids), all_ids
+
+
+def _collect_snapshot_ids(value: Any) -> list[str]:
+    """从工具输出里提取 snapshot_id 字段（含嵌套/JSON 字符串）。"""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def walk(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if key == "snapshot_id":
+                    sid = str(child or "").strip()
+                    if sid and sid not in seen:
+                        seen.add(sid)
+                        found.append(sid)
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(value)
+    return found[:10]
 
 
 def _record_tool_result(trace: KkAgentTrace, event: dict[str, Any]) -> None:
@@ -308,10 +415,14 @@ def _record_tool_result(trace: KkAgentTrace, event: dict[str, Any]) -> None:
                 ids.add(input_issue_id)
         target.evidence_issue_ids = sorted(ids)[:100]
     if "redmine_attachments" in target.tool_name:
-        parsed, count, text_ids = _attachment_manifest(output)
+        parsed, count, text_ids, all_ids = _attachment_manifest(output)
         target.attachment_manifest_parsed = parsed
         target.attachment_count = count
         target.text_artifact_ids = text_ids
+        target.all_artifact_ids = all_ids
+    target.snapshot_ids = _collect_snapshot_ids(output)
+    if _is_source_evidence_tool(target.tool_name):
+        target.source_reproducible = _source_reproducible_flag(output)
 
 
 def _apply_usage(trace: KkAgentTrace, usage: Any, *, override: bool) -> None:

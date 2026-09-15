@@ -282,6 +282,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+    # SDK source registry：与 Web 进程同源初始化（审核意见 P1）。否则本
+    # 进程的 sdk_sources_available() 与 Web 手动分析不一致，evidence gate
+    # 会错误地对测试类失败降级放行。
+    try:
+        from features.system import initialize_source_runtime
+
+        state = initialize_source_runtime()
+        logger.info("sdk source registry initialized: %s", state)
+    except Exception:
+        logger.exception("sdk source registry init failed; source gate stays strict")
+
     async def run() -> None:
         stop_event = asyncio.Event()
         loop = asyncio.get_running_loop()

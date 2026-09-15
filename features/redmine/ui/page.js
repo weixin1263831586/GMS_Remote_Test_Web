@@ -1033,7 +1033,6 @@ function showSettingsModal() {
         await loadDailyBriefAgentProfiles(dailyBriefConfigCache.agent_profile || '');
         await loadDailyBriefModelOptions(dailyBriefConfigCache.model || '');
         dailyBriefSetting('max_parallel_issues').value = dailyBriefConfigCache.max_parallel_issues || 1;
-        dailyBriefSetting('max_turns').value = dailyBriefConfigCache.max_turns || 20;
       } catch (_) {}
     } catch (_) {}
   })();
@@ -1108,7 +1107,8 @@ async function saveSettings() {
     briefConfig.agent_profile = dailyBriefSetting('agent_profile').value.trim();
     briefConfig.model = dailyBriefSetting('model').value.trim();
     briefConfig.max_parallel_issues = parseInt(dailyBriefSetting('max_parallel_issues').value) || 1;
-    briefConfig.max_turns = parseInt(dailyBriefSetting('max_turns').value) || 20;
+    briefConfig.max_turns = 0;
+    briefConfig.issue_timeout_seconds = 0;
     dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
@@ -2775,6 +2775,87 @@ syncRedmineStatusRefresh();
 
 var dailyBriefCache = null;
 var dailyBriefConfigCache = null;
+var singleIssueAnalysisRunId = '';
+var singleIssueAnalysisTimer = null;
+
+function setSingleIssueAnalysisBusy(busy) {
+  document.getElementById('singleIssueAnalysisStart').disabled = busy;
+  document.getElementById('singleIssueAnalysisId').disabled = busy;
+  document.getElementById('singleIssueAnalysisStop').hidden = !busy;
+}
+
+async function loadSingleIssueAnalysis() {
+  var runId = singleIssueAnalysisRunId;
+  var resultBox = document.getElementById('singleIssueAnalysisResult');
+  if (!runId || !resultBox) return;
+  clearTimeout(singleIssueAnalysisTimer);
+  try {
+    var data = await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(runId)) || {};
+    if (singleIssueAnalysisRunId !== runId) return;
+    var run = data.run || {};
+    var issue = (data.issues || [])[0] || {};
+    var busy = ['pending', 'snapshotting', 'analyzing'].indexOf(run.status) >= 0;
+    setSingleIssueAnalysisBusy(busy);
+    if (busy) {
+      resultBox.textContent = '#' + (issue.issue_id || '') + (issue.status === 'running' ? ' 正在分析…' : ' 已排队，等待 Worker 分析…');
+      singleIssueAnalysisTimer = setTimeout(loadSingleIssueAnalysis, 5000);
+    } else if (issue.status === 'completed' && (issue.result || {}).detailed_report) {
+      resultBox.innerHTML = '<div class="daily-brief-section-md"><div class="daily-brief-section-body">'
+        + renderMarkdownDoc(String(issue.result.detailed_report)) + '</div></div>';
+    } else {
+      resultBox.textContent = run.status === 'cancelled' ? '此项分析已停止。' : '分析失败：' + (issue.error || run.error || '未返回最终总结');
+    }
+  } catch (e) {
+    if (singleIssueAnalysisRunId !== runId) return;
+    resultBox.textContent = '读取分析状态失败：' + e.message;
+    singleIssueAnalysisTimer = setTimeout(loadSingleIssueAnalysis, 5000);
+  }
+}
+
+async function analyzeSingleIssueFromInput() {
+  var input = document.getElementById('singleIssueAnalysisId');
+  var value = input.value.trim();
+  if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) {
+    notifyUser('单号无效', '请输入正整数 Redmine 单号。', 'warning');
+    return;
+  }
+  setSingleIssueAnalysisBusy(true);
+  document.getElementById('singleIssueAnalysisStop').hidden = true;
+  document.getElementById('singleIssueAnalysisResult').textContent = '正在提交 #' + value + '…';
+  try {
+    var queued = await api('/api/redmine-agent/daily-brief/analyze-issue', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({issue_id: Number(value)})
+    }) || {};
+    if (!queued.run_id) throw new Error(queued.error || '未创建分析任务');
+    singleIssueAnalysisRunId = queued.run_id;
+    setSingleIssueAnalysisBusy(true);
+    await loadSingleIssueAnalysis();
+  } catch (e) {
+    setSingleIssueAnalysisBusy(false);
+    document.getElementById('singleIssueAnalysisResult').textContent = '提交失败：' + e.message;
+  }
+}
+
+async function stopSingleIssueAnalysis() {
+  if (!singleIssueAnalysisRunId) return;
+  try {
+    await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(singleIssueAnalysisRunId) + '/cancel', {method: 'POST'});
+    await loadSingleIssueAnalysis();
+  } catch (e) {
+    notifyUser('停止失败', e.message, 'error');
+  }
+}
+window.stopSingleIssueAnalysis = stopSingleIssueAnalysis;
+
+if (!window.singleIssueAnalysisSubmitBound) {
+  window.singleIssueAnalysisSubmitBound = true;
+  document.addEventListener('submit', function (event) {
+    if (event.target.id !== 'singleIssueAnalysisForm') return;
+    event.preventDefault();
+    if (!document.getElementById('singleIssueAnalysisStart').disabled) analyzeSingleIssueFromInput();
+  });
+}
 
 function dailyBriefSetting(name) {
   return document.querySelector('[data-daily-brief-setting="' + name + '"]');
@@ -2883,11 +2964,11 @@ function scheduleDailyBriefAutoRefresh(data) {
 }
 
 function renderDailyBriefInner(data) {
+  var controls = document.getElementById('dailyBriefRunControls');
   if (!data || !data.run) {
-    return '<div style="padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-      + '<b>🤖 每日晨报</b><span class="muted">暂无每日晨报</span>'
-      + '<button class="ka-btn" data-click="startDailyBriefRun">▶ 生成每日晨报</button>'
-      + '</div>';
+    if (controls) controls.innerHTML = '<span class="muted">暂无每日晨报</span>'
+      + '<button class="ka-btn" data-click="startDailyBriefRun">▶ 生成每日晨报</button>';
+    return '';
   }
   var run = data.run || {};
   var issues = data.issues || [];
@@ -2918,12 +2999,9 @@ function renderDailyBriefInner(data) {
   } else {
     actionBtn = '';
   }
+  if (controls) controls.innerHTML = statusBadge
+    + actionBtn;
   var head = '<div class="daily-brief-head">'
-    + '<div class="daily-brief-titlebar">'
-    + '<span class="daily-brief-title">🤖 每日晨报 · 待回复事项</span>' + statusBadge
-    + '<span class="muted">' + esc(run.brief_date || '') + (run.finished_at ? ' · 生成于 ' + esc(String(run.finished_at).replace('T', ' ').slice(0, 16)) : '') + '</span>'
-    + actionBtn
-    + '</div>'
     + '<div class="daily-brief-metrics">'
     + '<div class="daily-brief-metric"><span>今日待处理</span><b>' + esc(counts.total != null ? counts.total : run.issue_count || 0) + '</b></div>'
     + '<div class="daily-brief-metric"><span>待回复</span><b>' + esc(run.waiting_my_reply_count || 0) + '</b></div>'
@@ -2962,12 +3040,12 @@ function renderDailyBriefInner(data) {
     var r = issue.result || {};
     var prio = issue.priority === 'P1' ? '🔴' : (issue.priority === 'P2' ? '🟡' : '⚪');
     var subject = String(issue.subject || '').trim();
-    var titleFull = 'Defect #' + issue.issue_id + (subject ? ' ' + subject : '');
+    var titleFull = '#' + issue.issue_id + (subject ? ' ' + subject : '');
     var hover = r.problem_summary ? titleFull + ' — ' + r.problem_summary : titleFull;
     return '<div class="daily-brief-row">'
       + '<div class="daily-brief-main"><span class="daily-brief-priority">' + prio + '</span>'
       + '<span class="daily-brief-issue-title" title="' + esc(hover) + '">'
-      + '<b>Defect #' + esc(issue.issue_id) + '</b>' + (subject ? ' ' + esc(subject) : '')
+      + '<b>#' + esc(issue.issue_id) + '</b>' + (subject ? ' ' + esc(subject) : '')
       + (r.problem_summary ? '<span style="display:block;white-space:normal">' + esc(r.problem_summary) + '</span>' : '')
       + (r.suggested_solution ? '<span class="muted" style="display:block;white-space:normal">下一步：' + esc(r.suggested_solution) + '</span>' : '') + '</span>'
       + '</div>'
@@ -3015,13 +3093,24 @@ function dailyBriefObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+// 与服务端 evidence_gate.result_analysis_mode 同构：无 evidence_gate 的
+// 历史结果按 triage 特征（根因为空/占位且类型 unknown）判定，不能把
+// undefined !== 'triage' 当成 diagnostic 放行「存为案例」。
+function dailyBriefAnalysisMode(r, gate) {
+  if (gate.analysis_mode) return gate.analysis_mode === 'triage' ? 'triage' : 'diagnostic';
+  var rootCause = String(r.root_cause || '').trim();
+  var placeholder = rootCause === '' || rootCause === '未进行深度诊断';
+  var type = r.root_cause_type || 'unknown';
+  return placeholder && type === 'unknown' ? 'triage' : 'diagnostic';
+}
+
 function showDailyBriefIssueFallback(issueId) {
   var modalId = 'dailyBriefIssueModal-' + Date.now();
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal';
   modal.innerHTML = '<div class="modal-content daily-brief-modal">'
-    + '<div class="modal-header"><span class="modal-title">每日晨报 · Defect #' + esc(issueId) + '</span>'
+    + '<div class="modal-header"><span class="modal-title">每日晨报 · #' + esc(issueId) + '</span>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body"><div class="muted">该历史分析结果包含旧格式字段，暂无法完整呈现。重新分析此项后会生成兼容的完整结果。</div></div>'
     + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button>'
@@ -3033,23 +3122,31 @@ function showDailyBriefIssueFallback(issueId) {
 function showDailyBriefIssueModal(issueId) {
   var issue = findDailyBriefIssue(issueId);
   if (!issue) {
-    notifyUser('每日晨报数据已更新', '未找到 Defect #' + issueId + '，正在刷新后重试。', 'warning');
+    notifyUser('每日晨报数据已更新', '未找到 #' + issueId + '，正在刷新后重试。', 'warning');
     loadDailyBrief();
     return;
   }
   var r = dailyBriefObject(issue.result);
+  // detailed_report 是 kkagent 最终分析结论（完整 Markdown 报告），作为弹窗
+  // 正文；其余字段只是同一份结论的机器可读分解，统一收进一个默认折叠的
+  // 「结构化明细」区，避免十来个并列展开的小节造成割裂感。
   var section = function (title, body, open) {
     if (!body) return '';
-    return '<details' + (open !== false ? ' open' : '') + ' class="daily-brief-section">'
+    return '<details' + (open === true ? ' open' : '') + ' class="daily-brief-section">'
       + '<summary>' + title + '</summary>'
       + '<div class="daily-brief-section-body">' + esc(body) + '</div></details>';
   };
-  // 深度报告是 Markdown（表格/标题/代码块），走已有的轻量渲染器。
-  var mdSection = function (title, body, open) {
+  // raw=true 时 body 已是调用方拼好的 HTML（条目各自 esc 过）。
+  var detailBlk = function (title, body, raw) {
     if (!body) return '';
-    return '<details' + (open !== false ? ' open' : '') + ' class="daily-brief-section daily-brief-section-md">'
-      + '<summary>' + title + '</summary>'
-      + '<div class="daily-brief-section-body">' + renderMarkdownDoc(String(body)) + '</div></details>';
+    return '<div class="daily-brief-sub"><div class="daily-brief-sub-title">' + title + '</div>'
+      + '<div class="daily-brief-sub-body">' + (raw ? body : esc(body)) + '</div></div>';
+  };
+  // 深度报告是 Markdown（表格/标题/代码块），走已有的轻量渲染器。
+  var mdSection = function (body) {
+    if (!body) return '';
+    return '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body">'
+      + renderMarkdownDoc(String(body)) + '</div></div>';
   };
   var ev = dailyBriefList(r.evidence).map(function (entry) {
     if (typeof entry === 'string') return '· ' + esc(entry);
@@ -3068,13 +3165,12 @@ function showDailyBriefIssueModal(issueId) {
     return '· #' + esc(s.issue_id) + '（' + esc(s.similarity || 'related') + '）' + (s.subject ? ' ' + esc(s.subject) : '')
       + (s.reusable_fix ? '\n  ↳ 可参考：' + esc(s.reusable_fix) : '');
   }).join('\n');
+  // 历史检索结论只对已完成的分析有意义：失败/中断的 issue 没有
+  // result,不能显示"未发现同题/类似工单"误导排障。
   var similarSection = similar
-    ? section('🧭 相似历史工单', similar)
-    // 历史检索结论只对已完成的分析有意义：失败/中断的 issue 没有
-    // result,不能显示"未发现同题/类似工单"误导排障。
-    : (issue.status !== 'completed' ? '' : (r.history_checked === false
-      ? '<div class="muted" style="padding:4px 0 8px">未执行历史工单检索</div>'
-      : '<div class="muted" style="padding:4px 0 8px">历史检索未发现同题/类似工单</div>'));
+    ? detailBlk('🧭 相似历史工单', similar, true)
+    : (issue.status !== 'completed' ? '' : detailBlk('🧭 相似历史工单',
+      r.history_checked === false ? '未执行历史工单检索' : '历史检索未发现同题/类似工单', true));
   var execution = dailyBriefObject(issue.ai_execution);
   var gate = dailyBriefObject(r.evidence_gate);
   var mark = function (value) {
@@ -3112,6 +3208,29 @@ function showDailyBriefIssueModal(issueId) {
   var auditBody = auditRows.map(function (item) {
     return item[0] + '：' + item[1];
   }).join('\n');
+  if (r.result_format === 'kkagent_markdown') {
+    // CLI calls are visible as Bash events; do not report absent MCP events as unread evidence.
+    auditBody = '原始总结已返回。CLI 取证无法由 MCP 调用名自动判定完整性。\n'
+      + auditRows.filter(function (item) {
+        return ['工具调用', '自动修复', 'Session', '耗时', 'Tokens'].indexOf(item[0]) >= 0;
+      }).map(function (item) { return item[0] + '：' + item[1]; }).join('\n');
+  }
+  var hasReport = !!(r.detailed_report && String(r.detailed_report).trim());
+  var structured = ([
+    gate.analysis_mode === 'triage' ? '' : detailBlk('🧩 根因分析', r.root_cause),
+    detailBlk('💬 客户诉求', r.customer_request),
+    detailBlk('📌 当前状态', r.current_status || r.current_blocker),
+    detailBlk('🔍 关键证据', ev, true),
+    detailBlk('🛠️ 建议动作', actions, true),
+    detailBlk('💡 建议方案', r.suggested_solution),
+    similarSection,
+    detailBlk('❓ 缺失资料', missing, true),
+    (Object.keys(execution).length || Object.keys(gate).length)
+      ? detailBlk('🧾 执行与取证审计', auditBody) : ''
+  ]).filter(Boolean).join('');
+  var structuredTitle = gate.analysis_mode === 'triage'
+    ? '🧾 结构化明细（状态 / 证据 / 下一步）'
+    : '🧾 结构化明细（根因 / 证据 / 动作 / 建议方案）';
   var subject = String(issue.subject || '').trim();
   var chips = '<span style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
     + (r.confidence != null ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(59,130,246,.15))">模型自评 ' + esc(r.confidence) + '</span>' : '')
@@ -3126,30 +3245,26 @@ function showDailyBriefIssueModal(issueId) {
   modal.innerHTML = `
     <div class="modal-content daily-brief-modal">
       <div class="modal-header">
-        <span class="modal-title daily-brief-modal-title"><span>🤖 AI 分析 · Defect #${esc(issueId)}</span>${subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : ''}</span>
+        <span class="modal-title daily-brief-modal-title"><span>🤖 AI 分析 · #${esc(issueId)}</span>${subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : ''}</span>
         <button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="${modalId}">&times;</button>
       </div>
       <div class="modal-body daily-brief-modal-body">
         ${issue.status === 'failed' ? `<div style="color:var(--bad,#ef4444)"><b>分析失败${issue.error_type ? '（' + esc(issue.error_type) + '）' : ''}</b><div style="white-space:pre-wrap;margin-top:4px">${esc(issue.error || '未知错误')}</div></div>` : ''}
-        ${r.problem_summary ? '<div style="line-height:1.7;margin-bottom:4px">' + esc(r.problem_summary) + '</div>' : ''}
+        ${!hasReport && r.problem_summary ? '<div style="line-height:1.7;margin-bottom:4px">' + esc(r.problem_summary) + '</div>' : ''}
         ${!r.problem_summary && issue.status !== 'failed' && !Object.keys(execution).length && !Object.keys(gate).length ? '<div class="muted" style="line-height:1.7">该项分析尚未生成可展示的结果，请稍后刷新每日晨报。</div>' : ''}
-        ${chips}
-        ${(Object.keys(execution).length || Object.keys(gate).length) ? section('🧾 执行与取证审计', auditBody, false) : ''}
-        ${mdSection(gate.analysis_mode === 'triage' ? '📋 今日待办' : '📋 详细分析报告', r.detailed_report)}
-        ${gate.analysis_mode === 'triage' ? '' : section('🧩 根因分析', r.root_cause)}
-        ${section('💬 客户诉求', r.customer_request)}
-        ${section('📌 当前状态', r.current_status || r.current_blocker)}
-        ${section('🔍 关键证据', ev)}
-        ${section('🛠️ 建议动作', actions)}
-        ${section('💡 建议方案', r.suggested_solution)}
-        ${gate.analysis_mode === 'triage' ? '' : similarSection}
-        ${section('❓ 缺失资料', missing)}
-        ${section('✉️ 回复草稿（EN / 中文）', [r.suggested_reply_en, r.suggested_reply_zh].filter(Boolean).join('\n\n—— 中文 ——\n\n'), false)}
+        ${hasReport ? '' : chips}
+        ${mdSection(r.detailed_report)}
+        ${hasReport ? section('运行记录', auditBody, false) : (structured || Object.keys(execution).length || Object.keys(gate).length
+          ? '<details' + (hasReport ? '' : ' open') + ' class="daily-brief-section">'
+            + '<summary>' + structuredTitle + '</summary>'
+            + '<div class="daily-brief-structured">' + structured + '</div></details>'
+          : '')}
+        ${hasReport ? '' : section('✉️ 回复草稿（EN / 中文）', [r.suggested_reply_en, r.suggested_reply_zh].filter(Boolean).join('\n\n—— 中文 ——\n\n'), false)}
       </div>
       <div class="modal-buttons daily-brief-modal-footer">
         <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">关闭</button>
         <button class="secondary" data-daily-brief-reanalyze="${esc(issueId)}">深度分析此项</button>
-        ${issue.status === 'completed' ? '<button class="secondary" data-daily-brief-save-case="' + esc(issueId) + '">存为案例</button>' : ''}
+        ${issue.status === 'completed' && dailyBriefAnalysisMode(r, gate) === 'diagnostic' && r.result_format !== 'kkagent_markdown' ? '<button class="secondary" data-daily-brief-save-case="' + esc(issueId) + '">存为案例</button>' : ''}
         ${r.suggested_reply_en ? '<button class="secondary" data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="en">复制英文回复</button>' : ''}
         ${r.suggested_reply_zh ? '<button data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="zh">复制中文回复</button>' : ''}
       </div>
@@ -3180,7 +3295,7 @@ async function reanalyzeDailyBriefIssue(issueId, button) {
     dailyBriefManualPoll = true;
     await loadDailyBrief();
     removeDynamicModal(button.closest('.modal').id);
-    notifyUser('已加入分析队列', 'Defect #' + issueId + ' 将由独立 Worker 重新分析', 'success');
+    notifyUser('已加入分析队列', '#' + issueId + ' 将由独立 Worker 重新分析', 'success');
     pollDailyBriefRun(queued.run_id || run.run_id);
   } catch (e) {
     button.disabled = false;
@@ -3208,7 +3323,7 @@ async function saveDailyBriefCase(issueId, button) {
     var response = await api(base, {method: 'POST'}) || {};
     if (response && response.success === false) throw new Error(response.error || '保存被拒绝');
     button.textContent = '✓ 已存为案例';
-    notifyUser('已存为案例', 'Defect #' + issueId + ' 的分析结论已沉淀到知识库，后续历史检索可命中', 'success');
+    notifyUser('已存为案例', '#' + issueId + ' 已保存到知识库', 'success');
   } catch (e) {
     button.disabled = false;
     button.textContent = original;

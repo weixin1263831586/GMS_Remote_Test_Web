@@ -33,12 +33,17 @@ class CodesearchProvider:
 
     - 索引是动态的：``revision`` 仅作为请求标签记录在 result_id 里，
       ``commit`` 恒为空串；不保证跨索引更新的引用可复现性；
+    - 审核意见（P2）：所有返回显式携带 ``reproducible: false`` 与
+      ``requested_revision``——这类证据不允许单独把 root_cause 推到
+      confirmed（由 daily brief prompt/evidence 消费方执行）；
     - result_id 载荷为 ``source_id/revision/path``（无 commit）；
     - ``search`` 走 ``GET /api/v1/search``（full + projects [+ path]），
       ``read`` 走 ``GET /api/v1/file/content?path=/<project>/<path>``。
     """
 
     kind = "codesearch"
+    # 动态索引：证据不可按 commit 复现（local_git provider 为 True）。
+    reproducible = False
 
     def __init__(self, config: ProviderConfig, secret: bytes):
         self.config = config
@@ -118,10 +123,13 @@ class CodesearchProvider:
     def revision_metadata(self, revision: str = "") -> dict[str, Any]:
         return {
             "source_id": self.config.source_id,
+            "provider": self.kind,
+            "requested_revision": self.resolve_revision(revision),
             "revision": self.resolve_revision(revision),
             "commit": "",
             "commit_subject": "OpenGrok 动态索引（无固定 commit）",
             "commit_date": "",
+            "reproducible": False,
         }
 
     # -------------------------------------------------------------- search
@@ -162,6 +170,7 @@ class CodesearchProvider:
                         "source_id": self.config.source_id,
                         "revision": resolved,
                         "commit": "",
+                        "reproducible": False,
                         "path": repo_path,
                         "line": _opengrok_line_number(hit.get("lineNumber")),
                         "snippet": snippet,
@@ -175,6 +184,7 @@ class CodesearchProvider:
             "source_id": self.config.source_id,
             "revision": resolved,
             "commit": "",
+            "reproducible": False,
             "total": _opengrok_line_number(data.get("resultCount")) or len(matches),
             "scanned_files": len(results) if isinstance(results, dict) else 0,
             "limited": False,
@@ -200,6 +210,7 @@ class CodesearchProvider:
             "source_id": self.config.source_id,
             "revision": payload["revision"],
             "commit": "",
+            "reproducible": False,
             "path": safe_path,
             "blob_sha256": hashlib.sha256(raw).hexdigest(),
             "total_lines": len(lines),

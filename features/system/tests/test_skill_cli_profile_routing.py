@@ -76,6 +76,13 @@ class SkillCliProfileRoutingTests(unittest.TestCase):
         env.update(
             {
                 "HOME": str(home),
+                # helper 按 ${XDG_CONFIG_HOME:-$HOME/.config} 解析 profile、
+                # ${XDG_STATE_HOME:-...} 解析 token；CI runner（ubuntu-latest
+                # 镜像）预置了指向真实 HOME 的 XDG_*，不钉进沙箱就会读到
+                # runner 的真实 profile/凭据。
+                "XDG_CONFIG_HOME": str(home / ".config"),
+                "XDG_DATA_HOME": str(home / ".local" / "share"),
+                "XDG_STATE_HOME": str(home / ".local" / "state"),
                 "GMS_AUTH_COOKIE_JAR": str(home / "session.cookies"),
                 "NO_COLOR": "1",
             }

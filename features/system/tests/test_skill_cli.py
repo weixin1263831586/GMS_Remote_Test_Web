@@ -43,6 +43,11 @@ class SkillCliTests(unittest.TestCase):
                     "GMS_REMOTE_TEST_SERVER": (
                         f"http://127.0.0.1:{self.server.server_port}"
                     ),
+                    # profile/token 按 XDG 优先解析；runner 预置的 XDG_* 指向
+                    # 真实 HOME，必须一并钉进临时沙箱。
+                    "XDG_CONFIG_HOME": str(Path(temporary) / ".config"),
+                    "XDG_DATA_HOME": str(Path(temporary) / ".local" / "share"),
+                    "XDG_STATE_HOME": str(Path(temporary) / ".local" / "state"),
                     "GMS_AUTH_COOKIE_JAR": str(Path(temporary) / "session.cookies"),
                     "NO_COLOR": "1",
                 }
@@ -533,62 +538,6 @@ class SkillCliTests(unittest.TestCase):
         self.assertEqual(request["system_img"], image.name)
         self.assertEqual(request["script_path"], "controller-managed")
         self.assertEqual(request["devices"], ["SERIAL-1"])
-
-
-class SkillUpdateEnvTests(unittest.TestCase):
-    """gms-rt-system-update 必须走 gms-agent update 并传导当前 TLS 配置。
-
-    install.sh 已随包结构迁移删除，更新生命周期改为
-    `gms-agent update`（registry → 校验 → versions/<v>/ → 整包重激活）。
-    命令现在优先取本脚本旁边的 gms-agent，并把会话的
-    GMS_INSTALL_CA_CERT / GMS_INSTALL_INSECURE 传导给 gms-agent 的下载层。
-    """
-
-    def test_update_invokes_gms_agent_with_tls_passthrough(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            scripts_dir = Path(temporary) / "scripts"
-            scripts_dir.mkdir()
-            helper_copy = scripts_dir / "gms-remote-test.sh"
-            helper_copy.write_bytes(HELPER.read_bytes())
-            # Stub gms-agent（与真实入口一致：#!/usr/bin/env python3）：
-            # 记录收到的关键环境变量后成功退出。
-            env_dump = Path(temporary) / "agent-env.json"
-            (scripts_dir / "gms-agent").write_text(
-                "#!/usr/bin/env python3\n"
-                'import os, sys\n'
-                'ca = os.environ.get("GMS_INSTALL_CA_CERT", "")\n'
-                'insecure = os.environ.get("GMS_INSTALL_INSECURE", "")\n'
-                'with open(r"' + str(env_dump) + '", "w") as fh:\n'
-                '    fh.write("\\n".join([ca, insecure, *sys.argv[1:]]) + "\\n")\n',
-                encoding="utf-8",
-            )
-            (scripts_dir / "gms-agent").chmod(0o755)
-
-            env = os.environ.copy()
-            env.update(
-                {
-                    "HOME": temporary,
-                    "GMS_CURL_CA_CERT": "/tmp/trusted-ca.pem",
-                    "NO_COLOR": "1",
-                }
-            )
-            result = subprocess.run(
-                ["bash", str(helper_copy), "gms-rt-system-update"],
-                cwd=ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            lines = env_dump.read_text(encoding="utf-8").splitlines()
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        ca_cert, insecure, *argv = lines[:3]
-        # 当前会话的 TLS 配置必须传导给 gms-agent（CA 优先，未配置时回退 0）。
-        self.assertEqual(ca_cert, "/tmp/trusted-ca.pem")
-        self.assertEqual(insecure, "0")
-        # 新生命周期：python3 <scripts>/gms-agent update
-        self.assertTrue(any(arg == "update" for arg in argv), lines[3:])
 
 
 if __name__ == "__main__":

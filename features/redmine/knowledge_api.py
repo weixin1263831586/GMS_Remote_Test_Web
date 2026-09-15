@@ -220,12 +220,21 @@ async def latest_evaluation(issue_id: int, request: Request):
 
 @router.post("/daily-brief/{brief_date}/issues/{issue_id}/save-case")
 async def save_daily_brief_case(brief_date: str, issue_id: int, request: Request, run_id: str = Query("")):
-    """把一次晨报 AI 分析结果沉淀为本地 case_fact（FTS 可检索）。
+    """把一次晨报**诊断**分析结果沉淀为本地 case_fact（FTS 可检索）。
 
-    只写本地知识库，不做任何 Redmine 写操作；重复保存按 issue_id 覆盖
-    （upsert，保留 created_at）。run_id 指定用户当前查看的晨报。
+    审核意见（P1）：批量 triage 的结果只是待办摘要（无根因），且其执行
+    状态（completed）不是 Redmine 工单状态——一律拒绝保存，避免把错误
+    status 和 AI 推导写进知识库。只有 evidence_gate 判定为 diagnostic 的
+    深度分析可以保存。
+
+    只写本地知识库，不做任何 Redmine 写操作。字段以
+    RedmineCaseExtractor 从本地扫描库提取的 Redmine 事实为基底，AI 结论
+    仅覆盖结论性字段；落库为 non-destructive merge（已有非空事实字段不
+    被空值清空）。重复保存按 issue_id upsert，保留 created_at。
+    run_id 指定用户当前查看的晨报。
     """
     from .daily_brief_case_fact import build_case_fact_from_brief
+    from .kkagent.evidence_gate import result_analysis_mode
 
     require_human_principal_when_auth_required(request)
     owner_id = owner_id_from_request(request)
@@ -236,8 +245,22 @@ async def save_daily_brief_case(brief_date: str, issue_id: int, request: Request
     record = repository.get_issue(run.run_id, issue_id)
     if record is None or record.status != "completed" or not record.result:
         return ApiError.not_found(f"issue {issue_id} has no completed analysis in {run.run_id}").to_response()
-    fact = build_case_fact_from_brief(issue_id, record, run)
-    _knowledge(request).knowledge_db.upsert_case_fact(fact)
+    if result_analysis_mode(record.result) != "diagnostic":
+        return ApiError.conflict(
+            "only diagnostic (deep) analysis results can be saved as a case; "
+            f"issue {issue_id} in {run.run_id} is a triage summary — run "
+            "深度分析此项 first"
+        ).to_response()
+    service = _knowledge(request)
+    issue_row: dict[str, Any] | None = None
+    issue_repository = getattr(service, "issue_repository", None)
+    if issue_repository is not None:
+        try:
+            issue_row = issue_repository.get_issue(issue_id)
+        except Exception:  # pragma: no cover - scan store unavailable
+            issue_row = None
+    fact = build_case_fact_from_brief(issue_id, record, run, issue=issue_row)
+    service.knowledge_db.upsert_case_fact(fact, merge_missing=True)
     return {"success": True, "data": {"issue_id": issue_id, "saved": True}}
 
 
