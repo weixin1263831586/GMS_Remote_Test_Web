@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,12 @@ from fastapi.responses import HTMLResponse, Response
 
 from features.auth import (
     CurrentUser,
+    automation_granted_capabilities,
     get_authenticated_user,
     principal_owner_id,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
+    require_elevated_admin_when_auth_required,
     require_human_principal,
     require_human_principal_when_auth_required,
     require_role,
@@ -48,12 +51,7 @@ automation_service = AutomationService(
 
 
 def _request_owner(request: Request) -> tuple[str, bool]:
-    """Return the ATS owner filter and whether the caller may see all runs.
-
-    Ownership compares against the resource-owner ACCOUNT (ADR 0010): an
-    agent token sees runs created by its enrolling account, so token
-    rotation never orphans a run.
-    """
+    """Return the ATS owner filter and whether the caller may see all runs."""
     user = get_authenticated_user(request)
     if user is None:
         user = require_authenticated_user_when_auth_required(request)
@@ -73,14 +71,41 @@ def _owned_run(run_id: str, request: Request) -> dict[str, Any]:
 
 
 def _require_human_run_access(run_id: str, request: Request) -> dict[str, Any]:
-    """Owner check for run mutations, refusing agent/machine principals.
-
-    Cancelling or retrying a run mutates the orchestration surface itself
-    (ADR 0012): only the owning human account (or an admin) may do it.
-    """
-
+    """Owner check for run mutations, refusing agent/machine principals."""
     require_human_principal(request)
     return _owned_run(run_id, request)
+
+
+def _flash_stage_required(req: dict[str, Any]) -> bool:
+    """Match the service/executor default: missing flash config means firmware."""
+    plan = req.get('test_plan') if isinstance(req.get('test_plan'), dict) else {}
+    flash = plan.get('flash') if isinstance(plan.get('flash'), dict) else {}
+    return flash.get('mode') != 'skip'
+
+
+def _automation_creation_principal(
+    request: Request,
+    principal: CurrentUser | None,
+    req: dict[str, Any],
+) -> CurrentUser | None:
+    """Snapshot human elevation as the narrow ``firmware.stage`` capability.
+
+    Firmware staging is a human elevated-admin operation. ATS must validate
+    that consent at create/preflight time, but the worker must never receive
+    the browser's admin/elevation session. We therefore add exactly one
+    transient permission to the principal used only for capability compilation;
+    the resulting run stores ``firmware.stage`` in its immutable capability
+    snapshot and the machine principal receives nothing else.
+    """
+    if not _flash_stage_required(req):
+        return principal
+    require_elevated_admin_when_auth_required(request)
+    if principal is None:
+        return None
+    return replace(
+        principal,
+        extra_permissions=principal.extra_permissions | frozenset({'firmware.stage'}),
+    )
 
 
 def configure_automation_service(service: AutomationService) -> None:
@@ -119,9 +144,7 @@ async def list_automation_profiles(
     return {
         'success': True,
         'data': {
-            'items': automation_service.list_profiles(
-                enabled_only=enabled_only
-            )
+            'items': automation_service.list_profiles(enabled_only=enabled_only)
         },
     }
 
@@ -169,17 +192,18 @@ async def dry_run_automation_profile(
 
 
 @router.post('/runs')
-async def create_automation_run(
-    req: dict[str, Any], request: Request
-):
-    # ADR 0012: runs are a human-operator surface. Agent tokens and machine
-    # principals must not create (or chain) runs — the pipeline's authority
-    # is snapshotted from the human creator at this single entry point.
+async def create_automation_run(req: dict[str, Any], request: Request):
+    # ADR 0012: runs are a human-operator surface. The capability snapshot is
+    # compiled once here; firmware plans additionally require live human
+    # elevation, converted only into the narrow firmware.stage capability.
     try:
         principal = require_human_principal(request)
+        capability_principal = _automation_creation_principal(
+            request, principal, req
+        )
         owner = principal_owner_id(request)
         run = automation_service.create_run(
-            req, created_by=owner, principal=principal
+            req, created_by=owner, principal=capability_principal
         )
     except ValueError as exc:
         return error_response(str(exc), 400)
@@ -189,9 +213,17 @@ async def create_automation_run(
 @router.post('/runs/preflight')
 async def preflight_automation_run(
     req: dict[str, Any],
+    request: Request,
     _user: CurrentUser | None = Depends(require_human_principal_when_auth_required),
 ):
     try:
+        capability_principal = _automation_creation_principal(
+            request, _user, req
+        )
+        # Preflight and creation must use the SAME authorization compiler.
+        # Otherwise a plan can show green then fail only after Queue/Create.
+        plan = req.get('test_plan') if isinstance(req.get('test_plan'), dict) else {}
+        automation_granted_capabilities(capability_principal, plan)
         data = automation_service.preflight(req)
     except ValueError as exc:
         return error_response(str(exc), 409)
@@ -273,9 +305,7 @@ async def automation_dashboard(request: Request):
 
 
 @router.get('/runs/{run_id}/events')
-async def get_automation_run_events(
-    run_id: str, request: Request
-):
+async def get_automation_run_events(run_id: str, request: Request):
     try:
         _owned_run(run_id, request)
         events = automation_service.list_events(run_id)
@@ -328,16 +358,12 @@ async def get_automation_run_timeline(
 
 
 @router.get('/runs/{run_id}/trace')
-async def get_automation_run_trace(
-    run_id: str, request: Request
-):
+async def get_automation_run_trace(run_id: str, request: Request):
     """Correlate a run with its build job, commit, artifact and report."""
     try:
         run = _owned_run(run_id, request)
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
-
-    import json
 
     from features.build import get_build_service
 
@@ -395,9 +421,7 @@ async def get_automation_run_trace(
 
 
 @router.post('/runs/{run_id}/cancel')
-async def cancel_automation_run(
-    run_id: str, request: Request
-):
+async def cancel_automation_run(run_id: str, request: Request):
     try:
         _require_human_run_access(run_id, request)
         run = automation_service.cancel_run(run_id)
@@ -409,9 +433,7 @@ async def cancel_automation_run(
 
 
 @router.post('/runs/{run_id}/retry')
-async def retry_automation_run(
-    run_id: str, request: Request
-):
+async def retry_automation_run(run_id: str, request: Request):
     try:
         _require_human_run_access(run_id, request)
         run = automation_service.retry_run(run_id)
@@ -427,12 +449,8 @@ async def automation_worker_tick(
     executor: str = Query('http', pattern='^(http|stub)$'),
     _admin: CurrentUser = Depends(require_role("admin")),
 ):
-    # 自动化状态机包含长耗时阻塞操作，在线程中执行。
     data = await asyncio.to_thread(automation_service.worker_tick, executor)
-    return {
-        'success': True,
-        'data': data,
-    }
+    return {'success': True, 'data': data}
 
 
 @router.get('/worker/status')
@@ -481,8 +499,6 @@ async def poll_gerrit_changes(
         'success': True,
         'data': await automation_service.poll_gerrit_changes(
             limit,
-            # ADR 0010: store the platform ACCOUNT id (admin is human, so
-            # this equals admin.id, but keep the canonical owner accessor).
             created_by=admin.resource_owner_id,
         ),
     }
