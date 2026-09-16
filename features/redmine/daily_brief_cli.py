@@ -38,6 +38,7 @@ def _owner_service(owner_id: str):
 
 def _enabled_owner_ids() -> list[str]:
     """列出配置了 enabled=true 的 owner（数据目录下 by_user/*）。"""
+    from features.redmine.daily_brief_owner_policy import is_daily_brief_owner_eligible
     from foundation.config import settings
 
     root = settings.data_root / "redmine" / "by_user"
@@ -48,6 +49,9 @@ def _enabled_owner_ids() -> list[str]:
         if not entry.is_dir():
             continue
         owner_id = entry.name
+        if not is_daily_brief_owner_eligible(owner_id):
+            logger.info("skip administrator owner %s for daily brief", owner_id)
+            continue
         try:
             service = _owner_service(owner_id)
             if service.get_config().get("enabled"):
@@ -72,6 +76,8 @@ def _run_mode(mode: str, owner_ids: list[str]) -> int:
     exit code 语义：入队成功=0；任何 owner 入队失败=1（执行结果由
     Worker 收敛进 runs 表，CLI 不等待）。
     """
+    from features.redmine.daily_brief_owner_policy import is_daily_brief_owner_eligible
+
     owners = owner_ids or _enabled_owner_ids()
     if not owners:
         logger.warning("no enabled daily-brief owners; nothing to do")
@@ -79,6 +85,9 @@ def _run_mode(mode: str, owner_ids: list[str]) -> int:
 
     failures = 0
     for owner_id in owners:
+        if not is_daily_brief_owner_eligible(owner_id):
+            logger.info("skip administrator owner %s for daily brief", owner_id)
+            continue
         try:
             service = _owner_service(owner_id)
             started = service.start_run(mode=mode)

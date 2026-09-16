@@ -146,6 +146,20 @@ class DailyBriefApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(url).status_code, 200)
         self.assertEqual(self.client.get(url, headers={'x-test-owner': 'owner-b'}).status_code, 404)
 
+    def test_active_single_issue_is_available_after_page_reload(self):
+        queued = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={'issue_id': 647338},
+        ).json()['data']
+
+        response = self.client.get('/api/redmine-agent/daily-brief/active-issue')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()['data']
+        self.assertEqual(payload['run']['run_id'], queued['run_id'])
+        self.assertEqual(payload['run']['status'], 'pending')
+        self.assertEqual(payload['issues'][0]['issue_id'], 647338)
+
     def test_single_issue_worker_analyzes_without_snapshot_scan(self):
         from features.redmine.daily_brief_worker import _execute_job
 

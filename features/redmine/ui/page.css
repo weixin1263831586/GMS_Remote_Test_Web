@@ -285,23 +285,24 @@
 
     /* 每日晨报：信息分层清楚，长标题和窄屏不挤压状态与操作。 */
     .daily-brief-card { overflow:hidden; }
-    .daily-brief-head { padding:16px; background:linear-gradient(135deg,rgba(59,130,246,.10),rgba(124,58,237,.08)); }
+    .daily-brief-head { padding:8px 16px; background:linear-gradient(135deg,rgba(59,130,246,.10),rgba(124,58,237,.08)); }
     .daily-brief-titlebar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .daily-brief-title { font-size:16px; font-weight:750; }
-    .daily-brief-toolbar { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:16px; }
+    .daily-brief-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px 16px; }
     .daily-brief-toolbar .daily-brief-title { white-space:nowrap; }
     .daily-brief-single-form, .daily-brief-run-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .daily-brief-toolbar-right { display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; margin-left:auto; }
+    .daily-brief-toolbar-right { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; min-width:0; }
     .daily-brief-toolbar-right .daily-brief-single-form { justify-content:flex-end; }
     .daily-brief-run-controls { justify-content:flex-end; }
     .daily-brief-toolbar .ka-btn { height:36px; padding:0 12px; white-space:nowrap; border-radius:8px; }
     .daily-brief-toolbar .ka-btn.primary:hover { background:#4338ca; }
     #singleIssueAnalysisId { height:36px; box-sizing:border-box; padding:0 12px; border-radius:8px; }
-    .daily-brief-run-controls { padding-left:12px; border-left:1px solid var(--border); }
+    .daily-brief-run-controls { padding-left:8px; border-left:1px solid var(--border); }
     .daily-brief-run-controls .daily-brief-status { padding:5px 10px; white-space:nowrap; }
     .daily-brief-run-controls .daily-brief-action { display:flex; align-items:center; gap:8px; margin-left:0; }
     .daily-brief-toolbar-right .daily-brief-action { width:auto; }
     .daily-brief-toolbar .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
+    #singleIssueAnalysisResult { margin:4px 16px 2px; font-size:12px; color:var(--muted); line-height:1.5; }
     #singleIssueAnalysisResult:empty { display:none; }
     .daily-brief-status { font-size:12px; font-weight:750; padding:2px 8px; border-radius:999px; background:#273244; }
     .daily-brief-status.completed { color:#86efac; background:#123524; }
@@ -309,10 +310,29 @@
     .daily-brief-status.failed { color:#fecaca; background:#451a1a; }
     .daily-brief-status.cancelled { color:#cbd5e1; background:#1f2937; }
     .daily-brief-action { margin-left:auto; }
-    .daily-brief-metrics { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:8px; margin-top:14px; }
+    .daily-brief-metrics { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:8px; margin-top:0; }
     .daily-brief-metric { padding:9px 10px; border:1px solid var(--border); border-radius:7px; background:rgba(15,23,42,.72); }
     .daily-brief-metric span { display:block; color:var(--muted); font-size:11px; }
     .daily-brief-metric b { display:block; margin-top:2px; font-size:18px; }
+    .daily-brief-ai-statistics { min-width:0; }
+    .daily-brief-stat-overview { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .daily-brief-stat-summary { min-width:0; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:rgba(15,23,42,.62); }
+    .daily-brief-stat-summary h4 { margin:0 0 9px; font-size:12px; color:#cbd5e1; }
+    .daily-brief-stat-values { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+    .daily-brief-stat-value { min-width:0; }
+    .daily-brief-stat-value span { display:block; color:var(--muted); font-size:11px; white-space:nowrap; }
+    .daily-brief-stat-value b { display:block; margin-top:3px; color:#f8fafc; font-size:16px; overflow-wrap:anywhere; }
+    .daily-brief-stat-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
+    .daily-brief-stat-grid section, .daily-brief-tool-improvements { min-width:0; }
+    .daily-brief-stat-grid h4, .daily-brief-tool-improvements h4 { margin:0 0 7px; font-size:12px; color:#cbd5e1; }
+    .daily-brief-tool-improvements { margin-top:14px; }
+    .daily-brief-tool-improvements h4 span { color:var(--muted); font-size:11px; font-weight:400; }
+    .daily-brief-stat-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .daily-brief-stat-table th, .daily-brief-stat-table td { padding:6px 7px; border:1px solid var(--border); text-align:left; overflow-wrap:anywhere; }
+    .daily-brief-stat-table th { color:#cbd5e1; background:rgba(30,41,59,.5); font-weight:650; }
+    .daily-brief-tool-failed { color:#fca5a5; font-weight:650; }
+    .daily-brief-tool-recommendations { margin:0; padding-left:20px; color:#fde68a; line-height:1.65; }
+    .daily-brief-tool-recommendations code { color:#dbeafe; }
     .daily-brief-warning { display:flex; align-items:center; gap:10px; padding:9px 16px; color:#fde68a; background:#3b2b0b; border-top:1px solid #6b4f13; border-bottom:1px solid #6b4f13; font-size:12px; line-height:1.5; }
     .daily-brief-warning.daily-brief-error { color:#fecaca; background:#451a1a; border-color:#7f1d1d; white-space:pre-wrap; overflow-wrap:anywhere; }
     .daily-brief-warning .ka-btn { margin-left:auto; flex:none; }
@@ -325,11 +345,13 @@
     .daily-brief-state.failed { color:#fca5a5; }
     .daily-brief-row-actions { display:flex; align-items:center; gap:6px; }
     .daily-brief-modal { width:min(1180px,calc(100vw - 32px)); max-width:none; height:min(860px,calc(100dvh - 32px)); max-height:calc(100dvh - 32px); border-radius:12px; }
+    .daily-brief-modal.daily-brief-statistics-modal { width:min(920px,calc(100vw - 32px)); height:auto; max-height:min(720px,calc(100dvh - 32px)); }
     .daily-brief-modal .modal-header { flex:0 0 auto; padding:14px 20px; }
     .daily-brief-modal-title { display:flex; flex-direction:column; min-width:0; align-items:flex-start; gap:2px; line-height:1.35; white-space:normal; }
     .daily-brief-modal-title > span:first-child { font-size:16px; }
     .daily-brief-modal-subject { width:100%; min-width:0; color:#e2e8f0; font-size:13px; font-weight:450; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
     .daily-brief-modal-body { padding:20px 24px 24px; gap:12px; overflow-y:auto; scrollbar-gutter:stable; }
+    .daily-brief-statistics-modal .daily-brief-modal-body { flex:0 1 auto; padding:16px 18px 18px; }
     .daily-brief-section { margin:0; border:1px solid var(--border); border-radius:8px; background:#101620; overflow:hidden; flex:0 0 auto; }
     .daily-brief-section summary { padding:10px 12px; cursor:pointer; font-weight:650; color:#dbeafe; background:rgba(30,41,59,.46); user-select:none; }
     .daily-brief-section[open] summary { border-bottom:1px solid rgba(43,51,66,.72); }
@@ -345,8 +367,12 @@
     .daily-brief-sub-body { white-space:pre-wrap; line-height:1.7; overflow-wrap:anywhere; color:var(--text); }
     .daily-brief-modal-footer { flex:0 0 auto; width:100%; margin:0; padding:12px 20px; border-top:1px solid var(--border); background:var(--panel); box-shadow:0 -8px 20px rgba(0,0,0,.18); }
     @media (max-width:760px) {
+        .daily-brief-toolbar { grid-template-columns:1fr; }
+        .daily-brief-toolbar-right { justify-content:flex-start; }
         .setting-inline-grid { grid-template-columns:1fr; }
         .daily-brief-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .daily-brief-stat-grid { grid-template-columns:1fr; }
+        .daily-brief-stat-overview { grid-template-columns:1fr; }
         .daily-brief-row { grid-template-columns:minmax(0,1fr) auto; gap:8px; }
         .daily-brief-state { grid-column:1 / -1; padding-left:28px; white-space:normal; }
         .daily-brief-row-actions { grid-column:1 / -1; padding-left:28px; }
@@ -354,6 +380,7 @@
         .daily-brief-action .ka-btn { width:100%; }
         .daily-brief-warning { align-items:flex-start; flex-wrap:wrap; }
         .daily-brief-modal { width:calc(100vw - 16px); height:calc(100dvh - 16px); max-height:calc(100dvh - 16px); }
+        .daily-brief-modal.daily-brief-statistics-modal { width:calc(100vw - 16px); height:auto; max-height:calc(100dvh - 16px); }
         .daily-brief-modal-body { padding:14px 12px 18px; }
         .daily-brief-modal-footer { padding:10px 12px; }
     }

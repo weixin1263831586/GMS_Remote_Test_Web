@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from . import daily_brief_cancellation as cancellation
+from .daily_brief_execution_statistics import summarize_execution_statistics
 from .daily_brief_execution_view import issue_payload
 from .daily_brief_models import (
     DailyBriefIssue,
@@ -101,16 +102,31 @@ class DailyBriefService(DailyBriefRunStarterMixin):
     def latest_run(self, brief_date: str | None = None) -> DailyBriefRun | None:
         return self.repository.latest_run(self.owner_id, brief_date)
 
+    def latest_active_issue_run(self) -> DailyBriefRun | None:
+        return self.repository.latest_active_issue_run(self.owner_id)
+
     def find_run(self, brief_date: str, mode: str = "nightly") -> DailyBriefRun | None:
         return self.repository.find_run(self.owner_id, brief_date, mode)
 
     def run_payload(self, run: DailyBriefRun) -> dict[str, Any]:
         issues = self.repository.list_issues(run.run_id)
-        executions = self.repository.latest_ai_executions_by_issue(run.run_id)
+        latest_executions = self.repository.latest_ai_executions_by_issue(run.run_id)
+        attempts_by_issue: dict[int, list[dict[str, Any]]] = {}
+        for attempt in self.repository.list_ai_executions_for_run(run.run_id):
+            issue_id = int(attempt.get("issue_id") or 0)
+            if issue_id:
+                attempts_by_issue.setdefault(issue_id, []).append(attempt)
         return {
             "run": run.to_row(),
             "issues": [
-                issue_payload(issue, executions.get(issue.issue_id))
+                issue_payload(
+                    issue,
+                    latest_executions.get(issue.issue_id),
+                    summarize_execution_statistics(
+                        attempts_by_issue.get(issue.issue_id, []),
+                        fallback_model=run.model_name,
+                    ),
+                )
                 for issue in issues
             ],
         }
@@ -454,6 +470,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
                 run.run_id, issue_id,
                 {
                     "attempt_no": record.attempt_count,
+                    "model_name": run.model_name,
                     **(outcome.trace or {}),
                     "final_ok": bool(outcome.ok),
                     "failure_stage": outcome.error_type,

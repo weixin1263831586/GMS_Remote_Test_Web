@@ -10,7 +10,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
-from features.redmine.kkagent import PROMPT_VERSION, KkAgentRedmineAnalyzer
+from features.redmine.kkagent import (
+    PROMPT_VERSION,
+    KkAgentAnalysisResult,
+    KkAgentRedmineAnalyzer,
+)
 from features.redmine.tests.kkagent.test_process import (
     _valid_result,
     _write_fake_kkagent,
@@ -142,6 +146,26 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertFalse(outcome.ok)
         self.assertEqual(outcome.error_type, "llm_timeout")
         self.assertIn("模型服务流式响应超时", outcome.error)
+
+    def test_each_transient_error_type_gets_its_own_retry(self):
+        analyzer = self._analyzer("ok-result", interrupted_retries=1)
+        timed_out = KkAgentAnalysisResult(
+            ok=False, error_type="llm_timeout", error="stream timeout"
+        )
+        interrupted = KkAgentAnalysisResult(
+            ok=False, error_type="interrupted", error="received SIGTERM"
+        )
+        succeeded = KkAgentAnalysisResult(ok=True, result={"ok": True})
+
+        async def outcomes(_entry):
+            return sequence.pop(0)
+
+        sequence = [timed_out, interrupted, succeeded]
+        with patch.object(analyzer, "_analyze_once", side_effect=outcomes) as run_once:
+            outcome = asyncio.run(analyzer.analyze(ENTRY))
+
+        self.assertTrue(outcome.ok)
+        self.assertEqual(run_once.await_count, 3)
 
     def test_invalid_json_is_invalid_ai_output(self):
         analyzer = self._analyzer("garbage", timeout_seconds=20)

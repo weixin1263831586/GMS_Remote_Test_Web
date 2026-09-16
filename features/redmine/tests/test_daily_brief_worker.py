@@ -179,6 +179,35 @@ class DailyBriefWorkerTests(unittest.TestCase):
                          {"problem_summary": "keep newer run untouched"})
         self.assertEqual(self.repository.get_job(job["job_id"])["status"], "completed")
 
+    def test_failed_standalone_issue_job_marks_its_run_failed(self):
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-13", mode="issue:101",
+            run_id="db_test", status="analyzing",
+        )
+        self.repository.create_run(run)
+        self.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=101, buckets=[], status="running",
+        ))
+        job = self._claim(kind="issue", issue_id=101)
+        fake_service = SimpleNamespace(
+            repository=self.repository,
+            reanalyze_issue=AsyncMock(return_value={"error": "agent unavailable"}),
+        )
+
+        self.assertTrue(asyncio.run(run_claimed_job(
+            self.repository,
+            job,
+            self.worker_id,
+            asyncio.Event(),
+            lease_seconds=30,
+            service_factory=lambda _owner: fake_service,
+        )))
+
+        self.assertEqual(self.repository.get_job(job["job_id"])["status"], "failed")
+        failed = self.repository.get_run(run.run_id)
+        self.assertEqual(failed.status, "failed")
+        self.assertEqual(failed.error, "agent unavailable")
+
     def test_issue_job_persisted_cancel_stops_active_analysis(self):
         self._patch_preflight()
         run = DailyBriefRun(
@@ -262,6 +291,22 @@ class DailyBriefWorkerTests(unittest.TestCase):
 
 class OwnerFairnessTests(unittest.TestCase):
     """owner round-robin 游标:字母序靠前的 owner 不得垄断 claim 起点。"""
+
+    def test_discovery_excludes_administrator_owner(self):
+        from features.redmine.daily_brief_worker import discover_repositories
+
+        with TemporaryDirectory() as directory:
+            data_root = Path(directory)
+            root = data_root / "redmine" / "by_user"
+            DailyBriefRepository(root / "gms")
+            DailyBriefRepository(root / "ordinary")
+            with patch(
+                "features.redmine.daily_brief_worker.is_daily_brief_owner_eligible",
+                side_effect=lambda owner_id: owner_id != "gms",
+            ):
+                repositories = discover_repositories(data_root)
+
+        self.assertEqual([item.owner_root.name for item in repositories], ["ordinary"])
 
     def test_cursor_rotates_start_offset_each_round(self):
         from features.redmine.daily_brief_worker import OwnerFairnessCursor

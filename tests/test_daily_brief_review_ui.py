@@ -6,6 +6,32 @@ from tests.test_runtime_ui_smoke import RuntimeUiHarness, expect
 
 
 class DailyBriefReviewUiTests(RuntimeUiHarness):
+    def test_active_single_issue_is_restored_after_page_reload(self):
+        page = self.new_page()
+
+        def respond(route):
+            if route.request.url.endswith((
+                '/daily-brief/active-issue',
+                '/daily-brief/runs/restored-single',
+            )):
+                data = {
+                    'run': {'run_id': 'restored-single', 'status': 'analyzing'},
+                    'issues': [{'issue_id': 652654, 'status': 'running'}],
+                }
+            else:
+                data = {}
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            expect(page.locator('#singleIssueAnalysisResult')).to_contain_text('#652654 正在分析')
+            expect(page.locator('#singleIssueAnalysisStop')).to_be_visible()
+            self.assertEqual(page.locator('#singleIssueAnalysisId').input_value(), '652654')
+        finally:
+            page.close()
+
     def test_single_issue_input_submits_only_one_issue_on_repeated_navigation(self):
         page = self.new_page()
         submissions = []
@@ -76,6 +102,52 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             self.assertNotIn('idle-user', result['refreshed'])
             self.assertIn('idle-user', result['all'])
             self.assertIn('busy-user', result['all'])
+        finally:
+            page.close()
+
+    def test_issue_ai_statistics_open_from_the_daily_brief_row(self):
+        page = self.new_page()
+        page.route("**/api/redmine-agent/**", lambda route: route.fulfill(
+            status=200, content_type="application/json", body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.wait_for_function("typeof renderDailyBriefInner === 'function'")
+            page.evaluate("switchTab('daily-brief')")
+            page.wait_for_load_state("networkidle")
+            page.evaluate("""() => {
+                dailyBriefCache = {
+                    run: {run_id: 'statistics-fixture', status: 'completed', report_json: {}},
+                    issues: [{issue_id: 101, status: 'completed', result: {}, ai_statistics: {
+                        execution_count: 2,
+                        tokens: {total_tokens: 150, input_tokens: 120, output_tokens: 30},
+                        timing: {total_duration_ms: 497_000, average_duration_ms: 497_000},
+                        gms_tool_call_count: 3,
+                        models: [{model_name: 'glm-4.7', execution_count: 2, total_tokens: 150,
+                                  input_tokens: 120, output_tokens: 30}],
+                        gms_tools: [{tool_name: 'gms_rt_redmine_issue_fetch', call_count: 3,
+                                     succeeded_count: 2, failed_count: 1}],
+                        tool_improvement_recommendations: [{
+                            tool_name: 'gms_rt_redmine_issue_fetch',
+                            message: '1/3 次调用失败；优先补充失败码、参数校验和重试指引。'
+                        }]
+                    }}]
+                };
+                document.getElementById('dailyBriefCard').innerHTML = renderDailyBriefInner(dailyBriefCache);
+            }""")
+            page.locator('#dailyBriefCard').get_by_text('AI 统计', exact=True).click()
+            statistics = page.locator('.daily-brief-statistics-modal').last
+            expect(statistics).to_be_visible()
+            text = statistics.inner_text()
+            self.assertIn('总 Tokens', text)
+            self.assertIn('总耗时', text)
+            self.assertIn('平均耗时', text)
+            self.assertIn('8 分 17 秒', text)
+            self.assertIn('glm-4.7', text)
+            self.assertIn('gms_rt_redmine_issue_fetch', text)
+            self.assertIn('失败码', text)
+            self.assertEqual(statistics.locator('img').count(), 0)
+            self.assertLess(statistics.bounding_box()['height'], 720)
         finally:
             page.close()
 
