@@ -4,7 +4,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-from features.auth import authority
+from starlette.requests import Request
+
+from features.auth import access, authority
 from features.auth.principal import CurrentUser
 
 
@@ -92,6 +94,20 @@ class AutomationAuthorityTests(unittest.TestCase):
             token = authority.mint_capability_token(principal, ttl_seconds=60)
         with patch.object(authority, "_signing_key", return_value=b"k" * 32):
             self.assertIsNone(authority.verify_capability_token(token))
+
+    def test_machine_principal_never_inherits_cookie_elevation(self):
+        request = Request({"type": "http", "headers": []})
+        request.state.auth_method = "machine_authority"
+        request.state.current_user = authority.automation_authority(
+            "ats_elevation", "owner-1", []
+        )
+        with patch.object(
+            access.auth_service,
+            "get_elevated_until",
+            return_value="2099-01-01T00:00:00Z",
+        ) as elevated_lookup:
+            self.assertFalse(access.is_elevated(request))
+        elevated_lookup.assert_not_called()
 
 
 if __name__ == "__main__":
