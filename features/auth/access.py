@@ -52,8 +52,8 @@ def get_authenticated_user(request: Request) -> CurrentUser | None:
 def require_authenticated_user(request: Request) -> CurrentUser:
     user = get_authenticated_user(request)
     if not user:
-        # Rejected credentials (invalid agent token) must 401/403 even in
-        # dev mode — never downgrade to an anonymous principal.
+        # Rejected bearer credentials must fail even in dev mode — never
+        # downgrade to an anonymous principal.
         if getattr(request.state, "credentials_rejected", False):
             raise HTTPException(
                 status_code=401, detail="Invalid agent credentials"
@@ -76,12 +76,7 @@ def require_authenticated_user_when_auth_required(
 
 
 def require_human_principal(request: Request) -> CurrentUser:
-    """Refuse agent/machine principals on always-authenticated endpoints.
-
-    Mutation surfaces (e.g. ATS run create/cancel/retry) already require an
-    authenticated principal; this adds the human-only rule of ADR 0012 on
-    top, so neither agent tokens nor machine capabilities pass.
-    """
+    """Refuse agent/machine principals on always-authenticated endpoints."""
 
     user = require_authenticated_user(request)
     if getattr(request.state, "auth_method", None) in {
@@ -100,16 +95,7 @@ def require_human_principal(request: Request) -> CurrentUser:
 def require_human_principal_when_auth_required(
     request: Request,
 ) -> CurrentUser | None:
-    """Authenticate like today, but refuse non-human principals.
-
-    The MCP tool allowlist is not a security boundary — an agent
-    token can call REST endpoints directly with its Bearer credential. VPN,
-    SSH helpers and suite management are human-operator surfaces: without a
-    matching agent scope they must fail closed here, server-side.
-    Machine capability principals (ADR 0012) are likewise refused: the
-    automation worker must not create chained runs through its own stage
-    authority.
-    """
+    """Authenticate like today, but refuse non-human principals."""
 
     user = require_authenticated_user_when_auth_required(request)
     if user is not None and getattr(
@@ -126,27 +112,12 @@ def require_human_principal_when_auth_required(
 
 
 def principal_owner_id(request: Request) -> str:
-    """Return the account id that should OWN newly-created resources.
-
-    Actor vs resource owner (ADR 0010): an agent service token creates
-    resources on behalf of its enrolling account, so the resource owner is
-    the token's ``owner_user_id`` — not the synthetic ``agent:<token_id>``.
-    Revoking/rotating the token then keeps those resources visible to the
-    account instead of orphaning them. Audit trails that need the acting
-    principal record ``user.id`` / ``user.actor_id`` alongside.
-    """
-
+    """Return the account id that should OWN newly-created resources."""
     return require_authenticated_user(request).resource_owner_id
 
 
 def principal_owner_id_when_auth_required(request: Request) -> str | None:
-    """Resource-owner id when authenticated, anonymous passthrough in dev mode.
-
-    Mirrors ``principal_owner_id`` for endpoints that stay usable without a
-    global login (dev deployments): anonymous callers keep their explicit
-    ``owner_id_from_request`` value, authenticated callers always own
-    through the account id (ADR 0010) — never the synthetic actor id.
-    """
+    """Resource-owner id when authenticated, anonymous passthrough in dev mode."""
 
     user = get_authenticated_user(request)
     if user is not None:
@@ -158,13 +129,11 @@ def principal_owner_id_when_auth_required(request: Request) -> str | None:
 
 def principal_actor_id(request: Request) -> str:
     """Return the ACTING principal id for audit attribution."""
-
     return require_authenticated_user(request).actor_id
 
 
 def principal_display_name(request: Request) -> str:
     """Return the human-readable username for device claim records."""
-
     return require_authenticated_user(request).username
 
 
@@ -174,11 +143,7 @@ def require_resource_owner(
     *,
     not_found_detail: str = "resource not found",
 ) -> CurrentUser:
-    """Enforce an owner boundary without revealing cross-user identifiers.
-
-    Ownership is compared against the RESOURCE owner account (ADR 0010):
-    an agent token may access resources owned by its enrolling account.
-    """
+    """Enforce an owner boundary without revealing cross-user identifiers."""
 
     user = require_authenticated_user(request)
     if user.role != "admin" and str(owner_id or "") != user.resource_owner_id:
@@ -192,12 +157,7 @@ def require_resource_owner_when_auth_required(
     *,
     not_found_detail: str = "resource not found",
 ) -> CurrentUser | None:
-    """Enforce an owner boundary in authenticated mode, allow anonymous in dev mode.
-
-    Mirrors require_authenticated_user_when_auth_required: when authentication is
-    not globally enforced (internal/dev deployments), anonymous callers may access
-    shared resources such as cancelling a running test.
-    """
+    """Enforce an owner boundary in authenticated mode, allow anonymous in dev mode."""
 
     user = get_authenticated_user(request)
     if user:
@@ -218,8 +178,7 @@ def require_role(*roles: str):
             return user
         # Temporary administrator verification intentionally does not mutate
         # the client's account role. Legacy admin-only dependencies must honor
-        # that elevated session, otherwise the UI receives a plain
-        # "Permission denied" after successful administrator verification.
+        # that elevated session.
         if "admin" in allowed:
             if is_elevated(request):
                 return user
@@ -253,8 +212,8 @@ def require_permission(permission: str):
         user = require_authenticated_user(request)
         if user.has_permission(permission):
             return user
-        # 与 require_role 一致：临时管理员验证（elevation）也满足权限检查，
-        # 否则 UI 在成功二次验证后仍会收到 Permission denied。
+        # Human session elevation may temporarily satisfy a permission gate.
+        # Bearer principals are explicitly excluded by is_elevated().
         if is_elevated(request):
             return user
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -276,13 +235,17 @@ def require_permission_when_auth_required(permission: str):
 
 
 def is_elevated(request: Request) -> bool:
-    """Return whether this request has a live re-authenticated elevation."""
-    # Elevation lives on a human *cookie* session. An
-    # agent_token principal must never inherit the elevation of a leftover
-    # browser/CLI cookie that happens to ride along in the same request —
-    # that would collapse the agent's scope isolation. Bearer and elevation
-    # are mutually exclusive by definition.
-    if getattr(request.state, "auth_method", None) == "agent_token":
+    """Return whether this HUMAN cookie session has live admin elevation.
+
+    Elevation is a browser/session property. Agent and ATS machine Bearer
+    principals must never inherit a leftover cookie's elevation; otherwise a
+    scoped bearer could silently expand to administrator authority merely by
+    being sent alongside an elevated browser cookie.
+    """
+    if getattr(request.state, "auth_method", None) in {
+        "agent_token", "machine_authority",
+        "invalid_agent_token", "invalid_capability_token",
+    }:
         return False
     if getattr(request.state, "is_elevated", None) is not None:
         return bool(request.state.is_elevated)
@@ -293,11 +256,7 @@ def is_elevated(request: Request) -> bool:
 
 
 def require_elevated_admin(request: Request) -> CurrentUser:
-    """Require a session verified by an administrator.
-
-    The authenticated user may remain an ordinary client. The separate admin
-    verification is stored on that same session and never changes its role.
-    """
+    """Require a human session verified by an administrator."""
 
     user = require_authenticated_user(request)
     if not is_elevated(request):
@@ -320,7 +279,7 @@ def require_elevated_admin_when_auth_required(request: Request) -> CurrentUser |
 
 
 def require_agent_scope(scope: str):
-    """Require an agent principal carrying ``scope`` (human roles also pass)."""
+    """Require a principal carrying ``scope`` (human role permissions also pass)."""
 
     def dependency(request: Request) -> CurrentUser:
         user = require_authenticated_user(request)
@@ -338,7 +297,7 @@ def require_agent_scope(scope: str):
 
 
 def ensure_agent_worker_allowed(request: Request, worker_id: str) -> None:
-    """Enforce the token's allowed_workers ACL (no-op for human sessions)."""
+    """Enforce the token's allowed_workers ACL (no-op for non-agent principals)."""
 
     if getattr(request.state, "auth_method", None) != "agent_token":
         return
@@ -351,7 +310,7 @@ def ensure_agent_worker_allowed(request: Request, worker_id: str) -> None:
 
 
 def ensure_agent_device_allowed(request: Request, serial: str) -> None:
-    """Enforce the token's allowed_devices ACL (no-op for human sessions)."""
+    """Enforce the token's allowed_devices ACL (no-op for non-agent principals)."""
 
     if getattr(request.state, "auth_method", None) != "agent_token":
         return
