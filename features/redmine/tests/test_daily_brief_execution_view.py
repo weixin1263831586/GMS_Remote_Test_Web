@@ -11,6 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
+from features.redmine.daily_brief_execution_statistics import DEFAULT_MODEL_LABEL
 from features.redmine.kkagent_analyzer import KkAgentAnalysisResult
 from features.redmine.tests.test_daily_brief_service import (
     SNAPSHOT,
@@ -51,6 +52,8 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
                     "session_id": "sess-1",
                     "status": "completed",
                     "tool_call_count": 2,
+                    "input_tokens": 120,
+                    "output_tokens": 30,
                     "history_search_count": 2,
                     "distinct_history_search_count": 2,
                     "repair_attempts": 1,
@@ -72,6 +75,17 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
             self.assertTrue(issue["ai_execution"]["issue_fetched"])
             self.assertNotIn("tools", issue["ai_execution"])
             self.assertNotIn("PRIVATE", str(issue["ai_execution"]))
+        statistics = payload["issues"][0]["ai_statistics"]
+        self.assertEqual(statistics["execution_count"], 1)
+        self.assertEqual(statistics["tokens"]["input_tokens"], 120)
+        self.assertEqual(statistics["tokens"]["output_tokens"], 30)
+        self.assertEqual(
+            statistics["timing"]["total_duration_ms"],
+            payload["issues"][0]["ai_execution"]["duration_ms"],
+        )
+        self.assertEqual(statistics["gms_tool_call_count"], 1)
+        self.assertEqual(statistics["models"][0]["model_name"], DEFAULT_MODEL_LABEL)
+        self.assertNotIn("PRIVATE", str(statistics))
 
 
 if __name__ == "__main__":

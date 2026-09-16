@@ -218,6 +218,22 @@ class DailyBriefJobStore:
                         "WHERE run_id=? AND issue_id=?",
                         (item["run_id"], item["issue_id"]),
                     )
+            # 先清理所有已被 full-run 覆盖的 issue-job，再从全局队列选取。
+            # 不能只在当前候选恰好是 issue-job 时清理：requested_at 相同
+            # 时 job_id 可能让 run-job 先被领取，遗留的 issue-job 会在
+            # full-run 完成后错误执行。
+            conn.execute(
+                "UPDATE redmine_daily_brief_jobs SET status='cancelled',"
+                "worker_id='',lease_token='',lease_expires_at='',"
+                "finished_at=?,error='superseded by full run job' "
+                "WHERE kind='issue' AND status='queued' AND EXISTS ("
+                "SELECT 1 FROM redmine_daily_brief_jobs AS run_job "
+                "WHERE run_job.run_id=redmine_daily_brief_jobs.run_id "
+                "AND run_job.kind='run' "
+                "AND run_job.status IN ('queued','running')"
+                ")",
+                (now,),
+            )
             while True:
                 row = conn.execute(
                     "SELECT * FROM redmine_daily_brief_jobs WHERE status='queued' "

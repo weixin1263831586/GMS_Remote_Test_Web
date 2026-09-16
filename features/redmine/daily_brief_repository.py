@@ -314,6 +314,21 @@ class DailyBriefRepository:
                 ).fetchone()
             return self._row_to_run(row) if row else None
 
+    def latest_active_issue_run(self, owner_id: str) -> DailyBriefRun | None:
+        """Return the owner's newest in-flight standalone issue analysis."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
+                "AND mode LIKE 'issue:%' "
+                "AND status IN ('pending', 'snapshotting', 'analyzing') "
+                "AND EXISTS (SELECT 1 FROM redmine_daily_brief_jobs AS job "
+                "WHERE job.run_id=redmine_daily_brief_runs.run_id "
+                "AND job.status IN ('queued','running')) "
+                "ORDER BY started_at DESC, rowid DESC LIMIT 1",
+                (owner_id,),
+            ).fetchone()
+            return self._row_to_run(row) if row else None
+
     def update_run(self, run: DailyBriefRun) -> bool:
         now = _now()
         with self._lock, self._connect() as conn:
@@ -533,6 +548,28 @@ class DailyBriefRepository:
                     payload["recorded_at"] = row["created_at"]
                     executions.append(payload)
             return executions
+
+    def list_ai_executions_for_run(self, run_id: str) -> list[dict[str, Any]]:
+        """Return sanitized attempt payloads for a run-level aggregate."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT issue_id, payload_json, created_at "
+                "FROM redmine_daily_brief_ai_executions "
+                "WHERE run_id=? ORDER BY rowid",
+                (run_id,),
+            ).fetchall()
+        executions: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            payload["issue_id"] = int(row["issue_id"])
+            payload["recorded_at"] = row["created_at"]
+            executions.append(payload)
+        return executions
 
     def latest_ai_executions_by_issue(self, run_id: str) -> dict[int, dict[str, Any]]:
         """一次查询返回 run 内每个 issue 最新的脱敏执行 payload。"""

@@ -16,6 +16,7 @@ from typing import Any
 
 from foundation.config import settings
 
+from .daily_brief_owner_policy import is_daily_brief_owner_eligible
 from .daily_brief_repository import TERMINAL_RUN_STATUSES, DailyBriefRepository
 from .daily_brief_service import DailyBriefService
 from .users import _now
@@ -40,7 +41,11 @@ def discover_repositories(data_root: Path | None = None) -> list[DailyBriefRepos
     return [
         DailyBriefRepository(owner_dir)
         for owner_dir in sorted(root.iterdir())
-        if owner_dir.is_dir() and (owner_dir / "daily_brief.sqlite3").is_file()
+        if (
+            owner_dir.is_dir()
+            and (owner_dir / "daily_brief.sqlite3").is_file()
+            and is_daily_brief_owner_eligible(owner_dir.name)
+        )
     ]
 
 
@@ -194,12 +199,14 @@ async def run_claimed_job(
             # 会覆盖新执行者的 pending/analyzing/completed 状态。
             if finished:
                 run = repository.get_run(str(job["run_id"]))
-                # issue-job 失败只影响该 issue 行，不拥有 run 级终态
-                # 收敛权（审核意见 P1）：排队的 issue-job 与 force 重跑
-                # 的 run-job 并存时，issue 行可能已被 run 重置删除，
-                # 这类失败若写 run 会把刚重置的执行打成 failed。
-                # run 终态收敛只属于 run-job（或人工取消）。
-                if run is not None and job["kind"] == "run" and run.status not in TERMINAL_RUN_STATUSES:
+                # 普通 run-job 拥有 run 级终态收敛权。独立单号分析
+                # (mode=issue:<id>) 也只有这一条 issue-job；若其失败而
+                # 不收敛 run，页面会永久显示“分析中”，并且重启后无法
+                # 区分真实队列任务和已经失败的任务。
+                # 批量 run 中的 issue-job 仍不写 run，避免和 force 重跑
+                # 的 run-job 竞争终态。
+                owns_run_terminal_state = job["kind"] == "run" or run.mode.startswith("issue:")
+                if run is not None and owns_run_terminal_state and run.status not in TERMINAL_RUN_STATUSES:
                     run.status = "failed"
                     run.error = str(exc)[:1000]
                     run.finished_at = _now()

@@ -121,6 +121,17 @@ async def get_latest_brief(request: Request):
     return {"success": True, "data": service.run_payload(run)}
 
 
+@router.get("/daily-brief/active-issue")
+async def get_active_issue_analysis(request: Request):
+    """Restore a standalone issue analysis after the browser reloads."""
+    _require_read(request)
+    service = _service_for_request(request)
+    run = service.latest_active_issue_run()
+    if run is None:
+        return {"success": True, "data": {"run": None, "issues": []}}
+    return {"success": True, "data": service.run_payload(run)}
+
+
 @router.get("/daily-brief/config")
 async def get_daily_brief_config(request: Request):
     _require_read(request)

@@ -187,17 +187,22 @@ class KkAgentRedmineAnalyzer:
     # -------------------------------------------------------------- entry
 
     async def analyze(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
-        """执行 headless 分析；可识别的 turn 中断/LLM 超时自动重试一次。"""
+        """执行 headless 分析；每类可识别的临时错误各自动重试一次。"""
         outcome: KkAgentAnalysisResult | None = None
-        for attempt in range(self.interrupted_retries + 1):
+        retries_by_error: dict[str, int] = {}
+        while True:
             outcome = await self._analyze_once(entry)
             retryable = outcome.error_type in ("interrupted", "llm_timeout")
-            if not retryable or attempt >= self.interrupted_retries:
+            retry_count = retries_by_error.get(outcome.error_type, 0)
+            if not retryable or retry_count >= self.interrupted_retries:
                 return outcome
+            retries_by_error[outcome.error_type] = retry_count + 1
             logger.warning(
-                "kkagent %s for issue %s; retrying once",
+                "kkagent %s for issue %s; retrying once (%d/%d for this error type)",
                 outcome.error_type,
                 entry.get("issue_id"),
+                retry_count + 1,
+                self.interrupted_retries,
             )
         return outcome  # pragma: no cover - loop always returns
 
@@ -252,6 +257,11 @@ class KkAgentRedmineAnalyzer:
                     continue
             await process.wait()
         except asyncio.TimeoutError:
+            logger.warning(
+                "terminating kkagent pid=%s after stdout idle timeout (%ss)",
+                process.pid,
+                self.timeout_seconds,
+            )
             await terminate_process_tree(process)
             readers.cancel()
             await settle_reader_future(readers)
@@ -261,6 +271,10 @@ class KkAgentRedmineAnalyzer:
             return trace, raw, True
         except asyncio.CancelledError:
             # 取消不得遗留 kkagent 或 stdio MCP 孤儿进程。
+            logger.info(
+                "terminating kkagent pid=%s because its controller task was cancelled",
+                process.pid,
+            )
             cleanup = asyncio.create_task(terminate_process_tree(process))
             try:
                 await asyncio.shield(cleanup)
@@ -399,6 +413,12 @@ class KkAgentRedmineAnalyzer:
         trace.status = error_type
         trace.error_type = error_type
         trace.error = message
+        if error_type == "interrupted":
+            logger.warning(
+                "kkagent issue process exited from signal (exit_code=%s); "
+                "no controller-originated cancellation was active in this analyzer",
+                trace.exit_code,
+            )
 
     def _success(
         self, result: dict[str, Any], trace: KkAgentTrace, raw: _StreamFallback

@@ -3,6 +3,10 @@
 from typing import Any
 
 from .daily_brief_models import DailyBriefIssue, DailyBriefRun
+from .daily_brief_owner_policy import (
+    ADMIN_OWNER_MESSAGE,
+    is_daily_brief_owner_eligible,
+)
 from .daily_brief_repository import new_run_id
 from .daily_brief_snapshot import brief_date_today
 from .kkagent_analyzer import PROMPT_VERSION
@@ -10,8 +14,13 @@ from .users import _now
 
 
 class DailyBriefRunStarterMixin:
+    def _owner_is_eligible(self) -> bool:
+        return is_daily_brief_owner_eligible(self.owner_id)
+
     def start_issue_analysis(self, issue_id: int) -> dict[str, Any]:
         """Queue only the requested issue, independently of workload scans and nightly runs."""
+        if not self._owner_is_eligible():
+            return {"error": ADMIN_OWNER_MESSAGE, "code": "ADMIN_OWNER_FORBIDDEN"}
         run = DailyBriefRun(
             owner_id=self.owner_id, brief_date=brief_date_today(),
             mode=f"issue:{issue_id}", run_id=new_run_id(),
@@ -35,6 +44,8 @@ class DailyBriefRunStarterMixin:
         already_running 分支还做 has_active_job 兜底——万一存在历史孤儿
         （旧版本产物）也当场补队。
         """
+        if not self._owner_is_eligible():
+            return {"error": ADMIN_OWNER_MESSAGE, "code": "ADMIN_OWNER_FORBIDDEN"}
         self._recover_interrupted_runs(self.get_config())
         brief_date = brief_date_today()
         existing = self.repository.find_run(self.owner_id, brief_date, mode)
@@ -70,6 +81,8 @@ class DailyBriefRunStarterMixin:
 
     def start_refresh(self, brief_date: str) -> dict[str, Any]:
         """delta 模式：基于当天 nightly 快照做增量重分析（入队 durable job）。"""
+        if not self._owner_is_eligible():
+            return {"error": ADMIN_OWNER_MESSAGE, "code": "ADMIN_OWNER_FORBIDDEN"}
         self._recover_interrupted_runs(self.get_config())
         nightly = self.repository.find_run(self.owner_id, brief_date, "nightly")
         if nightly is None:

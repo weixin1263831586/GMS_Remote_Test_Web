@@ -24,11 +24,15 @@ def _tool_succeeded(tools: list[Any], name_fragment: str) -> bool:
 
 
 def issue_payload(
-    issue: DailyBriefIssue, execution: dict[str, Any] | None = None
+    issue: DailyBriefIssue,
+    execution: dict[str, Any] | None = None,
+    execution_statistics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the browser payload without raw model or tool output."""
     payload = issue.to_row()
     payload.pop("raw_response", None)
+    if execution_statistics:
+        payload["ai_statistics"] = execution_statistics
     if not execution:
         return payload
 

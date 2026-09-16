@@ -2781,6 +2781,15 @@ var dailyBriefCache = null;
 var dailyBriefConfigCache = null;
 var singleIssueAnalysisRunId = '';
 var singleIssueAnalysisTimer = null;
+var SINGLE_ISSUE_ANALYSIS_STORAGE_KEY = 'gms-redmine-single-issue-run-id';
+
+function rememberSingleIssueAnalysisRun(runId) {
+  singleIssueAnalysisRunId = String(runId || '');
+  try {
+    if (singleIssueAnalysisRunId) sessionStorage.setItem(SINGLE_ISSUE_ANALYSIS_STORAGE_KEY, singleIssueAnalysisRunId);
+    else sessionStorage.removeItem(SINGLE_ISSUE_ANALYSIS_STORAGE_KEY);
+  } catch (_) {}
+}
 
 function setSingleIssueAnalysisBusy(busy) {
   document.getElementById('singleIssueAnalysisStart').disabled = busy;
@@ -2804,9 +2813,11 @@ async function loadSingleIssueAnalysis() {
       resultBox.textContent = '#' + (issue.issue_id || '') + (issue.status === 'running' ? ' 正在分析…' : ' 已排队，等待 Worker 分析…');
       singleIssueAnalysisTimer = setTimeout(loadSingleIssueAnalysis, 5000);
     } else if (issue.status === 'completed' && (issue.result || {}).detailed_report) {
+      rememberSingleIssueAnalysisRun(runId);
       resultBox.innerHTML = '<div class="daily-brief-section-md"><div class="daily-brief-section-body">'
         + renderMarkdownDoc(String(issue.result.detailed_report)) + '</div></div>';
     } else {
+      rememberSingleIssueAnalysisRun(runId);
       resultBox.textContent = run.status === 'cancelled' ? '此项分析已停止。' : '分析失败：' + (issue.error || run.error || '未返回最终总结');
     }
   } catch (e) {
@@ -2814,6 +2825,31 @@ async function loadSingleIssueAnalysis() {
     resultBox.textContent = '读取分析状态失败：' + e.message;
     singleIssueAnalysisTimer = setTimeout(loadSingleIssueAnalysis, 5000);
   }
+}
+
+async function restoreSingleIssueAnalysis() {
+  if (singleIssueAnalysisRunId) {
+    await loadSingleIssueAnalysis();
+    return;
+  }
+  try {
+    var storedRunId = sessionStorage.getItem(SINGLE_ISSUE_ANALYSIS_STORAGE_KEY);
+    if (storedRunId) {
+      rememberSingleIssueAnalysisRun(storedRunId);
+      await loadSingleIssueAnalysis();
+      return;
+    }
+  } catch (_) {}
+  try {
+    var data = await api('/api/redmine-agent/daily-brief/active-issue') || {};
+    var run = data.run || {};
+    if (!run.run_id) return;
+    rememberSingleIssueAnalysisRun(run.run_id);
+    var issue = (data.issues || [])[0] || {};
+    var input = document.getElementById('singleIssueAnalysisId');
+    if (input && issue.issue_id) input.value = String(issue.issue_id);
+    await loadSingleIssueAnalysis();
+  } catch (_) {}
 }
 
 async function analyzeSingleIssueFromInput() {
@@ -2832,7 +2868,7 @@ async function analyzeSingleIssueFromInput() {
       body: JSON.stringify({issue_id: Number(value)})
     }) || {};
     if (!queued.run_id) throw new Error(queued.error || '未创建分析任务');
-    singleIssueAnalysisRunId = queued.run_id;
+    rememberSingleIssueAnalysisRun(queued.run_id);
     setSingleIssueAnalysisBusy(true);
     await loadSingleIssueAnalysis();
   } catch (e) {
@@ -2944,6 +2980,7 @@ async function loadDailyBrief() {
     card.innerHTML = renderDailyBriefInner(dailyBriefCache);
     updateRedmineToolbar();
     scheduleDailyBriefAutoRefresh(dailyBriefCache);
+    await restoreSingleIssueAnalysis();
   } catch (e) {
     card.innerHTML = renderDailyBriefInner(null);
     updateRedmineToolbar();
@@ -2965,6 +3002,73 @@ function scheduleDailyBriefAutoRefresh(data) {
     if (currentTab !== 'daily-brief') return; // 离开每日晨报页后不再刷
     await loadDailyBrief();
   }, 10000);
+}
+
+function dailyBriefMetricNumber(value) {
+  var number = Number(value || 0);
+  return Number.isFinite(number) ? number.toLocaleString('zh-CN') : '0';
+}
+
+function dailyBriefDuration(value) {
+  var milliseconds = Number(value || 0);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return '—';
+  if (milliseconds < 1000) return Math.round(milliseconds) + ' ms';
+  var seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return seconds.toLocaleString('zh-CN') + ' 秒';
+  var minutes = Math.floor(seconds / 60);
+  return minutes.toLocaleString('zh-CN') + ' 分 ' + (seconds % 60) + ' 秒';
+}
+
+function renderDailyBriefIssueStatistics(statistics) {
+  var stats = dailyBriefObject(statistics);
+  if (!Number(stats.execution_count || 0)) return '';
+  var tokens = dailyBriefObject(stats.tokens);
+  var timing = dailyBriefObject(stats.timing);
+  var models = dailyBriefList(stats.models);
+  var tools = dailyBriefList(stats.gms_tools);
+  var recommendations = dailyBriefList(stats.tool_improvement_recommendations);
+  var modelRows = models.map(function (model) {
+    var item = dailyBriefObject(model);
+    return '<tr><td>' + esc(item.model_name || '—') + '</td><td>'
+      + esc(dailyBriefMetricNumber(item.execution_count)) + '</td><td>'
+      + esc(dailyBriefMetricNumber(item.total_tokens)) + '</td><td>'
+      + esc(dailyBriefMetricNumber(item.input_tokens)) + '</td><td>'
+      + esc(dailyBriefMetricNumber(item.output_tokens)) + '</td></tr>';
+  }).join('');
+  var toolRows = tools.map(function (tool) {
+    var item = dailyBriefObject(tool);
+    var failure = Number(item.failed_count || 0);
+    return '<tr><td>' + esc(item.tool_name || '—') + '</td><td>'
+      + esc(dailyBriefMetricNumber(item.call_count)) + '</td><td>'
+      + esc(dailyBriefMetricNumber(item.succeeded_count)) + '</td><td class="'
+      + (failure ? 'daily-brief-tool-failed' : '') + '">' + esc(dailyBriefMetricNumber(failure))
+      + '</td></tr>';
+  }).join('');
+  var recommendationRows = recommendations.length
+    ? '<ul class="daily-brief-tool-recommendations">' + recommendations.map(function (entry) {
+      var item = dailyBriefObject(entry);
+      return '<li><code>' + esc(item.tool_name || 'gms_rt_*') + '</code>：' + esc(item.message || '') + '</li>';
+    }).join('') + '</ul>'
+    : '<div class="muted">本单号未观察到需要优先处理的工具可靠性或重复调用问题。</div>';
+  var value = function (label, amount) {
+    return '<div class="daily-brief-stat-value"><span>' + esc(label) + '</span><b>'
+      + esc(amount) + '</b></div>';
+  };
+  return '<div class="daily-brief-ai-statistics"><div class="daily-brief-stat-overview">'
+    + '<section class="daily-brief-stat-summary"><h4>分析概览</h4><div class="daily-brief-stat-values">'
+    + value('分析尝试', dailyBriefMetricNumber(stats.execution_count))
+    + value('总耗时', dailyBriefDuration(timing.total_duration_ms))
+    + value('平均耗时', dailyBriefDuration(timing.average_duration_ms))
+    + '</div></section><section class="daily-brief-stat-summary"><h4>Token 用量</h4><div class="daily-brief-stat-values">'
+    + value('总 Tokens', dailyBriefMetricNumber(tokens.total_tokens))
+    + value('输入 Tokens', dailyBriefMetricNumber(tokens.input_tokens))
+    + value('输出 Tokens', dailyBriefMetricNumber(tokens.output_tokens))
+    + '</div></section></div><div class="daily-brief-stat-grid"><section><h4>模型用量</h4><table class="daily-brief-stat-table"><thead><tr><th>模型</th><th>尝试</th><th>总计</th><th>输入</th><th>输出</th></tr></thead><tbody>'
+    + (modelRows || '<tr><td colspan="5" class="muted">暂无模型轨迹</td></tr>')
+    + '</tbody></table></section><section><h4>gms-remote-test 工具 <span>调用 ' + esc(dailyBriefMetricNumber(stats.gms_tool_call_count)) + ' 次</span></h4><table class="daily-brief-stat-table"><thead><tr><th>工具</th><th>调用</th><th>成功</th><th>失败</th></tr></thead><tbody>'
+    + (toolRows || '<tr><td colspan="4" class="muted">本次未调用 gms-remote-test 工具</td></tr>')
+    + '</tbody></table></section></div><section class="daily-brief-tool-improvements"><h4>工具改进建议 <span>基于本单号的失败率和重复调用量</span></h4>'
+    + recommendationRows + '</section></div>';
 }
 
 function renderDailyBriefInner(data) {
@@ -3055,7 +3159,8 @@ function renderDailyBriefInner(data) {
       + '</div>'
       + issueStateHtml(issue)
       + '<div class="daily-brief-row-actions"><button type="button" class="ka-btn" data-click="showDailyBriefIssue" data-a0="' + esc(issue.issue_id) + '" data-prevent data-stop>查看分析</button>'
-      + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button></div>'
+      + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button>'
+      + '<button class="ka-btn" data-click="showDailyBriefIssueStatistics" data-a0="' + esc(issue.issue_id) + '">AI 统计</button></div>'
       + '</div>';
   }).join('');
   return head + rows;
@@ -3086,6 +3191,26 @@ function showDailyBriefIssue(issueId) {
     showDailyBriefIssueFallback(issueId);
     notifyUser('分析内容格式不兼容', '已打开简化视图；可重新分析此项以生成完整结果。', 'warning');
   }
+}
+
+function showDailyBriefIssueStatistics(issueId) {
+  var issue = findDailyBriefIssue(issueId);
+  var body = issue && renderDailyBriefIssueStatistics(issue.ai_statistics);
+  if (!body) {
+    notifyUser('暂无 AI 统计', '#' + issueId + ' 尚未保存可展示的分析轨迹。', 'warning');
+    return;
+  }
+  var modalId = 'dailyBriefIssueStatisticsModal-' + Date.now();
+  var modal = document.createElement('div');
+  modal.id = modalId;
+  modal.className = 'modal';
+  modal.innerHTML = '<div class="modal-content daily-brief-modal daily-brief-statistics-modal">'
+    + '<div class="modal-header"><span class="modal-title">📊 AI 统计 · #' + esc(issueId) + '</span>'
+    + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
+    + '<div class="modal-body daily-brief-modal-body">' + body + '</div>'
+    + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
+  document.body.appendChild(modal);
+  showModal(modalId);
 }
 
 function dailyBriefList(value) {
@@ -3267,6 +3392,7 @@ function showDailyBriefIssueModal(issueId) {
       </div>
       <div class="modal-buttons daily-brief-modal-footer">
         <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">关闭</button>
+        ${Number(dailyBriefObject(issue.ai_statistics).execution_count || 0) ? '<button class="secondary" data-click="showDailyBriefIssueStatistics" data-a0="' + esc(issueId) + '">AI 统计</button>' : ''}
         <button class="secondary" data-daily-brief-reanalyze="${esc(issueId)}">深度分析此项</button>
         ${issue.status === 'completed' && dailyBriefAnalysisMode(r, gate) === 'diagnostic' && r.result_format !== 'kkagent_markdown' ? '<button class="secondary" data-daily-brief-save-case="' + esc(issueId) + '">存为案例</button>' : ''}
         ${r.suggested_reply_en ? '<button class="secondary" data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="en">复制英文回复</button>' : ''}
@@ -3279,6 +3405,7 @@ function showDailyBriefIssueModal(issueId) {
 // act-bridge 按 window 查找委托目标；显式导出避免页面脚本加载方式变化后
 // 「查看分析」成为静默无响应的按钮。
 window.showDailyBriefIssue = showDailyBriefIssue;
+window.showDailyBriefIssueStatistics = showDailyBriefIssueStatistics;
 
 async function reanalyzeDailyBriefIssue(issueId, button) {
   var run = dailyBriefCache && dailyBriefCache.run;

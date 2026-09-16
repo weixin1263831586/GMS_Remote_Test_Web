@@ -51,6 +51,31 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.latest_run("u1", "2026-09-12").run_id, older.run_id)
         self.assertIsNone(self.repo.latest_run("other-owner"))
 
+    def test_latest_active_issue_run_excludes_batch_and_terminal_runs(self):
+        batch = make_run(mode="manual", status="analyzing", started_at="2026-09-13T09:00:00")
+        completed = make_run(mode="issue:100", status="completed", started_at="2026-09-13T10:00:00")
+        active = make_run(mode="issue:200", status="analyzing", started_at="2026-09-13T11:00:00")
+        for run in (batch, completed, active):
+            self.repo.create_run(run)
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=active.run_id, issue_id=200, buckets=[], status="pending",
+        ))
+        self.repo.enqueue_job(active.run_id, kind="issue", issue_id=200)
+
+        self.assertEqual(
+            self.repo.latest_active_issue_run("u1").run_id,
+            active.run_id,
+        )
+        self.assertIsNone(
+            self.repo.latest_active_issue_run("other-owner")
+        )
+        claimed = self.repo.claim_next_job("worker-a")
+        self.repo.finish_job(
+            claimed["job_id"], "worker-a", claimed["lease_token"],
+            error="analysis failed",
+        )
+        self.assertIsNone(self.repo.latest_active_issue_run("u1"))
+
     def test_issue_upsert_and_list_ordering(self):
         run = make_run()
         self.repo.create_run(run)
@@ -85,6 +110,18 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(latest[1]["status"], "completed")
         self.assertEqual(latest[2]["attempt_no"], 1)
         self.assertIn("recorded_at", latest[1])
+
+    def test_list_ai_executions_for_run_keeps_all_attempts_in_order(self):
+        run = make_run()
+        self.repo.create_run(run)
+        self.repo.record_ai_execution(run.run_id, 1, {"attempt_no": 1, "status": "failed"})
+        self.repo.record_ai_execution(run.run_id, 1, {"attempt_no": 2, "status": "completed"})
+
+        executions = self.repo.list_ai_executions_for_run(run.run_id)
+
+        self.assertEqual([item["attempt_no"] for item in executions], [1, 2])
+        self.assertEqual([item["issue_id"] for item in executions], [1, 1])
+        self.assertTrue(executions[0]["recorded_at"])
 
     def test_reset_stale_running_marks_interrupted_runs(self):
         run = make_run(status="analyzing", started_at="2026-09-13T00:00:00")
