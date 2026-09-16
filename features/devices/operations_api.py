@@ -20,12 +20,8 @@ from foundation.security_audit import security_audit_logger
 
 from . import reconnect, runtime
 from .locks import device_lock_manager
-from .management_api import (
-    _known_usbip_device_ids,
-)
-from .management_api import (
-    router as management_router,
-)
+from .management_api import _known_usbip_device_ids
+from .management_api import router as management_router
 from .manager import device_manager
 from .models import DeviceActionRequest, DeviceLockRequest, DeviceShellRequest, WifiConnectRequest
 from .screens_api import router as screens_router
@@ -59,21 +55,25 @@ def _device_results(results, operation_name):
     )
 
 
+def _device_request_identities(request: Request) -> tuple[str, str, str]:
+    """Return (resource owner, actor id, actor username) for device APIs."""
+    user = require_authenticated_user(request)
+    return user.resource_owner_id, user.actor_id, user.username
+
+
 @router.get("/api/devices/user-locked")
 async def list_user_locks(request: Request):
-    """List all user-locked devices."""
+    """List device claims visible to the resource-owner account."""
     current_user = require_authenticated_user(request)
     locks = device_lock_manager.get_all_locks()
     if current_user.role != "admin":
-        client_id = current_user.id
+        owner_id = current_user.resource_owner_id
         locks = {
             key: value
             for key, value in locks.items()
-            if value.get("client_id") == client_id
+            if value.get("client_id") == owner_id
         }
-    return JSONResponse(
-        content={"success": True, "data": locks}
-    )
+    return JSONResponse(content={"success": True, "data": locks})
 
 
 @router.post("/api/devices/force-release")
@@ -103,13 +103,7 @@ async def force_release_device_locks(
     results = []
     for device_id in device_ids:
         success, message = device_lock_manager.force_unlock_device(device_id)
-        results.append(
-            {
-                "device_id": device_id,
-                "success": success,
-                "message": message,
-            }
-        )
+        results.append({"device_id": device_id, "success": success, "message": message})
 
     await broadcast_device_lock_update(device_ids)
     security_audit_logger.log_event({
@@ -119,7 +113,8 @@ async def force_release_device_locks(
         "method": request.method,
         "path": request.url.path,
         "status_code": 200 if all(item["success"] for item in results) else 409,
-        "client_id": admin.id,
+        "client_id": admin.actor_id,
+        "owner_id": admin.resource_owner_id,
         "username": admin.username,
         "devices": device_ids,
         "results": results,
@@ -140,8 +135,8 @@ async def reboot_devices(req: DeviceActionRequest, request: Request):
     devices = sanitize_device_ids(req.devices)
     if not devices:
         return error_response("No valid device serials", status_code=400)
-    client_id = require_authenticated_user(request).id
-    conflict = device_claim_conflict_response(devices, client_id, allow_owner=True)
+    owner_id, _actor_id, _username = _device_request_identities(request)
+    conflict = device_claim_conflict_response(devices, owner_id, allow_owner=True)
     if conflict:
         return conflict
     usbip_device_ids = _known_usbip_device_ids()
@@ -171,9 +166,7 @@ async def reboot_devices(req: DeviceActionRequest, request: Request):
         result["usbip_reconnect_expected"] = not wait_for_online
         return result
 
-    results = await asyncio.gather(
-        *[reboot_single_device(d) for d in devices]
-    )
+    results = await asyncio.gather(*[reboot_single_device(d) for d in devices])
     if usbip_reconnect_hosts:
         for device_host, device_ids in usbip_reconnect_hosts.items():
             reconnect.schedule_usbip_reconnect(
@@ -189,35 +182,27 @@ async def reboot_devices(req: DeviceActionRequest, request: Request):
 @device_mutation_guard("remount")
 async def remount_devices(req: DeviceActionRequest, request: Request):
     """Remount devices."""
-    client_id = require_authenticated_user(request).id
+    owner_id, actor_id, _username = _device_request_identities(request)
     devices = sanitize_device_ids(req.devices)
     if not devices:
         return error_response("No valid device serials", status_code=400)
-    conflict = device_claim_conflict_response(devices, client_id, allow_owner=True)
+    conflict = device_claim_conflict_response(devices, owner_id, allow_owner=True)
     if conflict:
         return conflict
 
-    # AsyncSSHConnection keeps the pool acquire/release (SSH health
-    # probes and cold connect) off the event loop; a stalled host used to
-    # freeze every concurrent request during `with SSHConnection()`.
-    # See docs/architecture/adr/0004-ssh-execution-boundary.md.
     async with AsyncSSHConnection() as ssh:
         async def remount_single_device(device_id: str) -> dict:
             await runtime.safe_websocket_send(
-                client_id,
+                actor_id,
                 {
                     "type": "log_update",
                     "log": f"[{device_id}] adb root && adb remount",
                     "log_type": "info",
                 },
             )
-
-            # remount_device does blocking SSH — run it off the event loop. The
-            # surrounding for-loop is serial, so the shared ssh connection is
-            # never used by two threads at once.
             result = await asyncio.to_thread(device_manager.remount_device, device_id, ssh)
             await runtime.safe_websocket_send(
-                client_id,
+                actor_id,
                 {
                     "type": "log_update",
                     "log": f"[{device_id}] remount: {(result.get('output') or '').strip()}",
@@ -227,8 +212,6 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
             result["device"] = device_id
             return result
 
-        # Serial execution (was a false-concurrency gather) — frees the loop
-        # between devices and keeps the shared ssh connection single-threaded.
         results = []
         for device_id in devices:
             results.append(await remount_single_device(device_id))
@@ -243,15 +226,14 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
         devices = sanitize_device_ids(req.devices)
         if not devices:
             return error_response("No valid device serials", status_code=400)
-        client_id = require_authenticated_user(request).id
-        conflict = device_claim_conflict_response(devices, client_id, allow_owner=True)
+        owner_id, _actor_id, _username = _device_request_identities(request)
+        conflict = device_claim_conflict_response(devices, owner_id, allow_owner=True)
         if conflict:
             return conflict
         config = runtime.config_manager.load_config()
         wifi_defaults = runtime.config_manager.get_wifi_defaults(config)
         ssid = req.ssid or wifi_defaults["ssid"]
         password = req.password or wifi_defaults["password"]
-        # Wi-Fi 参数转义后再传给 ADB Shell。
         ssid_q = shlex.quote(ssid)
         password_q = shlex.quote(password)
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
@@ -267,8 +249,6 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
                 _result = runtime.ssh_manager.execute_command(ssh, full_cmd)
                 return {"device": device_id, "success": _result.ok}
 
-            # Serial to_thread — frees the loop between devices and keeps the
-            # shared ssh connection single-threaded (paramiko is not thread-safe).
             results = []
             for device_id in devices:
                 results.append(await asyncio.to_thread(_connect_one, device_id))
@@ -294,11 +274,8 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
 async def open_device_shell(req: DeviceShellRequest, request: Request):
     """Open device ADB Shell - prepare device connection for terminal page."""
     try:
-        client_id = require_authenticated_user(request).id
-        conflict = device_claim_conflict_response(
-            [req.serial_no],
-            client_id,
-        )
+        owner_id, actor_id, _username = _device_request_identities(request)
+        conflict = device_claim_conflict_response([req.serial_no], owner_id)
         if conflict:
             return conflict
         config = runtime.config_manager.load_config()
@@ -317,7 +294,9 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
                 if not hasattr(runtime.global_state, "device_shells"):
                     runtime.global_state.device_shells = {}
 
-                runtime.global_state.device_shells[client_id] = {
+                # Runtime shell sessions are actor-scoped, unlike durable
+                # device claim ownership which is account-scoped.
+                runtime.global_state.device_shells[actor_id] = {
                     "serial_no": req.serial_no,
                     "connected_at": datetime.now().isoformat(),
                 }
@@ -329,22 +308,21 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
                         "serial_no": req.serial_no,
                     }
                 )
-            else:
-                detail = (
-                    ready_result.get("state")
-                    or ready_result.get("devices")
-                    or "No response"
-                )
-                logger.warning(
-                    f"[Device Shell] Device {req.serial_no} not ready: {detail}"
-                )
-                return JSONResponse(
-                    content={
-                        "success": False,
-                        "message": f"Device {req.serial_no} is not online or unresponsive: {detail}",
-                    },
-                    status_code=400,
-                )
+            detail = (
+                ready_result.get("state")
+                or ready_result.get("devices")
+                or "No response"
+            )
+            logger.warning(
+                f"[Device Shell] Device {req.serial_no} not ready: {detail}"
+            )
+            return JSONResponse(
+                content={
+                    "success": False,
+                    "message": f"Device {req.serial_no} is not online or unresponsive: {detail}",
+                },
+                status_code=400,
+            )
     except Exception as e:
         logger.error(f"Error opening device shell: {e}")
         return JSONResponse(
