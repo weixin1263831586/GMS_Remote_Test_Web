@@ -20,15 +20,16 @@ router = APIRouter()
 
 
 def _request_log_scope(request: Request) -> tuple[str, bool]:
-    """Resolve the log owner and admin flag.
+    """Resolve the durable log owner and admin flag.
 
-    Uses an authenticated user when available; in dev/anonymous deployments
-    (authentication_required() == False), falls back to the stable anonymous
-    client id so log save/get/list still work without a session.
+    Per-user logs are account resources, not actor resources. Agent tokens and
+    ATS machine principals therefore share the enrolling/creating account's
+    log partition via ``resource_owner_id`` (ADR 0010). In dev/anonymous
+    deployments we retain the stable anonymous client id.
     """
     current_user = require_authenticated_user_when_auth_required(request)
     if current_user:
-        return current_user.id, current_user.role == "admin"
+        return current_user.resource_owner_id, current_user.role == "admin"
     return runtime.get_client_id_from_request(request), False
 
 
