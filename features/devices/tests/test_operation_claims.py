@@ -14,6 +14,7 @@ def authenticated_request(
     username: str,
     role: str = "device_operator",
     extra_permissions: frozenset[str] = frozenset(),
+    resource_owner_id: str = "",
 ) -> Request:
     request = Request({
         "type": "http",
@@ -27,6 +28,7 @@ def authenticated_request(
         username=username,
         role=role,
         extra_permissions=extra_permissions,
+        resource_owner_id=resource_owner_id or user_id,
     )
     return request
 
@@ -41,9 +43,7 @@ def test_dynamic_operation_claim_is_atomic_and_fenced():
         bob = authenticated_request("user-bob", "bob")
         with patch.object(operation_claims, "device_lock_manager", manager):
             source_id, records, conflict = support.acquire_device_operation_claim(
-                alice,
-                ["SERIAL-1"],
-                "reboot",
+                alice, ["SERIAL-1"], "reboot",
             )
             assert conflict is None
             assert source_id.startswith("operation:reboot:")
@@ -56,23 +56,15 @@ def test_dynamic_operation_claim_is_atomic_and_fenced():
                 "owner_id": "user-alice",
             }]
 
-            _, conflicting_records, conflict = (
-                support.acquire_device_operation_claim(
-                    bob,
-                    ["SERIAL-1"],
-                    "remount",
-                )
+            _, conflicting_records, conflict = support.acquire_device_operation_claim(
+                bob, ["SERIAL-1"], "remount",
             )
             assert conflict.status_code == 409
             assert conflicting_records[0]["id"] == records[0]["id"]
 
             assert support.release_device_operation_claim(source_id) == 1
-            _, next_records, next_conflict = (
-                support.acquire_device_operation_claim(
-                    bob,
-                    ["SERIAL-1"],
-                    "remount",
-                )
+            _, next_records, next_conflict = support.acquire_device_operation_claim(
+                bob, ["SERIAL-1"], "remount",
             )
             assert next_conflict is None
             assert next_records[0]["generation"] == 2
@@ -81,9 +73,7 @@ def test_dynamic_operation_claim_is_atomic_and_fenced():
 def test_operation_claim_rejects_untrusted_device_ids():
     request = authenticated_request("user-alice", "alice")
     source_id, records, conflict = support.acquire_device_operation_claim(
-        request,
-        ["SERIAL; reboot"],
-        "reboot",
+        request, ["SERIAL; reboot"], "reboot",
     )
     assert source_id == ""
     assert records == []
@@ -91,11 +81,6 @@ def test_operation_claim_rejects_untrusted_device_ids():
 
 
 def test_plain_user_can_operate_free_device():
-    """普通用户（无 devices.lease）可直接操作空闲设备。
-
-    常规设备运维（wifi/reboot/remount 等）不再要求"先租后用"；设备
-    归属冲突仍由 claim 409 fencing 兜底，高危操作另有管理员提权门。
-    """
     with tempfile.TemporaryDirectory() as directory:
         manager = DeviceLockManager(
             Path(directory) / "claims.sqlite3",
@@ -104,9 +89,7 @@ def test_plain_user_can_operate_free_device():
         alice = authenticated_request("user-alice", "alice", role="user")
         with patch.object(operation_claims, "device_lock_manager", manager):
             source_id, records, conflict = support.acquire_device_operation_claim(
-                alice,
-                ["SERIAL-9"],
-                "wifi",
+                alice, ["SERIAL-9"], "wifi",
             )
             assert conflict is None
             assert source_id.startswith("operation:wifi:")
@@ -115,7 +98,6 @@ def test_plain_user_can_operate_free_device():
 
 
 def test_agent_token_without_use_leased_scope_is_rejected():
-    """Agent Service Token 没有 devices.use_leased scope 时 403。"""
     with tempfile.TemporaryDirectory() as directory:
         manager = DeviceLockManager(
             Path(directory) / "claims.sqlite3",
@@ -124,9 +106,7 @@ def test_agent_token_without_use_leased_scope_is_rejected():
         agent = authenticated_request("agent-1", "agent:agt_x", role="agent_service")
         with patch.object(operation_claims, "device_lock_manager", manager):
             source_id, records, conflict = support.acquire_device_operation_claim(
-                agent,
-                ["SERIAL-1"],
-                "wifi",
+                agent, ["SERIAL-1"], "wifi",
             )
             assert source_id == ""
             assert records == []
@@ -135,7 +115,6 @@ def test_agent_token_without_use_leased_scope_is_rejected():
 
 
 def test_agent_token_with_use_leased_scope_can_operate():
-    """显式授予 devices.use_leased scope 的 agent token 可正常操作。"""
     with tempfile.TemporaryDirectory() as directory:
         manager = DeviceLockManager(
             Path(directory) / "claims.sqlite3",
@@ -149,13 +128,45 @@ def test_agent_token_with_use_leased_scope_can_operate():
         )
         with patch.object(operation_claims, "device_lock_manager", manager):
             source_id, records, conflict = support.acquire_device_operation_claim(
-                agent,
-                ["SERIAL-1"],
-                "wifi",
+                agent, ["SERIAL-1"], "wifi",
             )
             assert conflict is None
             assert records[0]["owner_id"] == "agent-1"
             assert support.release_device_operation_claim(source_id) == 1
+
+
+def test_machine_operation_claim_uses_resource_owner_and_borrows_reservation():
+    """Synthetic automation actor must share its human account's fencing."""
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        machine = authenticated_request(
+            "automation:run-1",
+            "automation:run-1",
+            role="agent_service",
+            extra_permissions=frozenset({"devices.use_leased"}),
+            resource_owner_id="user-alice",
+        )
+        with patch.object(operation_claims, "device_lock_manager", manager):
+            ok, _ = manager.lock_devices(
+                ["SERIAL-1"],
+                "user-alice",
+                "alice",
+                source_id="reservation:res-1",
+                source_type="cluster-reservation",
+                ttl_seconds=3600,
+                allow_existing_source=True,
+            )
+            assert ok
+            source_id, records, conflict = support.acquire_device_operation_claim(
+                machine, ["SERIAL-1"], "remount",
+            )
+            assert conflict is None
+            assert source_id == ""
+            assert records[0]["owner_id"] == "user-alice"
+            assert machine.state.device_lease_tokens[0]["owner_id"] == "user-alice"
 
 
 def test_lock_status_resolves_internal_owner_to_user_management_identity():
@@ -170,19 +181,11 @@ def test_lock_status_resolves_internal_owner_to_user_management_identity():
             "N387pLbIBhpMw5JsWUL9hg",
         )
         assert success
-        with patch(
-            "features.users.resolve_client_display_id",
-            return_value="hcq@172.16.14.66",
-        ):
-            assert (
-                manager.get_lock_status("SERIAL-1")["locked_by"]
-                == "hcq@172.16.14.66"
-            )
+        with patch("features.users.resolve_client_display_id", return_value="hcq@172.16.14.66"):
+            assert manager.get_lock_status("SERIAL-1")["locked_by"] == "hcq@172.16.14.66"
 
 
 def test_operation_claim_borrows_existing_claim_for_same_owner():
-    """A device already claimed by the same owner (reservation/job/
-    earlier operation) must be reused, not rejected with a spurious 409."""
     with tempfile.TemporaryDirectory() as directory:
         manager = DeviceLockManager(
             Path(directory) / "claims.sqlite3",
@@ -190,7 +193,6 @@ def test_operation_claim_borrows_existing_claim_for_same_owner():
         )
         alice = authenticated_request("user-alice", "alice")
         with patch.object(operation_claims, "device_lock_manager", manager):
-            # Alice holds the device via a long-lived reservation claim.
             ok, _first = manager.lock_devices(
                 ["SERIAL-1"], "user-alice", "alice",
                 source_id="reservation:res-1", source_type="cluster-reservation",
@@ -198,28 +200,17 @@ def test_operation_claim_borrows_existing_claim_for_same_owner():
             )
             assert ok
 
-            source_id, records, conflict = (
-                support.acquire_device_operation_claim(alice, ["SERIAL-1"], "remount")
+            source_id, records, conflict = support.acquire_device_operation_claim(
+                alice, ["SERIAL-1"], "remount",
             )
             assert conflict is None
-            # The existing claim is borrowed, not re-acquired under a new
-            # source_id; nothing is released by the operation source_id.
             assert records[0]["source_id"] == "reservation:res-1"
             assert support.release_device_operation_claim(source_id) == 0
-            # The original reservation claim survives the operation.
             active = manager.registry.list_active(worker_id="ats-worker-controller")
-            assert any(
-                c["source_id"] == "reservation:res-1" for c in active
-            )
+            assert any(c["source_id"] == "reservation:res-1" for c in active)
 
 
 def test_operation_claim_does_not_borrow_running_cluster_job_claim():
-    """同 owner 的运行中 cluster-job claim 不得被直接操作借用。
-
-    否则用户 A 在 CTS/GTS 任务运行期间从设备页发 reboot/remount 等
-    mutation 会静默借用自己的 job claim，污染正在跑的测试；必须 409
-    冲突并指明持有者是集群任务（workflow 级重入，非 owner 级）。
-    """
     with tempfile.TemporaryDirectory() as directory:
         manager = DeviceLockManager(
             Path(directory) / "claims.sqlite3",
@@ -234,13 +225,12 @@ def test_operation_claim_does_not_borrow_running_cluster_job_claim():
             )
             assert ok
 
-            source_id, records, conflict = (
-                support.acquire_device_operation_claim(alice, ["SERIAL-1"], "reboot")
+            source_id, records, conflict = support.acquire_device_operation_claim(
+                alice, ["SERIAL-1"], "reboot",
             )
             assert source_id == ""
             assert conflict is not None
             assert conflict.status_code == 409
             assert records[0]["source_type"] == "cluster-job"
-            # The job claim is untouched by the refused operation.
             active = manager.registry.list_active(worker_id="ats-worker-controller")
             assert any(c["source_id"] == "job:job-123" for c in active)
