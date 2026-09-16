@@ -10,11 +10,12 @@ MIGRATION_LINE_LIMITS = {
     'features/assistant/executor.py': 1397,
     'features/assistant/tools.py': 967,
     'features/assistant/universal_ai.py': 970,
-    'features/automation/executors.py': 1051,
-    'features/automation/service.py': 736,
+    'features/automation/executors.py': 1095,  # +44: ADR 0012 回环请求携带能力 Bearer 头
+    'features/automation/service.py': 771,  # +35: ADR 0012 能力快照编译入 run
+    'features/automation/tests/test_api.py': 684,  # +84: ADR 0012 human-only 验收（agent 403 / 能力不足 400）
     'features/cluster/deployment_api.py': 775,  # +9: worker token 改 0600 文件传递
     # 这些模块使用显式上限，后续拆分时继续收紧。
-    'features/cluster/api.py': 757,  # +34: page JS 静态端点(CSP 前置迁移)
+    'features/cluster/api.py': 760,  # +37: page JS 静态端点(CSP 前置迁移); +3: ADR 0010 owner 读侧注释
     'features/cluster/tests/test_api_hardening.py': 744,
     'features/cluster/tests/test_cluster.py': 667,
     # +43: 启动期 reconcile_claims()（跨库 split-brain 修复，审核意见 P2）；
@@ -43,7 +44,10 @@ MIGRATION_LINE_LIMITS = {
     'features/redmine/knowledge_service.py': 599,
     # 2026-09 并发收敛:enqueue 去重键修正 + runs ON CONFLICT + job lease_token
     # CAS + 旧库迁移分支;后续拆 jobs 队列到独立模块时应回落 600。
-    'features/redmine/daily_brief_repository.py': 652,  # +46: 协作式取消(cancel_requested 列+请求/查询/清除)
+    'features/redmine/daily_brief_repository.py': 830,  # +178: f64c054 及后续协作式取消/执行统计扩展;拆分后回落
+    'features/redmine/daily_brief_service.py': 621,  # +21: f64c054 执行统计
+    'features/redmine/tests/test_daily_brief_api.py': 603,  # +3: f64c054 统计接口回归
+    'features/redmine/tests/test_daily_brief_repository.py': 623,  # +23: f64c054 取消路径回归
     # +72: sanitizeHref scheme 白名单回归(node 执行测试)。
     'features/redmine/tests/test_dashboard_stats.py': 1165,
     'features/reports/analysis_api.py': 752,  # +40: reports.read 门禁 helper
@@ -59,7 +63,7 @@ MIGRATION_LINE_LIMITS = {
     'features/users/config_api.py': 616,
     'features/devices/adb_proxy_service.py': 874,  # adb proxy Hub 重启防护 + host-level disconnect guards
     'features/devices/config_explorer.py': 625,
-    'features/devices/integrations_api.py': 2463,  # assignments 存储层已拆至 usbip_assignments.py
+    'features/devices/integrations_api.py': 2464,  # assignments 存储层已拆至 usbip_assignments.py; +1: ADR 0010 owner 注释
     'features/devices/reconnect.py': 942,
     'features/devices/tests/test_adb_proxy_service.py': 911,  # adb proxy 重启/断连 guard 回归桩
     'features/devices/tests/test_usbip_flash_modes.py': 851,  # +43: scoped mode 重算回归

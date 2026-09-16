@@ -8,7 +8,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from foundation.novnc import novnc_url
-from foundation.processes import command_reports_running
 from foundation.security import sanitize_device_ids
 
 from . import runtime
@@ -24,6 +23,45 @@ from .utils import DeviceUtils
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# 投屏就绪判定窗口：scrcpy 版本会打印 Connected 或 Device；轮询兜住慢设备。
+_SCRCPY_START_POLL_ATTEMPTS = 8
+_SCRCPY_START_POLL_INTERVAL = 0.5
+
+
+async def _verify_scrcpy_started(ssh, device_id: str) -> tuple[bool, str]:
+    """启动后确认投屏真正就绪，而不是只看进程存在。
+
+    仅凭 pgrep 会在 scrcpy 随后立即失败（设备离线/ADB 未授权/编码失败）
+    时误报成功；这里复用 check_scrcpy_healthy（进程状态 + 版本兼容的
+    就绪日志）短轮询，失败时带回日志尾部，让用户能看到真实原因。
+    """
+    await asyncio.sleep(_SCRCPY_START_POLL_INTERVAL)
+    for _ in range(_SCRCPY_START_POLL_ATTEMPTS):
+        is_healthy, _pid_or_error = await asyncio.to_thread(
+            DeviceUtils.check_scrcpy_healthy, ssh, device_id,
+        )
+        if is_healthy:
+            return True, ""
+        await asyncio.sleep(_SCRCPY_START_POLL_INTERVAL)
+    # 同步函数：由 to_thread 调用（async 版本会把协程对象当返回值塞进响应）。
+    return False, _scrcpy_log_tail(ssh, device_id)
+
+
+def _scrcpy_log_tail(ssh, device_id: str) -> str:
+    """抓取 scrcpy 日志尾部作为失败原因（压成单行、截断）。"""
+    try:
+        from foundation.ssh_executor import ssh_executor
+
+        result = ssh_executor.run(
+            ssh,
+            f"tail -c 400 {shlex.quote(DeviceUtils.scrcpy_log_path(device_id))}",
+            timeout=10,
+        )
+        tail = " ".join((result.stdout or "").split())
+        return tail[:300]
+    except Exception:
+        return ""
+
 
 @router.post("/api/devices/scrcpy")
 @device_mutation_guard("scrcpy")
@@ -34,7 +72,6 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
 
         config = runtime.config_manager.load_config()
         ubuntu_user = runtime.config_manager.get_ubuntu_user(config)
-        ubuntu_host = runtime.config_manager.get_ubuntu_host(config)
 
         if not devices:
             return JSONResponse(
@@ -57,9 +94,13 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
                 return ssh_connection_failed_response()
 
             try:
+                # websockify 只绑定 127.0.0.1（浏览器经桌面页同源代理访问
+                # noVNC），探测必须在测试主机本机对 loopback 发起；对
+                # ubuntu_host 的外部地址探测会连接拒绝，把可用 VNC 误报为
+                # "Local display only"。
                 vnc_check_cmd = (
                     f"curl -s -o /dev/null -w '%{{http_code}}' "
-                    f"{novnc_url(ubuntu_host, autoconnect=False)} --connect-timeout 3"
+                    f"{novnc_url('127.0.0.1', autoconnect=False)} --connect-timeout 3"
                 )
                 vnc_result = await asyncio.to_thread(
                     runtime.ssh_manager.execute_command, ssh, vnc_check_cmd, timeout=5,
@@ -169,48 +210,46 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
                         runtime.ssh_manager.execute_command, ssh, cmd, timeout=10,
                     )
 
-                    await asyncio.sleep(0.3)
-                    pattern = DeviceUtils.scrcpy_process_pattern(device_id)
-                    check_cmd = f"pgrep -f -- {shlex.quote(pattern)} && echo 'RUNNING' || echo 'NOT_RUNNING'"
-                    check_result = await asyncio.to_thread(
-                        runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=5,
+                    is_started, health_error = await _verify_scrcpy_started(
+                        ssh, device_id,
                     )
-                    is_started = command_reports_running(check_result.stdout)
 
-                    results.append(
-                        {
-                            "device": device_id,
-                            "started": is_started,
-                            "position": {
-                                "x": x_offset,
-                                "y": y_offset,
-                                "width": window_width,
-                                "height": window_height,
-                            },
-                        }
-                    )
+                    result_entry: dict = {
+                        "device": device_id,
+                        "started": is_started,
+                        "position": {
+                            "x": x_offset,
+                            "y": y_offset,
+                            "width": window_width,
+                            "height": window_height,
+                        },
+                    }
+                    if not is_started and health_error:
+                        result_entry["error"] = health_error
+                    results.append(result_entry)
 
                     vnc_sessions.append(
                         {
                             "device": device_id,
-                            "url": novnc_url(ubuntu_host) if vnc_available else None,
+                            # 不返回 http://<host>:6080 直连 URL：websockify
+                            # 仅监听 loopback，浏览器应经桌面页的同源代理
+                            # （/novnc/vnc.html + access_token）访问。
                             "message": "VNC view available" if vnc_available else "Local display only",
                         }
                     )
 
 
-                newly_started = [r["device"] for r in results if r.get("started")]
                 failed_devices = [r["device"] for r in results if not r.get("started")]
 
+                # 逐设备结果行（前端按 ✅/❌ 前缀着色），失败行附带真实原因。
                 message_parts = []
-                if newly_started:
-                    message_parts.append(
-                        f"Started {len(newly_started)} screen mirrors: {', '.join(newly_started)}"
-                    )
-                if failed_devices:
-                    message_parts.append(
-                        f"{len(failed_devices)} devices failed to start: {', '.join(failed_devices)}"
-                    )
+                for entry in results:
+                    device = entry["device"]
+                    if entry.get("started"):
+                        message_parts.append(f"✅ 设备 {device}: 投屏已就绪")
+                    else:
+                        detail = str(entry.get("error") or "进程未就绪（无 scrcpy 就绪日志）").strip()
+                        message_parts.append(f"❌ 设备 {device}: 投屏启动失败 - {detail}")
 
                 message = "\n".join(message_parts) if message_parts else "Screen mirror started"
 

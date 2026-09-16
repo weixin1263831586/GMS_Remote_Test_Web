@@ -2119,7 +2119,8 @@ async def stop_usbip(
                         cluster.repository.acquire_device_operation_claim(
                             req.worker_id,
                             claimed_serials,
-                            owner_id=_elevated.id,
+                            # ADR 0010: canonical resource-owner accessor.
+                            owner_id=_elevated.resource_owner_id,
                             source_type="cluster-usbip",
                             source_id=claim_source,
                             ttl_seconds=10 * 60,

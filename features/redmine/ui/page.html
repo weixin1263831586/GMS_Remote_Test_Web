@@ -11,14 +11,14 @@
 </head>
 <body>
 <header>
-  <div class="tabs">
-    <div class="tab" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</div>
-    <div class="tab active" data-tab="stats" data-click="switchTab" data-a0="stats">📈 个人看板</div>
-    <div class="tab" data-tab="project" data-click="switchTab" data-a0="project">🧩 项目看板</div>
-    <div class="tab" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief">🤖 每日晨报</div>
-    <div class="tab" data-tab="issues" data-click="switchTab" data-a0="issues">📋 工单列表</div>
-    <div class="tab" data-tab="cases" data-click="switchTab" data-a0="cases">📚 成熟案例</div>
-    <div class="tab" data-tab="runs" data-click="switchTab" data-a0="runs">📊 扫描记录</div>
+  <div class="tabs" role="tablist" aria-label="看板视图" data-keydown="redmineTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End">
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</button>
+    <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="stats" data-click="switchTab" data-a0="stats">📈 个人看板</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="project" data-click="switchTab" data-a0="project">🧩 项目看板</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief">🤖 每日晨报</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="issues" data-click="switchTab" data-a0="issues">📋 工单列表</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="cases" data-click="switchTab" data-a0="cases">📚 成熟案例</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="runs" data-click="switchTab" data-a0="runs">📊 扫描记录</button>
   </div>
   <div class="header-toolbar">
     <div id="issuesToolbarFilters" class="filter-bar">
@@ -53,7 +53,7 @@
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">重置 Redmine 数据</span>
-      <span class="modal-close" data-click="hideResetModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideResetModal">&times;</button>
     </div>
     <div class="modal-body">
       <p class="warning" style="color:#c00">此操作将删除当前用户在本系统内的所有 Redmine 扫描数据、知识库、附件缓存和文档缓存，且不可恢复。确认继续？</p>
@@ -127,6 +127,7 @@
         <form id="singleIssueAnalysisForm" class="daily-brief-single-form">
           <label for="singleIssueAnalysisId" class="sr-only">Redmine 单号</label>
           <input id="singleIssueAnalysisId" type="text" inputmode="numeric" pattern="[0-9]+" required placeholder="Redmine 单号，如 647338" style="width:200px;max-width:100%">
+          <button id="singleIssueAnalysisHintButton" type="button" class="ka-btn" data-click="openSingleIssueAnalysisHint" aria-haspopup="dialog">辅助说明</button>
           <select id="singleIssueAnalysisMode" aria-label="分析方式">
             <option value="incremental">增量分析</option>
             <option value="full">全量分析</option>
@@ -164,7 +165,7 @@
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">添加用户</span>
-      <span class="modal-close" data-click="hideAddUserModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddUserModal">&times;</button>
     </div>
     <div class="modal-body">
       <div>
@@ -199,7 +200,7 @@
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">添加部门</span>
-      <span class="modal-close" data-click="hideAddDepartmentModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddDepartmentModal">&times;</button>
     </div>
     <div class="modal-body">
       <div>
@@ -224,7 +225,7 @@
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">添加项目</span>
-      <span class="modal-close" data-click="hideAddProjectModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddProjectModal">&times;</button>
     </div>
     <div class="modal-body">
       <div>
@@ -248,7 +249,7 @@
   <div class="modal-content" style="width:min(760px,96vw);max-width:min(760px,96vw);height:min(560px,72vh)">
     <div class="modal-header" style="background:linear-gradient(135deg,#667eea,#764ba2);padding:15px 20px">
       <span class="modal-title">⚙️ 统计设置</span>
-      <span class="modal-close" data-click="hideSettingsModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideSettingsModal">&times;</button>
     </div>
     <div class="modal-body">
       <div>
@@ -298,6 +299,11 @@
         <span>启用每日晨报</span>
       </label>
       <div>
+        <label>触发时间</label>
+        <input type="time" data-daily-brief-setting="trigger_time" value="00:00" required aria-describedby="dailyBriefTriggerTimeHelp">
+        <div class="setting-help" id="dailyBriefTriggerTimeHelp">按 Controller 服务器本地时间每天触发；默认凌晨 00:00。</div>
+      </div>
+      <div>
         <label>取证 Agent Profile</label>
         <select data-daily-brief-setting="agent_profile" aria-describedby="dailyBriefProfileHelp">
           <option value="">正在读取本机 kkagent Profile…</option>
@@ -316,9 +322,6 @@
           <label>并发分析数</label>
           <input type="number" min="1" max="4" data-daily-brief-setting="max_parallel_issues" value="1">
         </div>
-      </div>
-      <div>
-        <div class="setting-help">分析不设步数、耗时或 Token 预算；按证据需要持续调查，返回完整总结。可在晨报页面手动停止。</div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div>
@@ -358,7 +361,7 @@
   <div class="modal-content">
     <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
       <span class="modal-title" id="trendStartModalTitle">设置统计日期范围</span>
-      <span class="modal-close" data-click="hideTrendStartModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideTrendStartModal">&times;</button>
     </div>
     <div class="modal-body">
       <div>
@@ -382,7 +385,7 @@
   <div class="modal-content" style="max-width:900px">
     <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
       <span class="modal-title" id="trendDetailTitle">解决Redmine问题明细</span>
-      <span class="modal-close" data-click="hideModal" data-a0="trendDetailModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="trendDetailModal">&times;</button>
     </div>
     <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
   </div>
@@ -390,6 +393,7 @@
 
 <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
 <script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script>
+<script src="/static/js/embedded-ui/modal-controller.js?v=20260916-modal-controller"></script>
 <script src="/redmine-agent/page.js"></script>
 
 <!-- Batch Import Modal -->
@@ -397,7 +401,7 @@
   <div class="modal-content">
     <div class="modal-header" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)">
       <span class="modal-title">📥 批量导入历史工单到知识库</span>
-      <span class="modal-close" data-click="hideModal" data-a0="batchImportModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="batchImportModal">&times;</button>
     </div>
     <div class="modal-body">
       <div class="muted" style="font-size:11px;margin-bottom:8px">粘贴工单号(每行一个,可带#号),或直接导入你名下最近的工单。</div>
@@ -420,7 +424,7 @@
   <div class="modal-content" style="max-width:880px">
     <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
       <span class="modal-title" id="knowledgeTitle">知识库</span>
-      <span class="modal-close" data-click="hideModal" data-a0="knowledgeModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="knowledgeModal">&times;</button>
     </div>
     <div class="modal-body" id="knowledgeBody"><div class="muted">加载中…</div></div>
     <div class="modal-buttons" id="knowledgeFooter" style="display:none">
@@ -434,7 +438,7 @@
   <div class="modal-content">
     <div class="modal-header" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">
       <span class="modal-title">导入参考输出(仅评测,不进自动回复)</span>
-      <span class="modal-close" data-click="hideModal" data-a0="referenceModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="referenceModal">&times;</button>
     </div>
     <div class="modal-body">
       <div><label>来源</label>
@@ -452,7 +456,7 @@
   <div class="modal-content">
     <div class="modal-header" style="background:linear-gradient(135deg,#dc2626,#b91c1c)">
       <span class="modal-title">⚠️ 创建内部 Redmine 工单</span>
-      <span class="modal-close" data-click="hideModal" data-a0="internalCreateModal">&times;</span>
+      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="internalCreateModal">&times;</button>
     </div>
     <div class="modal-body">
       <div class="muted" style="margin-bottom:8px">该操作会在 Redmine 上真实创建工单,请确认信息无误。</div>

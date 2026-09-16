@@ -58,6 +58,13 @@
     @media (max-width:560px) {
         .modal-buttons, .modal-footer { flex-direction:column; }
         .modal-buttons button, .modal-footer button { width:100%; }
+        /* 触摸目标（Responsive E2E 以 360/390 宽为支持对象）：
+           手机 breakpoint 下普通控件 ≥40px，destructive ≥44px。 */
+        button { min-height:40px; }
+        button.danger { min-height:44px; }
+        .tab { min-height:40px; }
+        .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; }
+        header .filter-bar select { height:40px; }
     }
     @media (max-height:560px) {
         .modal { align-items:stretch; }
@@ -69,8 +76,11 @@
 
     /* Tabs — inline in header, left side */
     .tabs { display:flex; gap:0; flex:0 1 auto; min-width:min-content; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
-    .tab { flex:0 0 auto; padding:8px 10px; cursor:pointer; font-size:13px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
+    /* 页签是原生 <button role="tab">（a11y 契约）：重置按钮外观，
+       保留底部指示条；:focus-visible 提供键盘焦点可见性。 */
+    .tab { flex:0 0 auto; padding:8px 10px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
     .tab:hover { color:var(--text); }
+    .tab:focus-visible { outline:2px solid var(--primary); outline-offset:-2px; }
     .tab.active { color:var(--primary); border-bottom-color:var(--primary); }
 
     /* Panels */
@@ -297,6 +307,8 @@
     .daily-brief-toolbar .ka-btn { height:36px; padding:0 12px; white-space:nowrap; border-radius:8px; }
     .daily-brief-toolbar .ka-btn.primary:hover { background:#4338ca; }
     #singleIssueAnalysisId { width:200px; height:36px; box-sizing:border-box; flex:0 0 200px; padding:0 12px; border-radius:8px; }
+    .single-issue-analysis-hint-modal { width:min(760px, 92vw); max-width:min(760px, 92vw); }
+    .single-issue-analysis-hint-modal textarea { min-height:300px; height:min(52vh, 440px); resize:vertical; line-height:1.55; }
     .daily-brief-run-controls { padding-left:8px; border-left:1px solid var(--border); }
     .daily-brief-run-controls .daily-brief-status { padding:5px 10px; white-space:nowrap; }
     .daily-brief-run-controls .daily-brief-action { display:flex; align-items:center; gap:8px; margin-left:0; }

@@ -4,6 +4,9 @@
 <body data-default-max-jobs="{{DEFAULT_MAX_JOBS}}"><style>
 .cards{grid-template-columns:repeat(4,minmax(0,1fr))}.meta{display:block}.meta-row{display:flex;flex-wrap:wrap;gap:7px 14px;margin-top:7px;overflow:visible}.meta-row>span{white-space:nowrap}@media(max-width:1200px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.cards{grid-template-columns:1fr}}
 button:disabled{cursor:not-allowed;opacity:.5}.mode-status{margin-top:5px;color:var(--blue)!important}td,th{height:36px;padding:5px 9px;vertical-align:middle}td button,td select,td input{height:26px;padding:2px 8px;line-height:1;box-sizing:border-box;vertical-align:middle}
+/* 触摸目标：手机 breakpoint（≤560px，Responsive E2E 以 360/390 宽为支持对象）
+   普通控件 ≥40px；checkbox/radio 保持原生尺寸不受 min-height 影响。 */
+@media(max-width:560px){button,select,input:not([type=checkbox]):not([type=radio]){min-height:40px}td button,td select,td input{height:40px;padding:2px 10px}.stable-action{height:40px}.compact-filter{height:40px}.worker-delete,.worker-redeploy,.worker-config,.worker-menu-toggle{min-height:40px}.worker-menu button{padding:10px 14px}}
 #library th:nth-child(1),#library td:nth-child(1){max-width:320px;overflow:hidden;text-overflow:ellipsis}
 #library th:nth-child(5),#library td:nth-child(5){min-width:380px;width:380px}
 #suites-table th:nth-child(2),#suites-table td:nth-child(1){min-width:120px;width:120px}
@@ -76,4 +79,4 @@ body.modal-open{overflow:hidden}
   <div class="actions"><button id="save-worker-config" class="primary">保存配置</button></div>
   <pre id="config-error" class="host-warning" hidden style="white-space:pre-wrap;"></pre>
 </section></div>
-<div id="toast"></div><script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script><script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script><script src="/cluster/page-boot.js"></script><script src="/cluster/page-echarts.js"></script><script src="/cluster/page.js"></script></body></html>
+<div id="toast" role="status" aria-live="polite"></div><script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script><script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script><script src="/cluster/page-boot.js"></script><script src="/cluster/page-echarts.js"></script><script src="/cluster/page.js"></script></body></html>

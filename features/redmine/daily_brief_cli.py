@@ -19,6 +19,7 @@ import fcntl
 import logging
 import os
 import sys
+from datetime import datetime
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -36,8 +37,8 @@ def _owner_service(owner_id: str):
     return DailyBriefService(owner_id, config_manager=service.agent.config_manager)
 
 
-def _enabled_owner_ids() -> list[str]:
-    """列出配置了 enabled=true 的 owner（数据目录下 by_user/*）。"""
+def _enabled_owner_ids(trigger_time: str | None = None) -> list[str]:
+    """列出启用晨报的 owner；指定时间时仅返回恰好到点的 owner。"""
     from features.redmine.daily_brief_owner_policy import is_daily_brief_owner_eligible
     from foundation.config import settings
 
@@ -54,7 +55,10 @@ def _enabled_owner_ids() -> list[str]:
             continue
         try:
             service = _owner_service(owner_id)
-            if service.get_config().get("enabled"):
+            config = service.get_config()
+            if config.get("enabled") and (
+                trigger_time is None or config.get("trigger_time") == trigger_time
+            ):
                 owners.append(owner_id)
         except Exception as exc:
             # 发现失败必须可见：静默跳过会让定时任务以「无 owner」正常退出。
@@ -78,7 +82,10 @@ def _run_mode(mode: str, owner_ids: list[str]) -> int:
     """
     from features.redmine.daily_brief_owner_policy import is_daily_brief_owner_eligible
 
-    owners = owner_ids or _enabled_owner_ids()
+    # 定时入口每分钟调用一次，因此无 --owner 的 nightly 只投递当前分钟
+    # 配置的 owner。显式 --owner 是人工试跑，必须不受时刻筛选影响。
+    due_time = datetime.now().strftime("%H:%M") if mode == "nightly" and not owner_ids else None
+    owners = owner_ids or _enabled_owner_ids(trigger_time=due_time)
     if not owners:
         logger.warning("no enabled daily-brief owners; nothing to do")
         return 0

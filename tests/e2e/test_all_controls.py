@@ -73,6 +73,7 @@ ALL_PAGES = [
     'terminal',
     'users',
     'devices',
+    'devices-console',
     'reports',
     'report-analysis',
     'apk-analysis',
@@ -340,6 +341,7 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                 inventories.append(self.inventory_document(page, page_name))
 
             for frame_selector, page_name in [
+                ('#devices-console-frame', 'devices-console-frame'),
                 ('#cluster-frame', 'cluster-frame'),
                 ('#redmine-agent-frame', 'redmine-agent-frame'),
                 ('#gerrit-dashboard-frame', 'gerrit-dashboard-frame'),
@@ -402,6 +404,7 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                     self.assert_clean_browser(page, captured)
 
             for frame_selector, page_name in [
+                ('#devices-console-frame', 'devices-console-frame'),
                 ('#cluster-frame', 'cluster-frame'),
                 ('#redmine-agent-frame', 'redmine-agent-frame'),
                 ('#gerrit-dashboard-frame', 'gerrit-dashboard-frame'),

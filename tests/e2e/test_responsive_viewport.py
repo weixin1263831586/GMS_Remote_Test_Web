@@ -7,9 +7,16 @@ assert the document never overflows horizontally:
         <= document.documentElement.clientWidth + tolerance
 
 Table wrappers are allowed to scroll horizontally *inside* their own
-container — the rule only rejects page-level overflow. Modal reachability
-(header visible, footer/close button tappable) is checked for the device
-config modal at the narrowest viewport.
+container — the rule only rejects page-level overflow. Embedded pages
+(devices-console / cluster / redmine-agent / gerrit-dashboard) render
+inside iframes, so their INTERNAL document geometry is checked with the
+same rule across a dedicated iframe viewport matrix — a clean parent
+shell does not prove the iframe content fits.
+
+Modal reachability (header visible, footer/close button tappable) is
+checked for the device config modal at the narrowest viewport, using the
+stable ``data-testid="device-config-open"`` contract: a missing key
+control is a FAILURE, not a skip.
 
 Skipped automatically when Playwright is unavailable (same contract as
 ``test_all_controls``).
@@ -32,6 +39,20 @@ VIEWPORTS = [
     {"width": 1920, "height": 1080},
 ]
 _OVERFLOW_TOLERANCE_PX = 2
+
+# Embedded documents: activating the shell page lazy-loads the iframe, then
+# the same overflow rule is evaluated on the frame's own document.
+IFRAME_PAGES = [
+    ("devices-console", "#devices-console-frame"),
+    ("cluster", "#cluster-frame"),
+    ("redmine-agent", "#redmine-agent-frame"),
+    ("gerrit-dashboard", "#gerrit-dashboard-frame"),
+]
+IFRAME_VIEWPORT_WIDTHS = (360, 390, 768, 1024, 1440)
+IFRAME_VIEWPORTS = [
+    viewport for viewport in VIEWPORTS
+    if viewport["width"] in IFRAME_VIEWPORT_WIDTHS
+]
 
 OVERFLOW_SCRIPT = """
 (tolerance) => {
@@ -80,31 +101,88 @@ class ResponsiveViewportE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                         ),
                     )
 
+    def test_embedded_iframes_do_not_overflow_horizontally(self):
+        """A clean parent shell proves nothing about iframe-internal layout.
+
+        devices-console / cluster / redmine-agent / gerrit-dashboard render
+        inside iframes hosted by the shell; activate each page through the
+        application's own navigation entrypoint (this lazy-loads the iframe
+        src) and run the same overflow rule on the frame's own document
+        across the mobile/tablet/desktop subset of the viewport matrix.
+        """
+        page = self.new_page()
+        self.addCleanup(page.close)
+        for viewport in IFRAME_VIEWPORTS:
+            page.set_viewport_size(viewport)
+            page.goto(self.base_url, wait_until="domcontentloaded")
+            page.wait_for_selector(".sidebar-item[data-page]")
+            self.close_initial_modals(page)
+            for page_name, frame_selector in IFRAME_PAGES:
+                with self.subTest(viewport=viewport, frame=page_name):
+                    page.evaluate("name => window.switchPage(name)", page_name)
+                    page.wait_for_function(
+                        "sel => Boolean(document.querySelector(sel)?.getAttribute('src'))",
+                        arg=frame_selector,
+                        timeout=15000,
+                    )
+                    frame = self.frame_for(page, frame_selector)
+                    frame.wait_for_function(
+                        "document.readyState === 'complete'"
+                    )
+                    result = frame.evaluate(OVERFLOW_SCRIPT, _OVERFLOW_TOLERANCE_PX)
+                    self.assertLessEqual(
+                        result["overflow"],
+                        _OVERFLOW_TOLERANCE_PX,
+                        (
+                            f"horizontal overflow {result['overflow']}px inside "
+                            f"iframe {page_name} ({frame_selector}) at "
+                            f"{viewport['width']}x{viewport['height']}; "
+                            f"offenders: {result['offenders']}"
+                        ),
+                    )
+
     def test_device_config_modal_controls_reachable_on_narrow_viewport(self):
-        """The dcfg-toolbar must wrap instead of clipping inputs."""
+        """The dcfg-toolbar must wrap instead of clipping inputs.
+
+        Stable contract: the trigger is ``data-testid="device-config-open"``
+        (never a guessed onclick/text selector), and a missing trigger or
+        modal is a FAILURE — silently skipping would hide a broken entry
+        point behind a green build.
+        """
         page = self.new_page()
         self.addCleanup(page.close)
         page.set_viewport_size(VIEWPORTS[0])  # 360x800 — narrowest
-        page.goto(f"{self.base_url}/devices", wait_until="domcontentloaded")
-
-        open_device_config = page.evaluate(
-            """
-            () => {
-              const trigger = document.querySelector(
-                '[onclick*="openDeviceConfig"], [onclick*="DeviceConfig"], #device-config-btn'
-              );
-              if (!trigger) return {found: false};
-              trigger.click();
-              return {found: true};
-            }
-            """
+        # Routes must be registered BEFORE navigation so the first device
+        # inventory request (/api/devices/management) is served by the mock.
+        page.route(
+            "**/api/devices/management*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=(
+                    '{"devices":[{"serial_no":"CFG-E2E-1",'
+                    '"status":"online","source_host":"e2e-local"}]}'
+                ),
+            ),
         )
-        if not open_device_config.get("found"):
-            self.skipTest("device config modal trigger not present on devices page")
+        page.goto(self.base_url, wait_until="domcontentloaded")
+        page.wait_for_selector(".sidebar-item[data-page]")
+        self.close_initial_modals(page)
+        page.evaluate("() => window.switchPage('devices')")
+        page.wait_for_function(
+            "Boolean(document.querySelector('[data-testid=\"device-config-open\"]'))",
+            timeout=15000,
+        )
+        # 客户端身份识别弹框（/api/users/detect 失败时）是异步晚到的，
+        # 可能落在初始 2s 窗口之后（满负载运行时尤其明显）；点击目标
+        # 前再清一次，避免弹层拦截指针事件造成假失败。
+        self.close_initial_modals(page)
+        page.locator('[data-testid="device-config-open"]').first.click()
 
         modal = page.locator("#device-config-modal")
-        if modal.count() == 0:
-            self.skipTest("device config modal not present")
+        self.assertEqual(
+            modal.count(), 1, "device config modal missing after trigger click"
+        )
         modal.wait_for(state="visible", timeout=5000)
 
         result = page.evaluate(
@@ -125,8 +203,8 @@ class ResponsiveViewportE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                 }
               }
               const closeBtn = document.querySelector(
-                '#device-config-modal .close,'
-                + ' #device-config-modal [onclick*="close"],'
+                '#device-config-modal .modal-close,'
+                + ' #device-config-modal [aria-label="关闭"],'
                 + ' #device-config-modal [aria-label="Close"]'
               );
               const closeVisible = Boolean(

@@ -136,6 +136,21 @@ class DailyBriefService(DailyBriefRunStarterMixin):
                     fallback_model=run.model_name,
                 ),
             )
+            # 防御旧库尚未完成迁移或外部旧 Worker 写回 pending：已经取消的
+            # run 内条目不能再呈现为“排队中”。
+            if run.status == "cancelled" and payload.get("status") in ("pending", "running"):
+                payload["status"] = "cancelled"
+            if not str((payload.get("result") or {}).get("detailed_report") or "").strip():
+                previous = self.repository.latest_issue_run_with_report(
+                    self.owner_id, issue.issue_id, exclude_run_id=run.run_id,
+                )
+                if previous is not None:
+                    previous_run, previous_issue = previous
+                    payload["previous_analysis"] = {
+                        "run_id": previous_run.run_id,
+                        "finished_at": previous_run.finished_at,
+                        "result": previous_issue.result,
+                    }
             # 旧版单号 run 只保存了 ``#<id>``。若同 owner 的 Redmine
             # 本地镜像已有标题，读时补齐展示而不改动历史分析结论。
             if payload.get("subject") not in ("", f"#{issue.issue_id}"):
@@ -154,7 +169,10 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             return payload
 
         return {
-            "run": run.to_row(),
+            "run": {
+                **run.to_row(),
+                "cancel_requested": self.repository.is_cancel_requested(run.run_id),
+            },
             "issues": [display_issue(issue) for issue in issues],
         }
 
@@ -227,12 +245,13 @@ class DailyBriefService(DailyBriefRunStarterMixin):
                 "already_terminal": True,
             }
         requested = self.repository.request_cancel(run.run_id)
+        cancelled_now = requested and self.repository.cancel_queued_issue_run(run.run_id)
         task = self._RUN_EXECUTIONS.get(run.run_id)
         if task is not None and not task.done():
             task.cancel()
         return {
             "run_id": run.run_id,
-            "status": run.status,
+            "status": "cancelled" if cancelled_now else run.status,
             "cancel_requested": bool(requested),
         }
 
@@ -264,6 +283,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         # 的设置修改悄悄改变历史重分析的实机取证目标。
         if run.device_serial:
             config["device_serial"] = run.device_serial
+        if run.analysis_hint:
+            config["analysis_hint"] = run.analysis_hint
         task = asyncio.current_task()
         if task is not None:
             self._RUN_EXECUTIONS[run_id] = task
@@ -483,6 +504,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             analyze_entry.setdefault("analysis_mode", "diagnostic")
             if config.get("device_serial"):
                 analyze_entry.setdefault("device_serial", config["device_serial"])
+            if config.get("analysis_hint"):
+                analyze_entry.setdefault("analysis_hint", config["analysis_hint"])
             # 部署事实 hint：SDK 源可用性决定源码取证门禁是否强制
             #（evidence_gate 降级依据），只进本次调用，不回写快照。
             analyze_entry["sdk_sources_available"] = _sdk_sources_available()
@@ -578,8 +601,10 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             "buckets": record.buckets,
             "priority_name": record.priority,
         }
-        if config.get("device_serial"):
-            entry = {**entry, "device_serial": config["device_serial"]}
+        if run.device_serial:
+            entry = {**entry, "device_serial": run.device_serial}
+        if run.analysis_hint:
+            entry = {**entry, "analysis_hint": run.analysis_hint}
         analyzer = self._build_analyzer(config)
         try:
             await self._analyze_one(run, issue_id, entry, analyzer, config)

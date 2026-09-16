@@ -1832,6 +1832,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/redmine-agent/daily-brief/active-issue"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/redmine-agent/daily-brief/agent-profiles"
   },
   {
@@ -1851,6 +1857,18 @@
       "PUT"
     ],
     "path": "/api/redmine-agent/daily-brief/config"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/issue-analyses"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/issue-analyses/{issue_id}"
   },
   {
     "methods": [

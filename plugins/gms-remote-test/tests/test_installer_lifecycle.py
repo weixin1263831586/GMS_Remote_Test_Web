@@ -447,7 +447,16 @@ gms-rt-agent-enroll-code --name fixture
             ["bash", "-c", command, "bash", str(script)],
             capture_output=True,
             text=True,
-            env={**os.environ, "GMS_RT_OUTPUT": "json"},
+            env={
+                **os.environ,
+                "GMS_RT_OUTPUT": "json",
+                # The helper fail-fasts when no Controller URL is configured
+                # and localhost:5001 is not listening (CI runners). Point the
+                # preflight at a fixture URL — curl is stubbed above, so no
+                # real network call happens; the stubbed enrollment is what
+                # the test exercises.
+                "GMS_REMOTE_TEST_SERVER": "https://fixture.invalid:5001",
+            },
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 

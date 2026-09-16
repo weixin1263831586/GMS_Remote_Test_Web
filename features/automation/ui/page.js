@@ -1764,6 +1764,25 @@ document.addEventListener('keydown', event => {
     }
 });
 
+// WAI-ARIA tabs pattern：tablist 内左右方向键移动焦点并激活页签，
+// Home/End 跳转首/尾；roving tabindex（非活跃 tab tabIndex=-1）由
+// switchWorkflowPane 维护，这里只按可见 tab 顺序循环。
+document.querySelector('.workflow-tabs')?.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+    const tabs = Array.from(document.querySelectorAll('.workflow-tab'))
+        .filter(tab => tab.offsetParent !== null);
+    if (!tabs.length) return;
+    const activeIndex = tabs.indexOf(document.querySelector('.workflow-tab.active'));
+    let nextIndex;
+    if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = tabs.length - 1;
+    else if (activeIndex === -1) nextIndex = 0;
+    else nextIndex = (activeIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    tabs[nextIndex].focus();
+    switchWorkflowPane(tabs[nextIndex].dataset.workflow);
+});
+
 async function dryRunProfile() {
     try {
         const profileId = qs('automation-profile').value;

@@ -258,7 +258,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
         missing = sorted(set(DELEGATED_TARGET_RE.findall(combined)) - funcs)
         self.assertEqual(
-            missing, [], "act-bridge 委托目标未定义（运行时会 console.warn）"
+            missing, [], "act-bridge 委托目标未定义（运行时会 console.error 并让 E2E 变红）"
         )
 
     def test_embedded_dashboard_inline_handlers_resolve_locally(self):
@@ -418,6 +418,14 @@ class FrontendIntegrityTests(unittest.TestCase):
             "返回 false，让调用方重新走提权弹框",
             elevation,
         )
+
+    def test_firmware_download_progress_uses_upload_progress_bar_not_log_rows(self):
+        websocket = read_text("web/static/js/shell/websocket-manager.js")
+
+        self.assertIn("function routeFirmwareDownloadProgress", websocket)
+        self.assertIn("Download\\s+Image", websocket)
+        self.assertIn("updateProgressBar(percentage, '', '固件下载')", websocket)
+        self.assertIn("if (routeFirmwareDownloadProgress(data.log))", websocket)
 
     def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
         navigation = read_all_frontend_js()
@@ -961,13 +969,10 @@ class WorkspaceIdentityRegressions(unittest.TestCase):
         """
         allowed_files = {
             "web/static/js/modal.js",
-            # redmine/gerrit 是 iframe 内独立应用：不加载 modal.js，使用
-            # 页面内自洽的 showModal/hideModal + 专属栈实现（syncRedmine/
-            # GerritModalState），不在平台 Shell 的 ModalManager 管辖内。
-            "features/redmine/ui/page.js",
-            "features/redmine/ui/page.html",
-            "features/gerrit/ui/page.js",
-            "features/gerrit/ui/page.html",
+            # iframe 内独立应用（redmine/gerrit）的 modal 可见性实现本体：
+            # 共享控制器 embedded-ui/modal-controller.js（各页面经全局
+            # showModal/hideModal 别名委托，不加载 Shell 的 modal.js）。
+            "web/static/js/embedded-ui/modal-controller.js",
         }
         # shell.html 中合法的 display 写入目标（非对话框元素）。
         allowed_display_targets = {

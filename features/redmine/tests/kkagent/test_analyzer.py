@@ -255,7 +255,16 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v13")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v14")
+
+    def test_prompt_includes_operator_observation_as_verifiable_context(self):
+        prompt = KkAgentRedmineAnalyzer().build_prompt({
+            **ENTRY,
+            "analysis_hint": "The patch did not work; check notification_custom_view_max_image_width.",
+        })
+        self.assertIn("OPERATOR OBSERVATION", prompt)
+        self.assertIn("notification_custom_view_max_image_width", prompt)
+        self.assertIn("independently verify every claim", prompt)
 
     def test_prompt_requires_source_evidence_for_test_failures(self):
         prompt = KkAgentRedmineAnalyzer().build_prompt(ENTRY)

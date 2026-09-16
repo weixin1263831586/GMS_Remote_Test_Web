@@ -68,6 +68,7 @@ class SingleIssueAnalysisRequest(BaseModel):
     issue_id: int = Field(strict=True, gt=0, le=9223372036854775807)
     analysis_mode: Literal["incremental", "full"] = "incremental"
     device_serial: str = Field(default="", max_length=64)
+    analysis_hint: str = Field(default="", max_length=4000)
 
 
 @router.post("/daily-brief/analyze-issue")
@@ -93,7 +94,7 @@ async def analyze_single_issue(request: Request, payload: SingleIssueAnalysisReq
         logger.info("single issue %s metadata refresh unavailable", payload.issue_id, exc_info=True)
     return {"success": True, "data": _service_for_request(request).start_issue_analysis(
         payload.issue_id, analysis_mode=payload.analysis_mode, device_serial=device_serial,
-        subject=subject,
+        analysis_hint=payload.analysis_hint.strip(), subject=subject,
     )}
 
 

@@ -142,7 +142,8 @@ def list_devices(
                 is_self = bool(
                     _user
                     and (
-                        _user.id == claim_owner_id
+                        # ADR 0010: claims store the resource-owner ACCOUNT.
+                        _user.resource_owner_id == claim_owner_id
                         or _user.username in {claim_owner_id, claim_username}
                     )
                 )

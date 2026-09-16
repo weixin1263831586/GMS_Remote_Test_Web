@@ -41,6 +41,7 @@ def _require_command_access(request: Request, command: dict[str, Any]) -> None:
 
     command 顶层没有 owner_id：job 类命令从 job 反查，device action 等
     从 payload.owner_id 判断（与 GET /commands/{id} 的规则一致）。
+    写入侧统一记录 resource-owner 账号（ADR 0010），此处用同一身份比较。
     """
     user = get_authenticated_user(request)
     if user is None:
@@ -56,7 +57,7 @@ def _require_command_access(request: Request, command: dict[str, Any]) -> None:
     if job_id or not owner_id:
         job = service().repository.get_job(job_id) if job_id else None
         owner_id = owner_id or str((job or {}).get("owner_id") or "")
-    if owner_id != user.id:
+    if owner_id != user.resource_owner_id:
         raise HTTPException(404, "command not found")
 
 

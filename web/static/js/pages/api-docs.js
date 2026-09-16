@@ -166,7 +166,7 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
         <div class="modal-content" style="max-width: 700px; max-height: 85vh; overflow-y: auto;">
             <div class="modal-header">
                 <span class="modal-title">📝 Redmine回复</span>
-                <span class="modal-close" data-click="_actCloseModal" data-a0="${modalId}">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="${modalId}">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="margin-bottom: 16px;">

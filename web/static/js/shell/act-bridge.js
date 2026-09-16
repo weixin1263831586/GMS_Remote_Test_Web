@@ -24,9 +24,14 @@
  *                     开头的 event.preventDefault(); 语句）。
  *   data-stop         存在即先 event.stopPropagation()（等价旧 handler
  *                     开头的 event.stopPropagation(); 语句）。
- *   data-hover-*      mouseover/mouseout 样式切换见 _bindHover。
  *
  * 分发语义与 inline handler 对齐：函数内 `this` = 触发元素。
+ *
+ * 错误传播契约：handler 的同步异常与 Promise rejection 都在本桥内
+ * 兜底上报（console.error），保证单个控件故障不会变成静默失败或
+ * unhandledrejection；E2E 把 console.error 计为失败，死控件因此可见。
+ * handler 自身的 loading/disabled 恢复仍由 handler 负责（bridge 只兜
+ * “上报”，不猜测 UI 状态回滚）。
  */
 (function () {
     'use strict';
@@ -99,6 +104,13 @@
         return false;
     }
 
+    function reportUiActionFailure(name, type, error) {
+        var detail = error && (error.stack || error.message) || String(error);
+        console.error(
+            '[act-bridge] handler for data-' + type + '="' + name + '" failed: ' + detail
+        );
+    }
+
     function dispatch(el, event, type) {
         var name = el.getAttribute('data-' + type);
         if (!name) return;
@@ -108,12 +120,23 @@
         }
         var fn = resolveFn(name);
         if (!fn) {
-            console.warn('[act-bridge] no global function for data-' + type + '="' + name + '"');
+            // console.error（而非 warn）：All-controls E2E 把 console.error
+            // 计为失败——“控件存在、可点击、但没有任何响应”必须让测试变红。
+            console.error('[act-bridge] no global function for data-' + type + '="' + name + '"');
             return;
         }
         if (el.hasAttribute('data-prevent')) event.preventDefault();
         if (el.hasAttribute('data-stop')) event.stopPropagation();
-        fn.apply(el, marshalArgs(el, event));
+        try {
+            var result = fn.apply(el, marshalArgs(el, event));
+            if (result && typeof result.then === 'function') {
+                result.catch(function (error) {
+                    reportUiActionFailure(name, type, error);
+                });
+            }
+        } catch (error) {
+            reportUiActionFailure(name, type, error);
+        }
     }
 
     function handle(event, type) {

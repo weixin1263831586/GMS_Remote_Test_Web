@@ -6,6 +6,8 @@ from fastapi import HTTPException, Request
 
 from .request_security import authentication_required
 from .service import AUTH_COOKIE_NAME, CurrentUser, auth_service
+
+
 def get_authenticated_user(request: Request) -> CurrentUser | None:
     user = getattr(request.state, "current_user", None)
     if isinstance(user, CurrentUser):

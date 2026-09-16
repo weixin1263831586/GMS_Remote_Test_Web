@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from bootstrap.application import create_app
@@ -154,7 +155,10 @@ class AutomationApiTests(unittest.TestCase):
                             'devices': ['ABC123'],
                             'test_plan': {'test_type': 'CTS'},
                         },
-                        self.request_for('alice'),
+                        # ADR 0012: run creation compiles the plan's capability
+                        # union; the creator needs devices.lease/read, so the
+                        # operator here holds the device_operator role.
+                        self.request_for('alice', role='device_operator'),
                     )
                 )
                 run_id = created['data']['id']
@@ -224,7 +228,8 @@ class AutomationApiTests(unittest.TestCase):
                             'devices': ['ABC123'],
                             'test_plan': {'test_type': 'CTS'},
                         },
-                        self.request_for('alice'),
+                        # ADR 0012: creator needs the plan capability union.
+                        self.request_for('alice', role='device_operator'),
                     )
                 )
                 ticked = asyncio.run(automation_api.automation_worker_tick('stub'))
@@ -255,13 +260,16 @@ class AutomationApiTests(unittest.TestCase):
                         'devices': ['ABC'],
                         'test_plan': {'test_type': 'CTS'},
                     },
-                    self.request_for('alice'),
+                    # ADR 0012: creator needs the plan capability union
+                    # (devices.lease/read) — see test above.
+                    self.request_for('alice', role='device_operator'),
                 ))
                 denied = asyncio.run(automation_api.get_automation_run(
                     created['data']['id'], self.request_for('bob')
                 ))
                 visible = asyncio.run(automation_api.list_automation_runs(
-                    self.request_for('alice'), status='', limit=50
+                    self.request_for('alice', role='device_operator'),
+                    status='', limit=50,
                 ))
 
             self.assertEqual(denied.status_code, 404)
@@ -589,3 +597,88 @@ class AutomationApiTests(unittest.TestCase):
             self.assertTrue(created['success'])
             self.assertTrue(dry_run['data']['matched'])
             self.assertEqual(dry_run['data']['run_request']['profile_id'], 'p1')
+
+
+class HumanOnlyRunSurfaceTests(unittest.TestCase):
+    """ADR 0012 验收：ATS run 表面对 Agent/机器 principal 关闭。
+
+    零 scope 的 Agent Token 能通过任意“仅认证”端点，因此 create/
+    preflight/cancel/retry 必须显式要求人类 principal；能力不足的
+    人类创建者按缺失能力拒绝（执行链不能比发起者更多权）。
+    """
+
+    def agent_request_for(self, username: str = 'bot') -> Request:
+        request = Request({
+            'type': 'http', 'method': 'POST', 'path': '/',
+            'headers': [], 'client': ('127.0.0.1', 1234),
+        })
+        request.state.current_user = CurrentUser(
+            id=f'agent:{username}', username=username, role='agent_service',
+        )
+        request.state.auth_method = 'agent_token'
+        return request
+
+    @staticmethod
+    def _run_payload() -> dict:
+        return {
+            'profile_id': 'manual-smoke',
+            'artifact_path': '/tmp/update.img',
+            'devices': ['ABC123'],
+            'test_plan': {'test_type': 'CTS'},
+        }
+
+    def test_agent_token_cannot_create_run(self):
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            with patch.object(automation_api, 'automation_service', service), \
+                    self.assertRaises(HTTPException) as raised:
+                asyncio.run(
+                    automation_api.create_automation_run(
+                        self._run_payload(), self.agent_request_for()
+                    )
+                )
+            self.assertEqual(raised.exception.status_code, 403)
+            self.assertTrue(raised.exception.detail.get('agent_forbidden'))
+
+    def test_agent_token_cannot_cancel_or_retry_run(self):
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            run = service.create_run(
+                self._run_payload(), created_by='id-human'
+            )
+            with patch.object(automation_api, 'automation_service', service):
+                with self.assertRaises(HTTPException) as cancel_raised:
+                    asyncio.run(
+                        automation_api.cancel_automation_run(
+                            run['id'], self.agent_request_for()
+                        )
+                    )
+                with self.assertRaises(HTTPException) as retry_raised:
+                    asyncio.run(
+                        automation_api.retry_automation_run(
+                            run['id'], self.agent_request_for()
+                        )
+                    )
+            self.assertEqual(cancel_raised.exception.status_code, 403)
+            self.assertEqual(retry_raised.exception.status_code, 403)
+
+    def test_creator_without_capabilities_is_rejected(self):
+        request = Request({
+            'type': 'http', 'method': 'POST', 'path': '/',
+            'headers': [], 'client': ('127.0.0.1', 1234),
+        })
+        # 'user' 角色没有 devices.lease/devices.read —— 设备预留阶段
+        # 的能力必须由创建者本身持有（ADR 0012 阶段→能力映射）。
+        request.state.current_user = CurrentUser(
+            id='id-alice', username='alice', role='user'
+        )
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            with patch.object(automation_api, 'automation_service', service):
+                response = asyncio.run(
+                    automation_api.create_automation_run(
+                        self._run_payload(), request
+                    )
+                )
+            self.assertEqual(response.status_code, 400)
+            self.assertIn('devices.lease', response.body.decode())

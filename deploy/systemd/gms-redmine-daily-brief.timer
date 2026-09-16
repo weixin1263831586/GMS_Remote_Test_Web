@@ -1,9 +1,10 @@
 [Unit]
-Description=Run GMS Redmine Daily Brief at 00:00 daily
+Description=Check due GMS Redmine Daily Brief schedules every minute
 
 [Timer]
-OnCalendar=*-*-* 00:00:00
-# 服务器 00:00 停机时，启动后补跑当天错过的执行
+# 每个 owner 的 trigger_time 由 CLI 对照 runtime 配置筛选；默认 00:00。
+OnCalendar=*-*-* *:*:00
+# 停机恢复后会立即检查一次；CLI 只投递恢复当刻到期的配置，避免补跑过时晨报。
 Persistent=true
 Unit=gms-redmine-daily-brief.service
 

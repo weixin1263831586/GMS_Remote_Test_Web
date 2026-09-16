@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 import unittest.mock
 from unittest.mock import Mock
@@ -26,7 +27,7 @@ class DeviceUtilsTests(unittest.TestCase):
         )
 
         self.assertIn("nohup '/opt/scrcpy bin/scrcpy' -s ABC-123", command)
-        self.assertIn("--no-control", command)
+        self.assertNotIn("--no-control", command)
         self.assertNotIn("--stay-awake", command)
         self.assertIn("--window-title ABC-123", command)
         self.assertIn("> /tmp/scrcpy_ABC-123.log 2>&1 &", command)
@@ -64,8 +65,19 @@ class DeviceUtilsTests(unittest.TestCase):
         self.assertTrue(healthy)
         self.assertEqual(pid, "1234")
         command = command_used["cmd"]
-        self.assertIn("pgrep -f -- 'scrcpy.*-s ABC-123'", command)
+        self.assertIn("pgrep -x scrcpy", command)
+        self.assertIn('"/proc/$candidate/cmdline"', command)
+        self.assertIn('*" -s ABC-123 "*', command)
+        self.assertIn('*" --no-control "*) continue', command)
+        self.assertNotIn("pgrep -f", command)
         self.assertIn("tail -c 2048 /tmp/scrcpy_ABC-123.log", command)
+        self.assertNotIn("[[", command)
+        self.assertIn('case "$state" in R|S|D)', command)
+        self.assertIn(r"\[server\] INFO: Device:", command)
+        self.assertEqual(
+            subprocess.run(["dash", "-n", "-c", command], check=False).returncode,
+            0,
+        )
 
 
 if __name__ == "__main__":

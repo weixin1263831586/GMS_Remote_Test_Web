@@ -39,6 +39,7 @@ from foundation.secrets import derive_application_key
 
 from .constants import CurrentUser
 
+
 CAPABILITY_TOKEN_PREFIX = "gmscap_v1_"
 _CAPABILITY_TTL_SECONDS = 2 * 60 * 60
 _HMAC_PURPOSE = b"gms-machine-authority-v1:"

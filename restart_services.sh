@@ -62,6 +62,39 @@ systemctl_admin() {
     fi
 }
 
+restart_local_vnc() {
+    # x11vnc/websockify are application-managed processes rather than systemd
+    # units.  Reuse the canonical VNC manager so this script cannot drift from
+    # the Web UI's display, keyboard, and loopback-binding settings.
+    if [[ ! -f "${PROJECT_DIR}/features/system/vnc.py" ]]; then
+        echo -e "${YELLOW}  ℹ VNC 运行时未随当前部署提供，跳过本地 VNC 重启${NC}"
+        return 0
+    fi
+
+    local vnc_user vnc_home
+    vnc_user="$(systemctl show "${SYSTEMD_SERVICE}" --property=User --value 2>/dev/null || true)"
+    vnc_user="${vnc_user:-${SUDO_USER:-$(id -un)}}"
+    vnc_home="$(getent passwd "${vnc_user}" | awk -F: '{print $6}' || true)"
+    vnc_home="${vnc_home:-${HOME}}"
+
+    local -a vnc_command=(
+        "${PYTHON_BIN}" -c '
+import sys
+from features.system.vnc import vnc_manager
+
+result = vnc_manager._start_local_vnc(force_restart=True)
+message = result.get("message") if result.get("success") else result.get("error")
+print(message or "VNC restart returned no status")
+raise SystemExit(0 if result.get("success") else 1)
+'
+    )
+    if [[ "${EUID}" -eq 0 && "${vnc_user}" != "root" ]]; then
+        runuser -u "${vnc_user}" -- env "HOME=${vnc_home}" "${vnc_command[@]}"
+    else
+        "${vnc_command[@]}"
+    fi
+}
+
 DAILY_BRIEF_INSTALLED=false
 if [[ "$(systemctl show "${DAILY_BRIEF_SERVICE}" --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]; then
     DAILY_BRIEF_INSTALLED=true
@@ -116,7 +149,7 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 # 1. 清理缓存
-echo -e "${YELLOW}[1/4] 清理 Python 缓存...${NC}"
+echo -e "${YELLOW}[1/6] 清理 Python 缓存...${NC}"
 # 清理 Python 字节码缓存
 cache_count=$(find . -type d -name "__pycache__" 2>/dev/null | wc -l)
 pyc_count=$(find . -type f -name "*.pyc" 2>/dev/null | wc -l)
@@ -130,7 +163,7 @@ echo -e "${GREEN}✓ 缓存已清理 (删除了 ${cache_count} 个 __pycache__ �
 echo ""
 
 # 2. 备份旧日志
-echo -e "${YELLOW}[2/4] 备份日志...${NC}"
+echo -e "${YELLOW}[2/6] 备份日志...${NC}"
 for log in fastapi.log; do
     [[ -f "$log" ]] && mv "$log" "${log}.backup.$(date +%Y%m%d_%H%M%S)"
 done
@@ -138,7 +171,7 @@ echo -e "${GREEN}✓ 日志已备份${NC}"
 echo ""
 
 # 3. 停止旧服务
-echo -e "${YELLOW}[3/4] 停止旧服务...${NC}"
+echo -e "${YELLOW}[3/6] 停止旧服务...${NC}"
 
 # Environment loading is handled above; there is no single ENV_FILE anymore.
 echo -e "${BLUE}  ℹ 环境配置由统一配置加载器处理${NC}"
@@ -166,7 +199,7 @@ done
 echo ""
 
 # 4. 启动新服务
-echo -e "${YELLOW}[4/4] 启动新服务...${NC}"
+echo -e "${YELLOW}[4/6] 启动新服务...${NC}"
 
 ensure_https_cert
 
@@ -240,7 +273,13 @@ else
     exit 1
 fi
 
-# 5. 重启本地 Worker Agent
+# 5. Web 已恢复后再重启本机 VNC/noVNC，避免旧进程继续使用过期参数。
+echo -e "${YELLOW}[5/6] 重启本机 VNC（x11vnc / websockify）...${NC}"
+restart_local_vnc || fail_service_action "无法重启本机 VNC（x11vnc / websockify）"
+echo -e "${GREEN}  ✓ 本机 VNC（x11vnc / websockify）已重启${NC}"
+
+# 6. 重启本地 Worker Agent
+echo -e "${YELLOW}[6/6] 重启本地 Worker Agent...${NC}"
 if [[ "${DAILY_BRIEF_INSTALLED}" == "true" ]]; then
     echo -e "${YELLOW}  重启晨报 Worker (${DAILY_BRIEF_SERVICE})...${NC}"
     systemctl_admin restart "${DAILY_BRIEF_SERVICE}" \

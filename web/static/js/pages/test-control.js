@@ -169,21 +169,19 @@ function updateTestToggleButton(isTesting) {
         btn.className = 'btn-primary btn-lg';
     }
 
-    // 禁用/启用测试相关输入框
-    const testInputs = [
-        'test-type',      // 测试类型
-        'test-module',    // 测试模块
-        'test-case',      // 测试用例
-        'test-suite',     // 测试套件
-        'retry-result'    // 测试报告
-    ];
-
-    testInputs.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.disabled = isTesting;
-        }
+    // 禁用/启用测试配置控件（CSP 迁移后统一契约：data-test-config-control，
+    // 覆盖测试类型/模块/用例/套件/报告输入及“📁 选择报告”浏览按钮；
+    // 不再按 handler 名（onclick*=）猜测，避免 data-click 迁移后失配）。
+    document.querySelectorAll('[data-test-config-control]').forEach(element => {
+        element.disabled = isTesting;
     });
+
+    // 保留 id 兜底：历史 DOM（如测试快照）可能尚无统一标记。
+    ['test-type', 'test-module', 'test-case', 'test-suite', 'retry-result']
+        .forEach(id => {
+            const element = document.getElementById(id);
+            if (element) element.disabled = isTesting;
+        });
 
     // 测试主机下拉框在测试期间也保持可用：切换主机不会中断正在运行的测试
     // （测试在后端按 clusterJobId 运行，停止操作也通过 clusterJobId 执行）。
@@ -202,13 +200,7 @@ function updateTestToggleButton(isTesting) {
             : '当前为单机模式；切换到集群模式后可选择远端测试主机';
     }
 
-    // 禁用/启用浏览按钮
-    const browseButtons = document.querySelectorAll('button[onclick*="browseRemoteFile"]');
-    browseButtons.forEach(btn => {
-        if (btn.getAttribute('onclick').includes('suite') || btn.getAttribute('onclick').includes('retry')) {
-            btn.disabled = isTesting;
-        }
-    });
+    // 浏览按钮随统一契约一并禁用（上面 data-test-config-control 已覆盖）。
 }
 
 async function cleanTest() {
@@ -280,15 +272,17 @@ async function showConfig() {
         : String(config.usbip_vid_pid || '');
 
     // Generate config form with actual values
+    // ADR：结构用 HTML、数据用 DOM property —— 模板不插入任何配置数据，
+    // 避免 " < > & 破坏属性 / DOM 注入 / 字段消失类 UI 完整性问题。
     modalBody.innerHTML = `
         <form id="test-control-config-form" autocomplete="off">
         <div class="modal-form-row">
             <label>测试主机用户:</label>
-            <input type="text" id="config-ubuntu-user" value="${config.ubuntu_user || ''}" autocomplete="username" />
+            <input type="text" id="config-ubuntu-user" autocomplete="username" />
         </div>
         <div class="modal-form-row">
             <label>测试主机地址:</label>
-            <input type="text" id="config-ubuntu-host" value="${config.ubuntu_host || ''}" />
+            <input type="text" id="config-ubuntu-host" />
         </div>
         <div class="modal-form-row">
             <label>测试主机密码:</label>
@@ -296,7 +290,7 @@ async function showConfig() {
         </div>
         <div class="modal-form-row">
             <label>设备主机地址:</label>
-            <input type="text" id="config-device-host" value="${config.device_host || ''}" />
+            <input type="text" id="config-device-host" />
         </div>
         <div class="modal-form-row">
             <label>设备主机密码:</label>
@@ -304,32 +298,30 @@ async function showConfig() {
         </div>
         <div class="modal-form-row">
             <label>本地主机地址:</label>
-            <input type="text" id="config-local-server" value="${config.local_server || ''}" />
+            <input type="text" id="config-local-server" />
         </div>
         <div class="modal-form-row">
             <label>设备VID:PID:</label>
-            <input type="text" id="config-usbip-vid-pids" value="${escapeHtml(usbipVidPids)}" placeholder="例如: 2207:0006, 18d1:4d00" />
+            <input type="text" id="config-usbip-vid-pids" placeholder="例如: 2207:0006, 18d1:4d00" />
         </div>
         <div class="modal-form-row">
             <label>测试脚本路径:</label>
-            <input type="text" id="config-script-path" class="readonly" value="${config.script_path || ''}" readonly />
+            <input type="text" id="config-script-path" class="readonly" readonly />
         </div>
         <div class="modal-form-row">
             <label>测试套件路径:</label>
-            <input type="text" id="config-suites-path" value="${config.suites_path || ''}" />
+            <input type="text" id="config-suites-path" />
         </div>
 
         <div style="margin-top:14px;border-top:1px solid var(--border-color);padding-top:10px;">
             <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">日志显示设置</div>
             <div class="modal-form-row">
                 <label>历史日志条数:</label>
-                <input type="number" id="config-log-history-limit" min="10" max="2000"
-                       value="${localStorage.getItem('gms-log-history-limit') || 100}" />
+                <input type="number" id="config-log-history-limit" min="10" max="2000" />
             </div>
             <div class="modal-form-row">
                 <label>实时日志上限:</label>
-                <input type="number" id="config-log-max-entries" min="50" max="10000"
-                       value="${localStorage.getItem('gms-log-max-entries') || 1000}" />
+                <input type="number" id="config-log-max-entries" min="50" max="10000" />
             </div>
             <small style="color:var(--text-secondary);">历史日志：首次加载状态时显示的条数；实时日志：页面每个Tab最多保留的条数。保存后即时生效。</small>
         </div>
@@ -388,6 +380,25 @@ async function showConfig() {
             <small style="color:var(--text-secondary);margin-top:4px;">程序启动和每次保存时自动应用（幂等）。修改路由表需要 root；普通用户运行时需配置 sudoers 免密 ip route。</small>
         </div>
     `;
+
+    // 数据通过 DOM property 写入（不进 HTML 字符串）。
+    const configValues = {
+        'config-ubuntu-user': config.ubuntu_user,
+        'config-ubuntu-host': config.ubuntu_host,
+        'config-device-host': config.device_host,
+        'config-local-server': config.local_server,
+        'config-usbip-vid-pids': usbipVidPids,
+        'config-script-path': config.script_path,
+        'config-suites-path': config.suites_path,
+        'config-log-history-limit':
+            localStorage.getItem('gms-log-history-limit') || 100,
+        'config-log-max-entries':
+            localStorage.getItem('gms-log-max-entries') || 1000,
+    };
+    Object.entries(configValues).forEach(([id, value]) => {
+        const input = document.getElementById(id);
+        if (input) input.value = value ?? '';
+    });
 
     ModalManager.open('config-modal');
     const footer = document.getElementById('config-modal-footer');

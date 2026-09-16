@@ -508,7 +508,7 @@ class HttpAutomationExecutor:
                 return {"success": False, "command_id": command_id,
                         "error": command.get("error") or f"cluster flash {status or 'unknown'}"}
             verify = flash_plan.get("verify") if isinstance(flash_plan.get("verify"), dict) else {}
-            checked = self._verify_cluster_post_flash(worker_id, devices, verify)
+            checked = self._verify_cluster_post_flash(run, worker_id, devices, verify)
             if not checked.get("success") and checked.get("retry"):
                 timeout = max(60, int(verify.get("retries") or 30) * int(verify.get("retry_delay") or 10))
                 acknowledged = str(command.get("acknowledged_at") or command.get("updated_at") or "")
@@ -748,7 +748,7 @@ class HttpAutomationExecutor:
                 response.close()
 
     def _verify_cluster_post_flash(
-        self, worker_id: str, devices: list[str], verify: dict[str, Any]
+        self, run: dict[str, Any], worker_id: str, devices: list[str], verify: dict[str, Any]
     ) -> dict[str, Any]:
         """Probe the exact reserved Worker device and validate its flashed build."""
         try:

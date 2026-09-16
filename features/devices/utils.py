@@ -157,7 +157,6 @@ class DeviceUtils:
             f"{xauthority} && "
             f"{launcher}{quoted_scrcpy} -s {quoted_device} "
             "--max-size 800 "
-            "--no-control "
             f"--window-title {quoted_title} "
             f"--window-x {int(x_offset)} "
             f"--window-y {int(y_offset)} "
@@ -168,17 +167,24 @@ class DeviceUtils:
 
     @staticmethod
     def check_scrcpy_healthy(ssh, device_id: str) -> tuple[bool, str | None]:
-        """检查 scrcpy 是否健康运行。单命令检查进程 + 状态 + 日志 Connected。返回 (is_healthy, pid_or_error)。"""
+        """检查可交互 scrcpy 是否健康运行（进程状态 + 就绪日志）。"""
         try:
-            pattern = DeviceUtils.scrcpy_process_pattern(device_id)
+            safe_device = _require_safe_device(device_id)
             log_path = DeviceUtils.scrcpy_log_path(device_id)
             cmd = (
-                f"pid=$(pgrep -f -- {shlex.quote(pattern)} | head -n 1) && "
-                '[ -n "$pid" ] && '
-                'state=$(ps -p $pid -o state= 2>/dev/null | tr -d \' \') && '
-                '[[ "$state" =~ ^[RSD]$ ]] && '
-                f"tail -c 2048 {shlex.quote(log_path)} 2>/dev/null | grep -q 'Connected' && "
-                'echo $pid || echo ""'
+                "pid=''; "
+                "for candidate in $(pgrep -x scrcpy); do "
+                "args=$(tr '\\000' ' ' < \"/proc/$candidate/cmdline\" 2>/dev/null) || continue; "
+                f'case " $args " in *" -s {safe_device} "*) ;; *) continue;; esac; '
+                'case " $args " in *" --no-control "*) continue;; esac; '
+                "pid=$candidate; break; "
+                "done; "
+                'if [ -n "$pid" ] && '
+                'state=$(ps -p "$pid" -o state= 2>/dev/null | tr -d \' \'); then '
+                'case "$state" in R|S|D) '
+                f"if tail -c 2048 {shlex.quote(log_path)} 2>/dev/null | "
+                "grep -Eq 'Connected|Server connected|\\[server\\] INFO: Device:'; "
+                'then echo "$pid"; fi;; esac; fi'
             )
             from foundation.ssh_executor import ssh_executor
 
