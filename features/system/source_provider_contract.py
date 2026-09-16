@@ -82,7 +82,9 @@ def _safe_repo_path(path: str) -> str:
     if ".." in parts or ".git" in parts or re.match(r"^[A-Za-z]:", normalized):
         raise SourceProviderError("非法路径", status_code=422)
     normalized = "/".join(parts)
-    if normalized.startswith(".git") or "/.git/" in normalized:
+    # 只拒绝 .git 目录本身；.github/.gitignore 等合法路径不受前缀误伤。
+    parts = normalized.split("/")
+    if parts[0] == ".git" or ".git" in parts:
         raise SourceProviderError("拒绝读取 .git 私有数据", status_code=422)
     return normalized
 
@@ -184,6 +186,11 @@ def decode_signed_id(result_id: str, secret: bytes) -> dict[str, Any]:
         raise SourceProviderError("result_id 格式非法", status_code=422)
     encoded, sep, signature = value[len(RESULT_ID_PREFIX):].rpartition("_")
     if not sep or not encoded or not signature:
+        raise SourceProviderError("result_id 格式非法", status_code=422)
+    # 非 ASCII 载荷在这里是非法输入（签名内容只可能是 base64url/hex），
+    # 必须映射 422 而不是让 UnicodeEncodeError 穿透成 500（审核意见：
+    # 任何持 sdk.read scope 的客户端可用非 ASCII result_id 打出全栈）。
+    if not encoded.isascii():
         raise SourceProviderError("result_id 格式非法", status_code=422)
     expected = hmac.new(secret, encoded.encode("ascii"), hashlib.sha256).hexdigest()[:16]
     if not hmac.compare_digest(expected, signature):

@@ -318,8 +318,20 @@ def configure_source_registry(configs: list[ProviderConfig], secret: bytes) -> N
 
 
 def source_registry() -> SourceRegistry:
+    """当前进程的 SDK source registry。
+
+    审核意见（P1）：旧的惰性兜底（``configure_source_registry([], b"")``）
+    会在未初始化进程里用**空密钥**建空 registry 并写回全局——第一条
+    ``/api/sdk/*`` 读请求就把状态从 UNINITIALIZED 静默转成 UNAVAILABLE，
+    ``sdk_sources_available()`` 由 None（fail-safe 强制取证）变 False，
+    evidence gate 随之降级放水。未初始化必须显式失败（503 依赖不可用），
+    初始化入口只有 :func:`initialize_source_runtime`。
+    """
     if _REGISTRY is None:
-        configure_source_registry(load_provider_configs({}), b"")
+        raise SourceProviderError(
+            "SDK source 运行时未初始化；请先调用 initialize_source_runtime()",
+            status_code=503,
+        )
     return _REGISTRY
 
 
@@ -349,4 +361,7 @@ def sdk_sources_available() -> bool | None:
     """
     if registry_state() == "UNINITIALIZED":
         return None
-    return bool(source_registry().list_sources())
+    # registry 已初始化（AVAILABLE/UNAVAILABLE）：空 registry = 部署确认
+    # 无源（降级依据），有源 = 要求取证。不经过 source_registry() 的
+    # 未初始化异常路径。
+    return bool(_REGISTRY is not None and _REGISTRY.list_sources())

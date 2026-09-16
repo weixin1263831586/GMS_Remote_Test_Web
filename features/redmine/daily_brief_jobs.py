@@ -74,6 +74,23 @@ class DailyBriefJobStore:
         with self.repo._connect() as conn:
             return conn.execute(sql + " LIMIT 1", params).fetchone() is not None
 
+    def cancel_queued_issue_jobs(self, run_id: str) -> int:
+        """作废 run 的全部排队 issue-job（force 重跑前调用）。
+
+        审核意见 P1：force 重跑会删除 issue 行（refreeze），排队的
+        issue-job 若不清除，会在 run-job 之后被领取并因 issue 行不存在
+        而失败。claim 门控是兜底，这里在重置时源头清除。
+        """
+        with self.repo._lock, self.repo._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE redmine_daily_brief_jobs SET status='cancelled',"
+                "worker_id='',lease_token='',lease_expires_at='',"
+                "finished_at=?,error='superseded by full run rerun' "
+                "WHERE run_id=? AND kind='issue' AND status='queued'",
+                (self._utc_now(), run_id),
+            )
+            return cursor.rowcount
+
     # -------------------------------------------------------------- mutate
 
     def _active_job(
@@ -201,24 +218,47 @@ class DailyBriefJobStore:
                         "WHERE run_id=? AND issue_id=?",
                         (item["run_id"], item["issue_id"]),
                     )
-            row = conn.execute(
-                "SELECT * FROM redmine_daily_brief_jobs WHERE status='queued' "
-                "ORDER BY requested_at,job_id LIMIT 1"
-            ).fetchone()
-            if row is None:
-                return None
-            lease_token = uuid.uuid4().hex
-            cursor = conn.execute(
-                "UPDATE redmine_daily_brief_jobs SET status='running',worker_id=?,"
-                "lease_token=?,lease_expires_at=?,started_at=?,attempt_count=attempt_count+1,"
-                "error='' WHERE job_id=? AND status='queued'",
-                (worker_id, lease_token, self._lease_expiry(lease_seconds), now, row["job_id"]),
-            )
-            if cursor.rowcount != 1:
-                return None
-            return dict(conn.execute(
-                "SELECT * FROM redmine_daily_brief_jobs WHERE job_id=?", (row["job_id"],)
-            ).fetchone())
+            while True:
+                row = conn.execute(
+                    "SELECT * FROM redmine_daily_brief_jobs WHERE status='queued' "
+                    "ORDER BY requested_at,job_id LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    return None
+                # 跨 kind 互斥（审核意见 P1）：同一 run 的活跃 run-job 是
+                # 全量执行域（force 重跑会删掉 issue 行），排队的
+                # issue-job 此时不允许被领取——否则 reanalyze_issue 读到
+                # 被删除的 issue 行 → RuntimeError → 失败收敛把刚重置的
+                # run 打成 failed。作废（cancelled）而不是等待：run-job
+                # 完成后用户可重新发起单项分析。
+                if row["kind"] == "issue":
+                    active_run_job = conn.execute(
+                        "SELECT 1 FROM redmine_daily_brief_jobs "
+                        "WHERE run_id=? AND kind='run' "
+                        "AND status IN ('queued','running') LIMIT 1",
+                        (row["run_id"],),
+                    ).fetchone()
+                    if active_run_job is not None:
+                        conn.execute(
+                            "UPDATE redmine_daily_brief_jobs SET status='cancelled',"
+                            "worker_id='',lease_token='',lease_expires_at='',"
+                            "finished_at=?,error='superseded by full run job' "
+                            "WHERE job_id=?",
+                            (now, row["job_id"]),
+                        )
+                        continue
+                lease_token = uuid.uuid4().hex
+                cursor = conn.execute(
+                    "UPDATE redmine_daily_brief_jobs SET status='running',worker_id=?,"
+                    "lease_token=?,lease_expires_at=?,started_at=?,attempt_count=attempt_count+1,"
+                    "error='' WHERE job_id=? AND status='queued'",
+                    (worker_id, lease_token, self._lease_expiry(lease_seconds), now, row["job_id"]),
+                )
+                if cursor.rowcount != 1:
+                    return None
+                return dict(conn.execute(
+                    "SELECT * FROM redmine_daily_brief_jobs WHERE job_id=?", (row["job_id"],)
+                ).fetchone())
 
     def renew_job(
         self, job_id: str, worker_id: str, lease_token: str, lease_seconds: int = 90

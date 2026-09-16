@@ -93,12 +93,35 @@ def build_case_fact_from_brief(
     fact["reply_template"] = _first_line(result.get("suggested_reply_zh"), 500)
     fact["keywords"] = keywords[:8] or list(base.get("keywords") or [])[:8]
     evidence = result.get("evidence")
-    fact["evidence"] = evidence if isinstance(evidence, list) and evidence else base.get("evidence") or []
+    # evidence 列形状统一为 dict（审核意见 P1）：schema 默认 '{}'、
+    # RedmineCaseExtractor 写 dict、消费方（knowledge_service /
+    # mature_cases）按 dict 解引用；AI 的 Evidence list 原样落库会让
+    # workbench 502、成熟案例聚合静默丢证据。包一层保留原文。
+    # per-run provenance 落在 evidence 内（审核意见 P1）：错误签名是
+    # 真实领域事实，绝不能拿 "daily-brief:<date>" 这类 provenance
+    # 字符串冒充——它会覆盖已有真实签名并破坏签名聚合/检索。
+    run_provenance = {
+        "brief_date": str(getattr(run, "brief_date", "") or ""),
+        "run_id": str(getattr(run, "run_id", "") or ""),
+    }
+    if isinstance(evidence, list) and evidence:
+        fact["evidence"] = {
+            "daily_brief_evidence": evidence,
+            "daily_brief_run": run_provenance,
+        }
+    else:
+        merged_evidence = dict(base.get("evidence") or {})
+        merged_evidence.setdefault("daily_brief_run", run_provenance)
+        fact["evidence"] = merged_evidence
     fact["confidence"] = result.get("confidence") or 0
-    # 已有真实错误签名优先；否则用晨报来源标记，便于回溯。
-    fact["error_signature"] = str(base.get("error_signature") or "") or (
-        f"daily-brief:{run.brief_date}:{run.run_id}"
-    )
+    # 尺度统一（审核意见 P2）：AI 自评是 0–1（schema ge=0 le=1），提取器
+    # 是 0–100，同列混存会让 merge 的 max() 与成熟案例排序跨量纲比较。
+    # 入库统一 0–100。
+    if isinstance(fact["confidence"], (int, float)) and 0 < float(fact["confidence"]) <= 1:
+        fact["confidence"] = round(float(fact["confidence"]) * 100, 1)
+    # 真实错误签名优先；无真实签名时留空（merge 保留已有签名），
+    # per-run 合成标记会破坏签名聚合与检索加分（审核意见 P2）。
+    fact["error_signature"] = str(base.get("error_signature") or "")
     fact["source_quality"] = "daily_brief_ai"
     # 保留提取器的症状/文档摘录，供 merge 与质量判断使用。
     if base.get("symptoms"):

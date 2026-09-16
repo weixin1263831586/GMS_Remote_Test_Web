@@ -89,9 +89,23 @@ def require_human_principal_when_auth_required(
 
 
 def principal_owner_id(request: Request) -> str:
-    """Return the immutable account id used by newly-created resources."""
+    """Return the account id that should OWN newly-created resources.
 
-    return require_authenticated_user(request).id
+    Actor vs resource owner (ADR 0010): an agent service token creates
+    resources on behalf of its enrolling account, so the resource owner is
+    the token's ``owner_user_id`` — not the synthetic ``agent:<token_id>``.
+    Revoking/rotating the token then keeps those resources visible to the
+    account instead of orphaning them. Audit trails that need the acting
+    principal record ``user.id`` / ``user.actor_id`` alongside.
+    """
+
+    return require_authenticated_user(request).resource_owner_id
+
+
+def principal_actor_id(request: Request) -> str:
+    """Return the ACTING principal id for audit attribution."""
+
+    return require_authenticated_user(request).actor_id
 
 
 def principal_display_name(request: Request) -> str:
@@ -106,10 +120,14 @@ def require_resource_owner(
     *,
     not_found_detail: str = "resource not found",
 ) -> CurrentUser:
-    """Enforce an owner boundary without revealing cross-user identifiers."""
+    """Enforce an owner boundary without revealing cross-user identifiers.
+
+    Ownership is compared against the RESOURCE owner account (ADR 0010):
+    an agent token may access resources owned by its enrolling account.
+    """
 
     user = require_authenticated_user(request)
-    if user.role != "admin" and str(owner_id or "") != user.id:
+    if user.role != "admin" and str(owner_id or "") != user.resource_owner_id:
         raise HTTPException(status_code=404, detail=not_found_detail)
     return user
 
@@ -129,7 +147,7 @@ def require_resource_owner_when_auth_required(
 
     user = get_authenticated_user(request)
     if user:
-        if user.role != "admin" and str(owner_id or "") != user.id:
+        if user.role != "admin" and str(owner_id or "") != user.resource_owner_id:
             raise HTTPException(status_code=404, detail=not_found_detail)
         return user
     if not authentication_required():

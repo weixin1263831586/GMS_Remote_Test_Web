@@ -91,6 +91,36 @@ async def _async_none(*_args, **_kwargs):
     return None
 
 
+async def _async_pair_empty(*_args, **_kwargs):
+    """_prepare_usbip_firmware_routes 桩：无 USB/IP 路由，无错误。"""
+    return [], ""
+
+
+async def _fake_local_batch(*_args, **_kwargs):
+    """本地烧写批桩：全部成功。"""
+    devices = _kwargs.get("devices") or []
+    return (
+        [{"device": device, "success": True, "stage": "DONE"} for device in devices],
+        None,
+    )
+
+
+class _FakeSCPClient:
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def put(self, *_args, **_kwargs):
+        return None
+
+    def close(self):
+        return None
+
+
+def _patched_scp_client():
+    """upgrade_tool 的 SCP 上传走假客户端（真实 scp 需要可用 SSH transport）。"""
+    return patch("scp.SCPClient", _FakeSCPClient)
+
+
 class AgentBurnAuthorizationTests(unittest.TestCase):
     """The dependency gate: who may reach the burn handler at all."""
 
@@ -226,6 +256,8 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
 
         固件文件存在（临时文件），服务端必须对它的实际字节计算 SHA256 并
         用服务端派生的 operation 串消费审批，而不是客户端传入的任何串。
+        审批消费点在全部 deterministic preflight 之后（审核意见 P2），
+        这里把链路推进到本地烧写批处理，断言消费恰好一次且绑定串正确。
         """
         with tempfile.NamedTemporaryFile(
             suffix=".img", delete=False
@@ -249,21 +281,31 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
             return_value=[],
         ), patch(
             "features.firmware.firmware_api.validate_local_update_image",
-        ) as _unused_validation, patch(
+        ), patch(
             "features.firmware.firmware_api._upload_firmware_to_test_host",
             side_effect=_async_none,
         ), patch(
             "features.firmware.firmware_api._lock_devices",
             side_effect=_fake_lock,
-        ):
+        ), patch(
+            "features.firmware.firmware_api.validate_remote_update_image",
+            return_value=SimpleNamespace(valid=True, error=""),
+        ), patch(
+            "features.firmware.firmware_api._prepare_usbip_firmware_routes",
+            side_effect=_async_pair_empty,
+        ), patch(
+            "features.firmware.firmware_api._device_flash_protocols",
+            return_value={"D1": "adb", "D2": "adb"},
+        ), patch(
+            "features.firmware.firmware_api._run_local_firmware_batch",
+            side_effect=_fake_local_batch,
+        ), _patched_scp_client():
             response = self.client.post(
                 "/api/burn/firmware?devices=D2,D1&approval_token=tok123"
                 "&burn_mode=auto",
                 data={"firmware_path": firmware_name, "wipe_data": "true"},
             )
-        # 测试桩环境在后续 SSH 阶段会失败，但审批消费发生在进入 SSH 前，
-        # 只需断言消费调用的绑定串正确。
-        self.assertGreaterEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200)
         consume.assert_called_once()
         kwargs = consume.call_args.kwargs
         self.assertEqual(kwargs.get("tool"), "gms_rt_burn_firmware")
@@ -292,7 +334,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
         ), patch(
             "features.auth.service.auth_service.consume_approval_token",
             return_value=False,
-        ), patch(
+        ) as consume, patch(
             "features.firmware.firmware_api._adb_proxy_devices",
             return_value=[],
         ), patch(
@@ -303,12 +345,70 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
         ), patch(
             "features.firmware.firmware_api._lock_devices",
             side_effect=_fake_lock,
-        ):
+        ), patch(
+            "features.firmware.firmware_api.validate_remote_update_image",
+            return_value=SimpleNamespace(valid=True, error=""),
+        ), patch(
+            "features.firmware.firmware_api._prepare_usbip_firmware_routes",
+            side_effect=_async_pair_empty,
+        ), patch(
+            "features.firmware.firmware_api._device_flash_protocols",
+            return_value={"D1": "adb"},
+        ), _patched_scp_client():
             response = self.client.post(
                 "/api/burn/firmware?devices=D1&approval_token=tok123",
                 data={"firmware_path": firmware_name},
             )
+        # 审批无效：在破坏性执行点被拒，token 恰好消费尝试一次。
         self.assertEqual(response.status_code, 403)
+        consume.assert_called_once()
+
+    def test_agent_burn_preflight_failure_does_not_consume_approval(self):
+        """无损失败不得提前烧掉一次性审批 token（审核意见 P2）。
+
+        preflight（设备不在可烧写状态）失败时，审批必须原封不动，
+        用户修正设备状态后可用同一 token 重试。
+        """
+        with tempfile.NamedTemporaryFile(
+            suffix=".img", delete=False
+        ) as firmware:
+            firmware.write(b"GMS-FAKE-FIRMWARE-BYTES")
+            firmware_name = firmware.name
+        self.addCleanup(os.unlink, firmware_name)
+        self._set_principal(AGENT_ROLE)
+        with patch(
+            "features.firmware.firmware_api.authentication_required",
+            return_value=True,
+        ), patch(
+            "features.auth.service.auth_service.consume_approval_token",
+            return_value=True,
+        ) as consume, patch(
+            "features.firmware.firmware_api._adb_proxy_devices",
+            return_value=[],
+        ), patch(
+            "features.firmware.firmware_api.validate_local_update_image",
+        ), patch(
+            "features.firmware.firmware_api._upload_firmware_to_test_host",
+            side_effect=_async_none,
+        ), patch(
+            "features.firmware.firmware_api._lock_devices",
+            side_effect=_fake_lock,
+        ), patch(
+            "features.firmware.firmware_api.validate_remote_update_image",
+            return_value=SimpleNamespace(valid=True, error=""),
+        ), patch(
+            "features.firmware.firmware_api._prepare_usbip_firmware_routes",
+            side_effect=_async_pair_empty,
+        ), patch(
+            "features.firmware.firmware_api._device_flash_protocols",
+            return_value={},  # 设备不在 ADB/Fastboot 可烧写状态
+        ), _patched_scp_client():
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1&approval_token=tok123",
+                data={"firmware_path": firmware_name},
+            )
+        self.assertEqual(response.status_code, 409)
+        consume.assert_not_called()
 
     def test_plain_user_without_elevation_is_denied_in_production(self):
         """普通 user 无提权在生产模式仍被拒（原有安全语义不变）。"""
@@ -348,6 +448,52 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
             response.json(),
             {"success": False, "error": "Firmware not found: /tmp/not-found.img"},
         )
+
+    def test_elevated_human_admin_reaches_burn_without_agent_approval(self):
+        """网页登录烧写不应引用 Agent 专用审批消费函数。"""
+        with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as firmware:
+            firmware.write(b"GMS-FAKE-FIRMWARE-BYTES")
+            firmware_name = firmware.name
+        self.addCleanup(os.unlink, firmware_name)
+
+        self._set_principal("admin")
+        with patch(
+            "features.firmware.firmware_api.authentication_required",
+            return_value=True,
+        ), patch(
+            "features.firmware.firmware_api.require_elevated_admin",
+            side_effect=lambda request: self.current_user,
+        ), patch(
+            "features.firmware.firmware_api._adb_proxy_devices",
+            return_value=[],
+        ), patch(
+            "features.firmware.firmware_api.validate_local_update_image",
+        ), patch(
+            "features.firmware.firmware_api._upload_firmware_to_test_host",
+            side_effect=_async_none,
+        ), patch(
+            "features.firmware.firmware_api._lock_devices",
+            side_effect=_fake_lock,
+        ), patch(
+            "features.firmware.firmware_api.validate_remote_update_image",
+            return_value=SimpleNamespace(valid=True, error=""),
+        ), patch(
+            "features.firmware.firmware_api._prepare_usbip_firmware_routes",
+            side_effect=_async_pair_empty,
+        ), patch(
+            "features.firmware.firmware_api._device_flash_protocols",
+            return_value={"D1": "adb"},
+        ), patch(
+            "features.firmware.firmware_api._run_local_firmware_batch",
+            side_effect=_fake_local_batch,
+        ), _patched_scp_client():
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={"firmware_path": firmware_name},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
 
 
 if __name__ == "__main__":

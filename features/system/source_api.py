@@ -6,6 +6,11 @@
 - ``GET /api/sdk/read``             通过 result_id 分段读取
 
 所有端点要求 ``sdk.read`` scope；provider 配置只来自服务端 config。
+
+Handler 全部为普通 ``def``（审核意见 P1）：provider 内部是同步阻塞 I/O
+（urllib 30s 超时、local_git 逐文件 ``git show`` 子进程），声明为
+``async def`` 会把阻塞放到事件循环上，一次慢查询就卡停整个 Web 进程；
+普通 ``def`` 由 FastAPI 丢线程池执行。
 """
 
 from __future__ import annotations
@@ -34,14 +39,18 @@ def _error(exc: SourceProviderError) -> JSONResponse:
 
 @router.get("/sources")
 @handle_api_errors
-async def list_sdk_sources(request: Request):
+def list_sdk_sources(request: Request):
     require_agent_scope("sdk.read")(request)
-    return {"success": True, "data": {"sources": source_registry().list_sources()}}
+    try:
+        sources = source_registry().list_sources()
+    except SourceProviderError as exc:
+        return _error(exc)
+    return {"success": True, "data": {"sources": sources}}
 
 
 @router.get("/revision")
 @handle_api_errors
-async def sdk_revision_metadata(
+def sdk_revision_metadata(
     request: Request,
     source: str = Query(..., min_length=1, max_length=128),
     revision: str = Query("", max_length=256),
@@ -57,7 +66,7 @@ async def sdk_revision_metadata(
 
 @router.get("/search")
 @handle_api_errors
-async def sdk_search(
+def sdk_search(
     request: Request,
     source: str = Query(..., min_length=1, max_length=128),
     revision: str = Query(..., min_length=1, max_length=256),
@@ -78,7 +87,7 @@ async def sdk_search(
 
 @router.get("/read")
 @handle_api_errors
-async def sdk_read(
+def sdk_read(
     request: Request,
     result_id: str = Query(..., min_length=8, max_length=2048),
     offset: int = Query(0, ge=0),

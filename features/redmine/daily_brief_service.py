@@ -149,6 +149,10 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         if refreeze:
             self.repository.delete_snapshot(run.run_id)
             self.repository.delete_issues(run.run_id)
+            # 重冻结会删掉全部 issue 行；仍在排队的 issue-job 必须一并
+            # 作废，否则它们随后被领取时读不到 issue 行（审核意见 P1：
+            # 跨 kind 竞态把刚重置的 run 打成 failed）。
+            self.repository.jobs.cancel_queued_issue_jobs(run.run_id)
         # 复用 run 重新执行前清除上一轮的取消标志。
         self.repository.clear_cancel(run.run_id)
         self.repository.update_run(run)

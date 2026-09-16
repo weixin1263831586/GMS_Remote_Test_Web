@@ -37,8 +37,16 @@ class KnowledgeSchemaMixin:
 
     def _open_connection(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        # 与 daily_brief_repository 同规（仓库硬规则：多进程 Web/Worker/CLI
+        # 并发）：WAL 允许读写并行，busy_timeout 把写锁竞争从立即
+        # "database is locked" 变成等待重试。
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+        except sqlite3.OperationalError:
+            pass
         return conn
 
     def connect(self) -> sqlite3.Connection:

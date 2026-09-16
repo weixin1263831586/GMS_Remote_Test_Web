@@ -1052,6 +1052,10 @@ function renderRedmineCredentialStatus(status) {
       : '当前账号：Redmine 地址与账号密码已配置。';
     return;
   }
+  if (status.credential_error === 'stored_secret_unreadable') {
+    el.textContent = '已保存 Redmine 凭据，但当前部署主密钥无法解密；请恢复原 master.key，或重新保存凭据。';
+    return;
+  }
   var missing = [];
   if (!status.base_url_configured) missing.push('地址');
   if (!status.password_configured && !status.api_key_configured) missing.push('账号密码或 API Key');

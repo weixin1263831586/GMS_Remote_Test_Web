@@ -1836,6 +1836,12 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/daily-brief/analyze-issue"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/redmine-agent/daily-brief/config"
@@ -1863,6 +1869,12 @@
       "POST"
     ],
     "path": "/api/redmine-agent/daily-brief/run"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/runs/{run_id}"
   },
   {
     "methods": [

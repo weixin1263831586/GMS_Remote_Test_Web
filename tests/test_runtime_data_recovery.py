@@ -25,6 +25,21 @@ class RuntimeDataRecoveryTests(unittest.TestCase):
             browse_root = Path(runtime_parent) / "GMS-Suite"
             browse_root.mkdir()
             (browse_root / "system.img").write_bytes(b"image")
+            # Isolate the static host config (review: test contamination).
+            # Without this, /api/files/list reads the checked-in
+            # configs/local/deployment.json ubuntu_host; on a CI runner that
+            # address is NOT this machine, so the endpoint SSHes to a remote
+            # host and returns 502. The runtime "devices" overlay
+            # (data_root/devices/runtime.json) is applied last, so pinning
+            # ubuntu_host=127.0.0.1 here forces the local-filesystem branch.
+            override = {"ubuntu_host": "127.0.0.1"}
+
+            def _write_host_override() -> None:
+                override_path = data_root / "devices" / "runtime.json"
+                override_path.parent.mkdir(parents=True, exist_ok=True)
+                override_path.write_text(json.dumps(override), encoding="utf-8")
+
+            _write_host_override()
             port = _free_port()
             base_url = f"http://127.0.0.1:{port}"
             env = os.environ.copy()
@@ -105,6 +120,10 @@ class RuntimeDataRecoveryTests(unittest.TestCase):
                     self.assertLess(status, 500, f"before deletion: {path}: {status} {content}")
 
                 shutil.rmtree(data_root)
+                # The recovery scenario deleted the whole data root — the
+                # host override lived there too, so re-write it before the
+                # post-deletion request sweep.
+                _write_host_override()
 
                 for method, path, body in requests:
                     status, content = _request(path, method=method, body=body)

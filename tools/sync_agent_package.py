@@ -313,6 +313,11 @@ def main() -> int:
         r16_tree_guard(root, skill, cli_version, "skill/", package_yaml)
         r16_tree_guard(root, manifests, cli_version, "manifests/", package_yaml)
         r16_tree_guard(root, agent_dir / "templates", cli_version, "templates/", package_yaml)
+        # AGENT_PLAYBOOK.md 是发布载荷（同步进 plugin docs/），同版本内容
+        # 漂移同样造成 "version 未变但内容变了" 的安装漂移（审核意见）。
+        playbook = docs / "AGENT_PLAYBOOK.md"
+        if in_git and playbook.is_file():
+            r16_tree_guard(root, docs, cli_version, "docs/", package_yaml)
 
     # --- generate --------------------------------------------------------
     expected: set[str] = set()

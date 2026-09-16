@@ -451,10 +451,23 @@ def _merge_traces(first: KkAgentTrace, second: KkAgentTrace) -> KkAgentTrace:
         error_type=second.error_type,
         error=second.error,
     )
-    seen_ids = {call.tool_call_id for call in first.tool_calls if call.tool_call_id}
     merged.tool_calls = list(first.tool_calls)
+    for index, call in enumerate(first.tool_calls):
+        # 修复轮 replay 同 id 的调用（resume 会重放工具调用）：优先保留
+        # 「有结果」的一侧——初跑只有 pending tool_call、修复轮带回成功
+        # result 时，旧去重无条件保留 first 会把已成功的取证永远留在
+        # pending，gate 误判取证缺失并烧光修复轮次（审核意见 P2）。
+        if not call.tool_call_id:
+            continue
+        for later in second.tool_calls:
+            if later.tool_call_id == call.tool_call_id and later.status != "pending":
+                merged.tool_calls[index] = later
+                break
+    merged_ids = {
+        call.tool_call_id for call in merged.tool_calls if call.tool_call_id
+    }
     for call in second.tool_calls:
-        if call.tool_call_id and call.tool_call_id in seen_ids:
+        if call.tool_call_id and call.tool_call_id in merged_ids:
             continue
         merged.tool_calls.append(call)
     return merged

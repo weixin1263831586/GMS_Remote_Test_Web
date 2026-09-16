@@ -273,5 +273,47 @@ class AnalyzerE2ETests(unittest.TestCase):
         asyncio.run(scenario())
 
 
+class MergeTracesReplayTests(unittest.TestCase):
+    """审核意见 P2：修复轮 replay 同 id 调用时，保留有结果的一侧。"""
+
+    def test_replayed_call_with_result_replaces_pending(self):
+        from features.redmine.kkagent.analyzer import _merge_traces
+        from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
+
+        first = KkAgentTrace()
+        first.tool_calls = [ToolTrace(tool_call_id="c1", tool_name="gms_rt_sdk_search", status="pending")]
+        second = KkAgentTrace()
+        second.tool_calls = [
+            ToolTrace(
+                tool_call_id="c1",
+                tool_name="gms_rt_sdk_search",
+                status="succeeded",
+                source_reproducible=True,
+            ),
+            ToolTrace(tool_call_id="c2", tool_name="other", status="pending"),
+        ]
+        merged = _merge_traces(first, second)
+        self.assertEqual(len(merged.tool_calls), 2)
+        replayed = merged.tool_calls[0]
+        self.assertEqual(replayed.status, "succeeded")
+        self.assertIs(replayed.source_reproducible, True)
+        self.assertEqual(merged.reproducible_source_evidence_count, 1)
+
+    def test_pending_replay_does_not_replace_succeeded(self):
+        from features.redmine.kkagent.analyzer import _merge_traces
+        from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
+
+        first = KkAgentTrace()
+        first.tool_calls = [
+            ToolTrace(tool_call_id="c1", tool_name="gms_rt_sdk_search", status="succeeded")
+        ]
+        second = KkAgentTrace()
+        second.tool_calls = [
+            ToolTrace(tool_call_id="c1", tool_name="gms_rt_sdk_search", status="pending")
+        ]
+        merged = _merge_traces(first, second)
+        self.assertEqual(merged.tool_calls[0].status, "succeeded")
+
+
 if __name__ == "__main__":
     unittest.main()

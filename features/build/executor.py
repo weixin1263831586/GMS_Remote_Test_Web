@@ -238,15 +238,31 @@ class SshTmuxBuildBackend:
         ]
         script = "\n".join(commands) + "\n"
         script_b64 = base64.b64encode(script.encode()).decode()
+        # Build the inner command as a complete string FIRST, then quote it
+        # once as a single argv element. Nesting shlex.quote() output inside
+        # a double-quoted tmux command is NOT safe: the single quotes become
+        # literal characters inside "..." and $(...) / `...` / $VAR still
+        # expand in the outer shell, letting a hostile workspace name break
+        # out of the template boundary (review P1 nested-quote injection).
+        # NOTE: $? below is intentionally NOT backslash-escaped: the whole
+        # inner string is single-quoted by shlex.quote for every outer shell
+        # layer, so it reaches the final `bash -lc` verbatim and expands at
+        # execution time.
+        inner = (
+            f"timeout {int(timeout_sec)}s {shlex.quote(script_path)} > {shlex.quote(log_path)} 2>&1; "
+            f"echo $? > {shlex.quote(rc_path)}; date -Is > {shlex.quote(done_path)}"
+        )
+        bash_command = f"bash -lc {shlex.quote(inner)}"
+        tmux_command = (
+            f"tmux new-session -d -s {shlex.quote(session)} {shlex.quote(bash_command)}"
+        )
         remote = (
             f"mkdir -p {shlex.quote(log_dir)} && "
             f"rm -f {shlex.quote(log_path)} {shlex.quote(rc_path)} {shlex.quote(done_path)} && "
             f"printf %s {shlex.quote(script_b64)} | base64 -d > {shlex.quote(script_path)} && "
             f"chmod +x {shlex.quote(script_path)} && "
             f"tmux kill-session -t {shlex.quote(session)} 2>/dev/null || true; "
-            f"tmux new-session -d -s {shlex.quote(session)} "
-            f"\"bash -lc 'timeout {int(timeout_sec)}s {shlex.quote(script_path)} > {shlex.quote(log_path)} 2>&1; "
-            f"echo \\$? > {shlex.quote(rc_path)}; date -Is > {shlex.quote(done_path)}'\""
+            f"{tmux_command}"
         )
         code, out, err = self._run(server, remote, timeout=30)
         if code != 0:

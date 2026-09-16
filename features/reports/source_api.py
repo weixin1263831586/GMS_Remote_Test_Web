@@ -70,6 +70,10 @@ async def _save_redmine_credentials_for_request(username: str, password: str, re
     return await _save_redmine_credentials(username, password, request)
 
 
+def _redmine_credentials_error_message(request: Request) -> str:
+    return _request_redmine_config_manager(request).redmine_credentials_error_message()
+
+
 # ==================== Analyze URL ====================
 
 @router.post("/api/reports/analyze-url")
@@ -247,7 +251,12 @@ async def analyze_report_from_url(request: Request):
                         redmine_password = stored_creds.get("password")
                         headers.update(create_basic_auth_header(redmine_username, redmine_password))
                     else:
-                        return error_response("Redmine credentials not configured", status_code=401, requires_auth=True, is_redmine=True)
+                        return error_response(
+                            _redmine_credentials_error_message(request),
+                            status_code=401,
+                            requires_auth=True,
+                            is_redmine=True,
+                        )
 
             async with (
                 aiohttp.ClientSession() as session,
@@ -403,7 +412,7 @@ async def extract_redmine_attachment(request: Request):
 
         stored_creds = await _load_redmine_credentials_for_request(request)
         if not stored_creds:
-            return error_response("Redmine credentials not configured", 401)
+            return error_response(_redmine_credentials_error_message(request), 401)
 
         try:
             redmine_config = _request_redmine_config_manager(request).get_redmine_config()

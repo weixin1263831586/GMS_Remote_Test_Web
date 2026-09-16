@@ -170,7 +170,7 @@ class TestArchivePostExtractionSafety(unittest.TestCase):
 
         with (
             tempfile.TemporaryDirectory() as tmp,
-            patch("features.reports.archive.MAX_ARCHIVE_FILES", 5),
+            patch("foundation.archives.MAX_ARCHIVE_FILES", 5),
         ):
             # Create more files than MAX_ARCHIVE_FILES (capped at a small
             # number for test speed)
@@ -226,7 +226,7 @@ class TestArchivePostExtractionSafety(unittest.TestCase):
         listing = "7-Zip\n----------\nPath = result.xml\nSize = 6\n"
         with (
             tempfile.TemporaryDirectory() as tmp,
-            patch("features.reports.archive.MAX_ARCHIVE_EXPANDED_BYTES", 5),
+            patch("foundation.archives.MAX_ARCHIVE_EXPANDED_BYTES", 5),
             patch(
                 "features.reports.archive.subprocess.run",
                 return_value=CompletedProcess([], 0, stdout=listing, stderr=""),

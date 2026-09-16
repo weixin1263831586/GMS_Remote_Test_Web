@@ -16,6 +16,7 @@ from .repository_claims import ClusterClaimRepositoryMixin
 from .repository_commands import ClusterCommandRepositoryMixin
 from .repository_inventory import ClusterInventoryRepositoryMixin
 from .repository_observability import ClusterObservabilityRepositoryMixin
+from .repository_reconciliation import ClusterReconciliationRepositoryMixin
 from .repository_reservations import ClusterReservationRepositoryMixin
 from .repository_transfers import ClusterTransferRepositoryMixin
 
@@ -25,6 +26,7 @@ def utc_now() -> str:
 
 
 class ClusterRepository(
+    ClusterReconciliationRepositoryMixin,
     ClusterObservabilityRepositoryMixin,
     ClusterClaimRepositoryMixin,
     ClusterCommandRepositoryMixin,
@@ -49,6 +51,9 @@ class ClusterRepository(
         self.claim_lease_ttl_seconds = max(30, int(claim_lease_ttl_seconds))
         self._lock = threading.RLock()
         self._init_schema()
+        # Crash split-brain reconciliation (review P2, ADR 0011):
+        # idempotent repair of ghost claims / unfenced jobs at startup.
+        self.reconcile_claims()
 
     def _open_connection(self) -> sqlite3.Connection:
         # Self-heal parent dir so a runtime data/ clear-out doesn't turn
@@ -153,10 +158,22 @@ class ClusterRepository(
             automation_run_id = str(data.get("automation_run_id") or "")
             if automation_run_id and reservation.get("source_id") != automation_run_id:
                 raise ValueError("device reservation belongs to another automation run")
+            # 预约一致性只比较用户请求的设备集合（requested identity）。
+            # device_keys 是 _claim_devices 展开后的物理 fencing 集合，
+            # ADB Proxy 请求会被展开成 {proxy, source_worker:serial}，
+            # 拿它与 reservation.requested（只含 proxy id）严格比较会把
+            # 合法的 proxy 预约永远判成不匹配（requested vs fencing
+            # 两个集合不可混用）；物理 fencing 由下方 claims.transfer
+            # 按展开集合继续保证。
+            requested_keys = {
+                value if value.startswith(f"{worker_id}:") else f"{worker_id}:{value}"
+                for value in (str(item).strip() for item in data.get("devices", []))
+                if value
+            }
             reservation_devices = {
                 item["id"] for item in reservation.get("devices") or []
             }
-            if reservation_devices != set(device_keys):
+            if requested_keys != reservation_devices:
                 raise ValueError("test devices do not match the active reservation")
             transferred = self.claims.transfer(
                 reservation_source,

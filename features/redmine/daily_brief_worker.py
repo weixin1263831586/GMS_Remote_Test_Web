@@ -81,10 +81,14 @@ async def _execute_job(
             raise RuntimeError(f"daily brief run disappeared: {run.run_id}")
         return
 
-    run.status = "analyzing"
-    run.error = ""
-    run.finished_at = ""
-    service.repository.update_run(run)
+    # issue-job 的前置状态写只在 run 处于非执行态时进行；claim 门控已
+    # 保证无活跃 run-job，这里再防御一次（lease 恢复窗口内 run-job 可能
+    # 刚被另一 Worker 领取），避免把执行中的 run 状态打回 analyzing。
+    if run.status in ("pending", "failed", "cancelled"):
+        run.status = "analyzing"
+        run.error = ""
+        run.finished_at = ""
+        service.repository.update_run(run)
     result = await service.reanalyze_issue(
         run.brief_date, int(job.get("issue_id") or 0), run_id=run.run_id
     )
@@ -190,7 +194,12 @@ async def run_claimed_job(
             # 会覆盖新执行者的 pending/analyzing/completed 状态。
             if finished:
                 run = repository.get_run(str(job["run_id"]))
-                if run is not None and run.status not in TERMINAL_RUN_STATUSES:
+                # issue-job 失败只影响该 issue 行，不拥有 run 级终态
+                # 收敛权（审核意见 P1）：排队的 issue-job 与 force 重跑
+                # 的 run-job 并存时，issue 行可能已被 run 重置删除，
+                # 这类失败若写 run 会把刚重置的执行打成 failed。
+                # run 终态收敛只属于 run-job（或人工取消）。
+                if run is not None and job["kind"] == "run" and run.status not in TERMINAL_RUN_STATUSES:
                     run.status = "failed"
                     run.error = str(exc)[:1000]
                     run.finished_at = _now()
@@ -264,6 +273,14 @@ async def worker_loop(
                 logger.exception(
                     "daily brief worker continuing after unexpected job error"
                 )
+                # backoff（审核意见 P3）：DB 持续异常时避免紧密循环重扫
+                # 全部 owner 库。
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(), timeout=max(0.1, poll_seconds)
+                    )
+                except asyncio.TimeoutError:
+                    pass
                 continue
             if not keep_running:
                 break
@@ -293,17 +310,46 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         logger.exception("sdk source registry init failed; source gate stays strict")
 
+    async def retry_source_init(stop_event: asyncio.Event) -> None:
+        """初始化失败低频重试（审核意见 P2）：启动期密钥文件竞态/临时
+        权限问题不应让本进程整个生命周期都保持 UNINITIALIZED（与 Web
+        行为永久不一致，且强制取证会系统性烧光分析轮次）。"""
+        from features.system import registry_state
+
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=3600.0)
+            except (asyncio.TimeoutError, TimeoutError):
+                pass
+            if stop_event.is_set():
+                return
+            if registry_state() == "UNINITIALIZED":
+                try:
+                    from features.system import initialize_source_runtime
+
+                    state = initialize_source_runtime()
+                    logger.info("sdk source registry retry initialized: %s", state)
+                except Exception:
+                    logger.exception("sdk source registry retry init failed")
+
     async def run() -> None:
         stop_event = asyncio.Event()
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGINT, signal.SIGTERM):
             with suppress(NotImplementedError):
                 loop.add_signal_handler(signum, stop_event.set)
-        await worker_loop(
-            stop_event,
-            poll_seconds=max(0.1, args.poll_seconds),
-            lease_seconds=max(10, args.lease_seconds),
-        )
+        retry_task = asyncio.create_task(retry_source_init(stop_event))
+        try:
+            await worker_loop(
+                stop_event,
+                poll_seconds=max(0.1, args.poll_seconds),
+                lease_seconds=max(10, args.lease_seconds),
+            )
+        finally:
+            stop_event.set()
+            retry_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await retry_task
 
     asyncio.run(run())
     return 0

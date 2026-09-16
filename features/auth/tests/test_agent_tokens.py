@@ -62,6 +62,35 @@ class AgentTokenServiceTests(unittest.TestCase):
         self.assertTrue(
             self.service.agent_acl_allows(agent_record, "devices", "any")
         )
+        # Actor vs resource owner (ADR 0010): the acting principal is the
+        # synthetic agent id; the resource owner is the enrolling account.
+        self.assertEqual(principal.actor_id, principal.id)
+        self.assertTrue(principal.id.startswith("agent:"))
+        self.assertEqual(principal.resource_owner_id, self.admin.id)
+
+    def test_human_principal_owner_is_self(self):
+        """人类 principal 的 actor 与 resource owner 同一账号，行为不变。"""
+        self.assertEqual(self.admin.actor_id, self.admin.id)
+        self.assertEqual(self.admin.resource_owner_id, self.admin.id)
+
+    def test_resource_owner_survives_token_rotation(self):
+        """token 轮换后资源归属仍是登记账号（审核意见：防资源孤儿）。"""
+        first = self.service.create_agent_token(
+            name="rotate-a", owner=self.admin, scopes=["build.execute"]
+        )
+        principal_a, _ = self.service.get_agent_token_principal(first["token"])
+        self.assertEqual(principal_a.resource_owner_id, self.admin.id)
+
+        # 模拟轮换：吊销 A，签发 B（不同 token_id）。
+        self.assertTrue(self.service.revoke_agent_token(first["id"]))
+        second = self.service.create_agent_token(
+            name="rotate-b", owner=self.admin, scopes=["build.execute"]
+        )
+        principal_b, _ = self.service.get_agent_token_principal(second["token"])
+        self.assertNotEqual(principal_a.id, principal_b.id)
+        # 归属身份一致：B 可以访问 A 期间创建的（账号归属）资源。
+        self.assertEqual(principal_b.resource_owner_id, principal_a.resource_owner_id)
+        self.assertEqual(principal_b.resource_owner_id, self.admin.id)
 
     def test_unknown_and_revoked_tokens_fail_closed(self):
         record = self.service.create_agent_token(

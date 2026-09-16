@@ -17,11 +17,17 @@ MIGRATION_LINE_LIMITS = {
     'features/cluster/api.py': 757,  # +34: page JS 静态端点(CSP 前置迁移)
     'features/cluster/tests/test_api_hardening.py': 744,
     'features/cluster/tests/test_cluster.py': 667,
-    'features/auth/service.py': 608,
+    # +43: 启动期 reconcile_claims()（跨库 split-brain 修复，审核意见 P2）；
+    # 后续把 reconcile 拆到 repository_reconciliation.py 时应回落 600。
+    'features/cluster/repository.py': 651,
+    # +7: update_user last-admin 检查移入 BEGIN IMMEDIATE（跨进程原子性）。
+    'features/auth/service.py': 615,
     'features/auth/agent_tokens.py': 365,
     'features/auth/constants.py': 98,  # +14: build.* scopes 与人类角色权限(ADR 0006)
     'features/auth/tests/test_auth_api.py': 602,
     'features/auth/tests/test_security_boundary.py': 472,
+    # +105: tmux 嵌套引号注入回归（7 组恶意 workspace，真实 shell 执行桩）。
+    'features/build/tests/test_build_service.py': 705,
     'features/devices/config_override.py': 732,
     # 57c30e1 grew apk_api.py 524→605 without registering it here; the rule
     # failed on clean HEAD. Registered at its current size; debt must now

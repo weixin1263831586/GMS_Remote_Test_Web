@@ -54,7 +54,10 @@ class DailyBriefCancellationTests(unittest.TestCase):
             ) as builder:
                 builder.return_value.analyze = slow_analyze
                 task = asyncio.create_task(self.service.execute_run(run_id))
-                await asyncio.wait_for(entered.wait(), timeout=1)
+                # The full repository suite can start several subprocesses at
+                # once; allow scheduler contention without changing the
+                # cancellation behavior being tested.
+                await asyncio.wait_for(entered.wait(), timeout=5)
                 # 模拟 Web 与 Worker 分属两个进程：只写持久标志。
                 self.service.repository.request_cancel(run_id)
                 return await asyncio.wait_for(task, timeout=2)

@@ -29,3 +29,19 @@ def test_concurrent_operation_claim_is_not_borrowed(tmp_path):
     with pytest.raises(HTTPException) as caught:
         device_action_claim_payload(repository, "worker", ["worker:A"], "operation2", "owner")
     assert caught.value.status_code == 409
+
+
+def test_running_cluster_job_claim_is_not_borrowed_by_same_owner(tmp_path):
+    """cluster 侧设备操作同样不得借用运行中 cluster-job 的 claim。"""
+    repository = ClusterRepository(tmp_path / "cluster.sqlite3")
+    repository.acquire_device_operation_claim(
+        "worker", ["worker:A"], owner_id="owner", source_type="cluster-job",
+        source_id="job:job-1", ttl_seconds=3600,
+    )
+    with pytest.raises(HTTPException) as caught:
+        device_action_claim_payload(
+            repository, "worker", ["worker:A"], "operation1", "owner",
+        )
+    assert caught.value.status_code == 409
+    assert "already claimed" in str(caught.value.detail)
+    assert repository.claims.active_claim("worker:A")["source_id"] == "job:job-1"

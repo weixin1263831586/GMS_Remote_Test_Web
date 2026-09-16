@@ -237,8 +237,6 @@ class SdkApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class CodesearchProviderTests(unittest.TestCase):
@@ -321,6 +319,33 @@ class CodesearchProviderTests(unittest.TestCase):
         with self.assertRaises(SourceProviderError) as ctx:
             self.provider.search("r38", "  ")
         self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_malformed_results_hits_map_to_502_not_500(self):
+        """审核意见 P1：上游畸形 results（hits 非 list）必须 502 而非 TypeError→500。"""
+        def fake_request(path, params):
+            return json.dumps({"results": {"/P/a.c": 42}}).encode()
+
+        with unittest.mock.patch.object(self.provider, "_request", fake_request), \
+                self.assertRaises(SourceProviderError) as ctx:
+            self.provider.search("r38", "q")
+        self.assertEqual(ctx.exception.status_code, 502)
+
+    def test_non_ascii_result_id_maps_to_422_not_500(self):
+        """审核意见 P1：非 ASCII result_id 必须 422 而非 UnicodeEncodeError→500。"""
+        with self.assertRaises(SourceProviderError) as ctx:
+            self.provider.read_signed("src1_路径非ASCII_abcdef0123456789")
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_github_style_paths_are_not_rejected_as_git_dir(self):
+        """审核意见 P3：.github/ 前缀路径不受 .git 目录过滤误伤。"""
+        from features.system.source_provider_contract import _safe_repo_path
+
+        self.assertEqual(_safe_repo_path(".github/workflows/x.yml"),
+                         ".github/workflows/x.yml")
+        with self.assertRaises(SourceProviderError):
+            _safe_repo_path(".git/config")
+        with self.assertRaises(SourceProviderError):
+            _safe_repo_path("a/.git/HEAD")
 
     def test_read_signed_fetches_project_path(self):
         captured = {}
@@ -439,6 +464,13 @@ class RegistryStateTests(unittest.TestCase):
         self.assertEqual(self.sp.registry_state(), "UNINITIALIZED")
         # 未初始化时 availability 返回 None（fail-safe，不得据此降级）。
         self.assertIsNone(self.sp.sdk_sources_available())
+        # 未初始化读取 registry 必须显式失败（503），不允许惰性 b"" 兜底
+        # 把 UNINITIALIZED 静默转成 UNAVAILABLE（审核意见 P1 回归）。
+        with self.assertRaises(self.sp.SourceProviderError) as ctx:
+            self.sp.source_registry()
+        self.assertEqual(ctx.exception.status_code, 503)
+        # 失败后状态不被污染，仍是 UNINITIALIZED。
+        self.assertEqual(self.sp.registry_state(), "UNINITIALIZED")
         # 初始化空配置 → 明确 UNAVAILABLE。
         self.sp.configure_source_registry([], b"")
         self.assertEqual(self.sp.registry_state(), "UNAVAILABLE")
@@ -491,3 +523,6 @@ class RegistryStateTests(unittest.TestCase):
             foundation_config.config_manager.load_config = original
         self.assertEqual(self.sp.registry_state(), "UNINITIALIZED")
         self.assertIsNone(self.sp.sdk_sources_available())
+
+if __name__ == "__main__":
+    unittest.main()

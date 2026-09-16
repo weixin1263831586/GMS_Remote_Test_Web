@@ -49,11 +49,25 @@ class BuildCaseFactTests(unittest.TestCase):
         self.assertNotIn("\n", fact["problem_summary"])
         self.assertEqual(fact["root_cause"], "内核 stable backport 改了错误码")
         self.assertIn("确认设备", fact["verification"])
-        self.assertEqual(fact["confidence"], 0.85)
+        # AI 0-1 统一 ×100 入库（与提取器 0-100 同量纲）。
+        self.assertEqual(fact["confidence"], 85.0)
         self.assertEqual(fact["source_quality"], "daily_brief_ai")
         self.assertEqual(len(fact["keywords"]), 2)
-        self.assertEqual(fact["evidence"], result["evidence"])
-        self.assertTrue(fact["error_signature"].startswith("daily-brief:2026-09-15:"))
+        # evidence 列统一包 dict（审核意见 P1：消费方按 dict 解引用）；
+        # per-run provenance 落在 evidence 内，不冒充 error_signature。
+        self.assertEqual(
+            fact["evidence"],
+            {
+                "daily_brief_evidence": result["evidence"],
+                "daily_brief_run": {
+                    "brief_date": "2026-09-15",
+                    "run_id": "db_test",
+                },
+            },
+        )
+        # 无真实签名时留空（merge 保留已有签名）；provenance 占位符
+        # 会覆盖已有真实 error_signature 并破坏签名聚合（审核意见 P1）。
+        self.assertEqual(fact["error_signature"], "")
 
     def test_minimal_result_does_not_crash(self):
         fact = build_case_fact_from_brief(
@@ -61,7 +75,7 @@ class BuildCaseFactTests(unittest.TestCase):
         self.assertEqual(fact["issue_id"], 1)
         self.assertEqual(fact["root_cause"], "")
         self.assertEqual(fact["keywords"], [])
-        self.assertEqual(fact["confidence"], 0.3)
+        self.assertEqual(fact["confidence"], 30.0)
 
     def test_execution_status_never_becomes_redmine_status(self):
         """AI 执行状态（completed）不得写进知识库 status_name。"""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -14,6 +15,7 @@ from foundation.archives import (
     copy_archive_member,
     derive_suite_dir_name_from_archive,
     safe_extract_member_path,
+    sniff_archive_format,
     strip_common_archive_root,
 )
 
@@ -59,7 +61,11 @@ def extract_archive_local_with_progress(
         if name.endswith("-tradefed"):
             ensure_tradefed_executable(path)
 
-    if archive_path.endswith(".zip"):
+    # Dispatch by CONTENT, never by filename: a tarball renamed payload.rar
+    # used to reach the raw `tar -xf` branch below and bypass the
+    # member-count / byte-budget / symlink policy entirely (review P1).
+    fmt = sniff_archive_format(archive_path)
+    if fmt == "zip":
         with zipfile.ZipFile(archive_path, "r") as archive:
             names = archive.namelist()
             if target_dir_name:
@@ -121,15 +127,8 @@ def extract_archive_local_with_progress(
                     chmod_tradefed(target_path, os.path.basename(target_path))
                     files_count += 1
                     progress(files_count, total)
-    elif archive_path.endswith((".tar.gz", ".tgz", ".tar", ".tar.bz2")):
-        mode = (
-            "r:gz"
-            if archive_path.endswith((".tar.gz", ".tgz"))
-            else "r:bz2"
-            if archive_path.endswith(".tar.bz2")
-            else "r"
-        )
-        with tarfile.open(archive_path, mode) as archive:
+    elif fmt == "tar":
+        with tarfile.open(archive_path, "r:*") as archive:
             members = archive.getmembers()
             if target_dir_name:
                 _, mapped_names = strip_common_archive_root(
@@ -179,25 +178,41 @@ def extract_archive_local_with_progress(
                         chmod_tradefed(target_path, os.path.basename(target_path))
                         files_count += 1
                         progress(files_count, total)
-    else:
-        command = [
-            "tar",
-            "-xf",
-            archive_path,
-            "-C",
-            target_extract_dir if target_dir_name else extract_dir,
-        ]
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=1800,
-            check=False,
+    elif fmt in {"7z", "rar"}:
+        # Genuinely 7z/rar content: system extractor with the reports'
+        # preflight + post-scan safety layer (member/type/budget policy
+        # still enforced around the subprocess).
+        from foundation.archives import (
+            enforce_post_extraction_safety,
+            preflight_system_archive,
         )
-        if result.returncode != 0:
+
+        command = "rar" if fmt == "rar" and shutil.which("rar") else "7z"
+        if not shutil.which(command):
             raise RuntimeError(
-                result.stderr or result.stdout or "tar extraction failed"
+                f"{command} 命令不可用，无法解压 {fmt} 测试套件压缩包"
             )
+        destination = target_extract_dir if target_dir_name else extract_dir
+        preflight_system_archive(archive_path, destination, command)
+        if command == "rar":
+            subprocess.run(
+                ["rar", "x", "-y", archive_path, destination + os.sep],
+                check=True,
+                capture_output=True,
+                timeout=1800,
+            )
+        else:
+            subprocess.run(
+                ["7z", "x", "-y", f"-o{destination}", archive_path],
+                check=True,
+                capture_output=True,
+                timeout=1800,
+            )
+        enforce_post_extraction_safety(destination)
+    else:
+        raise ValueError(
+            f"不支持的压缩包内容格式（按内容检测，非文件名）: {os.path.basename(archive_path)}"
+        )
 
     extracted_name = target_dir_name or derive_suite_dir_name_from_archive(
         archive_path

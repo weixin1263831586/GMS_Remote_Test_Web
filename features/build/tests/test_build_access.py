@@ -32,6 +32,12 @@ class FakeBuildService:
         self.created_request = request
         return {"id": "new-job", "owner": request.get("owner"), "status": "running"}
 
+    def list_servers(self):
+        return [{"id": "server"}]
+
+    def list_templates(self, *, enabled_only=False):
+        return [{"id": "template"}]
+
 
 class BuildAccessTests(unittest.TestCase):
     def setUp(self):
@@ -164,6 +170,54 @@ class BuildAccessTests(unittest.TestCase):
                 json={"server_id": "server"},
             )
         self.assertEqual(discover.status_code, 403)
+
+    def test_zero_scope_agent_token_cannot_enumerate_servers_or_templates(self):
+        """零 scope Agent token 不得枚举构建服务器/模板元数据（ADR 0006
+        零隐式权限）；带 build.read 的 token 与人类用户保持可用。"""
+        app = FastAPI()
+        app.include_router(build_api.router)
+
+        @app.middleware("http")
+        async def test_identity(request: Request, call_next):
+            username = request.headers.get("X-Test-User", "kkagent")
+            role = request.headers.get("X-Test-Role", "agent_service")
+            scopes = frozenset(
+                item
+                for item in request.headers.get("X-Test-Scopes", "").split(",")
+                if item
+            )
+            request.state.current_user = CurrentUser(
+                id=f"id-{username}", username=username, role=role,
+                extra_permissions=scopes,
+            )
+            return await call_next(request)
+
+        env = {"GMS_ENV": "production", "GMS_AUTH_REQUIRED": "true"}
+        with patch.dict(os.environ, env), TestClient(app) as client:
+            zero_servers = client.get(
+                "/api/build/servers",
+                headers={"X-Test-User": "kkagent", "X-Test-Role": "agent_service"},
+            )
+            zero_templates = client.get(
+                "/api/build/templates",
+                headers={"X-Test-User": "kkagent", "X-Test-Role": "agent_service"},
+            )
+            scoped_servers = client.get(
+                "/api/build/servers",
+                headers={
+                    "X-Test-User": "kkagent",
+                    "X-Test-Role": "agent_service",
+                    "X-Test-Scopes": "build.read",
+                },
+            )
+            human_servers = client.get(
+                "/api/build/servers",
+                headers={"X-Test-User": "alice", "X-Test-Role": "user"},
+            )
+        self.assertEqual(zero_servers.status_code, 403)
+        self.assertEqual(zero_templates.status_code, 403)
+        self.assertEqual(scoped_servers.status_code, 200)
+        self.assertEqual(human_servers.status_code, 200)
 
     def test_human_roles_keep_build_access(self):
         response = self.client.post(

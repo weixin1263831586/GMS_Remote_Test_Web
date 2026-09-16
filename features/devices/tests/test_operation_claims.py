@@ -211,3 +211,36 @@ def test_operation_claim_borrows_existing_claim_for_same_owner():
             assert any(
                 c["source_id"] == "reservation:res-1" for c in active
             )
+
+
+def test_operation_claim_does_not_borrow_running_cluster_job_claim():
+    """同 owner 的运行中 cluster-job claim 不得被直接操作借用。
+
+    否则用户 A 在 CTS/GTS 任务运行期间从设备页发 reboot/remount 等
+    mutation 会静默借用自己的 job claim，污染正在跑的测试；必须 409
+    冲突并指明持有者是集群任务（workflow 级重入，非 owner 级）。
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        alice = authenticated_request("user-alice", "alice")
+        with patch.object(operation_claims, "device_lock_manager", manager):
+            ok, _first = manager.lock_devices(
+                ["SERIAL-1"], "user-alice", "alice",
+                source_id="job:job-123", source_type="cluster-job",
+                ttl_seconds=3600, allow_existing_source=True,
+            )
+            assert ok
+
+            source_id, records, conflict = (
+                support.acquire_device_operation_claim(alice, ["SERIAL-1"], "reboot")
+            )
+            assert source_id == ""
+            assert conflict is not None
+            assert conflict.status_code == 409
+            assert records[0]["source_type"] == "cluster-job"
+            # The job claim is untouched by the refused operation.
+            active = manager.registry.list_active(worker_id="ats-worker-controller")
+            assert any(c["source_id"] == "job:job-123" for c in active)

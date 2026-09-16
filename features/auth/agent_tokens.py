@@ -221,6 +221,10 @@ class AgentTokenServiceMixin:
             role=AGENT_ROLE,
             display_name=str(row["name"]),
             extra_permissions=scopes,
+            # Resources created through this token belong to the enrolling
+            # account (ADR 0010), so revoking/rotating the token never
+            # orphans them.
+            resource_owner_id=str(row["owner_user_id"] or ""),
         )
         return principal, record
 
@@ -233,6 +237,21 @@ class AgentTokenServiceMixin:
         if allowed == "*":
             return True
         return value in {part.strip() for part in allowed.split(",") if part.strip()}
+
+    @classmethod
+    def agent_acl_allows_all(
+        cls, record: dict[str, Any] | None, kind: str, values: list[str]
+    ) -> bool:
+        """ACL 校验一组值：每个成员都必须被允许。
+
+        单值 membership（``agent_acl_allows``）不能拿 CSV 聚合字符串冒充
+        一个设备身份——多设备烧写的 canonical device 是 "A,B"，旧写法
+        ``"A,B" in {"A","B"}`` 恒 False，合法的多设备审批被误拒绝
+        （审核意见 P2）。
+        """
+        return bool(values) and all(
+            cls.agent_acl_allows(record, kind, value) for value in values
+        )
 
 
 # Enrollment-code lifecycle moved to agent_enrollment.py (line-budget split);

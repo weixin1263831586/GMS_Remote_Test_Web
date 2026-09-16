@@ -99,7 +99,7 @@ async def get_daily_triage(
     """
     _require_read(request)
     if not _has_redmine_credentials(request):
-        return _missing_credentials_payload()
+        return _missing_credentials_payload(request)
     service = _service_for_request(request)
     try:
         snapshot = await service.build_triage(
@@ -177,7 +177,7 @@ async def run_daily_brief(
         )
     _require_human(request)
     if not _has_redmine_credentials(request):
-        return _missing_credentials_payload()
+        return _missing_credentials_payload(request)
     service = _service_for_request(request)
     force = (payload or {}).get("force", False) if isinstance(payload, dict) else False
     if not isinstance(force, bool):

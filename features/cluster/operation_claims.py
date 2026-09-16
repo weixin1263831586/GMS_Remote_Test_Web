@@ -9,13 +9,19 @@ def device_action_claim_payload(
     repository, worker_id: str, device_ids: list[str], operation_id: str,
     owner_id: str, *, username: str = "",
 ) -> dict:
-    """Fence every target while preserving the lifetime of borrowed claims."""
+    """Fence every target while preserving the lifetime of borrowed claims.
+
+    Only reservation claims may be borrowed (the holder's flash→test
+    workflow umbrella). cluster-job claims are NOT borrowable: mutating a
+    device under the owner's own running job must 409 instead of silently
+    borrowing the job's claim (workflow-level reentrancy, review P1).
+    """
     source_id = f"operation:{operation_id}"
     owned = {
         str(claim.get("device_key") or ""): claim
         for claim in repository.claims.list_active(owner_id=owner_id)
-        if claim.get("source_type") in {"cluster-reservation", "cluster-job"}
-        or str(claim.get("source_id") or "").startswith(("reservation:", "job:"))
+        if claim.get("source_type") == "cluster-reservation"
+        or str(claim.get("source_id") or "").startswith("reservation:")
     }
     records = [owned[key] for key in device_ids if key in owned]
     missing = [key for key in device_ids if key not in owned]

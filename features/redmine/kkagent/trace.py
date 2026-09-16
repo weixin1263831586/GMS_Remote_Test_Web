@@ -90,6 +90,8 @@ class ToolTrace:
             "attachment_manifest_parsed": self.attachment_manifest_parsed,
             "attachment_count": self.attachment_count,
             "text_artifact_ids": self.text_artifact_ids,
+            "all_artifact_ids": self.all_artifact_ids,
+            "snapshot_ids": self.snapshot_ids,
             "source_reproducible": self.source_reproducible,
         }
 
@@ -249,6 +251,44 @@ class KkAgentTrace:
             and call.source_reproducible is True
         )
 
+    def evidence_ledger(self) -> list[dict[str, Any]]:
+        """Claim ↔ Evidence Ledger（审核意见 P2）：给每次成功调用分配稳定证据 ID。
+
+        全局布尔计数（``*_checked`` / ``*_count``）只能证明"某次调用发生过"，
+        不能证明"结论引用的证据就是这次调用"。Ledger 为每条证据分配
+        ``EV-<n>`` 稳定 ID 并携带可匹配的引用 token（issue/artifact/snapshot
+        id、路径、查询词），供 evidence_gate 把模型声称的 evidence 条目
+        绑定回真实调用——root_cause_type=confirmed 时要求引用的 evidence
+        能绑定到一条可复现的源码取证调用，而不是仅"轨迹里存在过一次"。
+        """
+        ledger: list[dict[str, Any]] = []
+        for index, call in enumerate(self.tool_calls, start=1):
+            if not call.succeeded:
+                continue
+            is_source = _is_source_evidence_tool(call.tool_name)
+            refs: set[str] = set()
+            for key in ("issue", "issue_id"):
+                value = _as_int(call.tool_input.get(key))
+                if value:
+                    refs.update({f"#{value}", str(value)})
+            for key in ("artifact_id", "snapshot_id", "path", "query", "file", "q"):
+                value = str(call.tool_input.get(key) or "").strip()
+                if value:
+                    refs.add(value)
+            refs.update(str(value) for value in call.all_artifact_ids if value)
+            for value in call.evidence_issue_ids:
+                if value:
+                    refs.update({f"#{value}", str(value)})
+            refs.update(str(value) for value in call.snapshot_ids if value)
+            ledger.append({
+                "evidence_id": f"EV-{index:03d}",
+                "kind": "source" if is_source else "tool",
+                "tool_name": call.tool_name,
+                "reproducible": call.source_reproducible if is_source else None,
+                "refs": sorted(refs),
+            })
+        return ledger
+
     def to_summary(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
@@ -287,9 +327,19 @@ def _bounded_tool_input(value: Any) -> dict[str, Any]:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
     if len(encoded) <= TOOL_INPUT_JSON_CHARS:
         return value
-    # 身份字段永远保留（供 Evidence Gate 按目标 issue 归属核对），
-    # 其余内容截断为原始 JSON 前缀。
-    kept = {key: value[key] for key in _IDENTITY_INPUT_KEYS if key in value}
+    # 身份字段永远保留（供 Evidence Gate 按目标 issue 归属核对），其余
+    # 内容截断为原始 JSON 前缀。身份键的**值**也要截断（审核意见 P2）：
+    # path/query 等值可被超大参数击穿总量上限，审计表随之膨胀；归属核对
+    # 只需要可辨识前缀。
+    kept = {
+        key: (
+            value[key]
+            if isinstance(value[key], (int, float)) and not isinstance(value[key], bool)
+            else str(value[key])[:TOOL_INPUT_JSON_CHARS]
+        )
+        for key in _IDENTITY_INPUT_KEYS
+        if key in value
+    }
     kept["_truncated_json"] = encoded[:TOOL_INPUT_JSON_CHARS]
     kept["_truncated"] = True
     return kept
@@ -346,7 +396,6 @@ def _attachment_manifest(value: Any) -> tuple[bool, int, list[str], list[str]]:
     text_ids = {
         str(item.get("artifact_id") or "").strip()
         for item in rows
-        and [item for item in rows if isinstance(item, dict)]
         if str(item.get("kind") or "") in {"text", "log"}
         and str(item.get("status") or "") in {"ready", "partial"}
         and str(item.get("artifact_id") or "").strip()

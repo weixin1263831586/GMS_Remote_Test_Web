@@ -248,6 +248,39 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertTrue(self.repo.finish_job(first["job_id"], "worker-a", token))
         self.assertEqual(self.repo.get_job(first["job_id"])["status"], "completed")
 
+    def test_queued_issue_job_is_cancelled_when_run_job_active(self):
+        """审核意见 P1：活跃 run-job 存在时，排队 issue-job 被作废而不是领取。"""
+        run = make_run(status="pending")
+        self.repo.create_run(run)
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=100, buckets=[], status="completed"
+        ))
+        issue_job_row, _ = self.repo.enqueue_job(run.run_id, kind="issue", issue_id=100)
+        issue_job_id = issue_job_row["job_id"]
+        run_job, _ = self.repo.enqueue_job(run.run_id, kind="run")
+        # 两次 claim：第一次作废 issue-job 后应直接领到 run-job。
+        claimed = self.repo.claim_next_job("worker-a", lease_seconds=30)
+        self.assertEqual(claimed["job_id"], run_job["job_id"])
+        self.assertEqual(claimed["kind"], "run")
+        issue_job = self.repo.get_job(issue_job_id)
+        self.assertEqual(issue_job["status"], "cancelled")
+        self.assertIn("superseded", issue_job["error"])
+
+    def test_force_rerun_cancels_queued_issue_jobs(self):
+        """审核意见 P1：refreeze 重置作废排队 issue-job（源头清除）。"""
+        run = make_run(status="failed")
+        self.repo.create_run(run)
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=100, buckets=[], status="completed"
+        ))
+        self.repo.enqueue_job(run.run_id, kind="issue", issue_id=100)
+        cancelled = self.repo.jobs.cancel_queued_issue_jobs(run.run_id)
+        self.assertEqual(cancelled, 1)
+        # 无活跃 job 阻塞 run-job 入队。
+        _run_job, created = self.repo.enqueue_job(run.run_id, kind="run")
+        self.assertTrue(created)
+        self.assertIsNotNone(self.repo.claim_next_job("worker-a", lease_seconds=30))
+
     def test_distinct_reanalysis_targets_are_never_coalesced(self):
         """评审 P1:不同 issue 的 reanalyze 请求绝不能互相吞掉。"""
         run = make_run(status="completed")

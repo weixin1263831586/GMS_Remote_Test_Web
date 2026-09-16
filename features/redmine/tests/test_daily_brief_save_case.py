@@ -41,12 +41,19 @@ def case_client(tmp_path, monkeypatch):
         return await call_next(request)
 
     app.include_router(knowledge_api.router)
-    for run_id, mode, owner in (("old", "manual", "owner"), ("new", "delta", "owner"), ("foreign", "manual", "other")):
+    for run_id, mode, owner in (("old", "manual", "owner"), ("new", "delta", "owner"), ("foreign", "manual", "other"), ("native", "issue:101", "owner")):
         run = DailyBriefRun(owner_id=owner, brief_date="2026-09-15", mode=mode, run_id=run_id, status="completed")
         repository.create_run(run)
         result = DIAGNOSTIC_RESULT if run_id == "old" else {"problem_summary": run_id}
         if run_id == "new":
             result = dict(result, evidence_gate={"analysis_mode": "triage"}, root_cause="", root_cause_type="unknown")
+        if run_id == "native":
+            # native 摘要：diagnostic gate + result_format 标记（ADR 0009）。
+            result = {
+                "result_format": "kkagent_markdown",
+                "detailed_report": "## 结论\n…",
+                "evidence_gate": {"analysis_mode": "diagnostic"},
+            }
         repository.upsert_issue(DailyBriefIssue(
             run_id=run_id, issue_id=101, buckets=[], status="completed", result=result,
         ))
@@ -72,6 +79,16 @@ def test_save_case_rejects_triage_result(case_client):
     response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=new")
     assert response.status_code == 409
     assert response.json()["code"] == "STATE_CONFLICT"
+    sink.upsert_case_fact.assert_not_called()
+
+
+def test_save_case_rejects_native_markdown_summary(case_client):
+    """ADR 0009：native 摘要无结构化字段，禁止保存为案例（挡 API 直连）。"""
+    client, sink = case_client
+    response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=native")
+    assert response.status_code == 409
+    assert response.json()["code"] == "STATE_CONFLICT"
+    assert "native markdown summary" in response.json()["error"]
     sink.upsert_case_fact.assert_not_called()
 
 

@@ -287,8 +287,6 @@ class TargetIssueScopeTests(unittest.TestCase):
         self.assertTrue(any("attachments" in e for e in gate_errors(gate)))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ReproducibleSourceEvidenceTests(unittest.TestCase):
@@ -329,12 +327,41 @@ class ReproducibleSourceEvidenceTests(unittest.TestCase):
         self.assertIn("cannot alone confirm", errors[0])
 
     def test_local_git_evidence_can_confirm_root_cause(self):
-        errors = self._gate_with_source_output(
+        trace = _full_trace()
+        sdk_call = ToolTrace(
+            tool_call_id="sdk1",
+            tool_name="gms_rt_sdk_read",
+            status="succeeded",
+            tool_input={"path": "kernel/drivers/gpu/drm/panel/panel-rk3576.c"},
+        )
+        trace.tool_calls.append(sdk_call)
+        from features.redmine.kkagent.trace import _source_reproducible_flag
+
+        sdk_call.source_reproducible = _source_reproducible_flag(
             json.dumps({"success": True, "data": {
                 "source_id": "git", "commit": "abc", "reproducible": True,
             }})
         )
+        result = {
+            "root_cause_type": "confirmed",
+            "evidence": [{
+                "source": "code",
+                "reference": "kernel/drivers/gpu/drm/panel/panel-rk3576.c",
+                "fact": "缺少 stable backport",
+            }],
+        }
+        gate, errors = gate_and_errors(trace, self._entry(), result)
         self.assertEqual(errors, [])
+        # claim 绑定到一条可复现源码证据。
+        reproducible_ids = {
+            item["evidence_id"] for item in gate["evidence_ledger"]
+            if item["reproducible"] is True
+        }
+        self.assertTrue(reproducible_ids)
+        self.assertTrue(
+            any(set(b["evidence_ids"]) & reproducible_ids
+                for b in gate["claim_bindings"])
+        )
 
     def test_missing_flag_counts_as_not_reproducible(self):
         errors = self._gate_with_source_output(
@@ -350,3 +377,74 @@ class ReproducibleSourceEvidenceTests(unittest.TestCase):
         result: dict = {"root_cause_type": "likely"}
         _gate, errors = gate_and_errors(trace, self._entry(), result)
         self.assertFalse(any("reproducible" in e for e in errors))
+
+
+class ClaimEvidenceLedgerTests(unittest.TestCase):
+    """审核意见 P2：源码证据 A 不足以证实无关根因 B（claim 级绑定）。"""
+
+    @staticmethod
+    def _entry() -> dict:
+        return {
+            "issue_id": 1,
+            "subject": "VTS vts_ltp_test_arm_64 fail",
+            "attachment_count": 0,
+            "sdk_sources_available": True,
+        }
+
+    def _trace_with_reproducible_source(self) -> KkAgentTrace:
+        trace = _full_trace()
+        from features.redmine.kkagent.trace import _source_reproducible_flag
+
+        call = ToolTrace(
+            tool_call_id="sdk1",
+            tool_name="gms_rt_sdk_read",
+            status="succeeded",
+            tool_input={"path": "kernel/mm/mmap.c"},
+        )
+        call.source_reproducible = _source_reproducible_flag(
+            json.dumps({"success": True, "data": {
+                "source_id": "git", "reproducible": True,
+            }})
+        )
+        trace.tool_calls.append(call)
+        return trace
+
+    def test_confirmed_with_unrelated_evidence_fails_binding(self):
+        trace = self._trace_with_reproducible_source()
+        result = {
+            "root_cause_type": "confirmed",
+            "evidence": [{
+                "source": "log",
+                "reference": "host_log_12345.txt",
+                "fact": "SELinux denial",
+            }],
+        }
+        gate, errors = gate_and_errors(trace, self._entry(), result)
+        self.assertEqual(gate["reproducible_source_evidence_count"], 1)
+        self.assertTrue(any("cited evidence references" in e for e in errors))
+
+    def test_confirmed_with_cited_source_passes_binding(self):
+        trace = self._trace_with_reproducible_source()
+        result = {
+            "root_cause_type": "confirmed",
+            "evidence": [{
+                "source": "code",
+                "reference": "kernel/mm/mmap.c",
+                "fact": "缺少 upstream 修复",
+            }],
+        }
+        _gate, errors = gate_and_errors(trace, self._entry(), result)
+        self.assertFalse(any("cited evidence references" in e for e in errors))
+
+    def test_ledger_assigns_stable_ids(self):
+        trace = _full_trace()
+        ledger = trace.evidence_ledger()
+        self.assertTrue(all(item["evidence_id"].startswith("EV-") for item in ledger))
+        self.assertEqual(
+            [item["evidence_id"] for item in ledger],
+            [f"EV-{i:03d}" for i in range(1, len(ledger) + 1)],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

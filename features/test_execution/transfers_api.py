@@ -472,7 +472,22 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
             remote_extract_dir = os.path.join(extract_dir, target_dir_name) if target_dir_name else extract_dir
             mkdir_cmd = f"mkdir -p {shlex.quote(remote_extract_dir)}"
             await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, mkdir_cmd, timeout=20)
-            cmd = f"tar -xf {shlex.quote(archive_path)} -C {shlex.quote(remote_extract_dir)} 2>&1"
+            # 远端无法做内容嗅探，按扩展名选择对应的系统解压工具；
+            # 不再对一切后缀统一 `tar -xf`（tar 恰好也能解开改名文件，
+            # 会让伪装扩展名的载荷绕过本地策略的分派预期）。
+            lower = os.path.basename(archive_path).lower()
+            if lower.endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2')):
+                extractor = ['tar', '-xf', archive_path, '-C', remote_extract_dir]
+            elif lower.endswith('.zip'):
+                extractor = ['unzip', '-o', archive_path, '-d', remote_extract_dir]
+            elif lower.endswith(('.rar', '.7z')):
+                extractor = ['7z', 'x', '-y', f'-o{remote_extract_dir}', archive_path]
+            else:
+                return error_response(
+                    f"不支持的压缩包格式: {os.path.basename(archive_path)}", 400
+                )
+            quoted = ' '.join(shlex.quote(part) for part in extractor)
+            cmd = f"{quoted} 2>&1"
             extract_result = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, cmd, timeout=300)
 
             if not extract_result.ok:
