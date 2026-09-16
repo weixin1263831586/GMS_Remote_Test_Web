@@ -13,8 +13,8 @@ Three invariants enforced here:
    (cluster jobs, reports, device leases) resolves to exactly the resources
    the creating user already owns.
 2. The machine principal carries ONLY the capability union snapshotted from
-   the run plan at creation time (``granted_capabilities_json``) plus the
-   fixed ``MACHINE_PERMISSIONS`` floor it needs to execute its own stages.
+   the run plan at creation time (``granted_capabilities``) plus the fixed
+   ``MACHINE_PERMISSIONS`` floor it needs to execute its own stages.
    An orchestration service can never grant itself anything the creating
    principal did not consent to.
 3. The capability travels as a short-TTL HMAC-signed bearer token minted
@@ -29,8 +29,10 @@ apply, while every owner/scope check applies unchanged.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import secrets
 import time
 from typing import Any
@@ -84,17 +86,21 @@ def automation_granted_capabilities(
     stages need ``tests.execute`` and firmware flashing needs the explicit
     ``firmware.stage`` capability. Anonymous/dev-mode creators get an empty
     union (same trust level as the caller).
+
+    Flash semantics intentionally match the executor/service default:
+    omitting ``test_plan.flash`` means normal firmware flashing; only
+    ``{"mode": "skip"}`` disables the stage. The authorization compiler must
+    therefore request ``firmware.stage`` for the omitted/default case too,
+    otherwise a run can pass creation and fail later at the firmware API.
     """
 
     if principal is None:
         return []
     plan = test_plan if isinstance(test_plan, dict) else {}
     granted: list[str] = []
-    if plan.get("flash") if isinstance(plan.get("flash"), dict) else False:
-        if not isinstance(plan.get("flash"), dict) or (
-            plan["flash"].get("mode") != "skip"
-        ):
-            granted.append("firmware.stage")
+    flash = plan.get("flash") if isinstance(plan.get("flash"), dict) else {}
+    if flash.get("mode") != "skip":
+        granted.append("firmware.stage")
     if isinstance(plan.get("build"), dict):
         granted.append("build.execute")
         granted.append("build.cancel")
@@ -104,11 +110,11 @@ def automation_granted_capabilities(
     granted.append("devices.use_leased")
     granted.append("tests.execute")
     granted.append("tests.cancel")
-    granted = [name for name in AUTOMATION_PLAN_CAPABILITIES if name in set(granted)]
-    missing = [
-        name for name in granted
-        if not principal.has_permission(name)
+    granted_set = set(granted)
+    granted = [
+        name for name in AUTOMATION_PLAN_CAPABILITIES if name in granted_set
     ]
+    missing = [name for name in granted if not principal.has_permission(name)]
     if missing:
         raise MachineAuthorityError(
             "Automation plan requires capabilities the caller does not hold: "
@@ -154,6 +160,35 @@ def _signing_key() -> bytes:
     return derive_application_key(_HMAC_PURPOSE)
 
 
+def _encode_token_field(value: str) -> str:
+    """URL-safe field encoding without padding or dots.
+
+    The original token concatenated raw principal/owner values with ``.``.
+    Besides losing permissions on verification, that made the format depend
+    on identifiers never containing dots. Encoding every variable field makes
+    parsing unambiguous while retaining the existing ``gmscap_v1_`` prefix.
+    """
+
+    encoded = base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def _decode_token_field(value: str) -> str:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii")).decode(
+        "utf-8"
+    )
+
+
+def _principal_plan_capabilities(principal: CurrentUser) -> list[str]:
+    allowed = set(AUTOMATION_PLAN_CAPABILITIES)
+    return sorted(
+        permission
+        for permission in principal.extra_permissions
+        if permission in allowed
+    )
+
+
 def mint_capability_token(
     principal: CurrentUser,
     *,
@@ -162,9 +197,9 @@ def mint_capability_token(
     """Mint a short-TTL signed bearer token FOR a machine principal.
 
     Called in-process by the automation worker only — no HTTP surface can
-    mint tokens. Verification accepts the token back into the same
-    principal with a bounded lifetime, so loopback HTTP calls authenticate
-    without cookies or long-lived credentials.
+    mint tokens. The signed payload includes the exact plan-capability
+    snapshot; verification reconstructs the same principal instead of
+    accidentally dropping every permission except the fixed machine floor.
     """
 
     principal_id = str(principal.id or "")
@@ -175,7 +210,19 @@ def mint_capability_token(
         )
     expires = int(time.time()) + max(60, int(ttl_seconds))
     nonce = secrets.token_hex(8)
-    payload = f"{expires}.{nonce}.{principal_id}.{owner_id}"
+    capabilities_json = json.dumps(
+        _principal_plan_capabilities(principal),
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    fields = (
+        str(expires),
+        nonce,
+        _encode_token_field(principal_id),
+        _encode_token_field(owner_id),
+        _encode_token_field(capabilities_json),
+    )
+    payload = ".".join(fields)
     digest = hmac.new(
         _signing_key(), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()
@@ -185,18 +232,40 @@ def mint_capability_token(
 def verify_capability_token(token: str) -> CurrentUser | None:
     """Resolve a minted capability token back into its machine principal.
 
-    Returns None for anything malformed, expired, or wrongly signed; never
-    raises into request handling (an invalid capability is just anonymous).
+    New tokens contain six dot-separated fields including the signed
+    capability snapshot. The five-field legacy format is still accepted for
+    its remaining TTL, but deliberately reconstructs with no plan capabilities
+    (fail closed) because old tokens never authenticated that information.
     """
 
     value = str(token or "")
     if not value.startswith(CAPABILITY_TOKEN_PREFIX):
         return None
     parts = value[len(CAPABILITY_TOKEN_PREFIX):].split(".")
-    if len(parts) != 5:
+    if len(parts) not in {5, 6}:
         return None
-    expires_raw, nonce, principal_id, owner_id, digest = parts
-    payload = f"{expires_raw}.{nonce}.{principal_id}.{owner_id}"
+
+    if len(parts) == 6:
+        expires_raw, nonce, principal_raw, owner_raw, capabilities_raw, digest = parts
+        payload = ".".join(parts[:-1])
+        try:
+            principal_id = _decode_token_field(principal_raw)
+            owner_id = _decode_token_field(owner_raw)
+            decoded_capabilities = json.loads(_decode_token_field(capabilities_raw))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(decoded_capabilities, list) or not all(
+            isinstance(item, str) for item in decoded_capabilities
+        ):
+            return None
+        granted_capabilities = decoded_capabilities
+    else:
+        # Compatibility for tokens minted before capability snapshots were
+        # carried in the token. They retain only the machine floor.
+        expires_raw, nonce, principal_id, owner_id, digest = parts
+        payload = f"{expires_raw}.{nonce}.{principal_id}.{owner_id}"
+        granted_capabilities = []
+
     expected = hmac.new(
         _signing_key(), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()
@@ -210,9 +279,13 @@ def verify_capability_token(token: str) -> CurrentUser | None:
         return None
     if not principal_id.startswith("automation:"):
         return None
+    known = set(AUTOMATION_PLAN_CAPABILITIES)
+    if any(item not in known for item in granted_capabilities):
+        return None
     return automation_authority(
         principal_id[len("automation:"):],
         owner_id,
+        granted_capabilities,
     )
 
 
