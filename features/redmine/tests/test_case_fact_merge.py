@@ -128,6 +128,62 @@ class UpsertCaseFactMergeTests(unittest.TestCase):
         self.assertEqual(fact["symptoms_json"], ["reboot"])
         self.assertEqual(fact["root_cause"], "new ai cause")
 
+    def test_real_error_signature_not_replaced_by_provenance_placeholder(self):
+        """真实 error_signature 不被 provenance 占位符覆盖（审核意见 P1）。
+
+        历史 mapper 在提取器拿不到签名时写 "daily-brief:<date>"；这是
+        非空 provenance 字符串，旧 merge 的"空才保留"挡不住它，真实签名
+        被逐轮替换。新 merge 对 daily-brief: 前缀做防御。
+        """
+        self.db.upsert_case_fact({
+            "issue_id": 12,
+            "subject": "s",
+            "error_signature": "CtsSecurityHostTestCases#testAllDomainsEnforcing",
+            "confidence": 0.9,
+        })
+        self.db.upsert_case_fact({
+            "issue_id": 12,
+            "error_signature": "daily-brief:2026-09-15",
+            "root_cause": "ai cause",
+            "confidence": 0.5,
+        }, merge_missing=True)
+        self.assertEqual(
+            self.db.get_case_fact(12)["error_signature"],
+            "CtsSecurityHostTestCases#testAllDomainsEnforcing",
+        )
+
+    def test_evidence_and_keywords_union_on_merge(self):
+        """新 evidence/keywords 非空时 union/dedupe，不整体覆盖（审核意见 P1）。"""
+        self.db.upsert_case_fact({
+            "issue_id": 13,
+            "subject": "s",
+            "keywords": ["cts", "gts"],
+            "evidence": {
+                "daily_brief_evidence": [{"source": "log", "quote": "a"}],
+                "manual_note": "operator verified",
+            },
+            "symptoms": ["reboot"],
+            "confidence": 0.9,
+        })
+        self.db.upsert_case_fact({
+            "issue_id": 13,
+            "keywords": ["cts", "vts"],
+            "evidence": {
+                "daily_brief_evidence": [{"source": "log", "quote": "a"}],
+            },
+            "root_cause": "new ai cause",
+            "confidence": 0.6,
+        }, merge_missing=True)
+        fact = self.db.get_case_fact(13)
+        # list 集合保序去重合并：旧值在前，新值追加。
+        self.assertEqual(fact["keywords_json"], ["cts", "gts", "vts"])
+        evidence = fact["evidence_json"]
+        # dict key 级合并：未提及的 manual_note 保留，同名 list 证据去重合并。
+        self.assertEqual(evidence["manual_note"], "operator verified")
+        self.assertEqual(
+            evidence["daily_brief_evidence"], [{"source": "log", "quote": "a"}]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

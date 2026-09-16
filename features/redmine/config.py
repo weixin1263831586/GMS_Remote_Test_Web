@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,9 @@ from .dashboard import (
 from .users import owner_runtime_config_path
 
 
+logger = logging.getLogger(__name__)
+
+
 class RedmineConfig:
     """Feature-owned configuration facade backed by runtime config files."""
 
@@ -31,6 +35,7 @@ class RedmineConfig:
         else:
             self.manager = ConfigManager(project_root=project_root)
         self.project_root = self.manager.project_root
+        self._redmine_credential_error = ""
 
     @property
     def config_path(self) -> Path:
@@ -107,12 +112,20 @@ class RedmineConfig:
         if encrypted:
             try:
                 password = decrypt_secret(str(encrypted))
+                self._redmine_credential_error = ""
                 return {
                     "username": str(saved.get("username") or ""),
                     "password": password,
                 }
-            except Exception:
+            except Exception as exc:
+                self._redmine_credential_error = "stored_secret_unreadable"
+                logger.warning(
+                    "Redmine credentials cannot be decrypted for runtime config %s: %s",
+                    self.runtime_config_path,
+                    exc,
+                )
                 return {}
+        self._redmine_credential_error = ""
         return {}
 
     def load_redmine_api_key(self) -> str:
@@ -126,7 +139,7 @@ class RedmineConfig:
         except Exception:
             return ""
 
-    def redmine_credentials_status(self) -> dict[str, bool]:
+    def redmine_credentials_status(self) -> dict[str, bool | str]:
         """Return current-owner credential readiness without returning secrets."""
         base_url = self.get_redmine_base_url()
         parsed = urlparse(base_url)
@@ -142,7 +155,19 @@ class RedmineConfig:
             "base_url_configured": bool(base_url_configured),
             "password_configured": password_configured,
             "api_key_configured": api_key_configured,
+            "credential_error": self._redmine_credential_error,
         }
+
+    def redmine_credentials_error_message(self) -> str:
+        """Return a safe, actionable credential failure message."""
+        status = self.redmine_credentials_status()
+        if status.get("credential_error") == "stored_secret_unreadable":
+            return (
+                "Redmine credentials cannot be decrypted with the active "
+                "master key. Restore the original master.key or save the "
+                "credentials again."
+            )
+        return "Redmine credentials not configured"
 
     def save_redmine_api_key(self, api_key: str) -> bool:
         """加密保存 Redmine API Key；文件权限 0600，与密码凭据共存。"""

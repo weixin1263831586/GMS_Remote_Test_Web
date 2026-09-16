@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from foundation.archives import (
-    ARCHIVE_EXTENSIONS,
-    MAX_ARCHIVE_EXPANDED_BYTES,
-    MAX_ARCHIVE_FILES,
+    UPLOAD_ARCHIVE_EXTENSIONS,
     copy_archive_member,
+    enforce_post_extraction_safety,
+    preflight_system_archive,
     safe_extract_member_path,
 )
 from foundation.config import ConfigManager
@@ -35,108 +35,10 @@ def default_report_temp_dir() -> str:
     return os.environ.get('GMS_REPORT_TEMP_DIR') or str(Path(tempfile.gettempdir()) / 'gms_report')
 
 
-def _enforce_post_extraction_safety(base_dir: str) -> None:
-    """Scan a directory extracted by a system tool (rar/7z) and enforce the
-    same constraints applied to zip/tar extraction: reject symlinks, path
-    traversal, file-count bombs, and decompression bombs.
-
-    Without this, ``rar``/``7z`` bypass every safety check that
-    :func:`safe_extract_member_path` and :func:`copy_archive_member`
-    enforce for zip/tar.
-    """
-    base = os.path.abspath(base_dir)
-    file_count = 0
-    total_bytes = 0
-    for root, dirs, files in os.walk(base, followlinks=False):
-        for name in [*dirs, *files]:
-            full = os.path.join(root, name)
-            try:
-                mode = os.lstat(full).st_mode
-            except OSError as exc:
-                raise ValueError(f'无法检查压缩包成员: {name}') from exc
-            if stat.S_ISLNK(mode):
-                raise ValueError(f'压缩包包含不安全符号链接: {os.path.relpath(full, base)}')
-            if not stat.S_ISDIR(mode) and not stat.S_ISREG(mode):
-                raise ValueError(f'压缩包包含不安全特殊文件: {os.path.relpath(full, base)}')
-            resolved = os.path.realpath(full)
-            try:
-                confined = os.path.commonpath((base, resolved)) == base
-            except ValueError:
-                confined = False
-            if not confined:
-                raise ValueError(f'压缩包包含不安全路径: {os.path.relpath(full, base)}')
-            if stat.S_ISDIR(mode):
-                continue
-            file_count += 1
-            if file_count > MAX_ARCHIVE_FILES:
-                raise ValueError(f'压缩包文件数量超过限制: {MAX_ARCHIVE_FILES}')
-            try:
-                total_bytes += os.lstat(full).st_size
-            except OSError:
-                pass
-            if total_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
-                raise ValueError(
-                    f'压缩包展开大小超过限制: {MAX_ARCHIVE_EXPANDED_BYTES} bytes'
-                )
-
-
-def _preflight_system_archive(
-    archive_path: str,
-    target_dir: str,
-    command: str,
-    *,
-    timeout: int = 120,
-) -> None:
-    """Validate RAR/7z member paths before the external tool writes files."""
-    if command == 'rar':
-        completed = subprocess.run(
-            [command, 'lb', archive_path],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        members = [(line.strip(), 0) for line in completed.stdout.splitlines()]
-    else:
-        completed = subprocess.run(
-            [command, 'l', '-slt', archive_path],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        details = completed.stdout.partition('----------')[2]
-        members = []
-        member_name = ''
-        member_size = 0
-        for line in [*details.splitlines(), 'Path = ']:
-            if line.startswith('Path = '):
-                if member_name:
-                    members.append((member_name, member_size))
-                member_name = line.removeprefix('Path = ').strip()
-                member_size = 0
-            elif line.startswith('Size = '):
-                try:
-                    member_size = max(0, int(line.removeprefix('Size = ').strip()))
-                except ValueError:
-                    member_size = 0
-
-    file_count = 0
-    total_bytes = 0
-    for member_name, member_size in members:
-        if not member_name:
-            continue
-        normalized = member_name.replace('\\', '/')
-        safe_extract_member_path(target_dir, normalized)
-        file_count += 1
-        total_bytes += member_size
-        if file_count > MAX_ARCHIVE_FILES:
-            raise ValueError(f'压缩包文件数量超过限制: {MAX_ARCHIVE_FILES}')
-        if total_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
-            raise ValueError(
-                f'压缩包展开大小超过限制: {MAX_ARCHIVE_EXPANDED_BYTES} bytes'
-            )
-
+# Archive security helpers moved to foundation.archives (single shared
+# policy); private aliases keep intra-feature call sites stable.
+_enforce_post_extraction_safety = enforce_post_extraction_safety
+_preflight_system_archive = preflight_system_archive
 
 def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
     if not android_version or not opengrok_config:
@@ -257,7 +159,7 @@ class ReportAnalyzer:
 
         lower_path = file_path.lower()
 
-        if lower_path.endswith(ARCHIVE_EXTENSIONS):
+        if lower_path.endswith(UPLOAD_ARCHIVE_EXTENSIONS):
             try:
                 from .analysis_agent import ReportAnalysisAgent
 

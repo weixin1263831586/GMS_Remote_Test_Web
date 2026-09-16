@@ -39,7 +39,15 @@ def _owned_local_device_keys(owner_id: str, device_keys: list[str]) -> dict[str,
 # another in-flight operation's claim let two parallel mutations share one
 # lifecycle: when the first finished it released the claim while the second
 # was still executing, and neither had an independent source_id.
-_BORROWABLE_SOURCE_TYPES = {"cluster-reservation", "cluster-job"}
+#
+# cluster-job claims are deliberately NOT borrowable: a running cluster job
+# is an active exclusive workflow, and letting the same owner silently
+# borrow its claim from a device page (reboot/remount/flash...) would
+# mutate hardware under a live CTS/GTS run. Such requests must conflict
+# (409) with the holding job instead (review: workflow-level reentrancy).
+# Reservation claims stay borrowable: the reservation holder owns the
+# device through the flash→test workflow stages and reuses its claim.
+_BORROWABLE_SOURCE_TYPES = {"cluster-reservation"}
 
 
 def _borrowable(claim: dict) -> bool:
@@ -48,7 +56,7 @@ def _borrowable(claim: dict) -> bool:
         return True
     # Local test runs register cluster-source-like ids without source_type.
     source_id = str(claim.get("source_id") or "")
-    return source_id.startswith(("reservation:", "job:"))
+    return source_id.startswith("reservation:")
 
 
 def _has_permission(user, permission: str) -> bool:

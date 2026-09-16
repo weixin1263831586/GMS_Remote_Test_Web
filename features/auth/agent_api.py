@@ -268,10 +268,12 @@ async def auth_consume_approval_token(request: Request, req: dict):
         except ValueError as exc:
             return error_response(str(exc), status_code=400)
     # Agent token device ACL applies at approval time so a token scoped to
-    # specific devices cannot be driven against anything else.
+    # specific devices cannot be driven against anything else. Multi-device
+    # burns carry a CSV canonical device list ("A,B"); verify every member
+    # instead of testing the CSV blob against single-value membership.
     record = getattr(request.state, "agent_token_record", None)
-    if record is not None and not auth_service.agent_acl_allows(
-        record, "devices", device
+    if record is not None and not auth_service.agent_acl_allows_all(
+        record, "devices", [part for part in device.split(",") if part.strip()]
     ):
         return error_response(
             f"Agent token 不允许操作设备 {device}", status_code=403

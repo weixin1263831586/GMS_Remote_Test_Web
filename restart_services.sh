@@ -39,8 +39,33 @@ SERVER_HOSTNAME="${GMS_SERVER_HOSTNAME:-${CONFIGURED_SERVER_HOSTNAME:-127.0.0.1}
 
 SYSTEMD_SERVICE="gms-web-app.service"
 WORKER_SERVICE="gms-worker-agent"
+DAILY_BRIEF_SERVICE="gms-redmine-daily-brief-worker.service"
 SYSTEMD_UNIT_FILE="/etc/systemd/system/${SYSTEMD_SERVICE}"
 WORKER_UNIT_FILE="${HOME}/.config/systemd/user/${WORKER_SERVICE}.service"
+
+fail_service_action() {
+    echo -e "${RED}  ✗ $*${NC}" >&2
+    exit 1
+}
+
+systemctl_admin() {
+    if [[ "${EUID}" -eq 0 ]]; then
+        systemctl "$@"
+    else
+        # sudo 失败（无权限/无 sudo）时退回 polkit 非交互通道；若 sudo
+        # 本身执行了命令但命令失败（返回非零），不得重试第二种方式——
+        # 否则一次失败的服务操作会被执行两次（副作用重复）。
+        if sudo -n systemctl "$@" 2>/dev/null; then
+            return 0
+        fi
+        sudo systemctl "$@" || systemctl --no-ask-password "$@"
+    fi
+}
+
+DAILY_BRIEF_INSTALLED=false
+if [[ "$(systemctl show "${DAILY_BRIEF_SERVICE}" --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]; then
+    DAILY_BRIEF_INSTALLED=true
+fi
 
 ensure_https_cert() {
     mkdir -p "${CERT_DIR}"
@@ -117,8 +142,14 @@ echo -e "${YELLOW}[3/4] 停止旧服务...${NC}"
 
 # Environment loading is handled above; there is no single ENV_FILE anymore.
 echo -e "${BLUE}  ℹ 环境配置由统一配置加载器处理${NC}"
+if [[ "${DAILY_BRIEF_INSTALLED}" == "true" ]]; then
+    systemctl_admin stop "${DAILY_BRIEF_SERVICE}" \
+        || fail_service_action "无法停止晨报 Worker (${DAILY_BRIEF_SERVICE})"
+    echo -e "${GREEN}  ✓ 晨报 Worker 已停止${NC}"
+fi
 if [[ -f "${SYSTEMD_UNIT_FILE}" ]]; then
-    sudo systemctl stop "${SYSTEMD_SERVICE}" 2>/dev/null || systemctl stop "${SYSTEMD_SERVICE}" 2>/dev/null || true
+    systemctl_admin stop "${SYSTEMD_SERVICE}" \
+        || fail_service_action "无法停止 Web (${SYSTEMD_SERVICE})"
     echo -e "${GREEN}  ✓ systemd ${SYSTEMD_SERVICE} 已停止${NC}"
 else
     echo -e "${BLUE}  ℹ systemd ${SYSTEMD_SERVICE} 未安装${NC}"
@@ -148,14 +179,21 @@ fi
 
 if [[ "${USE_SYSTEMD}" == "true" ]]; then
     echo -e "  通过 systemd 启动 ${SYSTEMD_SERVICE}..."
-    sudo systemctl restart "${SYSTEMD_SERVICE}" 2>/dev/null || systemctl restart "${SYSTEMD_SERVICE}" 2>/dev/null || true
+    WEB_RESTART_OK=true
+    systemctl_admin restart "${SYSTEMD_SERVICE}" || WEB_RESTART_OK=false
     # systemd 启动时如果端口仍被占用，清理残留后重试一次
     if lsof -i :"${PORT}" >/dev/null 2>&1 && ! systemctl is-active --quiet "${SYSTEMD_SERVICE}" 2>/dev/null; then
         echo -e "${YELLOW}  端口 ${PORT} 仍被占用，清理残留进程后重试...${NC}"
         fuser -k "${PORT}/tcp" 2>/dev/null || true
         sleep 2
-        sudo systemctl restart "${SYSTEMD_SERVICE}" 2>/dev/null || systemctl restart "${SYSTEMD_SERVICE}" 2>/dev/null || true
+        systemctl_admin restart "${SYSTEMD_SERVICE}" \
+            || fail_service_action "无法重启 Web (${SYSTEMD_SERVICE})"
+        WEB_RESTART_OK=true
     fi
+    [[ "${WEB_RESTART_OK}" == "true" ]] \
+        || fail_service_action "无法重启 Web (${SYSTEMD_SERVICE})"
+    systemctl is-active --quiet "${SYSTEMD_SERVICE}" \
+        || fail_service_action "Web 未进入 active 状态 (${SYSTEMD_SERVICE})"
 else
     echo -e "${YELLOW}  systemd 服务未安装，使用 nohup 方式启动...${NC}"
 
@@ -203,10 +241,23 @@ else
 fi
 
 # 5. 重启本地 Worker Agent
+if [[ "${DAILY_BRIEF_INSTALLED}" == "true" ]]; then
+    echo -e "${YELLOW}  重启晨报 Worker (${DAILY_BRIEF_SERVICE})...${NC}"
+    systemctl_admin restart "${DAILY_BRIEF_SERVICE}" \
+        || fail_service_action "无法重启晨报 Worker (${DAILY_BRIEF_SERVICE})"
+    systemctl is-active --quiet "${DAILY_BRIEF_SERVICE}" \
+        || fail_service_action "晨报 Worker 未进入 active 状态 (${DAILY_BRIEF_SERVICE})"
+    echo -e "${GREEN}  ✓ 晨报 Worker 已重启${NC}"
+else
+    echo -e "${YELLOW}  ℹ 晨报 Worker 未安装；单号分析与晨报任务无法在后台执行${NC}"
+fi
 if [[ -f "${WORKER_UNIT_FILE}" ]]; then
     echo ""
     echo -e "${YELLOW}  重启 Worker Agent (${WORKER_SERVICE})...${NC}"
-    systemctl --user restart "${WORKER_SERVICE}" 2>/dev/null || true
+    systemctl --user restart "${WORKER_SERVICE}" \
+        || fail_service_action "无法重启设备 Worker (${WORKER_SERVICE})"
+    systemctl --user is-active --quiet "${WORKER_SERVICE}" \
+        || fail_service_action "设备 Worker 未进入 active 状态 (${WORKER_SERVICE})"
     echo -e "${GREEN}  ✓ Worker Agent 已重启${NC}"
 fi
 echo ""

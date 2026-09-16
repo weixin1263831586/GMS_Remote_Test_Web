@@ -375,6 +375,13 @@ class AuthService(
         if role is not None and role not in {"admin", "device_operator", "user"}:
             raise ValueError("角色必须是 admin、device_operator 或 user")
         with self._lock, self._connect() as conn:
+            # BEGIN IMMEDIATE serializes the last-admin check with the
+            # UPDATE across processes. self._lock only covers THIS process;
+            # with multiple Uvicorn workers (or CLI + web) two concurrent
+            # demotions could both observe admin count=2 and land the
+            # system with zero active admins (review P1). The database
+            # invariant must be enforced by the database transaction.
+            conn.execute('BEGIN IMMEDIATE')
             row = conn.execute(
                 "SELECT * FROM platform_users WHERE id = ?",
                 (user_id,),

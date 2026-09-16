@@ -27,6 +27,7 @@ from features.build.models import (
     utc_now_iso,
 )
 from features.build.repository import BuildStore
+from features.build.runtime_passwords import RuntimePasswordStore
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,13 @@ class BuildService:
             "ssh": SshTmuxBuildBackend(),
             "local": LocalBuildBackend(),
         }
-        self._runtime_passwords: dict[str, str] = {}
+        # Runtime SSH passwords: encrypted on disk with a hard TTL instead
+        # of a process-local dict, so any Uvicorn worker (and a Controller
+        # restart) can still poll/cancel a password-auth build. Plaintext is
+        # never persisted; password-auth servers still cannot QUEUE.
+        self._runtime_passwords = RuntimePasswordStore(
+            store.db_path.parent / "runtime_passwords.json",
+        )
         self._lunch_options_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
         self._lunch_options_cache_ttl = 300.0
 
@@ -75,7 +82,7 @@ class BuildService:
             raise BuildExecutionError("只能删除已完成、失败或已取消的历史构建任务")
         if not self.store.delete_job(job_id):
             raise BuildNotFoundError("Build job not found")
-        self._runtime_passwords.pop(job_id, None)
+        self._runtime_passwords.pop(job_id)
 
     def create_job(self, request: dict[str, Any], *, start: bool = True) -> dict[str, Any]:
         req = BuildJobCreateRequest(**(request or {}))
@@ -111,7 +118,7 @@ class BuildService:
             "finished_at": "",
         })
         if req.server_password:
-            self._runtime_passwords[job["id"]] = req.server_password
+            self._runtime_passwords.set(job["id"], req.server_password)
         if start:
             job = self.start_job(job["id"], server_password=req.server_password)
         return self._decorate_job(job)
@@ -146,12 +153,12 @@ class BuildService:
         for job in self.store.list_jobs(status=JOB_QUEUED, limit=100):
             server = self._with_runtime_password(
                 self._get_server(job["server_id"]),
-                self._runtime_passwords.get(job["id"], ""),
+                self._runtime_passwords.get(job["id"]),
             )
             try:
                 if not self._maybe_defer_for_capacity(server, True):
                     continue
-                self.start_job(job["id"], server_password=self._runtime_passwords.get(job["id"], ""))
+                self.start_job(job["id"], server_password=self._runtime_passwords.get(job["id"]))
                 started += 1
             except BuildExecutionError as exc:
                 logger.info("Queued build %s remains deferred: %s", job.get("id"), exc)
@@ -166,7 +173,7 @@ class BuildService:
             raise BuildNotFoundError("Build job not found")
         if job["status"] != JOB_QUEUED:
             return job
-        effective_password = server_password or self._runtime_passwords.get(job["id"], "")
+        effective_password = server_password or self._runtime_passwords.get(job["id"])
         server = self._with_runtime_password(self._get_server(job["server_id"]), effective_password)
         template = self._get_template(job["template_id"])
         prepared = build_command_from_template(
@@ -200,7 +207,7 @@ class BuildService:
                 error=str(exc),
                 finished_at=utc_now_iso(),
             )
-            self._runtime_passwords.pop(job["id"], None)
+            self._runtime_passwords.pop(job["id"])
             return failed
         return self.store.update_job(
             job["id"],
@@ -213,11 +220,11 @@ class BuildService:
         if not job:
             raise BuildNotFoundError("Build job not found")
         if job["status"] in TERMINAL_JOB_STATUSES:
-            self._runtime_passwords.pop(job_id, None)
+            self._runtime_passwords.pop(job_id)
             return self._decorate_job(job)
         if job["status"] == JOB_QUEUED:
             return self._decorate_job(self.start_job(job_id))
-        server = self._with_runtime_password(self._get_server(job["server_id"]), self._runtime_passwords.get(job_id, ""))
+        server = self._with_runtime_password(self._get_server(job["server_id"]), self._runtime_passwords.get(job_id))
         template = self._get_template(job["template_id"])
         backend = self._backend(server)
         result = backend.poll(
@@ -244,7 +251,7 @@ class BuildService:
             }
         if updates:
             job = self.store.update_job(job_id, **updates)
-            self._runtime_passwords.pop(job_id, None)
+            self._runtime_passwords.pop(job_id)
         return self._decorate_job(job)
 
     def tail_log(self, job_id: str, lines: int = 200) -> str:
@@ -253,7 +260,7 @@ class BuildService:
             raise BuildNotFoundError("Build job not found")
         if not job.get("remote_log_path"):
             return ""
-        server = self._with_runtime_password(self._get_server(job["server_id"]), self._runtime_passwords.get(job_id, ""))
+        server = self._with_runtime_password(self._get_server(job["server_id"]), self._runtime_passwords.get(job_id))
         return self._backend(server).tail_log(server=server, log_path=job["remote_log_path"], lines=lines)
 
     def cancel_job(self, job_id: str) -> dict[str, Any]:
@@ -261,9 +268,9 @@ class BuildService:
         if not job:
             raise BuildNotFoundError("Build job not found")
         if job["status"] in TERMINAL_JOB_STATUSES:
-            self._runtime_passwords.pop(job_id, None)
+            self._runtime_passwords.pop(job_id)
             return self._decorate_job(job)
-        server = self._with_runtime_password(self._get_server(job["server_id"]), self._runtime_passwords.get(job_id, ""))
+        server = self._with_runtime_password(self._get_server(job["server_id"]), self._runtime_passwords.get(job_id))
         if job.get("remote_session"):
             self._backend(server).cancel(server=server, session=job["remote_session"])
         cancelled = self.store.update_job(
@@ -271,7 +278,7 @@ class BuildService:
             status=JOB_CANCELLED,
             finished_at=utc_now_iso(),
         )
-        self._runtime_passwords.pop(job_id, None)
+        self._runtime_passwords.pop(job_id)
         return self._decorate_job(cancelled)
 
     def set_job_password(self, job_id: str, server_password: str) -> dict[str, Any]:
@@ -279,7 +286,7 @@ class BuildService:
         if not job:
             raise BuildNotFoundError("Build job not found")
         if server_password and job["status"] not in TERMINAL_JOB_STATUSES:
-            self._runtime_passwords[job_id] = server_password
+            self._runtime_passwords.set(job_id, server_password)
         return self._decorate_job(job)
 
     def discover_workspaces(self, server_id: str, server_password: str = "", base_dir: str = "") -> list[str]:

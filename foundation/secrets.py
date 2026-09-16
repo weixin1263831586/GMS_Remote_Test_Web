@@ -31,7 +31,17 @@ def _validate_key(raw: bytes) -> bytes:
 
 def _key_path() -> Path:
     configured = os.getenv("GMS_SECRET_KEY_FILE", "").strip()
-    return Path(configured) if configured else settings.data_root / "secrets/master.key"
+    if configured:
+        return Path(configured)
+
+    # Secrets under configs/secrets must survive cleanup/recreation of the
+    # runtime data directory.  Keep the data-root location as a legacy
+    # fallback so existing deployments continue using their current key.
+    canonical = settings.project_root / "configs/secrets/master.key"
+    legacy = settings.data_root / "secrets/master.key"
+    if canonical.exists() or not legacy.exists():
+        return canonical
+    return legacy
 
 
 def _load_key() -> bytes:
@@ -40,6 +50,30 @@ def _load_key() -> bytes:
         return _validate_key(injected.encode("ascii"))
 
     path = _key_path()
+    legacy_path = settings.data_root / "secrets/master.key"
+    canonical_path = settings.project_root / "configs/secrets/master.key"
+    if path == legacy_path and not canonical_path.exists():
+        # Preserve existing deployments while moving the default key beside
+        # the encrypted configuration it protects.  Use exclusive creation
+        # so two Web/Worker processes cannot overwrite each other's key.
+        try:
+            canonical_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            descriptor = os.open(
+                canonical_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            try:
+                os.write(descriptor, legacy_path.read_bytes())
+            finally:
+                os.close(descriptor)
+            path = canonical_path
+        except FileExistsError:
+            path = canonical_path
+        except OSError:
+            # A read-only deployment can continue with the legacy key; the
+            # next writable startup can complete the migration.
+            pass
     if path.exists():
         mode = stat.S_IMODE(path.stat().st_mode)
         if mode & 0o077:

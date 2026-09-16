@@ -1917,6 +1917,21 @@
         "title": "SecurityPageViewRequest",
         "type": "object"
       },
+      "SingleIssueAnalysisRequest": {
+        "properties": {
+          "issue_id": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 9.223372036854776e+18,
+            "title": "Issue Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "issue_id"
+        ],
+        "title": "SingleIssueAnalysisRequest",
+        "type": "object"
+      },
       "SuiteApkAnalyzeRequest": {
         "properties": {
           "path": {
@@ -15202,6 +15217,41 @@
         "summary": "Get Daily Brief Agent Profiles"
       }
     },
+    "/api/redmine-agent/daily-brief/analyze-issue": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SingleIssueAnalysisRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Single Issue"
+      }
+    },
     "/api/redmine-agent/daily-brief/config": {
       "get": {
         "responses": {
@@ -15336,6 +15386,42 @@
           }
         },
         "summary": "Run Daily Brief"
+      }
+    },
+    "/api/redmine-agent/daily-brief/runs/{run_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Brief Run"
       }
     },
     "/api/redmine-agent/daily-brief/runs/{run_id}/cancel": {
@@ -15603,7 +15689,7 @@
     },
     "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/save-case": {
       "post": {
-        "description": "把一次晨报 AI 分析结果沉淀为本地 case_fact（FTS 可检索）。\n\n只写本地知识库，不做任何 Redmine 写操作；重复保存按 issue_id 覆盖\n（upsert，保留 created_at）。run_id 指定用户当前查看的晨报。",
+        "description": "把一次晨报**诊断**分析结果沉淀为本地 case_fact（FTS 可检索）。\n\n审核意见（P1）：批量 triage 的结果只是待办摘要（无根因），且其执行\n状态（completed）不是 Redmine 工单状态——一律拒绝保存，避免把错误\nstatus 和 AI 推导写进知识库。只有 evidence_gate 判定为 diagnostic 的\n深度分析可以保存。\n\n只写本地知识库，不做任何 Redmine 写操作。字段以\nRedmineCaseExtractor 从本地扫描库提取的 Redmine 事实为基底，AI 结论\n仅覆盖结论性字段；落库为 non-destructive merge（已有非空事实字段不\n被空值清空）。重复保存按 issue_id upsert，保留 created_at。\nrun_id 指定用户当前查看的晨报。",
         "parameters": [
           {
             "in": "path",

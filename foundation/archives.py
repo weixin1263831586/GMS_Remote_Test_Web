@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import re
+import stat
+import subprocess
 import tarfile
 import urllib.parse
 import zipfile
@@ -14,9 +16,13 @@ ARCHIVE_EXTENSIONS = (
     '.tgz',
     '.tar.bz2',
     '.tar',
-    '.rar',
-    '.7z',
 )
+# Extensions accepted at upload time (test suites are large; rar/7z travel
+# through the system-extractor path with preflight + post-scan, NOT through
+# `tar -xf`). Extraction dispatch is by CONTENT sniffing, never by filename
+# alone — a tar renamed to .rar used to fall into the raw `tar -xf` path and
+# bypass the member/budget/symlink policy entirely (review P1).
+UPLOAD_ARCHIVE_EXTENSIONS = (*ARCHIVE_EXTENSIONS, '.rar', '.7z')
 _SANITIZE_FILENAME_RE = re.compile(r'[^\w\-_.\[\]]')
 _SANITIZE_DIRNAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
 MAX_ARCHIVE_FILES = 10_000
@@ -52,6 +58,43 @@ def is_complete_archive_file(path: str) -> bool:
         return os.path.getsize(path) > 0
     except OSError:
         return False
+
+
+def sniff_archive_format(path: str) -> str:
+    """Identify the REAL archive format from file content, not filename.
+
+    Extension-based dispatch let a tarball renamed ``payload.rar`` reach a
+    raw ``tar -xf`` fallback and bypass every member/budget/symlink check
+    (review P1). Dispatch order: zip → tar (any compression, via content
+    probe) → 7z/rar (magic bytes). Returns '' when the content matches no
+    known archive format.
+    """
+    try:
+        with open(path, 'rb') as handle:
+            magic = handle.read(8)
+    except OSError:
+        return ''
+    if not magic:
+        return ''
+    if magic.startswith(b'PK\x03\x04') or magic.startswith(b'PK\x05\x06'):
+        return 'zip'
+    if magic[:2] == b'\x1f\x8b' or magic[:3] == b'BZh':
+        # gzip/bzip2 stream: accept as tar only when tarfile can open it.
+        try:
+            return 'tar' if tarfile.open(path, 'r:*') else ''
+        except (tarfile.TarError, OSError):
+            return ''
+    try:
+        with tarfile.open(path, 'r:') as _probe:
+            _probe.next()
+        return 'tar'
+    except (tarfile.TarError, OSError, EOFError):
+        pass
+    if magic.startswith(b'7z\xbc\xaf\x27\x1c'):
+        return '7z'
+    if magic[:7] == b'Rar!\x1a\x07':
+        return 'rar'
+    return ''
 
 
 def safe_extract_member_path(base_dir: str, member_name: str) -> str:
@@ -95,3 +138,107 @@ def strip_common_archive_root(
             if name not in {root, root + '/'}
         ]
     return '', [(name, name) for name in names]
+
+
+def enforce_post_extraction_safety(base_dir: str) -> None:
+    """Scan a directory extracted by a system tool (rar/7z) and enforce the
+    same constraints applied to zip/tar extraction: reject symlinks, path
+    traversal, file-count bombs, and decompression bombs.
+
+    Without this, ``rar``/``7z`` bypass every safety check that
+    :func:`safe_extract_member_path` and :func:`copy_archive_member`
+    enforce for zip/tar. Lives in foundation so every feature shares ONE
+    archive security policy (review: unify archive extraction).
+    """
+    base = os.path.abspath(base_dir)
+    file_count = 0
+    total_bytes = 0
+    for root, dirs, files in os.walk(base, followlinks=False):
+        for name in [*dirs, *files]:
+            full = os.path.join(root, name)
+            try:
+                mode = os.lstat(full).st_mode
+            except OSError as exc:
+                raise ValueError(f'无法检查压缩包成员: {name}') from exc
+            if stat.S_ISLNK(mode):
+                raise ValueError(f'压缩包包含不安全符号链接: {os.path.relpath(full, base)}')
+            if not stat.S_ISDIR(mode) and not stat.S_ISREG(mode):
+                raise ValueError(f'压缩包包含不安全特殊文件: {os.path.relpath(full, base)}')
+            resolved = os.path.realpath(full)
+            try:
+                confined = os.path.commonpath((base, resolved)) == base
+            except ValueError:
+                confined = False
+            if not confined:
+                raise ValueError(f'压缩包包含不安全路径: {os.path.relpath(full, base)}')
+            if stat.S_ISDIR(mode):
+                continue
+            file_count += 1
+            if file_count > MAX_ARCHIVE_FILES:
+                raise ValueError(f'压缩包文件数量超过限制: {MAX_ARCHIVE_FILES}')
+            try:
+                total_bytes += os.lstat(full).st_size
+            except OSError:
+                pass
+            if total_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
+                raise ValueError(
+                    f'压缩包展开大小超过限制: {MAX_ARCHIVE_EXPANDED_BYTES} bytes'
+                )
+
+
+def preflight_system_archive(
+    archive_path: str,
+    target_dir: str,
+    command: str,
+    *,
+    timeout: int = 120,
+) -> None:
+    """Validate RAR/7z member paths before the external tool writes files."""
+    if command == 'rar':
+        completed = subprocess.run(
+            [command, 'lb', archive_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        members = [(line.strip(), 0) for line in completed.stdout.splitlines()]
+    else:
+        completed = subprocess.run(
+            [command, 'l', '-slt', archive_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        details = completed.stdout.partition('----------')[2]
+        members = []
+        member_name = ''
+        member_size = 0
+        for line in [*details.splitlines(), 'Path = ']:
+            if line.startswith('Path = '):
+                if member_name:
+                    members.append((member_name, member_size))
+                member_name = line.removeprefix('Path = ').strip()
+                member_size = 0
+            elif line.startswith('Size = '):
+                try:
+                    member_size = max(0, int(line.removeprefix('Size = ').strip()))
+                except ValueError:
+                    member_size = 0
+
+    file_count = 0
+    total_bytes = 0
+    for member_name, member_size in members:
+        if not member_name:
+            continue
+        normalized = member_name.replace('\\', '/')
+        safe_extract_member_path(target_dir, normalized)
+        file_count += 1
+        total_bytes += member_size
+        if file_count > MAX_ARCHIVE_FILES:
+            raise ValueError(f'压缩包文件数量超过限制: {MAX_ARCHIVE_FILES}')
+        if total_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
+            raise ValueError(
+                f'压缩包展开大小超过限制: {MAX_ARCHIVE_EXPANDED_BYTES} bytes'
+            )

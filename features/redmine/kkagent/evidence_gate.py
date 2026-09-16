@@ -56,6 +56,35 @@ def is_test_failure_subject(entry: dict[str, Any]) -> bool:
     return any(keyword in subject for keyword in TEST_FAILURE_SUBJECT_KEYWORDS)
 
 
+def bind_claims(
+    result: dict[str, Any], ledger: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """把模型声称的 evidence 条目绑定回真实证据 ID（审核意见 P2）。
+
+    每条声称的 evidence 用 source/reference/fact 拼接成可匹配文本，与 ledger
+    每条证据的引用 token（issue/artifact/snapshot id、路径、查询词）做包含
+    匹配，返回每条 claim 绑定的 evidence_id 列表。空 refs 的 ledger 条目
+    不参与匹配，避免"匹配一切"。
+    """
+    bindings: list[dict[str, Any]] = []
+    for item in result.get("evidence") or []:
+        if not isinstance(item, dict):
+            continue
+        haystack = " ".join(
+            str(item.get(key) or "") for key in ("source", "reference", "fact")
+        ).lower()
+        bound: list[str] = []
+        for entry in ledger:
+            tokens = [str(ref).lower() for ref in entry.get("refs") or [] if str(ref)]
+            if any(token and token in haystack for token in tokens):
+                bound.append(str(entry["evidence_id"]))
+        bindings.append({
+            "reference": str(item.get("reference") or "")[:120],
+            "evidence_ids": bound,
+        })
+    return bindings
+
+
 def evaluate_evidence_gate(
     trace: KkAgentTrace, entry: dict[str, Any]
 ) -> dict[str, Any]:
@@ -199,6 +228,14 @@ def evaluate_evidence_gate(
             for issue_id in trace.evidenced_issue_ids()
             if issue_id != _positive_int(entry.get("issue_id"))
         ),
+        "evidence_ledger": [
+            {
+                "evidence_id": item["evidence_id"],
+                "kind": item["kind"],
+                "reproducible": item["reproducible"],
+            }
+            for item in trace.evidence_ledger()
+        ],
         "session_id": trace.session_id,
         "tool_call_count": len(trace.tool_calls),
     }
@@ -246,10 +283,15 @@ def gate_errors(
         elif not gate.get("attachment_manifest_parsed"):
             errors.append("attachment manifest result was not structured JSON")
         elif gate.get("unread_text_artifact_ids"):
-            errors.append(
-                "text attachments were listed but not read: "
-                + ", ".join(str(value) for value in gate["unread_text_artifact_ids"])
+            # artifact_id 来自不可信 Redmine 附件清单；拼接前清洗换行/控
+            # 制字符，防止把 findings 渲染成新的 prompt 指令行（注入面）。
+            cleaned = ", ".join(
+                "".join(
+                    ch for ch in str(value) if ch.isprintable() and ch not in "\n\r\t"
+                )[:80]
+                for value in gate["unread_text_artifact_ids"]
             )
+            errors.append("text attachments were listed but not read: " + cleaned)
         else:
             errors.append("attachment manifest contained fewer items than the issue snapshot")
     count = int(gate.get("distinct_history_search_count") or 0)
@@ -277,6 +319,27 @@ def gate_errors(
                 "(reproducible=false) cannot alone confirm a root cause — "
                 "downgrade to 'likely' or obtain pinned-commit evidence"
             )
+        elif result.get("root_cause_type") == "confirmed":
+            # Claim 级绑定（审核意见 P2）：轨迹里存在可复现源码证据还不够，
+            # 模型声称的 evidence 必须真的引用了其中一条——否则"源码证据 A
+            # + 无关根因 B"仍会被全局计数误判为已证实。
+            reproducible_ids = {
+                str(item.get("evidence_id"))
+                for item in gate.get("evidence_ledger") or []
+                if item.get("reproducible") is True
+            }
+            bindings = gate.get("claim_bindings") or []
+            bound_to_reproducible = any(
+                set(binding.get("evidence_ids") or []) & reproducible_ids
+                for binding in bindings
+            )
+            if reproducible_ids and bindings and not bound_to_reproducible:
+                errors.append(
+                    "root_cause_type=confirmed claims evidence but none of the "
+                    "cited evidence references the reproducible source call; "
+                    "cite the source path/query of the reproducible evidence "
+                    "in evidence[].reference, or downgrade to 'likely'"
+                )
     if isinstance(result, dict):
         if gate.get("analysis_mode") == "triage":
             if result.get("root_cause_type") != "unknown":
@@ -312,8 +375,12 @@ def apply_gate(result: dict[str, Any], gate: dict[str, Any]) -> None:
 def gate_and_errors(
     trace: KkAgentTrace, entry: dict[str, Any], result: dict[str, Any]
 ) -> tuple[dict[str, Any], list[str]]:
-    """一次性：评估 gate → 写回 result → 返回 (gate, errors)。"""
+    """一次性：评估 gate → 绑定 claim → 写回 result → 返回 (gate, errors)。"""
     gate = evaluate_evidence_gate(trace, entry)
+    # Claim ↔ Evidence Ledger 绑定（审核意见 P2）：把模型声称的 evidence
+    # 绑定回稳定证据 ID，随 gate 一起存档；confirmed 级结论的引用必须
+    # 命中可复现源码证据，而不是仅"轨迹里存在过一次"（gate_errors）。
+    gate["claim_bindings"] = bind_claims(result, trace.evidence_ledger())
     apply_gate(result, gate)
     return gate, gate_errors(gate, result)
 
@@ -323,6 +390,7 @@ __all__ = [
     "MIN_HISTORY_SEARCHES",
     "TEST_FAILURE_SUBJECT_KEYWORDS",
     "apply_gate",
+    "bind_claims",
     "evaluate_evidence_gate",
     "gate_and_errors",
     "gate_errors",

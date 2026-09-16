@@ -97,6 +97,40 @@ class SuiteExtractTests(unittest.TestCase):
 
             self.assertFalse((root / "escape.txt").exists())
 
+    def test_tar_renamed_rar_is_detected_by_content_and_extracted_safely(self):
+        """tar 改名 .rar 不再落入裸 tar -xf：内容嗅探识别为 tar 后必须
+        走 Python 安全解压（路径穿越成员被拒绝）。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "payload.rar"
+            data = b"evil" * 32
+            with tarfile.open(archive, "w") as tf:
+                normal = tarfile.TarInfo("normal.txt")
+                normal.size = len(b"ok")
+                tf.addfile(normal, io.BytesIO(b"ok"))
+                escape = tarfile.TarInfo("../escape.txt")
+                escape.size = len(data)
+                tf.addfile(escape, io.BytesIO(data))
+
+            with self.assertRaises(ValueError):
+                _extract_archive_local_with_progress(
+                    str(archive), str(root / "extract"), ""
+                )
+            extract_dir = root / "extract"
+            self.assertTrue((extract_dir / "normal.txt").exists())
+            self.assertFalse((root / "escape.txt").exists())
+
+    def test_unknown_content_archive_is_rejected(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "mystery.rar"
+            archive.write_bytes(b"definitely not an archive")
+
+            with self.assertRaises(ValueError):
+                _extract_archive_local_with_progress(
+                    str(archive), str(root / "extract"), ""
+                )
+
 
 class RemoteSuiteExtractTests(unittest.IsolatedAsyncioTestCase):
     async def test_remote_extract_uses_third_ssh_result_as_exit_code(self):

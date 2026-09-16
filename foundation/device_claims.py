@@ -279,6 +279,22 @@ class DeviceClaimRegistry:
             finally:
                 self._close(conn)
 
+    def list_by_source(self, source_id: str) -> list[dict[str, Any]]:
+        """Active claims currently held under one source_id."""
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                self._expire(conn, now)
+                rows = conn.execute(
+                    "SELECT * FROM device_claims WHERE source_id=? AND status='active'",
+                    (source_id,),
+                ).fetchall()
+                conn.commit()
+                return [self._claim_dict(row) for row in rows]
+            finally:
+                self._close(conn)
+
     def renew(
         self,
         source_id: str,
@@ -360,7 +376,7 @@ class DeviceClaimRegistry:
         status: str = "released",
         device_keys: list[str] | None = None,
     ) -> int:
-        if status not in {"released", "cancelled", "converted", "expired", "failed"}:
+        if status not in {"released", "cancelled", "converted", "expired", "failed", "reconciled"}:
             raise ValueError("invalid device claim release status")
         clauses = ["source_id=?", "status='active'"]
         values: list[Any] = [source_id]

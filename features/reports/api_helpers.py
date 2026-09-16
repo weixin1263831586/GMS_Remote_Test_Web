@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from features.redmine import get_redmine_config_for_request
 from features.reports.analyzer import ReportAnalyzer
 from features.reports.repository import test_report_db
-from foundation.archives import ARCHIVE_EXTENSIONS
+from foundation.archives import UPLOAD_ARCHIVE_EXTENSIONS
 from foundation.config import ConfigManager
 from foundation.responses import error_response, success_response
 from foundation.uploads import (
@@ -592,7 +592,7 @@ def _rename_downloaded_report_if_needed(file_path: str, filename: str, content_t
 def _ensure_uploaded_report_extension(file_path: str, filename: str, content_type: str = "") -> tuple[str, str]:
     """Ensure uploaded reports keep a parser-recognizable extension."""
     lower_name = (filename or "").lower()
-    if lower_name.endswith(ARCHIVE_EXTENSIONS) or lower_name.endswith(".xml"):
+    if lower_name.endswith(UPLOAD_ARCHIVE_EXTENSIONS) or lower_name.endswith(".xml"):
         return file_path, filename
 
     detected_ext = _detected_report_extension(file_path, content_type)

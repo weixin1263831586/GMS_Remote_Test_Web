@@ -471,35 +471,50 @@ async def burn_firmware(
                     _canonical_devices = ",".join(sorted(devices))
                     # Agent token device ACL: a token scoped to specific
                     # devices must not be driven against anything else.
+                    # 逐设备校验（审核意见 P2）：CSV 聚合串不是设备身份。
                     _agent_record = getattr(
                         request.state, "agent_token_record", None
                     )
-                    if _agent_record is not None:
-                        for _dev in _canonical_devices.split(","):
-                            if not _auth.agent_acl_allows(
-                                _agent_record, "devices", _dev
-                            ):
-                                return error_response(
-                                    f"Agent token 不允许操作设备 {_dev}",
-                                    status_code=403,
-                                )
-                    _wipe = wipe_data is not False
-                    if not _auth.consume_approval_token(
-                        approval_token,
-                        tool="gms_rt_burn_firmware",
-                        device=_canonical_devices,
-                        command=_auth.derive_burn_command(
-                            device=_canonical_devices,
-                            firmware_sha256=firmware_sha256,
-                            wipe_data=_wipe,
-                            burn_mode=burn_mode_for_approval,
-                        ),
+                    if _agent_record is not None and not _auth.agent_acl_allows_all(
+                        _agent_record,
+                        "devices",
+                        [str(dev).strip() for dev in devices if str(dev).strip()],
                     ):
                         return error_response(
-                            "审批令牌无效、已使用或与本次烧录操作"
-                            "（设备/固件/参数）不匹配",
+                            f"Agent token 不允许操作设备 {_canonical_devices}",
                             status_code=403,
                         )
+                    _wipe = wipe_data is not False
+                    # 审批消费时机（审核意见 P2）：一次性 token 在全部
+                    # deterministic preflight 通过、即将执行第一个破坏性
+                    # 动作时才消费——否则"设备不在 fastboot/路由不匹配/
+                    # 校验失败"等无损失败会把用户刚批准的 5 分钟 token 白白
+                    # 烧掉。两个分支（USB/IP ownership 交还 / 本地 fastboot
+                    # 重启）各自在破坏点前调用本闭包，恰好消费一次。
+                    _approval_consumed = False
+
+                    def _consume_agent_burn_approval():
+                        nonlocal _approval_consumed
+                        if _approval_consumed:
+                            return None
+                        _approval_consumed = True
+                        if not _auth.consume_approval_token(
+                            approval_token,
+                            tool="gms_rt_burn_firmware",
+                            device=_canonical_devices,
+                            command=_auth.derive_burn_command(
+                                device=_canonical_devices,
+                                firmware_sha256=firmware_sha256,
+                                wipe_data=_wipe,
+                                burn_mode=burn_mode_for_approval,
+                            ),
+                        ):
+                            return error_response(
+                                "审批令牌无效、已使用或与本次烧录操作"
+                                "（设备/固件/参数）不匹配",
+                                status_code=403,
+                            )
+                        return None
 
                 # Upload upgrade_tool only after the firmware source has been
                 # validated. Missing paths must not reboot devices into loader.
@@ -652,7 +667,13 @@ async def burn_firmware(
                     # ---- ownership handoff：烧写前显式
                     # 释放设备——暂停通用重连 watchdog + target 侧 vhci
                     # detach + fail-closed 复核，保证源主机物理持有设备。
+                    # 这是第一个破坏性动作：审批 token 在此消费。
                     # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
+                    _approval_failure = (
+                        _consume_agent_burn_approval() if agent_burn else None
+                    )
+                    if _approval_failure is not None:
+                        return _approval_failure
                     released, release_error = await _release_usbip_devices_to_source(
                         ssh, usbip_flash_routes,
                     )
@@ -763,6 +784,13 @@ async def burn_firmware(
                 # Rockchip update.img is written by upgrade_tool in Loader
                 # mode. A device selected in Fastboot first returns to Android
                 # so the established `adb reboot loader` path remains valid.
+                # fastboot reboot 是本链路第一个破坏性动作：审批 token
+                # 在此消费（此前所有 preflight 均已通过）。
+                _approval_failure = (
+                    _consume_agent_burn_approval() if agent_burn else None
+                )
+                if _approval_failure is not None:
+                    return _approval_failure
                 fastboot_devices = [
                     device
                     for device, protocol in protocols.items()

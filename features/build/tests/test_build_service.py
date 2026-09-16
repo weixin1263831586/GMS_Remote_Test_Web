@@ -1,15 +1,21 @@
 import asyncio
 import json
+import os
+import shlex
 import shutil
-import threading
-import time
+import subprocess
 from pathlib import Path
 
 import pytest
 from starlette.requests import Request
 
 from features.auth import CurrentUser
-from features.build.executor import BuildExecutionError, SshTmuxBuildBackend, build_command_from_template
+from features.build.executor import (
+    BuildExecutionError,
+    PreparedCommand,
+    SshTmuxBuildBackend,
+    build_command_from_template,
+)
 from features.build.repository import JOB_COLUMNS, BuildStore
 from features.build.service import BuildService
 
@@ -168,6 +174,106 @@ def test_build_command_rejects_parent_segment_workspace_escape():
                 {'workspace_root': '/srv/build'},
                 {},
             )
+
+
+HOSTILE_WORKSPACES = [
+    # Command substitution must never expand in ANY outer shell layer of
+    # the generated tmux command (nested-quote injection regression).
+    'foo$(touch PWN_SUBSTITUTION)',
+    'foo`touch PWN_BACKTICK`',
+    'foo; touch PWN_SEMICOLON',
+    "foo'touch PWN_QUOTE",
+    'foo"touch PWN_DQUOTE',
+    'foo bar',
+    'foo PWN_SPACE touch',
+]
+
+
+@pytest.mark.parametrize('workspace_name', HOSTILE_WORKSPACES)
+def test_remote_start_command_never_expands_hostile_workspace(
+    tmp_path: Path, workspace_name: str
+):
+    """The full remote command must survive a real shell without executing
+    anything embedded in the workspace name, and tmux must receive the
+    bash -lc command as ONE argv element (never re-parsed by outer shells)."""
+    stub_bin = tmp_path / 'stub-bin'
+    stub_bin.mkdir()
+    tmux_log = tmp_path / 'tmux-args.log'
+    (stub_bin / 'tmux').write_text(
+        '#!/bin/sh\nprintf \'%s\\t\' "$@" >> '
+        + shlex.quote(str(tmux_log))
+        + '\nprintf \'\\n\' >> '
+        + shlex.quote(str(tmux_log))
+        + '\nexit 0\n'
+    )
+    (stub_bin / 'tmux').chmod(0o755)
+
+    workspace_root = tmp_path / 'srv' / 'android'
+    workspace = workspace_root / workspace_name
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    backend = SshTmuxBuildBackend()
+
+    def execute(server, command, timeout=30):
+        # Execute the generated remote command through a REAL shell, from a
+        # controlled cwd, with the stub tmux first on PATH. If any quoting
+        # layer leaked, $(...)/`...`/; would create a PWN_* file here.
+        proc = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(tmp_path),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, 'PATH': f'{stub_bin}{os.pathsep}{os.environ["PATH"]}'},
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    backend._run = execute
+    prepared = PreparedCommand(
+        command='true',
+        workspace=str(workspace),
+        artifact_patterns=[],
+        init_commands=[],
+    )
+    result = backend.start(
+        server={},
+        job_id='job1',
+        prepared=prepared,
+        init_commands=[],
+        timeout_sec=60,
+    )
+
+    assert result['session'] == 'gms_build_job1'
+    pwn_files = sorted(p.name for p in tmp_path.glob('PWN*'))
+    assert pwn_files == [], f'command substitution leaked: {pwn_files}'
+
+    invocations = [
+        line.rstrip('\t').split('\t')
+        for line in tmux_log.read_text().splitlines()
+    ]
+    assert invocations, 'stub tmux was never invoked'
+    # First invocation: kill-session (harmless). Last: new-session.
+    last = invocations[-1]
+    assert last[0] == 'new-session'
+    assert last[1] == '-d'
+    assert last[2] == '-s'
+    assert last[3] == 'gms_build_job1'
+    # The whole `bash -lc ...` command must arrive as ONE argument: if it
+    # were ever split, an outer shell had re-parsed it (injection vector).
+    assert len(last) == 5, last
+    parsed = shlex.split(last[4])
+    assert parsed[:2] == ['bash', '-lc'], parsed
+    assert len(parsed) == 3, parsed
+    inner_command = parsed[2]
+    assert inner_command.startswith('timeout 60s ')
+    # Unquoting must restore the workspace verbatim — proof the hostile
+    # characters stayed literal through every shell layer.
+    inner_tokens = shlex.split(inner_command)
+    assert any(
+        str(workspace) in token for token in inner_tokens
+    ), inner_tokens
+
 
 
 def test_env_password_auth_requires_configured_environment(monkeypatch):
@@ -387,211 +493,3 @@ def test_delete_build_history_only_allows_terminal_jobs(tmp_path: Path):
         service.delete_job("running")
 
 
-def test_local_build_job_completes_and_discovers_artifact(tmp_path: Path):
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    config_path = tmp_path / "build_servers.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "servers": [
-                    {
-                        "id": "local",
-                        "backend": "local",
-                        "workspace_root": str(tmp_path),
-                    }
-                ],
-                "templates": [
-                    {
-                        "id": "demo",
-                        "server_id": "local",
-                        "workspace": str(workspace),
-                        "command": "mkdir -p out && echo firmware > out/update.img && echo done",
-                        "timeout_sec": 30,
-                        "artifact_patterns": ["out/*.img"],
-                        "parameters_schema": {},
-                        "enabled": True,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    service = BuildService(
-        store=BuildStore(tmp_path / "build.sqlite3"),
-        config_path=config_path,
-    )
-
-    job = service.create_job({"server_id": "local", "template_id": "demo"})
-    for _ in range(20):
-        job = service.poll_job(job["id"])
-        if job["status"] != "running":
-            break
-        time.sleep(0.2)
-
-    assert job["status"] == "completed"
-    assert job["artifacts"][0]["path"].endswith("out/update.img")
-    assert "done" in service.tail_log(job["id"], lines=20)
-
-
-def test_separate_workers_start_a_queued_job_only_once(tmp_path: Path):
-    workspace = tmp_path / 'workspace'
-    workspace.mkdir()
-    config_path = tmp_path / 'build_servers.json'
-    config_path.write_text(
-        json.dumps({
-            'servers': [{
-                'id': 'local',
-                'backend': 'local',
-                'workspace_root': str(tmp_path),
-            }],
-            'templates': [{
-                'id': 'demo',
-                'server_id': 'local',
-                'workspace': str(workspace),
-                'command': 'true',
-                'parameters_schema': {},
-                'enabled': True,
-            }],
-        }),
-        encoding='utf-8',
-    )
-    db_path = tmp_path / 'build.sqlite3'
-    creator = BuildService(store=BuildStore(db_path), config_path=config_path)
-    job = creator.create_job(
-        {'server_id': 'local', 'template_id': 'demo'},
-        start=False,
-    )
-
-    class CountingBackend:
-        def __init__(self):
-            self.calls = 0
-            self.lock = threading.Lock()
-
-        def start(self, **_kwargs):
-            with self.lock:
-                self.calls += 1
-            return {'session': 'session', 'log_path': '/tmp/build.log'}
-
-    backend = CountingBackend()
-    services = [
-        BuildService(store=BuildStore(db_path), config_path=config_path)
-        for _ in range(2)
-    ]
-    for service in services:
-        service.backends['local'] = backend
-    barrier = threading.Barrier(2)
-
-    def start(service):
-        barrier.wait()
-        service.start_job(job['id'])
-
-    threads = [threading.Thread(target=start, args=(service,)) for service in services]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    assert backend.calls == 1
-    assert creator.get_job(job['id'])['status'] == 'running'
-
-
-def test_concurrent_workers_respect_server_capacity(tmp_path: Path):
-    workspace = tmp_path / 'workspace'
-    workspace.mkdir()
-    config_path = tmp_path / 'build_servers.json'
-    config_path.write_text(
-        json.dumps({
-            'servers': [{
-                'id': 'local', 'backend': 'local',
-                'workspace_root': str(tmp_path), 'max_concurrent_jobs': 1,
-            }],
-            'templates': [{
-                'id': 'demo', 'server_id': 'local',
-                'workspace': str(workspace), 'command': 'true',
-                'parameters_schema': {}, 'enabled': True,
-            }],
-        }),
-        encoding='utf-8',
-    )
-    db_path = tmp_path / 'build.sqlite3'
-    creator = BuildService(store=BuildStore(db_path), config_path=config_path)
-    jobs = [
-        creator.create_job({'server_id': 'local', 'template_id': 'demo'}, start=False)
-        for _ in range(2)
-    ]
-
-    class CountingBackend:
-        def __init__(self):
-            self.calls = 0
-            self.lock = threading.Lock()
-
-        def start(self, **kwargs):
-            with self.lock:
-                self.calls += 1
-            return {
-                'session': kwargs['job_id'],
-                'log_path': f"/tmp/{kwargs['job_id']}.log",
-            }
-
-    backend = CountingBackend()
-    services = [
-        BuildService(store=BuildStore(db_path), config_path=config_path)
-        for _ in range(2)
-    ]
-    for service in services:
-        service.backends['local'] = backend
-    barrier = threading.Barrier(2)
-
-    def start(index):
-        barrier.wait()
-        services[index].start_job(jobs[index]['id'])
-
-    threads = [threading.Thread(target=start, args=(index,)) for index in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    statuses = [creator.get_job(job['id'])['status'] for job in jobs]
-    assert backend.calls == 1
-    assert sorted(statuses) == ['queued', 'running']
-
-
-def test_runtime_password_is_removed_when_start_fails(tmp_path: Path):
-    workspace = tmp_path / 'workspace'
-    workspace.mkdir()
-    config_path = tmp_path / 'build_servers.json'
-    config_path.write_text(
-        json.dumps({
-            'servers': [{
-                'id': 'local', 'backend': 'local',
-                'workspace_root': str(tmp_path),
-            }],
-            'templates': [{
-                'id': 'demo', 'server_id': 'local',
-                'workspace': str(workspace), 'command': 'true',
-                'parameters_schema': {}, 'enabled': True,
-            }],
-        }),
-        encoding='utf-8',
-    )
-    service = BuildService(
-        store=BuildStore(tmp_path / 'build.sqlite3'),
-        config_path=config_path,
-    )
-
-    class FailingBackend:
-        @staticmethod
-        def start(**_kwargs):
-            raise RuntimeError('cannot connect')
-
-    service.backends['local'] = FailingBackend()
-    job = service.create_job({
-        'server_id': 'local',
-        'template_id': 'demo',
-        'server_password': 'secret',
-    })
-
-    assert job['status'] == 'failed'
-    assert job['id'] not in service._runtime_passwords

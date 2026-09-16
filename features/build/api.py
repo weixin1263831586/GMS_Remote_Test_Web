@@ -60,12 +60,23 @@ def _owned_build_job(job_id: str, request: Request) -> dict[str, Any]:
 
 
 @router.get("/servers")
-async def list_build_servers():
+async def list_build_servers(
+    # 认证 ≠ 授权(ADR 0006):Agent Service Token 零 scope 不得枚举构建
+    # 服务器元数据(host/端口/认证方式),与 discover 系列同样挂 build.read。
+    _user: CurrentUser | None = Depends(
+        require_permission_when_auth_required("build.read")
+    ),
+):
     return {"success": True, "data": {"items": build_service.list_servers()}}
 
 
 @router.get("/templates")
-async def list_build_templates(enabled_only: bool = Query(False)):
+async def list_build_templates(
+    enabled_only: bool = Query(False),
+    _user: CurrentUser | None = Depends(
+        require_permission_when_auth_required("build.read")
+    ),
+):
     return {"success": True, "data": {"items": build_service.list_templates(enabled_only=enabled_only)}}
 
 

@@ -67,13 +67,27 @@ class CodesearchProvider:
                     raise SourceProviderError("OpenGrok 响应超过读取上限", status_code=502)
                 return raw
         except urllib.error.HTTPError as exc:
-            status = 502 if exc.code >= 500 else 404
+            # 错误模型：上游 5xx/凭据失效 = 依赖故障 → 502（凭据问题
+            # 管理员可修，不能让 agent 误判为“文件不存在”而放弃）；
+            # 400/422 = 查询非法 → 422；404 保留 404。
+            if exc.code in (400, 422):
+                status = 422
+            elif exc.code == 404:
+                status = 404
+            else:
+                status = 502
             raise SourceProviderError(
                 f"OpenGrok HTTP {exc.code}: {path}", status_code=status
             ) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            # 超时按错误模型映射 504（agents 靠状态码决定 retry vs fix）。
+            timed_out = isinstance(exc, TimeoutError) or (
+                isinstance(exc, urllib.error.URLError)
+                and isinstance(getattr(exc, "reason", None), TimeoutError)
+            )
             raise SourceProviderError(
-                f"OpenGrok 请求失败: {type(exc).__name__}", status_code=502
+                f"OpenGrok 请求失败: {type(exc).__name__}",
+                status_code=504 if timed_out else 502,
             ) from exc
 
     def _request_json(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -162,7 +176,15 @@ class CodesearchProvider:
         if isinstance(results, dict):
             for raw_path, raw_hits in results.items():
                 repo_path = _strip_opengrok_path(str(raw_path), self.config.project)
-                for hit in (raw_hits or [])[:CODESEARCH_MAX_HITS_PER_FILE]:
+                # 畸形上游（代理错误页/索引损坏）可能返回非 list 的
+                # hits 值；按依赖数据损坏映射 502，而不是 TypeError→500。
+                if not isinstance(raw_hits, list):
+                    raise SourceProviderError(
+                        "OpenGrok 返回了无法解析的 results 结构（hits 非"
+                        " 列表）；请检查上游索引/代理",
+                        status_code=502,
+                    )
+                for hit in raw_hits[:CODESEARCH_MAX_HITS_PER_FILE]:
                     if not isinstance(hit, dict):
                         continue
                     snippet = _strip_html_tags(str(hit.get("line") or ""))[:400]

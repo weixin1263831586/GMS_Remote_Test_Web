@@ -7,11 +7,15 @@ Composes with :class:`KnowledgeSchemaMixin`. All JSON columns are stored with
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from typing import Any
 
 from .knowledge_schema import KnowledgeSchemaMixin
 from .users import _now
+
+
+logger = logging.getLogger(__name__)
 
 
 class RedmineKnowledgeDB(KnowledgeSchemaMixin):
@@ -31,41 +35,49 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
         if not issue_id:
             raise ValueError("case_fact requires issue_id")
         now = _now()
-        existing = self.get_case_fact(issue_id)
-        if merge_missing and existing:
-            payload = self._merge_case_fact_payload(payload, existing)
-        created_at = (existing or {}).get("created_at") or now
-        fields = {
-            "issue_id": issue_id,
-            "subject": payload.get("subject") or "",
-            "status_name": payload.get("status_name") or "",
-            "assigned_to_name": payload.get("assigned_to_name") or "",
-            "project_name": payload.get("project_name") or "",
-            "category": payload.get("category") or "",
-            "chip_platform": payload.get("chip_platform") or "",
-            "android_version": payload.get("android_version") or "",
-            "certification_type": payload.get("certification_type") or "",
-            "module": payload.get("module") or "",
-            "product_form": payload.get("product_form") or "",
-            "region": payload.get("region") or "",
-            "error_signature": payload.get("error_signature") or "",
-            "problem_summary": payload.get("problem_summary") or "",
-            "symptoms_json": self._json_value(payload.get("symptoms") or payload.get("symptoms_json") or []),
-            "root_cause": payload.get("root_cause") or "",
-            "solution": payload.get("solution") or "",
-            "verification": payload.get("verification") or "",
-            "reply_template": payload.get("reply_template") or "",
-            "keywords_json": self._json_value(payload.get("keywords") or payload.get("keywords_json") or []),
-            "evidence_json": self._json_value(payload.get("evidence") or payload.get("evidence_json") or {}),
-            "doc_excerpt": payload.get("doc_excerpt") or "",
-            "confidence": float(payload.get("confidence") or 0),
-            "source_quality": payload.get("source_quality") or "",
-            "created_at": created_at,
-            "updated_at": now,
-        }
-        columns = ", ".join(fields.keys())
-        placeholders = ", ".join("?" for _ in fields)
+        # 单事务 read-merge-write（审核意见 P2）：旧实现先独立连接读、再
+        # 开另一连接写，多进程（Web/Worker/CLI）并发保存同一 issue 时
+        # 后写者整行覆盖前者的合并结果。BEGIN IMMEDIATE 持写锁完成整个
+        # RMW，配合 schema 层 WAL + busy_timeout 消除丢失更新。
         with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM redmine_case_facts WHERE issue_id=?", (issue_id,)
+            ).fetchone()
+            existing = self._decode_row(row) if row else {}
+            if merge_missing and existing:
+                payload = self._merge_case_fact_payload(payload, existing)
+            created_at = existing.get("created_at") or now
+            fields = {
+                "issue_id": issue_id,
+                "subject": payload.get("subject") or "",
+                "status_name": payload.get("status_name") or "",
+                "assigned_to_name": payload.get("assigned_to_name") or "",
+                "project_name": payload.get("project_name") or "",
+                "category": payload.get("category") or "",
+                "chip_platform": payload.get("chip_platform") or "",
+                "android_version": payload.get("android_version") or "",
+                "certification_type": payload.get("certification_type") or "",
+                "module": payload.get("module") or "",
+                "product_form": payload.get("product_form") or "",
+                "region": payload.get("region") or "",
+                "error_signature": payload.get("error_signature") or "",
+                "problem_summary": payload.get("problem_summary") or "",
+                "symptoms_json": self._json_value(payload.get("symptoms") or payload.get("symptoms_json") or []),
+                "root_cause": payload.get("root_cause") or "",
+                "solution": payload.get("solution") or "",
+                "verification": payload.get("verification") or "",
+                "reply_template": payload.get("reply_template") or "",
+                "keywords_json": self._json_value(payload.get("keywords") or payload.get("keywords_json") or []),
+                "evidence_json": self._json_value(payload.get("evidence") or payload.get("evidence_json") or {}),
+                "doc_excerpt": payload.get("doc_excerpt") or "",
+                "confidence": float(payload.get("confidence") or 0),
+                "source_quality": payload.get("source_quality") or "",
+                "created_at": created_at,
+                "updated_at": now,
+            }
+            columns = ", ".join(fields.keys())
+            placeholders = ", ".join("?" for _ in fields)
             conn.execute(
                 f"INSERT OR REPLACE INTO redmine_case_facts ({columns}) VALUES ({placeholders})",
                 tuple(fields.values()),
@@ -96,13 +108,32 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
         for key in cls._MERGE_TEXT_COLUMNS:
             if not str(merged.get(key) or "").strip():
                 merged[key] = existing.get(key) or ""
+        # error_signature 是领域事实，provenance 占位符（历史版本写入的
+        # "daily-brief:<date>"）不得覆盖已有真实签名（审核意见 P1）。
+        incoming_signature = str(merged.get("error_signature") or "").strip()
+        existing_signature = str(existing.get("error_signature") or "").strip()
+        if (
+            incoming_signature.startswith("daily-brief:")
+            and existing_signature
+            and not existing_signature.startswith("daily-brief:")
+        ):
+            merged["error_signature"] = existing_signature
+        # 集合字段 union/dedupe（审核意见 P1）：新 evidence/keywords 非空
+        # 时不再整体覆盖已有集合——dict 做 key 级合并（list 值保序去重
+        # 合并），list 做保序去重；只有 payload 为空才整体保留已有值。
         for payload_key, existing_key in (
             ("keywords", "keywords_json"),
             ("evidence", "evidence_json"),
             ("symptoms", "symptoms_json"),
         ):
-            if not merged.get(payload_key) and existing.get(existing_key):
-                merged[payload_key] = existing.get(existing_key)
+            incoming = merged.get(payload_key)
+            existing_value = existing.get(existing_key)
+            if not incoming and existing_value:
+                merged[payload_key] = existing_value
+            elif incoming and existing_value:
+                merged[payload_key] = cls._union_collections(
+                    incoming, existing_value
+                )
         # 质量分与结论绑定：根因（或方案）被新 AI 结论替换时，置信度必须
         # 跟着替换值走，不能继承旧结论的高置信度（回归：verified 根因被
         # AI 猜测覆盖后 confidence 仍是 1.0）。
@@ -118,7 +149,33 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             merged["confidence"] = new_conf
         else:
             merged["confidence"] = max(old_conf, new_conf)
+        # 质量标签仲裁（审核意见 P2）：save-case 恒带 "daily_brief_ai"，
+        # 不能覆盖批量导入得到的更高分级（"high" 等）——否则一次晨报保存
+        # 就把已有质量分级降级。仅当新来源质量更高时才更新。
+        merged["source_quality"] = cls._better_source_quality(
+            str(payload.get("source_quality") or ""),
+            str(existing.get("source_quality") or ""),
+        )
         return merged
+
+    # 质量分级从高到低；跨级保存只升不降。
+    _SOURCE_QUALITY_RANK = ("high", "medium", "daily_brief_ai", "low", "")
+
+    @classmethod
+    def _better_source_quality(cls, incoming: str, existing: str) -> str:
+        incoming_rank = (
+            cls._SOURCE_QUALITY_RANK.index(incoming)
+            if incoming in cls._SOURCE_QUALITY_RANK else len(cls._SOURCE_QUALITY_RANK)
+        )
+        existing_rank = (
+            cls._SOURCE_QUALITY_RANK.index(existing)
+            if existing in cls._SOURCE_QUALITY_RANK else len(cls._SOURCE_QUALITY_RANK)
+        )
+        # 未知标签按中性处理：incoming 非空即采纳（保持向后兼容），
+        # 已有已知分级不被未知标签覆盖。
+        if incoming and existing_rank < len(cls._SOURCE_QUALITY_RANK) and incoming_rank == len(cls._SOURCE_QUALITY_RANK):
+            return existing
+        return incoming if incoming_rank <= existing_rank or not existing else existing
 
     @staticmethod
     def _conclusion_replaced(
@@ -130,6 +187,46 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             if incoming and incoming != str(existing.get(key) or "").strip():
                 return True
         return False
+
+    @staticmethod
+    def _dedupe_list(items: list) -> list:
+        """保序去重；dict/list 成员按稳定 JSON 形态判重。"""
+        seen: set[str] = set()
+        result = []
+        for item in items:
+            marker = (
+                json.dumps(item, ensure_ascii=False, sort_keys=True)
+                if isinstance(item, (dict, list))
+                else str(item)
+            )
+            if marker in seen:
+                continue
+            seen.add(marker)
+            result.append(item)
+        return result
+
+    @classmethod
+    def _union_collections(cls, incoming: Any, existing_value: Any) -> Any:
+        """集合字段合并（审核意见 P1）：union/dedupe 而非整体覆盖。
+
+        - dict：key 级合并；同 key 且双方都是 list 时保序去重合并
+          （多轮晨报的 ``daily_brief_evidence`` 逐轮累积，旧证据不丢），
+          其余同 key 值由新值更新；
+        - list：existing 在前、incoming 在后保序去重；
+        - 形状不兼容时保留 incoming（调用方语义：新值可用）。
+        """
+        if isinstance(incoming, dict) and isinstance(existing_value, dict):
+            merged_dict = dict(existing_value)
+            for key, value in incoming.items():
+                old_value = merged_dict.get(key)
+                if isinstance(old_value, list) and isinstance(value, list):
+                    merged_dict[key] = cls._dedupe_list(old_value + value)
+                else:
+                    merged_dict[key] = value
+            return merged_dict
+        if isinstance(incoming, list) and isinstance(existing_value, list):
+            return cls._dedupe_list(existing_value + incoming)
+        return incoming
 
     def _replace_fts(self, conn: sqlite3.Connection, fields: dict[str, Any]) -> None:
         try:
@@ -150,8 +247,10 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
                     " ".join(self._decode_list(fields["keywords_json"])),
                 ),
             )
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as exc:
+            # FTS 半更新（DELETE 成功、INSERT 失败）会让该案例静默退出
+            # 检索；至少留下可排查的日志（审核意见 P3）。
+            logger.warning("FTS index update failed for issue %s: %s", fields["issue_id"], exc)
 
     @staticmethod
     def _decode_list(value: Any) -> list:

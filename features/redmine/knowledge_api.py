@@ -251,6 +251,16 @@ async def save_daily_brief_case(brief_date: str, issue_id: int, request: Request
             f"issue {issue_id} in {run.run_id} is a triage summary — run "
             "深度分析此项 first"
         ).to_response()
+    # ADR 0009：native（kkagent_markdown）摘要在独立提取契约存在之前
+    # 不提供结构化案例保存——它没有 root_cause/solution/confidence 等
+    # 结构化字段，落库只会得到空结论的 FTS 壳记录（UI 已隐藏按钮，这里
+    # 挡 API 直连绕过）。
+    if record.result.get("result_format") == "kkagent_markdown":
+        return ApiError.conflict(
+            f"native markdown summary (issue {issue_id}) has no structured "
+            "case fields yet; structured case saving requires the JSON "
+            "diagnostic result format"
+        ).to_response()
     service = _knowledge(request)
     issue_row: dict[str, Any] | None = None
     issue_repository = getattr(service, "issue_repository", None)

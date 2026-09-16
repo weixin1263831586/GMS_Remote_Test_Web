@@ -504,7 +504,7 @@ class RedmineAgent(
         creds = self.config_manager.load_redmine_credentials() or {}
         api_key = self.config_manager.load_redmine_api_key()
         if not (api_key or (creds.get("username") and creds.get("password"))):
-            raise RuntimeError("Redmine credentials not configured")
+            raise RuntimeError(self.config_manager.redmine_credentials_error_message())
         return RedmineClient(redmine_config["base_url"], creds.get("username", ""), creds.get("password", ""), api_key=api_key)
 
     @staticmethod

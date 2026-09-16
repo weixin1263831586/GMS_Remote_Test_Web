@@ -58,13 +58,36 @@ def _config_for_request(request: Request | None):
     return get_redmine_config_for_request(request)
 
 
-def _missing_credentials_payload(message: str | None = None) -> dict[str, Any]:
+def _missing_credentials_payload(
+    request: Request | None = None,
+    message: str | None = None,
+) -> dict[str, Any]:
+    credential_error = ""
+    if request is not None:
+        try:
+            credential_error = str(
+                _config_for_request(request)
+                .redmine_credentials_status()
+                .get("credential_error") or ""
+            )
+        except Exception:
+            pass
+    unreadable = credential_error == "stored_secret_unreadable"
     return {
         "success": True,
         "data": {
             "configured": False,
-            "error": "Redmine credentials not configured",
-            "message": message or "请先在 Redmine 看板设置中保存 Redmine 地址、账号和密码/API 密码。",
+            "error": (
+                "Redmine credentials cannot be decrypted"
+                if unreadable else "Redmine credentials not configured"
+            ),
+            "credential_error": credential_error,
+            "message": message or (
+                "已保存的 Redmine 凭据无法由当前主密钥解密；请恢复原 master.key，"
+                "或在当前账号的设置页重新保存凭据。"
+                if unreadable else
+                "请先在 Redmine 看板设置中保存 Redmine 地址、账号和密码/API 密码。"
+            ),
         },
     }
 
@@ -171,7 +194,7 @@ async def get_workload_statistics(
     refresh: bool = Query(False),
 ):
     if not _has_redmine_credentials(request):
-        return _missing_credentials_payload()
+        return _missing_credentials_payload(request)
     service = _service_for_request(request)
     # Check cache
     stats_cfg = _get_redmine_stats_config(request)
@@ -429,7 +452,7 @@ async def get_department_overdue_statistics(
     refresh: bool = Query(False),
 ):
     if not _has_redmine_credentials(request):
-        return _missing_credentials_payload()
+        return _missing_credentials_payload(request)
     service = _service_for_request(request)
     now_ts = datetime.now().timestamp()
     stats_cfg = _get_redmine_stats_config(request)
@@ -517,7 +540,7 @@ async def get_project_statistics(
     refresh: bool = Query(False),
 ):
     if not _has_redmine_credentials(request):
-        return _missing_credentials_payload()
+        return _missing_credentials_payload(request)
     service = _service_for_request(request)
     now_ts = datetime.now().timestamp()
     manager = _config_for_request(request)

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from foundation.archives import (
-    ARCHIVE_EXTENSIONS,
+    UPLOAD_ARCHIVE_EXTENSIONS,
     copy_archive_member,
     safe_extract_member_path,
 )
@@ -122,7 +122,7 @@ class ReportAnalysisAgent:
             return tarfile.is_tarfile(path)
         if lower.endswith((".rar", ".7z")):
             return True
-        return bool(lower.endswith(ARCHIVE_EXTENSIONS))
+        return bool(lower.endswith(UPLOAD_ARCHIVE_EXTENSIONS))
 
     def _extract_archive(self, archive_path: str, target_dir: str) -> bool:
         lower = archive_path.lower()
@@ -177,7 +177,7 @@ class ReportAnalysisAgent:
         command = "rar" if archive_path.lower().endswith(".rar") and shutil.which("rar") else "7z"
         if not shutil.which(command):
             raise RuntimeError(f"{command} command not found")
-        from .archive import _preflight_system_archive
+        from foundation.archives import preflight_system_archive as _preflight_system_archive
 
         _preflight_system_archive(archive_path, target_dir, command)
         args = [command, "x", "-y", archive_path, target_dir + os.sep] if command == "rar" else [
@@ -190,7 +190,7 @@ class ReportAnalysisAgent:
         subprocess.run(args, check=True, capture_output=True, timeout=120)
         # System rar/7z bypass the zip/tar safety layer; enforce the same
         # constraints post-extraction (symlinks, path traversal, bombs).
-        from .archive import _enforce_post_extraction_safety
+        from foundation.archives import enforce_post_extraction_safety as _enforce_post_extraction_safety
         _enforce_post_extraction_safety(target_dir)
 
     def _analyze_expanded_files(self, files: list[str]) -> dict[str, Any] | None:
