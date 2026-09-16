@@ -68,12 +68,19 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("explicit device selection", body["error"])
 
-    async def test_scrcpy_response_uses_shared_novnc_url_helper(self):
+    async def test_scrcpy_probes_websockify_on_loopback(self):
         ssh_manager = FakeSshManager()
+        # 初始扫描：未在投屏（需启动）；启动后轮询：健康（日志 Connected）。
+        health_states = iter([(False, None), (True, "4321")])
 
         with (
             patch.object(screens_api.runtime, "config_manager", FakeConfigManager()),
             patch.object(screens_api.runtime, "ssh_manager", ssh_manager),
+            patch.object(
+                screens_api.DeviceUtils,
+                "check_scrcpy_healthy",
+                side_effect=lambda *_args, **_kw: next(health_states),
+            ),
             patch.object(
                 screens_api.runtime,
                 "get_client_id_from_request",
@@ -104,13 +111,69 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
 
         body = json.loads(response.body)
         self.assertTrue(body["success"])
-        self.assertEqual(
-            body["vnc_sessions"][0]["url"],
-            "http://192.168.0.2:6080/vnc.html?autoconnect=true&resize=scale",
-        )
-        curl_check = "http://192.168.0.2:6080/vnc.html?resize=scale --connect-timeout 3"
+        # websockify 只监听 127.0.0.1（浏览器走同源代理），可用性探测必须
+        # 对 loopback 发起；对 ubuntu_host 的外部地址探测会误报不可用。
+        curl_check = "http://127.0.0.1:6080/vnc.html?resize=scale --connect-timeout 3"
         self.assertTrue(any(curl_check in cmd for cmd in ssh_manager.commands))
-        self.assertTrue(any("--no-control" in cmd for cmd in ssh_manager.commands))
+        self.assertEqual(body["vnc_sessions"][0]["message"], "VNC view available")
+        # 直连 URL 对浏览器不可达，不再下发。
+        self.assertNotIn("url", body["vnc_sessions"][0])
+        self.assertTrue(any("scrcpy -s ABC-123" in cmd for cmd in ssh_manager.commands))
+        self.assertFalse(any("--no-control" in cmd for cmd in ssh_manager.commands))
+
+    async def test_scrcpy_start_failure_reports_log_reason(self):
+        """进程短暂存活但日志无 Connected 时不得误报成功，须带回日志原因。"""
+        ssh_manager = FakeSshManager()
+
+        with (
+            patch.object(screens_api.runtime, "config_manager", FakeConfigManager()),
+            patch.object(screens_api.runtime, "ssh_manager", ssh_manager),
+            # 健康检查始终不通过：进程虽在但投屏从未就绪。
+            patch.object(
+                screens_api.DeviceUtils,
+                "check_scrcpy_healthy",
+                return_value=(False, None),
+            ),
+            patch.object(
+                screens_api,
+                "_scrcpy_log_tail",
+                return_value="[server] ERROR: Could not open video stream: Device is offline",
+            ),
+            patch.object(
+                screens_api.runtime,
+                "get_client_id_from_request",
+                return_value="user-id",
+            ),
+            patch.object(
+                device_support,
+                "acquire_device_operation_claim",
+                return_value=(
+                    "operation:scrcpy:test",
+                    [{
+                        "id": "claim-1",
+                        "device_key": "ats-worker-controller:ABC-123",
+                        "generation": 1,
+                        "owner_id": "user-id",
+                    }],
+                    None,
+                ),
+            ),
+            patch.object(device_support, "release_device_operation_claim"),
+            patch.object(device_support, "audit_device_operation"),
+            # 轮询等待不真 sleep，失败路径 8 次轮询立即走完。
+            patch.object(screens_api.asyncio, "sleep", return_value=None),
+        ):
+            response = await screens_api.show_device_screens(
+                DeviceActionRequest(devices=["ABC-123"]),
+                SimpleNamespace(state=SimpleNamespace()),
+            )
+
+        body = json.loads(response.body)
+        self.assertFalse(body["success"])
+        self.assertIn("投屏启动失败", body["message"])
+        self.assertIn("Device is offline", body["message"])
+        self.assertEqual(body["results"][0]["started"], False)
+        self.assertIn("Device is offline", body["results"][0]["error"])
 
 
 if __name__ == "__main__":

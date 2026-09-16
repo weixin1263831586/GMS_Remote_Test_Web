@@ -68,7 +68,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "reports.read",  # see "user" above
         "devices.use_leased",
         "devices.inventory",
-        "devices.lease",
+        "devices.lease", "devices.read",  # ATS 能力并集（ADR 0012）需要两者
         "redmine.read",
         "artifacts.read_own",
         "apk.analyze_own",

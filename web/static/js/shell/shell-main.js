@@ -1062,6 +1062,17 @@
             try{await loadXTermScripts();}catch(error){if(terminalWorkspace.mountingPanes.get(index)===mountToken)terminalWorkspace.mountingPanes.delete(index);console.error('[Terminal workspace] xterm.js load failed:',error);if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';terminalWorkspaceStatus(index,'加载失败');return;}
             if(terminalWorkspace.mountingPanes.get(index)===mountToken)terminalWorkspace.mountingPanes.delete(index);
             if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;
+            // terminal_ 前缀 WS 在认证部署下要求已提权 session（服务端握手
+            // 直接 403）。switchPage 的门卫覆盖不了恢复/复用路径（提权过期
+            // 后切回终端页），这里在建立 WS 前兜底确认，拒绝时给出可见
+            // 状态而不是哑失败。
+            if(!await ensureTerminalElevation(false,'打开主机终端','主机终端')){
+                if(generation===terminalWorkspace.generation&&paneGeneration===(terminalWorkspace.paneGenerations.get(index)||0)&&currentPage==='terminal'&&body.isConnected){
+                    body.innerHTML='<div class="host-workspace-empty">需要管理员认证后才能打开主机终端</div>';
+                    terminalWorkspaceStatus(index,'等待管理员认证');
+                }
+                return;
+            }
             const el=document.createElement('div');el.className='host-workspace-terminal';body.replaceChildren(el);
             const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:createTerminalTheme(),scrollback:2000,termName:'xterm-256color'});
             const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(el);fit.fit();
@@ -1959,7 +1970,7 @@
                     : `<button class="btn-xxs" data-serial="${serialAttr}" data-click="openDeviceShell" data-r0="dataset.serial" title="${localShellTitle}" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>🐧 adb shell</button>`;
                 const deviceInfoButton = isClusterRemote
                     ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceInfo" data-r0="dataset.serial" data-r1="dataset.worker" title="${inspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>ℹ️ device info</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" data-click="openDeviceConfigExplorer" data-r0="dataset.serial" data-r1="dataset.worker" title="${localInspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>ℹ️ device info</button>`;
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" data-click="openDeviceConfigExplorer" data-r0="dataset.serial" data-r1="dataset.worker" data-testid="device-config-open" title="${localInspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>ℹ️ device info</button>`;
                 const uiControlButton = isClusterRemote
                     ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceUiControl" data-r0="dataset.serial" data-r1="dataset.worker" title="${controlTitle}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>🎯 UI 操控</button>`
                     : `<button class="btn-xxs" data-serial="${serialAttr}" data-click="openUiControl" data-r0="dataset.serial" title="${localControlTitle}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>🎯 UI 操控</button>`;

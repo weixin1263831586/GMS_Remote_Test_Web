@@ -1,5 +1,16 @@
 // Shared modal helpers and Escape-key modal lifecycle management.
 
+// 可聚焦元素选择器：focus trap 与初始聚焦共用同一契约。
+const MODAL_FOCUSABLE_SELECTOR = [
+    '[autofocus]',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    'button:not([disabled])',
+    '[href]',
+    '[tabindex]:not([tabindex="-1"])'
+].join(', ');
+
 function showModalError(modal, message) {
     modal.querySelector('.modal-title').textContent = '❌ 分析失败';
     modal.querySelector('.modal-body').textContent = message;
@@ -15,7 +26,7 @@ function createAnalysisModal(type, title, loadingMessage) {
         <div class="modal-content" style="max-width: 900px; max-height: min(90vh, calc(100dvh - 16px));">
             <div class="modal-header">
                 <span class="modal-title"></span>
-                <span class="modal-close" role="button" tabindex="0" aria-label="关闭">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="text-align: center; padding: 40px;">
@@ -45,11 +56,13 @@ function createAnalysisModal(type, title, loadingMessage) {
 
 const ModalManager = {
     _escListener: null,
+    _trapListener: null,
     _activeModals: [],
     _dynamicModals: new Set(),
     _closeHandlers: new Map(),
     _originalZIndexes: new Map(),
     _focusOrigins: new Map(),
+    _inertedRoots: new Set(),
     _baseZIndex: 12000,
     _stackStep: 20,
 
@@ -192,12 +205,53 @@ const ModalManager = {
             };
             document.addEventListener('keydown', this._escListener);
         }
+        if (!this._trapListener) {
+            // Focus trap：Tab / Shift+Tab 只在栈顶 modal 内循环，
+            // 焦点不得落到被 inert 的背景页面（删除/烧写/停止任务等
+            // 破坏性操作所在的页面尤其重要）。
+            this._trapListener = (event) => {
+                if (event.key !== 'Tab' || this._activeModals.length === 0) {
+                    return;
+                }
+                const topModalId = this._activeModals[this._activeModals.length - 1];
+                const modal = document.getElementById(topModalId);
+                if (!modal) {
+                    return;
+                }
+                const focusables = Array.from(
+                    modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)
+                ).filter(el => !el.disabled && el.getAttribute('tabindex') !== '-1');
+                if (focusables.length === 0) {
+                    event.preventDefault();
+                    modal.focus({ preventScroll: true });
+                    return;
+                }
+                const active = document.activeElement;
+                const inside = modal.contains(active);
+                const first = focusables[0];
+                const last = focusables[focusables.length - 1];
+                if (event.shiftKey) {
+                    if (!inside || active === first) {
+                        event.preventDefault();
+                        last.focus({ preventScroll: true });
+                    }
+                } else if (!inside || active === last) {
+                    event.preventDefault();
+                    first.focus({ preventScroll: true });
+                }
+            };
+            document.addEventListener('keydown', this._trapListener);
+        }
     },
 
     _cleanupEscListener() {
         if (this._escListener && this._activeModals.length === 0) {
             document.removeEventListener('keydown', this._escListener);
             this._escListener = null;
+        }
+        if (this._trapListener && this._activeModals.length === 0) {
+            document.removeEventListener('keydown', this._trapListener);
+            this._trapListener = null;
         }
     },
 
@@ -231,6 +285,47 @@ const ModalManager = {
             }
         });
         document.body.classList.toggle('modal-open', this._activeModals.length > 0);
+        this._syncBackgroundInert();
+    },
+
+    _syncBackgroundInert() {
+        // 背景 inert：modal 打开期间，body 下除 modal 顶层祖先之外的
+        // 所有内容一律不可聚焦/不可交互（主页面本身此前没有 inert，
+        // Tab 可以逃出 modal 落到背景按钮上）。只记录本管理器置过的
+        // inert，避免误清页面自身的 inert 状态。
+        const modalRoots = new Set();
+        for (const modalId of this._activeModals) {
+            const modal = document.getElementById(modalId);
+            if (!modal) continue;
+            let node = modal;
+            while (node.parentElement && node.parentElement !== document.body) {
+                node = node.parentElement;
+            }
+            if (node.parentElement === document.body) {
+                modalRoots.add(node);
+            }
+        }
+        for (const el of [...this._inertedRoots]) {
+            if (!modalRoots.has(el) || this._activeModals.length === 0) {
+                el.inert = false;
+                this._inertedRoots.delete(el);
+            }
+        }
+        if (this._activeModals.length === 0) {
+            return;
+        }
+        for (const child of Array.from(document.body.children)) {
+            if (modalRoots.has(child) || this._inertedRoots.has(child)) {
+                continue;
+            }
+            const tag = child.tagName;
+            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK'
+                || tag === 'TEMPLATE' || tag === 'NOSCRIPT') {
+                continue;
+            }
+            child.inert = true;
+            this._inertedRoots.add(child);
+        }
     },
 
     _restoreZIndex(modalId, modal) {
@@ -252,9 +347,7 @@ const ModalManager = {
             return;
         }
         const content = modal.querySelector('.modal-content');
-        const focusTarget = modal.querySelector(
-            '[autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-        ) || content;
+        const focusTarget = modal.querySelector(MODAL_FOCUSABLE_SELECTOR) || content;
         if (focusTarget) {
             if (focusTarget === content && !content.hasAttribute('tabindex')) {
                 content.setAttribute('tabindex', '-1');

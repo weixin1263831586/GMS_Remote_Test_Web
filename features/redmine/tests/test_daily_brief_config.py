@@ -80,3 +80,10 @@ def test_legacy_budgets_do_not_limit_analysis():
         normalize_daily_brief_config({"max_turns": 50}), extra_turns=6
     ).max_turns == 0
     assert build_brief_analyzer({"max_turns": 20, "issue_timeout_seconds": 60}).timeout_seconds == 0
+
+
+def test_trigger_time_defaults_to_midnight_and_rejects_invalid_values():
+    assert normalize_daily_brief_config({})["trigger_time"] == "00:00"
+    assert normalize_daily_brief_config({"trigger_time": "08:30"})["trigger_time"] == "08:30"
+    assert normalize_daily_brief_config({"trigger_time": "24:00"})["trigger_time"] == "00:00"
+    assert normalize_daily_brief_config({"trigger_time": "8:30"})["trigger_time"] == "00:00"

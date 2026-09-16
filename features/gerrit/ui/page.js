@@ -42,7 +42,11 @@ async function init() {
   restoreGerritProfileState();
   var validTabs = {'personal':1,'department':1,'query':1};
   if (!validTabs[currentTab]) currentTab = 'personal';
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === currentTab));
+  document.querySelectorAll('.tab').forEach(x => {
+    var active = x.dataset.tab === currentTab;
+    x.classList.toggle('active', active);
+    x.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
   document.querySelectorAll('.tab-content').forEach(x => x.classList.toggle('active', x.id === 'tab-' + currentTab));
   const first = (config.dashboard_profiles || [])[0] || {};
   var queryInput = document.getElementById('query');
@@ -106,60 +110,14 @@ function scrollToSection(id) {
   const offset = (header ? header.getBoundingClientRect().height : 0) + 14;
   window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top + window.pageYOffset - offset), behavior:'smooth'});
 }
-const gerritModalStack = [];
-function syncGerritModalState() {
-  const active = gerritModalStack.filter(function(id) {
-    const modal = document.getElementById(id);
-    return modal && modal.classList.contains('show');
-  });
-  gerritModalStack.length = 0;
-  active.forEach(function(id) { gerritModalStack.push(id); });
-  const topIndex = gerritModalStack.length - 1;
-  gerritModalStack.forEach(function(id, index) {
-    const modal = document.getElementById(id);
-    modal.style.zIndex = String(10000 + index * 20);
-    modal.inert = index !== topIndex;
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-hidden', index === topIndex ? 'false' : 'true');
-    if (index === topIndex) modal.setAttribute('aria-modal', 'true');
-    else modal.removeAttribute('aria-modal');
-  });
-  document.documentElement.classList.toggle('modal-open', gerritModalStack.length > 0);
-  document.body.classList.toggle('modal-open', gerritModalStack.length > 0);
-}
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape' && gerritModalStack.length) {
-    e.preventDefault();
-    e.stopPropagation();
-    hideModal(gerritModalStack[gerritModalStack.length - 1]);
-  }
-});
-document.addEventListener('click', function(e) {
-  if (e.target && e.target.classList && e.target.classList.contains('modal')
-      && gerritModalStack[gerritModalStack.length - 1] === e.target.id) {
-    hideModal(e.target.id);
-  }
-});
+// Modal 生命周期统一走共享控制器（web/static/js/embedded-ui/modal-controller.js）：
+// 栈/z-index/inert/aria/Escape/backdrop/focus trap 单一所有者，页面只保留
+// 全局函数别名——运行时冒烟测试与 data-click 契约依赖这些名字。
 function showModal(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const index = gerritModalStack.indexOf(id);
-  if (index >= 0) gerritModalStack.splice(index, 1);
-  gerritModalStack.push(id);
-  el.classList.add('show');
-  syncGerritModalState();
+  window.EmbeddedModalController.open(id);
 }
 function hideModal(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.classList.remove('show');
-  el.inert = false;
-  el.setAttribute('aria-hidden', 'true');
-  el.removeAttribute('aria-modal');
-  el.style.removeProperty('z-index');
-  const index = gerritModalStack.indexOf(id);
-  if (index >= 0) gerritModalStack.splice(index, 1);
-  syncGerritModalState();
+  window.EmbeddedModalController.close(id);
 }
 function notifyUser(title, message, level) {
   level = level || 'info';
@@ -222,12 +180,33 @@ function restoreGerritProfileState() {
 }
 function switchTab(tab) {
   currentTab = tab;
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
+  document.querySelectorAll('.tab').forEach(x => {
+    var active = x.dataset.tab === tab;
+    x.classList.toggle('active', active);
+    x.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
   document.querySelectorAll('.tab-content').forEach(x => x.classList.toggle('active', x.id === 'tab-' + tab));
   saveGerritProfileState();
   if (tab === 'personal') loadPersonal(false);
   if (tab === 'department') loadDepartment(false);
   if (tab === 'query') loadChanges();
+}
+
+// ARIA tablist 方向键导航（←/→ 循环，Home/End 跳转）。
+function gerritTabKeydown(event) {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  if (!tabs.length) return;
+  var index = tabs.indexOf(document.activeElement);
+  if (index === -1) return;
+  var next = null;
+  if (event.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length];
+  else if (event.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
+  else if (event.key === 'Home') next = tabs[0];
+  else if (event.key === 'End') next = tabs[tabs.length - 1];
+  if (!next) return;
+  event.preventDefault();
+  next.focus();
+  if (next.dataset.tab !== currentTab) switchTab(next.dataset.tab);
 }
 function viewMemberInPersonal(owner) {
   owner = String(owner || '').trim();

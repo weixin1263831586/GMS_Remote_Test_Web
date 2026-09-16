@@ -33,7 +33,7 @@ RUN_COLUMNS = (
     "started_at", "finished_at", "snapshot_at", "snapshot_hash",
     "source_sync_status", "data_quality", "last_sync_at",
     "issue_count", "waiting_my_reply_count", "no_reply_3_days_count",
-    "urgent_count", "analysis_backend", "model_name", "device_serial", "prompt_version",
+    "urgent_count", "analysis_backend", "model_name", "device_serial", "analysis_hint", "prompt_version",
     "report_json", "report_markdown", "error",
 )
 ISSUE_COLUMNS = (
@@ -55,7 +55,7 @@ class DailyBriefRepository:
     # 当前 schema 版本（PRAGMA user_version）。每次改 _init_db 的表结构
     # 都必须 +1，让旧库在下一次启动时重放迁移；版本历史见
     # docs/redmine-daily-brief.md 的 schema migration 契约一节。
-    _SCHEMA_VERSION = 2
+    _SCHEMA_VERSION = 4
 
     def __init__(self, owner_root: Path):
         self.owner_root = Path(owner_root)
@@ -110,6 +110,7 @@ class DailyBriefRepository:
                     analysis_backend TEXT NOT NULL DEFAULT '',
                     model_name TEXT NOT NULL DEFAULT '',
                     device_serial TEXT NOT NULL DEFAULT '',
+                    analysis_hint TEXT NOT NULL DEFAULT '',
                     prompt_version TEXT NOT NULL DEFAULT '',
                     report_json TEXT NOT NULL DEFAULT '{}',
                     report_markdown TEXT NOT NULL DEFAULT '',
@@ -200,6 +201,24 @@ class DailyBriefRepository:
                     "ALTER TABLE redmine_daily_brief_runs "
                     "ADD COLUMN device_serial TEXT NOT NULL DEFAULT ''"
                 )
+            if "analysis_hint" not in run_cols:
+                conn.execute(
+                    "ALTER TABLE redmine_daily_brief_runs "
+                    "ADD COLUMN analysis_hint TEXT NOT NULL DEFAULT ''"
+                )
+            # 历史取消只收敛了 run，遗留 issue 仍为 pending/running，UI 会
+            # 优先展示成“排队中”。一次性收敛这些不可能再执行的条目。
+            now = _now()
+            conn.execute(
+                "UPDATE redmine_daily_brief_issues SET status='cancelled', "
+                "finished_at=CASE WHEN finished_at='' THEN ? ELSE finished_at END, "
+                "error='', error_type='' "
+                "WHERE status IN ('pending','running') AND EXISTS ("
+                "SELECT 1 FROM redmine_daily_brief_runs AS run "
+                "WHERE run.run_id=redmine_daily_brief_issues.run_id "
+                "AND run.status='cancelled')",
+                (now,),
+            )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS redmine_daily_brief_jobs (
@@ -379,6 +398,40 @@ class DailyBriefRepository:
                 return run
         return None
 
+    def latest_issue_run_with_report(
+        self, owner_id: str, issue_id: int, *, exclude_run_id: str = ""
+    ) -> tuple[DailyBriefRun, DailyBriefIssue] | None:
+        """Return the newest standalone run that still has a displayable report.
+
+        A cancelled retry may be newer than a prior completed conclusion. Keep
+        the retry as the row's execution state, but allow the UI to retain the
+        earlier report rather than making the conclusion appear deleted.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
+                "AND mode LIKE ? ORDER BY started_at DESC, rowid DESC",
+                (owner_id, f"issue:{int(issue_id)}%"),
+            ).fetchall()
+            for row in rows:
+                run = self._row_to_run(row)
+                if run.run_id == exclude_run_id:
+                    continue
+                match = re.match(r"^issue:(\d+)(?::|$)", run.mode)
+                if not match or int(match.group(1)) != int(issue_id):
+                    continue
+                issue_row = conn.execute(
+                    "SELECT * FROM redmine_daily_brief_issues "
+                    "WHERE run_id=? AND issue_id=?",
+                    (run.run_id, issue_id),
+                ).fetchone()
+                if issue_row is None:
+                    continue
+                issue = self._row_to_issue(issue_row)
+                if str((issue.result or {}).get("detailed_report") or "").strip():
+                    return run, issue
+        return None
+
     def update_run(self, run: DailyBriefRun) -> bool:
         now = _now()
         with self._lock, self._connect() as conn:
@@ -403,6 +456,51 @@ class DailyBriefRepository:
                 f"updated_at=? WHERE run_id=? AND status NOT IN "
                 f"({', '.join('?' * len(TERMINAL_RUN_STATUSES))})",
                 (_now(), run_id, *TERMINAL_RUN_STATUSES),
+            )
+            return bool(cursor.rowcount)
+
+    def cancel_queued_issue_run(self, run_id: str) -> bool:
+        """Immediately converge an unclaimed standalone issue run to cancelled.
+
+        A queued job has no Worker process to observe ``cancel_requested`` yet.
+        Leaving it pending makes the UI revert to “排队中” after refresh and
+        can let a later Worker run work the user already stopped. Running jobs
+        remain cooperative: their Worker owns the final transition.
+        """
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            run = conn.execute(
+                "SELECT mode, status FROM redmine_daily_brief_runs WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            if run is None or not str(run["mode"] or "").startswith("issue:"):
+                return False
+            if run["status"] in TERMINAL_RUN_STATUSES:
+                return False
+            running = conn.execute(
+                "SELECT 1 FROM redmine_daily_brief_jobs "
+                "WHERE run_id=? AND status='running' LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            if running is not None:
+                return False
+            now = _now()
+            conn.execute(
+                "UPDATE redmine_daily_brief_jobs SET status='cancelled', "
+                "finished_at=?, error='cancelled before execution' "
+                "WHERE run_id=? AND status='queued'",
+                (now, run_id),
+            )
+            conn.execute(
+                "UPDATE redmine_daily_brief_issues SET status='cancelled', "
+                "finished_at=?, error='', error_type='' "
+                "WHERE run_id=? AND status IN ('pending','running')",
+                (now, run_id),
+            )
+            cursor = conn.execute(
+                "UPDATE redmine_daily_brief_runs SET status='cancelled', error='', "
+                "finished_at=?, updated_at=? WHERE run_id=?",
+                (now, now, run_id),
             )
             return bool(cursor.rowcount)
 

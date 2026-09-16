@@ -19,7 +19,7 @@ function selectReportSource() {
         <div class="modal-content modal-xs">
             <div class="modal-header">
                 <span class="modal-title">选择上传方式</span>
-                <span class="modal-close" data-click="closeReportSourceModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeReportSourceModal">&times;</button>
             </div>
             <div class="modal-body" style="padding: 20px;">
                 <div style="display: flex; flex-direction: column; gap: 12px;">
@@ -450,7 +450,7 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
         <div class="modal-content modal-xs">
             <div class="modal-header">
                 <span class="modal-title">🔐 Redmine 认证</span>
-                <span class="modal-close" data-click="_actCloseRedmineAuthModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseRedmineAuthModal">&times;</button>
             </div>
             <div class="modal-body">
                 <p style="margin-bottom: 15px;">请输入 Redmine 账号密码以自动下载附件：</p>
@@ -1947,7 +1947,7 @@ async function analyzeFailureWithSource(testName, errorMessage) {
         <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
             <div class="modal-header">
                 <span class="modal-title">🔍 源码分析 - 正在定位失败位置...</span>
-                <span class="modal-close" data-click="_actCloseModal" data-a0="${modalId}">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="${modalId}">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="text-align: center; padding: 40px;">
@@ -2096,7 +2096,7 @@ async function aiAnalyzeFailureReport(testName, errorMessage) {
         <div class="modal-content" style="max-width: 800px; max-height: 85vh; overflow-y: auto;">
             <div class="modal-header">
                 <span class="modal-title">🤖 正在分析报错并搜索源码...</span>
-                <span class="modal-close" data-click="_actCloseModal" data-a0="${modalId}">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="${modalId}">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="text-align: center; padding: 40px;">

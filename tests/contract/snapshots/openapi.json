@@ -1919,6 +1919,27 @@
       },
       "SingleIssueAnalysisRequest": {
         "properties": {
+          "analysis_hint": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Analysis Hint",
+            "type": "string"
+          },
+          "analysis_mode": {
+            "default": "incremental",
+            "enum": [
+              "incremental",
+              "full"
+            ],
+            "title": "Analysis Mode",
+            "type": "string"
+          },
+          "device_serial": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Device Serial",
+            "type": "string"
+          },
           "issue_id": {
             "exclusiveMinimum": 0.0,
             "maximum": 9.223372036854776e+18,
@@ -15201,6 +15222,22 @@
         "summary": "Update Stats Config"
       }
     },
+    "/api/redmine-agent/daily-brief/active-issue": {
+      "get": {
+        "description": "Restore a standalone issue analysis after the browser reloads.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Active Issue Analysis"
+      }
+    },
     "/api/redmine-agent/daily-brief/agent-profiles": {
       "get": {
         "description": "Expose only local kkagent profile names for explicit human selection.",
@@ -15300,6 +15337,84 @@
           }
         },
         "summary": "Put Daily Brief Config"
+      }
+    },
+    "/api/redmine-agent/daily-brief/issue-analyses": {
+      "get": {
+        "description": "Persistent standalone-analysis history, grouped by Redmine issue id.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Issue Analyses"
+      }
+    },
+    "/api/redmine-agent/daily-brief/issue-analyses/{issue_id}": {
+      "get": {
+        "description": "Look up a saved standalone analysis before creating a new one.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Issue Analysis"
       }
     },
     "/api/redmine-agent/daily-brief/latest": {

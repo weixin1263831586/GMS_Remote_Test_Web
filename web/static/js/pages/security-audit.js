@@ -294,7 +294,7 @@ function ensureSecurityAuditDetailModal() {
         <div class="modal-content" style="width: min(980px, 92vw); max-width: min(980px, 92vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
             <div class="modal-header">
                 <span class="modal-title">安全审计详情</span>
-                <span class="modal-close" data-action="close-security-audit-detail">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-action="close-security-audit-detail">&times;</button>
             </div>
             <div class="modal-body" id="security-audit-detail-body" style="overflow: auto; padding-right: 4px;">
                 加载中...

@@ -58,12 +58,20 @@ WEBSOCKIFY_PATTERN = websockify_pattern()
 X11VNC_PERF_FLAGS = ('-threads', '-noxdamage', '-wait', '5', '-defer', '5')
 X11VNC_PERF_ARGS = ' '.join(X11VNC_PERF_FLAGS)
 
+# x11vnc 默认 -norepeat 会在有 VNC 客户端时关闭 X11 自动重复，导致方向键
+# 等按键长按只触发一次。noVNC 能正确转发重复 keydown，因此显式保留 X11
+# 的自动重复。
+X11VNC_INPUT_FLAGS = ('-repeat',)
+X11VNC_INPUT_ARGS = ' '.join(X11VNC_INPUT_FLAGS)
+
 # x11vnc 大小写参数：远端 X 的 CapsLock 状态会把客户端发来的按键大小写
 # 反向（noVNC 的按键 keysym 已携带本地大小写，远端再叠加一次 caps 会双
 # 重取反），而 x11vnc 不支持 QEMU LED 状态回传，noVNC 的自动纠偏不会触
-# 发。-clear_all 在启动时清除远端锁定状态，-remap Caps_Lock-None 阻止
-# VNC 客户端翻转远端 caps，使大小写完全跟随客户端本地键盘状态。
-X11VNC_KEYMAP_FLAGS = ('-clear_all', '-remap', 'Caps_Lock-None')
+# 发。仅用 -clear_mods 释放可能卡住的普通修饰键；不可用 -clear_all，后者
+# 会清除 NumLock，使 noVNC 数字键盘的数字键被当作导航键。-skip_lockkeys
+# 令大小写和数字锁状态完全由客户端的 keysym 决定，并把 KP_n 映射为普通
+# 数字，避免客户端与远端的锁定状态不同而使数字键盘失效。
+X11VNC_KEYMAP_FLAGS = ('-clear_mods', '-skip_lockkeys')
 X11VNC_KEYMAP_ARGS = ' '.join(X11VNC_KEYMAP_FLAGS)
 
 
@@ -194,11 +202,21 @@ class VNCManager:
                 '-localhost',
                 '-nopw',
                 *X11VNC_PERF_FLAGS,
+                *X11VNC_INPUT_FLAGS,
                 *X11VNC_KEYMAP_FLAGS,
                 '-bg'
             ]
             subprocess.run(x11vnc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
             logger.info("[VNC] Started x11vnc")
+            repeat_result = subprocess.run(
+                ['xset', '-display', VNC_DISPLAY, 'r', 'on'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+            if repeat_result.returncode:
+                logger.warning("[VNC] Failed to enable X11 key auto repeat")
             time.sleep(0.5)
 
             websockify_cmd = self._build_local_websockify_cmd(novnc_web_dir)
@@ -405,8 +423,8 @@ sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
                     f"export DISPLAY={VNC_DISPLAY} && "
                     f"export XAUTHORITY=/home/{quoted_ubuntu_user}/.Xauthority && "
                     f"x11vnc -display {VNC_DISPLAY} -forever -shared "
-                    f"-rfbport {VNC_PORT} {auth_param} {X11VNC_PERF_ARGS} {X11VNC_KEYMAP_ARGS} "
-                    f"-bg -o ~/logs/x11vnc.log"
+                    f"-rfbport {VNC_PORT} {auth_param} {X11VNC_PERF_ARGS} {X11VNC_INPUT_ARGS} {X11VNC_KEYMAP_ARGS} "
+                    f"-bg -o ~/logs/x11vnc.log && xset -display {VNC_DISPLAY} r on"
                 )
                 x11_result = self.ssh_manager.execute_command(
                     ssh, x11vnc_cmd, timeout=15

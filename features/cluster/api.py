@@ -236,7 +236,8 @@ def list_worker_tests(
                 continue
             job_id = str(item.get("job_id") or "")
             job = service().repository.get_job(job_id) if job_id else None
-            if job and job.get("owner_id") == user.id:
+            # ADR 0010: job.owner_id stores the resource-owner ACCOUNT.
+            if job and job.get("owner_id") == user.resource_owner_id:
                 visible.append(item)
         tests = visible
     return {"success": True, "tests": tests,
@@ -365,9 +366,11 @@ def get_command(command_id: str, request: Request):
         job_id = str(command.get("job_id") or "")
         job = service().repository.get_job(job_id) if job_id else None
         owner_id = str((command.get("payload") or {}).get("owner_id") or "")
+        # ADR 0010: both job.owner_id and payload.owner_id store the
+        # resource-owner ACCOUNT id, not the (possibly synthetic) actor id.
         if not (
-            (job and job.get("owner_id") == user.id)
-            or owner_id == user.id
+            (job and job.get("owner_id") == user.resource_owner_id)
+            or owner_id == user.resource_owner_id
         ):
             raise HTTPException(404, "command not found")
     return {"success": True, "command": _redact_command_payload(command)}

@@ -167,6 +167,71 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_persisted_cancel_request_is_not_rendered_as_queued(self):
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = [{
+                    run: {run_id: 'stopping-run', status: 'pending', cancel_requested: true},
+                    issues: [{issue_id: 652498, status: 'pending'}],
+                }];
+                renderSingleIssueAnalysisHistory();
+            }""")
+            expect(page.locator('#singleIssueAnalysisHistory')).to_contain_text('停止中')
+            self.assertNotIn('排队中', page.locator('#singleIssueAnalysisHistory').inner_text())
+        finally:
+            page.close()
+
+    def test_terminal_single_issue_cancel_is_not_kept_as_stopping(self):
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = [{
+                    run: {run_id: 'stopped-run', status: 'cancelled', cancel_requested: true},
+                    issues: [{issue_id: 652654, status: 'cancelled'}],
+                }];
+                renderSingleIssueAnalysisHistory();
+            }""")
+            history = page.locator('#singleIssueAnalysisHistory')
+            expect(history).to_contain_text('已停止')
+            self.assertNotIn('停止中', history.inner_text())
+        finally:
+            page.close()
+
+    def test_stopped_single_issue_modal_shows_the_previous_saved_report(self):
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            # 历史列表在 daily-brief 页签内（默认激活 stats），需先切换才可见。
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = [{
+                    run: {run_id: 'stopped-run', status: 'cancelled'},
+                    issues: [{issue_id: 652654, status: 'cancelled', previous_analysis: {
+                        finished_at: '2026-09-16T10:00:00',
+                        result: {detailed_report: '# Previous conclusion\\n\\nRetained evidence'},
+                    }}],
+                }];
+                renderSingleIssueAnalysisHistory();
+            }""")
+            page.locator('#singleIssueAnalysisHistory').get_by_text('查看分析', exact=True).click()
+            modal = page.locator('.daily-brief-modal').last
+            expect(modal).to_contain_text('最新一次分析已停止')
+            expect(modal).to_contain_text('Retained evidence')
+        finally:
+            page.close()
+
     def test_active_single_issue_is_restored_after_page_reload(self):
         page = self.new_page()
 
@@ -277,6 +342,41 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             expect(page.locator('#singleIssueAnalysisHistory')).to_contain_text('#652654')
             self.assertEqual(submissions, [{
                 'issue_id': 652654, 'analysis_mode': 'full', 'device_serial': 'ADB-OWN',
+            }])
+        finally:
+            page.close()
+
+    def test_single_issue_sends_optional_analysis_hint(self):
+        page = self.new_page()
+        submissions = []
+
+        def redmine(route):
+            if route.request.method == 'POST':
+                submissions.append(route.request.post_data_json)
+                data = {'run_id': 'hint-fixture', 'issue_id': 652498}
+            elif route.request.url.endswith('/daily-brief/runs/hint-fixture'):
+                data = {'run': {'run_id': 'hint-fixture', 'status': 'completed'},
+                        'issues': [{'issue_id': 652498, 'status': 'completed'}]}
+            else:
+                data = {}
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', redmine)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            page.locator('#singleIssueAnalysisId').fill('652498')
+            page.locator('#singleIssueAnalysisHintButton').click()
+            hint_modal = page.locator('.single-issue-analysis-hint-modal')
+            hint_modal.locator('textarea').fill('Patch is ineffective; verify the runtime value.')
+            hint_modal.get_by_text('保存', exact=True).click()
+            expect(page.locator('#singleIssueAnalysisHintButton')).to_contain_text('已保存')
+            page.locator('#singleIssueAnalysisStart').click()
+            expect(page.locator('#singleIssueAnalysisHistory')).to_contain_text('#652498')
+            self.assertEqual(submissions, [{
+                'issue_id': 652498,
+                'analysis_mode': 'full',
+                'analysis_hint': 'Patch is ineffective; verify the runtime value.',
             }])
         finally:
             page.close()

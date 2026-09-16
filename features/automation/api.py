@@ -13,12 +13,12 @@ from fastapi.responses import HTMLResponse, Response
 from features.auth import (
     CurrentUser,
     get_authenticated_user,
+    principal_owner_id,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
     require_human_principal,
     require_human_principal_when_auth_required,
     require_role,
-    principal_owner_id,
 )
 from features.automation.repository import AutomationStore
 from features.automation.service import (
@@ -481,6 +481,8 @@ async def poll_gerrit_changes(
         'success': True,
         'data': await automation_service.poll_gerrit_changes(
             limit,
-            created_by=admin.id,
+            # ADR 0010: store the platform ACCOUNT id (admin is human, so
+            # this equals admin.id, but keep the canonical owner accessor).
+            created_by=admin.resource_owner_id,
         ),
     }

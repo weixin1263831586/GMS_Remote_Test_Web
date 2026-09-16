@@ -35,7 +35,7 @@ router = APIRouter()
 _VNC_STATUS_TTL = 10.0
 _vnc_status_cache: dict[str, float] = {"ts": 0.0, "value": None}
 _NOVNC_ZH_CN_LOCALE = Path(__file__).with_name("novnc_zh_cn.json")
-_NOVNC_ASSET_VERSION = "20260718-clipboard-focus"
+_NOVNC_ASSET_VERSION = "20260916-keypad-input"
 _NOVNC_HTTP_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
@@ -80,7 +80,7 @@ def novnc_locale_override(path: str) -> bytes | None:
 
 
 def novnc_asset_override(path: str, body: bytes) -> bytes:
-    """抑制未聚焦 noVNC iframe 的剪贴板写入错误并刷新资源版本。"""
+    """Patch noVNC assets that need a platform-specific cache version."""
     normalized = path.lstrip("/") or "vnc.html"
     version = _NOVNC_ASSET_VERSION.encode()
     if normalized == "vnc.html":
@@ -96,9 +96,26 @@ def novnc_asset_override(path: str, body: bytes) -> bytes:
             1,
         )
     if normalized == "core/rfb.js":
+        body = body.replace(
+            b'import Keyboard from "./input/keyboard.js";',
+            b'import Keyboard from "./input/keyboard.js?gms_asset=' + version + b'";',
+            1,
+        )
         return body.replace(
             b'from "./clipboard.js";',
             b'from "./clipboard.js?gms_asset=' + version + b'";',
+            1,
+        )
+    if normalized == "core/input/keyboard.js":
+        return body.replace(
+            b'from "./util.js";',
+            b'from "./util.js?gms_asset=' + version + b'";',
+            1,
+        )
+    if normalized == "core/input/util.js":
+        return body.replace(
+            b'from "./domkeytable.js";',
+            b'from "./domkeytable.js?gms_asset=' + version + b'";',
             1,
         )
     if normalized == "core/clipboard.js":

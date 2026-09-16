@@ -515,7 +515,11 @@ function switchTab(tab) {
   if (target === 'stats') url.searchParams.delete('tab');
   else url.searchParams.set('tab', target);
   window.history.replaceState({}, '', url.toString());
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === target));
+  document.querySelectorAll('.tab').forEach(t => {
+    var active = t.dataset.tab === target;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
   document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + target));
   if (target === 'issues') return loadIssues();
   if (target === 'cases') return loadCases();
@@ -525,6 +529,24 @@ function switchTab(tab) {
   if (target === 'daily-brief') return loadDailyBrief();
   if (target === 'stats') return loadStatistics();
   return Promise.resolve();
+}
+
+// ARIA tablist 方向键导航：Home/End 跳转，←/→ 移动焦点并激活目标页签
+// （roving tabindex 简化版：页签是真实 <button>，Tab 键天然可达）。
+function redmineTabKeydown(event) {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  if (!tabs.length) return;
+  var index = tabs.indexOf(document.activeElement);
+  if (index === -1) return;
+  var next = null;
+  if (event.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length];
+  else if (event.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
+  else if (event.key === 'Home') next = tabs[0];
+  else if (event.key === 'End') next = tabs[tabs.length - 1];
+  if (!next) return;
+  event.preventDefault();
+  next.focus();
+  if (next.dataset.tab !== currentTab) switchTab(next.dataset.tab);
 }
 
 function updateRedmineToolbar() {
@@ -635,67 +657,17 @@ async function onStatsUserChange() {
 }
 
 // ---- Shared modal helpers ----
-const redmineModalStack = [];
-function syncRedmineModalState() {
-  const active = redmineModalStack.filter(function(id) {
-    const modal = document.getElementById(id);
-    return modal && modal.classList.contains('show');
-  });
-  redmineModalStack.length = 0;
-  active.forEach(function(id) { redmineModalStack.push(id); });
-  const topIndex = redmineModalStack.length - 1;
-  redmineModalStack.forEach(function(id, index) {
-    const modal = document.getElementById(id);
-    modal.style.zIndex = String(10000 + index * 20);
-    modal.inert = index !== topIndex;
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-hidden', index === topIndex ? 'false' : 'true');
-    if (index === topIndex) modal.setAttribute('aria-modal', 'true');
-    else modal.removeAttribute('aria-modal');
-  });
-  document.documentElement.classList.toggle('modal-open', redmineModalStack.length > 0);
-  document.body.classList.toggle('modal-open', redmineModalStack.length > 0);
-}
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape' && redmineModalStack.length) {
-    e.preventDefault();
-    e.stopPropagation();
-    hideModal(redmineModalStack[redmineModalStack.length - 1]);
-  }
-});
-document.addEventListener('click', function(e) {
-  if (e.target && e.target.classList && e.target.classList.contains('modal')
-      && redmineModalStack[redmineModalStack.length - 1] === e.target.id) {
-    hideModal(e.target.id);
-  }
-});
+// Modal 生命周期统一走共享控制器（web/static/js/embedded-ui/modal-controller.js）：
+// 栈/z-index/inert/aria/Escape/backdrop/focus trap 单一所有者，页面只保留
+// 全局函数别名——运行时冒烟测试与 data-click 契约依赖这些名字。
 function showModal(id) {
-  const modal = document.getElementById(id);
-  if (!modal) return;
-  const index = redmineModalStack.indexOf(id);
-  if (index >= 0) redmineModalStack.splice(index, 1);
-  redmineModalStack.push(id);
-  modal.classList.add('show');
-  syncRedmineModalState();
+  window.EmbeddedModalController.open(id);
 }
 function hideModal(id) {
-  const modal = document.getElementById(id);
-  if (!modal) return;
-  modal.classList.remove('show');
-  modal.inert = false;
-  modal.setAttribute('aria-hidden', 'true');
-  modal.removeAttribute('aria-modal');
-  modal.style.removeProperty('z-index');
-  const index = redmineModalStack.indexOf(id);
-  if (index >= 0) redmineModalStack.splice(index, 1);
-  syncRedmineModalState();
+  window.EmbeddedModalController.close(id);
 }
 function removeDynamicModal(id) {
-  const modal = document.getElementById(id);
-  if (modal) modal.remove();
-  const index = redmineModalStack.indexOf(id);
-  if (index >= 0) redmineModalStack.splice(index, 1);
-  syncRedmineModalState();
+  window.EmbeddedModalController.remove(id);
 }
 function notifyUser(title, message, level) {
   level = level || 'info';
@@ -736,7 +708,7 @@ function openRedmineReplyModal(issueId, replyText, meta) {
     <div class="modal-content redmine-reply-modal">
       <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
         <span class="modal-title">📝 Redmine回复</span>
-        <span class="modal-close" data-click="removeDynamicModal" data-a0="${modalId}">&times;</span>
+        <button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="${modalId}">&times;</button>
       </div>
       <div class="modal-body">
         ${meta.summaryHtml ? `<div class="muted">${meta.summaryHtml}</div>` : (meta.summary ? `<div class="muted">${esc(meta.summary)}</div>` : '')}
@@ -1030,6 +1002,7 @@ function showSettingsModal() {
       try {
         dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config') || {};
         dailyBriefSetting('enabled').checked = dailyBriefConfigCache.enabled === true;
+        dailyBriefSetting('trigger_time').value = dailyBriefConfigCache.trigger_time || '00:00';
         await loadDailyBriefAgentProfiles(dailyBriefConfigCache.agent_profile || '');
         await loadDailyBriefModelOptions(dailyBriefConfigCache.model || '');
         dailyBriefSetting('max_parallel_issues').value = dailyBriefConfigCache.max_parallel_issues || 1;
@@ -1108,6 +1081,7 @@ async function saveSettings() {
     try { renderRedmineCredentialStatus(await api('/api/redmine-agent/config/credentials')); } catch (_) {}
     var briefConfig = Object.assign({}, dailyBriefConfigCache || {});
     briefConfig.enabled = dailyBriefSetting('enabled').checked;
+    briefConfig.trigger_time = dailyBriefSetting('trigger_time').value || '00:00';
     briefConfig.agent_profile = dailyBriefSetting('agent_profile').value.trim();
     briefConfig.model = dailyBriefSetting('model').value.trim();
     briefConfig.max_parallel_issues = parseInt(dailyBriefSetting('max_parallel_issues').value) || 1;
@@ -2219,13 +2193,11 @@ async function triggerSync() {
 function showResetModal() {
   const cb = document.getElementById('resetConfirm');
   if (cb) cb.checked = false;
-  const m = document.getElementById('resetModal');
-  if (m) m.style.display = 'flex';
+  window.EmbeddedModalController.open('resetModal');
 }
 
 function hideResetModal() {
-  const m = document.getElementById('resetModal');
-  if (m) m.style.display = 'none';
+  window.EmbeddedModalController.close('resetModal');
 }
 
 async function confirmReset() {
@@ -2792,6 +2764,39 @@ var singleIssueHistoryRunTimers = {};
 var singleIssueStopRequested = {};
 var SINGLE_ISSUE_ANALYSIS_PAGE_SIZE = 8;
 var SINGLE_ISSUE_ANALYSIS_STORAGE_KEY = 'gms-redmine-single-issue-run-id';
+var singleIssueAnalysisHint = '';
+
+function updateSingleIssueAnalysisHintButton() {
+  var button = document.getElementById('singleIssueAnalysisHintButton');
+  if (!button) return;
+  var saved = Boolean(singleIssueAnalysisHint.trim());
+  button.textContent = saved ? '辅助说明 · 已保存' : '辅助说明';
+  button.title = saved ? '已保存辅助分析说明，点击编辑' : '输入辅助分析说明';
+}
+
+function openSingleIssueAnalysisHint() {
+  var modalId = 'singleIssueAnalysisHintModal-' + Date.now();
+  var modal = document.createElement('div');
+  modal.id = modalId;
+  modal.className = 'modal';
+  modal.innerHTML = '<div class="modal-content single-issue-analysis-hint-modal">'
+    + '<div class="modal-header"><span class="modal-title">🤖 辅助分析说明</span>'
+    + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
+    + '<div class="modal-body"><label for="' + modalId + '-text">提供已观察的现象、复现结果或希望重点核查的实际值；KkAgent 会将其作为待验证线索。</label>'
+    + '<textarea id="' + modalId + '-text" maxlength="4000" placeholder="例如：经验证补丁无效，需要查看设备上的实际值 notification_custom_view_max_image_width。">' + esc(singleIssueAnalysisHint) + '</textarea>'
+    + '<div class="muted">最多 4000 个字符。</div></div>'
+    + '<div class="modal-footer"><button type="button" class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">取消</button>'
+    + '<button type="button" class="ka-btn primary" data-single-issue-save-hint>保存</button></div></div>';
+  document.body.appendChild(modal);
+  modal.querySelector('[data-single-issue-save-hint]').addEventListener('click', function () {
+    singleIssueAnalysisHint = String(modal.querySelector('textarea').value || '').trim();
+    updateSingleIssueAnalysisHintButton();
+    removeDynamicModal(modalId);
+  });
+  showModal(modalId);
+  requestAnimationFrame(function () { modal.querySelector('textarea').focus(); });
+}
+window.openSingleIssueAnalysisHint = openSingleIssueAnalysisHint;
 
 function rememberSingleIssueAnalysisRun(runId) {
   singleIssueAnalysisRunId = String(runId || '');
@@ -2813,9 +2818,16 @@ function singleIssueAnalysisStatus(status) {
     cancelled: '■ 已停止'})[status] || status || '—';
 }
 
+function singleIssueAnalysisEffectiveStatus(run, issue) {
+  // A cancelled run is terminal even if an older record still carries a
+  // pending issue state. The run-level cancellation is authoritative.
+  if (String((run || {}).status || '') === 'cancelled') return 'cancelled';
+  return String((issue || {}).status || (run || {}).status || '');
+}
+
 function singleIssueAnalysisIsRunning(run, issue) {
   var states = ['pending', 'snapshotting', 'analyzing', 'running'];
-  return states.indexOf(String((issue || {}).status || (run || {}).status || '')) >= 0
+  return states.indexOf(singleIssueAnalysisEffectiveStatus(run, issue)) >= 0
     || states.indexOf(String((run || {}).status || '')) >= 0;
 }
 
@@ -2873,7 +2885,12 @@ function renderSingleIssueAnalysisHistory() {
       var meta = singleIssueAnalysisMeta(run, issue);
       var subject = String(issue.subject || '').trim();
       var running = singleIssueAnalysisIsRunning(run, issue);
-      var stopping = Boolean(singleIssueStopRequested[String(run.run_id)]);
+      var runActive = ['pending', 'snapshotting', 'analyzing', 'running']
+        .indexOf(String(run.status || '')) >= 0;
+      var stopping = runActive && Boolean(
+        singleIssueStopRequested[String(run.run_id)] || run.cancel_requested
+      );
+      var displayStatus = singleIssueAnalysisEffectiveStatus(run, issue);
       if (subject === '#' + issue.issue_id) subject = '';
       return '<article class="single-issue-analysis-entry'
         + (String(issue.issue_id) === singleIssueIndexedHistoryId ? ' is-indexed' : '')
@@ -2882,7 +2899,7 @@ function renderSingleIssueAnalysisHistory() {
         + '<div class="daily-brief-row"><div class="daily-brief-main"><span class="daily-brief-priority" title="手动提交分析">🔴</span>'
         + '<span class="daily-brief-issue-title"><b>#' + esc(issue.issue_id) + '</b>'
         + (subject ? ' ' + esc(subject) : '') + '<span class="single-issue-analysis-meta">' + meta + '</span></span></div>'
-        + '<span class="daily-brief-state ' + (issue.status === 'failed' ? 'failed' : '') + '">' + esc(stopping ? '⏳ 停止中' : singleIssueAnalysisStatus(issue.status || run.status)) + '</span>'
+        + '<span class="daily-brief-state ' + (displayStatus === 'failed' ? 'failed' : '') + '">' + esc(stopping ? '⏳ 停止中' : singleIssueAnalysisStatus(displayStatus)) + '</span>'
         + '<div class="daily-brief-row-actions">'
         + '<button class="ka-btn" data-single-issue-view="' + esc(run.run_id) + '">查看分析</button>'
         + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button>'
@@ -2969,12 +2986,21 @@ function showSingleIssueAnalysis(runId, statisticsOnly) {
   var item = findSingleIssueAnalysis(runId);
   var issue = item && (item.issues || [])[0];
   if (!item || !issue) return;
+  var previousAnalysis = issue.previous_analysis || {};
   var report = String((issue.result || {}).detailed_report || '').trim();
+  var previousReport = String((previousAnalysis.result || {}).detailed_report || '').trim();
+  var usesPreviousReport = !report && Boolean(previousReport);
+  if (!report) report = previousReport;
   var statistics = renderDailyBriefIssueStatistics(issue.ai_statistics);
+  var previousAt = String(previousAnalysis.finished_at || '').replace('T', ' ').slice(0, 16);
+  var previousNotice = usesPreviousReport
+    ? '<div class="daily-brief-warning">最新一次分析已停止，以下展示最近一次已保存的分析结论'
+      + (previousAt ? '（' + esc(previousAt) + '）' : '') + '。</div>'
+    : '';
   var body = statisticsOnly
     ? (statistics || '<div class="muted">本单号尚未保存可展示的 AI 统计。</div>')
     : (report
-      ? '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body">'
+      ? previousNotice + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body">'
         + renderMarkdownDoc(report) + '</div></div>'
       : '<div class="muted">' + esc(issue.error || singleIssueAnalysisStatus(issue.status || item.run.status)) + '</div>');
   var modalId = 'singleIssueAnalysisModal-' + Date.now();
@@ -3074,9 +3100,11 @@ async function analyzeSingleIssueFromInput(skipHistoryLookup) {
     var analysisMode = hasHistory && modeSelect && modeSelect.value === 'incremental' ? 'incremental' : 'full';
     var deviceSelect = document.getElementById('singleIssueAnalysisDevice');
     var deviceSerial = String((deviceSelect && deviceSelect.value) || '').trim();
+    var analysisHint = singleIssueAnalysisHint.trim();
     var payload = {issue_id: Number(value)};
     if (analysisMode === 'full') payload.analysis_mode = analysisMode;
     if (deviceSerial) payload.device_serial = deviceSerial;
+    if (analysisHint) payload.analysis_hint = analysisHint;
     var queued = await api('/api/redmine-agent/daily-brief/analyze-issue', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
@@ -3097,11 +3125,13 @@ async function reanalyzeSavedSingleIssue(runId, issueId) {
   var analysisMode = String((modeSelect && modeSelect.value) || 'incremental');
   var deviceSelect = document.getElementById('singleIssueAnalysisDevice');
   var deviceSerial = String((deviceSelect && deviceSelect.value) || '').trim();
+  var analysisHint = singleIssueAnalysisHint.trim();
   var originalText = button && button.textContent;
   if (button) { button.disabled = true; button.textContent = '⏳ 分析中'; }
   try {
     var payload = {issue_id: Number(issueId), analysis_mode: analysisMode};
     if (deviceSerial) payload.device_serial = deviceSerial;
+    if (analysisHint) payload.analysis_hint = analysisHint;
     var queued = await api('/api/redmine-agent/daily-brief/analyze-issue', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
     }) || {};

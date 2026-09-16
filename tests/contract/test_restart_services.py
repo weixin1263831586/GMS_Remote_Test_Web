@@ -29,6 +29,22 @@ def test_restart_reports_actual_worker_outcome(tmp_path, layout, service_case):
         shutil.copyfile(ROOT / relative, target)
     for package in ("foundation", "bootstrap"):
         (project / package / "__init__.py").touch()
+    vnc_module = project / "features/system/vnc.py"
+    vnc_module.parent.mkdir(parents=True)
+    (project / "features/__init__.py").touch()
+    (project / "features/system/__init__.py").touch()
+    vnc_module.write_text(
+        """
+class _VNCManager:
+    def _start_local_vnc(self, *, force_restart):
+        assert force_restart is True
+        return {"success": True, "message": "VNC fixture restarted"}
+
+
+vnc_manager = _VNCManager()
+""".lstrip(),
+        encoding="utf-8",
+    )
     certificate_dir = project / ("configs/certs" if layout == "legacy" else "configs/secrets/certs")
     certificate_dir.mkdir(parents=True)
     for name in ("gms-local.crt", "gms-local.key"):
@@ -108,7 +124,9 @@ fi
             assert "✓ Worker Agent 已重启" not in result.stdout
         return
     assert result.returncode == 0, result.stderr
-    assert "[3/4]" in result.stdout
+    assert "[3/6]" in result.stdout
+    assert "[5/6] 重启本机 VNC" in result.stdout
+    assert "VNC fixture restarted" in result.stdout
     assert "服务管理完成" in result.stdout
     assert "unbound variable" not in result.stderr
     assert "private-fixture" not in result.stdout + result.stderr

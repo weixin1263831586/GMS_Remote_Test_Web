@@ -9,6 +9,17 @@ debt visible and ratchets it down:
   inside the handler, or be listed in ``MIGRATION_ALLOWLIST`` below.
 - The allowlist may only shrink: deleting an entry turns that route into an
   enforcement obligation.
+
+Level 2 (capability semantics) ratchets on top of Level 1:
+
+- ``HUMAN_ONLY_ROUTE_MANIFEST``: routes whose surface mutates orchestration
+  itself (ATS runs, ADR 0012) must demand a HUMAN principal — an
+  authentication-only check is not enough, because agent tokens authenticate
+  fine while holding zero capabilities.
+- Resource-owner identity hygiene: fields named ``owner``/``owner_id``/
+  ``owner_user_id``/``created_for`` must never be compared with — or assigned
+  from — a principal's actor ``id`` (ADR 0010); use the account-scoped
+  ``resource_owner_id`` / ``principal_owner_id()`` accessors instead.
 """
 
 from __future__ import annotations
@@ -403,6 +414,232 @@ class SensitiveRouteAuthorizationTests(unittest.TestCase):
             len(MIGRATION_ALLOWLIST),
             7,
             "the authorization migration allowlist must not grow",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Level 2: human-only route semantics (ADR 0012).
+# ---------------------------------------------------------------------------
+
+# The ATS run surface mutates the orchestration pipeline itself. A
+# zero-scope agent token authenticates fine, so Level-1 "is authenticated"
+# is NOT the right gate here: runs must be created/triggered only by human
+# principals, and the run's authority is snapshotted from that human
+# creator at this single entry point (the worker derives its own machine
+# principal from the snapshot — it never escalates beyond the creator).
+HUMAN_ONLY_ROUTE_MANIFEST = {
+    "features/automation/api.py": {
+        "/runs",
+        "/runs/preflight",
+        "/runs/{run_id}/cancel",
+        "/runs/{run_id}/retry",
+    },
+}
+
+# Calls that correctly establish a HUMAN principal (agent/machine tokens
+# are rejected / fail-closed). Matching is prefix-based so the
+# *_when_auth_required variants count too.
+_HUMAN_PRINCIPAL_CALLS = (
+    "require_human_principal",
+)
+
+# Authentication-only helpers that do NOT prove a human principal; kept
+# explicit so the failure message can teach the fix instead of just failing.
+_AUTHENTICATION_ONLY_CALLS = (
+    "require_authenticated_user",
+    "get_authenticated_user",
+    "require_agent_scope",
+)
+
+
+def _call_names(node: ast.AST) -> set[str]:
+    """Names referenced as calls or passed around (e.g. inside Depends(...))."""
+    names: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+            names.add(sub.func.id)
+        elif isinstance(sub, ast.Name):
+            names.add(sub.id)
+    return names
+
+
+class HumanOnlyRouteSemanticsTests(unittest.TestCase):
+    """Level-2 check: some routes demand a human principal, not just auth."""
+
+    def test_human_only_manifest_routes_require_human_principal(self):
+        offenders = []
+        for relative, routes in sorted(HUMAN_ONLY_ROUTE_MANIFEST.items()):
+            path = ROOT / relative
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            helpers = _module_helper_bodies(tree)
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                    continue
+                for route in _route_info(node):
+                    if route not in routes:
+                        continue
+                    calls = _call_names(node)
+                    # Follow one level of same-module helper indirection
+                    # (handlers wrap their principal checks in helpers).
+                    for name in list(calls):
+                        helper = helpers.get(name)
+                        if helper is not None:
+                            calls |= _call_names(helper)
+                    if any(
+                        name.startswith(_HUMAN_PRINCIPAL_CALLS)
+                        for name in calls
+                    ):
+                        continue
+                    offenders.append((relative, route, sorted(calls)))
+        self.assertEqual(
+            offenders,
+            [],
+            "human-only routes must call require_human_principal(_when_auth_required)"
+            " directly or via a helper; authentication-only checks let zero-scope"
+            f" agent tokens onto the orchestration surface: {offenders}",
+        )
+
+    def test_human_only_manifest_is_current(self):
+        """Manifest entries must exist (no deleting routes to pass the gate)."""
+        discovered = set()
+        for relative in HUMAN_ONLY_ROUTE_MANIFEST:
+            tree = ast.parse(
+                (ROOT / relative).read_text(encoding="utf-8")
+            )
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                    continue
+                discovered |= {
+                    (relative, route) for route in _route_info(node)
+                }
+        stale = [
+            (relative, route)
+            for relative, routes in HUMAN_ONLY_ROUTE_MANIFEST.items()
+            for route in routes
+            if (relative, route) not in discovered
+        ]
+        self.assertEqual(
+            stale,
+            [],
+            "human-only manifest lists routes that no longer exist; update the"
+            f" manifest to match the real surface: {stale}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Level 2b: resource-owner identity hygiene (ADR 0010).
+# ---------------------------------------------------------------------------
+
+# Persistence/authorization fields that store the resource-owner ACCOUNT.
+_OWNER_FIELD_NAMES = ("owner", "owner_id", "owner_user_id", "created_for")
+
+# Receivers whose ``.id`` is the ACTOR identity (an agent token yields a
+# synthetic ``agent:<token_id>``); owner fields must instead be compared
+# with / assigned from the account-scoped ``resource_owner_id``.
+_PRINCIPAL_RECEIVERS = ("user", "current_user", "principal", "_user")
+
+# Rotating exemptions out requires a real fix: the set must stay empty.
+# (Test fixtures under features/**/tests/ are excluded from the scan.)
+_OWNER_IDENTITY_EXCEPTIONS: set[tuple[str, int]] = set()
+
+
+def _is_owner_field_ref(node: ast.AST) -> bool:
+    """Owner-field reference: attribute, dict key, or conventional variable.
+
+    Covers ``x.owner_id``, ``record["owner_id"]`` and local aliases such as
+    ``owner_id`` / ``claim_owner_id`` (exact or ``*_owner_id`` naming) that
+    handlers copy owner fields into before comparing.
+    """
+    if isinstance(node, ast.Attribute) and node.attr in _OWNER_FIELD_NAMES:
+        return True
+    if isinstance(node, ast.Name):
+        return any(
+            node.id == name or node.id.endswith("_" + name)
+            for name in _OWNER_FIELD_NAMES
+        )
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        # dict.get("owner_id") / mapping getter for an owner field.
+        return node.func.attr in {"get", "get_int", "get_str"} and any(
+            isinstance(arg, ast.Constant) and arg.value in _OWNER_FIELD_NAMES
+            for arg in node.args
+        )
+    if isinstance(node, ast.Subscript):
+        slice_value = getattr(node.slice, "value", None)
+        return isinstance(slice_value, str) and slice_value in _OWNER_FIELD_NAMES
+    return False
+
+
+def _is_principal_id_ref(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "id"
+        and isinstance(node.value, ast.Name)
+        and node.value.id in _PRINCIPAL_RECEIVERS
+    )
+
+
+class ResourceOwnerIdentityHygieneTests(unittest.TestCase):
+    """Owner fields must never bind to the (mutable) actor identity.
+
+    Regression guard for the class of bugs where a job/report/command was
+    stored or filtered with ``user.id`` — an agent token would then orphan
+    its own records on the next rotation (ADR 0010). The scan flags
+    comparisons (``==``/``!=``/``is``), attribute/key assignments and
+    keyword arguments that mix an owner field with a principal actor id.
+    """
+
+    def test_owner_fields_never_compare_or_assign_actor_id(self):
+        offenders = []
+        for base in ("features", "foundation"):
+            for path in sorted((ROOT / base).rglob("*.py")):
+                relative = str(path.relative_to(ROOT))
+                if "/tests/" in relative or "__pycache__" in relative:
+                    continue
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Compare):
+                        operands = [node.left, *node.comparators]
+                        if any(
+                            _is_owner_field_ref(op) for op in operands
+                        ) and any(_is_principal_id_ref(op) for op in operands):
+                            offenders.append((relative, node.lineno))
+                    elif isinstance(node, ast.Assign):
+                        if any(
+                            _is_owner_field_ref(target)
+                            for target in node.targets
+                        ) and _is_principal_id_ref(node.value):
+                            offenders.append((relative, node.lineno))
+                    elif isinstance(node, ast.keyword):
+                        if (
+                            node.arg in _OWNER_FIELD_NAMES
+                            and _is_principal_id_ref(node.value)
+                        ):
+                            offenders.append((relative, node.lineno))
+        unexpected = [
+            entry for entry in offenders
+            if entry not in _OWNER_IDENTITY_EXCEPTIONS
+        ]
+        stale = [
+            entry for entry in _OWNER_IDENTITY_EXCEPTIONS
+            if entry not in offenders
+        ]
+        self.assertEqual(
+            unexpected,
+            [],
+            "owner fields must use the resource-owner ACCOUNT identity "
+            "(user.resource_owner_id / principal_owner_id(request)), never the "
+            f"actor id (user.id) — token rotation orphans the record: {unexpected}",
+        )
+        self.assertEqual(
+            stale,
+            [],
+            f"stale owner-identity exceptions must be removed: {stale}",
+        )
+        self.assertEqual(
+            _OWNER_IDENTITY_EXCEPTIONS,
+            set(),
+            "the owner-identity exception set must stay empty; fix the code "
+            "instead of adding exemptions",
         )
 
 

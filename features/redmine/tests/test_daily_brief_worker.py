@@ -248,7 +248,7 @@ class DailyBriefWorkerTests(unittest.TestCase):
         self.assertTrue(asyncio.run(scenario()))
         self.assertTrue(analyzer_cancelled.is_set())
         self.assertEqual(self.repository.get_run(run.run_id).status, "cancelled")
-        self.assertEqual(self.repository.get_issue(run.run_id, 101).status, "pending")
+        self.assertEqual(self.repository.get_issue(run.run_id, 101).status, "cancelled")
         self.assertEqual(self.repository.get_job(job["job_id"])["status"], "completed")
 
     def test_stale_worker_failure_does_not_overwrite_new_lease_run_state(self):

@@ -4,6 +4,22 @@
 // 会让未登录的后台标签页无限空转，持续消耗本机连接资源。
 let wsReconnectAttempts = 0;
 
+// RKDevTool 将 "Download Image... (N%)" 当作普通 stdout 逐行发送。
+// 这是高频进度事件，不应污染日志；复用上传区域的进度条以呈现烧写进度。
+function routeFirmwareDownloadProgress(log) {
+    const match = String(log || '').match(
+        /^\s*(?:\[[^\]\r\n]{1,128}\]\s*)?Download\s+Image\s*\.{3}\s*\(\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\)\s*$/i
+    );
+    if (!match) return false;
+    const percentage = Number(match[1]);
+    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) return false;
+    if (percentage >= (state.currentBurningProgress || 0)) {
+        state.currentBurningProgress = percentage;
+        updateProgressBar(percentage, '', '固件下载');
+    }
+    return true;
+}
+
 // USB/IP 重新枚举到 ADB 注册之间存在窗口：devices_changed 事件可能先于
 // ADB 可见到达，单次立即刷新会拿到旧快照（表现为界面停留在空态/旧列表，
 // 提示"点击刷新按钮获取设备列表"）。对"已连接"设备做有界退避补刷。
@@ -130,6 +146,10 @@ function initWebSocket() {
                 switch (messageType) {
                     case 'log_update':
                         debugLog('[WebSocket] log_update:', data.log);
+                        if (routeFirmwareDownloadProgress(data.log)) {
+                            state.wsLogStallTicks = 0;
+                            break;
+                        }
                         addNormalizedLogEntry(data);
                         state.lastLogCount = (state.lastLogCount || 0) + 1;
                         // WebSocket 正常投递日志，清除停滞计数。

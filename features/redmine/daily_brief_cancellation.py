@@ -74,6 +74,13 @@ def reset_cancelled_issue(repository: Any, record: Any) -> None:
 
 def mark_reanalysis_cancelled(repository: Any, run: Any, issue_id: int) -> dict[str, Any]:
     """Converge a cancelled single-issue job without classifying it as failure."""
+    record = repository.get_issue(run.run_id, issue_id)
+    if record is not None:
+        record.status = "cancelled"
+        record.finished_at = _now()
+        record.error = ""
+        record.error_type = ""
+        repository.upsert_issue(record)
     run.status = "cancelled"
     run.error = ""
     run.finished_at = _now()

@@ -369,7 +369,7 @@ def capture_agent(page) -> None:
     annotate(
         page,
         "对话 Agent：受控编排，不是无人值守接管",
-        [("1", "#agent-chat-messages"), ("2", "#agent-input"), ("3", "#agent-model-status"), ("4", "#agent-steps"), ("5", "#agent-chat-messages button[onclick='confirmAgentPlan()']")],
+        [("1", "#agent-chat-messages"), ("2", "#agent-input"), ("3", "#agent-model-status"), ("4", "#agent-steps"), ("5", "#agent-chat-messages button[data-click='confirmAgentPlan']")],
         [
             "自然语言会被解析为受支持的页面、查询和操作计划。",
             "输入测试、设备、Retry 或分析意图；未支持动作会明确拒绝。",

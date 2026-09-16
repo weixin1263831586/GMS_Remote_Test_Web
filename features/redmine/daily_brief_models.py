@@ -43,7 +43,7 @@ BRIEF_MODES = ("nightly", "delta", "manual")
 RUN_STATUSES = (
     "pending", "snapshotting", "analyzing", "completed", "partial", "failed", "cancelled",
 )
-ISSUE_STATUSES = ("pending", "running", "completed", "failed", "stale")
+ISSUE_STATUSES = ("pending", "running", "completed", "failed", "cancelled", "stale")
 # Data freshness and execution status are independent dimensions:
 # execution_status（completed/partial/failed/cancelled）描述 AI 分析本身；
 # data_quality 描述输入数据可信程度——"晨报完成"不等于"数据是新的"。
@@ -154,6 +154,9 @@ class DailyBriefRun:
     # Standalone analysis may bind one current-host ADB device for read-only
     # runtime evidence.  It is persisted with the run for reproducibility.
     device_serial: str = ""
+    # Optional observation supplied by the operator for one standalone issue
+    # analysis. It is kept with the run so queued work has the same context.
+    analysis_hint: str = ""
     prompt_version: str = ""
     report_json: dict[str, Any] = field(default_factory=dict)
     report_markdown: str = ""
@@ -180,6 +183,7 @@ class DailyBriefRun:
             "analysis_backend": self.analysis_backend,
             "model_name": self.model_name,
             "device_serial": self.device_serial,
+            "analysis_hint": self.analysis_hint,
             "prompt_version": self.prompt_version,
             "report_json": self.report_json,
             "report_markdown": self.report_markdown,

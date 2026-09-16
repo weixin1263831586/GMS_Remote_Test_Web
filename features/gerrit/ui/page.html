@@ -18,8 +18,10 @@
     button.secondary { background:#30394a; }
     main { padding:0; }
     .tabs { display:flex; gap:0; }
-    .tab { padding:8px 16px; cursor:pointer; font-size:13px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; }
+    /* 页签是原生 <button role="tab">（a11y 契约）：重置按钮外观，保留底部指示条。 */
+    .tab { padding:8px 16px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-bottom:2px solid transparent; transition:all .15s; }
     .tab:hover { color:var(--text); }
+    .tab:focus-visible { outline:2px solid var(--primary); outline-offset:-2px; }
     .tab.active { color:var(--primary); border-bottom-color:var(--primary); }
     .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
     .toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
@@ -122,16 +124,16 @@
     #routeCheckModal .modal-body { display:block; padding:20px; overflow-y:auto; }
     html.modal-open, body.modal-open { overflow:hidden; }
     @media (max-width:800px) { header { grid-template-columns:1fr; align-items:flex-start; row-gap:8px; } input { min-width:180px; width:100%; } .toolbar { align-items:stretch; } }
-    @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; } }
+    @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; } .tab { padding:10px 14px; min-height:40px; } button { min-height:40px; } .select-add-btn { height:40px; min-width:40px; } .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
     @media (max-height:560px) { .modal { align-items:stretch; } .modal-content { max-height:calc(100dvh - 16px); } }
   </style>
 </head>
 <body>
 <header>
-  <div class="tabs">
-    <div class="tab" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</div>
-    <div class="tab active" data-tab="personal" data-click="switchTab" data-a0="personal">📈 个人看板</div>
-    <div class="tab" data-tab="query" data-click="switchTab" data-a0="query">🔍 查询</div>
+  <div class="tabs" role="tablist" aria-label="看板视图" data-keydown="gerritTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End">
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</button>
+    <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="personal" data-click="switchTab" data-a0="personal">📈 个人看板</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="query" data-click="switchTab" data-a0="query">🔍 查询</button>
   </div>
   <div class="btn-group">
     <button class="secondary" data-click="refreshCurrentTab">🔄 刷新</button>
@@ -250,6 +252,7 @@
 </div>
 <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
 <script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script>
+<script src="/static/js/embedded-ui/modal-controller.js?v=20260916-modal-controller"></script>
 <script src="/gerrit-dashboard/page.js"></script>
 </body>
 </html>

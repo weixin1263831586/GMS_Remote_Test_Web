@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from features.auth import (
+    CurrentUser,
+    automation_granted_capabilities,
+)
 from features.automation.executors import (
     HttpAutomationExecutor,
     StubAutomationExecutor,
@@ -22,11 +26,6 @@ from features.automation.profile_dry_run import dry_run_profile
 from features.automation.profiles import load_profiles, upsert_profile
 from features.automation.repository import AutomationStore
 from foundation.secrets import decrypt_secret, encrypt_secret
-
-from features.auth import (
-    CurrentUser,
-    automation_granted_capabilities,
-)
 
 
 GerritQuery = Callable[[str, str, int], Awaitable[list[dict[str, Any]]]]

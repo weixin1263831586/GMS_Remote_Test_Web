@@ -2181,6 +2181,10 @@ select option {
 }
 
 .modal-close {
+    /* 关闭按钮原生 <button>（a11y 契约）：重置浏览器默认外观。 */
+    background: none;
+    border: none;
+    padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2188,6 +2192,7 @@ select option {
     width: 32px;
     min-width: 32px;
     min-height: 32px;
+    font: inherit;
     font-size: 28px;
     font-weight: bold;
     line-height: 1;

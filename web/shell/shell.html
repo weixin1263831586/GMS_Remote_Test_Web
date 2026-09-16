@@ -38,7 +38,7 @@
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/api.js?v=20260902-error-serialize" defer></script>
-    <script src="/static/js/shell/websocket-manager.js?v=20260903-usbip-reconnect-scope" defer></script>
+    <script src="/static/js/shell/websocket-manager.js?v=20260916-firmware-download-progress" defer></script>
     <script src="/static/js/shell/icon-auto.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/websites.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/server-sync.js?v=20260905-extract" defer></script>
@@ -563,7 +563,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <span class="modal-title">导航设置与使用帮助</span>
-                    <span class="modal-close" data-click="closeSidebarVisibilityModal">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeSidebarVisibilityModal">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div class="sidebar-settings-tabs" role="tablist" aria-label="导航设置与项目帮助">
@@ -778,7 +778,7 @@
                     <span id="guide-image-title" class="modal-title">图片操作实例</span>
                     <div class="guide-image-actions">
                         <button id="guide-image-zoom-btn" type="button" class="btn-xxs" data-click="toggleGuideImageZoom">1:1 原图</button>
-                        <span class="modal-close" data-click="closeGuideImageLightbox">&times;</span>
+                        <button type="button" class="modal-close" aria-label="关闭" data-click="closeGuideImageLightbox">&times;</button>
                     </div>
                 </div>
                 <div class="modal-body">
@@ -803,7 +803,7 @@
                             <div class="left-frame">
                                 <div class="form-row">
                                     <label>测试类型:</label>
-                                    <select id="test-type" class="combo-box">
+                                    <select id="test-type" class="combo-box" data-test-config-control>
                                         <option value="" disabled selected></option>
                                         <option value="CTS">CTS</option>
                                         <option value="GSI">GSI</option>
@@ -816,11 +816,11 @@
                                 </div>
                                 <div class="form-row">
                                     <label>测试模块:</label>
-                                    <input type="text" id="test-module" class="entry-field" spellcheck="false" autocomplete="off" />
+                                    <input type="text" id="test-module" class="entry-field" spellcheck="false" autocomplete="off" data-test-config-control />
                                 </div>
                                 <div class="form-row">
                                     <label>测试用例:</label>
-                                    <input type="text" id="test-case" class="entry-field" spellcheck="false" autocomplete="off" />
+                                    <input type="text" id="test-case" class="entry-field" spellcheck="false" autocomplete="off" data-test-config-control />
                                 </div>
                             </div>
                         </td>
@@ -834,7 +834,7 @@
                                 </div>
                                 <div class="form-row">
                                     <label>测试套件:</label>
-                                    <select id="test-suite" class="combo-box">
+                                    <select id="test-suite" class="combo-box" data-test-config-control>
                                         <option value="" disabled selected></option>
                                     </select>
                                     <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" data-click="refreshTestSuites">↻ 刷新套件</button>
@@ -842,8 +842,8 @@
                                 <div class="form-row">
                                     <label>测试报告:</label>
                                     <div class="input-with-btn">
-                                        <input type="text" id="retry-result" class="entry-field" />
-                                        <button class="btn-small" data-click="browseRemoteFile" data-a0="retry">📁 选择报告</button>
+                                        <input type="text" id="retry-result" class="entry-field" data-test-config-control />
+                                        <button class="btn-small" data-click="browseRemoteFile" data-a0="retry" data-test-config-control>📁 选择报告</button>
                                     </div>
                                 </div>
                             </div>
@@ -907,6 +907,7 @@
                         <button id="btn-burn-gsi" class="btn-xxs" data-click="burnGsiImage">🔥 烧写GSI</button>
                         <button class="btn-xxs" disabled title="该功能尚未开放">🔥 烧写SN</button>
                         <button class="btn-xxs" id="start-vnc-btn" data-click="initAndStartVnc">🚀 启动VNC</button>
+                        <button class="btn-xxs" data-click="initAndStartVnc" data-a0="true" title="重启主机 VNC；会短暂断开当前 noVNC 连接">🔄 重启VNC</button>
                         <button class="btn-xxs" data-click="showDeviceScreen">📺 设备投屏</button>
                         <button class="btn-xxs" id="adb-forward-btn" data-click="setupAdbPortForward">🔌 ADB接入</button>
                         <button class="btn-xxs" id="usbip-btn" data-click="setupUsbipForward">📱 本地设备</button>
@@ -1992,7 +1993,7 @@
             <div class="modal-content modal-m">
                 <div class="modal-header">
                     <span class="modal-title">上传文件到知识库</span>
-                    <span class="modal-close" data-click="kbCloseUpload">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="kbCloseUpload">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div class="modal-info-text">支持 PDF / TXT / MD / 代码 / DOCX，上传后解析正文并作为当前目录文档。</div>
@@ -2012,7 +2013,7 @@
             <div class="modal-content modal-xs">
                 <div class="modal-header">
                     <span class="modal-title">添加分类</span>
-                    <span class="modal-close" data-click="closeCategoryModal">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeCategoryModal">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div class="modal-form-row">
@@ -2039,7 +2040,7 @@
             <div class="modal-content modal-m">
                 <div class="modal-header">
                     <span class="modal-title" id="tool-modal-title">添加工具</span>
-                    <span class="modal-close" data-click="closeToolModal">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeToolModal">&times;</button>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="tool-index" value="-1" />
@@ -2089,7 +2090,7 @@
             <div class="modal-content modal-xs">
                 <div class="modal-header">
                     <span class="modal-title">添加工具分类</span>
-                    <span class="modal-close" data-click="ut_closeCategoryModal">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeCategoryModal">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div class="modal-form-row">
@@ -2116,7 +2117,7 @@
             <div class="modal-content modal-m">
                 <div class="modal-header">
                     <span class="modal-title" id="ut-tool-modal-title">添加工具</span>
-                    <span class="modal-close" data-click="ut_closeToolModal">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeToolModal">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div class="modal-form-row">
@@ -2170,7 +2171,7 @@
         <div class="modal-content modal-l" style="height: min(560px, 72vh);">
             <div class="modal-header">
                 <span class="modal-title">系统配置</span>
-                <span class="modal-close" data-click="closeModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeModal">&times;</button>
             </div>
             <div class="modal-body" id="config-modal-body">
                 <!-- 动态生成配置表单 -->
@@ -2187,7 +2188,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">GMS助手配置</span>
-                <span class="modal-close" data-click="_actCloseModal" data-a0="gms-assistant-config-modal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="gms-assistant-config-modal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-form-row" style="display:block;">
@@ -2210,7 +2211,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">连接Wi-Fi</span>
-                <span class="modal-close" data-click="closeWifiModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeWifiModal">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="wifi-form" data-submit="submitWifiConfig" data-prevent autocomplete="off">
@@ -2236,7 +2237,7 @@
         <div class="modal-content device-routing-modal-content adb-proxy-modal-content">
             <div class="modal-header">
                 <span class="modal-title">🔌 ADB设备接入</span>
-                <span class="modal-close" data-click="closeAdbProxyModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeAdbProxyModal">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="adb-proxy-form" data-submit="submitAdbProxyConnect" data-prevent autocomplete="off">
@@ -2306,7 +2307,7 @@
         <div class="modal-content device-routing-modal-content adb-proxy-modal-content">
             <div class="modal-header">
                 <span class="modal-title">📱 USB/IP设备接入</span>
-                <span class="modal-close" data-click="closeUsbipAttachModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeUsbipAttachModal">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="usbip-attach-form" data-submit="submitUsbipAttach" data-prevent autocomplete="off">
@@ -2360,7 +2361,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title" id="device-password-modal-title">设备主机 SSH 密码</span>
-                <span class="modal-close" data-click="closeDevicePasswordModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeDevicePasswordModal">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="device-pswd-form" data-submit="submitDevicePassword" data-prevent autocomplete="off">
@@ -2386,7 +2387,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">🔒 选择 VPN 连接</span>
-                <span class="modal-close" data-click="closeVpnCredentialModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeVpnCredentialModal">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="vpn-credential-form" data-submit="submitVpnCredential" data-prevent autocomplete="off">
@@ -2411,7 +2412,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">🌐 Tailscale 组网</span>
-                <span class="modal-close" data-click="closeTailscaleInfoModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeTailscaleInfoModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-form-row" style="align-items:center">
@@ -2454,7 +2455,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">👤 客户端用户名识别</span>
-                <span class="modal-close" data-click="closeUsernameDetectModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeUsernameDetectModal">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="username-detect-form" data-submit="submitUsernameDetect" data-prevent autocomplete="off">
@@ -2487,7 +2488,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">🔐 管理员验证</span>
-                <span class="modal-close" data-click="cancelElevate">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="cancelElevate">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="elevate-form" data-submit="submitElevateForm" data-prevent autocomplete="off">
@@ -2524,7 +2525,7 @@
         <div class="modal-content" style="max-width: min(1380px, 97vw); width: 97vw; height: 92vh; max-height: 92vh;">
             <div class="modal-header">
                 <span class="modal-title">共享固件</span>
-                <span class="modal-close" data-click="closeFirmwareShareModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareShareModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; align-items: end;">
@@ -2580,7 +2581,7 @@
         <div class="modal-content" style="max-width: 1500px; width: 96vw; height: 92vh; max-height: 92vh;">
             <div class="modal-header">
                 <span class="modal-title">周报总结</span>
-                <span class="modal-close" data-click="closeWeeklyReportModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeWeeklyReportModal">&times;</button>
             </div>
             <div class="modal-body" style="display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0;">
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
@@ -2617,7 +2618,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">远端固件主机认证</span>
-                <span class="modal-close" data-click="closeFirmwareSharePasswordModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareSharePasswordModal">&times;</button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="firmware-share-password-host" />
@@ -2641,7 +2642,7 @@
                 <span class="modal-title">测试结果列表 <span id="test-results-modal-suite" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></span>
                 <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
                     <button type="button" class="btn-xs" data-click="minimizeTestResultsModal">缩小</button>
-                    <span class="modal-close" data-click="closeTestResultsModal">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeTestResultsModal">&times;</button>
                 </div>
             </div>
             <div class="modal-body" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 0 20px;">
@@ -2666,7 +2667,7 @@
         <div class="modal-content report-copy-modal-content">
             <div class="modal-header">
                 <span class="modal-title">🔁 跨主机拷贝测试报告</span>
-                <span class="modal-close" data-click="closeReportCopyModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeReportCopyModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-info-text" style="margin-bottom: 12px;">
@@ -2719,7 +2720,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">烧写固件</span>
-                <span class="modal-close" data-click="closeFirmwareModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-form-row">
@@ -2746,7 +2747,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">烧写GSI镜像</span>
-                <span class="modal-close" data-click="closeGsiModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeGsiModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-form-row">
@@ -2790,7 +2791,7 @@
                 <span class="modal-title">🎯 智能 UI 操控 <span id="ui-control-serial" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></span>
                 <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
                     <button class="btn-xxs" data-click="refreshUiControl">🔄 刷新</button>
-                    <span class="modal-close" data-click="closeUiControl">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeUiControl">&times;</button>
                 </div>
             </div>
             <div class="modal-body" style="display: flex; flex-direction: column; gap: 8px;">
@@ -2822,7 +2823,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">烧写SN码</span>
-                <span class="modal-close" data-click="closeSnModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeSnModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-form-row">
@@ -2845,7 +2846,7 @@
         <div class="modal-content" style="width: min(760px, 96vw); max-width: min(760px, 96vw); height: min(560px, 72vh); overflow: hidden;">
             <div class="modal-header" style="background: linear-gradient(135deg, #667eea, #764ba2);">
                 <span class="modal-title" id="file-browser-title" style="color:#fff;">浏览文件</span>
-                <span class="modal-close" data-click="closeFileBrowserModal" style="color:#fff;">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFileBrowserModal" style="color:#fff;">&times;</button>
             </div>
             <div class="modal-body" style="overflow: hidden; display: flex; flex-direction: column;">
                 <div id="file-browser-worker-row" style="display:none; align-items:center; gap:8px; margin-bottom:8px;">
@@ -2891,7 +2892,7 @@
                 <div class="dcfg-header-right">
                     <span id="device-config-serial" class="dcfg-serial"></span>
                     <button type="button" class="btn-xxs" data-click="minimizeDeviceConfigExplorer">缩小</button>
-                    <span class="modal-close" data-click="closeDeviceConfigExplorer">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeDeviceConfigExplorer">&times;</button>
                 </div>
             </div>
             <div class="modal-body dcfg-body">
@@ -2989,7 +2990,7 @@
     </div>
 
     <!-- Toast Notification -->
-    <div id="toast" class="toast"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <!-- Snackbar Notification (右下角弹框) -->
     <div id="snackbar-container" class="snackbar-container"></div>
@@ -3016,7 +3017,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">➕ 添加本地测试套件路径</span>
-                <span class="modal-close" data-click="closeAddLocalSuiteModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeAddLocalSuiteModal">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="add-local-suite-form" data-submit="submitAddLocalSuite" data-prevent autocomplete="off">
@@ -3042,7 +3043,7 @@
         <div class="modal-content modal-m">
             <div class="modal-header">
                 <span class="modal-title" id="device-group-modal-title">新建分组</span>
-                <span class="modal-close" data-click="_actCloseModal" data-a0="device-group-modal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="device-group-modal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-form-row">
@@ -3070,7 +3071,7 @@
         <div class="modal-content modal-m">
             <div class="modal-header">
                 <span class="modal-title">📦 解压测试套件</span>
-                <span class="modal-close" data-click="closeExtractSuiteModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeExtractSuiteModal">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="extract-suite-form" data-submit="submitExtractSuite" data-prevent autocomplete="off">
@@ -3103,7 +3104,7 @@
         <div class="modal-content modal-m">
             <div class="modal-header">
                 <span class="modal-title">⚠️ usbipd 安装指南</span>
-                <span class="modal-close" data-click="closeInstallGuide">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeInstallGuide">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 3px; color: #856404;">
@@ -3144,7 +3145,7 @@
         <div class="modal-content modal-m">
             <div class="modal-header">
                 <span class="modal-title">⚠️ SSHD 安装指南</span>
-                <span class="modal-close" data-click="closeSshdInstallGuide">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeSshdInstallGuide">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 3px; color: #856404;">
@@ -3170,7 +3171,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title" id="confirm-title">确认操作</span>
-                <span class="modal-close" data-click="_actCloseModal" data-a0="confirm-modal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="confirm-modal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-info-text" id="confirm-message" style="margin-bottom: 15px; background: rgba(231, 76, 60, 0.1); border-left-color: var(--danger-color); color: var(--danger-color); white-space: pre-wrap; overflow-wrap: anywhere;">
@@ -3189,7 +3190,7 @@
         <div class="modal-content modal-s">
             <div class="modal-header">
                 <span class="modal-title">选择扫描方式</span>
-                <span class="modal-close" data-click="ut_closeMainlineSyncModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeMainlineSyncModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-info-text" style="margin-bottom: 14px;">
@@ -3217,7 +3218,7 @@
         <div class="modal-content modal-l">
             <div class="modal-header">
                 <span class="modal-title">📖 GMS测试流程指南</span>
-                <span class="modal-close" data-click="closeUsageExamplesModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeUsageExamplesModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.6; color: var(--text-primary);">
@@ -3397,7 +3398,7 @@
         <div class="modal-content" style="max-width: 800px;">
             <div class="modal-header">
                 <span class="modal-title">🤖 报错分析 (OpenGrok)</span>
-                <span class="modal-close" data-click="closeSourceAnalysisModal">&times;</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeSourceAnalysisModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-form-row">
@@ -3467,7 +3468,7 @@
                     <button type="button" class="btn-xxs btn-primary" data-click="rerunReportDiagnosis">重新诊断</button>
                     <button type="button" class="btn-xxs" data-click="copyReportDiagnosis">📋 复制结果</button>
                     <button type="button" class="btn-xxs" data-click="minimizeReportDiagnosisWorkbench">缩小</button>
-                    <span class="modal-close" data-click="closeReportDiagnosisWorkbench">&times;</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeReportDiagnosisWorkbench">&times;</button>
                 </div>
             </div>
             <div class="modal-body report-diagnosis-body">

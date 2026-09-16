@@ -23,7 +23,7 @@ MIGRATION_BYTE_LIMITS = {
     'web/static/js/navigation.js': 50 * 1024,
     'web/static/js/api-constants.js': 36286,
     'web/static/js/pages/test-suite-browser.js': 125721,   # target: < 50 KB (browser context isolation + direct local fetch & request generation)
-    'web/static/js/pages/report-analysis.js': 117072,      # +335: act-bridge 委托 helper; +14 残留 onkeypress 迁移; target: < 50 KB
+    'web/static/js/pages/report-analysis.js': 117145,      # +335: act-bridge 委托 helper; +14 残留 onkeypress 迁移; +73: modal-close span→button a11y 契约; target: < 50 KB
     'web/static/js/pages/firmware-burn.js': 129459,        # target: < 50 KB
     'web/static/js/pages/api-docs.js': 50304,              # +165: act-bridge 委托 helper
     'web/static/js/shell/weekly-report.js': 83553,         # +244: XSS 转义一致性; target: < 50 KB

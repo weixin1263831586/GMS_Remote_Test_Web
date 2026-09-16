@@ -40,16 +40,28 @@ class DesktopProxyTests(unittest.TestCase):
         )
         rfb = novnc_asset_override(
             "core/rfb.js",
+            b'import Keyboard from "./input/keyboard.js";\n'
             b'import AsyncClipboard from "./clipboard.js";',
+        )
+        keyboard = novnc_asset_override(
+            "core/input/keyboard.js",
+            b'import * as KeyboardUtil from "./util.js";',
+        )
+        keyboard_util = novnc_asset_override(
+            "core/input/util.js",
+            b'import DOMKeyTable from "./domkeytable.js";',
         )
         clipboard = novnc_asset_override(
             "core/clipboard.js",
             b"if (!this._isAvailable) return false;",
         )
 
-        self.assertIn(b"gms_asset=20260718-clipboard-focus", entry)
-        self.assertIn(b"gms_asset=20260718-clipboard-focus", ui)
-        self.assertIn(b"gms_asset=20260718-clipboard-focus", rfb)
+        self.assertIn(b"gms_asset=20260916-keypad-input", entry)
+        self.assertIn(b"gms_asset=20260916-keypad-input", ui)
+        self.assertIn(b"gms_asset=20260916-keypad-input", rfb)
+        self.assertIn(b'keyboard.js?gms_asset=', rfb)
+        self.assertIn(b'util.js?gms_asset=', keyboard)
+        self.assertIn(b'domkeytable.js?gms_asset=', keyboard_util)
         self.assertIn(b"!document.hasFocus()", clipboard)
 
 

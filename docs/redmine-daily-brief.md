@@ -1,13 +1,13 @@
 # Redmine Daily Brief（凌晨每日晨报）
 
-每天 00:00 自动读取当前用户个人看板中的「待回复」「RK 3 天未回复客户」
+每天在各用户设置的触发时间（默认 00:00）自动读取当前用户个人看板中的「待回复」「RK 3 天未回复客户」
 两类 issue，去重后冻结快照，用 kkagent headless 调本地大模型做逐 issue
 深度分析，09:00 上班在个人看板直接查看每日晨报。
 
 ## 架构
 
 ```
-systemd timer 00:00 (Persistent=true)
+systemd timer 每分钟检查一次（Persistent=true；按 owner trigger_time 筛选）
   → python -m features.redmine.daily_brief_cli run-nightly
   → DailyBriefService（owner-aware 编排）
       → build_daily_triage_snapshot()   ← 唯一事实来源：get_workload_statistics()
@@ -48,6 +48,7 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 ```json
 {
   "enabled": false,
+  "trigger_time": "00:00",
   "analysis_backend": "kkagent",
   "model": "",
   "agent_profile": "",
@@ -62,6 +63,9 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 
 - `enabled` 默认 `false`（opt-in）：每日晨报会消耗 kkagent 分析资源，owner
   在设置里显式开启后才进入 nightly 调度。
+- `trigger_time` 是 Controller 服务器本地时区的每天触发时间，格式为 `HH:MM`，
+  默认 `00:00`。定时入口每分钟检查一次，并只为恰好到点的 owner 入队；以
+  `--owner` 手动试跑不受此设置限制。
 - `model` 为空时使用 kkagent 当前默认模型；
 - 分析和同会话修复不设步数、耗时或 Token 预算，以证据充分、结论可用为
   目标。旧 `max_turns` / `issue_timeout_seconds` 配置仍兼容读取，但统一

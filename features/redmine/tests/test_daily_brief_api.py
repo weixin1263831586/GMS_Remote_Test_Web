@@ -198,6 +198,98 @@ class DailyBriefApiTests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(invalid.json()['code'], 'MALFORMED_REQUEST')
 
+    def test_single_issue_analysis_hint_is_persisted_and_starts_a_new_context(self):
+        first = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={
+                'issue_id': 652498,
+                'analysis_hint': 'The patch did not work; check the actual runtime value.',
+            },
+        ).json()['data']
+        repo = brief_repo.owner_daily_brief_repository('owner-a')
+        self.assertEqual(
+            repo.get_run(first['run_id']).analysis_hint,
+            'The patch did not work; check the actual runtime value.',
+        )
+        same_context = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={
+                'issue_id': 652498,
+                'analysis_hint': 'The patch did not work; check the actual runtime value.',
+            },
+        ).json()['data']
+        self.assertEqual(same_context['run_id'], first['run_id'])
+        changed_context = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={'issue_id': 652498, 'analysis_hint': 'Verify a second device.'},
+        ).json()['data']
+        self.assertNotEqual(changed_context['run_id'], first['run_id'])
+
+    def test_cancelling_a_queued_single_issue_persists_terminal_status(self):
+        queued = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338},
+        ).json()['data']
+        response = self.client.post(
+            f"/api/redmine-agent/daily-brief/runs/{queued['run_id']}/cancel",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['data']['status'], 'cancelled')
+        payload = self.client.get(
+            f"/api/redmine-agent/daily-brief/runs/{queued['run_id']}",
+        ).json()['data']
+        self.assertEqual(payload['run']['status'], 'cancelled')
+        self.assertTrue(payload['run']['cancel_requested'])
+        self.assertEqual(payload['issues'][0]['status'], 'cancelled')
+
+    def test_cancelled_run_never_returns_a_stale_pending_issue(self):
+        queued = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338},
+        ).json()['data']
+        repo = brief_repo.owner_daily_brief_repository('owner-a')
+        run = repo.get_run(queued['run_id'])
+        run.status = 'cancelled'
+        repo.update_run(run)
+        issue = repo.get_issue(run.run_id, 647338)
+        issue.status = 'pending'
+        repo.upsert_issue(issue)
+        payload = self.client.get(
+            f'/api/redmine-agent/daily-brief/runs/{run.run_id}',
+        ).json()['data']
+        self.assertEqual(payload['issues'][0]['status'], 'cancelled')
+
+    def test_stopped_retry_keeps_the_previous_saved_analysis_available(self):
+        first = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={'issue_id': 652654, 'analysis_mode': 'full'},
+        ).json()['data']
+        repo = brief_repo.owner_daily_brief_repository('owner-a')
+        first_run = repo.get_run(first['run_id'])
+        first_run.status = 'completed'
+        first_run.finished_at = '2026-09-16T10:00:00'
+        repo.update_run(first_run)
+        first_issue = repo.get_issue(first_run.run_id, 652654)
+        first_issue.status = 'completed'
+        first_issue.result = dict(VALID)
+        repo.upsert_issue(first_issue)
+
+        retry = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={'issue_id': 652654, 'analysis_mode': 'full'},
+        ).json()['data']
+        retry_run = repo.get_run(retry['run_id'])
+        retry_run.status = 'cancelled'
+        repo.update_run(retry_run)
+        retry_issue = repo.get_issue(retry_run.run_id, 652654)
+        retry_issue.status = 'cancelled'
+        repo.upsert_issue(retry_issue)
+
+        history = self.client.get('/api/redmine-agent/daily-brief/issue-analyses').json()['data']['items']
+        item = next(entry for entry in history if entry['run']['run_id'] == retry['run_id'])
+        self.assertEqual(
+            item['issues'][0]['previous_analysis']['result']['detailed_report'],
+            VALID['detailed_report'],
+        )
+
     def test_single_issue_validation_and_owner_isolation(self):
         for invalid in (0, -1, True, '647338', 1.5):
             response = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': invalid})
@@ -348,11 +440,12 @@ class DailyBriefApiTests(unittest.TestCase):
     def test_config_get_put_roundtrip(self):
         resp = self.client.put(
             "/api/redmine-agent/daily-brief/config",
-            json={"model": "glm-4", "max_parallel_issues": 3},
+            json={"model": "glm-4", "trigger_time": "08:30", "max_parallel_issues": 3},
         )
         self.assertEqual(resp.status_code, 200)
         got = self.client.get("/api/redmine-agent/daily-brief/config").json()["data"]
         self.assertEqual(got["model"], "glm-4")
+        self.assertEqual(got["trigger_time"], "08:30")
         self.assertEqual(got["max_parallel_issues"], 3)
 
     def test_config_rejects_unknown_keys(self):
@@ -393,118 +486,6 @@ class DailyBriefApiTests(unittest.TestCase):
             "/api/redmine-agent/daily-brief/run", headers={"x-test-owner": "owner-b"}
         ).json()["data"]["run_id"]
         self.assertNotEqual(a, b)
-
-
-AGENT_HEADERS = {
-    "x-test-role": "agent_service",
-    "x-test-auth-method": "agent_token",
-}
-
-
-class DailyBriefApiAuthzTests(unittest.TestCase):
-    """Daily Brief 端点的 scope / human-only 边界。"""
-
-    def setUp(self):
-        self.directory = TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        repo_patch = patch.object(
-            brief_repo, "owner_redmine_root",
-            lambda owner: Path(self.directory.name) / "owners" / str(owner),
-        )
-        repo_patch.start()
-        self.addCleanup(repo_patch.stop)
-        brief_repo._REPO_CACHE.clear()
-        self.addCleanup(brief_repo._REPO_CACHE.clear)
-
-        triage_patch = patch.object(
-            daily_brief_api.DailyBriefService, "build_triage",
-            AsyncMock(return_value=dict(TRIAGE)),
-        )
-        triage_patch.start()
-        self.addCleanup(triage_patch.stop)
-
-        fake_manager = SimpleNamespace(
-            get_runtime_config=lambda: {},
-            save_runtime=lambda data: True,
-        )
-        cfg_patch = patch.object(
-            daily_brief_api, "get_redmine_config_for_request",
-            lambda request: fake_manager,
-        )
-        cfg_patch.start()
-        self.addCleanup(cfg_patch.stop)
-        creds_patch = patch.object(
-            daily_brief_api, "_has_redmine_credentials", lambda request: True,
-        )
-        creds_patch.start()
-        self.addCleanup(creds_patch.stop)
-
-        async def fake_analyze(entry):
-            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
-
-        analyzer_patch = patch.object(
-            daily_brief_api.DailyBriefService, "_build_analyzer",
-            lambda self, config=None: SimpleNamespace(analyze=fake_analyze),
-        )
-        analyzer_patch.start()
-        self.addCleanup(analyzer_patch.stop)
-
-        app = FastAPI()
-
-        @app.middleware("http")
-        async def authenticate(request, call_next):
-            owner = request.headers.get("x-test-owner", "owner-a")
-            role = request.headers.get("x-test-role", "user")
-            scopes = frozenset(
-                part for part in request.headers.get("x-test-scopes", "").split(",")
-                if part
-            )
-            request.state.current_user = CurrentUser(
-                id=owner, username=owner, role=role, extra_permissions=scopes,
-            )
-            request.state.auth_method = request.headers.get(
-                "x-test-auth-method", "session"
-            )
-            return await call_next(request)
-
-        app.include_router(daily_brief_api.router)
-        self.client = TestClient(app)
-        self.addCleanup(self.client.close)
-
-    def test_agent_token_without_redmine_scope_cannot_read(self):
-        headers = {**AGENT_HEADERS, "x-test-scopes": "devices.read"}
-        resp = self.client.get(
-            "/api/redmine-agent/daily-brief/latest", headers=headers
-        )
-        self.assertEqual(resp.status_code, 403)
-        resp = self.client.get(
-            "/api/redmine-agent/daily-brief/triage", headers=headers
-        )
-        self.assertEqual(resp.status_code, 403)
-
-    def test_agent_token_with_redmine_scope_can_read(self):
-        headers = {**AGENT_HEADERS, "x-test-scopes": "redmine.read"}
-        resp = self.client.get(
-            "/api/redmine-agent/daily-brief/latest", headers=headers
-        )
-        self.assertEqual(resp.status_code, 200)
-
-    def test_agent_token_cannot_trigger_run_even_with_read_scope(self):
-        headers = {**AGENT_HEADERS, "x-test-scopes": "redmine.read"}
-        resp = self.client.post("/api/redmine-agent/daily-brief/run", headers=headers)
-        self.assertEqual(resp.status_code, 403)
-        resp = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', headers=headers, json={'issue_id': 647338})
-        self.assertEqual(resp.status_code, 403)
-        resp = self.client.put(
-            "/api/redmine-agent/daily-brief/config",
-            headers=headers, json={"enabled": False},
-        )
-        self.assertEqual(resp.status_code, 403)
-
-    def test_human_session_can_trigger_run(self):
-        resp = self.client.post("/api/redmine-agent/daily-brief/run")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("run_id", resp.json()["data"])
 
 
 if __name__ == "__main__":

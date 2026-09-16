@@ -17,6 +17,9 @@ DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     # opt-in：晨报会消耗 kkagent 分析资源，默认关闭，owner 在设置里显式
     # 开启后才进入 nightly 调度（不得默认启用）。
     "enabled": False,
+    # 每个 owner 的夜间全量晨报触发时间（Controller 所在主机本地时间）。
+    # 固定为 HH:MM，供 systemd 的每分钟调度入口按 owner 筛选。
+    "trigger_time": "00:00",
     # 当前唯一实现的分析后端。历史上允许 "direct" 但从未实现，已从枚举
     # 移除；旧配置里的 "direct" 会被规范化回 "kkagent"。
     "analysis_backend": "kkagent",
@@ -41,6 +44,7 @@ RUNTIME_CONFIG_KEY = "redmine_daily_brief"
 _PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _KKAGENT_CLIENT_RE = re.compile(r'^\s*client\s*=\s*["\']kkagent["\']\s*$', re.MULTILINE)
 _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9:._-]{2,64}$")
+_TRIGGER_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 # Compatibility export; unbudgeted analysis does not need additional rounds.
 TEST_FAILURE_EXTRA_TURNS = 0
 
@@ -158,6 +162,11 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
             config["enabled"] = True
         elif normalized in ("0", "false", "no", "off"):
             config["enabled"] = False
+    trigger_time = str(payload.get("trigger_time") or config["trigger_time"]).strip()
+    config["trigger_time"] = (
+        trigger_time if _TRIGGER_TIME_RE.fullmatch(trigger_time)
+        else DEFAULT_BRIEF_CONFIG["trigger_time"]
+    )
     backend = str(payload.get("analysis_backend") or config["analysis_backend"]).strip()
     config["analysis_backend"] = backend if backend in ("kkagent",) else "kkagent"
     config["model"] = str(payload.get("model") or "").strip()
