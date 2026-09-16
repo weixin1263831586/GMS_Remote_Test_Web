@@ -2964,12 +2964,17 @@ function singleIssueAnalysisMeta(run, issue) {
   var tags = timestamp ? ['<span>分析时间 ' + esc(timestamp) + '</span>'] : [];
   var serial = String(run.device_serial || '').trim();
   if (serial) {
-    var tools = ((issue.ai_statistics || {}).gms_tools || []);
-    var snapshot = tools.find(function (tool) { return tool && tool.tool_name === 'gms_rt_devices_snapshot'; }) || {};
-    var evidenceClass = Number(snapshot.succeeded_count || 0) > 0 ? 'evidence-ok'
-      : (Number(snapshot.failed_count || 0) > 0 || issue.status === 'failed' ? 'evidence-failed' : 'evidence-pending');
-    var evidenceText = Number(snapshot.succeeded_count || 0) > 0 ? '实机取证成功'
-      : (evidenceClass === 'evidence-failed' ? '实机取证失败' : '实机取证中');
+    var evidenceStatus = String(((issue.ai_execution || {}).device_evidence_status) || 'not_collected');
+    var evidenceClass = evidenceStatus === 'succeeded' ? 'evidence-ok'
+      : (['service_unavailable', 'invalid_request', 'device_unavailable', 'unavailable'].includes(evidenceStatus)
+        ? 'evidence-failed' : 'evidence-pending');
+    var evidenceText = '未执行实机取证';
+    if (evidenceStatus === 'succeeded') evidenceText = '实机取证成功';
+    else if (evidenceStatus === 'service_unavailable') evidenceText = '取证服务暂不可用';
+    else if (evidenceStatus === 'invalid_request') evidenceText = '取证请求无效';
+    else if (evidenceStatus === 'device_unavailable') evidenceText = '设备取证未完成';
+    else if (evidenceStatus === 'unavailable') evidenceText = '实机取证失败';
+    else if (evidenceStatus === 'collecting') evidenceText = '实机取证中';
     tags.push('<span>设备 ' + esc(serial) + '</span>');
     tags.push('<span class="' + evidenceClass + '">' + evidenceText + '</span>');
   }

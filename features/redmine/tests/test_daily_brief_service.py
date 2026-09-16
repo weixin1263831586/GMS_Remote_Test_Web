@@ -19,6 +19,7 @@ from features.redmine.daily_brief_service import (
     DailyBriefService,
     normalize_daily_brief_config,
 )
+from features.redmine.kkagent.evidence_preflight import EvidencePreflight
 from features.redmine.kkagent_analyzer import KkAgentAnalysisResult
 
 
@@ -141,6 +142,13 @@ class RunLifecycleTests(unittest.TestCase):
         preflight = patch_preflight_ok()
         preflight.start()
         self.addCleanup(preflight.stop)
+        evidence_preflight = patch(
+            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
+            AsyncMock(return_value=EvidencePreflight()),
+        )
+        evidence_preflight.start()
+        self.addCleanup(evidence_preflight.stop)
+        self.evidence_preflight = evidence_preflight
 
     def _patch_snapshot(self):
         from unittest.mock import AsyncMock
@@ -366,6 +374,57 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertEqual(refreshed.report_json["counts"]["failed"], 0)
         subjects = {item["subject"] for item in refreshed.report_json["top_priorities"]}
         self.assertEqual(subjects, {"A", "B"})
+
+    def test_deep_analysis_precollects_bound_evidence_before_kkagent(self):
+        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+        from features.redmine.kkagent.trace import ToolTrace
+
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-16", mode="issue:652654",
+            run_id="db_deep", device_serial="RK3576GMS1", status="analyzing",
+        )
+        self.service.repository.create_run(run)
+        self.service.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=652654, buckets=[], subject="CTS failure",
+        ))
+        evidence = EvidencePreflight(
+            traces=[ToolTrace(
+                tool_name="gms_rt_devices_snapshot", status="succeeded",
+                tool_input={"device": "RK3576GMS1"},
+            )],
+            snapshot_id="ev_652654", device_status="succeeded",
+        )
+        self.evidence_preflight.stop()
+        collector = patch(
+            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
+            AsyncMock(return_value=evidence),
+        )
+        collector_mock = collector.start()
+        self.addCleanup(collector.stop)
+        seen: dict = {}
+
+        class Analyzer:
+            env_extra = {"GMS_RT_PROFILE": "kkagent-profile"}
+
+            async def analyze(self, entry):
+                seen.update(entry)
+                return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        import asyncio
+        asyncio.run(self.service._analyze_one(
+            run, 652654, {
+                "issue_id": 652654, "analysis_mode": "diagnostic",
+                "device_serial": "RK3576GMS1",
+            },
+            Analyzer(), {},
+        ))
+
+        self.assertEqual(seen["_evidence_preflight"], {
+            "snapshot_id": "ev_652654", "device_status": "succeeded",
+        })
+        self.assertEqual(seen["_precollected_tool_traces"], evidence.traces)
+        self.assertEqual(collector_mock.await_args.kwargs["issue_id"], 652654)
+        self.assertEqual(collector_mock.await_args.kwargs["device_serial"], "RK3576GMS1")
 
 class AnalyzerBindingTests(unittest.TestCase):
     """kkagent 分析器必须绑定 owner 的 profile，且不继承他人身份。"""

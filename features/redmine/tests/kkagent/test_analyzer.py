@@ -255,7 +255,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v14")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v15")
 
     def test_prompt_includes_operator_observation_as_verifiable_context(self):
         prompt = KkAgentRedmineAnalyzer().build_prompt({
@@ -276,8 +276,8 @@ class AnalyzerE2ETests(unittest.TestCase):
         prompt = KkAgentRedmineAnalyzer().build_prompt({
             **ENTRY, "analysis_mode": "diagnostic", "device_serial": "RK3576-ADB-01",
         })
-        self.assertIn("MUST first call gms_rt_devices_snapshot", prompt)
-        self.assertIn("gms-rt-devices-snapshot", prompt)
+        self.assertIn("gms_rt_devices_snapshot with device=`RK3576-ADB-01`", prompt)
+        self.assertIn("never run gms-rt CLI through Bash", prompt)
 
     def test_cancellation_cleans_up_process_tree(self):
         class _HangingStream:

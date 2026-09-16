@@ -23,6 +23,28 @@ def _tool_succeeded(tools: list[Any], name_fragment: str) -> bool:
     return False
 
 
+def _tool_status(tools: list[Any], name_fragment: str) -> str:
+    """Return a presentation-safe evidence state from the latest trace."""
+    matched = [
+        tool for tool in tools
+        if isinstance(tool, dict) and name_fragment in str(tool.get("tool_name") or "")
+    ]
+    if not matched:
+        return "not_collected"
+    if any(_tool_succeeded([tool], name_fragment) for tool in matched):
+        return "succeeded"
+    failure_kinds = {
+        str(tool.get("failure_kind") or "") for tool in matched
+        if str(tool.get("failure_kind") or "")
+    }
+    for status in ("service_unavailable", "invalid_request", "device_unavailable"):
+        if status in failure_kinds:
+            return status
+    if any(str(tool.get("status") or "").lower() == "failed" for tool in matched):
+        return "unavailable"
+    return "collecting"
+
+
 def issue_payload(
     issue: DailyBriefIssue,
     execution: dict[str, Any] | None = None,
@@ -56,6 +78,7 @@ def issue_payload(
         "failure_message": execution.get("failure_message") or "",
         "schema_status": schema_status,
         "issue_fetched": _tool_succeeded(tools, "redmine_issue_fetch"),
+        "device_evidence_status": _tool_status(tools, "gms_rt_devices_snapshot"),
         "journals_checked": _tool_succeeded(tools, "redmine_journals"),
         "attachments_checked": gate.get("attachments_checked") is True,
         "source_evidence_checked": bool(

@@ -55,6 +55,9 @@ class ToolTrace:
     output_sha256: str = ""
     output_bytes: int = 0
     output_preview: str = ""
+    # Controller-owned preflight may classify a failure without exposing raw
+    # diagnostics. Empty preserves the historical "unknown" tool result.
+    failure_kind: str = ""
     evidence_issue_ids: list[int] = field(default_factory=list)
     attachment_manifest_parsed: bool = False
     attachment_count: int = 0
@@ -86,6 +89,7 @@ class ToolTrace:
             "output_sha256": self.output_sha256,
             "output_bytes": self.output_bytes,
             "output_preview": self.output_preview,
+            "failure_kind": self.failure_kind,
             "evidence_issue_ids": self.evidence_issue_ids,
             "attachment_manifest_parsed": self.attachment_manifest_parsed,
             "attachment_count": self.attachment_count,
