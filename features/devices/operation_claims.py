@@ -13,14 +13,7 @@ from .locks import device_lock_manager
 
 
 def _owned_local_device_keys(owner_id: str, device_keys: list[str]) -> dict[str, dict]:
-    """Return the caller's active claims for the requested devices.
-
-    Used for claim-borrow semantics: a device the same owner already holds
-    through a claim, reservation or running job is reused (its fencing
-    token carries the holder's generation) instead of being re-acquired
-    under a new source_id — which would 409 against the owner's own
-    long-lived claim.
-    """
+    """Return the caller's active claims for the requested devices."""
     owned: dict[str, dict] = {}
     try:
         active = device_lock_manager.registry.list_active(worker_id=None)
@@ -34,19 +27,9 @@ def _owned_local_device_keys(owner_id: str, device_keys: list[str]) -> dict[str,
     return owned
 
 
-# Source types whose claims a concurrent operation may BORROW instead of
-# acquiring a new one. Only long-lived holder states qualify — borrowing
-# another in-flight operation's claim let two parallel mutations share one
-# lifecycle: when the first finished it released the claim while the second
-# was still executing, and neither had an independent source_id.
-#
-# cluster-job claims are deliberately NOT borrowable: a running cluster job
-# is an active exclusive workflow, and letting the same owner silently
-# borrow its claim from a device page (reboot/remount/flash...) would
-# mutate hardware under a live CTS/GTS run. Such requests must conflict
-# (409) with the holding job instead (review: workflow-level reentrancy).
-# Reservation claims stay borrowable: the reservation holder owns the
-# device through the flash→test workflow stages and reuses its claim.
+# Only reservation claims are workflow-reentrant. A live cluster-job claim is
+# exclusive even for the same account: allowing an unrelated reboot/remount/
+# flash operation to borrow it would mutate hardware under a running xTS job.
 _BORROWABLE_SOURCE_TYPES = {"cluster-reservation"}
 
 
@@ -54,7 +37,6 @@ def _borrowable(claim: dict) -> bool:
     source_type = str(claim.get("source_type") or "")
     if source_type in _BORROWABLE_SOURCE_TYPES:
         return True
-    # Local test runs register cluster-source-like ids without source_type.
     source_id = str(claim.get("source_id") or "")
     return source_id.startswith("reservation:")
 
@@ -73,9 +55,16 @@ def acquire_device_operation_claim(
     *,
     ttl_seconds: int = 3600,
 ) -> tuple[str, list[dict], JSONResponse | None]:
-    """Atomically fence a dynamic set of devices for one HTTP operation."""
+    """Atomically fence a dynamic set of devices for one HTTP operation.
+
+    Claim ownership follows ADR 0010's resource-owner account. The acting
+    principal remains available as ``user.actor_id`` for audit attribution,
+    but Agent token rotation and ATS machine execution must see/borrow claims
+    created for the same human account.
+    """
 
     user = require_authenticated_user(request)
+    owner_id = user.resource_owner_id
     requested = list(dict.fromkeys(
         str(device_id or "").strip()
         for device_id in device_ids
@@ -90,13 +79,8 @@ def acquire_device_operation_claim(
     if not devices:
         return "", [], None
     device_keys = [device_lock_manager._device(item)["device_key"] for item in devices]
-    # Agent Service Token（ADR 0006）在任何设备操作上都需要显式的
-    # devices.use_leased scope。人类普通用户不做“先租后用”限制：常规
-    # 操作（wifi/reboot/remount/scrcpy 等）可直接作用于空闲设备，设备
-    # 归属冲突由下方 409 fencing 兜底；高危操作（bootloader/verity/
-    # override）已在路由层挂 require_elevated_admin_when_auth_required，
-    # 普通用户到不了那一步。
-    owned = _owned_local_device_keys(user.id, device_keys)
+
+    owned = _owned_local_device_keys(owner_id, device_keys)
     if user.role == "agent_service" and not _has_permission(user, "devices.use_leased"):
         return "", [], JSONResponse(
             content={
@@ -105,11 +89,7 @@ def acquire_device_operation_claim(
             },
             status_code=403,
         )
-    # Borrow semantics: a device held by THIS owner through a
-    # reservation or running job is reused (its fencing token carries the
-    # holder's generation); a device held by another in-flight OPERATION
-    # is NOT borrowed — concurrent operations get independent claims and
-    # conflict with each other instead of sharing one lifecycle.
+
     borrowed = [
         owned[key] for key in device_keys
         if key in owned and _borrowable(owned[key])
@@ -123,7 +103,7 @@ def acquire_device_operation_claim(
     if missing:
         acquired, new_records = device_lock_manager.lock_devices(
             missing,
-            user.id,
+            owner_id,
             user.username,
             source_id=source_id,
             source_type=f"local-{operation}",
@@ -138,8 +118,6 @@ def acquire_device_operation_claim(
                 }
                 for row in new_records
             ]
-            # Keep the full conflicting claim records on the response so the
-            # caller can surface who holds the device (API contract).
             return "", new_records, JSONResponse(
                 content={
                     "success": False,
@@ -154,13 +132,10 @@ def acquire_device_operation_claim(
             "lease_id": row["id"],
             "device_id": row["device_key"],
             "generation": row["generation"],
-            "owner_id": user.id,
+            "owner_id": owner_id,
         }
         for row in records
     ]
-    # All requested devices were satisfied by existing claims: no new
-    # operation claim was created, so there is nothing to release by
-    # source_id (borrowed claims belong to their reservation/job).
     if not missing:
         return "", records, None
     return source_id, records, None
@@ -191,7 +166,8 @@ def audit_device_operation(
         "method": getattr(request, "method", ""),
         "path": str(getattr(getattr(request, "url", None), "path", "")),
         "status_code": int(status_code),
-        "owner_id": user.id,
+        "owner_id": user.resource_owner_id,
+        "actor_id": user.actor_id,
         "username": user.username,
         "leases": [
             {
