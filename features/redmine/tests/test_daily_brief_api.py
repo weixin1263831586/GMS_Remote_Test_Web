@@ -95,6 +95,18 @@ class DailyBriefApiTests(unittest.TestCase):
         analyzer_patch.start()
         self.addCleanup(analyzer_patch.stop)
 
+        metadata_service = SimpleNamespace(
+            refresh_issue_metadata=AsyncMock(side_effect=lambda issue_id: {
+                "data": {"issue": {"subject": f"Issue {issue_id}"}}
+            })
+        )
+        metadata_patch = patch(
+            "features.redmine.api.get_redmine_service_for_owner",
+            lambda _owner: metadata_service,
+        )
+        metadata_patch.start()
+        self.addCleanup(metadata_patch.stop)
+
         app = FastAPI()
 
         @app.middleware("http")
@@ -128,6 +140,7 @@ class DailyBriefApiTests(unittest.TestCase):
         queued = response.json()['data']
         repo = brief_repo.owner_daily_brief_repository('owner-a')
         self.assertEqual([row.issue_id for row in repo.list_issues(queued['run_id'])], [647338])
+        self.assertEqual(repo.get_issue(queued['run_id'], 647338).subject, 'Issue 647338')
         job = repo.get_job(queued['job_id'])
         self.assertEqual(job['kind'], 'issue')
         self.assertEqual(job['issue_id'], 647338)
@@ -136,6 +149,54 @@ class DailyBriefApiTests(unittest.TestCase):
         again = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338}).json()['data']
         self.assertEqual(again['job_id'], queued['job_id'])
         self.assertTrue(again['already_running'])
+
+    def test_single_issue_history_groups_saved_number_and_full_keeps_new_run(self):
+        incremental = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338}
+        ).json()['data']
+        full = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={'issue_id': 647338, 'analysis_mode': 'full'},
+        ).json()['data']
+
+        self.assertNotEqual(full['run_id'], incremental['run_id'])
+        self.assertEqual(full['analysis_mode'], 'full')
+        history = self.client.get('/api/redmine-agent/daily-brief/issue-analyses').json()['data']['items']
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]['issues'][0]['issue_id'], 647338)
+        self.assertEqual(history[0]['run']['run_id'], full['run_id'])
+
+    def test_single_issue_history_exact_lookup_finds_an_older_saved_number(self):
+        for issue_id in range(647300, 647405):
+            self.client.post(
+                '/api/redmine-agent/daily-brief/analyze-issue',
+                json={'issue_id': issue_id, 'analysis_mode': 'full'},
+            )
+
+        response = self.client.get('/api/redmine-agent/daily-brief/issue-analyses/647300')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['data']['issues'][0]['issue_id'], 647300)
+
+    def test_single_issue_device_selection_is_persisted_and_validated(self):
+        queued = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={'issue_id': 647338, 'device_serial': 'RK3576-ADB-01'},
+        ).json()['data']
+        repo = brief_repo.owner_daily_brief_repository('owner-a')
+        self.assertEqual(repo.get_run(queued['run_id']).device_serial, 'RK3576-ADB-01')
+        changed_device = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={'issue_id': 647338, 'device_serial': 'RK3576-ADB-02'},
+        ).json()['data']
+        self.assertNotEqual(changed_device['run_id'], queued['run_id'])
+        self.assertEqual(repo.get_run(changed_device['run_id']).device_serial, 'RK3576-ADB-02')
+        invalid = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={'issue_id': 647338, 'device_serial': 'bad;serial'},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(invalid.json()['code'], 'MALFORMED_REQUEST')
 
     def test_single_issue_validation_and_owner_isolation(self):
         for invalid in (0, -1, True, '647338', 1.5):

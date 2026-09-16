@@ -15,7 +15,10 @@ from features.auth import (
     get_authenticated_user,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
+    require_human_principal,
+    require_human_principal_when_auth_required,
     require_role,
+    principal_owner_id,
 )
 from features.automation.repository import AutomationStore
 from features.automation.service import (
@@ -45,7 +48,12 @@ automation_service = AutomationService(
 
 
 def _request_owner(request: Request) -> tuple[str, bool]:
-    """Return the ATS owner filter and whether the caller may see all runs."""
+    """Return the ATS owner filter and whether the caller may see all runs.
+
+    Ownership compares against the resource-owner ACCOUNT (ADR 0010): an
+    agent token sees runs created by its enrolling account, so token
+    rotation never orphans a run.
+    """
     user = get_authenticated_user(request)
     if user is None:
         user = require_authenticated_user_when_auth_required(request)
@@ -53,15 +61,26 @@ def _request_owner(request: Request) -> tuple[str, bool]:
         return owner_id_from_request(request), False
     if user.role == "admin":
         return "", True
-    return user.id, False
+    return user.resource_owner_id, False
 
 
 def _owned_run(run_id: str, request: Request) -> dict[str, Any]:
     run = automation_service.get_run(run_id)
     owner, see_all = _request_owner(request)
-    if not see_all and run.get("created_by") != owner:
+    if not see_all and str(run.get("created_by") or "") != owner:
         raise AutomationNotFoundError('Automation run not found')
     return run
+
+
+def _require_human_run_access(run_id: str, request: Request) -> dict[str, Any]:
+    """Owner check for run mutations, refusing agent/machine principals.
+
+    Cancelling or retrying a run mutates the orchestration surface itself
+    (ADR 0012): only the owning human account (or an admin) may do it.
+    """
+
+    require_human_principal(request)
+    return _owned_run(run_id, request)
 
 
 def configure_automation_service(service: AutomationService) -> None:
@@ -153,9 +172,15 @@ async def dry_run_automation_profile(
 async def create_automation_run(
     req: dict[str, Any], request: Request
 ):
+    # ADR 0012: runs are a human-operator surface. Agent tokens and machine
+    # principals must not create (or chain) runs — the pipeline's authority
+    # is snapshotted from the human creator at this single entry point.
     try:
-        owner = require_authenticated_user(request).id
-        run = automation_service.create_run(req, created_by=owner)
+        principal = require_human_principal(request)
+        owner = principal_owner_id(request)
+        run = automation_service.create_run(
+            req, created_by=owner, principal=principal
+        )
     except ValueError as exc:
         return error_response(str(exc), 400)
     return {'success': True, 'data': run}
@@ -164,7 +189,7 @@ async def create_automation_run(
 @router.post('/runs/preflight')
 async def preflight_automation_run(
     req: dict[str, Any],
-    _user: CurrentUser = Depends(require_authenticated_user),
+    _user: CurrentUser | None = Depends(require_human_principal_when_auth_required),
 ):
     try:
         data = automation_service.preflight(req)
@@ -374,7 +399,7 @@ async def cancel_automation_run(
     run_id: str, request: Request
 ):
     try:
-        _owned_run(run_id, request)
+        _require_human_run_access(run_id, request)
         run = automation_service.cancel_run(run_id)
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
@@ -388,7 +413,7 @@ async def retry_automation_run(
     run_id: str, request: Request
 ):
     try:
-        _owned_run(run_id, request)
+        _require_human_run_access(run_id, request)
         run = automation_service.retry_run(run_id)
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)

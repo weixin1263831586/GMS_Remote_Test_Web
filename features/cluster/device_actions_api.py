@@ -35,6 +35,36 @@ ELEVATED_DEVICE_ACTIONS = elevated_device_actions()
 ADB_PROXY_FORBIDDEN_DEVICE_ACTIONS = adb_proxy_forbidden_device_actions()
 
 
+def _require_machine_reservation(
+    request: Request, worker_id: str, devices: list[str]
+) -> None:
+    """Restrict machine principals to devices inside their run reservation.
+
+    A machine capability (ADR 0012) must not widen into "operate any device
+    the account could lease": the automation run may only probe devices
+    reserved under its own run id.
+    """
+
+    principal = getattr(request.state, "current_user", None)
+    principal_id = str(getattr(principal, "id", "") or "")
+    run_id = principal_id.removeprefix("automation:")
+    reservation = (
+        service().repository.get_reservation_by_source(run_id) if run_id else None
+    )
+    reserved = {
+        str(item.get("id") or "")
+        for item in (reservation or {}).get("devices") or []
+    }
+    if (
+        not reservation
+        or str(reservation.get("worker_id") or "") != worker_id
+        or any(device_id not in reserved for device_id in devices)
+    ):
+        raise HTTPException(
+            403, "machine principal may only operate devices in its own reservation"
+        )
+
+
 @router.post("/devices/actions")
 async def device_action(body: ClusterDeviceAction, request: Request):
     if body.action in ELEVATED_DEVICE_ACTIONS:
@@ -78,7 +108,10 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         requested.append(device_id)
 
     user = require_authenticated_user(request)
-    owner_id = user.id
+    # ADR 0010: device-action claims/leases belong to the resource-owner
+    # ACCOUNT, so machine principals and agent tokens attribute leases to the
+    # creating account rather than a synthetic actor id.
+    owner_id = user.resource_owner_id
     # Agent Service Token（ADR 0006）：额外要求 devices.use_leased scope
     # 与 allowed_devices/allowed_workers ACL。人类普通用户不做“先租后用”
     # 限制：常规操作可直接作用于空闲设备，冲突由下方 claim/fencing 的
@@ -94,6 +127,10 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             )
         for item in body.devices:
             ensure_agent_device_allowed(request, item)
+        # Machine principals (ADR 0012) additionally may only touch devices
+        # inside their run's active reservation.
+        if getattr(request.state, "auth_method", None) == "machine_authority":
+            _require_machine_reservation(request, body.worker_id, requested)
     operation_id = f"device-action-{uuid.uuid4().hex}"
     claim_source = f"operation:{operation_id}"
     if not is_read_only:

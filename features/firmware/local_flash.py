@@ -7,6 +7,7 @@ import contextlib
 import re
 import shlex
 
+from features.devices import parse_adb_device_states
 from foundation.ssh_executor import ssh_executor
 
 from . import runtime
@@ -50,10 +51,41 @@ async def run_local_firmware_batch(
                 break
         ready, detail = await wait_for_single_rockusb_loader(ssh, device)
         if not ready:
+            # 协议快照过期场景：快照时设备是 rockusb-loader，执行前已
+            # 自行恢复 adb（例如上一轮烧写实际已完成的迟到回报）。此时
+            # 卡满 120s 超时只会得到误导性的「唯一 Loader」错误；先复查
+            # adb 再定性，让上层能选择直接重试而非排查烧写链路。
+            adb_probe = await asyncio.to_thread(
+                runtime.ssh_manager.execute_command, ssh, "adb devices", timeout=8,
+            )
+            if adb_probe.ok and device in parse_adb_device_states(adb_probe.stdout):
+                wait_error = (
+                    "目标设备未停留在 Loader（已恢复 ADB，"
+                    "设备协议快照可能已过期，请刷新设备列表后重试）"
+                )
+            else:
+                wait_error = "未能确认目标设备是唯一 Loader"
             results.append({
                 "device": device, "success": False, "stage": "WAIT_LOADER",
-                "error": "未能确认目标设备是唯一 Loader",
+                "error": wait_error,
                 "loader_output": detail[-1000:],
+            })
+            break
+
+        # 门禁通过到 ``uf`` 执行之间存在时间窗：共享 Worker 上其他任务
+        # 可能在此窗口让第二块板进入 Loader。``upgrade_tool uf`` 无串号
+        # 选择器，窗口内出现歧义必须中止而不是赌目标板被选中。
+        reverified, reverify_detail = await wait_for_single_rockusb_loader(
+            ssh, device, timeout=2, interval=0.2,
+        )
+        if not reverified:
+            results.append({
+                "device": device, "success": False, "stage": "RECONFIRM_LOADER",
+                "error": (
+                    "Loader 唯一性复核失败：烧写启动前检测到其他设备同时"
+                    "处于 Loader，为避免错烧已中止"
+                ),
+                "loader_output": reverify_detail[-1000:],
             })
             break
 

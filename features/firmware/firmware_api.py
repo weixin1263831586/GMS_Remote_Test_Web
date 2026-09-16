@@ -17,6 +17,7 @@ from features.auth import (
 )
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
+from foundation.error_model import ApiError
 from foundation.responses import error_response, success_response
 from foundation.uploads import upload_temp_root
 
@@ -890,6 +891,10 @@ async def burn_firmware(
                     f"Firmware burn failed: {detail}", status_code=422,
                 )
 
+            except ApiError as api_error:
+                # 语义化基础设施错误（如 Worker 探测失败 502）按全局
+                # 错误码表返回信封，不落回通用 500。
+                return api_error.to_response()
             except Exception as e:
                 runtime.store_notification(client_id, "Firmware burn error", str(e)[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name if 'firmware_name' in dir() else ""})
                 return error_response(str(e))

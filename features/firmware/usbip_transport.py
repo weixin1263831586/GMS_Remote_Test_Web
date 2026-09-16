@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import time
 
 from features.devices import (
@@ -18,14 +17,12 @@ from features.devices import (
     rockusb_loader_vid_pids,
 )
 from features.devices import reconnect as usbip_reconnect
+from foundation.error_model import ApiError
 
 from . import runtime
 
 
 logger = logging.getLogger(__name__)
-ROCKUSB_LOADER_COUNT_RE = re.compile(
-    r"List\s+of\s+rockusb\s+connected\(\s*(\d+)\s*\)", re.IGNORECASE
-)
 
 
 def _configured_loader_pids() -> set[str] | None:
@@ -36,7 +33,10 @@ def _configured_loader_pids() -> set[str] | None:
     docs/architecture/adr/0005). The firmware gates must honor it the same
     way ``manager.get_rockusb_loader_devices`` does; otherwise a config-only
     addition silently has no effect on flashing. Falls back to the built-in
-    defaults when the config is unreadable.
+    defaults when the config is unreadable. The PID set is the explicit
+    recognition layer only; unknown PIDs are additionally recognized by the
+    BootROM product-name markers (features/devices/rockusb.py), so a new
+    SoC flashes even before its PID is configured.
     """
     try:
         config = runtime.config_manager.load_config()
@@ -62,22 +62,29 @@ def schedule_usbip_mode_reconnect(device: str, target_protocol: str) -> bool:
         return False
 
 
-async def wait_for_rockusb_loaders(
-    ssh, check_cmd: str, expected_count: int, *,
-    timeout: float = 120, interval: float = 2,
-) -> tuple[bool, str]:
-    deadline, last_detail = time.monotonic() + max(1, timeout), ""
-    while True:
-        probe = await asyncio.to_thread(
-            runtime.ssh_manager.execute_command, ssh, check_cmd, timeout=5
-        )
-        last_detail = (probe.stdout or probe.stderr or "").strip()
-        match = ROCKUSB_LOADER_COUNT_RE.search(last_detail)
-        if match and int(match.group(1)) >= max(1, expected_count):
-            return True, last_detail
-        if time.monotonic() >= deadline:
-            return False, last_detail
-        await asyncio.sleep(max(0.1, interval))
+def _probe_rockusb_loader_serials(ssh) -> tuple[bool, list[str], str]:
+    """Single sysfs+adb snapshot of RockUSB loaders.
+
+    Returns ``(probes_ok, loaders, detail)``. ``probes_ok`` is False when the
+    sysfs or adb probe failed on the Worker: the loader verdict is then
+    unusable (an empty exclusion set would let a healthy marker-matching
+    device pass the flash gate), so callers must treat it as "cannot
+    determine" instead of "no loaders". This mirrors the fail-closed
+    re-verification of ``release_usbip_devices_to_source``.
+    """
+    probe = runtime.ssh_manager.execute_command(
+        ssh, ROCKUSB_SYSFS_PROBE_COMMAND, timeout=8
+    )
+    adb_result = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
+    detail = (probe.stdout or probe.stderr or "").strip()
+    probes_ok = probe.code == 0 and adb_result.code == 0
+    adb_states = parse_adb_device_states(adb_result.stdout)
+    loaders = rockusb_loader_serials(
+        detail,
+        exclude_serials=set(adb_states),
+        loader_pids=_configured_loader_pids(),
+    )
+    return probes_ok, loaders, detail
 
 
 async def wait_for_single_rockusb_loader(
@@ -89,28 +96,17 @@ async def wait_for_single_rockusb_loader(
     selected loader.  Requiring one, and only one, loader before invoking it
     prevents a multi-device request from silently flashing the wrong board.
     Callers therefore enter Loader one device at a time on a shared Worker.
+    A failed Worker probe is never treated as "no loaders": it keeps the
+    gate closed so a transient adb/SSH failure cannot open the burn path.
     """
     deadline, last_detail = time.monotonic() + max(1, timeout), ""
     while True:
-        probe = await asyncio.to_thread(
-            runtime.ssh_manager.execute_command,
-            ssh,
-            ROCKUSB_SYSFS_PROBE_COMMAND,
-            timeout=8,
+        probes_ok, loaders, last_detail = await asyncio.to_thread(
+            _probe_rockusb_loader_serials, ssh
         )
-        last_detail = (probe.stdout or probe.stderr or "").strip()
-        adb_result = await asyncio.to_thread(
-            runtime.ssh_manager.execute_command, ssh, "adb devices", timeout=8
-        )
-        adb_states = parse_adb_device_states(adb_result.stdout)
-        loaders = rockusb_loader_serials(
-            last_detail,
-            exclude_serials=set(adb_states),
-            loader_pids=_configured_loader_pids(),
-        )
-        if loaders == [target_serial] or (
+        if probes_ok and (loaders == [target_serial] or (
             len(loaders) == 1 and target_serial in loaders
-        ):
+        )):
             return True, last_detail
         if time.monotonic() >= deadline:
             return False, last_detail
@@ -126,26 +122,16 @@ async def wait_for_rockusb_loader_exit(
     never return to ``adb devices`` until the setup wizard is completed.  USB
     Loader disappearance is the transport-level success signal that works for
     both user and eng builds; ADB availability remains informational only.
+    A failed Worker probe is never treated as "loader left" (that would turn
+    a transient SSH/adb failure into a fake success): the verification keeps
+    waiting until the deadline.
     """
     deadline, last_detail = time.monotonic() + max(1, timeout), ""
     while True:
-        probe = await asyncio.to_thread(
-            runtime.ssh_manager.execute_command,
-            ssh,
-            ROCKUSB_SYSFS_PROBE_COMMAND,
-            timeout=8,
+        probes_ok, loaders, last_detail = await asyncio.to_thread(
+            _probe_rockusb_loader_serials, ssh
         )
-        last_detail = (probe.stdout or probe.stderr or "").strip()
-        adb_result = await asyncio.to_thread(
-            runtime.ssh_manager.execute_command, ssh, "adb devices", timeout=8
-        )
-        adb_states = parse_adb_device_states(adb_result.stdout)
-        loaders = rockusb_loader_serials(
-            last_detail,
-            exclude_serials=set(adb_states),
-            loader_pids=_configured_loader_pids(),
-        )
-        if target_serial not in loaders:
+        if probes_ok and target_serial not in loaders:
             return True, last_detail
         if time.monotonic() >= deadline:
             return False, last_detail
@@ -308,10 +294,18 @@ async def release_usbip_devices_to_source(
 
 def device_flash_protocols(ssh, devices: list[str]) -> dict[str, str]:
     adb_result = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
-    adb_states = parse_adb_device_states(adb_result.stdout)
     fastboot_result = runtime.ssh_manager.execute_command(
         ssh, "fastboot devices", timeout=8
     )
+    if adb_result.code != 0 or fastboot_result.code != 0:
+        # 远端 Worker 探测失败映射 502（基础设施故障），不得落回 500，
+        # 也不能继续——空排除集会把健康 marker 命中设备暴露成 Loader。
+        raise ApiError.upstream_failure(
+            "无法在测试主机上探测 ADB/Fastboot（设备协议识别失败）",
+            details={"adb_exit_code": adb_result.code,
+                     "fastboot_exit_code": fastboot_result.code},
+        )
+    adb_states = parse_adb_device_states(adb_result.stdout)
     fastboot_devices = set(
         DeviceUtils.parse_fastboot_devices(
             fastboot_result.stdout or fastboot_result.stderr

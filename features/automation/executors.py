@@ -129,6 +129,7 @@ class HttpAutomationExecutor:
         build_password_provider: Any = None,
         device_selector: Any = None,
         device_manager: Any = None,
+        authority_provider: Any = None,
     ):
         port = os.environ.get("GMS_PORT", "5001")
         self.base_url = (base_url or os.environ.get("GMS_AUTOMATION_BASE_URL") or f"http://127.0.0.1:{port}").rstrip("/")
@@ -137,9 +138,29 @@ class HttpAutomationExecutor:
         self.build_password_provider = build_password_provider
         self.device_selector = device_selector
         self.device_manager = device_manager
+        # ADR 0012: callable(run) -> machine principal for this run. Loopback
+        # Feature API calls authenticate with its short-TTL signed capability
+        # token instead of cookies or long-lived admin credentials.
+        self.authority_provider = authority_provider
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
+
+    def _auth_headers(self, run: dict[str, Any]) -> dict[str, str]:
+        """Authorization header carrying this run's machine capability."""
+
+        if self.authority_provider is None:
+            return {}
+        try:
+            principal = self.authority_provider(run)
+            if principal is None:
+                return {}
+            from features.auth import mint_capability_token
+
+            token = mint_capability_token(principal)
+        except Exception:
+            return {}
+        return {"Authorization": f"Bearer {token}"}
 
     def _json_response(self, response: Any) -> dict[str, Any]:
         response.raise_for_status()
@@ -170,7 +191,12 @@ class HttpAutomationExecutor:
                         "parameters": parameters,
                         "source_type": run.get("source_type", "automation"),
                         "source_key": f"automation-build:{run.get('id', '')}",
-                        "owner": run.get("created_by") or run.get("owner", ""),
+                        # ADR 0010/0012: the build belongs to the creating
+                        # ACCOUNT (created_by stores the platform account id),
+                        # so the account keeps owning it across token rotation.
+                        "owner": str(
+                            run.get("created_by") or run.get("owner") or ""
+                        ),
                         "automation_run_id": run.get("id", ""),
                     },
                     start=True,
@@ -398,6 +424,8 @@ class HttpAutomationExecutor:
             reservation = cluster.repository.reserve_devices(
                 worker_id,
                 normalized,
+                # ADR 0010: reservation owner is the creating ACCOUNT, not a
+                # synthetic actor id, so it survives token rotation.
                 owner_id=str(run.get("created_by") or run.get("owner") or "automation"),
                 source_id=run["id"],
             )
@@ -465,7 +493,8 @@ class HttpAutomationExecutor:
         if command_id:
             try:
                 polled = self._json_response(self.session.get(
-                    self._url(f"/api/cluster/commands/{command_id}"), timeout=30
+                    self._url(f"/api/cluster/commands/{command_id}"),
+                    headers=self._auth_headers(run), timeout=30
                 ))
             except Exception as exc:
                 return {"success": True, "running": True, "command_id": command_id,
@@ -540,7 +569,10 @@ class HttpAutomationExecutor:
                 response = self.session.post(
                     self._url("/api/cluster/firmware/stage"),
                     data=encoder,
-                    headers={"Content-Type": encoder.content_type},
+                    headers={
+                        "Content-Type": encoder.content_type,
+                        **self._auth_headers(run),
+                    },
                     timeout=3600,
                 )
             result = self._json_response(response)
@@ -723,6 +755,7 @@ class HttpAutomationExecutor:
             response = self.session.post(
                 self._url("/api/cluster/devices/actions"),
                 json={"worker_id": worker_id, "devices": devices, "action": "props"},
+                headers=self._auth_headers(run),
                 timeout=45,
             )
             result = self._json_response(response)
@@ -857,7 +890,10 @@ class HttpAutomationExecutor:
                 plan.get("redmine_issue_id") or redmine.get("issue_id", "")
             ),
         }
-        response = self.session.post(self._url("/api/test/start"), json=payload, timeout=30)
+        response = self.session.post(
+            self._url("/api/test/start"), json=payload,
+            headers=self._auth_headers(run), timeout=30,
+        )
         result = self._json_response(response)
         if result.get("success"):
             if not result.get("cluster_job_id"):
@@ -873,7 +909,10 @@ class HttpAutomationExecutor:
             run.get("cluster_job_id") or _run_result(run).get("cluster_job_id") or ""
         )
         if cluster_job_id:
-            response = self.session.get(self._url(f"/api/cluster/jobs/{cluster_job_id}"), timeout=30)
+            response = self.session.get(
+                self._url(f"/api/cluster/jobs/{cluster_job_id}"),
+                headers=self._auth_headers(run), timeout=30,
+            )
             result = self._json_response(response)
             if not result.get("success"):
                 return result
@@ -899,6 +938,7 @@ class HttpAutomationExecutor:
                     "attempt_id": job.get("current_attempt_id", ""),
                     "automation_run_id": run.get("id", ""),
                 },
+                headers=self._auth_headers(run),
                 timeout=30,
             )
             report_data = self._json_response(reports).get("response", {})
@@ -937,7 +977,9 @@ class HttpAutomationExecutor:
                 run.get("cluster_job_id") or _run_result(run).get("cluster_job_id") or ""
             )
             endpoint = f"/api/cluster/jobs/{cluster_job_id}/cancel" if cluster_job_id else "/api/test/stop"
-            response = self.session.post(self._url(endpoint), timeout=30)
+            response = self.session.post(
+                self._url(endpoint), headers=self._auth_headers(run), timeout=30
+            )
             result = self._json_response(response)
             if result.get("success"):
                 self.release_resources(run)
@@ -986,7 +1028,8 @@ class HttpAutomationExecutor:
             "report_timestamp": report_timestamp,
         }
         response = self.session.get(
-            self._url("/api/reports/list"), params=params, timeout=30
+            self._url("/api/reports/list"), params=params,
+            headers=self._auth_headers(run), timeout=30,
         )
         data = self._json_response(response)
         if not data.get("success"):
@@ -1018,6 +1061,7 @@ class HttpAutomationExecutor:
         response = self.session.post(
             self._url("/api/reports/analyze"),
             data={"mode": "saved", "report_timestamp": report_timestamp},
+            headers=self._auth_headers(run),
             timeout=300,
         )
         return self._json_response(response)

@@ -13,6 +13,7 @@ from features.firmware.usbip_transport import (
     wait_for_single_rockusb_loader,
 )
 from foundation.command_result import CommandResult
+from foundation.error_model import ApiError
 
 
 PROBE_OUTPUT = (
@@ -115,9 +116,11 @@ class FlashProtocolTests(unittest.TestCase):
         回归背景（2026-09-15）：RK3576（2207:350e）烧写时烧写门只认内置
         默认 PID（351a），配置里的新 PID 不生效，导致"未能确认目标设备
         是唯一 Loader"。烧写门必须与 manager 一样读运行时配置。
+        产品名不带烧写标记（个别 SoC 的 iProduct 读取为空/自定义），
+        该用例专门检验 PID 配置路径。
         """
         probes = iter([
-            "350a\tNEW-SOC-DEV\tUSB download gadget\n",
+            "350a\tNEW-SOC-DEV\tNew SoC Loader\n",
         ])
 
         def execute_command(_ssh, cmd, timeout=None):
@@ -137,6 +140,107 @@ class FlashProtocolTests(unittest.TestCase):
                 )
             )
         self.assertTrue(ready)
+
+    def test_unknown_loader_pid_recognized_by_product_marker(self):
+        """未知 SoC 的 Loader 靠 BootROM 产品名标记兜底，无需补 PID。
+
+        回归背景（2026-09-16）：RK3562GMS1（Loader PID 不在默认清单
+        351a/350e 中，也未写入部署配置）烧写时反复超时并误报
+        "未能确认目标设备是唯一 Loader"。标记层让新 SoC 开箱即用。
+        """
+        probes = iter([
+            "0006\tHEALTHY-0006\tSSI 17 on ARM64\n"
+            "350f\tRK3562GMS1\tUSB download gadget\n",
+        ])
+
+        def execute_command(_ssh, cmd, timeout=None):
+            if cmd.startswith("adb devices"):
+                return CommandResult(stdout="List of devices attached\n", code=0)
+            return CommandResult(stdout=next(probes), code=0)
+
+        ssh_manager = SimpleNamespace(execute_command=execute_command)
+        config_manager = SimpleNamespace(load_config=lambda: {
+            "usbip_vid_pids": ["2207:0006", "18d1:4d00", "2207:351a", "2207:350e"],
+        })
+        with patch.object(firmware_runtime, "ssh_manager", ssh_manager), \
+                patch.object(firmware_runtime, "config_manager", config_manager):
+            ready, _detail = asyncio.run(
+                wait_for_single_rockusb_loader(
+                    object(), "RK3562GMS1", timeout=1, interval=0,
+                )
+            )
+        self.assertTrue(ready)
+
+    def test_gate_fails_closed_when_worker_probe_errors(self):
+        """Worker 探测失败时烧写门必须保持关闭（fail-closed）。
+
+        回归背景：sysfs/adb 探测返回非零（sshd 抖动、adb server 故障）
+        曾被当作"无 Loader"继续判定——空排除集会把健康的 marker 命中
+        设备暴露成唯一 Loader，打开错烧路径。
+        """
+        def execute_command(_ssh, cmd, timeout=None):
+            if cmd.startswith("adb devices"):
+                return CommandResult(stdout="", stderr="adb: failed", code=1)
+            return CommandResult(stdout="", code=0)
+
+        ssh_manager = SimpleNamespace(execute_command=execute_command)
+        with patch.object(firmware_runtime, "ssh_manager", ssh_manager):
+            ready, _detail = asyncio.run(
+                wait_for_single_rockusb_loader(
+                    object(), "ANY-DEV", timeout=1, interval=0,
+                )
+            )
+        self.assertFalse(ready)
+
+    def test_gate_rejects_ambiguous_multi_loader_state(self):
+        """第二块板同时处于 Loader 时必须拒绝，不得赌目标板被选中。"""
+        def execute_command(_ssh, cmd, timeout=None):
+            if cmd.startswith("adb devices"):
+                return CommandResult(stdout="List of devices attached\n", code=0)
+            return CommandResult(
+                stdout=(
+                    "351a\tTARGET-DEV\tUSB download gadget\n"
+                    "350f\tOTHER-DEV\tUSB download gadget\n"
+                ),
+                code=0,
+            )
+
+        ssh_manager = SimpleNamespace(execute_command=execute_command)
+        with patch.object(firmware_runtime, "ssh_manager", ssh_manager):
+            ready, _detail = asyncio.run(
+                wait_for_single_rockusb_loader(
+                    object(), "TARGET-DEV", timeout=1, interval=0,
+                )
+            )
+        self.assertFalse(ready)
+
+    def test_loader_exit_never_fakes_success_on_probe_error(self):
+        """VERIFY 阶段探测失败不得被当作"设备已离开 Loader"的假成功。"""
+        def execute_command(_ssh, cmd, timeout=None):
+            if cmd.startswith("adb devices"):
+                return CommandResult(stdout="List of devices attached\n", code=0)
+            return CommandResult(stdout="", stderr="probe failed", code=1)
+
+        ssh_manager = SimpleNamespace(execute_command=execute_command)
+        with patch.object(firmware_runtime, "ssh_manager", ssh_manager):
+            exited, _detail = asyncio.run(
+                wait_for_rockusb_loader_exit(
+                    object(), "TARGET-DEV", timeout=1, interval=0,
+                )
+            )
+        self.assertFalse(exited)
+
+    def test_device_flash_protocols_maps_probe_failure_to_502(self):
+        """协议探测失败映射 UPSTREAM_FAILURE(502)，不得落回 500。"""
+        def execute_command(_ssh, cmd, timeout=None):
+            if cmd.startswith("adb devices"):
+                return CommandResult(stdout="List of devices attached\n", code=0)
+            return CommandResult(stdout="", stderr="fastboot: not found", code=127)
+
+        ssh_manager = SimpleNamespace(execute_command=execute_command)
+        with patch.object(firmware_runtime, "ssh_manager", ssh_manager), self.assertRaises(ApiError) as ctx:
+            device_flash_protocols(object(), ["D1"])
+        self.assertEqual(ctx.exception.status_code, 502)
 
 
 if __name__ == "__main__":

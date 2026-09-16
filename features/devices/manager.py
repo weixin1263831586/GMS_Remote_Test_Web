@@ -195,10 +195,13 @@ class DeviceManager:
     def get_rockusb_loader_devices(self, exclude_serials=None, ssh=None) -> list[str]:
         """返回测试主机上处于 Loader/MaskROM 烧写模式的 Rockchip 设备序列号。
 
-        通过 sysfs 枚举 VID 2207 设备；PID 必须属于烧写模式 PID 集合
-        （平台配置 usbip_vid_pids 中 VID 2207 的条目），且任何出现在
-        adb 输出（含 unauthorized/offline 等任意状态）或调用方给定排除
-        集中的序列号都视为非烧写模式，避免把健康设备暴露成可烧写目标。
+        通过 sysfs 枚举 VID 2207 设备；烧写模式身份为「PID 属于平台配置
+        usbip_vid_pids 中 VID 2207 的条目，或产品名命中 BootROM 烧写标记
+        （见 features/devices/rockusb.py）」，且任何出现在 adb 输出（含
+        unauthorized/offline 等任意状态）或调用方给定排除集中的序列号都
+        视为非烧写模式，避免把健康设备暴露成可烧写目标。探测命令失败
+        （adb/sshd 异常）时 fail-closed 返回空列表：空排除集会把健康的
+        marker 命中设备暴露成 Loader，宁可不识别也不冒错烧风险。
         """
         exclude = {
             str(serial).strip()
@@ -234,6 +237,13 @@ class DeviceManager:
             except Exception as exc:
                 logger.error("[Device] Error scanning local rockusb loader devices: %s", exc)
                 return []
+            if adb_raw.returncode != 0 or probe.returncode != 0:
+                logger.warning(
+                    "[Device] Local probe failed (adb rc=%s, sysfs rc=%s); "
+                    "treating loader scan as indeterminate",
+                    adb_raw.returncode, probe.returncode,
+                )
+                return []
             return rockusb_loader_serials(
                 probe.stdout,
                 exclude_serials=exclude | set(parse_adb_device_states(adb_raw.stdout or "")),
@@ -256,6 +266,13 @@ class DeviceManager:
                 ROCKUSB_SYSFS_PROBE_COMMAND,
                 timeout=15,
             )
+            if not adb_raw.ok or not probe.ok:
+                logger.warning(
+                    "[Device] Remote probe failed (adb rc=%s, sysfs rc=%s); "
+                    "treating loader scan as indeterminate",
+                    adb_raw.code, probe.code,
+                )
+                return []
             return rockusb_loader_serials(
                 probe.stdout or "",
                 exclude_serials=exclude | set(parse_adb_device_states(adb_raw.stdout or "")),

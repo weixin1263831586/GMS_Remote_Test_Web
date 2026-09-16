@@ -17,22 +17,55 @@ class DailyBriefRunStarterMixin:
     def _owner_is_eligible(self) -> bool:
         return is_daily_brief_owner_eligible(self.owner_id)
 
-    def start_issue_analysis(self, issue_id: int) -> dict[str, Any]:
-        """Queue only the requested issue, independently of workload scans and nightly runs."""
+    def start_issue_analysis(
+        self, issue_id: int, *, analysis_mode: str = "incremental", device_serial: str = "",
+        subject: str = "",
+    ) -> dict[str, Any]:
+        """Queue an incremental retry or a fresh full analysis for one issue."""
         if not self._owner_is_eligible():
             return {"error": ADMIN_OWNER_MESSAGE, "code": "ADMIN_OWNER_FORBIDDEN"}
+        if analysis_mode == "incremental":
+            previous = self.repository.latest_issue_run(self.owner_id, issue_id)
+            # 选择另一台实机意味着取证上下文已经改变，必须保留旧 run 并
+            # 新建记录，不能把新设备证据混进原分析历史。
+            if previous is not None and (
+                not device_serial or previous.device_serial == device_serial
+            ):
+                record = self.repository.get_issue(previous.run_id, issue_id)
+                if record is not None:
+                    job, queued = self.repository.enqueue_job(
+                        previous.run_id, kind="issue", issue_id=issue_id
+                    )
+                    persisted = self.repository.get_run(previous.run_id)
+                    return {
+                        "run_id": previous.run_id, "job_id": job["job_id"],
+                        "issue_id": issue_id, "status": persisted.status,
+                        "queued": queued, "already_running": not queued,
+                        "analysis_mode": "incremental",
+                    }
+        # A full analysis gets a new run rather than replacing the previous
+        # conclusion.  This keeps the saved Redmine-number history auditable.
+        mode = (
+            f"issue:{issue_id}:{analysis_mode}:{new_run_id()[-12:]}"
+            if analysis_mode == "full" or device_serial else f"issue:{issue_id}"
+        )
         run = DailyBriefRun(
             owner_id=self.owner_id, brief_date=brief_date_today(),
-            mode=f"issue:{issue_id}", run_id=new_run_id(),
+            mode=mode, run_id=new_run_id(),
             started_at=_now(), prompt_version=PROMPT_VERSION, issue_count=1,
+            device_serial=device_serial,
         )
-        issue = DailyBriefIssue(run_id=run.run_id, issue_id=issue_id, buckets=[], subject=f"#{issue_id}")
+        issue = DailyBriefIssue(
+            run_id=run.run_id, issue_id=issue_id, buckets=[],
+            subject=subject or f"#{issue_id}",
+        )
         _created, job, queued = self.repository.create_run_and_enqueue_job(run, issue=issue)
         persisted = self.repository.get_run(job["run_id"])
         return {
             "run_id": job["run_id"], "job_id": job["job_id"],
             "issue_id": issue_id, "status": persisted.status, "queued": queued,
             "already_running": not queued,
+            "analysis_mode": analysis_mode,
         }
 
     def start_run(self, mode: str = "manual", *, force: bool = False) -> dict[str, Any]:

@@ -140,9 +140,12 @@ Loader 枚举为 `2207:351a / Rockusb Device`，RK3576 为
 }
 ```
 
-平台还会识别 `Rockusb Device` 标记，并在烧写模式切换时优先重挂载原 BUSID，
-降低新增 SoC/PID 导致重连失败的风险。RockUSB 模式和不同 SoC 使用不同 PID
-的说明见 [Rockchip Rockusb 文档](https://opensource.rock-chips.com/wiki_Rockusb)。
+平台还会识别 `Rockusb Device` / `USB download gadget` / `MaskROM` 等
+BootROM 产品名标记——这些标记跨 SoC 稳定，是未知 Loader PID 的兜底
+判定（新 SoC 无需补配置即可被识别），并在烧写模式切换时优先重挂载原
+BUSID，降低新增 SoC/PID 导致重连失败的风险。RockUSB 模式和不同 SoC
+使用不同 PID 的说明见
+[Rockchip Rockusb 文档](https://opensource.rock-chips.com/wiki_Rockusb)。
 
 ## 平台已覆盖的 USB/IP 能力
 

@@ -41,6 +41,12 @@ def configure_build_service(service: BuildService) -> None:
 
 
 def _request_owner(request: Request) -> tuple[str, bool]:
+    """Return the build owner filter and whether the caller may see all jobs.
+
+    Ownership compares against the resource-owner ACCOUNT (ADR 0010): jobs
+    created through an agent token belong to the enrolling account, so a
+    rotated token still resolves to the same owner partition.
+    """
     user = get_authenticated_user(request)
     if user is None:
         user = require_authenticated_user_when_auth_required(request)
@@ -48,7 +54,7 @@ def _request_owner(request: Request) -> tuple[str, bool]:
         return owner_id_from_request(request), False
     if user.role == "admin":
         return "", True
-    return user.id, False
+    return user.resource_owner_id, False
 
 
 def _owned_build_job(job_id: str, request: Request) -> dict[str, Any]:

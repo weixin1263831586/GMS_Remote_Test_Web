@@ -6,21 +6,31 @@ from fastapi import HTTPException, Request
 
 from .request_security import authentication_required
 from .service import AUTH_COOKIE_NAME, CurrentUser, auth_service
-
-
 def get_authenticated_user(request: Request) -> CurrentUser | None:
     user = getattr(request.state, "current_user", None)
     if isinstance(user, CurrentUser):
         return user
-    # Agent Service Token (ADR 0006): Bearer credentials from the
-    # Authorization header. An invalid/unknown Bearer token fails closed —
-    # it must not silently fall back to cookie auth or dev-mode anonymity
+    # Bearer credentials from the Authorization header, in priority order:
+    # (1) a short-TTL machine capability token (ADR 0012) minted in-process
+    # by the automation worker, (2) an Agent Service Token (ADR 0006).
+    # An invalid/unknown Bearer token fails closed — it must not silently
+    # fall back to cookie auth or dev-mode anonymity
     # (request.state.credentials_rejected marks the difference).
     auth_header = str(request.headers.get("Authorization") or "")
     if auth_header.startswith("Bearer "):
-        principal, record = auth_service.get_agent_token_principal(
-            auth_header[len("Bearer "):].strip()
-        )
+        credential = auth_header[len("Bearer "):].strip()
+        if credential.startswith("gmscap_v1_"):
+            from .authority import verify_capability_token
+
+            principal = verify_capability_token(credential)
+            if principal is None:
+                request.state.auth_method = "invalid_capability_token"
+                request.state.credentials_rejected = True
+                return None
+            request.state.current_user = principal
+            request.state.auth_method = "machine_authority"
+            return principal
+        principal, record = auth_service.get_agent_token_principal(credential)
         request.state.agent_token_record = record
         if principal is None:
             request.state.auth_method = "invalid_agent_token"
@@ -63,21 +73,46 @@ def require_authenticated_user_when_auth_required(
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
+def require_human_principal(request: Request) -> CurrentUser:
+    """Refuse agent/machine principals on always-authenticated endpoints.
+
+    Mutation surfaces (e.g. ATS run create/cancel/retry) already require an
+    authenticated principal; this adds the human-only rule of ADR 0012 on
+    top, so neither agent tokens nor machine capabilities pass.
+    """
+
+    user = require_authenticated_user(request)
+    if getattr(request.state, "auth_method", None) in {
+        "agent_token", "machine_authority"
+    }:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Agent tokens cannot call this endpoint",
+                "agent_forbidden": True,
+            },
+        )
+    return user
+
+
 def require_human_principal_when_auth_required(
     request: Request,
 ) -> CurrentUser | None:
-    """Authenticate like today, but refuse Agent Service Token principals.
+    """Authenticate like today, but refuse non-human principals.
 
     The MCP tool allowlist is not a security boundary — an agent
     token can call REST endpoints directly with its Bearer credential. VPN,
     SSH helpers and suite management are human-operator surfaces: without a
     matching agent scope they must fail closed here, server-side.
+    Machine capability principals (ADR 0012) are likewise refused: the
+    automation worker must not create chained runs through its own stage
+    authority.
     """
 
     user = require_authenticated_user_when_auth_required(request)
     if user is not None and getattr(
         request.state, "auth_method", None
-    ) == "agent_token":
+    ) in {"agent_token", "machine_authority"}:
         raise HTTPException(
             status_code=403,
             detail={
@@ -100,6 +135,23 @@ def principal_owner_id(request: Request) -> str:
     """
 
     return require_authenticated_user(request).resource_owner_id
+
+
+def principal_owner_id_when_auth_required(request: Request) -> str | None:
+    """Resource-owner id when authenticated, anonymous passthrough in dev mode.
+
+    Mirrors ``principal_owner_id`` for endpoints that stay usable without a
+    global login (dev deployments): anonymous callers keep their explicit
+    ``owner_id_from_request`` value, authenticated callers always own
+    through the account id (ADR 0010) — never the synthetic actor id.
+    """
+
+    user = get_authenticated_user(request)
+    if user is not None:
+        return user.resource_owner_id
+    if not authentication_required():
+        return None
+    raise HTTPException(status_code=401, detail="Authentication required")
 
 
 def principal_actor_id(request: Request) -> str:

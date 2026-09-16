@@ -41,7 +41,7 @@ def resolve_report_attachments(request, report_ids: list) -> tuple[list[Path], l
             continue
         report = test_report_db.get_report(
             report_id,
-            owner_id=None if principal.role == "admin" else principal.id,
+            owner_id=None if principal.role == "admin" else principal.resource_owner_id,
             include_all=principal.role == "admin",
         )
         if not report or not can_access_report(request, report):

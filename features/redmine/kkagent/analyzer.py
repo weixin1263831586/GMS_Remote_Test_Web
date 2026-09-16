@@ -144,8 +144,10 @@ class KkAgentRedmineAnalyzer:
         if serial and entry.get("analysis_mode") != "triage":
             prompt += (
                 f"\n\nLOCAL DEVICE (read-only diagnosis allowed): serial "
-                f"`{serial}` is available to this analysis. You MAY use "
-                f"gms_rt_devices_snapshot / gms_rt_logcat (dump mode) / "
+                f"`{serial}` is selected for this analysis. You MUST first call "
+                f"gms_rt_devices_snapshot on THIS serial (CLI equivalent: "
+                f"gms-rt-devices-snapshot) to collect runtime evidence; then use "
+                f"gms_rt_logcat (dump mode) / "
                 f"gms_rt_shell (read-only allowlist) on THIS serial only to "
                 f"verify runtime facts (build fingerprint, kernel behavior, "
                 f"logs). Describe the device observations in your final report from what you "

@@ -105,6 +105,17 @@ class DailyBriefService(DailyBriefRunStarterMixin):
     def latest_active_issue_run(self) -> DailyBriefRun | None:
         return self.repository.latest_active_issue_run(self.owner_id)
 
+    def latest_issue_runs(self, limit: int = 30) -> list[dict[str, Any]]:
+        """Saved standalone analyses, one newest entry for each issue id."""
+        return [self.run_payload(run) for run in self.repository.latest_issue_runs(
+            self.owner_id, limit=limit
+        )]
+
+    def latest_issue_run(self, issue_id: int) -> dict[str, Any] | None:
+        """Return one saved standalone analysis for an exact Redmine number."""
+        run = self.repository.latest_issue_run(self.owner_id, issue_id)
+        return self.run_payload(run) if run is not None else None
+
     def find_run(self, brief_date: str, mode: str = "nightly") -> DailyBriefRun | None:
         return self.repository.find_run(self.owner_id, brief_date, mode)
 
@@ -116,19 +127,35 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             issue_id = int(attempt.get("issue_id") or 0)
             if issue_id:
                 attempts_by_issue.setdefault(issue_id, []).append(attempt)
+        def display_issue(issue: DailyBriefIssue) -> dict[str, Any]:
+            payload = issue_payload(
+                issue,
+                latest_executions.get(issue.issue_id),
+                summarize_execution_statistics(
+                    attempts_by_issue.get(issue.issue_id, []),
+                    fallback_model=run.model_name,
+                ),
+            )
+            # 旧版单号 run 只保存了 ``#<id>``。若同 owner 的 Redmine
+            # 本地镜像已有标题，读时补齐展示而不改动历史分析结论。
+            if payload.get("subject") not in ("", f"#{issue.issue_id}"):
+                return payload
+            try:
+                from .api import get_redmine_service_for_owner
+
+                stored = get_redmine_service_for_owner(self.owner_id).repository.get_issue(
+                    issue.issue_id
+                ) or {}
+                subject = str(stored.get("subject") or "").strip()
+                if subject:
+                    payload["subject"] = subject
+            except Exception:
+                logger.debug("local Redmine title unavailable for #%s", issue.issue_id)
+            return payload
+
         return {
             "run": run.to_row(),
-            "issues": [
-                issue_payload(
-                    issue,
-                    latest_executions.get(issue.issue_id),
-                    summarize_execution_statistics(
-                        attempts_by_issue.get(issue.issue_id, []),
-                        fallback_model=run.model_name,
-                    ),
-                )
-                for issue in issues
-            ],
+            "issues": [display_issue(issue) for issue in issues],
         }
 
     _issue_payload = staticmethod(issue_payload)
@@ -233,6 +260,10 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             # 直接返回持久状态，不得复活已终态的 run。
             return run
         config = self.get_config()
+        # 单号分析的设备选择随 run 持久化；不回写晨报全局配置，也不让后来
+        # 的设置修改悄悄改变历史重分析的实机取证目标。
+        if run.device_serial:
+            config["device_serial"] = run.device_serial
         task = asyncio.current_task()
         if task is not None:
             self._RUN_EXECUTIONS[run_id] = task
@@ -450,6 +481,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         try:
             analyze_entry = dict(entry) if entry else {"issue_id": issue_id}
             analyze_entry.setdefault("analysis_mode", "diagnostic")
+            if config.get("device_serial"):
+                analyze_entry.setdefault("device_serial", config["device_serial"])
             # 部署事实 hint：SDK 源可用性决定源码取证门禁是否强制
             #（evidence_gate 降级依据），只进本次调用，不回写快照。
             analyze_entry["sdk_sources_available"] = _sdk_sources_available()
@@ -513,6 +546,21 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             return {"error": f"issue {issue_id} not in run {run.run_id}"}
         if self.run_is_executing(run.run_id):
             return {"error": f"run {run.run_id} is still executing; retry after it finishes"}
+        if run.mode.startswith("issue:") and record.subject in ("", f"#{issue_id}"):
+            # 单号任务没有晨报快照可提供标题。先用同 owner 的 Redmine
+            # 元数据同步补齐标题；失败不阻断后续 AI 取证，行内会退化为单号。
+            try:
+                from .api import get_redmine_service_for_owner
+
+                metadata = await get_redmine_service_for_owner(
+                    self.owner_id
+                ).refresh_issue_metadata(issue_id)
+                subject = str((metadata.get("data") or {}).get("issue", {}).get("subject") or "").strip()
+                if subject:
+                    record.subject = subject
+                    self.repository.upsert_issue(record)
+            except Exception:
+                logger.info("single issue %s subject refresh unavailable", issue_id, exc_info=True)
         config = self.get_config()
         # 认证预检：token 失效时直接拒绝单条重分析，
         # 不再让该 issue 烧满 turn 预算后以 max_turns 失败。
@@ -530,6 +578,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             "buckets": record.buckets,
             "priority_name": record.priority,
         }
+        if config.get("device_serial"):
+            entry = {**entry, "device_serial": config["device_serial"]}
         analyzer = self._build_analyzer(config)
         try:
             await self._analyze_one(run, issue_id, entry, analyzer, config)

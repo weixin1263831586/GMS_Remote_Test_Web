@@ -168,7 +168,7 @@ async def analyze_reports(
             report = (
                 test_report_db.get_report(
                     report_id,
-                    owner_id=None if principal.role == "admin" else principal.id,
+                    owner_id=None if principal.role == "admin" else principal.resource_owner_id,
                     include_all=principal.role == "admin",
                 )
                 if report_id and hasattr(test_report_db, "get_report")
@@ -189,14 +189,14 @@ async def analyze_reports(
             result = await asyncio.to_thread(
                 test_report_manager.analyze_report_by_id,
                 str(report.get("report_id") or report_id),
-                owner_id=None if principal.role == "admin" else principal.id,
+                owner_id=None if principal.role == "admin" else principal.resource_owner_id,
                 include_all=principal.role == "admin",
             ) if report.get("report_id") and hasattr(
                 test_report_manager, "analyze_report_by_id"
             ) else await asyncio.to_thread(
                 test_report_manager.analyze_report,
                 report_timestamp,
-                owner_id=None if principal.role == "admin" else principal.id,
+                owner_id=None if principal.role == "admin" else principal.resource_owner_id,
                 include_all=principal.role == "admin",
             )
             if not result:
@@ -698,7 +698,7 @@ async def delete_report(
         report = (
             test_report_db.get_report(
                 report_id,
-                owner_id=None if principal.role == "admin" else principal.id,
+                owner_id=None if principal.role == "admin" else principal.resource_owner_id,
                 include_all=principal.role == "admin",
             )
             if report_id and hasattr(test_report_db, "get_report")
@@ -733,13 +733,13 @@ async def delete_report(
         success = (
             test_report_db.delete_report_by_id(
                 str(report.get("report_id")),
-                owner_id=None if principal.role == "admin" else principal.id,
+                owner_id=None if principal.role == "admin" else principal.resource_owner_id,
                 include_all=principal.role == "admin",
             )
             if report.get("report_id") and hasattr(test_report_db, "delete_report_by_id")
             else test_report_db.delete_report(
                 str(report.get("timestamp") or timestamp),
-                owner_id=str(report.get("owner_id") or principal.id),
+                owner_id=str(report.get("owner_id") or principal.resource_owner_id),
             )
         )
         if success:
