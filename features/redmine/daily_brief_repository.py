@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -32,7 +33,7 @@ RUN_COLUMNS = (
     "started_at", "finished_at", "snapshot_at", "snapshot_hash",
     "source_sync_status", "data_quality", "last_sync_at",
     "issue_count", "waiting_my_reply_count", "no_reply_3_days_count",
-    "urgent_count", "analysis_backend", "model_name", "prompt_version",
+    "urgent_count", "analysis_backend", "model_name", "device_serial", "prompt_version",
     "report_json", "report_markdown", "error",
 )
 ISSUE_COLUMNS = (
@@ -54,7 +55,7 @@ class DailyBriefRepository:
     # 当前 schema 版本（PRAGMA user_version）。每次改 _init_db 的表结构
     # 都必须 +1，让旧库在下一次启动时重放迁移；版本历史见
     # docs/redmine-daily-brief.md 的 schema migration 契约一节。
-    _SCHEMA_VERSION = 1
+    _SCHEMA_VERSION = 2
 
     def __init__(self, owner_root: Path):
         self.owner_root = Path(owner_root)
@@ -108,6 +109,7 @@ class DailyBriefRepository:
                     urgent_count INTEGER NOT NULL DEFAULT 0,
                     analysis_backend TEXT NOT NULL DEFAULT '',
                     model_name TEXT NOT NULL DEFAULT '',
+                    device_serial TEXT NOT NULL DEFAULT '',
                     prompt_version TEXT NOT NULL DEFAULT '',
                     report_json TEXT NOT NULL DEFAULT '{}',
                     report_markdown TEXT NOT NULL DEFAULT '',
@@ -193,6 +195,11 @@ class DailyBriefRepository:
                         f"ALTER TABLE redmine_daily_brief_runs "
                         f"ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
                     )
+            if "device_serial" not in run_cols:
+                conn.execute(
+                    "ALTER TABLE redmine_daily_brief_runs "
+                    "ADD COLUMN device_serial TEXT NOT NULL DEFAULT ''"
+                )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS redmine_daily_brief_jobs (
@@ -328,6 +335,49 @@ class DailyBriefRepository:
                 (owner_id,),
             ).fetchone()
             return self._row_to_run(row) if row else None
+
+    def latest_issue_runs(self, owner_id: str, limit: int = 30) -> list[DailyBriefRun]:
+        """Return the newest saved standalone analysis for each Redmine issue.
+
+        Standalone full analyses have a versioned mode (``issue:<id>:full:…``)
+        while earlier installations used ``issue:<id>``.  Grouping here keeps
+        both formats visible as one history entry per Redmine number.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
+                "AND mode LIKE 'issue:%' "
+                "ORDER BY started_at DESC, rowid DESC",
+                (owner_id,),
+            ).fetchall()
+        latest: dict[int, DailyBriefRun] = {}
+        for row in rows:
+            match = re.match(r"^issue:(\d+)(?::|$)", str(row["mode"] or ""))
+            if not match:
+                continue
+            issue_id = int(match.group(1))
+            if issue_id not in latest:
+                latest[issue_id] = self._row_to_run(row)
+            if len(latest) >= max(1, min(int(limit), 100)):
+                break
+        return list(latest.values())
+
+    def latest_issue_run(self, owner_id: str, issue_id: int) -> DailyBriefRun | None:
+        """Newest standalone analysis for one issue, including legacy runs."""
+        # Do not route this through the bounded history view: an older issue
+        # must still be found when a user enters its exact Redmine number.
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
+                "AND mode LIKE ? ORDER BY started_at DESC, rowid DESC",
+                (owner_id, f"issue:{int(issue_id)}%"),
+            ).fetchall()
+        for row in rows:
+            run = self._row_to_run(row)
+            match = re.match(r"^issue:(\d+)(?::|$)", run.mode)
+            if match and int(match.group(1)) == int(issue_id):
+                return run
+        return None
 
     def update_run(self, run: DailyBriefRun) -> bool:
         now = _now()

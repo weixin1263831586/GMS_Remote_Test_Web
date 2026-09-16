@@ -26,7 +26,7 @@ RUN_COLUMNS = [
     "cluster_job_id", "attempt_id", "devices_json", "test_plan_json",
     "report_timestamp", "report_id", "result_json", "error",
     "created_at", "updated_at", "started_at", "finished_at", "lease_owner",
-    "lease_expires_at",
+    "lease_expires_at", "granted_capabilities",
 ]
 
 RUN_SUMMARY_COLUMNS = [
@@ -140,6 +140,7 @@ class AutomationStore:
                 "state_version": "INTEGER NOT NULL DEFAULT 1",
                 "recovery_count": "INTEGER NOT NULL DEFAULT 0",
                 "last_recovered_at": "TEXT NOT NULL DEFAULT ''",
+                "granted_capabilities": "TEXT NOT NULL DEFAULT ''",
             }.items():
                 self._ensure_column(conn, "automation_runs", column, definition)
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_source_key ON automation_runs(source_key) WHERE source_key != ''")

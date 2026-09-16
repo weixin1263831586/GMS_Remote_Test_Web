@@ -25,11 +25,17 @@ router = APIRouter()
 
 
 def _request_owner_id(request: Request) -> str:
+    """Resource-owner id for new Cluster Jobs (ADR 0010).
+
+    Agent tokens create jobs owned by their enrolling ACCOUNT, never the
+    synthetic ``agent:<token_id>``; token rotation then keeps the job
+    visible and cancellable for the same account.
+    """
     user = get_authenticated_user(request)
     if user:
-        return user.id
+        return user.resource_owner_id
     if authentication_required():
-        return require_authenticated_user(request).id
+        return require_authenticated_user(request).resource_owner_id
     return owner_id_from_request(request)
 
 
@@ -54,7 +60,12 @@ def _require_job_access(request: Request, job: dict) -> None:
         if authentication_required():
             require_authenticated_user(request)
         return
-    if user.role != "admin" and str(job.get("owner_id") or "") != user.id:
+    # ADR 0010: ownership compares the resource-owner ACCOUNT, so an agent
+    # token can access jobs owned by its enrolling account.
+    if (
+        user.role != "admin"
+        and str(job.get("owner_id") or "") != user.resource_owner_id
+    ):
         raise HTTPException(404, "job not found")
 
 
@@ -299,7 +310,8 @@ def list_jobs(
         require_agent_scope("jobs.read")(request)
     elif authentication_required():
         user = require_authenticated_user(request)
-    owner_id = user.id if user and user.role != "admin" else ""
+    # ADR 0010: list filtering uses the resource-owner ACCOUNT partition.
+    owner_id = user.resource_owner_id if user and user.role != "admin" else ""
     can_monitor_cross_owner = bool(
         user and user.role in {"device_operator", "admin"}
     )

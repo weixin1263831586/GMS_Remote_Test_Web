@@ -100,7 +100,7 @@ def _is_registered_report_file_path(
     principal = require_authenticated_user(request)
     for report in test_report_db.get_reports(
         limit=500,
-        owner_id=None if principal.role == "admin" else principal.id,
+        owner_id=None if principal.role == "admin" else principal.resource_owner_id,
         include_all=principal.role == "admin",
     ):
         if not can_access_report(request, report):
@@ -200,7 +200,9 @@ async def list_reports(
         owner_filter = (
             None
             if principal is None or (principal.role == "admin" and not user_only)
-            else principal.id
+            # ADR 0010: list from the caller's ACCOUNT partition, never the
+            # synthetic actor id (agent tokens share their owner's partition).
+            else principal.resource_owner_id
         )
         if report_timestamp:
             exact = get_accessible_report_by_timestamp(
@@ -244,7 +246,7 @@ async def list_reports(
                 report,
                 display_id
                 if principal
-                and str(report.get("owner_id") or "") == principal.id
+                and str(report.get("owner_id") or "") == principal.resource_owner_id
                 else "",
             )
             for report in page
@@ -300,7 +302,7 @@ async def download_report(
             report = (
                 test_report_db.get_report(
                     report_id,
-                    owner_id=None if principal.role == "admin" else principal.id,
+                    owner_id=None if principal.role == "admin" else principal.resource_owner_id,
                     include_all=principal.role == "admin",
                 )
                 if report_id and hasattr(test_report_db, "get_report")
@@ -324,7 +326,7 @@ async def download_report(
                     try:
                         bundle = await create_remote_report_bundle(
                             report,
-                            owner_id=principal.id,
+                            owner_id=principal.resource_owner_id,
                         )
                     except RuntimeError as exc:
                         logger.warning(
@@ -463,7 +465,7 @@ async def report_failure_summary(
         report = (
             test_report_db.get_report(
                 report_id,
-                owner_id=None if principal.role == "admin" else principal.id,
+                owner_id=None if principal.role == "admin" else principal.resource_owner_id,
                 include_all=principal.role == "admin",
             )
             if report_id and hasattr(test_report_db, "get_report")

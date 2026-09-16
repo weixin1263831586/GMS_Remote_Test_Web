@@ -65,10 +65,13 @@ class RockusbProbeParsingTests(unittest.TestCase):
         self.assertEqual(serials, [])
 
     def test_loader_serials_deduplicate(self):
-        doubled = PROBE_OUTPUT + "0006\tRK3562GMS7\tSSI 17 on ARM64\n"
+        probe = (
+            "350f\tRK3562GMS1\tUSB download gadget\n"
+            "350f\tRK3562GMS1\tUSB download gadget\n"
+        )
         self.assertEqual(
-            rockusb_loader_serials(doubled),
-            [],
+            rockusb_loader_serials(probe),
+            ["RK3562GMS1"],
         )
 
     def test_non_burn_mode_pid_is_never_a_loader(self):
@@ -97,8 +100,78 @@ class RockusbProbeParsingTests(unittest.TestCase):
         )
         self.assertIn("350e", rockusb_loader_vid_pids({}))
 
+    def test_unknown_soc_loader_pid_recognized_by_product_marker(self):
+        # 现场案例（2026-09-16）：RK3562GMS1 Loader 枚举为未知 PID +
+        # "USB download gadget"，默认 PID 清单（351a/350e）不覆盖，
+        # wait_for_single_rockusb_loader 120s 超时并误报
+        # "未能确认目标设备是唯一 Loader"。BootROM 产品名标记跨 SoC
+        # 稳定，作为未知 PID 的兜底判定，新 SoC 无需补 PID 即可烧写。
+        probe = (
+            "0006\tHEALTHY-ADB\tSSI 17 on ARM64\n"
+            "0007\tHEALTHY-OTHER\tSSI 17 Go on ARM64\n"
+            "350f\tRK3562GMS1\tUSB download gadget\n"
+        )
+        self.assertEqual(
+            rockusb_loader_serials(probe),
+            ["RK3562GMS1"],
+        )
+
+    def test_maskrom_product_marker_recognized(self):
+        probe = "320a\tMASKROM-DEV\tMaskROM\n"
+        self.assertEqual(
+            rockusb_loader_serials(probe),
+            ["MASKROM-DEV"],
+        )
+
+    def test_healthy_function_pid_is_never_a_loader_even_with_marker(self):
+        # H1 钉住：健康运行态功能枚举（0006 ADB / 0007 其他功能）即使
+        # iProduct 恰好命中 BootROM 标记子串，也绝不能进入烧写目标列表
+        # （现场存在 0007 健康枚举且永不出现于 adb 的设备）。
+        probe = (
+            "0006\tDEV-A\tRockusb Device Test Build\n"
+            "0007\tDEV-B\tUSB download gadget\n"
+        )
+        self.assertEqual(rockusb_loader_serials(probe), [])
+
+    def test_healthy_function_pid_not_rescued_by_explicit_loader_pids(self):
+        # PID 是硬约束：把 0007 误配进 loader_pids（或平台误配置）也不
+        # 得让健康枚举变成可烧写目标。
+        probe = "0007\tDEV-B\tSSI 17 Go on ARM64\n"
+        self.assertEqual(
+            rockusb_loader_serials(probe, loader_pids=["0007", "351a"]),
+            [],
+        )
+
+    def test_marker_hit_excluded_by_fastboot_enumeration(self):
+        # 标记层命中 × fastboot 枚举的组合：健康 fastboot 设备的产品名
+        # 若含标记，必须被排除层拦下。
+        probe = "350f\tFB-MARKED\tUSB download gadget\n"
+        self.assertEqual(
+            rockusb_loader_serials(probe, exclude_serials={"FB-MARKED"}),
+            [],
+        )
+
+    def test_marker_only_recognition_with_empty_pid_set(self):
+        # 配置只含健康 PID（loader_pids 为空）时，未知 PID 的 Loader
+        # 仍靠标记层识别。
+        probe = "350f\tDEV\tUSB download gadget\n"
+        self.assertEqual(
+            rockusb_loader_serials(probe, loader_pids=set()),
+            ["DEV"],
+        )
+
+    def test_product_marker_match_is_case_insensitive(self):
+        probe = (
+            "350f\tDEV1\tUSB Download Gadget\n"
+            "350f\tDEV2\tRockusb Device\n"
+        )
+        self.assertEqual(
+            rockusb_loader_serials(probe),
+            ["DEV1", "DEV2"],
+        )
+
     def test_explicit_loader_pids_override_default(self):
-        probe = "320a\tMASKROM-DEV\tMaskROM\n351a\tLOADER-DEV\tUSB download gadget\n"
+        probe = "320a\tMASKROM-DEV\tMaskROM\n351a\tLOADER-DEV\tLoader Dev\n"
         self.assertEqual(
             rockusb_loader_serials(probe, loader_pids=["320a"]),
             ["MASKROM-DEV"],
@@ -145,9 +218,11 @@ class RockusbManagerScanTests(unittest.TestCase):
         ):
             serials = manager.get_rockusb_loader_devices()
 
-        # IN-ADB 处于 unauthorized 状态也必须被排除；RK3562GMS7/LOADER-ONLY
-        # 的 PID（0006/350d）不是烧写模式 PID，同样不得进入可烧写列表。
-        self.assertEqual(serials, [])
+        # IN-ADB 处于 unauthorized 状态也必须被排除；健康枚举
+        # RK3562GMS7（0006，无烧写标记）同样不得进入可烧写列表。
+        # LOADER-ONLY（350d，未知 PID）通过 BootROM 产品名标记
+        # （"USB download gadget"）被识别为 Loader。
+        self.assertEqual(serials, ["LOADER-ONLY"])
 
     def test_local_scan_blocked_adb_returns_empty(self):
         manager = self._local_manager()

@@ -23,6 +23,11 @@ from features.automation.profiles import load_profiles, upsert_profile
 from features.automation.repository import AutomationStore
 from foundation.secrets import decrypt_secret, encrypt_secret
 
+from features.auth import (
+    CurrentUser,
+    automation_granted_capabilities,
+)
+
 
 GerritQuery = Callable[[str, str, int], Awaitable[list[dict[str, Any]]]]
 
@@ -59,11 +64,28 @@ class AutomationService:
                 build_password_provider=self.get_build_password,
                 device_selector=self._device_selector,
                 device_manager=self._device_manager,
+                authority_provider=self.run_authority,
             )
             if executor_name == 'http'
             else StubAutomationExecutor()
         )
         return AutomationOrchestrator(self.store, executor)
+
+    def run_authority(self, run: dict[str, Any]) -> Any:
+        """Build the machine principal that executes this run (ADR 0012)."""
+
+        from features.auth import automation_authority
+
+        granted = [
+            part.strip()
+            for part in str(run.get('granted_capabilities', '') or '').split(',')
+            if part.strip()
+        ]
+        return automation_authority(
+            str(run.get('id') or ''),
+            str(run.get('created_by') or run.get('owner') or ''),
+            granted,
+        )
 
     def get_build_password(self, run_id: str) -> str:
         encrypted = self.store.get_run_secret(run_id, "build_server_password")
@@ -88,7 +110,11 @@ class AutomationService:
         )
 
     def create_run(
-        self, request: dict[str, Any], *, created_by: str = ""
+        self,
+        request: dict[str, Any],
+        *,
+        created_by: str = "",
+        principal: CurrentUser | None = None,
     ) -> dict[str, Any]:
         # 深拷贝后再移除密码，避免修改调用方请求。
         # API bodies are usually disposable, but programmatic callers reuse
@@ -109,10 +135,17 @@ class AutomationService:
             raise ValueError('Firmware artifact or build configuration is required')
         if not str(plan.get('test_type') or '').strip():
             raise ValueError('test_plan.test_type is required')
+        # ADR 0012: snapshot the capability union the pipeline will need and
+        # verify the creator already holds every requested capability. The
+        # run later executes with exactly this snapshot — never more.
+        granted_capabilities = automation_granted_capabilities(
+            principal, plan
+        )
         self._prepare_cluster_plan(body, plan)
         create_request = AutomationRunCreateRequest(**body)
         run_data = create_request.to_run_dict(self.new_run_id())
         run_data["created_by"] = str(created_by or "")
+        run_data["granted_capabilities"] = ",".join(granted_capabilities)
         encrypted_secrets = {}
         if build_password:
             encrypted_secrets["build_server_password"] = encrypt_secret(build_password)
@@ -471,6 +504,8 @@ class AutomationService:
         run_data['devices_json'] = old['devices_json']
         run_data['test_plan_json'] = old['test_plan_json']
         run_data['created_by'] = old.get('created_by', '')
+        # Retry 继承原 run 的能力快照，不重新按当前角色放大（ADR 0012）。
+        run_data['granted_capabilities'] = str(old.get('granted_capabilities', '') or '')
         retry_password = self.get_build_password(run_id)
         encrypted_secrets = {}
         if retry_password:

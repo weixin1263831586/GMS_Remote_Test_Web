@@ -123,19 +123,30 @@
   <section class="stats-section" id="sec-daily-brief">
     <div class="card daily-brief-card">
       <div class="daily-brief-toolbar">
-        <span class="daily-brief-title">🤖 每日晨报 · 待回复事项</span>
-        <div class="daily-brief-toolbar-right">
-          <form id="singleIssueAnalysisForm" class="daily-brief-single-form">
-            <label for="singleIssueAnalysisId" class="sr-only">Redmine 单号</label>
-            <input id="singleIssueAnalysisId" type="text" inputmode="numeric" pattern="[0-9]+" required placeholder="Redmine 单号，如 647338" style="width:200px;max-width:100%">
-            <button id="singleIssueAnalysisStart" type="submit" class="ka-btn primary">分析此单号</button>
-            <button id="singleIssueAnalysisStop" type="button" class="ka-btn" data-click="stopSingleIssueAnalysis" hidden>停止此项</button>
-          </form>
+        <span class="daily-brief-title">🤖 Redmine 单号分析</span>
+        <form id="singleIssueAnalysisForm" class="daily-brief-single-form">
+          <label for="singleIssueAnalysisId" class="sr-only">Redmine 单号</label>
+          <input id="singleIssueAnalysisId" type="text" inputmode="numeric" pattern="[0-9]+" required placeholder="Redmine 单号，如 647338" style="width:200px;max-width:100%">
+          <select id="singleIssueAnalysisMode" aria-label="分析方式">
+            <option value="incremental">增量分析</option>
+            <option value="full">全量分析</option>
+          </select>
+          <select id="singleIssueAnalysisDevice" aria-label="实机验证设备">
+            <option value="">不使用实机验证</option>
+          </select>
+          <button id="singleIssueAnalysisStart" type="submit" class="ka-btn primary">开始分析</button>
+          <button id="singleIssueAnalysisStop" type="button" class="ka-btn" data-click="stopSingleIssueAnalysis" hidden>停止此项</button>
+        </form>
+      </div>
+      <div id="singleIssueAnalysisPagination" class="pagination single-issue-analysis-pagination"></div>
+      <div id="singleIssueAnalysisHistory" class="single-issue-analysis-history" aria-live="polite"></div>
+      <section class="daily-brief-summary" aria-label="每日晨报">
+        <div class="daily-brief-toolbar">
+          <span class="daily-brief-title">🤖 每日晨报 · 待回复事项</span>
           <div id="dailyBriefRunControls" class="daily-brief-run-controls"></div>
         </div>
-      </div>
-      <div id="singleIssueAnalysisResult" aria-live="polite"></div>
-      <div id="dailyBriefCard"><div class="muted" style="padding:16px">🤖 每日晨报加载中…</div></div>
+        <div id="dailyBriefCard"><div class="muted" style="padding:16px">🤖 每日晨报加载中…</div></div>
+      </section>
     </div>
   </section>
 </div>

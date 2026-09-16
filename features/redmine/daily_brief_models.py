@@ -151,6 +151,9 @@ class DailyBriefRun:
     urgent_count: int = 0
     analysis_backend: str = ""
     model_name: str = ""
+    # Standalone analysis may bind one current-host ADB device for read-only
+    # runtime evidence.  It is persisted with the run for reproducibility.
+    device_serial: str = ""
     prompt_version: str = ""
     report_json: dict[str, Any] = field(default_factory=dict)
     report_markdown: str = ""
@@ -176,6 +179,7 @@ class DailyBriefRun:
             "urgent_count": self.urgent_count,
             "analysis_backend": self.analysis_backend,
             "model_name": self.model_name,
+            "device_serial": self.device_serial,
             "prompt_version": self.prompt_version,
             "report_json": self.report_json,
             "report_markdown": self.report_markdown,

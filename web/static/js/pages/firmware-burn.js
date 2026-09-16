@@ -14,31 +14,30 @@ function closeFirmwareModal() {
     ModalManager.close('firmware-modal');
 }
 
-// 在UI上锁定设备（前端立即显示，不等待后端）
-function lockDevicesInUI(devices) {
+// 设备前端乐观锁定/解锁共用助手；后端锁由其 finally 释放，刷新同步。
+function applyDevicesLockState(devices, locked) {
     devices.forEach(deviceId => {
-        const device = state.devices.find(d => {
-            const id = typeof d === 'string' ? d : d.device_id;
-            return id === deviceId;
-        });
-        if (device) {
-            if (typeof device === 'string') {
-                const idx = state.devices.indexOf(device);
-                state.devices[idx] = {
-                    device_id: device,
-                    locked: true,
-                    locked_by: '当前用户',
-                    locked_at: new Date().toISOString()
-                };
-            } else {
-                device.locked = true;
-                device.locked_by = '当前用户';
-                device.locked_at = new Date().toISOString();
+        const idx = state.devices.findIndex(d =>
+            (typeof d === 'string' ? d : d.device_id) === deviceId);
+        if (idx === -1) return;
+        const device = state.devices[idx];
+        if (typeof device === 'string') {
+            if (locked) {
+                state.devices[idx] = { device_id: device, locked: true, locked_by: '当前用户', locked_at: new Date().toISOString() };
             }
+        } else if (locked) {
+            device.locked = true;
+            device.locked_by = '当前用户';
+            device.locked_at = new Date().toISOString();
+        } else {
+            delete device.locked; delete device.locked_by; delete device.locked_at;
         }
     });
-    renderDevices();  // 立即更新UI
+    renderDevices();
 }
+
+function lockDevicesInUI(d) { applyDevicesLockState(d, true); }
+function unlockDevicesInUI(d) { applyDevicesLockState(d, false); }
 
 // Browse local file for firmware (uses native file picker)
 function browseLocalFileForFirmware() {
@@ -645,12 +644,6 @@ async function submitFirmwareBurn() {
                     'POST',
                     finalizeForm
                 );
-                if (!uploadResult.success) {
-                    // finalize 失败（提权过期、设备被占用等）立即中止。
-                    addLogEntry(`固件烧写失败: ${uploadResult.error || '未知错误'}`, 'error');
-                    unlockDevicesInUI(devices);
-                    return;
-                }
             }
         } else {
             const formData = new FormData();
@@ -693,9 +686,10 @@ async function submitFirmwareBurn() {
 
         const result = uploadResult;
         if (!result.success) {
-            // 后端对烧写失败已通过 WebSocket 推送通知（如
-            // "USB/IP Fastboot firmware burn failed"）；这里只写页面日志，
-            // 不再回存通知中心，避免同一故障出现两条重复通知。
+            // 后端对烧写失败已通过 WebSocket 推送通知；这里只写页面日志，
+            // 不再回存通知中心，避免重复通知。200+success:false（服务器
+            // 路径 XHR 分支）同样回滚前端乐观锁定。
+            unlockDevicesInUI(devices);
             addLogEntry(`固件烧写失败: ${result.error}`, 'error');
         }
     } catch (error) {
@@ -705,6 +699,8 @@ async function submitFirmwareBurn() {
             notifyOperationResult('固件烧写失败', error.message, 'error', 'firmware-burn');
         }
         addLogEntry(`固件烧写异常: ${error.message}`, 'error');
+        // 回滚前端乐观锁定；后端锁由其 finally 释放并经下方刷新同步。
+        unlockDevicesInUI(devices);
         loadDevices(true).catch(refreshError => {
             console.error('[Firmware Burn] Failed to refresh devices after error:', refreshError);
         });

@@ -246,7 +246,13 @@ function initWebSocket() {
                             if (disconnected.length > 0) {
                                 message += `，断开：${disconnected.join(' ')}`;
                             }
-                            showToast(message, 'success');
+                            // 含断开事件的变化不是成功状态：烧写进入
+                            // Loader 的预期断开也走这里，success toast
+                            // 会误导用户以为操作全部正常。
+                            showToast(
+                                message,
+                                disconnected.length > 0 ? 'info' : 'success'
+                            );
 
                             // USB/IP 重枚举后 ADB 注册滞后：若"已连接"设备
                             // 尚未出现在刷新结果中，做有界退避补刷。

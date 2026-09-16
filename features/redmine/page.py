@@ -23,5 +23,7 @@ def redmine_agent_page_js():
     """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
     js = Path(__file__).with_name("ui") / "page.js"
     return Response(
-        js.read_text(encoding="utf-8"), media_type="application/javascript"
+        js.read_text(encoding="utf-8"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
     )

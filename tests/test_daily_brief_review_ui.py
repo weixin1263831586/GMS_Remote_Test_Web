@@ -1,11 +1,172 @@
 """Browser regressions for untrusted categories and long brief content."""
 
 import json
+import re
 
 from tests.test_runtime_ui_smoke import RuntimeUiHarness, expect
 
 
 class DailyBriefReviewUiTests(RuntimeUiHarness):
+    def test_single_issue_history_search_and_pagination(self):
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = Array.from({length: 9}, (_, index) => ({
+                    run: {run_id: 'history-' + index, status: 'completed', started_at: '2026-09-16T10:00:00'},
+                    issues: [{issue_id: 650000 + index, subject: 'Issue title ' + index, status: 'completed'}]
+                }));
+                renderSingleIssueAnalysisHistory();
+            }""")
+            history = page.locator('#singleIssueAnalysisHistory')
+            expect(history).to_contain_text('#650000')
+            self.assertNotIn('#650008', history.inner_text())
+            page.locator('[data-single-issue-page="2"]').click()
+            expect(history).to_contain_text('#650008')
+            page.locator('#singleIssueAnalysisId').fill('title 3')
+            expect(history).to_contain_text('#650003')
+            self.assertNotIn('#650008', history.inner_text())
+        finally:
+            page.close()
+
+    def test_saved_single_issue_analysis_is_shown_above_daily_brief_per_issue(self):
+        page = self.new_page()
+
+        def respond(route):
+            data = {}
+            if route.request.url.endswith('/daily-brief/issue-analyses?limit=30'):
+                data = {'items': [{
+                    'run': {'run_id': 'saved-652654', 'status': 'completed'},
+                    'issues': [{'issue_id': 652654, 'subject': 'RK3576 自动亮度调节问题',
+                        'status': 'completed', 'result': {'detailed_report': '# 分析结论\n\n已直接显示'},
+                        'ai_statistics': {'execution_count': 1, 'tokens': {'total_tokens': 42},
+                            'timing': {'total_duration_ms': 1000}}}],
+                }]}
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            history = page.locator('#singleIssueAnalysisHistory')
+            expect(history).to_contain_text('#652654')
+            self.assertNotIn('已直接显示', history.inner_text())
+            self.assertNotIn('总 Tokens', history.inner_text())
+            history.get_by_text('查看分析', exact=True).click()
+            expect(page.locator('.daily-brief-modal').last).to_contain_text('已直接显示')
+            page.locator('.daily-brief-modal').last.get_by_text('关闭', exact=True).click()
+            history.get_by_text('AI 统计', exact=True).click()
+            expect(page.locator('.daily-brief-statistics-modal').last).to_contain_text('总 Tokens')
+            self.assertLess(
+                history.bounding_box()['y'],
+                page.locator('.daily-brief-summary .daily-brief-toolbar').bounding_box()['y'],
+            )
+        finally:
+            page.close()
+
+    def test_enter_indexes_saved_issue_and_highlights_it_without_reanalysis(self):
+        page = self.new_page()
+        submissions = []
+        cancellations = []
+        state = {'cancelled': False}
+
+        def respond(route):
+            if route.request.method == 'POST':
+                if route.request.url.endswith('/cancel'):
+                    cancellations.append(route.request.url)
+                    state['cancelled'] = True
+                    data = {'run_id': 'reanalysis-fixture', 'cancel_requested': True}
+                else:
+                    submissions.append(route.request.post_data_json)
+                    data = {'run_id': 'reanalysis-fixture', 'issue_id': 652654}
+            elif route.request.url.endswith('/daily-brief/runs/reanalysis-fixture'):
+                status = 'cancelled' if state['cancelled'] else 'pending'
+                data = {'run': {'run_id': 'reanalysis-fixture', 'status': status},
+                        'issues': [{'issue_id': 652654, 'subject': '3562-A16-normal版GSI的CtsStatsdAtomHostTestCases',
+                                    'status': status}]}
+            elif route.request.url.endswith('/daily-brief/issue-analyses?limit=30'):
+                data = {'items': [{
+                    'run': {'run_id': 'saved-652654', 'status': 'completed'},
+                    'issues': [{'issue_id': 652654, 'subject': '3562-A16-normal版GSI的CtsStatsdAtomHostTestCases',
+                                'status': 'completed'}],
+                }]}
+            else:
+                data = {}
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            page.locator('#singleIssueAnalysisId').fill('652654')
+            page.locator('#singleIssueAnalysisId').press('Enter')
+            row = page.locator('article[data-single-issue-id="652654"]')
+            expect(row).to_have_class(re.compile(r'\bis-indexed\b'))
+            self.assertIn('3562-A16-normal版GSI', row.inner_text())
+            self.assertEqual(submissions, [])
+            self.assertEqual(page.locator('#singleIssueAnalysisStart').inner_text(), '开始分析')
+            row.locator('[data-single-issue-reanalysis-mode]').select_option('full')
+            row.get_by_text('重新分析', exact=True).click()
+            expect(page.locator('#singleIssueAnalysisHistory')).to_contain_text('排队中')
+            expect(page.locator('#singleIssueAnalysisHistory').get_by_text('停止分析', exact=True)).to_be_visible()
+            expect(page.locator('#singleIssueAnalysisStart')).to_be_enabled()
+            expect(page.locator('#singleIssueAnalysisStop')).to_be_hidden()
+            self.assertEqual(submissions, [{'issue_id': 652654, 'analysis_mode': 'full'}])
+            page.locator('#singleIssueAnalysisHistory').get_by_text('停止分析', exact=True).click()
+            expect(page.locator('#singleIssueAnalysisHistory').get_by_text('重新分析', exact=True)).to_be_visible()
+            self.assertEqual(len(cancellations), 1)
+            self.assertTrue(cancellations[0].endswith('/daily-brief/runs/reanalysis-fixture/cancel'))
+        finally:
+            page.close()
+
+    def test_partial_polling_response_preserves_saved_single_issue_content(self):
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = [{run: {run_id: 'old-run', status: 'completed'}, issues: [{
+                    issue_id: 652654, subject: '完整标题', status: 'completed',
+                    result: {detailed_report: '保留的分析结论'}, ai_statistics: {execution_count: 1}
+                }]}];
+                upsertSingleIssueAnalysis({run: {run_id: 'new-run', status: 'pending'}, issues: [{
+                    issue_id: 652654, status: 'pending'
+                }]});
+            }""")
+            merged = page.evaluate("""() => singleIssueAnalysisHistory[0].issues[0]""")
+            self.assertEqual(merged['subject'], '完整标题')
+            self.assertEqual(merged['result']['detailed_report'], '保留的分析结论')
+            self.assertEqual(merged['ai_statistics']['execution_count'], 1)
+            self.assertEqual(merged['status'], 'pending')
+        finally:
+            page.close()
+
+    def test_concurrent_single_issue_polls_keep_history_row_order_stable(self):
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            order = page.evaluate("""() => {
+                singleIssueAnalysisHistory = [
+                    {run: {run_id: 'run-652498', status: 'pending'}, issues: [{issue_id: 652498, status: 'pending'}]},
+                    {run: {run_id: 'run-652654', status: 'pending'}, issues: [{issue_id: 652654, status: 'pending'}]},
+                ];
+                upsertSingleIssueAnalysis({run: {run_id: 'run-652498', status: 'analyzing'}, issues: [{issue_id: 652498, status: 'running'}]});
+                upsertSingleIssueAnalysis({run: {run_id: 'run-652654', status: 'analyzing'}, issues: [{issue_id: 652654, status: 'running'}]});
+                return singleIssueAnalysisHistory.map(item => item.issues[0].issue_id);
+            }""")
+            self.assertEqual(order, [652498, 652654])
+        finally:
+            page.close()
+
     def test_active_single_issue_is_restored_after_page_reload(self):
         page = self.new_page()
 
@@ -26,7 +187,8 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         try:
             page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
             page.evaluate("switchTab('daily-brief')")
-            expect(page.locator('#singleIssueAnalysisResult')).to_contain_text('#652654 正在分析')
+            expect(page.locator('#singleIssueAnalysisHistory')).to_contain_text('#652654')
+            expect(page.locator('#singleIssueAnalysisHistory')).to_contain_text('分析中')
             expect(page.locator('#singleIssueAnalysisStop')).to_be_visible()
             self.assertEqual(page.locator('#singleIssueAnalysisId').input_value(), '652654')
         finally:
@@ -58,24 +220,64 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
                 page.evaluate("switchTab('stats'); switchTab('daily-brief')")
                 page.locator('#singleIssueAnalysisId').fill(str(issue_id))
                 page.locator('#singleIssueAnalysisId').press('Enter')
-                expect(page.locator('#singleIssueAnalysisResult')).to_contain_text('仅分析 #' + str(issue_id))
+                page.locator('#singleIssueAnalysisHistory').get_by_text('查看分析', exact=True).click()
+                expect(page.locator('.daily-brief-modal').last).to_contain_text('仅分析 #' + str(issue_id))
+                page.locator('.daily-brief-modal').last.get_by_text('关闭', exact=True).click()
                 expect(page.locator('#singleIssueAnalysisStart')).to_be_enabled()
-            self.assertEqual(submissions, [{'issue_id': 647338}, {'issue_id': 123}])
+            self.assertEqual(submissions, [
+                {'issue_id': 647338, 'analysis_mode': 'full'},
+                {'issue_id': 123, 'analysis_mode': 'full'},
+            ])
             page.set_viewport_size({'width': 1440, 'height': 900})
-            centers = page.evaluate("""() => {
+            titleStyles = page.evaluate("""() => {
                 document.getElementById('dailyBriefCard').innerHTML = renderDailyBriefInner({
                     run: {run_id: 'cancelled-fixture', status: 'cancelled',
                         brief_date: '2026-09-15', finished_at: '2026-09-15T21:17:00'}, issues: []
                 });
-                return ['.daily-brief-toolbar .daily-brief-title', '#singleIssueAnalysisId',
-                    '#singleIssueAnalysisStart', '#dailyBriefRunControls .daily-brief-status',
-                    '#dailyBriefRunControls button'].map(selector => {
-                        const box = document.querySelector(selector).getBoundingClientRect();
-                        return box.y + box.height / 2;
-                    });
+                return Array.from(document.querySelectorAll('.daily-brief-toolbar .daily-brief-title'))
+                    .map(node => getComputedStyle(node).fontSize);
             }""")
-            self.assertLess(max(centers) - min(centers), 2)
+            self.assertEqual(titleStyles, ['16px', '16px'])
             self.assertEqual(page.locator('#singleIssueAnalysisId').input_value(), '123')
+        finally:
+            page.close()
+
+    def test_single_issue_device_picker_only_offers_available_adb_devices(self):
+        page = self.new_page()
+        submissions = []
+
+        def redmine(route):
+            if route.request.method == 'POST':
+                submissions.append(route.request.post_data_json)
+                data = {'run_id': 'device-fixture', 'issue_id': 652654}
+            elif route.request.url.endswith('/daily-brief/runs/device-fixture'):
+                data = {'run': {'run_id': 'device-fixture', 'status': 'pending'},
+                        'issues': [{'issue_id': 652654, 'status': 'pending'}]}
+            else:
+                data = {}
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', redmine)
+        page.route('**/api/devices/list?force_refresh=true', lambda route: route.fulfill(
+            status=200, content_type='application/json', body=json.dumps([
+                {'device_id': 'ADB-OWN', 'protocol': 'adb', 'status': 'online', 'locked': False},
+                {'device_id': 'ADB-OTHER', 'protocol': 'adb', 'status': 'online', 'locked': True, 'locked_by_self': False},
+                {'device_id': 'FASTBOOT', 'protocol': 'fastboot', 'status': 'fastboot', 'locked': False},
+            ]),
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            page.locator('#singleIssueAnalysisDevice').focus()
+            expect(page.locator('#singleIssueAnalysisDevice')).to_contain_text('ADB-OWN')
+            self.assertNotIn('ADB-OTHER', page.locator('#singleIssueAnalysisDevice').inner_text())
+            page.locator('#singleIssueAnalysisDevice').select_option('ADB-OWN')
+            page.locator('#singleIssueAnalysisId').fill('652654')
+            page.locator('#singleIssueAnalysisId').press('Enter')
+            expect(page.locator('#singleIssueAnalysisHistory')).to_contain_text('#652654')
+            self.assertEqual(submissions, [{
+                'issue_id': 652654, 'analysis_mode': 'full', 'device_serial': 'ADB-OWN',
+            }])
         finally:
             page.close()
 
@@ -120,11 +322,11 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
                     run: {run_id: 'statistics-fixture', status: 'completed', report_json: {}},
                     issues: [{issue_id: 101, status: 'completed', result: {}, ai_statistics: {
                         execution_count: 2,
-                        tokens: {total_tokens: 150, input_tokens: 120, output_tokens: 30},
+                        tokens: {total_tokens: 6_140_285, input_tokens: 6_085_152, output_tokens: 55_133},
                         timing: {total_duration_ms: 497_000, average_duration_ms: 497_000},
                         gms_tool_call_count: 3,
-                        models: [{model_name: 'glm-4.7', execution_count: 2, total_tokens: 150,
-                                  input_tokens: 120, output_tokens: 30}],
+                        models: [{model_name: 'glm-4.7', execution_count: 2, total_tokens: 6_140_285,
+                                  input_tokens: 6_085_152, output_tokens: 55_133}],
                         gms_tools: [{tool_name: 'gms_rt_redmine_issue_fetch', call_count: 3,
                                      succeeded_count: 2, failed_count: 1}],
                         tool_improvement_recommendations: [{
@@ -147,7 +349,14 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             self.assertIn('gms_rt_redmine_issue_fetch', text)
             self.assertIn('失败码', text)
             self.assertEqual(statistics.locator('img').count(), 0)
-            self.assertLess(statistics.bounding_box()['height'], 720)
+            self.assertGreaterEqual(statistics.bounding_box()['width'], 1_000)
+            self.assertEqual(
+                statistics.locator('.daily-brief-stat-table td:nth-child(3)').first.evaluate(
+                    '(node) => getComputedStyle(node).whiteSpace'
+                ),
+                'nowrap',
+            )
+            self.assertLess(statistics.bounding_box()['height'], 800)
         finally:
             page.close()
 

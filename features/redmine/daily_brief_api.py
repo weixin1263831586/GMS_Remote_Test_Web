@@ -14,9 +14,11 @@ triage 数据严格来自 ``build_daily_triage_snapshot``（内部唯一调用
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
+from typing import Literal
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -64,6 +66,8 @@ def _service_for_request(request: Request | None) -> DailyBriefService:
 
 class SingleIssueAnalysisRequest(BaseModel):
     issue_id: int = Field(strict=True, gt=0, le=9223372036854775807)
+    analysis_mode: Literal["incremental", "full"] = "incremental"
+    device_serial: str = Field(default="", max_length=64)
 
 
 @router.post("/daily-brief/analyze-issue")
@@ -71,7 +75,43 @@ async def analyze_single_issue(request: Request, payload: SingleIssueAnalysisReq
     _require_human(request)
     if not _has_redmine_credentials(request):
         return ApiError.dependency_unavailable("请先配置 Redmine 取证凭据。").to_response()
-    return {"success": True, "data": _service_for_request(request).start_issue_analysis(payload.issue_id)}
+    device_serial = payload.device_serial.strip()
+    if device_serial and not re.fullmatch(r"[A-Za-z0-9:._-]{2,64}", device_serial):
+        return ApiError.malformed_request("设备序列号格式无效。").to_response()
+    subject = ""
+    try:
+        # This is a user-requested analysis action, so refresh its metadata
+        # before enqueueing.  The resulting title is stored on the standalone
+        # row rather than making the UI wait for the AI worker to discover it.
+        from .api import get_redmine_service_for_owner
+
+        metadata = await get_redmine_service_for_owner(
+            owner_id_from_request(request)
+        ).refresh_issue_metadata(payload.issue_id)
+        subject = str((metadata.get("data") or {}).get("issue", {}).get("subject") or "").strip()
+    except Exception:
+        logger.info("single issue %s metadata refresh unavailable", payload.issue_id, exc_info=True)
+    return {"success": True, "data": _service_for_request(request).start_issue_analysis(
+        payload.issue_id, analysis_mode=payload.analysis_mode, device_serial=device_serial,
+        subject=subject,
+    )}
+
+
+@router.get("/daily-brief/issue-analyses")
+async def list_issue_analyses(request: Request, limit: int = Query(30, ge=1, le=100)):
+    """Persistent standalone-analysis history, grouped by Redmine issue id."""
+    _require_read(request)
+    return {"success": True, "data": {"items": _service_for_request(request).latest_issue_runs(limit)}}
+
+
+@router.get("/daily-brief/issue-analyses/{issue_id}")
+async def get_issue_analysis(request: Request, issue_id: int = Path(ge=1)):
+    """Look up a saved standalone analysis before creating a new one."""
+    _require_read(request)
+    item = _service_for_request(request).latest_issue_run(issue_id)
+    if item is None:
+        return ApiError.not_found("该 Redmine 单号暂无已保存的分析。").to_response()
+    return {"success": True, "data": item}
 
 
 @router.get("/daily-brief/runs/{run_id}")

@@ -65,11 +65,16 @@ Rockchip 整包固件烧写（`upgrade_tool uf`）期间，设备会经历
 
 - Rockchip Loader 的 VID 固定为 `2207`，PID 随 SoC 变化（如 RK3572 Loader
   枚举为 `2207:351a / Rockusb Device`，RK3576 为 `2207:350e / USB download
-  gadget`）。部署可在 `configs/local/config.json`
-  的 `usbip_vid_pids` 中补充需要显式识别的身份；平台同时识别
-  `Rockusb Device` 标记，并优先重挂载原 BUSID。烧写门（Loader 唯一性
-  判定、协议识别）同样读取该配置：新增 SoC 只需在这里补充 PID 并刷新
-  配置，无需改代码。
+  gadget`）。烧写识别有两层：平台配置 `configs/local/config.json` 的
+  `usbip_vid_pids` 可显式补充需要识别的 PID（烧写门与设备列表都会读取）；
+  此外 BootROM 产品名标记（`USB download gadget` / `MaskROM` /
+  `Rockusb Device`）跨 SoC 稳定，作为未知 PID 的兜底——新 SoC 的 Loader
+  即使未配置 PID 也能被识别，不会再因清单滞后误报
+  「未能确认目标设备是唯一 Loader」。健康运行态功能 PID（`2207:0006`
+  ADB、`2207:0007 等）是硬约束，永远不参与烧写判定，即使其产品名
+  恰好命中标记。注意：无 USB 序列号（iSerial）的 MaskROM 设备无法
+  建立序列号身份，不会出现在设备列表或烧写目标中；此类设备需在
+  Source 端用 RKDevTool 手工处理。
 - 每次重枚举都要在 USB/IP 链路上重新 bind/attach。实机验证表明：
   **USB/IP 链路无法维持跨越多次 USB 重枚举的会话**，在 Worker 端直接
   跨重枚举烧写的方案均不可靠，已全部删除（见 [ADR-0005](../architecture/adr/0005-usbip-firmware-ownership.md)）。

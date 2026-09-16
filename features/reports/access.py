@@ -18,7 +18,6 @@ def report_request_user(request: Any) -> CurrentUser | None:
 
 def report_owner_id(report: dict[str, Any]) -> str:
     """Return the immutable platform account id stored on a report."""
-
     return str(report.get("owner_id") or "").strip()
 
 
@@ -30,8 +29,11 @@ def can_access_report(request: Any, report: dict[str, Any] | None) -> bool:
         return False
     if user.role == "admin":
         return True
+    # ADR 0010: report.owner_id stores the platform ACCOUNT id; compare it
+    # with the principal's resource-owner id so an agent token can access
+    # reports owned by its enrolling account (rotation-safe).
     owner_id = report_owner_id(report)
-    return bool(owner_id and owner_id == user.id)
+    return bool(owner_id and owner_id == user.resource_owner_id)
 
 
 def filter_accessible_reports(
@@ -55,7 +57,8 @@ def get_accessible_report_by_timestamp(
     user = report_request_user(request)
     if not user:
         return None
-    owner_id = None if user.role == "admin" else user.id
+    # ADR 0010: timestamp lookup stays inside the caller's ACCOUNT partition.
+    owner_id = None if user.role == "admin" else user.resource_owner_id
     report = repository.get_report_by_timestamp(
         timestamp,
         owner_id=owner_id,

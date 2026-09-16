@@ -263,6 +263,13 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn("BOTH directions", prompt)
         self.assertIn("GKI constraint", prompt)
 
+    def test_prompt_requires_selected_device_snapshot(self):
+        prompt = KkAgentRedmineAnalyzer().build_prompt({
+            **ENTRY, "analysis_mode": "diagnostic", "device_serial": "RK3576-ADB-01",
+        })
+        self.assertIn("MUST first call gms_rt_devices_snapshot", prompt)
+        self.assertIn("gms-rt-devices-snapshot", prompt)
+
     def test_cancellation_cleans_up_process_tree(self):
         class _HangingStream:
             async def read(self, size=-1):

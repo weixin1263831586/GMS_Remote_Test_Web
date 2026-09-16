@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse
 
 from features.auth import (
     CurrentUser,
+    machine_has_permission,
     principal_owner_id,
     require_elevated_admin_when_auth_required,
 )
@@ -49,13 +50,16 @@ def _shared():
 @router.post("/firmware/stage")
 async def stage_worker_firmware(
     request: Request,
-    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
     worker_id: str = Form(...),
     devices: str = Form(...),
     reservation_id: str = Form(default=""),
     automation_run_id: str = Form(default=""),
     firmware_file: UploadFile = File(...),
 ):
+    # ADR 0012: a machine capability principal holding firmware.stage may
+    # stage firmware for its own run; human sessions keep the elevation gate.
+    if not machine_has_permission(request, "firmware.stage"):
+        require_elevated_admin_when_auth_required(request)
     _shared()._require_cluster_enabled(remote=worker_id != _shared().service().config.local_worker_id)
     _shared()._online_worker(worker_id)
     device_id = worker_device(
