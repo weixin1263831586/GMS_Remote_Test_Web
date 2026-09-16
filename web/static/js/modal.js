@@ -1,6 +1,5 @@
 // Shared modal helpers and Escape-key modal lifecycle management.
 
-// 可聚焦元素选择器：focus trap 与初始聚焦共用同一契约。
 const MODAL_FOCUSABLE_SELECTOR = [
     '[autofocus]',
     'input:not([disabled])',
@@ -41,12 +40,6 @@ function createAnalysisModal(type, title, loadingMessage) {
     modal.querySelector('.modal-loading-message').textContent = String(loadingMessage ?? '');
     const closeButton = modal.querySelector('.modal-close');
     closeButton.addEventListener('click', () => ModalManager.close(modalId));
-    closeButton.addEventListener('keydown', event => {
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            ModalManager.close(modalId);
-        }
-    });
 
     document.body.appendChild(modal);
     ModalManager.open(modalId);
@@ -62,15 +55,15 @@ const ModalManager = {
     _closeHandlers: new Map(),
     _originalZIndexes: new Map(),
     _focusOrigins: new Map(),
-    _inertedRoots: new Set(),
+    // Roots present here are inert values owned by this manager. Existing
+    // page-owned inert state is deliberately never adopted/cleared.
+    _inertedRoots: new Map(),
     _baseZIndex: 12000,
     _stackStep: 20,
 
     open(modalId) {
         const modal = document.getElementById(modalId);
-        if (!modal) {
-            return;
-        }
+        if (!modal) return;
 
         if (!this._originalZIndexes.has(modalId)) {
             this._originalZIndexes.set(modalId, modal.style.zIndex || '');
@@ -79,9 +72,7 @@ const ModalManager = {
             this._focusOrigins.set(modalId, document.activeElement);
         }
 
-        if (modal.classList.contains('modal')) {
-            modal.style.display = 'flex';
-        }
+        if (modal.classList.contains('modal')) modal.style.display = 'flex';
         modal.classList.add('show');
         modal.setAttribute('role', modal.getAttribute('role') || 'dialog');
         modal.setAttribute('aria-hidden', 'false');
@@ -97,21 +88,18 @@ const ModalManager = {
             return;
         }
         const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.remove('show');
-            if (modal.classList.contains('modal')) {
-                modal.style.display = 'none';
-            }
-            modal.setAttribute('aria-hidden', 'true');
-            modal.removeAttribute('aria-modal');
-            modal.inert = false;
-            this._removeActiveModal(modalId);
-            this._restoreZIndex(modalId, modal);
-            this._emitClose(modalId);
-            this._syncModalStack();
-            this._restoreFocus(modalId);
-            this._cleanupEscListener();
-        }
+        if (!modal) return;
+        modal.classList.remove('show');
+        if (modal.classList.contains('modal')) modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+        modal.removeAttribute('aria-modal');
+        modal.inert = false;
+        this._removeActiveModal(modalId);
+        this._restoreZIndex(modalId, modal);
+        this._emitClose(modalId);
+        this._syncModalStack();
+        this._restoreFocus(modalId);
+        this._cleanupEscListener();
     },
 
     closeAll() {
@@ -131,9 +119,7 @@ const ModalManager = {
     closeTopmost() {
         this._syncModalStack();
         const modalId = this._activeModals[this._activeModals.length - 1];
-        if (modalId) {
-            this.close(modalId);
-        }
+        if (modalId) this.close(modalId);
     },
 
     toggle(modalId) {
@@ -146,9 +132,7 @@ const ModalManager = {
     },
 
     registerDynamic(modalElement) {
-        if (!modalElement.id) {
-            throw new Error('Dynamic modal must have an id');
-        }
+        if (!modalElement.id) throw new Error('Dynamic modal must have an id');
         document.body.appendChild(modalElement);
         this._dynamicModals.add(modalElement.id);
         this.open(modalElement.id);
@@ -164,38 +148,31 @@ const ModalManager = {
         this._dynamicModals.delete(modalId);
         this._removeActiveModal(modalId);
         this._emitClose(modalId);
+        // Release background inert before focus restoration.
         this._syncModalStack();
         this._restoreFocus(modalId);
         this._cleanupEscListener();
     },
 
     onClose(modalId, handler) {
-        if (typeof handler === 'function') {
-            this._closeHandlers.set(modalId, handler);
-        }
+        if (typeof handler === 'function') this._closeHandlers.set(modalId, handler);
     },
 
     _addActiveModal(modalId) {
         const existingIndex = this._activeModals.indexOf(modalId);
-        if (existingIndex !== -1) {
-            this._activeModals.splice(existingIndex, 1);
-        }
+        if (existingIndex !== -1) this._activeModals.splice(existingIndex, 1);
         this._activeModals.push(modalId);
     },
 
     _removeActiveModal(modalId) {
         const idx = this._activeModals.indexOf(modalId);
-        if (idx !== -1) {
-            this._activeModals.splice(idx, 1);
-        }
-        if (this._activeModals.length === 0) {
-            this._cleanupEscListener();
-        }
+        if (idx !== -1) this._activeModals.splice(idx, 1);
+        if (this._activeModals.length === 0) this._cleanupEscListener();
     },
 
     _ensureEscListener() {
         if (!this._escListener) {
-            this._escListener = (event) => {
+            this._escListener = event => {
                 if (event.key === 'Escape' && this._activeModals.length > 0) {
                     const topModalId = this._activeModals[this._activeModals.length - 1];
                     event.preventDefault();
@@ -206,23 +183,17 @@ const ModalManager = {
             document.addEventListener('keydown', this._escListener);
         }
         if (!this._trapListener) {
-            // Focus trap：Tab / Shift+Tab 只在栈顶 modal 内循环，
-            // 焦点不得落到被 inert 的背景页面（删除/烧写/停止任务等
-            // 破坏性操作所在的页面尤其重要）。
-            this._trapListener = (event) => {
-                if (event.key !== 'Tab' || this._activeModals.length === 0) {
-                    return;
-                }
+            this._trapListener = event => {
+                if (event.key !== 'Tab' || this._activeModals.length === 0) return;
                 const topModalId = this._activeModals[this._activeModals.length - 1];
                 const modal = document.getElementById(topModalId);
-                if (!modal) {
-                    return;
-                }
+                if (!modal) return;
                 const focusables = Array.from(
                     modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)
                 ).filter(el => !el.disabled && el.getAttribute('tabindex') !== '-1');
                 if (focusables.length === 0) {
                     event.preventDefault();
+                    if (!modal.hasAttribute('tabindex')) modal.setAttribute('tabindex', '-1');
                     modal.focus({ preventScroll: true });
                     return;
                 }
@@ -272,27 +243,18 @@ const ModalManager = {
         const topIndex = this._activeModals.length - 1;
         this._activeModals.forEach((modalId, index) => {
             const modal = document.getElementById(modalId);
-            if (!modal) {
-                return;
-            }
+            if (!modal) return;
             modal.style.zIndex = String(this._baseZIndex + index * this._stackStep);
             modal.inert = index !== topIndex;
             modal.setAttribute('aria-hidden', index === topIndex ? 'false' : 'true');
-            if (index === topIndex) {
-                modal.setAttribute('aria-modal', 'true');
-            } else {
-                modal.removeAttribute('aria-modal');
-            }
+            if (index === topIndex) modal.setAttribute('aria-modal', 'true');
+            else modal.removeAttribute('aria-modal');
         });
         document.body.classList.toggle('modal-open', this._activeModals.length > 0);
         this._syncBackgroundInert();
     },
 
     _syncBackgroundInert() {
-        // 背景 inert：modal 打开期间，body 下除 modal 顶层祖先之外的
-        // 所有内容一律不可聚焦/不可交互（主页面本身此前没有 inert，
-        // Tab 可以逃出 modal 落到背景按钮上）。只记录本管理器置过的
-        // inert，避免误清页面自身的 inert 状态。
         const modalRoots = new Set();
         for (const modalId of this._activeModals) {
             const modal = document.getElementById(modalId);
@@ -301,59 +263,48 @@ const ModalManager = {
             while (node.parentElement && node.parentElement !== document.body) {
                 node = node.parentElement;
             }
-            if (node.parentElement === document.body) {
-                modalRoots.add(node);
-            }
+            if (node.parentElement === document.body) modalRoots.add(node);
         }
-        for (const el of [...this._inertedRoots]) {
+
+        for (const el of [...this._inertedRoots.keys()]) {
             if (!modalRoots.has(el) || this._activeModals.length === 0) {
-                el.inert = false;
+                el.inert = this._inertedRoots.get(el);
                 this._inertedRoots.delete(el);
             }
         }
-        if (this._activeModals.length === 0) {
-            return;
-        }
+        if (this._activeModals.length === 0) return;
+
         for (const child of Array.from(document.body.children)) {
-            if (modalRoots.has(child) || this._inertedRoots.has(child)) {
-                continue;
-            }
+            if (modalRoots.has(child) || this._inertedRoots.has(child)) continue;
             const tag = child.tagName;
             if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK'
-                || tag === 'TEMPLATE' || tag === 'NOSCRIPT') {
-                continue;
-            }
+                || tag === 'TEMPLATE' || tag === 'NOSCRIPT') continue;
+            // Don't take ownership of inert state set by the page itself.
+            if (child.inert) continue;
+            this._inertedRoots.set(child, false);
             child.inert = true;
-            this._inertedRoots.add(child);
         }
     },
 
     _restoreZIndex(modalId, modal) {
-        if (!this._originalZIndexes.has(modalId)) {
-            return;
-        }
+        if (!this._originalZIndexes.has(modalId)) return;
         const original = this._originalZIndexes.get(modalId);
-        if (original) {
-            modal.style.zIndex = original;
-        } else {
-            modal.style.removeProperty('z-index');
-        }
+        if (original) modal.style.zIndex = original;
+        else modal.style.removeProperty('z-index');
         this._originalZIndexes.delete(modalId);
     },
 
     _focusModal(modalId) {
         const modal = document.getElementById(modalId);
-        if (!modal || this._activeModals[this._activeModals.length - 1] !== modalId) {
-            return;
-        }
+        if (!modal || this._activeModals[this._activeModals.length - 1] !== modalId) return;
         const content = modal.querySelector('.modal-content');
-        const focusTarget = modal.querySelector(MODAL_FOCUSABLE_SELECTOR) || content;
-        if (focusTarget) {
-            if (focusTarget === content && !content.hasAttribute('tabindex')) {
-                content.setAttribute('tabindex', '-1');
-            }
-            focusTarget.focus({ preventScroll: true });
+        const focusTarget = modal.querySelector(MODAL_FOCUSABLE_SELECTOR) || content || modal;
+        if (!focusTarget) return;
+        if (!focusTarget.hasAttribute('tabindex')
+            && (focusTarget === content || focusTarget === modal)) {
+            focusTarget.setAttribute('tabindex', '-1');
         }
+        focusTarget.focus({ preventScroll: true });
     },
 
     _restoreFocus(modalId) {
