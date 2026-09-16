@@ -47,6 +47,13 @@ _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9:._-]{2,64}$")
 _TRIGGER_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 # Compatibility export; unbudgeted analysis does not need additional rounds.
 TEST_FAILURE_EXTRA_TURNS = 0
+# kkagent's global thinking configuration is shared by interactive sessions and
+# Daily Brief.  Some OpenAI-compatible local gateways deliberately reject the
+# generic ``high`` spelling; set a process-local compatible value instead of
+# mutating the operator's ~/.kkagent/config.toml.
+MODEL_THINKING_EFFORTS = {
+    "glm-5.3-flash": "xhigh",
+}
 
 
 def list_daily_brief_model_options(
@@ -122,7 +129,7 @@ def list_daily_brief_agent_profiles(
 
 
 def analyzer_env_extra(
-    profile: Any, device_serial: str = ""
+    profile: Any, device_serial: str = "", model: str = ""
 ) -> dict[str, str]:
     """kkagent 子进程的 MCP 身份环境；未绑定 profile 时返回空。
 
@@ -139,6 +146,9 @@ def analyzer_env_extra(
     }
     if str(device_serial or "").strip():
         env["GMS_MCP_TOOLSETS"] = "evidence,device_evidence"
+    effort = MODEL_THINKING_EFFORTS.get(str(model or "").strip())
+    if effort:
+        env["KKAGENT_THINKING_EFFORT"] = effort
     return env
 
 
@@ -192,7 +202,7 @@ def build_brief_analyzer(
         timeout_seconds=0,
         model=str(config.get("model") or ""),
         env_extra=analyzer_env_extra(
-            config.get("agent_profile"), config.get("device_serial")
+            config.get("agent_profile"), config.get("device_serial"), config.get("model")
         ),
     )
 

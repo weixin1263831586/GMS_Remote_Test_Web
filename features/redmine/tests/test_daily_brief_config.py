@@ -70,6 +70,12 @@ def test_device_serial_normalized_and_env_sets_toolsets():
     assert normalize_daily_brief_config({"device_serial": ""})["device_serial"] == ""
 
 
+def test_glm_flash_uses_a_process_local_compatible_thinking_effort():
+    env = analyzer_env_extra("kk", model="glm-5.3-flash")
+    assert env["KKAGENT_THINKING_EFFORT"] == "xhigh"
+    assert "KKAGENT_THINKING_EFFORT" not in analyzer_env_extra("kk", model="other")
+
+
 def test_legacy_budgets_do_not_limit_analysis():
     config = normalize_daily_brief_config({"max_turns": 20})
     assert config["max_turns"] == 0

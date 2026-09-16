@@ -38,6 +38,7 @@ from .daily_brief_snapshot import (
     build_daily_triage_snapshot,
     detect_delta,
 )
+from .kkagent.evidence_preflight import collect_deep_analysis_evidence
 from .kkagent_analyzer import (
     PROMPT_VERSION,
     KkAgentRedmineAnalyzer,
@@ -506,6 +507,22 @@ class DailyBriefService(DailyBriefRunStarterMixin):
                 analyze_entry.setdefault("device_serial", config["device_serial"])
             if config.get("analysis_hint"):
                 analyze_entry.setdefault("analysis_hint", config["analysis_hint"])
+            # Deep analysis owns a deterministic read-only baseline.  The
+            # model receives the persisted provenance but cannot omit the
+            # serial or turn a transient Controller disconnect into a device
+            # failure by improvising CLI/Bash commands.
+            evidence_env = dict(getattr(analyzer, "env_extra", {}) or {})
+            if (
+                analyze_entry.get("analysis_mode") != "triage"
+                and str(evidence_env.get("GMS_RT_PROFILE") or "").strip()
+            ):
+                preflight = await collect_deep_analysis_evidence(
+                    issue_id=issue_id,
+                    device_serial=str(analyze_entry.get("device_serial") or ""),
+                    env_extra=evidence_env,
+                )
+                analyze_entry["_precollected_tool_traces"] = preflight.traces
+                analyze_entry["_evidence_preflight"] = preflight.prompt_context()
             # 部署事实 hint：SDK 源可用性决定源码取证门禁是否强制
             #（evidence_gate 降级依据），只进本次调用，不回写快照。
             analyze_entry["sdk_sources_available"] = _sdk_sources_available()

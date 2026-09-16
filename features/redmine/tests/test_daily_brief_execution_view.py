@@ -63,6 +63,11 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
                             "status": "succeeded",
                             "output_sha256": "abc",
                             "output_preview": "PRIVATE",
+                        },
+                        {
+                            "tool_name": "gms_rt_devices_snapshot",
+                            "status": "succeeded",
+                            "output_sha256": "device",
                         }
                     ],
                 },
@@ -73,6 +78,7 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
             self.assertNotIn("raw_response", issue)
             self.assertEqual(issue["ai_execution"]["session_id"], "sess-1")
             self.assertTrue(issue["ai_execution"]["issue_fetched"])
+            self.assertEqual(issue["ai_execution"]["device_evidence_status"], "succeeded")
             self.assertNotIn("tools", issue["ai_execution"])
             self.assertNotIn("PRIVATE", str(issue["ai_execution"]))
         statistics = payload["issues"][0]["ai_statistics"]
@@ -83,9 +89,25 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
             statistics["timing"]["total_duration_ms"],
             payload["issues"][0]["ai_execution"]["duration_ms"],
         )
-        self.assertEqual(statistics["gms_tool_call_count"], 1)
+        self.assertEqual(statistics["gms_tool_call_count"], 2)
         self.assertEqual(statistics["models"][0]["model_name"], DEFAULT_MODEL_LABEL)
         self.assertNotIn("PRIVATE", str(statistics))
+
+    def test_device_service_outage_is_not_presented_as_a_device_failure(self):
+        from features.redmine.daily_brief_execution_view import issue_payload
+        from features.redmine.daily_brief_models import DailyBriefIssue
+
+        payload = issue_payload(DailyBriefIssue(
+            run_id="db", issue_id=1, buckets=[]
+        ), {
+            "tools": [{
+                "tool_name": "gms_rt_devices_snapshot", "status": "failed",
+                "failure_kind": "service_unavailable",
+            }],
+        })
+        self.assertEqual(
+            payload["ai_execution"]["device_evidence_status"], "service_unavailable"
+        )
 
 
 if __name__ == "__main__":

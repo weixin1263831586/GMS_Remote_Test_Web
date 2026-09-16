@@ -43,7 +43,7 @@ DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 logger = logging.getLogger(__name__)
 
 # Prompt 版本随 runtime-owned evidence/schema repair 语义升级。
-PROMPT_VERSION = "redmine_daily_triage_v14"
+PROMPT_VERSION = "redmine_daily_triage_v15"
 
 REPAIR_MAX_TURNS = 0
 # 首次修复仍可能被模型原样重放（线上曾出现完整取证后连续漏掉
@@ -142,11 +142,16 @@ class KkAgentRedmineAnalyzer:
         )
         serial = str(entry.get("device_serial") or "").strip()
         if serial and entry.get("analysis_mode") != "triage":
+            preflight = entry.get("_evidence_preflight") or {}
+            device_status = str(preflight.get("device_status") or "")
+            snapshot_id = str(preflight.get("snapshot_id") or "")
             prompt += (
                 f"\n\nLOCAL DEVICE (read-only diagnosis allowed): serial "
-                f"`{serial}` is selected for this analysis. You MUST first call "
-                f"gms_rt_devices_snapshot on THIS serial (CLI equivalent: "
-                f"gms-rt-devices-snapshot) to collect runtime evidence; then use "
+                f"`{serial}` is selected for this analysis. Controller preflight "
+                f"device snapshot status is `{device_status or 'not_collected'}`. "
+                f"Use native GMS MCP tools only; never run gms-rt CLI through Bash. "
+                f"If additional device evidence is needed, call "
+                f"gms_rt_devices_snapshot with device=`{serial}`; then use "
                 f"gms_rt_logcat (dump mode) / "
                 f"gms_rt_shell (read-only allowlist) on THIS serial only to "
                 f"verify runtime facts (build fingerprint, kernel behavior, "
@@ -154,6 +159,12 @@ class KkAgentRedmineAnalyzer:
                 f"actually observed; write 未检查本地设备 only if every "
                 f"call failed. Never attempt to modify the device."
             )
+            if snapshot_id:
+                prompt += (
+                    f" Controller evidence snapshot `{snapshot_id}` was collected "
+                    "before this session; use native MCP tools for any additional "
+                    "artifact reads instead of creating a Bash workaround."
+                )
         analysis_hint = str(entry.get("analysis_hint") or "").strip()
         if analysis_hint:
             prompt += (
@@ -306,6 +317,7 @@ class KkAgentRedmineAnalyzer:
         prompt = self.build_prompt(entry)
         command = self.build_command(prompt)
         trace, raw, timed_out = await self._run_stream(command)
+        _merge_precollected_traces(trace, entry)
 
         if trace.error_type == "kkagent_unavailable":
             return self._failure(trace, raw)
@@ -504,6 +516,20 @@ def _merge_traces(first: KkAgentTrace, second: KkAgentTrace) -> KkAgentTrace:
             continue
         merged.tool_calls.append(call)
     return merged
+
+
+def _merge_precollected_traces(trace: KkAgentTrace, entry: dict[str, Any]) -> None:
+    """Add deterministic Controller evidence before applying the runtime gate."""
+    precollected = entry.get("_precollected_tool_traces") or []
+    existing = {call.tool_call_id for call in trace.tool_calls if call.tool_call_id}
+    for call in precollected:
+        if not isinstance(call, ToolTrace):
+            continue
+        if call.tool_call_id and call.tool_call_id in existing:
+            continue
+        trace.tool_calls.insert(0, call)
+        if call.tool_call_id:
+            existing.add(call.tool_call_id)
 
 
 class _StreamFallback:
