@@ -53,6 +53,23 @@ async function loadSecurityAudit(reset = false) {
     const tbody = $('security-audit-table-body');
     if (!tbody) return;
 
+    // Audit records are intentionally restricted to a temporarily elevated
+    // administrator. Do not issue a request that is known to be forbidden
+    // for an ordinary Web session: besides avoiding a noisy 403 in DevTools,
+    // this makes the access requirement visible before any data request.
+    if (state.authRequired && !state.elevated) {
+        if (reset || !securityAuditState.loaded) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        🔒 此页面需要管理员权限，请点击右上角提权后查看。
+                    </td>
+                </tr>
+            `;
+        }
+        return false;
+    }
+
     if (securityAuditState.loading && !reset) return;
     const requestGeneration = reset
         ? ++securityAuditState.requestGeneration

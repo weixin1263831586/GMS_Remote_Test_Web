@@ -1035,8 +1035,11 @@
             if (grid.children.length && terminalWorkspace.layout === 'single'
                     && pendingAdb?.serialNo === activeAdbPane?.serialNo
                     && pendingAdb?.workerId === activeAdbPane?.workerId
-                    && (!activeAdbInstance || activeAdbInstance.mode === 'adb'
-                        || terminalWorkspace.mountingPanes.has(0))
+                    && (!activeAdbInstance || (
+                        activeAdbInstance.mode === 'adb'
+                        && activeAdbInstance.serialNo === pendingAdb.serialNo
+                        && activeAdbInstance.workerId === pendingAdb.workerId
+                    ) || terminalWorkspace.mountingPanes.has(0))
                     && activeAdbPane?.mode === 'adb') {
                 // xterm loading happens before the instance is registered.
                 // Keep the already-mounted ADB DOM/socket lifecycle intact

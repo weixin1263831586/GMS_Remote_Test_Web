@@ -89,8 +89,10 @@ class DeviceManager:
                 if not acquired:
                     logger.warning("[Device] Local adb devices query skipped because a previous query is still running")
                     return []
+                from foundation.adb_binary import adb_binary
+
                 result = subprocess.run(
-                    ['adb', 'devices'],
+                    [adb_binary(), 'devices'],
                     capture_output=True,
                     text=True,
                     timeout=5

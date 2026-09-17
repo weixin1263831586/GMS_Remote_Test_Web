@@ -72,10 +72,10 @@ def _find_binary(name: str) -> str | None:
 
 
 def _adb_path() -> str:
-    p = _find_binary("adb")
-    if not p:
-        raise RuntimeError("adb not found on PATH (需要 Android platform-tools)")
-    return p
+    # Host-wide resolver: mixed adb client versions kill each other's server.
+    from foundation.adb_binary import adb_binary
+
+    return adb_binary()
 
 
 def _aapt2_path() -> str:

@@ -11,6 +11,7 @@ import logging
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import time
 from typing import Any
@@ -132,10 +133,16 @@ class VNCManager:
                 logger.info("[VNC] Old processes killed")
             else:
                 # 检查x11vnc是否运行
-                x11vnc_running = self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                x11vnc_running = (
+                    self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                    and self._is_local_port_listening(VNC_PORT)
+                )
 
                 # 检查websockify是否运行
-                websockify_running = self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                websockify_running = (
+                    self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                    and self._is_local_port_listening(NOVNC_WEB_PORT)
+                )
 
                 # 如果x11vnc正在运行，检查是否使用了密码模式
                 if x11vnc_running:
@@ -197,9 +204,15 @@ class VNCManager:
             time.sleep(0.5)
 
             # 验证服务是否运行
-            x11vnc_running = self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+            x11vnc_running = (
+                self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                and self._is_local_port_listening(VNC_PORT)
+            )
 
-            websockify_running = self._is_local_process_running(WEBSOCKIFY_PATTERN)
+            websockify_running = (
+                self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                and self._is_local_port_listening(NOVNC_WEB_PORT)
+            )
 
             if x11vnc_running and websockify_running:
                 return {
@@ -233,6 +246,13 @@ class VNCManager:
     @staticmethod
     def _is_local_process_running(pattern: str) -> bool:
         return subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True).returncode == 0
+
+    @staticmethod
+    def _is_local_port_listening(port: int) -> bool:
+        """Return whether the local loopback port accepts connections."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+            connection.settimeout(0.2)
+            return connection.connect_ex(('127.0.0.1', port)) == 0
 
     @staticmethod
     def _kill_local_processes(pattern: str, *, force: bool = False) -> None:
@@ -341,8 +361,14 @@ class VNCManager:
                 # The Controller commonly points ubuntu_host at one of its own
                 # LAN addresses. Avoid an SSH round trip back into the same
                 # machine on every cold desktop mount.
-                x11vnc_running = self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
-                websockify_running = self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                x11vnc_running = (
+                    self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                    and self._is_local_port_listening(VNC_PORT)
+                )
+                websockify_running = (
+                    self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                    and self._is_local_port_listening(NOVNC_WEB_PORT)
+                )
                 return {
                     'running': x11vnc_running and websockify_running,
                     'vnc_count': int(x11vnc_running),

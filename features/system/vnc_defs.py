@@ -38,7 +38,9 @@ WEBSOCKIFY_PATTERN = websockify_pattern()
 # x11vnc 性能参数：合成型窗口管理器（GNOME/KDE）下 XDamage 事件风暴会让
 # x11vnc 卡顿甚至停顿，改用快速轮询检测变化；降低 wait/defer 提高刷新率
 # 并降低延迟；-threads 让每个客户端的输入/输出在独立线程处理。
-X11VNC_PERF_FLAGS = ('-threads', '-noxdamage', '-wait', '5', '-defer', '5')
+# Some desktop sessions exhaust their MIT-SHM allocation even though :0 is
+# otherwise reachable.  -noshm keeps x11vnc alive by using XGetImage polling.
+X11VNC_PERF_FLAGS = ('-threads', '-noxdamage', '-wait', '5', '-defer', '5', '-noshm')
 X11VNC_PERF_ARGS = ' '.join(X11VNC_PERF_FLAGS)
 
 # x11vnc 默认 -norepeat 会在有 VNC 客户端时关闭 X11 自动重复，导致方向键

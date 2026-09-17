@@ -7206,10 +7206,41 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     for frame in terminal_frames
                 )
             )
+
+            # A later click must replace the one-shot ADB target.  The
+            # renderer previously retained any active ADB instance while a
+            # new pane was opening, even if its serial was different; every
+            # device button then continued to operate the first device.
+            page.evaluate(
+                """async () => {
+                  const localWorkerId = workspaceLocalWorkerId();
+                  allDevices.push({
+                    device_id: 'LOCAL-ADB-2',
+                    serial_no: 'LOCAL-ADB-2',
+                    worker_id: localWorkerId,
+                    status: 'online',
+                  });
+                  await openDeviceShell('LOCAL-ADB-2');
+                }"""
+            )
+            page.wait_for_function(
+                "() => terminalWorkspace.instances.get(0)?.serialNo === 'LOCAL-ADB-2'"
+            )
+            second_connect_messages = page.evaluate(
+                """() => (window.__terminalFrames || [])
+                  .filter(frame => typeof frame === 'string' && frame.includes('\\"type\\":\\"terminal_connect\\"'))
+                  .map(frame => JSON.parse(frame))"""
+            )
+            self.assertEqual(second_connect_messages[-1]["serial_no"], "LOCAL-ADB-2")
             persisted = page.evaluate(
                 "JSON.parse(localStorage.getItem('gms_terminal_workspace'))"
             )
             self.assertEqual(persisted["panes"], [{"hostId": "default"}])
+
+            # The isolated PTY used by this smoke test may trigger the
+            # unrelated client-username detector while the rejected fixture
+            # serial closes. It must not block the return-mode assertion.
+            page.evaluate("ModalManager.close('username-detect-modal')")
 
             return_button = page.locator(
                 "#terminal-workspace-host-mode-btn:visible, "

@@ -596,3 +596,28 @@ class ClusterInventoryRepositoryMixin:
         sql += " ORDER BY worker_id,suite_type,suite_version"
         with self.connect() as conn:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+    def upsert_seen_device(self, worker_id: str, serial: str) -> None:
+        """Backfill one live-verified device (terminal inventory fallback).
+
+        终端握手的实时 adb 探测命中后，把设备按库存标准形状补进
+        cluster_worker_devices；已存在时只刷新 seen/updated 时间戳，
+        不触碰 state/claims 等协议与租约字段。
+        """
+        now = _utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO cluster_worker_devices
+                    (id,worker_id,serial,transport,state,properties_json,
+                     first_seen_at,last_seen_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET
+                    last_seen_at=excluded.last_seen_at,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    f"{worker_id}:{serial}", worker_id, serial, "local_usb",
+                    "available", "{}", now, now, now,
+                ),
+            )

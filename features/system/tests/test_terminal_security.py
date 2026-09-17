@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -20,14 +21,37 @@ from features.system.terminal_service import (
 from foundation.device_claims import DeviceClaimRegistry
 
 
+def _pin_adb_binary():
+    """Pin a deterministic adb binary for resolver-backed call sites.
+
+    测试机不一定安装 platform-tools；解析器现在会在设备轮询/终端探测/
+    ADB 握手里被调用，统一钉到 /bin/true（存在且可执行）保证行为只取决于
+    打桩的 subprocess.run，而不是 runner 的 PATH。
+    """
+    return patch.dict(os.environ, {"GMS_ADB_PATH": "/bin/true"})
+
+
 class _FakeChannel:
     def __init__(self):
         self.closed = False
+        self.sent = []
+        # 模拟真实 shell：登录提示符就绪一次，之后每收到一条命令输出
+        # 一个新提示符，供 handle_adb_shell_connect 的 drain 辅助立即命中。
+        self._prompt_pending = True
 
     def resize_pty(self, **_kwargs):
         return None
 
+    def recv_ready(self):
+        return self._prompt_pending
+
+    def recv(self, _size):
+        self._prompt_pending = False
+        return b"hcq@localhost:~$ "
+
     def send(self, value):
+        self.sent.append(value)
+        self._prompt_pending = True
         return len(value)
 
     def close(self):
@@ -56,6 +80,10 @@ class TerminalSecurityTests(unittest.TestCase):
                 "GMS_AUTH_REQUIRED": "true",
                 "GMS_SECURE_COOKIES": "false",
                 "TRUSTED_HOSTS": "testserver",
+                # /bin/true 存在且可执行于所有 runner：ADB 解析器
+                # （foundation.adb_binary）拿到确定值，行为只取决于
+                # 各测试对 subprocess.run 的打桩。
+                "GMS_ADB_PATH": "/bin/true",
             },
         )
         self.environment.start()
@@ -212,6 +240,45 @@ class TerminalSecurityTests(unittest.TestCase):
         self.assertIsNone(registry.active_claim("ats-worker-controller:SERIAL-1"))
         self.assertTrue(channel.closed)
 
+    def test_adb_terminal_leaves_final_command_echo_for_browser_readiness(self):
+        """The output pump must receive the final adb command and device prompt.
+
+        The browser recognizes a ready ADB pane from the command echo followed
+        by an Android prompt. Waiting/draining after the final send consumed
+        that evidence and made every successful shell look like a timeout.
+        """
+        websocket = _FakeWebSocket()
+        channel = _FakeChannel()
+        registry = DeviceClaimRegistry(Path(self.tmp.name) / "echo-claims.sqlite3")
+        cluster = SimpleNamespace(repository=SimpleNamespace(claims=registry))
+        with patch(
+            "features.system.terminal_service.config_manager.load_config",
+            return_value={},
+        ), patch(
+            "features.system.terminal_service.resolve_authorized_terminal_target",
+            return_value=("ats-worker-controller", "localhost", "admin", "", "SERIAL-1"),
+        ), patch(
+            "features.cluster.get_cluster_service", return_value=cluster,
+        ), patch(
+            "features.system.terminal_service.config_manager.is_config_host_local",
+            return_value=True,
+        ), patch(
+            "features.system.terminal_service.create_local_terminal_channel",
+            return_value=channel,
+        ), patch(
+            "features.system.terminal_service._wait_for_shell_prompt",
+            new_callable=AsyncMock,
+        ) as wait_for_prompt, patch(
+            "features.system.terminal_output.threading.Thread.start"
+        ):
+            asyncio.run(handle_terminal_connect(
+                "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
+            ))
+
+        self.assertEqual(wait_for_prompt.await_count, 3)
+        self.assertEqual(channel.sent[-1], "/bin/true -s SERIAL-1 shell\n")
+        close_websocket_terminal(websocket)
+
     def test_adb_terminal_input_closes_after_claim_revocation(self):
         websocket = _FakeWebSocket()
         channel = _FakeChannel()
@@ -243,6 +310,152 @@ class TerminalSecurityTests(unittest.TestCase):
         self.assertTrue(channel.closed)
         self.assertEqual(websocket.messages[-1]["type"], "terminal_error")
         self.assertIn("租约", websocket.messages[-1]["error"])
+
+    def test_adb_terminal_accepts_live_device_missing_from_stale_inventory(self):
+        """库存滞后时实时探测命中 → 放行并回填库存（ADB Shell 启动失败修复）。"""
+        websocket = _FakeWebSocket()
+        channel = _FakeChannel()
+        registry = DeviceClaimRegistry(Path(self.tmp.name) / "stale-claims.sqlite3")
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
+            repository=SimpleNamespace(
+                claims=registry,
+                list_devices=lambda worker_id: [],
+                upsert_seen_device=lambda worker_id, serial: None,
+            ),
+        )
+        with patch(
+            "features.system.terminal_service.config_manager.load_config",
+            return_value={},
+        ), patch(
+            "features.system.terminal_service.config_manager.is_config_host_local",
+            return_value=True,
+        ), patch(
+            "features.cluster.get_cluster_service", return_value=cluster,
+        ), patch(
+            "features.system.terminal_service.create_local_terminal_channel",
+            return_value=channel,
+        ), patch(
+            "features.system.terminal_service.subprocess.run",
+            return_value=SimpleNamespace(
+                stdout="List of devices attached\nNEW-SERIAL\tdevice\n", returncode=0
+            ),
+        ):
+            asyncio.run(handle_terminal_connect(
+                "admin-user-id", websocket, {"mode": "adb", "serial_no": "NEW-SERIAL"}
+            ))
+
+        self.assertEqual(websocket.messages[-1]["type"], "terminal_connected")
+
+        close_websocket_terminal(websocket)
+
+    def test_adb_terminal_rejects_serial_absent_from_inventory_and_live_probe(self):
+        """库存与实时探测都找不到的序列号维持拒绝，不放宽归属边界。"""
+        websocket = _FakeWebSocket()
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
+            repository=SimpleNamespace(
+                list_devices=lambda worker_id: [],
+                upsert_seen_device=lambda worker_id, serial: None,
+            ),
+        )
+        with patch(
+            "features.system.terminal_service.config_manager.load_config",
+            return_value={},
+        ), patch(
+            "features.cluster.get_cluster_service", return_value=cluster,
+        ), patch(
+            "features.system.terminal_service.subprocess.run",
+            return_value=SimpleNamespace(
+                stdout="List of devices attached\n", returncode=0
+            ),
+        ):
+            asyncio.run(handle_terminal_connect(
+                "admin-user-id", websocket, {"mode": "adb", "serial_no": "GHOST-1"}
+            ))
+
+        message = websocket.messages[-1]
+        self.assertEqual(message["type"], "terminal_error")
+        self.assertIn("设备不属于所选 Worker", message["error"])
+
+    def test_adb_terminal_rejects_offline_inventory_row_when_live_probe_misses(self):
+        """库存 offline 的僵尸行必须实时探测确认，探测未命中 → 明确报离线。
+
+        生产事故：设备拔走后库存快照残留 offline 行，终端校验只看
+        composite_id 是否在库存里就放行，adb shell 报 device not found
+        退回宿主提示符，前端只能显示"ADB Shell 启动失败"。
+        """
+        websocket = _FakeWebSocket()
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
+            repository=SimpleNamespace(
+                list_devices=lambda worker_id: [
+                    {"id": "ats-worker-controller:STALE-SERIAL", "state": "offline"}
+                ],
+                upsert_seen_device=lambda worker_id, serial: None,
+            ),
+        )
+        with patch(
+            "features.system.terminal_service.config_manager.load_config",
+            return_value={},
+        ), patch(
+            "features.system.terminal_service.config_manager.is_config_host_local",
+            return_value=True,
+        ), patch(
+            "features.cluster.get_cluster_service", return_value=cluster,
+        ), patch(
+            "features.system.terminal_service.subprocess.run",
+            return_value=SimpleNamespace(
+                stdout="List of devices attached\n", returncode=0
+            ),
+        ):
+            asyncio.run(handle_terminal_connect(
+                "admin-user-id", websocket, {"mode": "adb", "serial_no": "STALE-SERIAL"}
+            ))
+
+        message = websocket.messages[-1]
+        self.assertEqual(message["type"], "terminal_error")
+        self.assertIn("不在线", message["error"])
+
+    def test_adb_terminal_accepts_offline_inventory_row_when_probe_confirms_device(self):
+        """库存 offline 但实时探测在线（设备刚插回、快照未刷新）→ 放行。"""
+        websocket = _FakeWebSocket()
+        channel = _FakeChannel()
+        registry = DeviceClaimRegistry(Path(self.tmp.name) / "stale-offline-claims.sqlite3")
+        cluster = SimpleNamespace(
+            config=SimpleNamespace(local_worker_id="ats-worker-controller"),
+            repository=SimpleNamespace(
+                claims=registry,
+                list_devices=lambda worker_id: [
+                    {"id": "ats-worker-controller:BACK-SERIAL", "state": "offline"}
+                ],
+                upsert_seen_device=lambda worker_id, serial: None,
+            ),
+        )
+        with patch(
+            "features.system.terminal_service.config_manager.load_config",
+            return_value={},
+        ), patch(
+            "features.system.terminal_service.config_manager.is_config_host_local",
+            return_value=True,
+        ), patch(
+            "features.cluster.get_cluster_service", return_value=cluster,
+        ), patch(
+            "features.system.terminal_service.create_local_terminal_channel",
+            return_value=channel,
+        ), patch(
+            "features.system.terminal_service.subprocess.run",
+            return_value=SimpleNamespace(
+                stdout="List of devices attached\nBACK-SERIAL\tdevice\n", returncode=0
+            ),
+        ):
+            asyncio.run(handle_terminal_connect(
+                "admin-user-id", websocket, {"mode": "adb", "serial_no": "BACK-SERIAL"}
+            ))
+
+        self.assertEqual(websocket.messages[-1]["type"], "terminal_connected")
+
+        close_websocket_terminal(websocket)
 
 
 if __name__ == "__main__":

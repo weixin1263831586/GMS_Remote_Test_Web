@@ -674,6 +674,17 @@ function hideModal(id) {
 function removeDynamicModal(id) {
   window.EmbeddedModalController.remove(id);
 }
+function showDailyBriefAnalysisModal(modal) {
+  // The analysis reader should occupy exactly the Redmine content area below
+  // the Tabs. Measure the live header because it wraps to two rows on narrow
+  // viewports; a fixed 44px offset would overlap it in that state.
+  var header = document.querySelector('body > header');
+  if (header) {
+    modal.style.setProperty('--daily-brief-modal-top', Math.ceil(header.getBoundingClientRect().height) + 'px');
+  }
+  document.body.appendChild(modal);
+  showModal(modal.id);
+}
 function notifyUser(title, message, level) {
   level = level || 'info';
   try {
@@ -3017,7 +3028,7 @@ function showSingleIssueAnalysis(runId, statisticsOnly) {
   var modalId = 'singleIssueAnalysisModal-' + Date.now();
   var modal = document.createElement('div');
   modal.id = modalId;
-  modal.className = 'modal';
+  modal.className = statisticsOnly ? 'modal' : 'modal daily-brief-analysis-overlay';
   modal.innerHTML = '<div class="modal-content daily-brief-modal' + (statisticsOnly ? ' daily-brief-statistics-modal' : '') + '">'
     + '<div class="modal-header"><span class="modal-title daily-brief-modal-title"><span>'
     + (statisticsOnly ? '📊 AI 统计' : '🤖 AI 分析') + ' · #' + esc(issue.issue_id)
@@ -3026,8 +3037,12 @@ function showSingleIssueAnalysis(runId, statisticsOnly) {
     + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body">' + body + '</div>'
     + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
-  document.body.appendChild(modal);
-  showModal(modalId);
+  if (statisticsOnly) {
+    document.body.appendChild(modal);
+    showModal(modalId);
+  } else {
+    showDailyBriefAnalysisModal(modal);
+  }
 }
 
 async function loadSingleIssueAnalysisHistory() {
@@ -3734,15 +3749,14 @@ function showDailyBriefIssueFallback(issueId) {
   var modalId = 'dailyBriefIssueModal-' + Date.now();
   var modal = document.createElement('div');
   modal.id = modalId;
-  modal.className = 'modal';
+  modal.className = 'modal daily-brief-analysis-overlay';
   modal.innerHTML = '<div class="modal-content daily-brief-modal">'
     + '<div class="modal-header"><span class="modal-title">每日晨报 · #' + esc(issueId) + '</span>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body"><div class="muted">该历史分析结果包含旧格式字段，暂无法完整呈现。重新分析此项后会生成兼容的完整结果。</div></div>'
     + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button>'
     + '<button data-daily-brief-reanalyze="' + esc(issueId) + '">深度分析此项</button></div></div>';
-  document.body.appendChild(modal);
-  showModal(modalId);
+  showDailyBriefAnalysisModal(modal);
 }
 
 function showDailyBriefIssueModal(issueId) {
@@ -3878,7 +3892,7 @@ function showDailyBriefIssueModal(issueId) {
   var modalId = 'dailyBriefIssueModal-' + Date.now();
   var modal = document.createElement('div');
   modal.id = modalId;
-  modal.className = 'modal';
+  modal.className = 'modal daily-brief-analysis-overlay';
   modal.innerHTML = `
     <div class="modal-content daily-brief-modal">
       <div class="modal-header">
@@ -3907,8 +3921,7 @@ function showDailyBriefIssueModal(issueId) {
         ${r.suggested_reply_zh ? '<button data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="zh">复制中文回复</button>' : ''}
       </div>
     </div>`;
-  document.body.appendChild(modal);
-  showModal(modalId);
+  showDailyBriefAnalysisModal(modal);
 }
 // act-bridge 按 window 查找委托目标；显式导出避免页面脚本加载方式变化后
 // 「查看分析」成为静默无响应的按钮。

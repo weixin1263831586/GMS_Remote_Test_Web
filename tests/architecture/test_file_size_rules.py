@@ -21,6 +21,8 @@ MIGRATION_LINE_LIMITS = {
     # +43: 启动期 reconcile_claims()（跨库 split-brain 修复，审核意见 P2）；
     # 后续把 reconcile 拆到 repository_reconciliation.py 时应回落 600。
     'features/cluster/repository.py': 651,
+    # +25: upsert_seen_device（终端握手库存滞后的实时探测回填）。
+    'features/cluster/repository_inventory.py': 623,
     # +7: update_user last-admin 检查移入 BEGIN IMMEDIATE（跨进程原子性）。
     'features/auth/service.py': 615,
     'features/auth/agent_tokens.py': 365,
@@ -44,10 +46,10 @@ MIGRATION_LINE_LIMITS = {
     'features/redmine/knowledge_service.py': 599,
     # 2026-09 并发收敛:enqueue 去重键修正 + runs ON CONFLICT + job lease_token
     # CAS + 旧库迁移分支;后续拆 jobs 队列到独立模块时应回落 600。
-    'features/redmine/daily_brief_repository.py': 830,  # +178: f64c054 及后续协作式取消/执行统计扩展;拆分后回落
+    'features/redmine/daily_brief_repository.py': 837,  # +178: f64c054 及后续协作式取消/执行统计扩展; +7: deep-analysis 接入;拆分后回落
     'features/redmine/daily_brief_service.py': 621,  # +21: f64c054 执行统计
     'features/redmine/tests/test_daily_brief_api.py': 603,  # +3: f64c054 统计接口回归
-    'features/redmine/tests/test_daily_brief_repository.py': 623,  # +23: f64c054 取消路径回归
+    'features/redmine/tests/test_daily_brief_repository.py': 630,  # +23: f64c054 取消路径回归; +7: deep-analysis 接入
     # +72: sanitizeHref scheme 白名单回归(node 执行测试)。
     'features/redmine/tests/test_dashboard_stats.py': 1165,
     'features/reports/analysis_api.py': 752,  # +40: reports.read 门禁 helper

@@ -2,7 +2,9 @@
 import asyncio
 import logging
 import os
+import re
 import shlex
+import subprocess
 import time
 import uuid
 from typing import Any
@@ -67,8 +69,8 @@ def resolve_authorized_terminal_target(
     if mode == "adb":
         if not normalized_serial:
             raise ValueError("缺少设备序列号")
-        device_ids = {
-            str(item.get("id") or "")
+        device_rows = {
+            str(item.get("id") or ""): item
             for item in cluster.repository.list_devices(requested_worker)
         }
         composite_id = (
@@ -76,11 +78,107 @@ def resolve_authorized_terminal_target(
             if normalized_serial.startswith(f"{requested_worker}:")
             else f"{requested_worker}:{normalized_serial}"
         )
-        if composite_id not in device_ids:
-            raise ValueError("设备不属于所选 Worker")
+        inventory_row = device_rows.get(composite_id)
+        # 归属校验只信任"库存里在线"的行。行缺失（心跳滞后）或 state 为
+        # offline（设备已拔走但快照未刷新，例如同端口换了设备）都必须经
+        # 实时探测确认，否则 adb shell 会在会话建立后立刻报 device not
+        # found，前端只能显示一个没有上下文的"ADB Shell 启动失败"。
+        inventory_online = inventory_row is not None and str(
+            inventory_row.get("state") or ""
+        ).strip().lower() not in {"", "offline"}
+        if (inventory_row is None or not inventory_online) and not (
+            _live_adb_device_confirmed(
+                config,
+                normalized_serial,
+                host=host,
+                user=user,
+                password=password,
+            )
+        ):
+            if inventory_row is None:
+                logger.warning(
+                    "[TERMINAL] Rejected adb target %s on worker %s; inventory=%s",
+                    normalized_serial,
+                    requested_worker,
+                    sorted(device_rows),
+                )
+                raise ValueError("设备不属于所选 Worker")
+            logger.warning(
+                "[TERMINAL] Rejected offline adb device %s on worker %s "
+                "(inventory state=%s, live probe miss)",
+                normalized_serial,
+                requested_worker,
+                inventory_row.get("state"),
+            )
+            raise ValueError(
+                f"设备 {normalized_serial} 当前不在线，无法打开 ADB Shell"
+            )
+        if inventory_row is None:
+            # 实时探测命中说明设备确实挂在这台 Worker 上，只是库存还没
+            # 随心跳/盘点刷新；回填一行让后续连接走快路径。
+            cluster.repository.upsert_seen_device(requested_worker, normalized_serial)
         normalized_serial = composite_id.split(":", 1)[1]
 
     return requested_worker, host, user, password, normalized_serial
+
+
+def _live_adb_device_confirmed(
+    config: dict,
+    serial_no: str,
+    *,
+    host: str,
+    user: str,
+    password: str,
+) -> bool:
+    """Inventory-lag fallback: one live `adb devices` probe on the target host.
+
+    cluster_worker_devices 按心跳/盘点节拍刷新，刚插上的设备在下一拍之前
+    不在库存里，归属校验会误拒实际在线的设备。这里对终端通道真正要执行
+    adb 的那台主机（本机或所选 Worker 的 SSH 主机）做一次实时探测作为
+    回退证据。命令是常量（不含序列号，避免 shell 执行边界上的不可信插
+    值），序列号匹配在 Python 侧完成。探测失败按"未确认"处理，维持原
+    有拒绝路径。
+    """
+    snapshot = ""
+    try:
+        # 与 handle_adb_shell_connect 相同的合并方式，保证探测命中的主机
+        # 就是随后真正执行 adb shell 的主机。
+        probe_config = dict(config)
+        probe_config.update({
+            "ubuntu_host": host,
+            "ubuntu_user": user,
+            "ubuntu_pswd": password,
+            "host": host,
+            "username": user,
+            "password": password,
+        })
+        if config_manager.is_config_host_local(probe_config):
+            from foundation.adb_binary import adb_binary
+
+            completed = subprocess.run(
+                [adb_binary(), "devices"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=False,
+            )
+            snapshot = completed.stdout or ""
+        else:
+            # The live probe must reach the selected Worker, rather than the
+            # controller's default SSH target retained in ``config``.
+            ssh = ssh_manager.get_connection(probe_config)
+            if not ssh:
+                return False
+            try:
+                result = ssh_manager.execute_command(ssh, "adb devices", timeout=8)
+                snapshot = result.stdout or ""
+            finally:
+                ssh_manager.return_connection(ssh)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return re.search(
+        rf"^{re.escape(serial_no)}\s+device\b", snapshot, re.MULTILINE
+    ) is not None
 
 
 def terminal_connection_id(websocket: WebSocket) -> str:
@@ -135,6 +233,53 @@ def create_local_terminal_channel(command: list[str] | None = None) -> LocalPtyC
     return LocalPtyChannel(terminal_command, cwd=os.path.expanduser("~"), env=env)
 
 
+_PROMPT_WAIT_TIMEOUT = 3.0
+_PROMPT_PATTERN = re.compile(rb"[$#] \r?$")
+
+
+async def _wait_for_shell_prompt(
+    channel,
+    *,
+    timeout: float = _PROMPT_WAIT_TIMEOUT,
+) -> None:
+    """Drain channel output until a shell prompt (or timeout) appears.
+
+    登录 shell 初始化（profile、motd、bashrc）需要数百毫秒，期间字节持续
+    可读。等待提示符出现即可确认 shell 已准备好执行下一条命令，从而避免
+    「命令回显先于提示符到达浏览器」造成的启动误判。超时按尽力而为处理：
+    即使没等到也继续发送，让原有流程兜底（远程 SSH 通道的 recv 语义由
+    ssh_manager 提供，行为与本机 pty 一致）。
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    buffer = b""
+
+    def _poll_once() -> bool:
+        nonlocal buffer
+        # 读到提示符后继续把当前突发读完，避免下一轮调用在本轮残留字符
+        # 上立刻"命中"提示符而跳过等待（真实通道的 recv_ready 会随即转为
+        # False，因此不会无限循环）。
+        found = _PROMPT_PATTERN.search(buffer) is not None
+        while channel.recv_ready():
+            chunk = channel.recv(65536)
+            if not chunk:
+                return True
+            buffer += chunk
+            if _PROMPT_PATTERN.search(buffer):
+                found = True
+        return found
+
+    while loop.time() < deadline:
+        if _poll_once():
+            return
+        await asyncio.sleep(0.02)
+    # 超时：记录现场便于排障，但按设计继续。
+    logger.info(
+        "[TERMINAL] Shell prompt not observed before send (waited %.1fs)",
+        timeout,
+    )
+
+
 async def handle_adb_shell_connect(
     connection_id: str,
     websocket: WebSocket,
@@ -167,8 +312,32 @@ async def handle_adb_shell_connect(
             backend_mode = 'adb'
 
         channel.resize_pty(width=80, height=24)
-        for cmd in ('\n\n\n', 'clear\n', f'adb -s {shlex.quote(serial_no)} shell\n'):
+        # 本机会话显式使用与设备轮询/实时探测相同的 adb 二进制：登录
+        # shell 的 profile 可能指向另一个 platform-tools 版本，混用客户端
+        # 会互相杀掉共享 adb server，令刚建立的 shell 瞬间断开。
+        # 绝对路径是常量（环境变量/配置钉死），序列号仍经 shlex.quote，
+        # shell 执行边界属性不变。远程 Worker 上保持 `adb` 由其自身环境
+        # 解析。前端 shell-main.js 的 `\badb\s+-s` 正则对绝对路径同样
+        # 命中（路径末尾的 adb 与 -s 之间存在词边界），启动判定不受影响。
+        adb_cmd = "adb"
+        if backend_mode == "local_adb":
+            from foundation.adb_binary import adb_binary
+
+            adb_cmd = adb_binary()
+        # pty 行规程会立即回显输入，而登录 shell 仍在初始化。三条命令无
+        # 间隔连发时，回显突发会把 `adb ... shell` 推到宿主提示符**之前**，
+        # 浏览器前端按"adb 命令之后出现宿主提示符"判定 adb 已退出，直接报
+        # 「ADB Shell 启动失败」并关闭连接（服务端随后只看到 session gone）。
+        # 前两条准备命令各自等待宿主提示符，保证最终 adb 命令的回显排在
+        # 宿主提示符之后。最后一条 *不能* 再 drain：浏览器需要同时收到
+        # `adb -s … shell` 回显和 Android 提示符，才能将会话标记为已就绪。
+        # 若在此处等待，会吞掉回显（甚至设备提示符），最终误报启动超时。
+        # 探测超时按最坏情况继续（不阻塞握手）。
+        await _wait_for_shell_prompt(channel)
+        for cmd in ('\n\n\n', 'clear\n'):
             channel.send(cmd)
+            await _wait_for_shell_prompt(channel)
+        channel.send(f'{adb_cmd} -s {shlex.quote(serial_no)} shell\n')
 
         loop = asyncio.get_event_loop()
         session_id = connection_id

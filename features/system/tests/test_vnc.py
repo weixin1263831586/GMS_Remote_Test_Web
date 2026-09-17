@@ -77,6 +77,7 @@ class VNCManagerTests(unittest.TestCase):
         self.assertIn("export XAUTHORITY=/home/'test user'/.Xauthority", joined)
         self.assertIn("x11vnc -display :0 -forever -shared -rfbport 5900", joined)
         self.assertIn("-threads -noxdamage -wait 5 -defer 5", joined)
+        self.assertIn("-noshm", joined)
         self.assertIn("-repeat", joined)
         self.assertIn("xset -display :0 r on", joined)
         self.assertIn("-clear_mods -skip_lockkeys", joined)
@@ -115,6 +116,10 @@ class VNCManagerTests(unittest.TestCase):
                 "websockify.*6080",
             },
         ), patch.object(
+            manager,
+            "_is_local_port_listening",
+            return_value=True,
+        ), patch.object(
             manager.ssh_manager,
             "get_connection",
         ) as get_connection:
@@ -125,6 +130,30 @@ class VNCManagerTests(unittest.TestCase):
         self.assertEqual(result["vnc_count"], 1)
         self.assertTrue(result["port_listening"])
         get_connection.assert_not_called()
+
+    def test_local_vnc_status_requires_the_vnc_port_to_listen(self):
+        manager = VNCManager()
+        with patch.object(
+            manager.config_manager,
+            "load_config",
+            return_value={"ubuntu_host": "172.16.14.233"},
+        ), patch(
+            "features.system.vnc.is_local_host",
+            return_value=True,
+        ), patch.object(
+            manager,
+            "_is_local_process_running",
+            return_value=True,
+        ), patch.object(
+            manager,
+            "_is_local_port_listening",
+            side_effect=lambda port: port == NOVNC_WEB_PORT,
+        ):
+            result = manager.get_vnc_status()
+
+        self.assertFalse(result["running"])
+        self.assertEqual(result["vnc_count"], 0)
+        self.assertTrue(result["port_listening"])
 
 
 if __name__ == "__main__":
