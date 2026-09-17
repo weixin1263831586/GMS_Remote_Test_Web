@@ -11,16 +11,18 @@
 <body data-automation-ready="false">
     <main class="ats-shell">
 <section class="ats-toolbar">
-    <div class="workflow-tabs" role="tablist" aria-label="GMS ATS workflow">
-        <button type="button" role="tab" aria-selected="true" class="workflow-tab active" data-workflow="overview" data-click="switchWorkflowPane" data-a0="overview">概览</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">创建运行</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">运行监控</button>
-        <span class="workflow-divider" aria-hidden="true"></span>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="build" data-click="switchWorkflowPane" data-a0="build">构建日志</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="events" data-click="switchWorkflowPane" data-a0="events">事件诊断</button>
-        <span class="workflow-divider" aria-hidden="true"></span>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="reports" data-click="switchWorkflowPane" data-a0="reports">测试报告</button>
-        <div class="ats-actions">
+    <div class="ats-toolbar-main">
+        <div class="workflow-tabs" role="tablist" aria-label="GMS ATS workflow">
+            <button type="button" role="tab" aria-selected="true" class="workflow-tab active" data-workflow="overview" data-click="switchWorkflowPane" data-a0="overview">概览</button>
+            <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">创建运行</button>
+            <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">运行监控</button>
+            <span class="workflow-divider" aria-hidden="true"></span>
+            <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="build" data-click="switchWorkflowPane" data-a0="build">构建日志</button>
+            <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="events" data-click="switchWorkflowPane" data-a0="events">事件诊断</button>
+            <span class="workflow-divider" aria-hidden="true"></span>
+            <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="reports" data-click="switchWorkflowPane" data-a0="reports">测试报告</button>
+        </div>
+        <div class="ats-actions" aria-label="GMS ATS actions">
             <span id="worker-indicator" class="worker-dot down" title="Worker 状态">Worker</span>
             <button type="button" data-click="loadAll">刷新</button>
             <details class="ats-more-menu">
@@ -31,8 +33,8 @@
                 </div>
             </details>
         </div>
-        <div id="automation-toast" class="toast" role="status" aria-live="polite"></div>
     </div>
+    <div id="automation-toast" class="toast" role="status" aria-live="polite"></div>
 </section>
 
 <section class="workflow-surface">
@@ -402,6 +404,7 @@
     <script src="/static/js/utils.js?v=20260826-escape-html"></script>
     <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
     <script src="/static/js/embedded-workspace.js?v=20260917-arrow-forward-v2"></script>
+    <script src="/static/js/automation-workflow-tabs.js?v=20260917-a11y-v1" defer></script>
     <script src="/automation/page.js"></script>
 </body>
 </html>

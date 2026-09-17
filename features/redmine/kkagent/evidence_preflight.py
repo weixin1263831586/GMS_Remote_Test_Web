@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,7 +29,9 @@ from .trace import ToolTrace, _attachment_manifest
 
 
 NETWORK_EXIT_CODE = 6
+CANCELLED_EXIT_CODE = 130
 PREFLIGHT_TIMEOUT_SECONDS = 90.0
+CANCEL_POLL_INTERVAL_SECONDS = 0.25
 # 网络类失败最多尝试 3 次，尝试之间按 (1.0s, 3.0s) 退避；单个命令的
 # 最坏 wall time ≈ 3 × PREFLIGHT_TIMEOUT_SECONDS + 4s。非网络失败
 # （含 usage error / 业务失败）不重试，立即收敛。
@@ -71,11 +74,32 @@ def _summary_trace(
     )
 
 
+async def _terminate_and_settle(
+    process: asyncio.subprocess.Process,
+    communicate_task: asyncio.Task[tuple[bytes, bytes]] | None,
+) -> None:
+    """Terminate one preflight process and settle its communicate task."""
+    await terminate_process_tree(process)
+    if communicate_task is None or communicate_task.done():
+        return
+    communicate_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await communicate_task
+
+
 async def _run_readonly_command(
     command: list[str], env_extra: dict[str, str], *, timeout_seconds: float,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> tuple[int, bytes, str]:
-    """Run one bounded, read-only CLI call and return its exit/output summary."""
+    """Run one bounded read-only CLI call, interruptible by persisted cancel.
+
+    Without ``should_cancel`` this keeps the normal one-shot ``wait_for`` path.
+    With a callback, the communicate future is polled at a short bounded
+    interval so a UI/API cancel request terminates the *currently running* CLI
+    process instead of waiting up to the full 90-second command timeout.
+    """
     process: asyncio.subprocess.Process | None = None
+    communicate_task: asyncio.Task[tuple[bytes, bytes]] | None = None
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -84,9 +108,30 @@ async def _run_readonly_command(
             env=child_env(env_extra),
             start_new_session=os.name == "posix",
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=timeout_seconds,
-        )
+        if should_cancel is None:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout_seconds,
+            )
+        else:
+            communicate_task = asyncio.create_task(process.communicate())
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout_seconds
+            while True:
+                if should_cancel():
+                    await _terminate_and_settle(process, communicate_task)
+                    return CANCELLED_EXIT_CODE, b"", "Controller evidence request cancelled"
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    await _terminate_and_settle(process, communicate_task)
+                    return NETWORK_EXIT_CODE, b"", "Controller evidence request timed out"
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        asyncio.shield(communicate_task),
+                        timeout=min(CANCEL_POLL_INTERVAL_SECONDS, remaining),
+                    )
+                    break
+                except asyncio.TimeoutError:
+                    continue
         return int(process.returncode or 0), stdout, stderr.decode(
             "utf-8", errors="replace"
         )[:500]
@@ -98,12 +143,34 @@ async def _run_readonly_command(
         return NETWORK_EXIT_CODE, b"", f"Controller evidence request unavailable: {exc}"
     except asyncio.CancelledError:
         if process is not None:
-            cleanup = asyncio.create_task(terminate_process_tree(process))
+            cleanup = asyncio.create_task(
+                _terminate_and_settle(process, communicate_task)
+            )
             try:
                 await asyncio.shield(cleanup)
             except asyncio.CancelledError:
                 await cleanup
         raise
+
+
+async def _sleep_with_cancel(
+    delay: float,
+    should_cancel: Callable[[], bool] | None,
+) -> bool:
+    """Sleep a retry backoff while allowing persisted cancellation to cut it short."""
+    if delay <= 0:
+        return bool(should_cancel and should_cancel())
+    if should_cancel is None:
+        await asyncio.sleep(delay)
+        return False
+    remaining = delay
+    while remaining > 0:
+        if should_cancel():
+            return True
+        step = min(CANCEL_POLL_INTERVAL_SECONDS, remaining)
+        await asyncio.sleep(step)
+        remaining -= step
+    return bool(should_cancel())
 
 
 async def _collect(
@@ -113,8 +180,9 @@ async def _collect(
 ) -> tuple[ToolTrace, dict[str, Any]]:
     """Run one preflight command; retry only documented network failures.
 
-    ``should_cancel`` 在每次尝试与退避间隙被轮询：返回 True 时立即返回
-    ``failed/cancelled`` 轨迹（等价 run 级停止），不再启动新的 CLI 进程。
+    ``should_cancel`` is checked before attempts, during retry backoff and while
+    the current CLI process is running. A cancellation terminates that process
+    and never starts a later retry.
     """
     command = _gms_command(tool_name.replace("gms_rt_", "gms-rt-").replace("_", "-"), arguments)
     if command is None:
@@ -127,16 +195,23 @@ async def _collect(
     exit_code = NETWORK_EXIT_CODE
     for attempt in range(NETWORK_RETRY_ATTEMPTS):
         if should_cancel is not None and should_cancel():
-            return _summary_trace(
-                tool_name=tool_name, tool_input=tool_input, status="failed",
-                error="cancelled before evidence preflight attempt",
-                evidence_issue_ids=evidence_issue_ids,
-            ), {}
-        if attempt:
-            await asyncio.sleep(NETWORK_RETRY_BACKOFF_SECONDS[attempt - 1])
+            exit_code = CANCELLED_EXIT_CODE
+            error = "cancelled before evidence preflight attempt"
+            break
+        if attempt and await _sleep_with_cancel(
+            NETWORK_RETRY_BACKOFF_SECONDS[attempt - 1], should_cancel
+        ):
+            exit_code = CANCELLED_EXIT_CODE
+            error = "cancelled during evidence preflight retry backoff"
+            break
         exit_code, output, error = await _run_readonly_command(
-            command, env_extra, timeout_seconds=PREFLIGHT_TIMEOUT_SECONDS,
+            command,
+            env_extra,
+            timeout_seconds=PREFLIGHT_TIMEOUT_SECONDS,
+            should_cancel=should_cancel,
         )
+        if exit_code == CANCELLED_EXIT_CODE:
+            break
         if exit_code != NETWORK_EXIT_CODE:
             break
     try:
@@ -158,7 +233,8 @@ async def _collect(
         evidence_issue_ids=evidence_issue_ids,
         snapshot_ids=[snapshot_id] if snapshot_id else [],
         failure_kind=(
-            "" if success else "service_unavailable"
+            "" if success else "cancelled"
+            if exit_code == CANCELLED_EXIT_CODE else "service_unavailable"
             if exit_code == NETWORK_EXIT_CODE else "invalid_request"
             if exit_code == 2 else "device_unavailable"
             if tool_name == "gms_rt_devices_snapshot" else "operation_failed"
@@ -189,11 +265,10 @@ async def collect_deep_analysis_evidence(
     """Collect the mandatory immutable evidence baseline for a single issue.
 
     Redmine fetch/journals/attachments and the optional device snapshot are all
-    idempotent, read-only evidence operations.  A failed preflight is recorded
+    idempotent, read-only evidence operations. A failed preflight is recorded
     but does not suppress the later analysis: the final report can accurately
-    state which source was unavailable.
-    ``should_cancel``（run 级取消标志轮询）在每次 CLI 尝试与退避间隙被
-    检查；用户请求停止时立即返回已收集的部分，而不是继续排队后续命令。
+    state which source was unavailable. Cancellation is checked while an
+    evidence CLI is in flight as well as at command/retry boundaries.
     """
     result = EvidencePreflight()
     fetched, data = await _collect(
@@ -246,6 +321,7 @@ async def collect_deep_analysis_evidence(
 
 
 __all__ = [
+    "CANCELLED_EXIT_CODE",
     "NETWORK_EXIT_CODE",
     "NETWORK_RETRY_ATTEMPTS",
     "EvidencePreflight",

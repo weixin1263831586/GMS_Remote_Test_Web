@@ -29,7 +29,12 @@ async function startTest() {
     // 通过 state.devices inventory 解析归属，绝不按 ":" 猜 Worker 前缀——
     // Android serial 可能含 ":"（ADB TCP "ip:5555"、ADB Proxy
     // "localhost:port"），字符串切分会误杀这类本机设备。
+    //
+    // worker + device 集合在进入 STARTING 前冻结：请求在飞行期间用户仍可
+    // 浏览其他 Worker/设备，成功回调不得重新读取 live UI 状态并把“实际
+    // 在 A 启动的 job”记成后来切换到的 B（workspace/log 归属会污染）。
     const currentWorker = workspaceWorkerId();
+    const requestedDevices = Array.from(state.selectedDevices);
     const resolveDeviceOwner = deviceId => {
         const device = state.devices.find(item => {
             const candidate = typeof item === 'string' ? item : item;
@@ -42,7 +47,7 @@ async function startTest() {
         if (!device || typeof device === 'string') return null;
         return device.worker_id || device.cluster_worker_id || null;
     };
-    const foreignDevices = Array.from(state.selectedDevices).filter(deviceId => {
+    const foreignDevices = requestedDevices.filter(deviceId => {
         const owner = resolveDeviceOwner(deviceId);
         // inventory 里找不到（列表未加载/设备刚消失）时交给后端权威校验，
         // 前端只拦截"明确解析到其他 Worker"的情况。
@@ -75,13 +80,13 @@ async function startTest() {
             void requestBrowserNotificationPermission();
         }
 
-        // 只清当前 Worker scope 的日志，保留其他 Worker 的隐藏历史
-        // 和无 scope 的全局条目。
-        clearWorkerLogs(workspaceWorkerId());
+        // 只清本次提交 Worker scope 的日志，保留其他 Worker 的隐藏历史
+        // 和无 scope 的全局条目。不得在 await 前后重新解析 live workspace。
+        clearWorkerLogs(currentWorker);
 
         const startResult = await apiCall('/api/test/start', 'POST', {
-            worker_id: workspaceWorkerId(),
-            devices: Array.from(state.selectedDevices),
+            worker_id: currentWorker,
+            devices: requestedDevices,
             test_type: testType,
             test_module: testModule,
             test_case: testCase,
@@ -101,19 +106,19 @@ async function startTest() {
             resetClusterEventCursor();
             sessionStorage.setItem('active_cluster_job', clusterJobId);
             window.GmsWorkspace?.update({
-                worker_id: workspaceWorkerId(),
-                device_ids: Array.from(state.selectedDevices),
+                worker_id: currentWorker,
+                device_ids: requestedDevices,
                 suite_key: suitePath,
                 suite_path: suitePath,
                 cluster_job_id: clusterJobId,
                 attempt_id: startResult?.data?.attempt_id || startResult?.attempt_id || '',
                 origin_page: 'test'
             }, {source: 'test-start'});
-            addWorkerLog(workspaceWorkerId(), `分布式任务 ${clusterJobId} 已排队`, 'info');
+            addWorkerLog(currentWorker, `分布式任务 ${clusterJobId} 已排队`, 'info');
         }
 
         updateTestToggleButton(true);
-        addWorkerLog(workspaceWorkerId(), '测试已启动', 'success');
+        addWorkerLog(currentWorker, '测试已启动', 'success');
         showToast('测试已启动', 'success');
         switchLogTab('module');
         wakeTestStatusPolling();
@@ -231,8 +236,9 @@ function updateTestToggleButton(isTesting) {
             if (element) element.disabled = controlsDisabled;
         });
 
-    // 测试主机下拉框在测试期间也保持可用：切换主机不会中断正在运行的测试
-    // （测试在后端按 clusterJobId 运行，停止操作也通过 clusterJobId 执行）。
+    // RUNNING 期间允许切换查看其他主机；STARTING 时冻结本次提交 Worker，
+    // 避免请求在飞行时 UI 看起来已经切到另一 Worker。成功后仍按
+    // clusterJobId 控制原任务，所以上线运行阶段可重新浏览其他 Worker。
     const workerSelect = document.getElementById('cluster-worker');
     if (workerSelect) {
         const clusterEnabled = Boolean(
@@ -240,12 +246,14 @@ function updateTestToggleButton(isTesting) {
             && window.GmsWorkspace?.get?.().scope_mode === 'cluster'
         );
         const workersLoaded = workerSelect.dataset.workersLoaded === 'true';
-        workerSelect.disabled = !clusterEnabled || !workersLoaded;
-        workerSelect.title = clusterEnabled
-            ? (workersLoaded
-                ? '选择执行测试的 Cluster Worker'
-                : '正在加载测试主机列表')
-            : '当前为单机模式；切换到集群模式后可选择远端测试主机';
+        workerSelect.disabled = state.testStarting || !clusterEnabled || !workersLoaded;
+        workerSelect.title = state.testStarting
+            ? '测试正在启动，本次提交主机已冻结'
+            : clusterEnabled
+                ? (workersLoaded
+                    ? '选择执行测试的 Cluster Worker'
+                    : '正在加载测试主机列表')
+                : '当前为单机模式；切换到集群模式后可选择远端测试主机';
     }
 
     // 浏览按钮随统一契约一并禁用（上面 data-test-config-control 已覆盖）。

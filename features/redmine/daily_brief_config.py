@@ -210,7 +210,12 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
 def build_brief_analyzer(
     config: dict[str, Any], *, extra_turns: int = 0
 ) -> KkAgentRedmineAnalyzer:
-    """Build unbudgeted analysis; legacy budgets cannot truncate evidence gathering."""
+    """Build unbudgeted analysis while preserving the legacy call signature."""
+    # ``extra_turns`` is intentionally ignored. Existing callers/tests still
+    # pass the keyword, but the evidence-first analyzer is explicitly
+    # unbudgeted; consuming it here documents that compatibility contract and
+    # prevents a dead-argument lint regression without reintroducing a budget.
+    del extra_turns
     return KkAgentRedmineAnalyzer(
         max_turns=0,
         timeout_seconds=0,
