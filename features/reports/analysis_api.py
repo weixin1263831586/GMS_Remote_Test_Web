@@ -714,8 +714,7 @@ async def delete_report(
         if not can_access_report(request, report):
             logger.warning(
                 "[DELETE] Permission denied: %s tried to delete report %s",
-                principal_actor_id(request),  # 审计归因记 actor（ADR 0010）
-                timestamp,
+                principal_actor_id(request), timestamp,
             )
             return error_response("Report not found", 404)
 

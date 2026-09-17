@@ -132,9 +132,15 @@
             <option value="incremental">增量分析</option>
             <option value="full">全量分析</option>
           </select>
-          <select id="singleIssueAnalysisDevice" aria-label="实机验证设备">
-            <option value="">不使用实机验证</option>
-          </select>
+          <div id="singleIssueAnalysisDevice" class="daily-brief-device-picker">
+            <button type="button" data-device-toggle aria-expanded="false" aria-controls="singleIssueAnalysisDeviceOptions">
+              <span data-device-label>不使用实机验证</span><span aria-hidden="true">▾</span>
+            </button>
+            <div id="singleIssueAnalysisDeviceOptions" data-device-options aria-label="实机验证设备（可多选）" hidden>
+              <label><input type="checkbox" value="" data-device-none checked> 不使用实机验证</label>
+              <span data-device-list></span>
+            </div>
+          </div>
           <button id="singleIssueAnalysisStart" type="submit" class="ka-btn primary">开始分析</button>
           <button id="singleIssueAnalysisStop" type="button" class="ka-btn" data-click="stopSingleIssueAnalysis" hidden>停止此项</button>
         </form>

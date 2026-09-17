@@ -295,12 +295,15 @@
 
     /* 每日晨报：信息分层清楚，长标题和窄屏不挤压状态与操作。 */
     .daily-brief-card { overflow:hidden; }
+    .daily-brief-card[data-device-picker-open] { overflow:visible; }
     .daily-brief-head { padding:8px 16px; background:linear-gradient(135deg,rgba(59,130,246,.10),rgba(124,58,237,.08)); }
     .daily-brief-titlebar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .daily-brief-title { font-size:16px; font-weight:750; }
     .daily-brief-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px 16px; }
     .daily-brief-toolbar .daily-brief-title { white-space:nowrap; }
     .daily-brief-single-form, .daily-brief-run-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    /* Keep the multi-device list above the following daily-brief summary. */
+    #singleIssueAnalysisForm { position:relative; z-index:2; }
     .daily-brief-toolbar-right { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; min-width:0; }
     .daily-brief-toolbar-right .daily-brief-single-form { justify-content:flex-end; }
     .daily-brief-run-controls { justify-content:flex-end; }
@@ -315,7 +318,14 @@
     .daily-brief-toolbar-right .daily-brief-action { width:auto; }
     .daily-brief-toolbar .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
     #singleIssueAnalysisMode { width:108px; height:36px; box-sizing:border-box; flex:0 0 108px; border-radius:8px; }
-    #singleIssueAnalysisDevice { width:190px; height:36px; box-sizing:border-box; flex:0 0 190px; border-radius:8px; text-overflow:ellipsis; }
+    #singleIssueAnalysisDevice { position:relative; width:190px; min-width:190px; height:36px; box-sizing:border-box; flex:0 0 190px; margin:0; }
+    #singleIssueAnalysisDevice [data-device-toggle] { display:flex; align-items:center; justify-content:space-between; width:100%; height:36px; padding:0 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--text); cursor:pointer; font:inherit; font-size:12px; text-align:left; }
+    #singleIssueAnalysisDevice [data-device-toggle]:hover { background:#1e293b; }
+    #singleIssueAnalysisDevice [data-device-options] { position:absolute; top:40px; left:0; z-index:30; display:flex; flex-direction:column; gap:6px; width:100%; box-sizing:border-box; padding:8px; border:1px solid var(--border); border-radius:8px; background:#111827; box-shadow:0 10px 24px rgba(0,0,0,.35); }
+    #singleIssueAnalysisDevice [data-device-options][hidden] { display:none; }
+    #singleIssueAnalysisDevice [data-device-options] label { display:flex; align-items:center; gap:6px; font-size:12px; line-height:18px; cursor:pointer; white-space:nowrap; }
+    #singleIssueAnalysisDevice [data-device-options] input { margin:0; }
+    #singleIssueAnalysisDevice [data-device-list] { display:flex; flex-direction:column; gap:6px; }
     .single-issue-analysis-history { margin:0 0 16px; display:grid; }
     .single-issue-analysis-history:empty { display:none; }
     .single-issue-analysis-entry { overflow:hidden; }
@@ -388,6 +398,19 @@
     .daily-brief-section-md .md-table { margin:6px 0 10px; max-width:100%; }
     .daily-brief-section-md .md-p, .daily-brief-section-md .md-ul, .daily-brief-section-md .md-ol { margin:4px 0 8px; }
     .daily-brief-section-md h2.md-h { font-size:15px; margin:10px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border); }
+    /* 单号分析弹框文档排版：补齐表格边框、标题层级与列表间距。 */
+    .analysis-doc { font-size:13px; }
+    .analysis-doc > h2.md-h:first-child { margin-top:0; }
+    .analysis-doc h2.md-h { font-size:15px; margin:16px 0 8px; padding-bottom:5px; border-bottom:1px solid var(--border); color:#dbeafe; }
+    .analysis-doc h3.md-h { font-size:13.5px; margin:12px 0 6px; color:#e2e8f0; }
+    .analysis-doc .md-p { margin:6px 0 9px; }
+    .analysis-doc .md-ul, .analysis-doc .md-ol { margin:6px 0 10px 20px; padding:0; }
+    .analysis-doc .md-ul li, .analysis-doc .md-ol li { margin:3px 0; }
+    .analysis-doc .md-table { width:100%; margin:8px 0 12px; border-collapse:collapse; }
+    .analysis-doc .md-table th, .analysis-doc .md-table td { border:1px solid var(--border); padding:6px 9px; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+    .analysis-doc .md-table th { background:rgba(30,41,59,.55); color:#dbeafe; font-weight:650; white-space:nowrap; }
+    .analysis-doc .md-table tbody tr:nth-child(even) { background:rgba(15,23,42,.4); }
+    .analysis-doc code { background:#0a0f1a; border:1px solid #1a2540; border-radius:4px; padding:1px 5px; font-family:'Cascadia Code','Fira Code',monospace; font-size:12px; color:#93c5fd; }
     .daily-brief-structured { padding:12px 14px 14px; display:flex; flex-direction:column; gap:10px; }
     .daily-brief-sub { border-left:2px solid var(--border); padding-left:10px; }
     .daily-brief-sub-title { font-size:12px; font-weight:650; color:#cbd5e1; margin-bottom:2px; }

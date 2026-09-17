@@ -112,13 +112,13 @@ def build_suite_info(full_path: str) -> dict[str, str] | None:
     parts = full_path.split('/')
     tradefed_name = parts[-1]
     test_type = get_test_type_from_binary(tradefed_name)
+    # tools_path stays the directory containing the tradefed launcher for
+    # every suite type (convention "<suite_root>/tools").  Consumers strip the
+    # trailing /tools themselves (suite_modules, suites_api, reports) and
+    # launcher discovery scans suite_path at maxdepth 1, so a CTS Verifier
+    # layout nested as android-cts-verifier*/android-cts-verifier/
+    # android-cts-v-host/tools must NOT be truncated to the outer directory.
     tools_dir = '/'.join(parts[:-1])
-
-    if test_type == 'cts-v':
-        for i, part in enumerate(parts):
-            if part.startswith('android-cts-verifier'):
-                tools_dir = '/'.join(parts[:i + 1])
-                break
 
     version_dir = next(
         (

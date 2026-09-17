@@ -313,6 +313,15 @@ async function prefillAuthUsernameFromClient() {
     const usernameHelp = document.getElementById('auth-username-help');
     const defaultPlaceholder = '用户名@客户端IP，例如 gms@192.0.2.10';
     if (!usernameInput) return;
+    if (usernameInput.dataset.accountSwitchTarget === 'admin') {
+        usernameInput.readOnly = false;
+        usernameInput.placeholder = '管理员账号';
+        return;
+    }
+    if (usernameInput.dataset.accountSwitchTarget === 'client') {
+        usernameInput.readOnly = true;
+        return;
+    }
     if (usernameInput.value.trim()) {
         usernameInput.placeholder = defaultPlaceholder;
         return;
@@ -354,6 +363,11 @@ function closeAuthGate() {
     // 关闭后以未认证状态继续初始化应用；记录 dismissed 让后台 401
     // 不再自动弹回，用户主动操作触发 401 时会重新弹出登录层。
     state.authGateDismissed = !state.authSetupRequired;
+    const usernameInput = document.getElementById('auth-username');
+    if (usernameInput) {
+        delete usernameInput.dataset.accountSwitchTarget;
+        usernameInput.readOnly = false;
+    }
     hideAuthGate();
     continueAppInitialization();
 }
@@ -457,6 +471,7 @@ async function submitAuthForm() {
     const password = document.getElementById('auth-password')?.value || '';
     const displayName = document.getElementById('auth-display-name')?.value.trim() || '';
     const bootstrapToken = document.getElementById('auth-bootstrap-token')?.value || '';
+    const accountSwitchTarget = document.getElementById('auth-username')?.dataset.accountSwitchTarget || '';
     const setupRequired = document.getElementById('auth-gate')?.classList.contains('setup-mode');
     const message = document.getElementById('auth-message');
     const submit = document.getElementById('auth-submit');
@@ -471,7 +486,10 @@ async function submitAuthForm() {
             method: 'POST',
             credentials: 'same-origin',
             headers,
-            body: JSON.stringify({ username, password, display_name: displayName })
+            body: JSON.stringify({
+                username, password, display_name: displayName,
+                account_switch_target: accountSwitchTarget,
+            })
         });
         const result = await response.json().catch(() => ({ success: false, error: '认证响应解析失败' }));
         if (!response.ok || result.success === false) {
@@ -484,7 +502,10 @@ async function submitAuthForm() {
             throw new Error(result.error || result.message || '认证失败');
         }
         state.currentUser = result.user || null;
+        state.lastConfirmedUser = state.currentUser;
         state.clientId = result.client_id || result.user?.id || null;
+        if (state.currentUser?.role === 'admin') state.defaultAdminUsername = state.currentUser.username;
+        updateLoginAccountDisplay();
         state.authReady = true;
         state.authGateDismissed = false;
         hideAuthGate();
@@ -517,8 +538,131 @@ async function submitAuthForm() {
 async function logoutCurrentUser() {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
     state.currentUser = null;
+    state.lastConfirmedUser = null;
     state.clientId = null;
+    updateLoginAccountDisplay();
     showAuthGate(false);
+}
+
+function updateLoginAccountDisplay() {
+    const target = document.getElementById('client-account-switch-label');
+    if (!target) return;
+    const user = state.currentUser;
+    if (!user) {
+        // 切换弹框/登录层只是“准备切换”，不是切换成功。保留上一次
+        // 已确认身份，避免用户误以为实际会话已变更。
+        if (target.dataset.lastConfirmedRole) {
+            target.textContent = target.dataset.lastConfirmedRole;
+            target.title = '等待登录新账号；当前登录身份尚未变更';
+            target.setAttribute('aria-label', target.title);
+            return;
+        }
+        target.textContent = '👤 登录中…';
+        target.title = '当前网页登录账号正在确认';
+        target.removeAttribute('aria-label');
+        return;
+    }
+    const isAdmin = user.role === 'admin';
+    target.textContent = `👤 ${isAdmin ? '管理员' : '普通用户'}`;
+    target.dataset.lastConfirmedRole = target.textContent;
+    target.title = `当前登录：${user.username}（${isAdmin ? '管理员' : '普通用户'}）`;
+    target.setAttribute('aria-label', target.title);
+}
+
+function clientAccountIdentity() {
+    return String(document.getElementById('client-identity')?.textContent || '').trim();
+}
+
+function isClientAccountIdentity(identity) {
+    return /^[^@\s]+@[^@\s]+$/.test(String(identity || ''));
+}
+
+async function resolveClientAccountIdentity() {
+    const displayed = clientAccountIdentity();
+    if (isClientAccountIdentity(displayed)) return displayed;
+    try {
+        const response = await fetch('/api/users/current', {credentials: 'same-origin'});
+        if (!response.ok) return '';
+        const client = await response.json();
+        const ip = String(client.ip || '').trim();
+        const storedUsername = ip ? String(localStorage.getItem(`gms_username_${ip}`) || '').trim() : '';
+        const identity = storedUsername && ip ? `${storedUsername}@${ip}` : '';
+        if (isClientAccountIdentity(identity)) {
+            const identityLine = document.getElementById('client-identity');
+            if (identityLine) identityLine.textContent = identity;
+            return identity;
+        }
+    } catch (error) {
+        debugLog('[Auth] client identity resolution failed:', error);
+    }
+    return '';
+}
+
+function renderClientAccountSwitchIdentity(identity) {
+    const identityEl = document.getElementById('client-account-switch-identity');
+    const clientLabel = document.getElementById('client-account-switch-client-label');
+    const clientOption = document.getElementById('client-account-switch-client-option');
+    const adminOption = document.getElementById('client-account-switch-admin-option');
+    const status = document.getElementById('client-account-switch-status');
+    if (identityEl) identityEl.textContent = identity || '正在识别客户端身份…';
+    if (clientLabel) clientLabel.textContent = identity || '当前客户端账号';
+    if (clientOption) clientOption.disabled = !identity;
+    const user = state.currentUser || state.lastConfirmedUser || {};
+    const isAdmin = user.role === 'admin';
+    const isClient = !!identity && !isAdmin && user.username === identity;
+    [
+        [adminOption, isAdmin],
+        [clientOption, isClient],
+    ].forEach(function ([option, current]) {
+        if (!option) return;
+        option.classList.toggle('is-current', current);
+        option.setAttribute('aria-current', current ? 'true' : 'false');
+    });
+    if (status) status.textContent = identity
+        ? '仅可切换以下账号；切换后需要输入目标账号密码。'
+        : '客户端身份尚未识别完成，请稍候再选择当前客户端账号。';
+}
+
+async function openClientAccountSwitchModal() {
+    renderClientAccountSwitchIdentity('');
+    ModalManager.open('client-account-switch-modal');
+    renderClientAccountSwitchIdentity(await resolveClientAccountIdentity());
+}
+
+function closeClientAccountSwitchModal() {
+    ModalManager.close('client-account-switch-modal');
+}
+
+async function selectClientAccountSwitch(target) {
+    if (target !== 'admin' && target !== 'client') return;
+    const identity = target === 'client' ? await resolveClientAccountIdentity() : '';
+    if (target === 'client' && !identity) {
+        renderClientAccountSwitchIdentity('');
+        ModalManager.open('client-account-switch-modal');
+        return;
+    }
+    closeClientAccountSwitchModal();
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    state.currentUser = null;
+    state.clientId = null;
+    updateLoginAccountDisplay();
+    const usernameInput = document.getElementById('auth-username');
+    const usernameHelp = document.getElementById('auth-username-help');
+    if (usernameInput) {
+        usernameInput.dataset.accountSwitchTarget = target;
+        usernameInput.readOnly = target === 'client';
+        const adminUsername = String(state.defaultAdminUsername || '').trim();
+        usernameInput.value = target === 'client' ? identity : adminUsername;
+        usernameInput.placeholder = target === 'client' ? identity : '管理员账号';
+    }
+    if (usernameHelp) {
+        usernameHelp.textContent = target === 'client'
+            ? '当前客户端账号固定为本机身份；请输入该账号的 SSH 密码。'
+            : '请输入管理员账号和平台密码。';
+    }
+    state.authGateDismissed = false;
+    showAuthGate(false);
+    document.getElementById('auth-password')?.focus();
 }
 
 async function ensureAuthenticatedBeforeAppStart() {
@@ -527,6 +671,7 @@ async function ensureAuthenticatedBeforeAppStart() {
     // when any new tab opens would also revoke it in every existing tab.
     const status = await fetchAuthStatus();
     state.authRequired = status.auth_required !== false;
+    state.defaultAdminUsername = String(status.default_admin_username || '').trim();
     state.authSetupRequired = Boolean(status.setup_required);
     state.authBootstrapTokenRequired = typeof status.bootstrap_token_required === 'boolean'
         ? status.bootstrap_token_required
@@ -534,6 +679,7 @@ async function ensureAuthenticatedBeforeAppStart() {
     if (!status.authenticated) {
         state.currentUser = null;
         state.clientId = null;
+        updateLoginAccountDisplay();
         state.authReady = !state.authRequired;
         state.elevated = false;
         state.elevatedUntil = null;
@@ -546,7 +692,9 @@ async function ensureAuthenticatedBeforeAppStart() {
         return true;
     }
     state.currentUser = status.user || null;
+    state.lastConfirmedUser = state.currentUser;
     state.clientId = status.user?.id || null;
+    updateLoginAccountDisplay();
     state.authReady = true;
     state.elevated = Boolean(status.elevated);
     state.elevatedUntil = status.elevated_until || null;
@@ -585,5 +733,8 @@ window.submitAuthForm = submitAuthForm;
 window.prefillAuthUsernameFromClient = prefillAuthUsernameFromClient;
 window.runAfterAuthReady = runAfterAuthReady;
 window.logoutCurrentUser = logoutCurrentUser;
+window.openClientAccountSwitchModal = openClientAccountSwitchModal;
+window.closeClientAccountSwitchModal = closeClientAccountSwitchModal;
+window.selectClientAccountSwitch = selectClientAccountSwitch;
 window.applyRoleBasedUiAccess = applyRoleBasedUiAccess;
 window.isPlatformAdmin = isPlatformAdmin;

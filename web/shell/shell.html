@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260910-compact-sidebar-v10">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260917-client-account-switch-v6">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260910-elev-recovery" defer></script>
@@ -37,7 +37,7 @@
     <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
     <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
     <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
-    <script src="/static/js/api.js?v=20260902-error-serialize" defer></script>
+    <script src="/static/js/api.js?v=20260917-client-account-switch-v8" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20260916-firmware-download-progress" defer></script>
     <script src="/static/js/shell/icon-auto.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/websites.js?v=20260905-extract" defer></script>
@@ -547,7 +547,9 @@
             <!-- 客户端信息区 -->
             <div class="client-info-panel">
                 <div class="client-info-header">
-                    <span>👤 客户端</span>
+                    <button type="button" class="client-account-switch-trigger" data-click="openClientAccountSwitchModal" aria-haspopup="dialog" title="切换网页登录账号">
+                        <span id="client-account-switch-label">👤 登录中…</span>
+                    </button>
                     <button id="notification-toggle" class="notification-toggle" title="消息通知" disabled>
                         🔔
                         <span id="notification-badge" class="notification-badge" style="display: none;">0</span>
@@ -558,6 +560,27 @@
                 </div>
             </div>
         </aside>
+
+        <div id="client-account-switch-modal" class="modal" aria-labelledby="client-account-switch-title">
+            <div class="modal-content modal-s">
+                <div class="modal-header">
+                    <span id="client-account-switch-title" class="modal-title">切换网页登录账号</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeClientAccountSwitchModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-info-text">客户端保持不变：<strong id="client-account-switch-identity">检测中...</strong></p>
+                    <p id="client-account-switch-status" class="modal-info-text">仅可切换以下账号；切换后需要输入目标账号密码。</p>
+                    <div class="client-account-switch-options">
+                        <button id="client-account-switch-admin-option" type="button" class="client-account-switch-option" data-click="selectClientAccountSwitch" data-a0="admin">
+                            <span>★ 管理员账号</span><small>管理平台与用户</small>
+                        </button>
+                        <button id="client-account-switch-client-option" type="button" class="client-account-switch-option" data-click="selectClientAccountSwitch" data-a0="client">
+                            <span id="client-account-switch-client-label">当前客户端账号</span><small>可运行每日晨报</small>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <div id="sidebar-visibility-modal" class="modal" style="display: none;">
             <div class="modal-content">
@@ -3205,7 +3228,7 @@
         </div>
     </div>
 
-<script src="/static/js/shell/shell-main.js?v=20260917-navigation-focus-anchor"></script>
+    <script src="/static/js/shell/shell-main.js?v=20260917-adb-host-ready-v7"></script>
 
 <style>
 /* 使用实例弹框重复内联样式收敛（.copy-chip 的 hover/transition 仍在 common.css） */

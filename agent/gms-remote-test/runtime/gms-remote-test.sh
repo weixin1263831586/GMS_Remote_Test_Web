@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.17"
+GMS_RT_VERSION="0.22.18"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -2931,6 +2931,11 @@ gms-rt-redmine-issue-fetch() {
                 ;;
             --no-refresh) refresh=0 ;;
             --refresh) refresh=1 ;;
+            --suite-path)
+                shift
+                [ $# -gt 0 ] || { error "--suite-path requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                suite_path="$1"
+                ;;
             --wait) do_wait=1 ;;
             --dry-run) dry_run=1 ;;
             --max-wait)
@@ -5003,15 +5008,22 @@ gms-rt-apk-resolve() {
     local module_query=""
     local suite_types=""
     local prefer="apk"
+    local suite_path=""
     local argument
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-apk-resolve <module_query> [--types cts,vts,gts,sts] [--prefer apk|jar]"
+                echo "Usage: gms-rt-apk-resolve <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk|jar] [--suite-path PATH]"
                 echo "  module_query  Test module keyword, e.g. CtsCamera"
-                echo "  --types       Comma-separated suite types (default cts,vts,gts,sts)"
+                echo "  --types       Comma-separated suite types (default cts,cts-v,vts,gts,sts)"
                 echo "  --prefer      Preferred artifact type: apk (default) or jar"
+                echo "  --suite-path  Explicit suite root (local host only); scans only that suite"
                 return 0
+                ;;
+            --suite-path)
+                shift
+                [ $# -gt 0 ] || { error "--suite-path requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                suite_path="$1"
                 ;;
             --types)
                 shift
@@ -5033,11 +5045,12 @@ gms-rt-apk-resolve() {
         esac
         shift
     done
-    [ -z "$module_query" ] && { error "Module query required. Usage: gms-rt-apk-resolve <module_query> [--types cts,vts,gts,sts] [--prefer apk|jar]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$module_query" ] && { error "Module query required. Usage: gms-rt-apk-resolve <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk|jar]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
     local url="/test/suites/modules/apk?query=$(_urlencode "$module_query")&prefer=$prefer"
     [ -n "$suite_types" ] && url="$url&suite_types=$(_urlencode "$suite_types")"
+    [ -n "$suite_path" ] && url="$url&suite_path=$(_urlencode "$suite_path")"
 
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
@@ -5057,13 +5070,14 @@ gms-rt-apk-analyze() {
     local module_query=""
     local suite_types=""
     local prefer="apk"
+    local suite_path=""
     local do_wait=0
     local max_wait=300
     local argument
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-apk-analyze <module_query> [--types cts,vts,gts,sts] [--prefer apk|jar] [--wait] [--max-wait SECONDS]"
+                echo "Usage: gms-rt-apk-analyze <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk|jar] [--suite-path PATH] [--wait] [--max-wait SECONDS]"
                 echo "  Resolve a test module to its APK/JAR in the latest suites, copy it into an"
                 echo "  analysis task, and start jadx decompilation. --wait polls until completed."
                 return 0
@@ -5094,12 +5108,13 @@ gms-rt-apk-analyze() {
         esac
         shift
     done
-    [ -z "$module_query" ] && { error "Module query required. Usage: gms-rt-apk-analyze <module_query> [--types cts,vts,gts,sts] [--prefer apk|jar] [--wait] [--max-wait SECONDS]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$module_query" ] && { error "Module query required. Usage: gms-rt-apk-analyze <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk|jar] [--suite-path PATH] [--wait] [--max-wait SECONDS]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
     # Step 1: resolve module keyword -> suite artifact
     local url="/test/suites/modules/apk?query=$(_urlencode "$module_query")&prefer=$prefer"
     [ -n "$suite_types" ] && url="$url&suite_types=$(_urlencode "$suite_types")"
+    [ -n "$suite_path" ] && url="$url&suite_path=$(_urlencode "$suite_path")"
     local resolve_resp
     resolve_resp=$(api_call "$url" "GET")
     if ! echo "$resolve_resp" | jq -e '.success' > /dev/null; then
@@ -5647,8 +5662,8 @@ _gms_rt_command_usage() {
         gms-rt-test-suites) printf '%s' 'gms-rt-test-suites [base_path]' ;;
         gms-rt-test-suites-result) printf '%s' 'gms-rt-test-suites-result <tools_path|suite_name> [--force-refresh]' ;;
         gms-rt-test-modules) printf '%s' 'gms-rt-test-modules <tools_path|suite_name> [--filter PATTERN]' ;;
-        gms-rt-apk-resolve) printf '%s' 'gms-rt-apk-resolve <module_query> [--types cts,vts,gts,sts] [--prefer apk|jar]' ;;
-        gms-rt-apk-analyze) printf '%s' 'gms-rt-apk-analyze <module_query> [--types cts,vts,gts,sts] [--prefer apk|jar] [--wait] [--max-wait SECONDS]' ;;
+        gms-rt-apk-resolve) printf '%s' 'gms-rt-apk-resolve <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk|jar] [--suite-path PATH]' ;;
+        gms-rt-apk-analyze) printf '%s' 'gms-rt-apk-analyze <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk|jar] [--suite-path PATH] [--wait] [--max-wait SECONDS]' ;;
         gms-rt-apk-status) printf '%s' 'gms-rt-apk-status [task_id]' ;;
         gms-rt-apk-manifest) printf '%s' 'gms-rt-apk-manifest <task_id> [--permissions]' ;;
         gms-rt-apk-source) printf '%s' 'gms-rt-apk-source <task_id> [path]' ;;

@@ -14,11 +14,11 @@
 | `gms-rt-agent-enroll-code` | Mint a one-shot enrollment code for a build server agent (admin + elevation) | gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2\|*] [--devices d1,d2\|*] [--expires-days N] [--ttl-minutes N] |
 | `gms-rt-agent-token-revoke` | Revoke an Agent Service Token by id (admin + elevation) | gms-rt-agent-token-revoke <TOKEN_ID> |
 | `gms-rt-agent-tokens` | List Agent Service Tokens (admin; metadata only, raw tokens are never stored) | gms-rt-agent-tokens |
-| `gms-rt-apk-analyze` | Resolve a module artifact, copy it from the suite, and start jadx decompilation | gms-rt-apk-analyze <module_query> [--types cts,vts,gts,sts] [--prefer apk\|jar] [--wait] [--max-wait SECONDS] |
+| `gms-rt-apk-analyze` | Resolve a module artifact, copy it from the suite, and start jadx decompilation | gms-rt-apk-analyze <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk\|jar] [--suite-path PATH] [--wait] [--max-wait SECONDS] |
 | `gms-rt-apk-analyze-attachment` | Import a Redmine .apk artifact into the JADX analysis pipeline (owner-scoped) | gms-rt-apk-analyze-attachment <snapshot_id> <artifact_id> |
 | `gms-rt-apk-download` | Download the decompiled source ZIP of an analysis task | gms-rt-apk-download <task_id> [output.zip] |
 | `gms-rt-apk-manifest` | Show the parsed AndroidManifest.xml, or its declared permissions with --permissions | gms-rt-apk-manifest <task_id> [--permissions] |
-| `gms-rt-apk-resolve` | Resolve a test module keyword to its APK/JAR artifact in the latest suites | gms-rt-apk-resolve <module_query> [--types cts,vts,gts,sts] [--prefer apk\|jar] |
+| `gms-rt-apk-resolve` | Resolve a test module keyword to its APK/JAR artifact in the latest suites | gms-rt-apk-resolve <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk\|jar] [--suite-path PATH] |
 | `gms-rt-apk-search` | Search decompiled sources by filename (name), file content (content), or Java symbol definition (symbol) | gms-rt-apk-search <task_id> <query> [--mode name\|content\|symbol] [--limit N] [--path FILTER] [--line N] |
 | `gms-rt-apk-source` | Browse the decompiled source tree (read file windows with gms-rt-apk-source-read) | gms-rt-apk-source <task_id> [path] |
 | `gms-rt-apk-source-read` | Read a window of one decompiled source file by task-relative path | gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N] |

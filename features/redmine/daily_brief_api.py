@@ -68,6 +68,7 @@ class SingleIssueAnalysisRequest(BaseModel):
     issue_id: int = Field(strict=True, gt=0, le=9223372036854775807)
     analysis_mode: Literal["incremental", "full"] = "incremental"
     device_serial: str = Field(default="", max_length=64)
+    device_serials: list[str] = Field(default_factory=list)
     analysis_hint: str = Field(default="", max_length=4000)
 
 
@@ -76,9 +77,19 @@ async def analyze_single_issue(request: Request, payload: SingleIssueAnalysisReq
     _require_human(request)
     if not _has_redmine_credentials(request):
         return ApiError.dependency_unavailable("请先配置 Redmine 取证凭据。").to_response()
-    device_serial = payload.device_serial.strip()
-    if device_serial and not re.fullmatch(r"[A-Za-z0-9:._-]{2,64}", device_serial):
+    requested_devices = [str(item).strip() for item in payload.device_serials if str(item).strip()]
+    if payload.device_serial.strip():
+        requested_devices.insert(0, payload.device_serial.strip())
+    device_serials = list(dict.fromkeys(requested_devices))
+    if any(
+        not re.fullmatch(r"[A-Za-z0-9:._-]{2,64}", item)
+        for item in device_serials
+    ):
         return ApiError.malformed_request("设备序列号格式无效。").to_response()
+    # Persist the existing string field for compatibility; commas are not
+    # valid serial characters, so this remains unambiguous for multi-device
+    # evidence runs and old clients can continue sending device_serial.
+    device_serial = ",".join(device_serials)
     subject = ""
     try:
         # This is a user-requested analysis action, so refresh its metadata

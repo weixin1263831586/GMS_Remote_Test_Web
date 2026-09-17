@@ -181,10 +181,27 @@ def prompt_template_for(entry: dict) -> str:
     if entry.get("analysis_mode") == "diagnostic":
         return """Analyze Redmine issue #{issue_id}: {subject}
 Status: {status}. Attachments: {attachment_count}.
-Return your final analysis directly in Simplified Chinese Markdown. Lead with
-your conclusion, explain the evidence, uncertainty and concrete next actions.
-Use a natural report structure; no JSON, fixed chapters, enum labels or duplicate
-summaries. Cite actual issue/journal/attachment/source references where relevant.
+Return your final analysis directly in Simplified Chinese Markdown (no JSON,
+enum labels or duplicate summaries). Lead with the conclusion, then structure
+the report with EXACTLY these level-2 sections, in order:
+1. "## 一、问题概况" — a compact Markdown table (one row per key): 单号/链接,
+   报告人, 报告设备, 测试套件/复现环境, 失败用例, 当前状态; facts from the
+   issue and journals only, cell text short.
+2. "## 二、处理时间线" — dated bullets of the journals (who changed what,
+   which attachments were added), oldest first; cite ids like [journal:ID].
+3. "## 三、机制分析（源码级）" — how the tested feature/mechanism actually
+   works, citing real host/device/AOSP source paths and key logic; when source
+   evidence is unavailable, describe the mechanism and say so instead of
+   inventing paths.
+4. "## 四、根因分析（按可能性排序）" — numbered hypotheses, most likely
+   first, each with how to verify it (config/file/log to check); mark each
+   hypothesis 待验证 unless backed by direct causal evidence.
+5. "## 五、本地设备现状" — only live device/tool output, with ✅/⚠️ markers;
+   if no device was inspected write "未检查本地设备。" and skip the rest.
+6. "## 六、建议下一步" — numbered concrete actions; adb/shell commands in a
+   fenced code block; state preconditions explicitly (SSI/GRF, dpi, version).
+Cite actual issue/journal/attachment/source references where relevant. Prefer
+tables and lists over prose; keep the report readable, not exhaustive.
 
 Read the current issue and its latest journals first, then relevant attachments.
 Use registered read-only GMS MCP tools when available. If only the GMS CLI is

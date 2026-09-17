@@ -15,7 +15,9 @@ async def redmine_agent_page():
         "{{REDMINE_CSS}}",
         (ui_dir / "page.css").read_text(encoding="utf-8").rstrip(),
     )
-    return HTMLResponse(html)
+    # CSS is embedded in this iframe page.  Do not let a previously opened
+    # Redmine frame retain an older embedded stylesheet after a UI deploy.
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 @page_router.get("/redmine-agent/page.js")

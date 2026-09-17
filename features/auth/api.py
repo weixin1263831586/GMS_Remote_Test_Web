@@ -82,6 +82,28 @@ def _request_source_ip(request: Request) -> str:
     return str(request.client.host if request.client else "unknown")
 
 
+def _configured_client_login(source_ip: str) -> str:
+    """Return the only client login identity allowed by the switch UI."""
+    try:
+        # Client identity is persisted in the runtime preference store by
+        # /api/users/set-username, not necessarily in the merged app config.
+        client_hosts = config_manager.get_runtime_config().get("client_hosts") or {}
+        username = str(client_hosts.get(source_ip) or "").strip()
+    except Exception:
+        return ""
+    return f"{username}@{source_ip}" if username and source_ip else ""
+
+
+def _default_admin_username() -> str:
+    """Return the sole enabled admin for the account-switcher, if unambiguous."""
+    admins = [
+        str(item.get("username") or "")
+        for item in auth_service.list_users()
+        if item.get("role") == "admin" and not item.get("disabled")
+    ]
+    return admins[0] if len(admins) == 1 else ""
+
+
 def _rate_limit_response(retry_after: int) -> JSONResponse:
     response = error_response("登录尝试过于频繁，请稍后重试", status_code=429)
     response.headers["Retry-After"] = str(max(1, retry_after))
@@ -191,6 +213,10 @@ async def auth_status(request: Request):
             "user": user.as_dict() if user else None,
             "elevated": bool(elevated_until),
             "elevated_until": elevated_until,
+            "default_admin_username": (
+                _default_admin_username()
+                if user is not None and principal_type == "user" else ""
+            ),
         }
     )
 
@@ -305,6 +331,9 @@ async def auth_setup(request: Request, req: dict):
 async def auth_login(request: Request, req: dict):
     username = str(req.get("username", "")).strip()
     source_ip = _request_source_ip(request)
+    switch_target = str(req.get("account_switch_target") or "").strip()
+    if switch_target not in ("", "admin", "client"):
+        return error_response("无效的账号切换目标", status_code=400)
     retry_after = auth_service.auth_retry_after("login", username, source_ip)
     if retry_after:
         return _rate_limit_response(retry_after)
@@ -314,6 +343,30 @@ async def auth_login(request: Request, req: dict):
         str(req.get("password", "")),
     )
     client_ssh_error = None
+    if switch_target == "admin":
+        # The account-picker's admin option must not become a back door to
+        # another ordinary account, even if its credentials are known.
+        if user is None or user.role != "admin":
+            retry_after = auth_service.record_auth_failure(
+                "login", username, source_ip,
+            )
+            if retry_after:
+                return _rate_limit_response(retry_after)
+            return error_response("用户名或密码错误", status_code=401)
+    elif switch_target == "client":
+        expected_client_login = _configured_client_login(source_ip)
+        is_source_bound_login = (
+            "@" in username and username.rsplit("@", 1)[1] == source_ip
+        )
+        if (expected_client_login and not hmac.compare_digest(
+            username, expected_client_login,
+        )) or (not expected_client_login and not is_source_bound_login):
+            retry_after = auth_service.record_auth_failure(
+                "login", username, source_ip,
+            )
+            if retry_after:
+                return _rate_limit_response(retry_after)
+            return error_response("当前客户端账号不匹配", status_code=403)
     if not user:
         try:
             ipaddress.ip_address(username)

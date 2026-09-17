@@ -198,6 +198,22 @@ class DailyBriefApiTests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(invalid.json()['code'], 'MALFORMED_REQUEST')
 
+    def test_single_issue_multiple_devices_are_persisted(self):
+        response = self.client.post(
+            '/api/redmine-agent/daily-brief/analyze-issue',
+            json={
+                'issue_id': 647338,
+                'device_serials': ['RK3576-ADB-01', 'RK3576-ADB-02'],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        run_id = response.json()['data']['run_id']
+        repo = brief_repo.owner_daily_brief_repository('owner-a')
+        self.assertEqual(
+            repo.get_run(run_id).device_serial,
+            'RK3576-ADB-01,RK3576-ADB-02',
+        )
+
     def test_single_issue_analysis_hint_is_persisted_and_starts_a_new_context(self):
         first = self.client.post(
             '/api/redmine-agent/daily-brief/analyze-issue',

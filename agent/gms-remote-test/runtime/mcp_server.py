@@ -102,7 +102,7 @@ mcp_tool_schemas = _load_tool_schemas()
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.17"
+SERVER_VERSION = "0.22.18"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2227,6 +2227,9 @@ def apk_resolve_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     prefer = str(arguments.get("prefer") or "").strip()
     if prefer:
         args.extend(["--prefer", prefer])
+    suite_path = str(arguments.get("suite_path") or "").strip()
+    if suite_path:
+        args.extend(["--suite-path", suite_path])
     return run_cli("gms-rt-apk-resolve", args)
 
 
@@ -2242,6 +2245,9 @@ def apk_analyze_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     prefer = str(arguments.get("prefer") or "").strip()
     if prefer:
         args.extend(["--prefer", prefer])
+    suite_path = str(arguments.get("suite_path") or "").strip()
+    if suite_path:
+        args.extend(["--suite-path", suite_path])
     if arguments.get("wait"):
         args.append("--wait")
         max_wait = arguments.get("max_wait")

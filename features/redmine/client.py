@@ -157,8 +157,7 @@ class RedmineClient(RedmineAttachmentMixin):
         limit = max(1, min(int(limit or 10), 50))
 
         def _search():
-            # redmine_user 是 Redmine 远端用户资源，与平台 CurrentUser
-            # 无关；避免与 owner 语义的 user.id 混淆。
+            # redmine_user 是 Redmine 远端用户资源，非平台 CurrentUser，其 .id 与 owner 无关。
             remote_users = self._redmine.user.filter(name=term, limit=limit)
             return [
                 {

@@ -255,7 +255,7 @@ body {
 }
 
 .client-info-panel {
-    padding: 10px;
+    padding: 10px 9px;
     margin-top: auto;
     border-top: 1px solid var(--border-color);
     background: var(--light-bg);
@@ -266,11 +266,78 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 4px;
     margin-bottom: 4px;
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 600;
+}
+
+.client-account-switch-trigger {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: inherit;
+    cursor: pointer;
+}
+
+.client-account-switch-trigger:hover,
+.client-account-switch-trigger:focus-visible {
+    color: var(--text-primary);
+    text-decoration: underline;
+}
+
+.client-account-switch-options {
+    display: grid;
+    gap: 8px;
+}
+
+.client-account-switch-option {
+    display: grid;
+    gap: 3px;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--light-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+}
+
+.client-account-switch-option:hover,
+.client-account-switch-option:focus-visible {
+    border-color: var(--primary-color);
+    background: var(--hover-bg);
+}
+
+.client-account-switch-option:disabled {
+    cursor: not-allowed;
+    opacity: .55;
+}
+
+.client-account-switch-option.is-current {
+    border-color: var(--success-color);
+    background: color-mix(in srgb, var(--success-color) 12%, var(--light-bg));
+    box-shadow: inset 3px 0 0 var(--success-color);
+}
+
+.client-account-switch-option.is-current::after {
+    content: '当前登录';
+    justify-self: start;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--success-color);
+    color: #062b1b;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.client-account-switch-option small {
+    color: var(--text-secondary);
 }
 
 .client-identity-line {

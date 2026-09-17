@@ -909,7 +909,7 @@ ALL_TOOLS: list[dict[str, Any]] = [
             "name": "gms_rt_apk_resolve",
             "description": (
                 "Resolve a test module keyword (e.g. CtsCamera) to its "
-                "APK/JAR artifact in the latest CTS/VTS/GTS/STS suites. "
+                "APK/JAR artifact in the latest CTS/CTS-V/VTS/GTS/STS suites. "
                 "Returns module, suite path, and the analyze_path consumed "
                 "by gms_rt_apk_analyze. Cheap read-only lookup."
             ),
@@ -924,12 +924,20 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "Comma-separated suite types "
-                            "(default cts,vts,gts,sts)."
+                            "(default cts,cts-v,vts,gts,sts)."
                         ),
                     },
                     "prefer": {
                         "type": "string",
                         "description": "Preferred artifact type: apk (default) or jar.",
+                    },
+                    "suite_path": {
+                        "type": "string",
+                        "description": (
+                            "Explicit suite root on the local suites host; "
+                            "scans only that suite instead of the latest "
+                            "per type."
+                        ),
                     },
                 },
                 "required": ["query"],
@@ -958,12 +966,20 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "Comma-separated suite types "
-                            "(default cts,vts,gts,sts)."
+                            "(default cts,cts-v,vts,gts,sts)."
                         ),
                     },
                     "prefer": {
                         "type": "string",
                         "description": "Preferred artifact type: apk (default) or jar.",
+                    },
+                    "suite_path": {
+                        "type": "string",
+                        "description": (
+                            "Explicit suite root on the local suites host; "
+                            "scans only that suite instead of the latest "
+                            "per type."
+                        ),
                     },
                     "wait": {
                         "type": "boolean",

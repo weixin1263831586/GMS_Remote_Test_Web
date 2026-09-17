@@ -1,8 +1,8 @@
 """Resolve a suite test module keyword to its APK/JAR artifact for decompilation.
 
 Feeds the CLI `gms-rt-apk-resolve` / `gms-rt-apk-analyze` flow: search the
-latest CTS/VTS/GTS/STS suites for module artifacts and return the suite path
-plus the relative artifact path consumed by
+latest CTS/CTS-V/VTS/GTS/STS suites for module artifacts and return the suite
+path plus the relative artifact path consumed by
 `POST /api/test/suites/apk/analyze`.
 """
 
@@ -40,7 +40,7 @@ def _pick_suite_module_artifact(payload: dict[str, Any], prefer: str) -> dict[st
     Ranking: exact module-name match beats substring match, a longer module
     name beats a shorter one (CtsCameraTestCases over CtsCamera), and the
     requested artifact extension wins within one module. Ties keep the scan
-    order (CTS before VTS/GTS/STS) so the choice stays deterministic.
+    order (CTS before CTS-V/VTS/GTS/STS) so the choice stays deterministic.
     """
     prefer_ext = "jar" if str(prefer or "").strip().lower() == "jar" else "apk"
     normalized_query = str(payload.get("normalized_query") or "").strip().lower()
@@ -104,13 +104,16 @@ def _pick_suite_module_artifact(payload: dict[str, Any], prefer: str) -> dict[st
 @handle_api_errors
 async def resolve_suite_module_apk_artifact(
     query: str = Query(..., description="模块关键词，例如 CtsCamera"),
-    suite_types: str = Query("cts,vts,gts,sts", description="逗号分隔套件类型，例如 cts,vts,gts,sts"),
+    suite_types: str = Query("cts,cts-v,vts,gts,sts", description="逗号分隔套件类型，例如 cts,cts-v,vts,gts,sts"),
     prefer: str = Query("apk", description="优先产物类型：apk 或 jar"),
+    suite_path: str = Query("", description="可选：显式套件根目录（含 testcases/ 的目录，绝对路径），指定后只搜索该套件"),
 ):
     """Resolve a test module keyword to its APK/JAR artifact for decompilation."""
     config = runtime.config_manager.load_config()
     types = [item.strip() for item in suite_types.split(",") if item.strip()]
-    payload = await asyncio.to_thread(search_latest_suite_modules, config, query, types, 30)
+    payload = await asyncio.to_thread(
+        search_latest_suite_modules, config, query, types, 30, suite_path,
+    )
     resolved = _pick_suite_module_artifact(payload, prefer)
     if not resolved:
         return ApiResponse.error(

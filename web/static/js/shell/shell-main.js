@@ -301,10 +301,20 @@
                 }
                 if (contextHost && window.terminalWorkspaceInitialized && terminalWorkspace.layout === 'single' && terminalWorkspace.panes.length) {
                     const currentPane = terminalWorkspace.panes[0];
-                    const contextWorkerId = contextHost.worker_id || workspaceLocalWorkerId();
+                    // ADB is a device target, not the saved SSH host mode.
+                    // Cluster-directory refreshes can arrive while the ADB
+                    // socket is still opening; replacing this pane with a
+                    // plain host pane disposes it before terminal_connect.
+                    // Keep every active ADB target and only refresh its host
+                    // metadata, even when the workspace context is changing
+                    // at the same time.
                     terminalWorkspace.panes[0] = currentPane?.mode === 'adb'
-                        && currentPane.workerId === contextWorkerId
-                        ? {...currentPane, hostId: contextHost.id}
+                        && currentPane.serialNo && currentPane.workerId
+                        // Changing hostId changes the render signature. While
+                        // a pane is mounted (or mounting), keep its identity
+                        // stable so a directory refresh cannot dispose the
+                        // socket before its first terminal_connect frame.
+                        ? {...currentPane, hostId: currentPane.hostId || contextHost.id}
                         : {hostId: contextHost.id};
                 }
                 if (window.hostWorkspaceInitialized && currentPage === 'desktop') renderHostWorkspace();
@@ -884,7 +894,7 @@
         window.maximizeHostWorkspacePane = maximizeHostWorkspacePane;
 
         // ==================== 多主机终端工作区 ====================
-        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), mountingPanes:new Map(), paneGenerations:new Map(), maximized:null, generation:0, clusterState:null};
+        const terminalWorkspace = {layout:'single', panes:[], instances:new Map(), mountingPanes:new Map(), paneGenerations:new Map(), maximized:null, generation:0, clusterState:null, pendingAdbTarget:null};
 
         function refreshTerminalWorkspaceHostSelectors() {
             terminalWorkspace.panes.forEach((pane, index) => {
@@ -1010,6 +1020,40 @@
                         refreshTerminalWorkspacePane(index);
                     }
                 });
+                setHostWorkspaceSurfaceReady('terminal',true);
+                return;
+            }
+            // Workspace-context/host-directory updates may legitimately alter
+            // only the host metadata while an ADB session is opening. A full
+            // render would dispose the live WebSocket before terminal_connect
+            // is sent. Keep the mounted one-shot ADB target alive when its
+            // device identity is unchanged; a real device/layout change still
+            // takes the normal teardown path below.
+            const activeAdbInstance = terminalWorkspace.instances.get(0);
+            const activeAdbPane = terminalWorkspace.panes[0];
+            const pendingAdb = terminalWorkspace.pendingAdbTarget;
+            if (grid.children.length && terminalWorkspace.layout === 'single'
+                    && pendingAdb?.serialNo === activeAdbPane?.serialNo
+                    && pendingAdb?.workerId === activeAdbPane?.workerId
+                    && (!activeAdbInstance || activeAdbInstance.mode === 'adb'
+                        || terminalWorkspace.mountingPanes.has(0))
+                    && activeAdbPane?.mode === 'adb') {
+                // xterm loading happens before the instance is registered.
+                // Keep the already-mounted ADB DOM/socket lifecycle intact
+                // during that gap as well.
+                terminalWorkspace.renderedSignature=signature;
+                refreshTerminalWorkspaceHostSelectors();
+                setHostWorkspaceSurfaceReady('terminal',true);
+                return;
+            }
+            if (grid.children.length && terminalWorkspace.layout === 'single'
+                    && activeAdbInstance?.mode === 'adb'
+                    && !activeAdbInstance.disposed
+                    && activeAdbPane?.mode === 'adb'
+                    && activeAdbPane.serialNo === activeAdbInstance.serialNo
+                    && activeAdbPane.workerId === activeAdbInstance.workerId) {
+                terminalWorkspace.renderedSignature=signature;
+                refreshTerminalWorkspaceHostSelectors();
                 setHostWorkspaceSurfaceReady('terminal',true);
                 return;
             }
@@ -1215,6 +1259,13 @@
         function maximizeTerminalWorkspacePane(i){terminalWorkspace.maximized=terminalWorkspace.maximized===i?null:i;renderTerminalWorkspace();}
         function applyHostWorkspaceScopeMode(clusterEnabled) {
             const nextClusterEnabled = Boolean(clusterEnabled);
+            // An ADB pane is a user-requested, one-shot target. Scope
+            // initialization can race with openDeviceShell and otherwise
+            // restore the saved SSH pane over it, disposing its WebSocket
+            // before terminal_connect is sent.
+            const activeAdbPane = terminalWorkspace.panes.find(pane =>
+                pane?.mode === 'adb' && pane.serialNo && pane.workerId
+            );
             // Workspace context also changes when a user selects a Worker.
             // Restoring the saved layout on every context event rolls the
             // first host selection back to the previous pane; only restore
@@ -1244,6 +1295,20 @@
             } else {
                 useSingleHostWorkspaceState();
                 useSingleTerminalWorkspaceState();
+            }
+            if (activeAdbPane && (nextClusterEnabled || isLocalWorkspaceWorker(activeAdbPane.workerId))) {
+                const targetHost = workspaceHostForWorker(activeAdbPane.workerId);
+                terminalWorkspace.layout = 'single';
+                terminalWorkspace.maximized = null;
+                terminalWorkspace.panes = [{
+                    ...activeAdbPane,
+                    // Preserve the pane identity while its WebSocket is
+                    // mounting; changing hostId here changes the render
+                    // signature and tears down the pending ADB connection.
+                    ...(targetHost && !terminalWorkspace.instances.has(0)
+                        && !terminalWorkspace.mountingPanes.has(0)
+                        ? {hostId: targetHost.id} : {}),
+                }];
             }
             if (window.hostWorkspaceInitialized) renderHostWorkspace();
             if (window.terminalWorkspaceInitialized) renderTerminalWorkspace();
@@ -2431,13 +2496,13 @@
                 // cluster directory. The visible terminal pane connects in ADB
                 // mode directly; no timer or shell-command injection is needed.
                 if (!desktopHosts.some(host => host.id === 'default')) {
-                    const hostsReady = initDesktopHosts();
-                    if (!isLocalWorkspaceWorker(workerId)) {
-                        await hostsReady;
-                    } else {
-                        hostsReady.catch(error =>
-                            debugLog('[Device shell] Background host refresh failed:', error));
-                    }
+                    // Do not let a local ADB pane race the asynchronous host
+                    // directory merge. That merge can redraw the terminal
+                    // workspace after its WebSocket opens; the disposed pane
+                    // then never sends terminal_connect. The local shortcut
+                    // used to be safe only before the workspace renderer
+                    // began preserving/replacing panes asynchronously.
+                    await initDesktopHosts();
                     window.desktopHostsInitialized = true;
                 } else if (typeof mergeClusterDesktopHosts === 'function') {
                     await mergeClusterDesktopHosts();
@@ -2463,6 +2528,10 @@
                     serialNo: rawSerial,
                     workerId
                 }];
+                terminalWorkspace.pendingAdbTarget = {
+                    serialNo: rawSerial,
+                    workerId,
+                };
                 terminalWorkspace.renderedSignature = null;
                 // 先隐藏旧终端画布再切换页面，避免 renderTerminalWorkspace
                 // 异步执行期间暴露上一次终端的残留内容。
